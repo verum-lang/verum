@@ -1593,6 +1593,44 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(variant_ptr)
     }
 
+    /// Stamp a freshly-built variant's ObjectHeader with its type id
+    /// (u32 @0) and data size (u32 @12) — the AOT-XMODULE-VALUESEM-1
+    /// discipline. A zeroed header makes `verum_generic_eq`'s
+    /// `first==0` early-out equate DISTINCT variants (and lets a
+    /// zero-header `None` masquerade as an empty Text in the is-text
+    /// probe). ONE authority for the stamp: the `MakeVariantTyped`
+    /// arm and every inline Maybe-building method arm call this.
+    pub fn stamp_variant_header(
+        &self,
+        builder: &Builder<'ctx>,
+        variant_ptr: PointerValue<'ctx>,
+        type_id: u32,
+        field_count: u32,
+    ) -> Result<()> {
+        let i64_type = self.context.i64_type();
+        let i32_type = self.context.i32_type();
+        let i8_type = self.context.i8_type();
+        builder
+            .build_store(variant_ptr, i32_type.const_int(type_id as u64, false))
+            .or_llvm_err()?;
+        // SAFETY: in-bounds GEP within the always-present 24-byte header.
+        let size_slot = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    i8_type,
+                    variant_ptr,
+                    &[i64_type.const_int(12, false)],
+                    "vhdr_size_slot",
+                )
+                .or_llvm_err()?
+        };
+        let total = Self::OBJECT_HEADER_SIZE + 8 + (field_count as u64) * VALUE_SIZE;
+        builder
+            .build_store(size_slot, i32_type.const_int(total, false))
+            .or_llvm_err()?;
+        Ok(())
+    }
+
     /// Lower GetTag instruction.
     ///
     /// Gets the tag from a variant (stored at offset OBJECT_HEADER_SIZE).

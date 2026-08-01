@@ -46,18 +46,18 @@ mount core.database.common.migrations.migration.{
 mount core.database.common.migrations.journal.{
     MigrationJournal, JournalEntry,
 };
-mount core.database.sqlite.connection.{SqliteConnection};
+mount core.database.sqlite.connection.{SqliteNativeConnection};
 
 // =============================================================================
 // SqliteMigrationStore
 // =============================================================================
 
 public type SqliteMigrationStore is {
-    conn: SqliteConnection,
+    conn: SqliteNativeConnection,
     config: MigrationStoreConfig,
 };
 
-public fn store_new(conn: SqliteConnection, config: MigrationStoreConfig) -> SqliteMigrationStore {
+public fn store_new(conn: SqliteNativeConnection, config: MigrationStoreConfig) -> SqliteMigrationStore {
     SqliteMigrationStore { conn: conn, config: config }
 }
 
@@ -162,11 +162,11 @@ fn sql_text_literal(t: &Text) -> Text {
     out
 }
 
-async fn execute_raw(conn: &mut SqliteConnection, sql: &Text) -> Result<(), DbError> {
+async fn execute_raw(conn: &mut SqliteNativeConnection, sql: &Text) -> Result<(), DbError> {
     conn.execute_simple(sql).await.map(|_| ())
 }
 
-async fn query_journal_rows(conn: &mut SqliteConnection, sql: &Text) -> Result<List<JournalEntry>, DbError> {
+async fn query_journal_rows(conn: &mut SqliteNativeConnection, sql: &Text) -> Result<List<JournalEntry>, DbError> {
     let raw_rows = conn.query_simple(sql).await?;
     let mut entries: List<JournalEntry> = List.new();
     let mut i: Int = 0;

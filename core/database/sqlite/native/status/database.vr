@@ -1,5 +1,5 @@
 // =============================================================================
-// status/database.vr — DbStatus aggregator (per-SqliteConnection)
+// status/database.vr — DbStatus aggregator (per-SqliteNativeConnection)
 // =============================================================================
 // Spec: SQLite C API — sqlite3_db_status
 // =============================================================================

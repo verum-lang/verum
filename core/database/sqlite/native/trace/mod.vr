@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/sqlite/native/trace/mod.vr
 // =============================================================================
-// Layer: 6 (per-SqliteConnection)
+// Layer: 6 (per-SqliteNativeConnection)
 // Spec: sqlite-native.md §22 (operational tooling — sqlite3_trace_v2)
 //
 
@@ -13,8 +13,8 @@
 //  * `Profile` — at last VDBE step (SQL + nanoseconds elapsed)
 //  * `Row` — at each ResultRow opcode (current row payload not
 //  exposed by the C API — the callback gets the
-//  SqliteConnection + Stmt only)
-//  * `Close` — SqliteConnection closed
+//  SqliteNativeConnection + Stmt only)
+//  * `Close` — SqliteNativeConnection closed
 //
 
 // We model the surface — the actual hook firing happens inside the

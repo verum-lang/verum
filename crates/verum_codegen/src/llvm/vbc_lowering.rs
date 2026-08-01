@@ -1985,7 +1985,34 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // The Call handler uses resolve_llvm_function() which tries suffixed names
             // to find the correct arity match.
             let llvm_fn = if let Some(existing) = self.module.get_function(&func_name) {
-                if existing.count_params() as usize != effective_params.len() {
+                if existing.count_params() as usize != effective_params.len()
+                    && existing.count_basic_blocks() == 0
+                {
+                    // BODYLESS forward stub with the WRONG arity (the
+                    // stdlib bake ships zero-param forward declarations
+                    // like `Text.from_utf8_unchecked` whose real body
+                    // arrives later with the true signature). This is
+                    // NOT method overloading — it is a stale stub
+                    // squatting the name. Delete the stub and let the
+                    // real function own the name: no `__arityN` mangle,
+                    // and crucially NO `has_arity_collisions`, which
+                    // would degrade the whole module's pass pipeline to
+                    // always-inline,globaldce (the O2 perf cliff).
+                    // Safe at declare time: nothing referenced the
+                    // stub yet (bodies lower after all declares).
+                    if std::env::var("VERUM_TRACE_PASSES").is_ok() {
+                        eprintln!(
+                            "[fwd-stub-replaced] {}: stub arity {} → real arity {}",
+                            func_name,
+                            existing.count_params(),
+                            effective_params.len(),
+                        );
+                    }
+                    // SAFETY: declare phase — the stub has no uses yet;
+                    // deleting it cannot dangle any reference.
+                    unsafe { existing.delete() };
+                    self.module.add_function(&func_name, fn_type, None)
+                } else if existing.count_params() as usize != effective_params.len() {
                     // Collision! Create with a unique suffix so both functions coexist.
                     //
                     // **Method overloading support**: Verum allows multiple

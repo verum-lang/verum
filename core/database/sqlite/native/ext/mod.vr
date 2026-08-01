@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/sqlite/native/ext/mod.vr
 // =============================================================================
-// Layer: 6 (SqliteConnection-mode visible)
+// Layer: 6 (SqliteNativeConnection-mode visible)
 // Spec: sqlite-native.md §19
 //
 

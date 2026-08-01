@@ -37,7 +37,7 @@ public mount .database.{
 // -----------------------------------------------------------------------------
 public mount .database.{ SqliteApiDbError as DbError };
 
-public mount core.database.sqlite.connection.{ SqliteConnection };
+public mount core.database.sqlite.connection.{ SqliteNativeConnection };
 
 public mount core.database.sqlite.native.l6_session.statement.{
     PreparedStatement, StmtError,

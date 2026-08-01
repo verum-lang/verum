@@ -4776,34 +4776,7 @@ pub fn lower_instruction<'ctx>(
             // `New`. Variants had fully zeroed headers, so
             // `verum_generic_eq`'s `first==0` early-out equated
             // DISTINCT enum variants before ever reading the tag.
-            {
-                let i32_type = ctx.types().context().i32_type();
-                let i8_type = ctx.types().i8_type();
-                let i64_type = ctx.types().i64_type();
-                ctx.builder()
-                    .build_store(
-                        variant_ptr,
-                        i32_type.const_int(*type_id as u64, false),
-                    )
-                    .or_llvm_err()?;
-                // SAFETY: in-bounds GEP within the 24-byte header.
-                let size_slot = unsafe {
-                    ctx.builder()
-                        .build_in_bounds_gep(
-                            i8_type,
-                            variant_ptr,
-                            &[i64_type.const_int(12, false)],
-                            "vhdr_size_slot",
-                        )
-                        .or_llvm_err()?
-                };
-                let total = RuntimeLowering::OBJECT_HEADER_SIZE
-                    + 8
-                    + (*field_count as u64) * 8;
-                ctx.builder()
-                    .build_store(size_slot, i32_type.const_int(total, false))
-                    .or_llvm_err()?;
-            }
+            runtime.stamp_variant_header(ctx.builder(), variant_ptr, *type_id, *field_count)?;
             ctx.set_register(dst.0, variant_ptr.into());
             ctx.mark_variant_register(dst.0);
             // CLONE-AOT-ALIAS-1: static size = header + tag word + fields.
@@ -15186,11 +15159,15 @@ fn lower_call_method<'ctx>(
         let i64_type = ctx.types().i64_type();
         let i8_type = ctx.types().i8_type();
         let ptr_type = ctx.types().ptr_type();
-        // Deref the &T search value (guard int/ptr to avoid the ARM-backend SIGSEGV
-        // on a non-address value — same guard as List.contains).
+        // Deref the &T search value ONLY when it is slot-shaped (scalar
+        // pointee → `ref_param` mark, T0332); a heap needle already IS the
+        // object pointer and dereffing it reads the object's first field
+        // as the value — see List.contains for the full shape contract.
         let search_val = {
             let raw = ctx.get_register(args.start.0)?;
-            if raw.is_pointer_value() || raw.is_int_value() {
+            if ctx.is_ref_param_register(args.start.0)
+                && (raw.is_pointer_value() || raw.is_int_value())
+            {
                 let sptr = as_ptr(ctx, raw, "dq_search_ptr")?;
                 ctx.builder()
                     .build_load(i64_type, sptr, "dq_search_deref")
@@ -15280,16 +15257,19 @@ fn lower_call_method<'ctx>(
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
                 let ptr_type = ctx.types().ptr_type();
-                // `contains(item: &T)` takes the item BY REFERENCE, so the
-                // argument register holds the ADDRESS of the searched value,
-                // not the value. Under interp the ref auto-derefs; under AOT
-                // it stayed a pointer and the scan compared list elements
-                // against the reference address (`value == &ref`, #18) →
-                // always false. Dereference to the pointee before comparing.
-                // For a scalar element this is the value; for a heap element
-                // it is the element pointer (pointer-identity), both correct
-                // improvements over comparing against the ref address.
-                let search_val = {
+                // `contains(item: &T)` — a Tier-1 `&T` is SHAPE-BIMODAL and
+                // the producer records which (T0332): a scalar pointee ref is
+                // a stack-slot ADDRESS (lower_ref/lower_ref_mut alloca
+                // branches + the scalar-&-param prologue mark it
+                // `ref_param`), while a heap pointee ref (`&"lit"`,
+                // `&text_value`) passes the OBJECT POINTER through unmarked.
+                // Deref only the slot shape. The old unconditional deref
+                // (#18) read a heap needle's FIRST FIELD as the value — for
+                // a rodata Text const that folded to its (align-1) data
+                // blob, so the structural probe rejected it and `contains`
+                // answered false; for a runtime Text it chased the data ptr
+                // in `verum_generic_eq` → SIGSEGV.
+                let search_val = if ctx.is_ref_param_register(args.start.0) {
                     let sp = ctx
                         .builder()
                         .build_int_to_ptr(search_val_ref, ptr_type, "search_ref_ptr")
@@ -15298,6 +15278,8 @@ fn lower_call_method<'ctx>(
                         .build_load(i64_type, sp, "search_deref")
                         .or_llvm_err()?
                         .into_int_value()
+                } else {
+                    search_val_ref
                 };
                 // Load len from LIST_LEN_OFFSET
                 // SAFETY: GEP into the list object header to access the length field at a fixed offset; the list pointer is non-null and valid
@@ -15391,9 +15373,45 @@ fn lower_call_method<'ctx>(
                     .build_load(i64_type, elem_ptr, "elem")
                     .or_llvm_err()?
                     .into_int_value();
+                // T0332 — STRUCTURAL element equality (contains AND
+                // index_of share this loop shape). The raw i64 compare
+                // is pointer identity for heap elements: a List<Text>
+                // scan matched only the exact same allocation, so
+                // `["alpha","beta"].contains(&"beta")` was true at
+                // Tier-0 and FALSE at Tier-1. Route through
+                // `verum_generic_eq` — the ONE structural+text
+                // equality authority (T0273): its fast path is the
+                // same bit-compare (identical i64s answer
+                // immediately), then a guarded header probe strcmps
+                // genuine Texts and field-compares records — primitive
+                // lists keep near-identical cost, heap lists become
+                // CORRECT.
+                let geq_module = ctx.get_module();
+                let geq_ty = i64_type
+                    .fn_type(&[i64_type.into(), i64_type.into()], false);
+                let geq = geq_module
+                    .get_function("verum_generic_eq")
+                    .unwrap_or_else(|| {
+                        geq_module.add_function("verum_generic_eq", geq_ty, None)
+                    });
+                let eq_i64 = ctx
+                    .builder()
+                    .build_call(
+                        geq,
+                        &[elem.into(), search_val.into()],
+                        "elem_veq",
+                    )
+                    .or_llvm_err()?
+                    .basic_value_or("verum_generic_eq: no value")?
+                    .into_int_value();
                 let cmp_eq = ctx
                     .builder()
-                    .build_int_compare(IntPredicate::EQ, elem, search_val, "cmp_eq")
+                    .build_int_compare(
+                        IntPredicate::NE,
+                        eq_i64,
+                        i64_type.const_zero(),
+                        "cmp_eq",
+                    )
                     .or_llvm_err()?;
                 ctx.builder()
                     .build_conditional_branch(cmp_eq, found_bb, inc_bb)
@@ -15439,10 +15457,10 @@ fn lower_call_method<'ctx>(
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
                 let ptr_type = ctx.types().ptr_type();
-                // `index_of(item: &T)` — same by-reference argument as
-                // `contains` (#18): deref the ref to the pointee before
-                // scanning, else the scan compares against the ref address.
-                let search_val = {
+                // `index_of(item: &T)` — same shape-bimodal `&T` as
+                // `contains` (T0332): deref only the slot-shaped (scalar)
+                // ref; a heap needle already IS the object pointer.
+                let search_val = if ctx.is_ref_param_register(args.start.0) {
                     let sp = ctx
                         .builder()
                         .build_int_to_ptr(search_val_ref, ptr_type, "search_ref_ptr")
@@ -15451,6 +15469,8 @@ fn lower_call_method<'ctx>(
                         .build_load(i64_type, sp, "search_deref")
                         .or_llvm_err()?
                         .into_int_value()
+                } else {
+                    search_val_ref
                 };
                 // SAFETY: GEP into the list object header to access the length field at a fixed offset; the list pointer is non-null and valid
                 let len_slot = unsafe {
@@ -15539,9 +15559,45 @@ fn lower_call_method<'ctx>(
                     .build_load(i64_type, elem_ptr, "elem")
                     .or_llvm_err()?
                     .into_int_value();
+                // T0332 — STRUCTURAL element equality (contains AND
+                // index_of share this loop shape). The raw i64 compare
+                // is pointer identity for heap elements: a List<Text>
+                // scan matched only the exact same allocation, so
+                // `["alpha","beta"].contains(&"beta")` was true at
+                // Tier-0 and FALSE at Tier-1. Route through
+                // `verum_generic_eq` — the ONE structural+text
+                // equality authority (T0273): its fast path is the
+                // same bit-compare (identical i64s answer
+                // immediately), then a guarded header probe strcmps
+                // genuine Texts and field-compares records — primitive
+                // lists keep near-identical cost, heap lists become
+                // CORRECT.
+                let geq_module = ctx.get_module();
+                let geq_ty = i64_type
+                    .fn_type(&[i64_type.into(), i64_type.into()], false);
+                let geq = geq_module
+                    .get_function("verum_generic_eq")
+                    .unwrap_or_else(|| {
+                        geq_module.add_function("verum_generic_eq", geq_ty, None)
+                    });
+                let eq_i64 = ctx
+                    .builder()
+                    .build_call(
+                        geq,
+                        &[elem.into(), search_val.into()],
+                        "elem_veq",
+                    )
+                    .or_llvm_err()?
+                    .basic_value_or("verum_generic_eq: no value")?
+                    .into_int_value();
                 let cmp_eq = ctx
                     .builder()
-                    .build_int_compare(IntPredicate::EQ, elem, search_val, "cmp_eq")
+                    .build_int_compare(
+                        IntPredicate::NE,
+                        eq_i64,
+                        i64_type.const_zero(),
+                        "cmp_eq",
+                    )
                     .or_llvm_err()?;
                 ctx.builder()
                     .build_conditional_branch(cmp_eq, found_bb, inc_bb)
@@ -15556,11 +15612,50 @@ fn lower_call_method<'ctx>(
                     .build_unconditional_branch(loop_bb)
                     .or_llvm_err()?;
                 phi_i.add_incoming(&[(&i64_type.const_zero(), entry_bb), (&i_next, inc_bb)]);
+                // `index_of(&self, value: &T) -> Maybe<Int>` — the DECLARED
+                // contract. The old tail returned the RAW index (or -1);
+                // the f-string/consumer side dispatches on the static
+                // Maybe<Int> type (e.g. `Maybe.fmt`), which chased the raw
+                // integer as a variant pointer → SIGSEGV. Build a REAL
+                // Maybe: Some(i) / None diamond, same template as `first`.
+                let runtime = RuntimeLowering::new(ctx.llvm_context());
+                let idx_module = ctx.get_module();
                 ctx.builder().position_at_end(found_bb);
+                let some_ptr =
+                    runtime.lower_make_variant(ctx.builder(), &idx_module, 1, 1)?;
+                runtime.stamp_variant_header(
+                    ctx.builder(),
+                    some_ptr,
+                    verum_vbc::TypeId::MAYBE.0,
+                    1,
+                )?;
+                runtime.lower_set_variant_data(ctx.builder(), some_ptr, 0, i_val)?;
+                let some_int = ctx
+                    .builder()
+                    .build_ptr_to_int(some_ptr, i64_type, "idxof_some_int")
+                    .or_llvm_err()?;
+                // lower_make_variant's malloc null-check SPLITS the block:
+                // the phi edge must come from the CURRENT block, not
+                // found_bb (see `first` for the stale-register failure).
+                let some_pred_bb = ctx.builder().get_insert_block().unwrap_or(found_bb);
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
                     .or_llvm_err()?;
                 ctx.builder().position_at_end(not_found_bb);
+                let none_ptr =
+                    runtime.lower_make_variant(ctx.builder(), &idx_module, 0, 0)?;
+                runtime.stamp_variant_header(
+                    ctx.builder(),
+                    none_ptr,
+                    verum_vbc::TypeId::MAYBE.0,
+                    0,
+                )?;
+                let none_int = ctx
+                    .builder()
+                    .build_ptr_to_int(none_ptr, i64_type, "idxof_none_int")
+                    .or_llvm_err()?;
+                let none_pred_bb =
+                    ctx.builder().get_insert_block().unwrap_or(not_found_bb);
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
                     .or_llvm_err()?;
@@ -15570,10 +15665,11 @@ fn lower_call_method<'ctx>(
                     .build_phi(i64_type, "idxof_result")
                     .or_llvm_err()?;
                 phi_result.add_incoming(&[
-                    (&i_val, found_bb),
-                    (&i64_type.const_int(u64::MAX, true), not_found_bb), // -1
+                    (&some_int, some_pred_bb),
+                    (&none_int, none_pred_bb),
                 ]);
                 ctx.set_register(dst.0, phi_result.as_basic_value());
+                ctx.mark_variant_register(dst.0);
                 return Ok(());
             }
             "sort" if args.count == 0 => {
@@ -15781,6 +15877,14 @@ fn lower_call_method<'ctx>(
                     .build_load(i64_type, backing_ptr, "first_elem")
                     .or_llvm_err()?
                     .into_int_value();
+                // T0332: stamp the Maybe header (type_id + size) so
+                // `verum_generic_eq` never hits the zero-header early-out.
+                runtime.stamp_variant_header(
+                    ctx.builder(),
+                    some_ptr,
+                    verum_vbc::TypeId::MAYBE.0,
+                    1,
+                )?;
                 runtime.lower_set_variant_data(ctx.builder(), some_ptr, 0, elem)?;
                 let some_int = ctx
                     .builder()
@@ -15798,6 +15902,12 @@ fn lower_call_method<'ctx>(
                 // None path: create None variant
                 ctx.builder().position_at_end(none_bb);
                 let none_ptr = runtime.lower_make_variant(ctx.builder(), &module, 0, 0)?;
+                runtime.stamp_variant_header(
+                    ctx.builder(),
+                    none_ptr,
+                    verum_vbc::TypeId::MAYBE.0,
+                    0,
+                )?;
                 let none_int = ctx
                     .builder()
                     .build_ptr_to_int(none_ptr, i64_type, "none_int")
@@ -15905,6 +16015,13 @@ fn lower_call_method<'ctx>(
                     .build_load(i64_type, elem_ptr, "last_elem")
                     .or_llvm_err()?
                     .into_int_value();
+                // T0332: stamp the Maybe header — see `first`.
+                runtime.stamp_variant_header(
+                    ctx.builder(),
+                    some_ptr,
+                    verum_vbc::TypeId::MAYBE.0,
+                    1,
+                )?;
                 runtime.lower_set_variant_data(ctx.builder(), some_ptr, 0, elem)?;
                 let some_int = ctx
                     .builder()
@@ -15919,6 +16036,12 @@ fn lower_call_method<'ctx>(
                 // None path: create None variant
                 ctx.builder().position_at_end(none_bb);
                 let none_ptr = runtime.lower_make_variant(ctx.builder(), &module, 0, 0)?;
+                runtime.stamp_variant_header(
+                    ctx.builder(),
+                    none_ptr,
+                    verum_vbc::TypeId::MAYBE.0,
+                    0,
+                )?;
                 let none_int = ctx
                     .builder()
                     .build_ptr_to_int(none_ptr, i64_type, "none_int")
@@ -23750,7 +23873,17 @@ fn lower_cbgr_extended<'ctx>(
                         (t(TypeId::I32.0), scalar4_bb),
                         (t(TypeId::F32.0), scalar4_bb),
                         (t(TypeId::U64.0), scalar8_bb),
-                        (t(TypeId::I64.0), scalar8_bb),
+                        // NB: `TypeId::I64` is an ALIAS of `TypeId::INT`
+                        // (both 2) — listing both emitted a DUPLICATE
+                        // switch case, which is INVALID LLVM IR. The
+                        // verifier flags it, and every function-level
+                        // pass (even bare mem2reg) then corrupts the
+                        // instruction ilist and dies in
+                        // IntervalMap::deleteNode — this one line was
+                        // the whole "default<O2> SIGBUSes on any
+                        // non-trivial module" class that kept the
+                        // release pipeline pinned to
+                        // always-inline,globaldce.
                         (t(TypeId::INT.0), scalar8_bb),
                         (t(TypeId::FLOAT.0), scalar8_bb),
                     ],
@@ -33099,6 +33232,36 @@ fn build_runtime_type_switch<'ctx>(
                             )
                             .or_llvm_err()?;
                         Ok(coerced.into())
+                    } else if arg_bv.is_int_value() && expected.is_float_type() {
+                        // Float params declared at native f64 (`AdamW.new
+                        // (lr: Float)`): the dispatch's i64 Value carries
+                        // the NaN-boxed double BITS — bitcast, never
+                        // sitofp (which would reinterpret the bits as an
+                        // integer magnitude). Without this arm the tid
+                        // branch emitted a verifier-invalid call and the
+                        // WHOLE module failed verification the moment
+                        // the O2 pipeline (which verifies) turned on.
+                        let coerced = ctx
+                            .builder()
+                            .build_bit_cast(
+                                arg_bv.into_int_value(),
+                                ctx.types().f64_type(),
+                                "rts_arg_f64",
+                            )
+                            .or_llvm_err()?;
+                        Ok(coerced.into())
+                    } else if arg_bv.is_float_value() && expected.is_int_type() {
+                        // Symmetric leg: a float-marked register feeding an
+                        // i64 Value slot travels as its bit pattern.
+                        let coerced = ctx
+                            .builder()
+                            .build_bit_cast(
+                                arg_bv.into_float_value(),
+                                i64_type,
+                                "rts_arg_bits",
+                            )
+                            .or_llvm_err()?;
+                        Ok(coerced.into())
                     } else {
                         Ok(*arg)
                     }
@@ -38062,6 +38225,16 @@ fn lower_load_const<'ctx>(
                 text_global.set_constant(true);
                 text_global.set_linkage(verum_llvm::module::Linkage::Private);
                 text_global.set_unnamed_addr(true);
+                // T0332: the structural-equality authority's guarded
+                // header probe (`verum_generic_eq` → is-text test)
+                // accepts a candidate Text pointer only when it is
+                // 16-byte aligned — the heap allocator's contract. A
+                // default-aligned (8) rodata Text failed the probe, so
+                // literal Texts fell to the raw bit-compare and
+                // `contains`/`index_of` over literal lists answered
+                // false. Static literals must satisfy the SAME
+                // alignment contract as heap Texts.
+                text_global.set_alignment(16);
                 text_global.as_pointer_value()
             };
 
@@ -40132,6 +40305,12 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
                     .build_ptr_to_int(elem_ptr, ctx.types().i64_type(), "ref_elem")
                     .or_llvm_err()?;
                 ctx.set_register(dst.0, ptr_as_i64.into());
+                // T0332: an element-slot ref is SLOT-SHAPED — one load
+                // recovers the element value (scalar bits or the heap
+                // element's pointer alike). Mark it so shape-aware
+                // consumers (contains/index_of, deref_if_lone_ref)
+                // dereference instead of comparing the slot address.
+                ctx.mark_ref_param_register(dst.0);
             } else {
                 // Create a fresh alloca and copy the current value into it.
                 // CRITICAL: never reuse the register's alloca slot directly,

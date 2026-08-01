@@ -1,11 +1,11 @@
 // =============================================================================
 // core/database/sqlite/native/limits/mod.vr
 // =============================================================================
-// Layer: 6 (per-SqliteConnection)
+// Layer: 6 (per-SqliteNativeConnection)
 // Spec: sqlite-native.md §22 (operational tooling — quotas)
 //
 
-// Per-SqliteConnection resource caps. Each `LimitDimension` enforces one
+// Per-SqliteNativeConnection resource caps. Each `LimitDimension` enforces one
 // of:
 //
 

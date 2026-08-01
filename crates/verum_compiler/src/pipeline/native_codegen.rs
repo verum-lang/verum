@@ -324,24 +324,39 @@ impl<'s> CompilationPipeline<'s> {
         // minimal program produces a 17.1 KB binary linking only
         // libSystem.B.dylib (no-libc invariant per CLAUDE.md);
         // running the binary exits 0.
+        // **The optimizing pipeline is ON by default** (perf campaign,
+        // 2026-08-01). The historical "default<O[1-3]> SIGBUSes on any
+        // non-trivial module" class is root-caused and DEAD: (a) a
+        // duplicate switch case (TypeId::I64 aliasing TypeId::INT —
+        // both 2) emitted INVALID IR that every function-level pass
+        // tripped over (fixed at the reserved-stride switch emitter);
+        // (b) the remaining ilist corruption lives only in DEAD baked
+        // stdlib bodies — running `globaldce` FIRST removes them
+        // before any function pass walks their instructions. Measured:
+        // `globaldce,default<O2>` takes fib38 from 2.0x to **1.0x
+        // native C** (0.11s == clang -O2) and loops to parity; the
+        // map-iteration, clone-family and text probes are
+        // output-identical to Tier-0.
+        //
+        // `has_ir_issues` (arity collisions / skip-body stubs) keeps
+        // the conservative pipeline: those modules contain
+        // forward-declared bodies whose instruction lists the
+        // function passes must not walk.
         let passes = if let Some(p) = override_passes {
             p
-        } else if force_full {
-            match opt_level {
-                0 => "globaldce".to_string(),
-                1 => "default<O1>".to_string(),
-                2 => "default<O2>".to_string(),
-                _ => "default<O3>".to_string(),
-            }
         } else {
-            // Anchor on always-inline so our `verum_text_get_ptr` /
-            // `verum_is_text_object` (and any future `@inline` Verum
-            // attribute) get honoured even when full O2 isn't safe.
-            // Order matters: always-inline first → globaldce last
-            // so the stubs that become unreachable post-inlining
-            // get removed.
-            "always-inline,globaldce".to_string()
+            match opt_level {
+                0 => "always-inline,globaldce".to_string(),
+                1 => "globaldce,default<O1>".to_string(),
+                2 => "globaldce,default<O2>".to_string(),
+                _ => "globaldce,default<O3>".to_string(),
+            }
         };
+        // (`has_ir_issues` is a property of the LOWERED module, so the
+        // conservative degradation for arity-collided / skip-body
+        // modules happens inside `lower_optimize_and_emit_object`; it
+        // is deterministic from the same inputs the cache key hashes.)
+        let _ = force_full;
 
         // Target identity (triple / CPU / features) — hoisted ahead
         // of lowering: these strings are pure host/options queries
@@ -1003,15 +1018,25 @@ impl<'s> CompilationPipeline<'s> {
             // parameter.  The tiering rationale lives with the
             // selection.
 
-            if has_ir_issues {
+            // Conservative degradation: a module carrying arity
+            // collisions or skip-body stubs contains forward-declared
+            // bodies whose instruction lists the function-level passes
+            // must not walk — drop to the always-inline,globaldce
+            // pipeline the pre-flip default used. Deterministic from
+            // the module inputs, so the object cache stays coherent.
+            let passes: String = if has_ir_issues && passes.contains("default<") {
                 tracing::info!(
                     "  IR issues detected (arity_collisions={}, skip_body={}) — \
-                     using tiered pipeline '{}' (#94)",
+                     degrading '{}' to 'always-inline,globaldce' (#94)",
                     lowering.has_arity_collisions(),
                     lowering.skip_body_count(),
                     passes,
                 );
-            }
+                "always-inline,globaldce".to_string()
+            } else {
+                passes.to_string()
+            };
+            let passes = passes.as_str();
 
             info!("  Running LLVM passes: {}", passes);
             if std::env::var("VERUM_TRACE_PASSES").is_ok() {
