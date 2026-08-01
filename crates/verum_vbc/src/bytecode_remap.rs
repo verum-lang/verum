@@ -113,6 +113,14 @@ pub fn rewrite_instruction_ids(instr: &mut Instruction, remap: &dyn IdRemap) {
         | Instruction::MakeVariantTyped { type_id, .. } => {
             *type_id = remap.map_type_id(TypeId(*type_id)).0;
         }
+        // Spec/Guard carry a TYPE-table index too (T0447: Spec is the
+        // interior-pointer pointee fact channel — an unremapped id
+        // resolves to the WRONG descriptor in the merged module and
+        // the AOT consumer silently derives no layout marks).
+        Instruction::Spec { expected_type, .. }
+        | Instruction::Guard { expected_type, .. } => {
+            *expected_type = remap.map_type_id(TypeId(*expected_type)).0;
+        }
         Instruction::MakePi { return_type_id, .. } => {
             *return_type_id = remap.map_type_id(TypeId(*return_type_id)).0;
         }

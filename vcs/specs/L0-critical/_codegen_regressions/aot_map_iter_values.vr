@@ -1,0 +1,28 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: aot, map, iteration, interior-pointer, T0447
+// @timeout: 60000
+// @description: T0447 — for (k, v) in map.iter() must yield correct
+//   VALUES at Tier-1. The baked MapIter.next body walks entries via
+//   `&unsafe Slot` interior pointers; AOT's GetF applied the
+//   +OBJECT_HEADER_SIZE model to those HEADERLESS slots, so entry.key
+//   read psl and entry.value read the NEXT slot's key. The Spec
+//   carried-fact channel (VBC ptr-intercept → AOT inline/stride marks)
+//   pins the raw layout.
+// @expected-stdout: sum=66
+// @expected-stdout: aot map iter values: PASS
+
+fn main() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    let mut sum = 0;
+    for (k, v) in m.iter() {
+        sum = sum + k + v;
+    }
+    print(f"sum={sum}");
+    assert_eq(sum, 66);
+    print("aot map iter values: PASS");
+}

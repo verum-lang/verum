@@ -8015,10 +8015,38 @@ pub fn lower_instruction<'ctx>(
         // Verification (debug-mode: assert; release-mode: no-op)
         // ====================================================================
         Instruction::Spec {
-            reg: _,
-            expected_type: _,
+            reg,
+            expected_type,
         } => {
-            // Type specification — no-op at runtime (checked at compile time)
+            // Type specification — no runtime effect, but it IS the
+            // designed carried-fact channel across the tier boundary
+            // (T0447): the VBC ptr-arithmetic intercept stamps the
+            // POINTEE type of an interior raw pointer into a
+            // HEADERLESS record array (`&unsafe Slot<K,V>` from
+            // `entries.offset(i)`). Mark the register inline-struct +
+            // element-stride so `lower_get_field` uses the raw
+            // `field_idx * 8` layout instead of +OBJECT_HEADER_SIZE
+            // (which read `entry.key` as `psl` and `entry.value` as
+            // the NEXT slot's key — the map-iteration value loss).
+            if let Some(module) = ctx.vbc_module() {
+                let desc = module.types.iter().find(|t| t.id.0 == *expected_type);
+                if std::env::var_os("VERUM_TRACE_SPECFACT").is_some() {
+                    eprintln!(
+                        "[spec-fact] reg={} type_id={} resolved={:?} fields={:?}",
+                        reg.0,
+                        expected_type,
+                        desc.and_then(|d| module.get_string(d.name)),
+                        desc.map(|d| d.fields.len()),
+                    );
+                }
+                if let Some(desc) = desc {
+                    let field_count = desc.fields.len() as u64;
+                    if field_count > 1 {
+                        ctx.mark_inline_struct_register(reg.0);
+                        ctx.set_element_stride(reg.0, field_count * 8);
+                    }
+                }
+            }
             Ok(())
         }
         Instruction::Guard {

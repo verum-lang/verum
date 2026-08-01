@@ -11978,6 +11978,36 @@ impl VbcCodegen {
             // so downstream `.offset()` / `.is_null()` calls on the
             // chain stay on the intercept path.
             self.ctx.mark_raw_pointer(result);
+
+            // T0447 — carry the POINTEE fact across the tier boundary.
+            // `mark_raw_pointer` is codegen-local: Tier-1 lowers the
+            // LoadI/Mul/Add sequence with no idea the result is an
+            // interior pointer into a HEADERLESS record array, so its
+            // GetF applied the +OBJECT_HEADER_SIZE model — `entry.key`
+            // read `psl`, `entry.value` read the NEXT slot's key
+            // (map iteration returned k=garbage/v=shifted at AOT while
+            // interp was green). `Spec` is the designed fact channel:
+            // a type-assertion hint, no-op in the interpreter, which
+            // the AOT lowering turns into inline-struct + stride marks.
+            if let Some(rt) = receiver_type.as_deref() {
+                let inner = rt
+                    .strip_prefix("&unsafe ")
+                    .or_else(|| rt.strip_prefix("*const "))
+                    .or_else(|| rt.strip_prefix("*mut "))
+                    .unwrap_or(rt);
+                let inner_base = match inner.find('<') {
+                    Some(lt) => inner[..lt].trim(),
+                    None => inner.trim(),
+                };
+                if stride_bytes > 8
+                    && let Some(&tid) = self.type_name_to_id.get(inner_base)
+                {
+                    self.ctx.emit(Instruction::Spec {
+                        reg: result,
+                        expected_type: tid.0,
+                    });
+                }
+            }
             return Ok(Some(result));
         }
 
