@@ -10111,6 +10111,10 @@ impl TypeChecker {
         use ExprKind::*;
         let ExprKind::Spawn { expr, contexts } = &current_expr.kind else { unreachable!() };
         // Validate contexts exist in scope and expand groups
+        // T0660: value-typed contexts — learn plain types first.
+        if !contexts.is_empty() {
+            self.ensure_using_types_registered(contexts);
+        }
         if !contexts.is_empty()
             && let Err(err) = self
                 .context_resolver

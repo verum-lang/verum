@@ -684,6 +684,11 @@ impl ContextResolver {
         Ok(())
     }
 
+    /// True when `name` is already a registered context (any kind).
+    pub fn is_defined_context(&self, name: &str) -> bool {
+        self.defined_contexts.contains(&Text::from(name))
+    }
+
     /// Get all registered group names (for diagnostics)
     pub fn group_names(&self) -> List<&Text> {
         self.registry.group_names()
