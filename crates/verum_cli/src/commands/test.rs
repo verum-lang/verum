@@ -470,18 +470,24 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     // the run spans MORE THAN ONE file — a single-file run has nothing
     // downstream to protect, and it is also exactly the shape the
     // child re-invocation produces (a second recursion terminator on
-    // top of the env marker).  JSON-family formats stay in-process:
-    // their consumers parse OUR stdout and the child protocol would
-    // double-emit events.
+    // top of the env marker).
+    //
+    // T0394/T0220: isolation covers EVERY format now. The old
+    // JSON-family carve-out feared double emission, but the child's
+    // stdout is fully CAPTURED (`Command::output`) and parsed into
+    // `TestResult`s — the parent is the only writer on the real
+    // stdout, rendering per-test events and the summary itself in
+    // whatever format was asked. The carve-out's real effect was
+    // that exactly the machine-readable formats — the ones CI and
+    // the INVENTORY liveness gate consume — ran in-process, where
+    // ONE crashing test (SIGSEGV class T0394) killed the whole run
+    // and, json being assembled at end, took every completed
+    // result with it (measured: 292s of suite → 0 bytes).
     let interp_child = std::env::var_os("VERUM_TEST_INTERP_CHILD").is_some();
     let interp_isolate = opts.tier == Tier::Interpret
         && !interp_child
         && !cfg.differential
         && std::env::var_os("VERUM_TEST_NO_ISOLATE").is_none()
-        && !matches!(
-            opts.format,
-            TestFormat::Json | TestFormat::Junit | TestFormat::Tap | TestFormat::Sarif
-        )
         && {
             let mut files: Vec<&Path> = active.iter().map(|t| t.file.as_path()).collect();
             files.sort_unstable();
