@@ -278,6 +278,7 @@ fn test_type_decl_with_meta_where_clause() {
     );
 
     let type_decl = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: Ident::new("Matrix", dummy_span),
         generics: List::new(),

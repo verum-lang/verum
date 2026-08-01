@@ -694,6 +694,14 @@ impl TypeChecker {
                         verum_ast::ty::TypeKind::Generic { base, .. } => &base.kind,
                         other => other,
                     };
+                    if std::env::var_os("VERUM_TRACE_DEPAPP").is_some() {
+                        eprintln!(
+                            "[depapp] arm carrier={:?} supplied={} map_len={}",
+                            std::mem::discriminant(base_kind),
+                            value_args.len(),
+                            self.ctx.dependent_value_params.len()
+                        );
+                    }
                     match base_kind {
                         verum_ast::ty::TypeKind::Path(p) if p.segments.len() == 1 => {
                             match p.segments.first() {

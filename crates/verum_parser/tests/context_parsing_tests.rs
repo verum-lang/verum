@@ -438,7 +438,7 @@ fn parse_protocol_decl(source: &str) -> Result<TypeDecl, String> {
                 // Convert ProtocolDecl to TypeDecl for unified testing
                 // This happens for `context protocol Name { }` form
                 Ok(TypeDecl {
-                    value_params: List::new(),
+                    value_params: verum_common::List::new(),
                     visibility: decl.visibility,
                     name: decl.name,
                     generics: decl.generics,

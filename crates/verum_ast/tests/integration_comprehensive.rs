@@ -263,6 +263,7 @@ fn test_record_type_declaration() {
     ));
 
     let type_decl = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("Point"),
         generics: List::new(),
@@ -318,6 +319,7 @@ fn test_variant_type_declaration() {
     variants.push(Variant::new(test_ident("None"), None, span));
 
     let type_decl = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("Option"),
         generics,
@@ -355,6 +357,7 @@ fn test_affine_type_declaration() {
     ));
 
     let type_decl = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("FileHandle"),
         generics: List::new(),
@@ -458,6 +461,7 @@ fn test_complete_program() {
     // Type declaration
     items.push(Item::new(
         ItemKind::Type(TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: test_ident("MyType"),
             generics: List::new(),

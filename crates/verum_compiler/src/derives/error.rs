@@ -888,7 +888,6 @@ mod tests {
     }
 
     fn create_error_with_fields() -> TypeDecl {
-        value_params: List::new(),
         let span = Span::default();
         TypeDecl {
             value_params: List::new(),

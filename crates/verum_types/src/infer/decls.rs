@@ -189,16 +189,9 @@ impl TypeChecker {
         if let Some(verum_ast::decl::ResourceModifier::Linear) = &type_decl.resource_modifier {
             self.affine_tracker.register_linear_type(type_name.clone());
         }
-        // T0266: record the dependent value-parameter ARITY for indexed
-        // families so the DependentApp arm of `ast_to_type` can reject
-        // `T<A>(x, y, z)` against a two-param declaration. Simple-name
-        // key — the checker validates unqualified heads only (qualified
-        // and aliased carriers skip the check, stdlib-safe).
-        if !type_decl.value_params.is_empty() {
-            self.ctx
-                .dependent_value_params
-                .insert(type_name.clone(), type_decl.value_params.len());
-        }
+        // T0266: dependent value-parameter arity — ONE authority, shared
+        // with the two-pass flow (`register_type_name_only`).
+        self.record_dependent_family(type_decl);
         // `@must_consume` attribute — alias for `type linear`. Lets API
         // authors mark must-consume types with attribute syntax (which
         // survives derive expansion / macro re-export) instead of the
@@ -1388,11 +1381,19 @@ impl TypeChecker {
                     // Try strict resolution first, fall back to lenient
                     let field_type = match self.ast_to_type(&field.ty) {
                         Ok(ty) => ty,
-                        Err(_) => {
+                        // VALIDATION errors are user defects and must
+                        // surface — the lenient fallback exists ONLY for
+                        // resolution-order gaps (forward references that a
+                        // later pass closes). Swallowing everything made
+                        // field-position defects (E408 dependent-arity,
+                        // T0266) vanish while the same annotation errored
+                        // in every other position.
+                        Err(e) if !Self::field_error_must_surface(&e) => {
                             // Lenient resolution: unresolved types become fresh type variables
                             // or Named types that will be resolved later
                             self.ast_to_type_lenient(&field.ty)
                         }
+                        Err(e) => return Err(e),
                     };
                     record_map.insert(field_name, field_type);
                 }
@@ -2018,11 +2019,52 @@ impl TypeChecker {
     ///
     /// After calling `register_type_name_only` for both types, `SearchRequest`
     /// can reference `SortOrder` even though it's defined later.
+    /// Field-type resolution runs strict-then-lenient: the lenient
+    /// fallback exists ONLY for resolution-ORDER gaps (forward
+    /// references a later pass closes). A VALIDATION defect — the
+    /// annotation is well-resolved but WRONG — must surface no matter
+    /// which syntactic position carries it; swallowing it here made
+    /// record-field positions the one place a defect silently vanished.
+    /// Extend this predicate when new validation-class TypeErrors gain
+    /// arms in `ast_to_type`.
+    fn field_error_must_surface(e: &crate::TypeError) -> bool {
+        matches!(
+            e,
+            crate::TypeError::DependentValueArgArityMismatch { .. }
+        )
+    }
+
+    /// T0266 — ONE authority for recording a dependent family's declared
+    /// value-parameter arity. Both registration entry points feed it:
+    /// the two-pass flow (`register_type_name_only`, used by the check /
+    /// compile pipeline) and the single-shot flow
+    /// (`register_type_declaration`, used by module registration). The
+    /// `DependentApp` arm of `ast_to_type` consults the map to reject
+    /// `T<A>(x, y, z)` against a two-param declaration. Simple-name key —
+    /// unqualified heads only; qualified/aliased carriers skip the check.
+    fn record_dependent_family(&mut self, type_decl: &verum_ast::TypeDecl) {
+        if type_decl.value_params.is_empty() {
+            return;
+        }
+        let type_name: verum_common::Text = type_decl.name.name.as_str().into();
+        if std::env::var_os("VERUM_TRACE_DEPAPP").is_some() {
+            eprintln!(
+                "[depapp] record family {} -> {}",
+                type_name,
+                type_decl.value_params.len()
+            );
+        }
+        self.ctx
+            .dependent_value_params
+            .insert(type_name, type_decl.value_params.len());
+    }
+
     pub fn register_type_name_only(&mut self, type_decl: &verum_ast::TypeDecl) {
         use verum_common::Text;
 
         let type_name: Text = type_decl.name.name.as_str().into();
         let span = type_decl.span;
+        self.record_dependent_family(type_decl);
 
         // Check if this type is already defined (e.g., builtin types like List, Map, etc.)
         // During stdlib loading: don't override existing definitions with placeholders.
@@ -3069,13 +3111,18 @@ impl TypeChecker {
                 // each other during recursive resolution.
                 self.define_type_in_current_module(type_name.clone(), Type::Var(placeholder_var));
 
-                // Use lenient resolution fallback for cross-module imports
+                // Use lenient resolution fallback for cross-module imports.
+                // VALIDATION-class errors still surface — see
+                // `field_error_must_surface`.
                 let mut record_map: IndexMap<Text, Type> = IndexMap::new();
                 for field in fields {
                     let field_name: Text = field.name.name.as_str().into();
                     let field_type = match self.ast_to_type(&field.ty) {
                         Ok(ty) => ty,
-                        Err(_) => self.ast_to_type_lenient(&field.ty),
+                        Err(e) if !Self::field_error_must_surface(&e) => {
+                            self.ast_to_type_lenient(&field.ty)
+                        }
+                        Err(e) => return Err(e),
                     };
                     record_map.insert(field_name, field_type);
                 }

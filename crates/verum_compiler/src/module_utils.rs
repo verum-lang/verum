@@ -226,7 +226,6 @@ pub fn filter_type_decl_for_target(
     type_decl: &verum_ast::TypeDecl,
     target: &TargetConfig,
 ) -> verum_ast::TypeDecl {
-    value_params: List::new(),
     use verum_ast::cfg::parse_cfg_predicate;
     use verum_ast::decl::TypeDeclBody;
     use verum_common::Maybe;
@@ -284,7 +283,7 @@ pub fn filter_type_decl_for_target(
     };
 
     verum_ast::TypeDecl {
-        value_params: List::new(),
+        value_params: type_decl.value_params.clone(),
         visibility: type_decl.visibility.clone(),
         name: type_decl.name.clone(),
         generics: type_decl.generics.clone(),

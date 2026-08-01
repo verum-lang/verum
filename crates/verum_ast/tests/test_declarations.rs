@@ -341,6 +341,7 @@ fn test_type_declaration() {
 
     // Simple type alias: type UserId = Int
     let alias = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("UserId"),
         generics: List::new(),
@@ -362,6 +363,7 @@ fn test_struct_declaration() {
 
     // Record: type Point { x: Float, y: Float }
     let point_struct = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("Point"),
         generics: List::new(),
@@ -408,6 +410,7 @@ fn test_enum_declaration() {
 
     // Variant: type Option<T> { Some(T), None }
     let option_enum = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("Option"),
         generics: List::from(vec![GenericParam {
@@ -469,6 +472,7 @@ fn test_newtype_declaration() {
 
     // Newtype: type Email(String{is_email(it)})
     let email_newtype = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("Email"),
         generics: List::new(),
@@ -1004,6 +1008,7 @@ fn test_complex_generic_declaration() {
     // Complex generic type:
     // type Container<T, N>
     let container = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("Container"),
         generics: List::from(vec![
@@ -1117,6 +1122,7 @@ fn test_enum_with_discriminants() {
 
     // Variant with no data
     let flags_enum = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("Flags"),
         generics: List::new(),
@@ -1281,6 +1287,7 @@ fn test_resource_modifier_affine() {
     let span = test_span();
 
     let file_handle = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("FileHandle"),
         generics: List::new(),
@@ -1316,6 +1323,7 @@ fn test_resource_modifier_linear() {
     let span = test_span();
 
     let token = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("Token"),
         generics: List::new(),
@@ -1351,6 +1359,7 @@ fn test_resource_modifier_none() {
     let span = test_span();
 
     let point = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("Point"),
         generics: List::new(),
@@ -1405,6 +1414,7 @@ fn test_resource_modifier_affine_newtype() {
     let span = test_span();
 
     let handle = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("Handle"),
         generics: List::new(),
@@ -1428,6 +1438,7 @@ fn test_resource_modifier_affine_variant() {
     let span = test_span();
 
     let resource = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: test_ident("Resource"),
         generics: List::new(),

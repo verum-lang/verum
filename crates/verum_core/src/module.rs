@@ -188,7 +188,6 @@ mod tests {
     fn variant_lookup_returns_ctor_names() {
         let mut m = IrModule::empty("core.test", Span::dummy());
         m.types.push(IrTypeDecl {
-            value_params: List::new(),
             name: Text::from("Color"),
             generics: List::new(),
             variant_kind: IrVariantKind::Variant {
