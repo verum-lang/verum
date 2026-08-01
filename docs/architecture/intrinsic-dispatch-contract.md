@@ -195,6 +195,47 @@ Inheritance from CBGR architecture docs:
 - `dispatch_method_call`, `handle_get_index`, `handle_set_index` —
   each has three parallel arms for the three shapes (Task #24 fix).
 
+## Generic-arithmetic object arm (T0499)
+
+The integer arithmetic opcodes (`AddI`/`SubI`/`MulI`/`DivI`/`ModI`/
+`NegI`) are POLYMORPHIC over erased operands. Arm order is pinned:
+
+1. both-inline-int fast path (zero-cost);
+2. reference resolve (CBGR refs);
+3. float arm (T0497 — either operand a real NaN-box float);
+4. 128-bit arm (T0272 — boxed Int128/UInt128 full width);
+5. string-concat arm (`AddI` only — small OR heap Texts);
+6. **object arm** — a heap-record operand dispatches to its type's
+   operator method (`Complex.add`) resolved through the guarded
+   header probe in
+   `interpreter/dispatch_table/handlers/object_dispatch.rs` (the ONE
+   runtime-type-resolution authority; the Eq/Ord fallback delegates
+   to it). Dispatch pushes the method's call frame in-loop (the
+   `handle_eqg` shape — no nested execution), memoised per
+   `(type_id, method)` including negative results;
+7. integer-extract fallback (legacy tag-robust arm — unchanged).
+
+Codegen counterpart: `compile_binary`'s operator-method route
+normalises the receiver type with `strip_generic_args` (function keys
+are generic-stripped — `Complex.add`, never `Complex<Float>.add`),
+same for unary `neg`.
+
+Static-call witness chain: a bare-path static call carries generic
+witnesses derived (in priority order) from an explicit TypeExpr
+receiver, an alias instantiation target, the binding-annotation hint
+(`let m: Matrix<Complex<Float>> = Matrix.zeros(…)`), or the
+enclosing-impl identity relay (`Matrix.zeros(n, n)` inside
+`implement<T> Matrix<T>` stages `[Generic(0..k)]`, resolved through
+the caller frame's witness table at runtime). Without a witness the
+callee's `LoadT Generic` loads nil — the "zeros() matrix full of
+nils" class.
+
+Tier-1 (AOT) parity: the object arm is interpreter-side; the AOT
+`AddI` lowering keeps integer semantics for erased operands. Mono
+specialization is the intended Tier-1 route for generic user-type
+arithmetic; until it covers this shape, generic `+` on user records
+under `--aot` remains a known gap (tracked with T0499's residuals).
+
 ## References
 
 - Task #25 [E3] — body @intrinsic vs table authority, LLVM-canonical

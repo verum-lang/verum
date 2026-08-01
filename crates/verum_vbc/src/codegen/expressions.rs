@@ -7664,7 +7664,7 @@ impl VbcCodegen {
     /// generic bodies re-resolve them against their own frame witnesses at
     /// CallG time.  Returns `None` unless at least one slot is concrete
     /// (an all-placeholder vector carries no information).
-    fn type_expr_witness_args(
+    pub(super) fn type_expr_witness_args(
         &self,
         ty: &verum_ast::ty::Type,
     ) -> Option<Vec<crate::types::TypeRef>> {
@@ -9160,6 +9160,46 @@ impl VbcCodegen {
     /// `b.is_none()` correctly maps to `Maybe.is_none(b)`.  `None`
     /// for non-method dispatch sites that already supply self in
     /// `args` directly (UFCS / free-fn-style call expressions).
+    /// ONE authority for "witnesses from the receiver's static
+    /// instantiation" (T0499/T0496): `Matrix<Complex<Float>>` ⇒
+    /// `[Complex<Float>]`. Works when the base type has a module-local
+    /// TypeId (Instantiated conversion) AND when the receiver is a
+    /// BAKED stdlib generic whose base id is unknown locally — the
+    /// tracked name still spells the instantiation args. Returns only
+    /// vectors carrying at least one concrete entry.
+    fn derive_receiver_witnesses(
+        &mut self,
+        receiver: &Expr,
+    ) -> Option<Vec<crate::types::TypeRef>> {
+        let recv_ty_opt = self.infer_expr_type_name(receiver);
+        if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
+            eprintln!("[tpcall] recv-witness recv_ty={:?}", recv_ty_opt);
+        }
+        let recv_ty = recv_ty_opt?;
+        let recv_ty = recv_ty.trim();
+        let derived = match self.type_name_to_type_ref_mono(recv_ty) {
+            Some(crate::types::TypeRef::Instantiated { args, .. }) if !args.is_empty() => {
+                Some(args)
+            }
+            _ => {
+                let args = VbcCodegen::split_generic_args(recv_ty);
+                if args.is_empty() {
+                    None
+                } else {
+                    args.iter()
+                        .map(|a| self.type_name_to_type_ref_mono(a))
+                        .collect::<Option<Vec<_>>>()
+                }
+            }
+        };
+        derived.filter(|ta| {
+            !ta.is_empty()
+                && ta
+                    .iter()
+                    .any(|t| !matches!(t, crate::types::TypeRef::Generic(_)))
+        })
+    }
+
     fn compile_resolved_call_target_with_receiver(
         &mut self,
         target: &verum_ast::expr::ResolvedCallTarget,
@@ -9491,6 +9531,15 @@ impl VbcCodegen {
                         prepended.push(a.clone());
                     }
                     let prepended_list: verum_common::List<Expr> = prepended.into();
+                    // T0499: the pre-resolved instance-method route is the
+                    // funnel the checker's carried resolutions take — stage
+                    // the receiver-instantiation witnesses so the callee
+                    // frame's `T.zero()`-class statics resolve (the sidecar
+                    // zone below is never reached on this route).
+                    if self.ctx.pending_static_call_type_args.is_none() {
+                        self.ctx.pending_static_call_type_args =
+                            self.derive_receiver_witnesses(recv);
+                    }
                     return self.compile_static_method_call(&info, &prepended_list);
                 }
                 self.compile_static_method_call(&info, args)
@@ -11039,6 +11088,62 @@ impl VbcCodegen {
                             Some(args)
                         }
                         _ => None,
+                    })
+                    .or_else(|| {
+                        // T0496 (annotation leg): a BARE-path static call
+                        // under an instantiated binding annotation —
+                        //   let m: Matrix<Complex<Float>> = Matrix.zeros(2, 2);
+                        // compile_let pre-derived the annotation's witness
+                        // vector through `type_expr_witness_args` (the SAME
+                        // authority the explicit TypeExpr-receiver form
+                        // uses; the textual disambig hint is base-stripped
+                        // and useless here) and staged it as
+                        // (base, witnesses). Consume it when this call's
+                        // receiver IS that base. Without a witness table the
+                        // callee's `T.zero()`-style statics load nil (a
+                        // Complex zeros() matrix full of nils, crashing the
+                        // first downstream field read).
+                        let pending = self.ctx.pending_annotation_witnesses.clone();
+                        if std::env::var_os("VERUM_TRACE_WITNESS").is_some() {
+                            eprintln!(
+                                "[witness] annot-fallback recv={:?} pending={:?}",
+                                static_receiver_type,
+                                pending.as_ref().map(|(b, w)| (b.clone(), w.len()))
+                            );
+                        }
+                        let (base, w) = pending?;
+                        let recv = static_receiver_type.as_deref()?;
+                        if base != recv || w.is_empty() {
+                            return None;
+                        }
+                        Some(w)
+                    })
+                    .or_else(|| {
+                        // Enclosing-impl relay: a bare self-type static call
+                        // INSIDE a generic impl (`Matrix.zeros(n, n)` in the
+                        // body of `implement<T: Semiring> Matrix<T>`): the
+                        // callee's type params ARE the enclosing impl's, so
+                        // stage the identity witness vector [Generic(0..k)]
+                        // and let the runtime chain it through this frame's
+                        // own witness table.
+                        let recv = static_receiver_type.as_deref()?;
+                        let impl_ty = self.ctx.current_impl_type_name.as_deref()?;
+                        if VbcCodegen::strip_generic_args(impl_ty) != recv {
+                            return None;
+                        }
+                        let k = self.ctx.generic_type_params_ordered.len();
+                        if k == 0 {
+                            return None;
+                        }
+                        Some(
+                            (0..k)
+                                .map(|i| {
+                                    crate::types::TypeRef::Generic(
+                                        crate::types::TypeParamId(i as u16),
+                                    )
+                                })
+                                .collect(),
+                        )
                     })
             };
 
@@ -13280,6 +13385,17 @@ impl VbcCodegen {
                 }
                 self.record_generic_instantiation(fid, &with_recv)
             })
+            // Chain honesty: an all-placeholder/empty PRIMARY derivation
+            // must not suppress the receiver-instantiation fallback below
+            // (`Some(vec![Generic..])` skipped the or_else and then died
+            // at the final filter — the exact shape that left
+            // `a.trace()` witness-less).
+            .filter(|ta| {
+                !ta.is_empty()
+                    && ta
+                        .iter()
+                        .any(|t| !matches!(t, crate::types::TypeRef::Generic(_)))
+            })
             // ARCHIVE-BLIND fallback: user-script codegen has no stdlib
             // FunctionDescriptors (self.functions is module-local), so
             // the structural binder above derives nothing for stdlib
@@ -13293,16 +13409,7 @@ impl VbcCodegen {
             // with extra fn-level generics get only the impl prefix; the
             // body's out-of-range LoadT(Generic) loads nil and keeps the
             // legacy fallback.
-            .or_else(|| {
-                let recv_ty = self.infer_expr_type_name(receiver)?;
-                match self.type_name_to_type_ref_mono(recv_ty.trim()) {
-                    Some(crate::types::TypeRef::Instantiated {
-                        args: inst_args,
-                        ..
-                    }) if !inst_args.is_empty() => Some(inst_args),
-                    _ => None,
-                }
-            })
+            .or_else(|| self.derive_receiver_witnesses(receiver))
             .filter(|ta| {
                 !ta.is_empty()
                     && ta
@@ -13310,6 +13417,14 @@ impl VbcCodegen {
                         .any(|t| !matches!(t, crate::types::TypeRef::Generic(_)))
             });
 
+        if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
+            eprintln!(
+                "[tpcall] split method={} devirt={:?} sidecar={:?}",
+                effective_method_name,
+                devirt_func_id,
+                sidecar_args.as_ref().map(|v| v.len())
+            );
+        }
         if let Some(func_id) = devirt_func_id {
             // Allocate a consecutive (receiver, args...) block.
             let call_block_start = self.ctx.registers.alloc_fresh();
@@ -14553,6 +14668,15 @@ impl VbcCodegen {
         };
         match self
             .record_generic_instantiation(func_info.id.0, args)
+            // Chain honesty (T0499): an all-placeholder structural
+            // derivation must not suppress the callsite-staged
+            // witnesses (annotation channel / receiver instantiation).
+            .filter(|ta| {
+                !ta.is_empty()
+                    && ta
+                        .iter()
+                        .any(|t| !matches!(t, crate::types::TypeRef::Generic(_)))
+            })
             .or(staged_type_args)
         {
             Some(type_args) if !type_args.is_empty() => {

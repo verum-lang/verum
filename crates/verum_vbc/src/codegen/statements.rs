@@ -1083,6 +1083,19 @@ impl VbcCodegen {
             self.ctx.pending_transmute_target = self.extract_base_type_name(ann);
         }
 
+        // T0496 (annotation leg): derive the binding annotation's generic
+        // witnesses once, through the same authority as the explicit
+        // TypeExpr-receiver form, so `let m: Matrix<Complex<Float>> =
+        // Matrix.zeros(2, 2)` carries [Complex<Float>] to the callee frame
+        // and `T.zero()` in its body resolves instead of loading nil.
+        let saved_annotation_witnesses = self.ctx.pending_annotation_witnesses.take();
+        if let Some(ann) = ty
+            && let Some(w) = self.type_expr_witness_args(ann)
+            && let Some(base) = self.extract_base_type_name(ann)
+        {
+            self.ctx.pending_annotation_witnesses = Some((base, w));
+        }
+
         // T0272: an `Int128`/`UInt128`-annotated binding whose initializer is a
         // *direct* integer literal (bare or negated) is boxed at full width, so
         // `let acc: Int128 = 1; … acc = acc * i …` keeps 128-bit precision.
@@ -1138,6 +1151,7 @@ impl VbcCodegen {
         };
         // Restore regardless of whether the transmute arm consumed the hint.
         self.ctx.pending_transmute_target = saved_transmute_target;
+        self.ctx.pending_annotation_witnesses = saved_annotation_witnesses;
         // Restore the i128-literal hint (compile_literal `.take()`s it when it
         // fires; this bounds it to the initializer either way).
         self.ctx.pending_i128_literal_signed = saved_i128_lit;

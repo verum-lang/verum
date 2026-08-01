@@ -5147,6 +5147,71 @@ pub(super) fn dispatch_primitive_method(
                     }
                     return Ok(Some(*receiver));
                 }
+                // BUILTIN-LIST spine clone (T0499): `.clone()` on the
+                // runtime List fell through to the identity return
+                // below, so the "clone" ALIASED the spine — every
+                // later element write through either binding mutated
+                // both (`Matrix.clone()` → `self.data.clone()` gave
+                // two matrices sharing one backing store; scaling the
+                // copy corrupted the original). Copy the
+                // [len, cap, backing] triple and the live element
+                // Values into a fresh backing. Element Values are
+                // copied bit-wise — heap elements stay shared, the
+                // same ownership depth an element read hands out.
+                if header.type_id == TypeId::LIST {
+                    let data_ptr =
+                        unsafe { p.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    if std::env::var_os("VERUM_TRACE_CLONE").is_some() {
+                        unsafe {
+                            eprintln!(
+                                "[clone-list] len_bits=0x{:x} cap_bits=0x{:x} backing_bits=0x{:x}",
+                                (*data_ptr).to_bits(),
+                                (*data_ptr.add(1)).to_bits(),
+                                (*data_ptr.add(2)).to_bits(),
+                            );
+                        }
+                    }
+                    // SAFETY: validated LIST object — slots are
+                    // [len, cap, backing_ptr].
+                    let len = unsafe { (*data_ptr).as_i64().max(0) } as usize;
+                    let cap_raw = unsafe { (*data_ptr.add(1)).as_i64() };
+                    let cap = cap_raw.max(len as i64).max(1) as usize;
+                    let src_backing =
+                        unsafe { (*data_ptr.add(2)).as_ptr::<Value>() };
+                    let obj = state
+                        .heap
+                        .alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
+                    state.record_allocation();
+                    let new_data = unsafe {
+                        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE)
+                            as *mut Value
+                    };
+                    let backing = state.heap.alloc_array(TypeId::LIST, cap)?;
+                    state.record_allocation();
+                    // SAFETY: fresh allocations of the exact sizes above;
+                    // src backing holds at least `len` initialized Values.
+                    // The backing is itself a header-carrying heap array —
+                    // elements start at +OBJECT_HEADER_SIZE (the same
+                    // convention every element reader uses).
+                    unsafe {
+                        *new_data = Value::from_i64(len as i64);
+                        *new_data.add(1) = Value::from_i64(cap as i64);
+                        *new_data.add(2) =
+                            Value::from_ptr(backing.as_ptr() as *mut u8);
+                        if !src_backing.is_null() && len > 0 {
+                            let src_elems = (src_backing as *const u8)
+                                .add(heap::OBJECT_HEADER_SIZE)
+                                as *const Value;
+                            let dst_elems = (backing.as_ptr() as *mut u8)
+                                .add(heap::OBJECT_HEADER_SIZE)
+                                as *mut Value;
+                            std::ptr::copy_nonoverlapping(
+                                src_elems, dst_elems, len,
+                            );
+                        }
+                    }
+                    return Ok(Some(Value::from_ptr(obj.as_ptr() as *mut u8)));
+                }
             }
         }
         // All primitives are Copy — clone returns the value itself

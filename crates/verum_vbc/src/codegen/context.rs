@@ -436,6 +436,15 @@ pub struct CodegenContext {
     /// this binding's type for its own target.
     pub pending_transmute_target: Option<String>,
 
+    /// T0496 (annotation leg): the current `let` binding's ANNOTATION,
+    /// pre-derived as `(base type name, positional generic witnesses)`
+    /// by `type_expr_witness_args` — the same ONE authority the explicit
+    /// `Matrix<Complex<Float>>.zeros(...)` receiver form uses. A
+    /// bare-path static call whose receiver type equals the base
+    /// consumes it as its CallG witness vector. Scoped to the
+    /// initializer (saved/restored around it), like the transmute hint.
+    pub pending_annotation_witnesses: Option<(String, Vec<crate::types::TypeRef>)>,
+
     /// Registers that contain raw FFI pointers (not CBGR references).
     ///
     /// When dereferencing values in these registers, we emit DerefRaw/DerefMutRaw
@@ -1446,6 +1455,7 @@ impl CodegenContext {
             pending_let_tuple_types: None,
             pending_i128_literal_signed: None,
             pending_transmute_target: None,
+            pending_annotation_witnesses: None,
             raw_pointer_regs: HashSet::new(),
             generic_type_params: HashSet::new(),
             generic_type_params_ordered: Vec::new(),
