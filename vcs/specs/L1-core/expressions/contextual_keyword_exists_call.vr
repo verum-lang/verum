@@ -1,0 +1,44 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: parser, contextual-keywords, quantifier-disambiguation
+// @timeout: 30000
+// @description: T0688 — `exists`/`forall` are contextual keywords, not
+//   reserved words (Verum reserves exactly `let`/`fn`/`is`). A BARE CALL
+//   of an exported function named `exists` must parse as a call; the
+//   quantifier reading applies only when the token after the matching
+//   `)` continues a binder (`in`/`:`/`,`/`where`/`.`). This spec pins
+//   the CALL side; the quantifier side is pinned by
+//   quantifier_tuple_binder_parses.vr.
+// @expected-stdout: file exists: false
+// @expected-stdout: local exists fn: 42
+// @expected-stdout: forall as value: 7
+
+mount core.*;
+mount core.io.fs.{exists};
+mount core.io.path.{Path};
+
+// A user function named `forall` — the same contextual-keyword class.
+fn forall(x: Int) -> Int {
+    x
+}
+
+fn main() {
+    // Bare call of the stdlib fs::exists — the T0688 headline shape.
+    let p = Path.from_str(&"/nonexistent-t0688-probe".to_text());
+    let e = exists(&p);
+    print(f"file exists: {e}");
+
+    // Bare call of a LOCAL function spelling a contextual keyword,
+    // with a non-binder continuation after `)` (end of statement).
+    let v = local_exists(41);
+    print(f"local exists fn: {v}");
+
+    // `forall` as a plain callable value too.
+    let w = forall(7);
+    print(f"forall as value: {w}");
+}
+
+fn local_exists(x: Int) -> Int {
+    x + 1
+}

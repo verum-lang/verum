@@ -1,0 +1,23 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L1
+// @tags: parser, quantifiers, contextual-keywords
+// @description: T0688 twin — the QUANTIFIER readings survive the
+//   call-disambiguation: a parenthesised (tuple) binder followed by
+//   `in`, a typed binder, multiple binders, and the unparenthesised
+//   forms all still parse as quantifiers for both `exists` and
+//   `forall` (the follow token after the matching `)` decides).
+
+fn quantifier_forms(xs: List<(Int, Int)>, ys: List<Int>) -> Bool {
+    // Parenthesised TUPLE binder + `in` — the shape the naive
+    // "exists( ⇒ call" fix would have broken.
+    let a = exists (p, q) in xs . p + q > 0;
+    let b = forall (p, q) in xs . p >= q;
+    // Unparenthesised binder + `in`.
+    let c = exists y in ys . y > 0;
+    let d = forall y in ys . y >= 0;
+    // Typed binder.
+    let e = exists n: Int . n > 41;
+    let f = forall n: Int . n * 0 == 0;
+    a && b && c && d && e && f
+}

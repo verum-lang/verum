@@ -1308,16 +1308,21 @@ impl<'a> RecursiveParser<'a> {
             //  `identifier` production for escape contexts).
             Some(TokenKind::Forall) => {
                 let next = self.stream.peek_nth_kind(1);
-                if matches!(
-                    next,
-                    Some(TokenKind::LParen)
-                        | Some(TokenKind::Ident(_))
-                        | Some(TokenKind::Mut)
-                        | Some(TokenKind::Some)
-                        | Some(TokenKind::None)
-                        | Some(TokenKind::Ok)
-                        | Some(TokenKind::Err)
-                ) {
+                // Same balanced lookahead as `exists` (T0688): `forall`
+                // is equally a legal identifier.
+                let paren_is_quantifier = matches!(next, Some(TokenKind::LParen))
+                    && self.quantifier_paren_lookahead_is_quantifier(0);
+                if paren_is_quantifier
+                    || matches!(
+                        next,
+                        Some(TokenKind::Ident(_))
+                            | Some(TokenKind::Mut)
+                            | Some(TokenKind::Some)
+                            | Some(TokenKind::None)
+                            | Some(TokenKind::Ok)
+                            | Some(TokenKind::Err)
+                    )
+                {
                     self.parse_forall_expr()
                 } else if matches!(next, Some(TokenKind::Dot)) {
                     self.stream.advance(); // consume `forall`
@@ -1338,16 +1343,23 @@ impl<'a> RecursiveParser<'a> {
             }
             Some(TokenKind::Exists) => {
                 let next = self.stream.peek_nth_kind(1);
-                if matches!(
-                    next,
-                    Some(TokenKind::LParen)
-                        | Some(TokenKind::Ident(_))
-                        | Some(TokenKind::Mut)
-                        | Some(TokenKind::Some)
-                        | Some(TokenKind::None)
-                        | Some(TokenKind::Ok)
-                        | Some(TokenKind::Err)
-                ) {
+                // `exists(` needs the balanced lookahead (T0688): a
+                // parenthesised TUPLE binder is a quantifier, a CALL of
+                // the stdlib fn `exists` is not — the follow token
+                // after the matching `)` decides.
+                let paren_is_quantifier = matches!(next, Some(TokenKind::LParen))
+                    && self.quantifier_paren_lookahead_is_quantifier(0);
+                if paren_is_quantifier
+                    || matches!(
+                        next,
+                        Some(TokenKind::Ident(_))
+                            | Some(TokenKind::Mut)
+                            | Some(TokenKind::Some)
+                            | Some(TokenKind::None)
+                            | Some(TokenKind::Ok)
+                            | Some(TokenKind::Err)
+                    )
+                {
                     self.parse_exists_expr()
                 } else if matches!(next, Some(TokenKind::Dot)) {
                     self.stream.advance(); // consume `exists`
@@ -2278,16 +2290,21 @@ impl<'a> RecursiveParser<'a> {
             // the full rationale.
             Some(TokenKind::Forall) => {
                 let next = self.stream.peek_nth_kind(1);
-                if matches!(
-                    next,
-                    Some(TokenKind::LParen)
-                        | Some(TokenKind::Ident(_))
-                        | Some(TokenKind::Mut)
-                        | Some(TokenKind::Some)
-                        | Some(TokenKind::None)
-                        | Some(TokenKind::Ok)
-                        | Some(TokenKind::Err)
-                ) {
+                // Same balanced lookahead as `exists` (T0688): `forall`
+                // is equally a legal identifier.
+                let paren_is_quantifier = matches!(next, Some(TokenKind::LParen))
+                    && self.quantifier_paren_lookahead_is_quantifier(0);
+                if paren_is_quantifier
+                    || matches!(
+                        next,
+                        Some(TokenKind::Ident(_))
+                            | Some(TokenKind::Mut)
+                            | Some(TokenKind::Some)
+                            | Some(TokenKind::None)
+                            | Some(TokenKind::Ok)
+                            | Some(TokenKind::Err)
+                    )
+                {
                     self.parse_forall_expr()
                 } else if matches!(next, Some(TokenKind::Dot)) {
                     self.stream.advance(); // consume `forall`
@@ -2308,16 +2325,23 @@ impl<'a> RecursiveParser<'a> {
             }
             Some(TokenKind::Exists) => {
                 let next = self.stream.peek_nth_kind(1);
-                if matches!(
-                    next,
-                    Some(TokenKind::LParen)
-                        | Some(TokenKind::Ident(_))
-                        | Some(TokenKind::Mut)
-                        | Some(TokenKind::Some)
-                        | Some(TokenKind::None)
-                        | Some(TokenKind::Ok)
-                        | Some(TokenKind::Err)
-                ) {
+                // `exists(` needs the balanced lookahead (T0688): a
+                // parenthesised TUPLE binder is a quantifier, a CALL of
+                // the stdlib fn `exists` is not — the follow token
+                // after the matching `)` decides.
+                let paren_is_quantifier = matches!(next, Some(TokenKind::LParen))
+                    && self.quantifier_paren_lookahead_is_quantifier(0);
+                if paren_is_quantifier
+                    || matches!(
+                        next,
+                        Some(TokenKind::Ident(_))
+                            | Some(TokenKind::Mut)
+                            | Some(TokenKind::Some)
+                            | Some(TokenKind::None)
+                            | Some(TokenKind::Ok)
+                            | Some(TokenKind::Err)
+                    )
+                {
                     self.parse_exists_expr()
                 } else if matches!(next, Some(TokenKind::Dot)) {
                     self.stream.advance(); // consume `exists`
@@ -6129,6 +6153,63 @@ impl<'a> RecursiveParser<'a> {
     ///
     /// Universal quantifier: `forall bindings . body` or `forall bindings => body`
     /// Used in verification contracts and formal proofs.
+
+    /// Disambiguate `exists (…)` / `forall (…)` between a QUANTIFIER
+    /// with a parenthesised (tuple) binder and a plain CALL of an
+    /// identifier that happens to spell a contextual keyword (T0688 —
+    /// Verum reserves exactly `let`/`fn`/`is`; `core.io.fs.exists` is
+    /// a real exported function). The decision needs lookahead PAST
+    /// the matching `)`: a quantifier binder continues with `in`
+    /// (domain), `:` (type), `,` (next binder), `where`, or `.`
+    /// (body); a call's argument list is followed by anything else
+    /// (operator, `;`, `)`, EOF, …).
+    ///
+    /// `kw_pos` is the offset of the keyword itself (0 at a prefix
+    /// site); the scan starts at its `(` and walks a balanced
+    /// paren/bracket/brace depth with a hard cap — an unclosed paren
+    /// resolves to "call" and lets the expression parser report the
+    /// real error.
+    fn quantifier_paren_lookahead_is_quantifier(&self, kw_pos: usize) -> bool {
+        const SCAN_CAP: usize = 4096;
+        let mut i = kw_pos + 1; // the `(`
+        debug_assert!(matches!(
+            self.stream.peek_nth_kind(i),
+            Some(TokenKind::LParen)
+        ));
+        let mut depth: i64 = 0;
+        let mut steps = 0usize;
+        loop {
+            match self.stream.peek_nth_kind(i) {
+                Some(TokenKind::LParen)
+                | Some(TokenKind::LBracket)
+                | Some(TokenKind::LBrace) => depth += 1,
+                Some(TokenKind::RParen)
+                | Some(TokenKind::RBracket)
+                | Some(TokenKind::RBrace) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                None => return false, // EOF inside parens → not a quantifier
+                _ => {}
+            }
+            i += 1;
+            steps += 1;
+            if steps > SCAN_CAP {
+                return false;
+            }
+        }
+        matches!(
+            self.stream.peek_nth_kind(i + 1),
+            Some(TokenKind::In)
+                | Some(TokenKind::Colon)
+                | Some(TokenKind::Comma)
+                | Some(TokenKind::Where)
+                | Some(TokenKind::Dot)
+        )
+    }
+
     fn parse_forall_expr(&mut self) -> ParseResult<Expr> {
         let start_pos = self.stream.position();
         self.stream.expect(TokenKind::Forall)?;
