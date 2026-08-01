@@ -190,6 +190,12 @@ byte_escape_seq = '\' , ( 'n' | 'r' | 't' | '0' | '\' | "'" | '"'
                        | ( 'x' , hex_digit , hex_digit ) ) ;
 byte_string_lit = 'b' , '"' , { byte_string_char | byte_escape_seq } , '"' ;
 
+(* Single byte-character literal — lexer TokenKind::ByteChar.
+   AUDIT ADDITION 2026-08-01: implemented since early development
+   (`b'x'`, `b'\n'`, `b'\x41'`), referenced by pattern productions,
+   never specified.                                                    *)
+byte_lit        = 'b' , "'" , ( byte_string_char | byte_escape_seq ) , "'" ;
+
 (* String literal: either escaped single-line or raw multiline *)
 string_lit      = plain_string | raw_multiline ;
 
@@ -355,6 +361,12 @@ bitwise_op      = '&' | '|' | '^' | '<<' | '>>' | '~' ;
 assign_op       = '=' | '+=' | '-=' | '*=' | '/=' | '%='
                 | '&=' | '|=' | '^=' | '<<=' | '>>=' ;
 range_op        = '..' | '..=' ;
+(* Concatenation. DECISION (grammar-audit 2026-08-01): `++` has been the
+   live List/Text concatenation operator in the parser since early
+   development (additive precedence, left-assoc) while carrying zero
+   grammar presence — the audit's canonical drift class. It is hereby
+   SPECIFIED rather than removed: stdlib and proofs use it widely.     *)
+concat_op       = '++' ;
 pipe_op         = '|>' ;
 compose_op      = '>>' | '<<' ;
 arrow_op        = '->' | '=>' ;
@@ -491,13 +503,22 @@ derive_attribute = 'derive' , '(' , identifier , { ',' , identifier } , ')' ;
 (* coherent_runtime      — α + runtime ε-monitor        (trace-bound)   *)
 (* coherent              — α/ε bidirectional check      (single-exp)    *)
 (* complexity_typed      — bounded-arithmetic verification (poly)        *)
-verify_attribute = 'verify' , '(' ,
-    ( 'runtime' | 'static' | 'formal' | 'proof'
+(* AUDIT 2026-08-01: `verify_strategy` promoted to a named production
+   (the website reference already used the name). The canonical set
+   below matches the implementation authority
+   (verum_verification/src/level.rs `from_annotation`); that authority
+   ADDITIONALLY accepts synonym/spelling aliases (`quick`/`rapid` for
+   fast, `robust` for thorough, `cross_validate` for certified,
+   `synthesis`/`synth` for synthesize, hyphenated and concatenated
+   variants of the multi-word names). Aliases are accepted, canonical
+   spellings are the documented surface.                               *)
+verify_attribute = 'verify' , '(' , verify_strategy , ')' ;
+verify_strategy =
+      'runtime' | 'static' | 'formal' | 'proof'
     | 'fast' | 'thorough' | 'reliable'
     | 'certified' | 'synthesize'
     | 'coherent' | 'coherent_static' | 'coherent_runtime'
-    | 'complexity_typed' ) ,
-    ')' ;
+    | 'complexity_typed' ;
 context_group_identifier = identifier ;
 
 (* 2.2 Cogs and Modules *)
@@ -519,8 +540,16 @@ path_segment    = identifier | 'self' | 'super' | 'crate' ;
 (* Spec: docs/detailed/05-syntax-grammar.md Section 3.1 - Unified type definitions *)
 (* No more struct/enum/trait keywords - unified type is syntax *)
 (* All type definitions use the unified 'is' syntax *)
-type_def        = visibility , 'type' , [ 'affine' ] , identifier , [ generics ]
+(* AUDIT 2026-08-01: `linear` is a live resource modifier alongside
+   `affine` (fast_parser ResourceModifier::Linear; `@must_consume` is
+   its attribute alias). The website reference already documented it. *)
+type_def        = visibility , 'type' , [ 'affine' | 'linear' ] , identifier , [ generics ]
                 , [ meta_where_clause ]
+                (* dependent value-parameters (T0266): an indexed family
+                   declares the values its applications must supply, e.g.
+                   `type Eq<T>(a: T, b: T) is ...`. Applications are
+                   checked against this list — see dependent_app_type.  *)
+                , [ '(' , [ param_list ] , ')' ]
                 , 'is' , type_definition_body ;
 
 type_definition_body = type_expr , [ type_refinement ] , ';'
@@ -912,10 +941,15 @@ universe_param = 'universe' , identifier ;
 (* Example: fn id<u: Level, A: Type(u)>(x: A) -> A { x }          *)
 level_param = identifier , ':' , 'Level' ;
 
-(* Universe type with optional level annotation *)
-(* universe_type = 'Type' , [ '(' , universe_level_expr , ')' ] ;    *)
-(* universe_level_expr = integer_lit | identifier                     *)
-(*                     | 'max' '(' universe_level_expr ',' universe_level_expr ')' ; *)
+(* Universe type with optional level annotation. AUDIT PROMOTION
+   2026-08-01: these productions were specified only as comments while
+   the parser implemented them in full (fast_parser ty.rs
+   parse_universe_type). Bare `Type` means Type(0). Disambiguation:
+   `Type` followed by '<' or '.' is NOT a universe — it falls through
+   to ordinary path/generic type parsing.                              *)
+universe_type   = 'Type' , [ '(' , universe_level_expr , ')' ] ;
+universe_level_expr = integer_lit | identifier
+                    | 'max' , '(' , universe_level_expr , ',' , universe_level_expr , ')' ;
 
 (* 2.4.2 Associated Type Bounds *)
 (* Constrain associated types in where clauses                                  *)
@@ -1277,6 +1311,19 @@ primitive_type  = 'Int' | 'Float' | 'Bool' | 'Char' | 'Text' | '()' | 'Interval'
 path_type_expr  = 'Path' , type_args , '(' , expression , ',' , expression , ')' ;
 interval_endpoint = 'i0' | 'i1' ;
 
+(* AUDIT ADDITION 2026-08-01 (T0266 kin): general dependent type
+   application — an indexed family applied to VALUE arguments, e.g.
+   `Fiber<A, B>(f, b)`, `HottPath<A>(a, b)`, `MyPath<A>(x, y)`.
+   The parser has implemented this for the whole cubical/HoTT stdlib
+   surface (fast_parser ty.rs DependentApp) with zero grammar
+   presence; the website reference grammar carried a
+   `dependent_app_type` production before this file did. The checker
+   validates the value-argument ARITY against the family's declared
+   value-parameter list (E408); identifiers are required in the
+   index positions of TYPE expressions (literals are a parse error
+   there).                                                             *)
+dependent_app_type = path , [ type_args ] , '(' , expression_list , ')' ;
+
 (* Never type: ! (bottom type) *)
 (* The type of expressions that never return (diverging expressions).           *)
 (* Examples: panic(), exit(), abort(), infinite loops, unreachable().           *)
@@ -1357,7 +1404,7 @@ expression      = pipeline_expr ;
 pipeline_expr   = assignment_expr , { '|>' , ( pipe_method_call | assignment_expr ) } ;
 
 (* Pipe-to-method: x |> .method(args) desugars to x.method(args) *)
-pipe_method_call = '.' , identifier , [ generic_args ] , '(' , [ arg_list ] , ')' ;
+pipe_method_call = '.' , identifier , [ type_args ] , '(' , [ arg_list ] , ')' ;
 
 (* 2.10.1 Assignment Expressions                                                *)
 (* Verum supports two forms of assignment:                                      *)
@@ -1900,13 +1947,33 @@ statement       = let_stmt
 
 let_stmt        = 'let' , pattern , [ ':' , type_expr ] , [ '=' , expression ] , ';' ;
 
-let_else_stmt   = 'let' , pattern , '=' , expression , 'else' , block_expr ;
+let_else_stmt   = 'let' , pattern , [ ':' , type_expr ] , '=' , expression , 'else' , block_expr ;
 
 (* Provide statement for context injection *)
 (* Supports optional alias for multiple instances of same context type *)
 (* Spec: docs/detailed/16-context-system.md Section 2.11.2 - Aliased Contexts *)
 (* context_path is defined in Section 2.4 *)
-provide_stmt    = 'provide' , context_path , [ 'as' , identifier ] , '=' , expression , ( ';' | 'in' , block_expr ) ;
+(* AUDIT REWRITE 2026-08-01: the previous production covered only the
+   `= expr ;` and `= expr in { }` forms. The parser has always accepted
+   a wider surface (fast_parser stmt.rs parse_provide_stmt); it is the
+   intended one and is now specified:
+     provide Layer;                       -- layer expansion (no '=')
+     provide db: Database = prod;         -- typed binding
+     provide Db as source = mk(url);      -- aliased instance
+     provide Ctx = value { ... }          -- direct scope block, no 'in'
+     provide Ctx = value in { ... }       -- explicit 'in' scope
+     provide A = x, B = y { ... }         -- multi-provide, block MANDATORY
+   The provided name may be dotted and may carry generic arguments
+   (`Repository<Order>`). Leading-dot / self / super context paths were
+   never accepted — the old `context_path` cite overreached.            *)
+provide_stmt    = 'provide' , ( provide_layer | provide_single | provide_multi ) ;
+provide_layer   = provide_context , ';' ;
+provide_single  = provide_binding , ( ';' | [ 'in' ] , block_expr ) ;
+provide_multi   = provide_binding , ',' , provide_binding ,
+                  { ',' , provide_binding } , block_expr ;
+provide_binding = provide_context , [ ':' , type_expr ] ,
+                  [ 'as' , identifier ] , '=' , expression ;
+provide_context = identifier , { '.' , identifier } , [ type_args ] ;
 
 (* Defer and errdefer statements *)
 (* defer: Always executes at scope exit (success or error) *)
@@ -1917,7 +1984,10 @@ defer_stmt      = 'defer' , defer_body
 defer_body      = expression , ';'
                 | block_expr ;
 
-expression_stmt = expression , [ ';' ] ;
+(* AUDIT FIX 2026-08-01: the terminator is MANDATORY in statement
+   position — a block's trailing result expression is a separate
+   production (block tail), not an expression_stmt.                    *)
+expression_stmt = expression , ';' ;
 
 (* 2.14 Patterns *)
 (* Active Patterns (F#-style) for custom pattern matchers                       *)
@@ -2004,7 +2074,12 @@ active_pattern_tail = '(' , ')' (* total pattern, no params *)
                     | '(' , expression_list , ')' , '(' , [ pattern_list ] , ')' ; (* with params: Pat(p)(b) *)
 pattern_list_nonempty = pattern , { ',' , pattern } , [ ',' ] ;
 
-literal_pattern = literal_expr ;
+(* AUDIT NARROWING 2026-08-01: the old rule licensed every
+   literal_expr (f-strings, tagged literals, collections) in pattern
+   position; the parser accepts only these atoms, with an optional
+   leading '-' on the numeric forms.                                   *)
+literal_pattern = [ '-' ] , ( integer_lit | float_lit )
+                | string_lit | char_lit | byte_lit | bool_lit ;
 
 identifier_pattern = [ 'ref' ] , [ 'mut' ] , identifier , [ '@' , pattern ] ;
 
@@ -2045,8 +2120,11 @@ variant_pattern_data = '(' , pattern_list , ')'
 
 reference_pattern = '&' , [ 'mut' ] , pattern ;
 
-range_pattern   = literal_expr , range_op , [ literal_expr ]
-                | range_op , literal_expr ;
+(* AUDIT NARROWING 2026-08-01: bounds are integer / char / byte
+   atoms (optionally negated) — not arbitrary literals.               *)
+range_pattern   = range_bound , range_op , [ range_bound ]
+                | range_op , range_bound ;
+range_bound     = [ '-' ] , integer_lit | char_lit | byte_lit ;
 
 pattern_list    = [ pattern , { ',' , pattern } , [ ',' ] ] ;
 
@@ -2073,10 +2151,16 @@ pattern_type_params = '(' , param_list , ')' ;
 pattern_params  = [ param , { ',' , param } ] ;
 
 (* 2.15 Constants and Statics *)
-const_def       = visibility , 'const' , identifier , ':' , type_expr
-                , '=' , const_expr , ';' ;
+(* AUDIT 2026-08-01: the annotation is optional (inferred), a generic
+   parameter list is accepted, and at ITEM level the `let` keyword is
+   an alias for `const` (fast_parser decl.rs parse_const).             *)
+const_def       = visibility , ( 'const' | 'let' ) , identifier , [ generics ]
+                , [ ':' , type_expr ] , '=' , const_expr , ';' ;
+(* AUDIT 2026-08-01: the initializer is optional — extern/FFI statics
+   are declared without one (the cell is defined by the foreign side
+   or zero-backed).                                                    *)
 static_def      = visibility , 'static' , [ 'mut' ] , identifier
-                , ':' , type_expr , '=' , const_expr , ';' ;
+                , ':' , type_expr , [ '=' , const_expr ] , ';' ;
 
 const_expr      = expression ;
 
@@ -2246,16 +2330,47 @@ type_property_expr = type_expr , '.' , type_property_name ;
        proof by auto
    }
 *)
-theorem_decl =
-    'theorem' , identifier , [ generic_params ] , '(' , [ param_list ] , ')' ,
-    [ '->' , type_expr ] , [ requires_clause ] , [ ensures_clause ] ,
-    proof_body ;
+(* AUDIT REWRITE 2026-08-01: the old production fixed one clause order,
+   made the parameter list and proof body mandatory, and omitted the
+   proposition form entirely — a fraction of what the parser (and the
+   stdlib, e.g. core/math/*.vr) has always used. The live surface
+   (fast_parser proof.rs parse_theorem_like), shared by theorem and
+   lemma:
+     - attributes and visibility prefix the keyword;
+     - the name may be an identifier or a contextual keyword
+       (`theorem trivial() ...`);
+     - the parameter list is optional;
+     - EITHER a proposition form `: P [where] [proof]`
+       OR a contract form: any number of requires / ensures / given /
+       from clauses in ANY order (each may be prefixed by `ghost`;
+       bare @attributes between clauses are consumed as hints),
+       then an optional `: P`, optional where, optional proof;
+     - the proof body may be a brace block or a `proof …` form, and a
+       bodyless declaration terminated by `;` is legal (obligation
+       discharged elsewhere).                                          *)
+theorem_decl = { attribute } , visibility , 'theorem' , theorem_tail ;
 
 (* 2.19.2 Lemma Declaration - Helper theorems *)
-lemma_decl =
-    'lemma' , identifier , [ generic_params ] , '(' , [ param_list ] , ')' ,
-    [ '->' , type_expr ] , [ requires_clause ] , [ ensures_clause ] ,
-    proof_body ;
+lemma_decl   = { attribute } , visibility , 'lemma' , theorem_tail ;
+
+theorem_tail =
+    theorem_name , [ generics ] , [ '(' , [ param_list ] , ')' ] ,
+    [ '->' , type_expr ] ,
+    ( ':' , expression , [ where_clause ] , theorem_proof_tail
+    | { theorem_contract_clause } , [ ':' , expression ] ,
+      [ where_clause ] , theorem_proof_tail
+    ) ;
+
+theorem_name = identifier | keyword ;
+
+theorem_contract_clause =
+      [ 'ghost' ] , 'requires' , expression , { ',' , expression }
+    | [ 'ghost' ] , 'ensures' , expression , { ',' , expression }
+    | 'given' , identifier , ':' , expression
+    | 'from' , identifier
+    | attribute ;
+
+theorem_proof_tail = proof_body , [ ';' ] | ';' ;
 
 (* 2.19.3 Axiom Declaration - Unproven assumptions
    An axiom is a universally quantified proposition over its parameters;
@@ -2263,7 +2378,7 @@ lemma_decl =
    `requires R` to yield `∀params. R → E`. The `requires`-only form is
    legacy and treats the requires clauses as the asserted proposition. *)
 axiom_decl =
-    'axiom' , identifier , [ generic_params ] , '(' , [ param_list ] , ')' ,
+    'axiom' , identifier , [ generics ] , '(' , [ param_list ] , ')' ,
     [ '->' , type_expr ] ,
     [ requires_clause ] ,
     [ ensures_clause ] ,
@@ -2274,7 +2389,7 @@ ensures_clause = 'ensures' , expression , { ',' , expression } ;
 
 (* 2.19.4 Corollary Declaration - Consequences of theorems *)
 corollary_decl =
-    'corollary' , identifier , [ generic_params ] , '(' , [ param_list ] , ')' ,
+    'corollary' , identifier , [ generics ] , '(' , [ param_list ] , ')' ,
     [ '->' , type_expr ] , [ requires_clause ] ,
     'from' , identifier , proof_body ;
 
@@ -2285,7 +2400,7 @@ corollary_decl =
    if/fail inside the body for monadic proof search. See §2.19.7.
 *)
 tactic_decl =
-    'tactic' , identifier , [ generic_params ] ,
+    'tactic' , identifier , [ generics ] ,
     '(' , [ tactic_param_list ] , ')' ,
     [ where_clause ] , tactic_body ;
 
@@ -2380,13 +2495,21 @@ tactic_name =
        == { by simplify } result
    }
 *)
+(* AUDIT FIX 2026-08-01: the previous calc_step production contradicted
+   the example above (and the parser, which implements the example): a
+   chain is ONE start expression followed by repeated
+   (relation, justification, target) steps — not free-standing
+   two-expression steps.                                               *)
 calc_chain =
-    'calc' , '{' , calc_step , { calc_step } , '}' ;
+    'calc' , '{' , expression , calc_step , { calc_step } , '}' ;
 
 calc_step =
-    expression , calc_relation , '{' , proof_justification , '}' , expression ;
+    calc_relation , '{' , proof_justification , '}' , expression ;
 
-calc_relation = '==' | '<' | '<=' | '>' | '>=' | '!=' ;
+calc_relation = '==' | '<' | '<=' | '>' | '>=' | '!='
+(* parser additionally accepts '=' , '=>' , 'iff' here — pending a
+   language decision (audit register, Lane C)                          *)
+              ;
 
 (* 2.19.9 Quantifier Expressions *)
 (* Used in specifications and proofs. Supports both type-based (∀x:T) and  *)
