@@ -402,7 +402,14 @@ item            = function_def
                 | ffi_declaration
                 | attribute_item ;
 
-visibility      = 'public' | 'internal' | 'protected' | epsilon ;
+(* AUDIT 2026-08-01: the parser has always accepted the full surface
+   below (fast_parser decl.rs parse_visibility): `pub` as an alias of
+   `public`, restriction forms `(cog)` / `(super)` / `(in path)`, and
+   an explicit `private`. Bare declarations are private. Note the
+   restriction argument is `cog` — Verum has no `crate` token.        *)
+visibility      = ( 'public' | 'pub' ) , [ visibility_restriction ]
+                | 'internal' | 'protected' | 'private' | epsilon ;
+visibility_restriction = '(' , ( 'cog' | 'super' | 'in' , path ) , ')' ;
 epsilon         = ;
 
 attribute_item  = '@' , attribute , item ;
