@@ -7444,9 +7444,19 @@ impl VbcCodegen {
                 if !generic {
                     if std::env::var_os("VERUM_TRACE_MONO").is_some() {
                         let nm = self.ctx.strings.get(d.name.0 as usize).cloned().unwrap_or_default();
-                        if nm.contains("poll_sync") || nm.contains("ready") {
-                            eprintln!("[mono-record] '{}' id={} NOT-generic (params/ret carry no Generic)", nm, func_id);
-                        }
+                        // Unconditional under the flag (T0330): the old
+                        // poll/ready name gate hid THE decisive bail —
+                        // a pre-merged archive descriptor whose param
+                        // TypeRefs lost their Generic markers reads as
+                        // NOT-generic here and silently kills the
+                        // whole CallG derivation.
+                        eprintln!(
+                            "[mono-record] '{}' id={} NOT-generic (params/ret carry no Generic) param_trs={:?} ret={:?}",
+                            nm,
+                            func_id,
+                            d.params.iter().map(|p| p.type_ref.clone()).collect::<Vec<_>>(),
+                            d.return_type,
+                        );
                     }
                     return None;
                 }
