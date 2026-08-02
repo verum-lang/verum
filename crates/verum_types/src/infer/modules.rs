@@ -18546,6 +18546,28 @@ impl TypeChecker {
                         Type::Function { return_type, .. } => (**return_type).clone(),
                         _ => Type::Var(TypeVar::fresh()),
                     }
+                } else if tname.contains("Zip") && targs.len() >= 2 {
+                    // ZipIter<A, B> — element is the PAIR of the two
+                    // inners' elements ((Item<A>, Item<B>)), not the
+                    // first inner alone.  Pre-fix the else-branch below
+                    // took targs[0]'s inner, so a zip().map(|p| …)
+                    // closure param typed as ONE side's element (or,
+                    // through the tuple-pattern path, as the raw
+                    // iterator pair) — the measured
+                    // 'expected ListIter<Int>, found Int' zip class
+                    // (T0701 residual, base/iterator ×3 files).
+                    let side = |t: &Type| -> Type {
+                        match t {
+                            Type::Generic { args, .. }
+                            | Type::Named { args, .. }
+                                if !args.is_empty() =>
+                            {
+                                args[0].clone()
+                            }
+                            _ => Type::Var(TypeVar::fresh()),
+                        }
+                    };
+                    Type::Tuple(vec![side(&targs[0]), side(&targs[1])].into())
                 } else if tname.contains("Enumerate") && !targs.is_empty() {
                     // EnumerateIter<Iter> - element type is (Int, inner_elem)
                     let inner_elem = match &targs[0] {
