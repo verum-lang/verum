@@ -7457,11 +7457,39 @@ impl VbcCodegen {
                 // Phase 5), but the loader carried its raw param TypeRefs.
                 // Same generic gate as the local arm; a non-generic callee
                 // derives nothing.
+                //
+                // Trace note: `self.functions`-derived names are EMPTY for
+                // exactly this arm, so the poll/ready name gates above
+                // never fire here — trace unconditionally under the flag,
+                // by raw id (the carry names it when known).
+                if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+                    let carried = self
+                        .ctx
+                        .resolved_name_by_id
+                        .borrow()
+                        .get(&func_id)
+                        .cloned()
+                        .unwrap_or_default();
+                    eprintln!(
+                        "[mono-record/archive] id={} carried_name='{}' trs={:?} any_generic={}",
+                        func_id,
+                        carried,
+                        trs,
+                        trs.iter().any(|t| t.is_generic()),
+                    );
+                }
                 if !trs.iter().any(|t| t.is_generic()) {
                     return None;
                 }
                 trs.clone()
             } else {
+                if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+                    eprintln!(
+                        "[mono-record/archive] id={} MISS in archive_fn_param_types ({} entries) — third registration path",
+                        func_id,
+                        self.ctx.archive_fn_param_types.len(),
+                    );
+                }
                 return None;
             }
         };
@@ -7567,8 +7595,12 @@ impl VbcCodegen {
                 .iter()
                 .find(|f| f.descriptor.id.0 == func_id)
                 .and_then(|f| self.ctx.strings.get(f.descriptor.name.0 as usize).cloned())
+                .or_else(|| self.ctx.resolved_name_by_id.borrow().get(&func_id).cloned())
                 .unwrap_or_default();
-            if nm.contains("poll_sync") || nm.contains("ready") {
+            // Archive callees have no self.functions descriptor — the
+            // carry-derived name (or empty) plus the raw id keeps the
+            // bind outcome visible for them too.
+            if nm.contains("poll_sync") || nm.contains("ready") || nm.is_empty() || nm.contains("fmt") {
                 eprintln!(
                     "[mono-record] '{}' id={} param_trs={:?} nargs={} bindings={:?}",
                     nm, func_id, param_trs, args.len(), bindings
