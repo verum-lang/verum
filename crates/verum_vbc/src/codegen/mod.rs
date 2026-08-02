@@ -415,6 +415,14 @@ impl VbcCodegen {
 /// tables — mounts, protocol registry, blanket impls — consulted while
 /// lowering each declaration and expression.
 pub struct VbcCodegen {
+    /// T0706/T0711 — index into `self.functions` marking the end of the
+    /// ARCHIVE-MERGED prefix.  The archive loader stamps it after the
+    /// primary merge; everything appended past it is USER codegen
+    /// output.  `collect_post_codegen_dispatch_names` scans only the
+    /// user suffix — walking the merged stdlib too ballooned the
+    /// supplemental wanted set from 7 seeds to 7,156 names on
+    /// hello-world (measured: +5.4s cold start).
+    pub archive_merged_fn_watermark: usize,
     /// REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2: deferred field-refinement
     /// stamps `(type_simple_name, field_name, predicate_src, binding)`.
     /// Interning the predicate strings INLINE (mid-bake) shifted every
@@ -1750,7 +1758,7 @@ impl VbcCodegen {
         let mut ctx = CodegenContext::new();
         ctx.target_os = config.target_config.target_os.to_string();
         Self {
-
+            archive_merged_fn_watermark: 0,
             pending_refinement_stamps: Vec::new(),            ctx,
             config,
             functions: Vec::new(),
@@ -22306,7 +22314,12 @@ impl VbcCodegen {
         let mut note = |name: &str| {
             if let Some((width, method)) = crate::prim_mangle::demangle(name) {
                 out.insert(crate::prim_mangle::qualified(width, method));
-            } else if let Some((head, method)) = name.split_once('.') {
+            } else if let Some((head, method)) = name.split_once('.')
+                && head
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_uppercase())
+            {
                 out.insert(name.to_string());
                 // Alias-canonical twin: the archive qualifies methods
                 // under the DECLARING type (`UInt8.to_hex`), while a
@@ -22329,7 +22342,14 @@ impl VbcCodegen {
                 }
             }
         };
-        for f in &self.functions {
+        // USER suffix only (T0711): the archive-merged prefix's own
+        // CallMs are the stdlib talking to itself — its bodies came
+        // FROM the archive, so re-wanting their names re-merges half
+        // the archive (hello-world: 7 seeds → 7,156 wanted, +5.4s).
+        let start = self
+            .archive_merged_fn_watermark
+            .min(self.functions.len());
+        for f in &self.functions[start..] {
             for ins in &f.instructions {
                 if let Instruction::CallM { method_id, .. } = ins
                     && let Some(name) = self.ctx.strings.get(*method_id as usize)

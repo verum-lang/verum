@@ -2578,6 +2578,9 @@ impl ArchiveCtxCache {
                 self.note_merged_ids(entry_name, pruned_remap.keys());
             }
         }
+        // T0711: everything below this index is archive-merged; the
+        // post-codegen dispatch-name collector scans only past it.
+        codegen.archive_merged_fn_watermark = codegen.function_count() as usize;
         // Unqualified-wanted second pass — same logic as apply_lazy's
         // tail block.  Module-prefix gate already filtered the
         // primary pass; this fills in any user code that uses a bare
