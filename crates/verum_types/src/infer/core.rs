@@ -2136,11 +2136,90 @@ impl TypeChecker {
                     args: List::new(),
                 }
             };
-            let params: List<Type> = params
-                .iter()
-                .map(|t| self.substitute_self_type(t, &self_ty))
-                .collect();
-            let mut return_ty = self.substitute_self_type(&return_ty, &self_ty);
+            // The bake's Self render is FLATTENED to the bare parent name
+            // (`substitute_self_in_type_name` — "MappedIter<Range, F>", not
+            // "MappedIter<Self, F>").  Inside a GENERIC parent's own method
+            // signatures an ARGLESS parent-name head can denote nothing but
+            // Self, so rewrite it to the instantiated parent alongside the
+            // literal `Self` spelling.  Non-generic parents (impl_k == 0)
+            // need no rewrite — Named{parent} already IS self_ty.
+            fn rewrite_argless_parent(
+                ty: &Type,
+                parent: &str,
+                self_ty: &Type,
+            ) -> Type {
+                match ty {
+                    Type::Named { path, args }
+                        if args.is_empty()
+                            && path
+                                .as_ident()
+                                .is_some_and(|id| id.name.as_str() == parent) =>
+                    {
+                        self_ty.clone()
+                    }
+                    Type::Generic { name, args }
+                        if args.is_empty() && name.as_str() == parent =>
+                    {
+                        self_ty.clone()
+                    }
+                    Type::Named { path, args } => Type::Named {
+                        path: path.clone(),
+                        args: args
+                            .iter()
+                            .map(|a| rewrite_argless_parent(a, parent, self_ty))
+                            .collect(),
+                    },
+                    Type::Generic { name, args } => Type::Generic {
+                        name: name.clone(),
+                        args: args
+                            .iter()
+                            .map(|a| rewrite_argless_parent(a, parent, self_ty))
+                            .collect(),
+                    },
+                    Type::Reference { inner, mutable } => Type::Reference {
+                        inner: Box::new(rewrite_argless_parent(inner, parent, self_ty)),
+                        mutable: *mutable,
+                    },
+                    Type::Function {
+                        params,
+                        return_type,
+                        contexts,
+                        type_params,
+                        properties,
+                    } => Type::Function {
+                        params: params
+                            .iter()
+                            .map(|p| rewrite_argless_parent(p, parent, self_ty))
+                            .collect(),
+                        return_type: Box::new(rewrite_argless_parent(
+                            return_type,
+                            parent,
+                            self_ty,
+                        )),
+                        contexts: contexts.clone(),
+                        type_params: type_params.clone(),
+                        properties: properties.clone(),
+                    },
+                    Type::Tuple(elems) => Type::Tuple(
+                        elems
+                            .iter()
+                            .map(|e| rewrite_argless_parent(e, parent, self_ty))
+                            .collect(),
+                    ),
+                    other => other.clone(),
+                }
+            }
+            let reconnect = |t: &Type, checker: &Self| -> Type {
+                let with_self = checker.substitute_self_type(t, &self_ty);
+                if impl_k > 0 {
+                    rewrite_argless_parent(&with_self, type_name.as_str(), &self_ty)
+                } else {
+                    with_self
+                }
+            };
+            let params: List<Type> =
+                params.iter().map(|t| reconnect(t, self)).collect();
+            let mut return_ty = reconnect(&return_ty, self);
             if !hof_reconnect.is_empty() {
                 let mut subst = crate::ty::Substitution::new();
                 for (gname, structural) in &hof_reconnect {

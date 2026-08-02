@@ -20987,6 +20987,30 @@ impl VbcCodegen {
                     .get(codegen_idx)
                     .copied()
                     .unwrap_or(StringId::EMPTY);
+                // PARAMNAME-CARRY (v2.10): the declared-type spelling is a
+                // StringId too — same codegen-index → module-StringId remap
+                // as every other carried name (the hint.type_name lesson;
+                // un-remapped it read as byte-offset garbage: declared_ty
+                // 'core.base' on Range.map's self param, live-decoded).
+                if param.type_name != StringId::EMPTY {
+                    param.type_name = string_id_map
+                        .get(param.type_name.0 as usize)
+                        .copied()
+                        .unwrap_or(StringId::EMPTY);
+                }
+            }
+
+            // GENERICNAME-CARRY (T0701): method-level generic names on
+            // FUNCTION descriptors — same remap as the type-descriptor
+            // twin above.  Pre-fix the fill stayed as codegen indices and
+            // `convert_generic_params` published garbage names ("",
+            // " || ") — the typechecker's declared-name set then missed
+            // `F` and carried verbatim returns parsed it as rigid Named.
+            for tp in descriptor.type_params.iter_mut() {
+                tp.name = string_id_map
+                    .get(tp.name.0 as usize)
+                    .copied()
+                    .unwrap_or(StringId::EMPTY);
             }
 
             // #87/#97 — remap `descriptor.intrinsic_name` (the
