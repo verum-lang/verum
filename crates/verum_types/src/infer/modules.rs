@@ -10771,8 +10771,40 @@ impl TypeChecker {
         // reported (STMT-RECOVERY-1 discipline).
         let judged: Vec<_> = self.pending_ambiguity.drain(ambiguity_mark..).collect();
         for (bind_name, bind_span, bind_ty) in judged {
-            let resolved = self.normalize_type(&bind_ty);
+            // The candidate was recorded at LET time — every binding the
+            // rest of the body established lives in the unifier, so
+            // apply BEFORE judging (pre-fix `Maybe.Some(5)` reported
+            // `Maybe<_>`: the payload var WAS bound to Int two
+            // statements later, the judge just never looked).
+            let resolved = self.normalize_type(&self.unifier.apply(&bind_ty));
             if resolved.free_vars().is_empty() {
+                continue;
+            }
+            // SHAPE criterion (T0701/T0585 calibration): a free var in an
+            // ARGUMENT/PAYLOAD slot under a KNOWN nominal head is a
+            // deferred generic, not an ambiguity — `try_fold(0, |a,x|
+            // Result.Ok(a+x))` legitimately leaves `Result<Int, E>`'s E
+            // unconstrained when no path ever touches the Err payload.
+            // Judge E404 only when the binding's SHAPE is undetermined:
+            // the type IS a bare var, or a var sits in head position.
+            // (The conformance corpus is the arbiter: iterator tests
+            // expect payload-slot freedom to compile; the
+            // ambiguous_types spec's shapes are all head-undetermined.)
+            fn shape_undetermined(ty: &Type) -> bool {
+                match ty {
+                    Type::Var(_) => true,
+                    Type::TypeApp { constructor, .. } => {
+                        matches!(constructor.as_ref(), Type::Var(_))
+                    }
+                    Type::Reference { inner, .. }
+                    | Type::CheckedReference { inner, .. }
+                    | Type::UnsafeReference { inner, .. }
+                    | Type::Ownership { inner, .. } => shape_undetermined(inner),
+                    Type::Tuple(parts) => parts.iter().any(shape_undetermined),
+                    _ => false,
+                }
+            }
+            if !shape_undetermined(&resolved) {
                 continue;
             }
             let e = TypeError::OtherWithCodeSpanned {

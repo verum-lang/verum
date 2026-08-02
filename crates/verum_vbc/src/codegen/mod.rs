@@ -4658,6 +4658,37 @@ impl VbcCodegen {
                     }
                 }
             }
+            // NESTED-MODULE-BODIES-1 (T0701 residual, Transducer class):
+            // an INLINE named module (`public module Transducer { … }`)
+            // must compile its items on the LENIENT path too.  This is
+            // the ONLY body-compilation path the stdlib bootstrap runs
+            // (`compile_items_into_state` → here), and the `_ => {}`
+            // catch-all silently swallowed the whole subtree — every
+            // nested-module function (Transducer.map/filter/compose2,
+            // result.vr's Validated factories) had declarations
+            // collected but NO body emitted into the archive: the baked
+            // .vbca contains ZERO occurrences of "Transducer.map"
+            // (measured, b60 bake).  Mirrors the strict `compile_item`
+            // arm: scope current_source_module to the inline module's
+            // name so descriptors qualify as `Transducer.map`.
+            ItemKind::Module(mod_decl) => {
+                if let verum_common::Maybe::Some(ref items) = mod_decl.items {
+                    let module_name = mod_decl.name.name.to_string();
+                    let prev_source = self.ctx.current_source_module.clone();
+                    self.ctx.current_source_module = Some(module_name);
+                    for sub_item in items.iter() {
+                        if let Err(e) = self.compile_item_lenient(sub_item) {
+                            if self.config.strict_codegen
+                                && e.skip_class() == SkipClass::BugClass
+                                && first_strict_err.is_none()
+                            {
+                                first_strict_err = Some(e);
+                            }
+                        }
+                    }
+                    self.ctx.current_source_module = prev_source;
+                }
+            }
             _ => {}
         }
         match first_strict_err {

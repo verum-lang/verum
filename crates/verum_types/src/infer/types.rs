@@ -3557,20 +3557,29 @@ impl TypeChecker {
                 // Check if this is an associated type projection (::AssocName)
                 if name.starts_with("::") {
                     let assoc_name: verum_common::Text = name[2..].into(); // Strip "::" prefix
-                    // #[cfg(debug_assertions)]
-                    // if assoc_name.as_str() == "Item" {
-                    //  eprintln!("[DEBUG resolve_assoc_proj] Found ::Item, looking up in associated_types");
-                    //  eprintln!(" associated_types keys: {:?}", associated_types.keys().collect::<Vec<_>>());
-                    // }
                     // Look up the associated type in the implementation
                     if let Some(assoc_ty) = associated_types.get(&assoc_name) {
-                        // #[cfg(debug_assertions)]
-                        // if assoc_name.as_str() == "Item" {
-                        //  eprintln!(" Found! assoc_ty={:?}", assoc_ty);
-                        // }
                         // Apply param_subst to the associated type value (e.g., &T -> &Int)
                         return self.substitute_type_params(assoc_ty, param_subst);
                     }
+                }
+                // T0707: BARE projection head (`Item<It>`, no `::` sigil) —
+                // same spelling the normalize/reduce authorities accept.
+                // The impl's own associated-types map is the natural gate
+                // (only declared assoc names fire); the nominal gate keeps
+                // a registered `type Item<T>` authoritative over the
+                // projection reading, mirroring normalize's Format 3.
+                if !name.starts_with("::")
+                    && args.len() == 1
+                    && name
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_uppercase())
+                    && matches!(self.ctx.lookup_type(name.as_str()), Option::None)
+                    && let Some(assoc_ty) =
+                        associated_types.get(&verum_common::Text::from(name.as_str()))
+                {
+                    return self.substitute_type_params(assoc_ty, param_subst);
                 }
                 // Recursively resolve in args
                 let resolved_args: List<Type> = args
@@ -4388,6 +4397,34 @@ impl TypeChecker {
                     {
                         return self.normalize_type_impl(&resolved, depth + 1);
                     }
+                }
+
+                // Format 3 (T0707): BARE projection head — `Item<It>` with
+                // no `::` sigil.  Descriptor strings and several inference
+                // paths spell projections this way; pre-consolidation only
+                // `reduce_projection_shape` handled it, so whether a
+                // projection reduced depended on WHICH normalizer a call
+                // site happened to use (three-reducer drift).  Nominal
+                // gate: a REGISTERED type of this name wins outright — a
+                // user's `type Output<T> is …` must never be re-read as
+                // the Add protocol's associated Output (mount/decl
+                // authority over ambient interpretation, same discipline
+                // as T0525).
+                if !name.starts_with("::")
+                    && normalized_args.len() == 1
+                    && name
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_uppercase())
+                    && matches!(self.ctx.lookup_type(name.as_str()), Option::None)
+                    && let Some(resolved) = self
+                        .try_resolve_associated_type_projection(
+                            &normalized_args[0],
+                            name.as_str(),
+                        )
+                    && resolved != *ty
+                {
+                    return self.normalize_type_impl(&resolved, depth + 1);
                 }
 
                 Generic {
@@ -7569,6 +7606,37 @@ impl TypeChecker {
     /// projections; every recursion step goes back through the
     /// resolver's own cycle/depth guards. Non-projection generics fall
     /// out unchanged after one cheap miss.
+    /// GENERIC-CTOR-FRESHNESS value-position twin (T0707 hunt): a
+    /// registered sum-type BODY carries PERSISTENT registration-time
+    /// `Type::Var`s in its payload slots (`Maybe` registers
+    /// `Some: Var(persistent)`).  Any consumer that returns that body
+    /// VERBATIM at a use site lets call-site unification bind the
+    /// persistent var GLOBALLY — measured: one
+    /// `assert_eq(iter.next(), Maybe.None)` bound it to
+    /// `Item<Range<Int>>` and every later `Maybe.Some(0)` in the FILE
+    /// failed `expected 'Item<Range<Int>>', found 'Int'` (base/iterator
+    /// E400 ×26, bisected to test_peekable_exhaustion).  This is the
+    /// instantiate-at-use authority for value-position variant reads:
+    /// resolve through the unifier, then freshen every still-free var
+    /// consistently across the whole type.
+    pub(super) fn instantiate_variant_value(&self, ty: &Type) -> Type {
+        let applied = self.unifier.apply(ty);
+        let free = applied.free_vars();
+        if free.is_empty() {
+            return applied;
+        }
+        let mut subst = crate::ty::Substitution::new();
+        for v in free {
+            subst.insert(v, Type::Var(crate::ty::TypeVar::fresh()));
+        }
+        applied.apply_subst(&subst)
+    }
+
+    /// T0707 consolidation: the bare-head spelling now ALSO reduces
+    /// inside [`Self::normalize_type`] (Format 3, nominal-gated), so
+    /// this is a thin shape-consumer entry point over the SAME
+    /// resolver, kept for call sites that want projection reduction
+    /// WITHOUT the full alias-rewriting normalize pass.
     pub(super) fn reduce_projection_shape(&self, ty: &Type) -> Type {
         if let Type::Generic { name, args } = ty
             && args.len() == 1
@@ -7579,6 +7647,7 @@ impl TypeChecker {
                 .chars()
                 .next()
                 .is_some_and(|c| c.is_ascii_uppercase())
+                && matches!(self.ctx.lookup_type(assoc), Option::None)
                 && let Some(resolved) =
                     self.try_resolve_associated_type_projection(&args[0], assoc)
                 && &resolved != ty

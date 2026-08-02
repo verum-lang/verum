@@ -7813,18 +7813,32 @@ impl TypeChecker {
                 if let Type::Variant(variants) = &resolved {
                     if let Some(payload_ty) = variants.get(field_name) {
                         if matches!(payload_ty, Type::Unit) {
-                            return Ok(InferResult::new(resolved.clone()));
+                            // Instantiate-at-use: the registered body's
+                            // persistent payload vars must never reach
+                            // call-site unification (see
+                            // `instantiate_variant_value`).
+                            return Ok(InferResult::new(
+                                self.instantiate_variant_value(&resolved),
+                            ));
                         } else {
-                            let params = match payload_ty {
+                            let fresh =
+                                self.instantiate_variant_value(&resolved);
+                            let fresh_payload = match &fresh {
+                                Type::Variant(vs) => vs
+                                    .get(field_name)
+                                    .cloned()
+                                    .unwrap_or_else(|| payload_ty.clone()),
+                                _ => payload_ty.clone(),
+                            };
+                            let params = match &fresh_payload {
                                 Type::Tuple(tuple_types) => tuple_types.clone(),
-                                _ => {
+                                other => {
                                     let mut p = List::new();
-                                    p.push(payload_ty.clone());
+                                    p.push(other.clone());
                                     p
                                 }
                             };
-                            let constructor_ty =
-                                Type::function(params, resolved.clone());
+                            let constructor_ty = Type::function(params, fresh);
                             return Ok(InferResult::new(constructor_ty));
                         }
                     }
@@ -7844,19 +7858,30 @@ impl TypeChecker {
                 if let Some(payload_ty) = variants.get(field_name) {
                     // Found variant constructor - return function type
                     if matches!(payload_ty, Type::Unit) {
-                        // Nullary variant - return the variant type itself
-                        return Ok(InferResult::new(ty.clone()));
+                        // Nullary variant — instantiate-at-use (persistent
+                        // payload vars must not leak into the unifier).
+                        return Ok(InferResult::new(
+                            self.instantiate_variant_value(&ty),
+                        ));
                     } else {
                         // Constructor function: fn(payload_ty) -> VariantType
-                        let params = match payload_ty {
+                        let fresh = self.instantiate_variant_value(&ty);
+                        let fresh_payload = match &fresh {
+                            Type::Variant(vs) => vs
+                                .get(field_name)
+                                .cloned()
+                                .unwrap_or_else(|| payload_ty.clone()),
+                            _ => payload_ty.clone(),
+                        };
+                        let params = match &fresh_payload {
                             Type::Tuple(tuple_types) => tuple_types.clone(),
-                            _ => {
+                            other => {
                                 let mut p = List::new();
-                                p.push(payload_ty.clone());
+                                p.push(other.clone());
                                 p
                             }
                         };
-                        let constructor_ty = Type::function(params, ty.clone());
+                        let constructor_ty = Type::function(params, fresh);
                         return Ok(InferResult::new(constructor_ty));
                     }
                 }
