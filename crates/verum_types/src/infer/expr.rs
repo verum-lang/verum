@@ -12442,6 +12442,7 @@ impl TypeChecker {
         // error-severity diagnostics still fail the typecheck.
         let mut has_diverging_stmt = false;
         for stmt in &block.stmts {
+            let amb_mark = self.pending_ambiguity.len();
             match self.check_stmt(stmt) {
                 Ok(diverges) => {
                     if diverges {
@@ -12449,6 +12450,11 @@ impl TypeChecker {
                     }
                 }
                 Err(e) => {
+                    // A failed statement may have leaked ambiguity
+                    // candidates from an aborted nested check —
+                    // drop anything recorded during it (the statement
+                    // already carries its own loud error).
+                    self.pending_ambiguity.truncate(amb_mark);
                     self.diagnostics.push(e.to_diagnostic());
                     self.recover_stmt_bindings(stmt);
                 }
@@ -12541,6 +12547,7 @@ impl TypeChecker {
         // above — one failing statement never hides its siblings.
         let mut has_diverging_stmt = false;
         for stmt in block.stmts.iter() {
+            let amb_mark = self.pending_ambiguity.len();
             match self.check_stmt(stmt) {
                 Ok(diverges) => {
                     if diverges {
@@ -12551,6 +12558,9 @@ impl TypeChecker {
                     }
                 }
                 Err(e) => {
+                    // See the synth twin: drop candidates leaked by an
+                    // aborted nested check inside this statement.
+                    self.pending_ambiguity.truncate(amb_mark);
                     self.diagnostics.push(e.to_diagnostic());
                     self.recover_stmt_bindings(stmt);
                 }

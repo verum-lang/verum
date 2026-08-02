@@ -9833,10 +9833,16 @@ impl TypeChecker {
         let prev_affine_tracker = std::mem::replace(&mut self.affine_tracker, new_affine_tracker);
 
         // AMBIGUITY-E404-1 (T0585): open this function's ambiguity
-        // window. Candidates recorded during the body are judged in
-        // the epilogue below; nested function items get their own
-        // window through this same save/restore.
-        let prev_pending_ambiguity = std::mem::take(&mut self.pending_ambiguity);
+        // window — MARKER discipline, not take/replace: an early `?`
+        // exit anywhere in this (large) function must not be able to
+        // lose the OUTER function's candidates. With a marker, an
+        // aborted nested check leaves the stack below its mark
+        // untouched; the enclosing epilogue drains only from its own
+        // mark (measured failure of the take/replace form: case 15's
+        // nested `fn recursive` E321-aborted its check and took
+        // main's 14 recorded candidates with it — the spec reported
+        // 1 E404 instead of 15).
+        let ambiguity_mark = self.pending_ambiguity.len();
 
         // Process generic parameters (type parameters and meta parameters)
         // Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Meta parameters for compile-time computation
@@ -10763,7 +10769,7 @@ impl TypeChecker {
         // the diagnostic (error severity) fails the check without
         // aborting it, so every ambiguous binding in the function is
         // reported (STMT-RECOVERY-1 discipline).
-        let judged = std::mem::replace(&mut self.pending_ambiguity, prev_pending_ambiguity);
+        let judged: Vec<_> = self.pending_ambiguity.drain(ambiguity_mark..).collect();
         for (bind_name, bind_span, bind_ty) in judged {
             let resolved = self.normalize_type(&bind_ty);
             if resolved.free_vars().is_empty() {
