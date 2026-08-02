@@ -612,6 +612,7 @@ impl TypeChecker {
             generator_context: Maybe::None,
             diagnostics: List::new(),
             deferred_soundness_errors: Vec::new(),
+            pending_ambiguity: Vec::new(),
             glob_import_provenance: std::collections::HashMap::new(),
             current_cog_name: verum_common::Text::from(""),
             dependent_enabled: true,
@@ -740,6 +741,7 @@ impl TypeChecker {
             generator_context: Maybe::None,
             diagnostics: List::new(),
             deferred_soundness_errors: Vec::new(),
+            pending_ambiguity: Vec::new(),
             glob_import_provenance: std::collections::HashMap::new(),
             current_cog_name: verum_common::Text::from(""),
             dependent_enabled: true,
@@ -869,6 +871,7 @@ impl TypeChecker {
             generator_context: Maybe::None,
             diagnostics: List::new(),
             deferred_soundness_errors: Vec::new(),
+            pending_ambiguity: Vec::new(),
             glob_import_provenance: std::collections::HashMap::new(),
             current_cog_name: verum_common::Text::from(""),
             dependent_enabled: true,
@@ -2157,8 +2160,9 @@ impl TypeChecker {
                             ) {
                             Some(ty) => Some(ty),
                             None => {
-                                let _ = self
-                                    .resolve_type_name_mount_scoped(type_name.as_str());
+                                self.ensure_mounted_record_fields_loaded(
+                                    type_name.as_str(),
+                                );
                                 match self.lookup_type_mount_scoped(
                                     type_name.as_str(),
                                     "__struct_fields_",
@@ -9296,6 +9300,24 @@ impl TypeChecker {
                     );
                     let is_mutable_with_unresolved_vars =
                         is_mutable_binding && !resolved_ty.free_vars().is_empty();
+
+                    // AMBIGUITY-E404-1 (T0585): an un-annotated binding whose
+                    // value type still carries free inference vars HERE is an
+                    // ambiguity CANDIDATE — judged at the end of the enclosing
+                    // function, where flow inference has had every chance to
+                    // constrain the vars (`let m = Map.new(); m.insert(1,2)`
+                    // must stay legal). Ident patterns only: `_` binds
+                    // nothing, and destructuring shapes get their ambiguity
+                    // from the scrutinee's own expression errors.
+                    if !resolved_ty.free_vars().is_empty()
+                        && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+                    {
+                        self.pending_ambiguity.push((
+                            name.name.clone(),
+                            stmt.span,
+                            resolved_ty.clone(),
+                        ));
+                    }
 
                     let scheme =
                         if is_closure_with_unresolved_vars || is_mutable_with_unresolved_vars {

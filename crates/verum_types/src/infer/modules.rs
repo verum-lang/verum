@@ -9832,6 +9832,12 @@ impl TypeChecker {
         let new_affine_tracker = self.affine_tracker.new_scope();
         let prev_affine_tracker = std::mem::replace(&mut self.affine_tracker, new_affine_tracker);
 
+        // AMBIGUITY-E404-1 (T0585): open this function's ambiguity
+        // window. Candidates recorded during the body are judged in
+        // the epilogue below; nested function items get their own
+        // window through this same save/restore.
+        let prev_pending_ambiguity = std::mem::take(&mut self.pending_ambiguity);
+
         // Process generic parameters (type parameters and meta parameters)
         // Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Meta parameters for compile-time computation
         for generic_param in &func.generics {
@@ -10748,6 +10754,35 @@ impl TypeChecker {
         // Restore the outer affine tracker scope
         // This ensures affine tracking is isolated per function
         self.affine_tracker = prev_affine_tracker;
+
+        // AMBIGUITY-E404-1 (T0585): judge this function's ambiguity
+        // candidates now that the WHOLE body has constrained what it
+        // can. An un-annotated `let` whose normalized type still
+        // carries free inference variables is genuinely ambiguous —
+        // no later code exists to determine it. E404 per binding;
+        // the diagnostic (error severity) fails the check without
+        // aborting it, so every ambiguous binding in the function is
+        // reported (STMT-RECOVERY-1 discipline).
+        let judged = std::mem::replace(&mut self.pending_ambiguity, prev_pending_ambiguity);
+        for (bind_name, bind_span, bind_ty) in judged {
+            let resolved = self.normalize_type(&bind_ty);
+            if resolved.free_vars().is_empty() {
+                continue;
+            }
+            let e = TypeError::OtherWithCodeSpanned {
+                code: Text::from("E404"),
+                msg: Text::from(format!(
+                    "Ambiguous type for `{}`: the inferred type `{}` is not fully \
+                     determined by this function — add a type annotation \
+                     (e.g. `let {}: <Type> = …;`)",
+                    bind_name,
+                    resolved,
+                    bind_name,
+                )),
+                span: bind_span,
+            };
+            self.diagnostics.push(e.to_diagnostic());
+        }
 
         // QTT enforcement: if any parameter was annotated with a
         // non-Omega quantity (via meta-parameter or explicit
@@ -12038,6 +12073,50 @@ impl TypeChecker {
             }
         }
         None
+    }
+
+    /// REEXPORT-FIELDS-LAZY-1 — drive the mount-scoped METADATA
+    /// loader for `name` so its qualified `__struct_fields_` keys
+    /// exist, WITHOUT consulting the lexical guards of
+    /// [`Self::resolve_type_name_mount_scoped`].
+    ///
+    /// The record-literal / field-read retry cannot go through the
+    /// full authority: a mounted record's flat slot legitimately
+    /// holds the self-referential `Named(name)` placeholder, and the
+    /// authority's lexical guard rightly defers to flat for the TYPE
+    /// result ("the mount-scoped result would be the IDENTICAL
+    /// Named") — but that skip also skips the loader's field-map
+    /// registration side effect, which is the only thing the retry
+    /// needs (measured: `mount core.text.{ParseError}` +
+    /// `ParseError { message: … }` died "field not found" with the
+    /// guard eating the reload).  Same source-derivation prologue as
+    /// [`Self::lookup_type_mount_scoped`]; ambiguous or unmounted
+    /// names decline.
+    pub(crate) fn ensure_mounted_record_fields_loaded(&mut self, name: &str) {
+        if !self.imports_in_progress.is_empty()
+            || !self.glob_imports_in_progress.is_empty()
+        {
+            return;
+        }
+        let name_text = verum_common::Text::from(name);
+        let Some(sources) = self.imported_names.get(&name_text) else {
+            return;
+        };
+        if sources.len() != 1 {
+            return;
+        }
+        let Some(source) = sources.iter().next().cloned() else {
+            return;
+        };
+        let source_str = source.as_str();
+        let canonical = source_str
+            .strip_prefix("cog.")
+            .unwrap_or(source_str)
+            .to_string();
+        if canonical.is_empty() || canonical == "cog" {
+            return;
+        }
+        let _ = self.ensure_mounted_type_loaded_qualified(name, &canonical);
     }
 
     /// MOUNT-TYPE-AUTHORITY-1 — authoritative bare type-NAME

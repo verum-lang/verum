@@ -9269,7 +9269,7 @@ impl TypeChecker {
             {
                 Some(ty) => Some(ty),
                 None => {
-                    let _ = self.resolve_type_name_mount_scoped(variant_name);
+                    self.ensure_mounted_record_fields_loaded(variant_name);
                     self.lookup_type_mount_scoped(variant_name, "__struct_fields_")
                 }
             };

@@ -684,6 +684,20 @@ pub struct TypeChecker {
     /// success so a Berardi-shaped declaration tucked inside an
     /// imported module still aborts the build.
     pub(crate) deferred_soundness_errors: Vec<TypeError>,
+    /// AMBIGUITY-E404-1 (T0585): candidate un-annotated `let`
+    /// bindings whose value type carried free inference variables AT
+    /// BINDING time — `(name, span, pre-generalize type)`. Recorded
+    /// during body checking, judged at END of the enclosing
+    /// function's check (the sound point: later statements may still
+    /// constrain the vars — HM flow inference; bind-time judgement
+    /// would reject `let m = Map.new(); m.insert(1, 2)`). A candidate
+    /// whose normalized type STILL contains free vars at fn end is a
+    /// genuine ambiguity: E404, add an annotation. Window is
+    /// save/restored around each function so nested fns judge their
+    /// own bindings; closure bodies deliberately land in the
+    /// ENCLOSING window (their vars may be constrained by enclosing
+    /// use).
+    pub(crate) pending_ambiguity: Vec<(Text, verum_ast::span::Span, Type)>,
     /// MOD-MED-2 — provenance side-table for glob-imported
     /// names. Maps each name registered by a glob mount to its
     /// `ImportProvenance { origin, module_path }`. Consulted at every
