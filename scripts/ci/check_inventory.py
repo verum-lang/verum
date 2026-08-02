@@ -158,13 +158,21 @@ def main() -> int:
         else:
             seen[module] = lineno
 
-    # S2 — row -> directory.
+    # S2 — row -> directory (or a root-level single-file suite:
+    # `tests/<module>.vr` — the runner names those file-modules by
+    # their stem, discovered by the first full liveness sweep).
     for lineno, module, _tok, _cnt in rows:
-        if not (CORE_TESTS / module).is_dir():
-            findings.append(
-                f"S2 row without directory: `{module}` (line {lineno}) — "
-                f"core-tests/{module}/ does not exist"
-            )
+        if (CORE_TESTS / module).is_dir():
+            continue
+        if (REPO / "tests" / f"{module}.vr").is_file():
+            continue
+        if (REPO / "tests" / module).is_dir():
+            continue
+        findings.append(
+            f"S2 row without directory: `{module}` (line {lineno}) — "
+            f"none of core-tests/{module}/, tests/{module}/ or "
+            f"tests/{module}.vr exists"
+        )
 
     # S3 — directory -> row (the 'never inventoried' class).
     dirs = discover_module_dirs()
