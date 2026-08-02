@@ -449,8 +449,15 @@ impl TypeChecker {
 
                 // Resolve type variables and named type aliases to find underlying tuple type
                 let tuple_ty = {
-                    // First, apply current substitution to resolve type variables
-                    let resolved = self.unifier.apply(&tuple_ty);
+                    // First, apply current substitution to resolve type variables.
+                    // ITER-ITEM-TUPLE-PROJECTION-1 (T0701): then reduce
+                    // associated-type projections through the ONE resolver —
+                    // `for (i, x) in xs.enumerate()` binds against
+                    // `Item<EnumerateIter<_>>`, which IS `(Int, Item<_>)`
+                    // once reduced; without the reduction the arm below
+                    // rejects with "Expected tuple type for tuple pattern".
+                    let resolved = self
+                        .reduce_projection_shape(&self.unifier.apply(&tuple_ty));
                     match &resolved {
                         Type::Tuple(_) => resolved,
                         // Resolve Named/Generic type aliases that may resolve to tuples

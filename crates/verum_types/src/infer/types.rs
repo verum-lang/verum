@@ -7558,6 +7558,37 @@ impl TypeChecker {
     /// 2. Find all protocols that base type implements
     /// 3. Look for one that defines the associated type
     /// 4. Return the resolved type from the implementation
+    /// ITER-ITEM-TUPLE-PROJECTION-1 (T0701): reduce an associated-type
+    /// projection rendered as a one-arg `Generic` head (`Item<It>` /
+    /// `::Item<It>`) to its concrete type through the ONE resolver —
+    /// shape-dependent consumers (tuple index `.0/.1`, tuple patterns)
+    /// must see the real tuple, not the opaque projection. Measured
+    /// blast radius of the missing reduction: 281 base/iterator tests
+    /// red on `cannot index type 'Item<EnumerateIter<_>>'` and
+    /// `Expected tuple type for tuple pattern`. Chases nested
+    /// projections; every recursion step goes back through the
+    /// resolver's own cycle/depth guards. Non-projection generics fall
+    /// out unchanged after one cheap miss.
+    pub(super) fn reduce_projection_shape(&self, ty: &Type) -> Type {
+        if let Type::Generic { name, args } = ty
+            && args.len() == 1
+        {
+            let name_str = name.as_str();
+            let assoc = name_str.strip_prefix("::").unwrap_or(name_str);
+            if assoc
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_uppercase())
+                && let Some(resolved) =
+                    self.try_resolve_associated_type_projection(&args[0], assoc)
+                && &resolved != ty
+            {
+                return self.reduce_projection_shape(&resolved);
+            }
+        }
+        ty.clone()
+    }
+
     pub(super) fn try_resolve_associated_type_projection(
         &self,
         base_ty: &Type,

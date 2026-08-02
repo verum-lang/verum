@@ -2221,7 +2221,13 @@ impl TypeChecker {
             // For tuple index (tuple.0 = value), skip init checking for the element
             ExprKind::TupleIndex { expr: tup, index } => {
                 let tup_result = self.synth_expr_for_field_access(tup)?;
-                match &tup_result.ty {
+                // ITER-ITEM-TUPLE-PROJECTION-1 (T0701): an associated-type
+                // projection (`Item<EnumerateIter<_>>`) IS a tuple once
+                // reduced — reduce through the ONE resolver before the
+                // shape match, exactly like the field-access arm above
+                // normalizes before ITS match.
+                let reduced_tup_ty = self.reduce_projection_shape(&tup_result.ty);
+                match &reduced_tup_ty {
                     Type::Tuple(types) => {
                         let idx = *index as usize;
                         if idx < types.len() {
