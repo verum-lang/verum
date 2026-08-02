@@ -1203,20 +1203,83 @@ fn scan_module_reexports(
         );
     }
 
+    // **DECLARER-FIXPOINT (T0691, ROOT-B):** each leaf's `source`
+    // must name the module that DECLARES the item, not the next
+    // umbrella up the chain. Pre-fix, `core.text`'s ParseError leaf
+    // recorded `core.base` (itself a re-exporter), so every consumer
+    // that probed `<source>.<name>` against the metadata type/function
+    // tables missed — the descriptor lives under
+    // `core.base.protocols.ParseError` — and the read-side fixpoint
+    // (`reexport_source_module_for`) had to re-derive the chain on
+    // every lookup. Chasing the chain ONCE here makes the artifact
+    // carry the truth and the read side O(1); the read-side walk
+    // stays as a compatibility net for pre-fixpoint archives.
+    //
+    // Hop rule mirrors the read side exactly: from `(name, module)`,
+    // `accum[module][name] -> (true_name, next_module)`; a missing
+    // entry means `module` declares it (terminal); a self-hop
+    // (`next == module && true == name`) is the umbrella-surface
+    // terminal; a repeated node is a malformed cycle — keep the last
+    // sound hop and report.
+    let chase = |mut name: String, mut module: String,
+                 accum: &BTreeMap<String, BTreeMap<String, (String, String)>>|
+     -> (String, String) {
+        let mut seen: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
+        seen.insert((name.clone(), module.clone()));
+        for _ in 0..16usize {
+            let Some((next_name, next_module)) = accum
+                .get(&module)
+                .and_then(|b| b.get(&name))
+                .cloned()
+            else {
+                break; // `module` declares `name`.
+            };
+            if next_module == module && next_name == name {
+                break; // self-reexport terminal.
+            }
+            if !seen.insert((next_name.clone(), next_module.clone())) {
+                eprintln!(
+                    "verum stdlib precompile: re-export CYCLE at {}::{} — \
+                     keeping last sound hop",
+                    module, name
+                );
+                break;
+            }
+            name = next_name;
+            module = next_module;
+        }
+        (name, module)
+    };
+
     let mut total_leaves = 0usize;
+    let mut fixpointed = 0usize;
+    let snapshot = accum.clone();
     for (reexporting_mp, items) in accum {
         let mut list: List<(Text, Text, Text)> = List::new();
         for (local, (true_name, source)) in items {
+            let (decl_name, decl_module) =
+                chase(true_name.clone(), source.clone(), &snapshot);
+            if decl_module != source {
+                fixpointed += 1;
+            }
             list.push((
                 Text::from(local.as_str()),
-                Text::from(true_name.as_str()),
-                Text::from(source.as_str()),
+                Text::from(decl_name.as_str()),
+                Text::from(decl_module.as_str()),
             ));
             total_leaves += 1;
         }
         metadata
             .module_reexports
             .insert(Text::from(reexporting_mp.as_str()), list);
+    }
+    if verbose && fixpointed > 0 {
+        eprintln!(
+            "verum stdlib precompile: declarer-fixpoint rewrote {} umbrella \
+             hops to their declaring modules",
+            fixpointed
+        );
     }
 
     if verbose {
