@@ -488,11 +488,28 @@ impl TypeChecker {
         // scheme birth below is DETERMINISTIC (T0175): the previous
         // `collect_type_vars` -> hashed `Set` collection let this same
         // descriptor resolve to a different quantification order per run.
-        let ((params, return_ty), scope_vars): (
-            (verum_common::List<crate::ty::Type>, crate::ty::Type),
+        let ((params, return_ty, hof_reconnect), scope_vars): (
+            (
+                verum_common::List<crate::ty::Type>,
+                crate::ty::Type,
+                Vec<(verum_common::Text, crate::ty::Type)>,
+            ),
             _,
         ) = crate::infer::helpers::with_declared_generic_names(declared_names.clone(), || {
             crate::infer::helpers::with_generic_var_scope_capture(|| {
+                // HOF reconnection (T0702, free-fn twin of the T0701
+                // method-path leg): a fn-bounded generic param (`f: F`
+                // where `F: fn() -> Maybe<T>`) is serialised with its
+                // STRUCTURAL expansion as `ty` — the declared name `F`
+                // survives only in the v2.10 `declared_ty` carry.  A
+                // return naming `F` (`from_fn -> FromFn<F>`) then parses
+                // to a scope var no argument ever constrains: the
+                // closure binds the STRUCTURAL type's payload var while
+                // `FromFn<F-var>` stays forever free — measured live as
+                // `let iter = from_fn(|| …Some(n*10)…)` judging E404
+                // `FromFn<_>` despite the body fixing T = Int.
+                let mut hof_reconnect: Vec<(verum_common::Text, crate::ty::Type)> =
+                    Vec::new();
                 let params: verum_common::List<crate::ty::Type> = fd
                     .params
                     .iter()
@@ -501,14 +518,39 @@ impl TypeChecker {
                         if i == 0 && p.name.as_str() == "self" {
                             None
                         } else {
-                            Some(to_type(&p.ty))
+                            let t = to_type(&p.ty);
+                            if !p.declared_ty.is_empty()
+                                && fd
+                                    .generic_params
+                                    .iter()
+                                    .any(|gp| gp.name == p.declared_ty)
+                            {
+                                hof_reconnect
+                                    .push((p.declared_ty.clone(), t.clone()));
+                            }
+                            Some(t)
                         }
                     })
                     .collect();
                 let return_ty = to_type(&fd.return_type);
-                (params, return_ty)
+                (params, return_ty, hof_reconnect)
             })
         });
+        let return_ty = {
+            let mut ret = return_ty;
+            if !hof_reconnect.is_empty() {
+                let mut subst = crate::ty::Substitution::new();
+                for (gname, structural) in &hof_reconnect {
+                    if let Some(tv) = scope_vars.get(gname.as_str()) {
+                        subst.insert(*tv, structural.clone());
+                    }
+                }
+                if !subst.is_empty() {
+                    ret = ret.apply_subst(&subst);
+                }
+            }
+            ret
+        };
         let fn_ty = crate::ty::Type::function(params, return_ty);
         // ONE authority (T0175): declared generics quantified in appearance
         // order, `__opaque_type_N` existentials marked implicit so a caller's

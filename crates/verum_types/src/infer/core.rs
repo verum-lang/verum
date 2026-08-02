@@ -1848,22 +1848,63 @@ impl TypeChecker {
                                 .map(|gp| gp.name.as_str().to_string()),
                         )
                         .collect();
-                    let ((params, return_ty), scope_vars): ((List<Type>, Type), _) =
-                        crate::infer::helpers::with_declared_generic_names(
-                            declared_names.clone(),
-                            || {
-                                crate::infer::helpers::with_generic_var_scope_capture(|| {
-                                    let params: List<Type> = fd
-                                        .params
-                                        .iter()
-                                        .map(|p| parse_descriptor_type_string(p.ty.as_str()))
-                                        .collect();
-                                    let return_ty =
-                                        parse_descriptor_type_string(fd.return_type.as_str());
-                                    (params, return_ty)
-                                })
-                            },
-                        );
+                    let ((params, return_ty, hof_reconnect), scope_vars): (
+                        (List<Type>, Type, Vec<(Text, Type)>),
+                        _,
+                    ) = crate::infer::helpers::with_declared_generic_names(
+                        declared_names.clone(),
+                        || {
+                            crate::infer::helpers::with_generic_var_scope_capture(|| {
+                                // HOF reconnection (T0702): see the twin in
+                                // env.rs `metadata_fn_scheme` — the declared
+                                // name of a fn-bounded generic param survives
+                                // only in the v2.10 `declared_ty` carry; a
+                                // return naming it (`-> FromFn<F>`) otherwise
+                                // keeps a forever-free var.
+                                let mut hof_reconnect: Vec<(Text, Type)> =
+                                    Vec::new();
+                                let params: List<Type> = fd
+                                    .params
+                                    .iter()
+                                    .map(|p| {
+                                        let t = parse_descriptor_type_string(
+                                            p.ty.as_str(),
+                                        );
+                                        if !p.declared_ty.is_empty()
+                                            && fd
+                                                .generic_params
+                                                .iter()
+                                                .any(|gp| gp.name == p.declared_ty)
+                                        {
+                                            hof_reconnect.push((
+                                                p.declared_ty.clone(),
+                                                t.clone(),
+                                            ));
+                                        }
+                                        t
+                                    })
+                                    .collect();
+                                let return_ty =
+                                    parse_descriptor_type_string(fd.return_type.as_str());
+                                (params, return_ty, hof_reconnect)
+                            })
+                        },
+                    );
+                    let return_ty = {
+                        let mut ret = return_ty;
+                        if !hof_reconnect.is_empty() {
+                            let mut subst = crate::ty::Substitution::new();
+                            for (gname, structural) in &hof_reconnect {
+                                if let Some(tv) = scope_vars.get(gname.as_str()) {
+                                    subst.insert(*tv, structural.clone());
+                                }
+                            }
+                            if !subst.is_empty() {
+                                ret = ret.apply_subst(&subst);
+                            }
+                        }
+                        ret
+                    };
                     let fn_ty = Type::function(params, return_ty);
                     // ONE authority (T0175): declared generics quantified in
                     // appearance order, `__opaque_type_N` existentials marked

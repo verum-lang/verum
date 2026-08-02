@@ -6631,9 +6631,15 @@ impl TypeChecker {
         // order) so the scheme birth below is DETERMINISTIC and can separate
         // a declared generic (`__generic_N` / a declared source name) from a
         // degraded-concrete existential (`__opaque_type_N`, e.g. `UInt32`).
-        let ((params, return_ty), scope_vars): ((List<Type>, Type), _) =
+        let ((params, return_ty, hof_reconnect), scope_vars): (
+            (List<Type>, Type, Vec<(Text, Type)>),
+            _,
+        ) =
             crate::infer::helpers::with_declared_generic_names(declared_names.clone(), || {
                 crate::infer::helpers::with_generic_var_scope_capture(|| {
+                    // HOF reconnection (T0702) — the free-fn twin of the
+                    // method-path leg; see env.rs metadata_fn_scheme.
+                    let mut hof_reconnect: Vec<(Text, Type)> = Vec::new();
                     let params: List<Type> = fd
                         .params
                         .iter()
@@ -6642,14 +6648,39 @@ impl TypeChecker {
                             if i == 0 && p.name.as_str() == "self" {
                                 None
                             } else {
-                                Some(to_type(&p.ty))
+                                let t = to_type(&p.ty);
+                                if !p.declared_ty.is_empty()
+                                    && fd
+                                        .generic_params
+                                        .iter()
+                                        .any(|gp| gp.name == p.declared_ty)
+                                {
+                                    hof_reconnect
+                                        .push((p.declared_ty.clone(), t.clone()));
+                                }
+                                Some(t)
                             }
                         })
                         .collect();
                     let return_ty = to_type(&fd.return_type);
-                    (params, return_ty)
+                    (params, return_ty, hof_reconnect)
                 })
             });
+        let return_ty = {
+            let mut ret = return_ty;
+            if !hof_reconnect.is_empty() {
+                let mut subst = crate::ty::Substitution::new();
+                for (gname, structural) in &hof_reconnect {
+                    if let Some(tv) = scope_vars.get(gname.as_str()) {
+                        subst.insert(*tv, structural.clone());
+                    }
+                }
+                if !subst.is_empty() {
+                    ret = ret.apply_subst(&subst);
+                }
+            }
+            ret
+        };
         let fn_ty = Type::function(params, return_ty);
 
         // BAKED-DEFAULT-ARG-1: relax the arity gate for defaulted
