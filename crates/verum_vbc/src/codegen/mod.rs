@@ -16601,13 +16601,36 @@ impl VbcCodegen {
                 }
             }
         }
-        // Function-level generics added after.
+        // Function-level generics added after.  SHADOW semantics
+        // (T0701 zip-class root): a method generic that REUSES an
+        // impl-level name (`implement<A, B> Iterator for ZipIter<A, B>
+        // { fn map<B, F: fn(Item<Self>) -> B> … }` — Iterator's default
+        // `map` materialised onto ZipIter spells its OWN `B`) must get
+        // its OWN pid, exactly as source scoping shadows the outer
+        // param.  The old skip-if-present merged the two: the bound
+        // string rendered `… -> __generic_1` (impl-B), so the call site
+        // bound the closure's RETURN to the receiver's SECOND type arg
+        // — `zip(..).map(|p| 1)` demanded the literal return
+        // `ListIter<Int>` (measured, fresh-sidecar dump of
+        // `ZipIter.map`).  Self-shape receivers don't consult this map
+        // (they encode via parent_tid), so shadowing is safe for the
+        // receiver; any LATER mention of the shadowed name inside the
+        // method's own signature means the METHOD's param by source
+        // scoping — which is precisely what the override yields.
         for gp in func.generics.iter() {
             if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
                 let n = gname.name.to_string();
-                if !method_generic_param_map.contains_key(&n) {
-                    method_generic_param_map.insert(n, next_pid);
-                    next_pid += 1;
+                match method_generic_param_map.get(&n) {
+                    None => {
+                        method_generic_param_map.insert(n, next_pid);
+                        next_pid += 1;
+                    }
+                    Some(_) => {
+                        // Impl-level occupant — shadow it for this
+                        // method's signature rendering.
+                        method_generic_param_map.insert(n, next_pid);
+                        next_pid += 1;
+                    }
                 }
             }
         }
