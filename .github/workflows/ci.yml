@@ -84,6 +84,58 @@ jobs:
         run: cargo test --workspace --lib --bins --locked
 
   # ---------------------------------------------------------------------------
+  # Job 1b (T0709): integration-test gate. `--lib --bins` above excludes the
+  # 834 files under crates/*/tests/ — every guard landed there was inert
+  # ("landed CI-INERT" class: stop-after-first-error recovery, INVENTORY
+  # liveness, speed contracts). This job arms the pure/cheap tier: crates
+  # whose tests/ run WITHOUT the AOT toolchain or live network. AOT-heavy
+  # suites (verum_cli, verum_codegen e2e) stay excluded here — they need the
+  # single-machine no-two-AOT-suites discipline and land in a follow-up
+  # nightly lane. Linux-only: the tier is platform-agnostic Rust; the unit
+  # matrix already covers OS spread.
+  # ---------------------------------------------------------------------------
+  integration:
+    name: Integration tests (tests/ gate, pure tier)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain (pinned via rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: integration-tests
+          cache-on-failure: true
+
+      - name: Run tests/ for the pure tier
+        # One crate per --package; --tests selects ONLY integration targets
+        # (unit surface already gated by Job 1). Timeout guards the
+        # suite-never-completes-means-hang class — a wedged suite fails
+        # loudly instead of eating the 6h job limit.
+        timeout-minutes: 45
+        # Measured locally 2026-08-02 (T0709 journal): the 9-crate light
+        # tier = 4,363 tests green. verum_kernel is EXCLUDED for now — its
+        # k_arch_v_alignment pin is honest-red (160/2480 cogs missing
+        # @arch_module attestation, tracked as its own task); a gate that
+        # starts red gets silenced wholesale. Heavier pure crates
+        # (types/smt/fast_parser/vbc/verification) join after their own
+        # timed local run.
+        run: >
+          cargo test --locked --tests
+          -p verum_common -p verum_ast -p verum_lexer
+          -p verum_cbgr -p verum_modules
+          -p verum_diagnostics -p verum_error -p verum_protocol_types
+
+  # ---------------------------------------------------------------------------
   # Job 2: VCS L0 (2,963 specs, 100%) + L1 (499 specs, 100%). Blocks merge.
   # ---------------------------------------------------------------------------
   vcs-l0-l1:
