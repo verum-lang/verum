@@ -1,0 +1,35 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L1
+// @tags: modules, mount, variant-constructor, namespace-precedence, regression
+// @timeout: 5000
+// @expected-exit: 0
+
+/// T0704 pin — an EXPLICITLY MOUNTED zero-arg FUNCTION must silence a
+/// same-named ambient variant constructor.
+///
+/// The collision this pins (measured in the shipped stdlib):
+///   * `core/money/currency.vr` declares
+///     `public fn inr() -> Currency` (a zero-arg factory), while
+///   * `core/math/hott.vr` declares `inr(b: B)` as a variant
+///     constructor of the HoTT `Pushout` sum type.
+///
+/// `variant_constructor_parents` is an AMBIENT flat bare-name table —
+/// a prelude.  Before the fix, the T0525 namespace-precedence rule
+/// consulted only the TYPE surface of the mounted module, so the
+/// mounted FUNCTION lost the bare name to the stranger constructor
+/// and the call failed with `inr expects 1 argument(s), got 0`.
+///
+/// Rule (2) MOUNTED-ITEM PRECEDENCE now consults the VALUE namespace
+/// too (`module_publishes_fn`, the `module_publishes_type` twin):
+/// when `inr` is explicitly mounted and the mounted module publishes
+/// it as a function, the ambient constructor table must DECLINE.
+mount core.money.currency.{Currency, inr, usd};
+
+fn main() {
+    let c = inr();
+    assert_eq(c.code, "INR");
+    let u = usd();
+    assert_eq(u.code, "USD");
+    print(c.code);
+}
