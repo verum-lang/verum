@@ -93,6 +93,7 @@
 pub use semantic_types::{List, Map, OrderedMap, OrderedSet, Set, Text};
 
 // Well-known type name constants (used throughout the compiler to replace hardcoded strings)
+pub mod defid;
 pub mod layout;
 pub mod platform_libs;
 pub mod errno;
