@@ -1893,6 +1893,20 @@ impl ArchiveCtxCache {
         codegen: &mut verum_vbc::codegen::VbcCodegen,
         user_module: &verum_ast::Module,
     ) -> (usize, usize) {
+        // **ONE-authority alias seeding** (T0695/T0692): every codegen
+        // that loads the embedded archive gets the DECLARED type
+        // aliases (`type Byte is UInt8`) and re-export renames from
+        // the baked metadata — HERE, at the single archive⇄codegen
+        // meeting point. The per-caller seeding sprinkle missed the
+        // script path (api.rs constructed codegen without it), so
+        // `verum run` compiled with an EMPTY alias table while `verum
+        // build`/`verum test` had one — three entry points, two
+        // behaviours, one class of unresolvable `Byte.*` dispatch
+        // names. Idempotent (import_type_aliases is first-wins) and
+        // cheap (one pass over metadata.types per compilation).
+        if let Some(metadata) = crate::embedded_stdlib_metadata::get_runtime_metadata() {
+            crate::pipeline::vbc_codegen::seed_reexport_type_aliases(codegen, &metadata);
+        }
         let mut wanted: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         for item in user_module.items.iter() {
