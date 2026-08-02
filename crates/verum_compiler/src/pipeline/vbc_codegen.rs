@@ -946,6 +946,38 @@ pub(crate) fn seed_reexport_type_aliases(
                 .or_insert_with(|| true_name.as_str().to_string());
         }
     }
+    // **DECLARED type aliases** (T0695 residual root): `public type
+    // Byte is UInt8;` bakes a `TypeDescriptorKind::Alias` descriptor —
+    // and user-side codegen never saw ANY of them (this seeder handled
+    // only re-export RENAMES; the bake-side alias registry is
+    // StdlibBootstrap-only — the bake≠user divergence again, T0692).
+    // The measured cost: `resolve_type_alias("Byte")` returned "Byte"
+    // in user compiles, the method-call composer emitted
+    // `Byte.to_hex`, the loader's keep-set never wanted the REAL
+    // `UInt8.to_hex`, and the CBGR by-example page died at dispatch
+    // with the method absent from the merged table. Seed every
+    // declared alias from the metadata truth (first-wins keeps a
+    // module's own local alias declarations authoritative).
+    for (name, desc) in metadata.types.iter() {
+        if let verum_types::core_metadata::TypeDescriptorKind::Alias { target } =
+            &desc.kind
+        {
+            let target_base = target
+                .as_str()
+                .split('<')
+                .next()
+                .unwrap_or(target.as_str())
+                .rsplit('.')
+                .next()
+                .unwrap_or(target.as_str());
+            if target_base.is_empty() || target_base == name.as_str() {
+                continue;
+            }
+            reexport_type_aliases
+                .entry(name.as_str().to_string())
+                .or_insert_with(|| target_base.to_string());
+        }
+    }
     if !reexport_type_aliases.is_empty() {
         codegen.import_type_aliases(&reexport_type_aliases);
     }
