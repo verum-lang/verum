@@ -17678,6 +17678,12 @@ impl TypeChecker {
                                         });
                                     }
 
+                                    if crate::ctor_trace_enabled() {
+                                        eprintln!(
+                                            "[ctor-trace] proto-search BOUND-ARM {}.{} params={:?}",
+                                            protocol_name, method.name, expected_params
+                                        );
+                                    }
                                     for (arg, param_ty) in args.iter().zip(expected_params.iter()) {
                                         let resolved_param = self.unifier.apply(param_ty);
                                         self.check_expr(arg, &resolved_param)?;
