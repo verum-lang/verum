@@ -17,6 +17,60 @@ Priorities: **P0** = wrong results or masked failures reach users;
 
 ---
 
+## R. Release spine — fundamental-mechanism census (2026-08-02)
+
+Ordered by fundamentality: each stratum unblocks the ones below it.
+This is the NAVIGATION layer — the detailed rows/sections elsewhere in
+this register stay authoritative for per-item state. Every entry
+carries its pool ID; claim before working.
+
+**R1. Identity (the root stratum).** Names are still the identity
+carrier in 679 measured places (census ratchet:
+`scripts/ci/census_name_keyed_surfaces.py`). Campaign: T0690
+(DefId end-to-end, S0/S1 landed, S2+ open), T0691 (ONE symbol-graph
+artifact), T0448/T0215-class residuals. Until S2 lands, every
+same-name collision class (barename ctor capture, qualified-key
+squats, first-wins registries) stays reachable.
+
+**R2. Descriptor fidelity (bake ≡ source).** The archive's
+signature-string channel erased declared identity; v2.10
+PARAMNAME-CARRY (T0701, 11904454b) closed the inherent-method leg
+(E404 adapter class dead). Open legs: protocol MethodSignature
+surface T0708 (bounded-var dispatch E404 `_`), qualified-keyed
+`metadata.types` (T0691 stone), bake-vs-user pipeline unification
+T0692.
+
+**R3. Type-system authorities.** One projection reducer instead of
+three — T0707 (Item<Range>-argless residual, base/iterator 54 E400).
+Mount-scope candidate discipline for multi-source names T0710
+(T0525/T0704 disarm on >1 source). Match-guard exhaustiveness gate
+T0649. Sized-int value semantics T0611 (cast masks / width wrap).
+E404 recovery shapes T0585/T0702. NLL dataflow T0694.
+
+**R4. Execution truth (both tiers, loud-by-default).** CallM
+const-zero degrade class A1/T0103-residue (strict-mono default =
+T0693). AOT adapter lowering T0260. FFI placeholder arms A9/T0110,
+SIMD degrades A10/T0112, Tier-0 ptr provenance A19/T0108. Prim-mangle
+totality T0695 + post-typecheck harvest T0706. cbgr_test SIGSEGV
+T0705.
+
+**R5. Gates that actually gate.** CI runs only `--lib --bins` — 849
+`tests/` files inert: T0709 (the single most release-blocking infra
+gap; every "landed CI-INERT" guard sits here). INVENTORY liveness
+T0220. FORCE_VERIFY sweep T0278.
+
+**R6. Verification honesty.** `verify` reports Proved on a violated
+precondition T0657; higher-order reflection T0490; excluded-middle on
+opaque calls T0487; five ProofTerm types T0637; refinement
+value-free-validity class (register §refinement).
+
+**R7. Product surface.** Format-spec pipeline T0700; effect
+polymorphism T0696; QTT channels T0697; region polymorphism T0698;
+contract-carrying archives T0699 — the innovation tier, after R1-R6
+hold.
+
+---
+
 ## A. Compiler / runtime (Rust crates)
 
 | # | Item | Pri | Anchor | Acceptance |
