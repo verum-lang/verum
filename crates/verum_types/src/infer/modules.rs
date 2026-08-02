@@ -15976,6 +15976,12 @@ impl TypeChecker {
         };
 
         if let Some(r) = self.resolve_reference_type_method(&recv_ty_raw, method, args, span)? {
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace] reference-resolver {} -> {}",
+                    method.name, r.ty
+                );
+            }
             return Ok(r);
         }
 
@@ -16036,6 +16042,12 @@ impl TypeChecker {
         if let Some(r) = self.resolve_inherent_and_collection_method(
             &recv_ty, method_name_str, receiver, method, type_args, args, span,
         )? {
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace] inherent-resolver {} -> {}",
+                    method.name, r.ty
+                );
+            }
             return Ok(r);
         }
 
