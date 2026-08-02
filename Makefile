@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live
+.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -50,6 +50,9 @@ check-bake-prepass-parity: ## Gate (T0640): every collect_all_declarations pre-p
 
 check-inventory: ## Gate (T0220): core-tests/INVENTORY.md structural integrity (rows unique, row<->dir bijection, status tokens)
 	python3 scripts/ci/check_inventory.py --structural-only
+
+check-name-census: ## Ratchet (T0690): name-keyed identity surfaces may only shrink (DefId migration)
+	python3 scripts/ci/census_name_keyed_surfaces.py --check
 
 check-inventory-live: ## Gate (T0220): INVENTORY liveness — green claims re-verified against a real interp run (INVENTORY_RESULTS=results.json, or it runs the suite)
 	@if [ -n "$(INVENTORY_RESULTS)" ]; then \
