@@ -20709,9 +20709,23 @@ impl TypeChecker {
     ) -> Result<Option<InferResult>> {
         if let Some(r) = self.try_resolve_super_path_call(
             receiver, method, args, span, skip_static_lookup,
-        )? { return Ok(Some(r)); }
+        )? {
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace] pre-recv SUPER-PATH {} -> {}",
+                    method.name, r.ty
+                );
+            }
+            return Ok(Some(r));
+        }
 
         if let Some(r) = self.try_resolve_module_call(receiver, method, args, span)? {
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace] pre-recv MODULE-CALL {} -> {}",
+                    method.name, r.ty
+                );
+            }
             return Ok(Some(r));
         }
 
@@ -20761,7 +20775,15 @@ impl TypeChecker {
                         }
 
                         let resolved_return = self.unifier.apply(return_type);
-                        return Ok(Some(InferResult::new(resolved_return)));
+                        {
+                            if crate::ctor_trace_enabled() {
+                                eprintln!(
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    method.name, resolved_return
+                                );
+                            }
+                            return Ok(Some(InferResult::new(resolved_return)));
+                        }
                     }
                 } else if candidates.len() > 1 {
                     // Multiple candidates - disambiguate by argument types.
@@ -20801,7 +20823,15 @@ impl TypeChecker {
                                     self.check_expr(arg, &resolved_param)?;
                                 }
                                 let resolved_return = self.unifier.apply(return_type);
-                                return Ok(Some(InferResult::new(resolved_return)));
+                                {
+                            if crate::ctor_trace_enabled() {
+                                eprintln!(
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    method.name, resolved_return
+                                );
+                            }
+                            return Ok(Some(InferResult::new(resolved_return)));
+                        }
                             }
                         }
                     }
@@ -20851,7 +20881,15 @@ impl TypeChecker {
                         }
 
                         let resolved_return = self.unifier.apply(return_type);
-                        return Ok(Some(InferResult::new(resolved_return)));
+                        {
+                            if crate::ctor_trace_enabled() {
+                                eprintln!(
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    method.name, resolved_return
+                                );
+                            }
+                            return Ok(Some(InferResult::new(resolved_return)));
+                        }
                     }
                 }
             }
@@ -20907,7 +20945,15 @@ impl TypeChecker {
                     // generic-instantiated by the registry).
                     let resolved_return =
                         self.unifier.apply(ctor.return_type.as_ref());
-                    return Ok(Some(InferResult::new(resolved_return)));
+                    {
+                            if crate::ctor_trace_enabled() {
+                                eprintln!(
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    method.name, resolved_return
+                                );
+                            }
+                            return Ok(Some(InferResult::new(resolved_return)));
+                        }
                 }
             }
         }
@@ -21004,7 +21050,15 @@ impl TypeChecker {
                                     }
 
                                     let resolved_return = self.unifier.apply(return_type);
-                                    return Ok(Some(InferResult::new(resolved_return)));
+                                    {
+                            if crate::ctor_trace_enabled() {
+                                eprintln!(
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    method.name, resolved_return
+                                );
+                            }
+                            return Ok(Some(InferResult::new(resolved_return)));
+                        }
                                 }
                             }
                         }
@@ -21131,7 +21185,15 @@ impl TypeChecker {
                                 module_path, method_name, resolved_return
                             );
                         }
-                        return Ok(Some(InferResult::new(resolved_return)));
+                        {
+                            if crate::ctor_trace_enabled() {
+                                eprintln!(
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    method.name, resolved_return
+                                );
+                            }
+                            return Ok(Some(InferResult::new(resolved_return)));
+                        }
                     }
                 }
             }
@@ -21165,7 +21227,15 @@ impl TypeChecker {
                                             module_path, method_name, resolved_return
                                         );
                                     }
-                                    return Ok(Some(InferResult::new(resolved_return)));
+                                    {
+                            if crate::ctor_trace_enabled() {
+                                eprintln!(
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    method.name, resolved_return
+                                );
+                            }
+                            return Ok(Some(InferResult::new(resolved_return)));
+                        }
                                 }
                             }
                         }
@@ -21204,7 +21274,15 @@ impl TypeChecker {
                                             module_path, method_name, resolved_return
                                         );
                                     }
-                                    return Ok(Some(InferResult::new(resolved_return)));
+                                    {
+                            if crate::ctor_trace_enabled() {
+                                eprintln!(
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    method.name, resolved_return
+                                );
+                            }
+                            return Ok(Some(InferResult::new(resolved_return)));
+                        }
                                 }
                             }
                         }

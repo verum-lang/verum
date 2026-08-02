@@ -9307,6 +9307,25 @@ impl TypeChecker {
                     let is_mutable_with_unresolved_vars =
                         is_mutable_binding && !resolved_ty.free_vars().is_empty();
 
+                    // VALUE RESTRICTION (T0701/T0585, the ML discipline the
+                    // closure and mut carve-outs above approximated): a
+                    // NON-VALUE RHS (call, method chain, match, …) whose
+                    // type still carries free inference vars binds
+                    // MONOMORPHIC.  Generalizing a computation's fresh
+                    // vars disconnects them from every later use — each
+                    // use instantiates NEW vars, so `let max = xs.min();
+                    // assert_eq(max, Maybe.Some(1))` never constrains the
+                    // let-time var and the end-of-fn ambiguity judge
+                    // reports a phantom E404 (`None(Unit) | Some(_)`,
+                    // measured ×9 on base/iterator).  Syntactic VALUES
+                    // (bare paths referencing polymorphic functions)
+                    // keep let-polymorphism — `let f = identity;` still
+                    // generalizes; closures were already forced mono.
+                    let is_nonvalue_with_unresolved_vars = !matches!(
+                        &val.kind,
+                        ExprKind::Path(_) | ExprKind::Closure { .. }
+                    ) && !resolved_ty.free_vars().is_empty();
+
                     // AMBIGUITY-E404-1 (T0585): an un-annotated binding whose
                     // value type still carries free inference vars HERE is an
                     // ambiguity CANDIDATE — judged at the end of the enclosing
@@ -9325,15 +9344,17 @@ impl TypeChecker {
                         ));
                     }
 
-                    let scheme =
-                        if is_closure_with_unresolved_vars || is_mutable_with_unresolved_vars {
-                            // Keep monomorphic so unification at call sites updates the
-                            // same type variables that are in the type registry
-                            TypeScheme::mono(resolved_ty)
-                        } else {
-                            // Normal let-polymorphism for non-closures or fully resolved closures
-                            self.ctx.env.generalize(resolved_ty)
-                        };
+                    let scheme = if is_closure_with_unresolved_vars
+                        || is_mutable_with_unresolved_vars
+                        || is_nonvalue_with_unresolved_vars
+                    {
+                        // Keep monomorphic so unification at call sites updates the
+                        // same type variables that are in the type registry
+                        TypeScheme::mono(resolved_ty)
+                    } else {
+                        // Normal let-polymorphism for non-closures or fully resolved closures
+                        self.ctx.env.generalize(resolved_ty)
+                    };
 
                     // Bind pattern
                     self.bind_pattern_scheme(pattern, scheme.clone())?;
