@@ -18103,6 +18103,13 @@ impl TypeChecker {
             }
         } // protocol_checker_guard dropped here
 
+        if crate::ctor_trace_enabled() {
+            eprintln!(
+                "[ctor-trace] proto-search CANDIDATES {} n={}",
+                method.name,
+                candidates.len()
+            );
+        }
         // Step 4: Handle no candidates or ambiguity
         if candidates.is_empty() {
             return self.handle_empty_candidates(
