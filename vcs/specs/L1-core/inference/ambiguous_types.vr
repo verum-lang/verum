@@ -48,8 +48,12 @@ fn main() {
         panic("cannot create T")
     }
     // E404: Cannot infer T - no constraints to guide inference
-    let unknown = unconstrained();
-    // FIX: let unknown: Int = unconstrained();
+    // NB: named `unknown_val` — `unknown` itself is the reserved
+    // top-type keyword (grammar `unknown_type`) and cannot be an
+    // identifier; the original spelling made this spec PARSE-fail
+    // (E071), contradicting its own @test: typecheck-fail directive.
+    let unknown_val = unconstrained();
+    // FIX: let unknown_val: Int = unconstrained();
 
     // === ERROR 8: Closure With Ambiguous Parameter ===
     // E404: Cannot infer type of closure parameter

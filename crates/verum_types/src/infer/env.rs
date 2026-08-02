@@ -2135,13 +2135,38 @@ impl TypeChecker {
                         // through to the plain unqualified probe when
                         // the type is not explicitly mounted (built-in
                         // types, locally-declared types, etc.).
+                        //
+                        // REEXPORT-FIELDS-LAZY-1: the read-only probe
+                        // cannot POPULATE — a type mounted through a
+                        // re-export hop (`mount core.text.{ParseError}`
+                        // → `core.base.protocols.ParseError`) has its
+                        // `__struct_fields_` keys registered only by
+                        // the metadata lazy loader, which field access
+                        // never invoked. A record-literal/field-read on
+                        // such a type then failed "field 'x' not found"
+                        // with the fields simply unloaded (pe1/pe2
+                        // bisection: direct mount clean, re-export hop
+                        // red). On a miss, drive the mount-scoped
+                        // METADATA loader once (it registers the
+                        // qualified field maps as a side effect) and
+                        // retry the same read-only probe.
                         let resolved_record = match self
                             .lookup_type_mount_scoped(
                                 type_name.as_str(),
                                 "__struct_fields_",
                             ) {
                             Some(ty) => Some(ty),
-                            None => self.ctx.lookup_type(&struct_key).cloned(),
+                            None => {
+                                let _ = self
+                                    .resolve_type_name_mount_scoped(type_name.as_str());
+                                match self.lookup_type_mount_scoped(
+                                    type_name.as_str(),
+                                    "__struct_fields_",
+                                ) {
+                                    Some(ty) => Some(ty),
+                                    None => self.ctx.lookup_type(&struct_key).cloned(),
+                                }
+                            }
                         };
                         if let Option::Some(Type::Record(fields)) = resolved_record {
                             if let Some(field_ty) = fields.get(&field_name) {

@@ -9259,8 +9259,20 @@ impl TypeChecker {
             // §Y close: mount-scoped probe FIRST so an explicit
             // `mount A.{Foo}` overrides whichever sibling module's
             // `Foo` happened to land later in the unqualified slot.
-            let mount_scoped_struct = self
-                .lookup_type_mount_scoped(variant_name, "__struct_fields_");
+            //
+            // REEXPORT-FIELDS-LAZY-1 (see the env.rs field-read twin):
+            // a re-export-hop mount's field maps exist only after the
+            // metadata lazy loader ran — on a miss, drive it once and
+            // retry before conceding to the flat slot.
+            let mount_scoped_struct = match self
+                .lookup_type_mount_scoped(variant_name, "__struct_fields_")
+            {
+                Some(ty) => Some(ty),
+                None => {
+                    let _ = self.resolve_type_name_mount_scoped(variant_name);
+                    self.lookup_type_mount_scoped(variant_name, "__struct_fields_")
+                }
+            };
             let resolved_struct_lookup = match mount_scoped_struct {
                 Some(ref ty) => Some(ty.clone()),
                 None => self.ctx.lookup_type(struct_key.as_str()).cloned(),
@@ -12418,11 +12430,28 @@ impl TypeChecker {
         }
 
         // PASS 2: Type check statements and track divergence
+        //
+        // STMT-RECOVERY-1 (T0584/T0585 class close): a failing statement
+        // pushes its diagnostic and the walk CONTINUES — pre-fix the `?`
+        // aborted the whole block on the first error, so a file with 15
+        // independent defects reported exactly 1 (ambiguous_types.vr).
+        // Statement-boundary recovery is sound for every TypeError: the
+        // inference-depth guard unwinds with its RAII drop, and a failed
+        // `let` binds its pattern to fresh vars so later statements
+        // don't cascade phantom "undefined variable" noise. The pushed
+        // error-severity diagnostics still fail the typecheck.
         let mut has_diverging_stmt = false;
         for stmt in &block.stmts {
-            let diverges = self.check_stmt(stmt)?;
-            if diverges {
-                has_diverging_stmt = true;
+            match self.check_stmt(stmt) {
+                Ok(diverges) => {
+                    if diverges {
+                        has_diverging_stmt = true;
+                    }
+                }
+                Err(e) => {
+                    self.diagnostics.push(e.to_diagnostic());
+                    self.recover_stmt_bindings(stmt);
+                }
             }
         }
 
@@ -12439,6 +12468,29 @@ impl TypeChecker {
         self.borrow_tracker.exit_scope();
         self.ctx.exit_scope();
         Ok(result)
+    }
+
+    /// STMT-RECOVERY-1 companion: after a statement's check failed and
+    /// its diagnostic was pushed, bind whatever names the statement
+    /// WOULD have introduced to fresh inference variables, so the
+    /// remaining statements type-check against real bindings instead
+    /// of cascading phantom "undefined variable" errors (which would
+    /// bury the genuine defects the recovery exists to surface).
+    /// Fresh vars unify with anything — the failed statement already
+    /// carries its own error, so no false green can result from the
+    /// permissive binding. Binding errors here are swallowed: recovery
+    /// must never introduce a second failure path.
+    fn recover_stmt_bindings(&mut self, stmt: &Stmt) {
+        use verum_ast::stmt::StmtKind;
+        let pattern = match &stmt.kind {
+            StmtKind::Let { pattern, .. } => pattern,
+            StmtKind::LetElse { pattern, .. } => pattern,
+            _ => return,
+        };
+        let recovery = crate::context::TypeScheme::mono(Type::Var(
+            crate::ty::TypeVar::fresh(),
+        ));
+        let _ = self.bind_pattern_scheme(pattern, recovery);
     }
 
     /// Check a block against expected type.
@@ -12484,13 +12536,24 @@ impl TypeChecker {
         }
 
         // PASS 2: Track if any statement diverges (has type Never)
+        //
+        // STMT-RECOVERY-1: same push-and-continue as the synth twin
+        // above — one failing statement never hides its siblings.
         let mut has_diverging_stmt = false;
         for stmt in block.stmts.iter() {
-            let diverges = self.check_stmt(stmt)?;
-            if diverges {
-                has_diverging_stmt = true;
-                // Once we hit a diverging statement, the rest is unreachable
-                // but we still type-check them for error reporting
+            match self.check_stmt(stmt) {
+                Ok(diverges) => {
+                    if diverges {
+                        has_diverging_stmt = true;
+                        // Once we hit a diverging statement, the rest is
+                        // unreachable but we still type-check them for
+                        // error reporting
+                    }
+                }
+                Err(e) => {
+                    self.diagnostics.push(e.to_diagnostic());
+                    self.recover_stmt_bindings(stmt);
+                }
             }
         }
 
