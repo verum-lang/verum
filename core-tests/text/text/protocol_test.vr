@@ -25,7 +25,9 @@
 //   audit.md             — findings & action items
 // =============================================================================
 
-mount core.text.{Text, Utf8Error, Utf16Error, ParseError};
+mount core.text.{Text, Utf8Error, Utf16Error};
+// See unit_test.vr: bare ParseError is a stdlib duplicate (T0458).
+mount core.base.protocols.{ParseError};
 mount core.text.{Chars, ByteIter, CharIndices, Lines};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};

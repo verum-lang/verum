@@ -17,7 +17,12 @@
 //   audit.md             — implementation audit findings & action items
 // =============================================================================
 
-mount core.text.{Text, Utf8Error, Utf16Error, ParseError};
+mount core.text.{Text, Utf8Error, Utf16Error};
+// ParseError mounted from its DECLARING module: the bare name is a live
+// stdlib duplicate (core.base.protocols vs core.cli.error), and the
+// core.text re-export hop resolves members against the WRONG twin
+// (T0458 canonical-identity class; repro pe1/pe3/pe4 in its journal).
+mount core.base.protocols.{ParseError};
 mount core.text.{Chars, ByteIter, CharIndices, Lines};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
