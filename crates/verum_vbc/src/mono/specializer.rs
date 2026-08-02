@@ -818,7 +818,19 @@ impl<'a> BytecodeSpecializer<'a> {
             TypeRef::Instantiated { base, .. } => base,
             _ => return None,
         };
-        let type_name = self.module.get_type_name(*tid)?;
+        // T0330 S2: a PRIMITIVE receiver (`Maybe.fmt<Int>`'s payload
+        // `v.fmt(f)` — T := Int) has no `module.types` descriptor, so
+        // `get_type_name` returns None and the devirt silently bailed —
+        // the spec body kept a bare `fmt` CallM that AOT degrades to
+        // const-zero (`m: Some()` with the payload swallowed).
+        // `display_type_id` names EVERY TypeId, primitives included.
+        let type_name = self
+            .module
+            .get_type_name(*tid)
+            .unwrap_or_else(|| self.module.display_type_id(*tid));
+        if type_name.is_empty() || type_name == "()" {
+            return None;
+        }
         let concrete = format!("{}.{}", type_name, method);
         if std::env::var_os("VERUM_TRACE_MONO").is_some() {
             let hit = self
