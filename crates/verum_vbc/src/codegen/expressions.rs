@@ -12606,9 +12606,16 @@ impl VbcCodegen {
                     let var_name = ident.name.to_string();
                     let vtype = self.ctx.get_variable_type(&ident.name);
                     match vtype {
-                        VarTypeKind::Byte => format!("byte${}", method.name),
-                        VarTypeKind::Int32 => format!("int32${}", method.name),
-                        VarTypeKind::UInt64 => format!("uint64${}", method.name),
+                        // T0695: the ONE prim-mangle authority — width-
+                        // semantic members mangle, everything else
+                        // dispatches the real registered method
+                        // (`UInt8.to_hex`), never an unresolvable name.
+                        VarTypeKind::Byte => crate::prim_mangle::dispatch_name(
+                            crate::prim_mangle::PrimWidth::Byte, &method.name),
+                        VarTypeKind::Int32 => crate::prim_mangle::dispatch_name(
+                            crate::prim_mangle::PrimWidth::Int32, &method.name),
+                        VarTypeKind::UInt64 => crate::prim_mangle::dispatch_name(
+                            crate::prim_mangle::PrimWidth::UInt64, &method.name),
                         // Canonical primitive types — emit the qualified
                         // `Type.method` name directly from the VarTypeKind
                         // slot so the call-site `takes_self_mut_ref` check
@@ -12811,12 +12818,16 @@ impl VbcCodegen {
                     if let Some(ref ret_type) = func_info.return_type {
                         // Check return type kind for UInt64
                         let type_name = self.type_ref_to_name(ret_type);
+                        // T0695: authority-composed (see prim_mangle).
                         if type_name == "UInt64" {
-                            format!("uint64${}", method.name)
+                            crate::prim_mangle::dispatch_name(
+                                crate::prim_mangle::PrimWidth::UInt64, &method.name)
                         } else if type_name == "Int32" {
-                            format!("int32${}", method.name)
+                            crate::prim_mangle::dispatch_name(
+                                crate::prim_mangle::PrimWidth::Int32, &method.name)
                         } else if type_name == "Byte" {
-                            format!("byte${}", method.name)
+                            crate::prim_mangle::dispatch_name(
+                                crate::prim_mangle::PrimWidth::Byte, &method.name)
                         } else {
                             method.name.to_string()
                         }
@@ -13051,11 +13062,15 @@ impl VbcCodegen {
             {
                 let target = ident.name.to_string();
                 match target.as_str() {
-                    "Byte" | "UInt8" | "U8" | "u8" => format!("byte${}", method.name),
-                    "Int32" | "I32" | "i32" => format!("int32${}", method.name),
+                    // T0695: authority-composed (see prim_mangle).
+                    "Byte" | "UInt8" | "U8" | "u8" => crate::prim_mangle::dispatch_name(
+                        crate::prim_mangle::PrimWidth::Byte, &method.name),
+                    "Int32" | "I32" | "i32" => crate::prim_mangle::dispatch_name(
+                        crate::prim_mangle::PrimWidth::Int32, &method.name),
                     "UInt" | "UInt64" | "U64" | "u64"
                     | "USize" | "UIntSize" | "Usize" | "usize" => {
-                        format!("uint64${}", method.name)
+                        crate::prim_mangle::dispatch_name(
+                            crate::prim_mangle::PrimWidth::UInt64, &method.name)
                     }
                     "Int" | "Float" | "Bool" | "Char" | "Text" | "Unit" => {
                         format!("{}.{}", target, method.name)
@@ -13200,11 +13215,15 @@ impl VbcCodegen {
                 {
                     let target = ident.name.to_string();
                     match target.as_str() {
-                        "Byte" | "UInt8" | "U8" | "u8" => format!("byte${}", method.name),
-                        "Int32" | "I32" | "i32" => format!("int32${}", method.name),
+                        // T0695: authority-composed (see prim_mangle).
+                        "Byte" | "UInt8" | "U8" | "u8" => crate::prim_mangle::dispatch_name(
+                            crate::prim_mangle::PrimWidth::Byte, &method.name),
+                        "Int32" | "I32" | "i32" => crate::prim_mangle::dispatch_name(
+                            crate::prim_mangle::PrimWidth::Int32, &method.name),
                         "UInt" | "UInt64" | "U64" | "u64"
                         | "USize" | "UIntSize" | "Usize" | "usize" => {
-                            format!("uint64${}", method.name)
+                            crate::prim_mangle::dispatch_name(
+                                crate::prim_mangle::PrimWidth::UInt64, &method.name)
                         }
                         "Int" | "Float" | "Bool" | "Char" | "Text" | "Unit" => {
                             format!("{}.{}", target, method.name)
@@ -14011,10 +14030,14 @@ impl VbcCodegen {
                 };
 
                 // Prefix method name with type for typed primitives.
+                // T0695: authority-composed (see prim_mangle).
                 let prefixed_method = match type_name.as_str() {
-                    "Int32" | "i32" => format!("int32${}", method_name),
-                    "UInt64" | "u64" => format!("uint64${}", method_name),
-                    "Byte" | "UInt8" | "u8" => format!("byte${}", method_name),
+                    "Int32" | "i32" => crate::prim_mangle::dispatch_name(
+                        crate::prim_mangle::PrimWidth::Int32, &method_name),
+                    "UInt64" | "u64" => crate::prim_mangle::dispatch_name(
+                        crate::prim_mangle::PrimWidth::UInt64, &method_name),
+                    "Byte" | "UInt8" | "u8" => crate::prim_mangle::dispatch_name(
+                        crate::prim_mangle::PrimWidth::Byte, &method_name),
                     _ => method_name.clone(),
                 };
 
@@ -14319,14 +14342,21 @@ impl VbcCodegen {
         // type defines `to_bits` / `as_nanos` / `first_byte`, so the
         // hardcode is a pinning of a single source of truth rather than
         // a guess across multiple competing types.
+        // T0695: the OUTER method composes through the authority —
+        // `buf.first_byte().to_hex()` must dispatch `UInt8.to_hex`
+        // (real method), while `....wrapping_add(1)` keeps the
+        // width-semantic mangle.
         if UINT64_METHODS.contains(&method_name_str) {
-            return format!("uint64${}", outer_method_name.name);
+            return crate::prim_mangle::dispatch_name(
+                crate::prim_mangle::PrimWidth::UInt64, &outer_method_name.name);
         }
         if INT32_METHODS.contains(&method_name_str) {
-            return format!("int32${}", outer_method_name.name);
+            return crate::prim_mangle::dispatch_name(
+                crate::prim_mangle::PrimWidth::Int32, &outer_method_name.name);
         }
         if BYTE_METHODS.contains(&method_name_str) {
-            return format!("byte${}", outer_method_name.name);
+            return crate::prim_mangle::dispatch_name(
+                crate::prim_mangle::PrimWidth::Byte, &outer_method_name.name);
         }
 
         // Try to determine receiver type and look up method return type

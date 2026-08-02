@@ -4866,15 +4866,33 @@ pub(super) fn dispatch_primitive_method(
     // `core-tests/base/primitives/regression_test.vr::regression_as_byte_cast_propagates_type_to_dispatch_pinned`.
     let normalised_method: String;
     let method = if let Some(pos) = method.find('.')
-        && let Some(suffix_form) = match &method[..pos] {
-            "Byte" | "UInt8" | "U8" | "u8" => Some("byte"),
-            "Int32" | "I32" | "i32" => Some("int32"),
+        && let Some(width) = match &method[..pos] {
+            "Byte" | "UInt8" | "U8" | "u8" => Some(crate::prim_mangle::PrimWidth::Byte),
+            "Int32" | "I32" | "i32" => Some(crate::prim_mangle::PrimWidth::Int32),
             "UInt" | "UInt64" | "U64" | "u64"
-            | "USize" | "UIntSize" | "Usize" | "usize" => Some("uint64"),
+            | "USize" | "UIntSize" | "Usize" | "usize" => {
+                Some(crate::prim_mangle::PrimWidth::UInt64)
+            }
             _ => None,
         }
     {
-        normalised_method = format!("{}${}", suffix_form, &method[pos + 1..]);
+        // T0695: normalize through the ONE prim-mangle authority.
+        // Width-semantic members take the `<prefix>$` intercept;
+        // everything else keeps the ALIAS-CANONICAL qualified name
+        // (`UInt8.to_hex`) so the late by-name probe resolves the
+        // REAL registered method — the old unconditional rewrite
+        // manufactured unresolvable mangles for the entire
+        // non-width surface (`byte$to_hex` class).
+        normalised_method =
+            crate::prim_mangle::dispatch_name(width, &method[pos + 1..]);
+        normalised_method.as_str()
+    } else if let Some((width, bare)) = crate::prim_mangle::demangle(method)
+        && !width.methods().contains(&bare)
+    {
+        // T0695 compatibility: PRE-fix bytecode (baked archives) carries
+        // total mangles (`byte$to_hex`). Rewrite non-members back to the
+        // canonical qualified method they always meant.
+        normalised_method = crate::prim_mangle::qualified(width, bare);
         normalised_method.as_str()
     } else if let Some(pos) = method.rfind('.') {
         // Generic strip: `Heap.generation` → `generation`.  Receiver kind
