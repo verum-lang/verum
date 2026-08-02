@@ -16591,24 +16591,55 @@ impl VbcCodegen {
         // path — is declaration-ordered and unaffected; this fallback
         // only fires when the parent map is unavailable.)
         {
+            // LAYERED-MAP discipline (T0701): the fallback exists for
+            // IMPL-level names when the parent descriptor is
+            // unavailable — it must NEVER pre-number the function's
+            // OWN generics, or the fn-level pids depend on what the
+            // session's HashSet happened to accumulate (measured:
+            // `from_fn<T, F>` numbered F=0,T=1 via the sorted fallback
+            // — declaration order inverted — and every positional
+            // carry consumer had to guess).
+            let fn_own: std::collections::HashSet<String> = func
+                .generics
+                .iter()
+                .filter_map(|gp| match &gp.kind {
+                    verum_ast::ty::GenericParamKind::Type { name, .. } => {
+                        Some(name.name.to_string())
+                    }
+                    _ => None,
+                })
+                .collect();
             let mut fallback_generics: Vec<&String> =
                 self.ctx.generic_type_params.iter().collect();
             fallback_generics.sort_unstable();
             for g in fallback_generics {
-                if !method_generic_param_map.contains_key(g) {
+                if !method_generic_param_map.contains_key(g) && !fn_own.contains(g) {
                     method_generic_param_map.insert(g.clone(), next_pid);
                     next_pid += 1;
                 }
             }
         }
-        // Function-level generics added after.
+        // Function-level generics added after, in DECLARATION order.
+        // SHADOW semantics (T0701 zip-class root, second landing —
+        // the first (d91a38801) was reverted because the fallback
+        // above had already pre-numbered fn-level names, so shadowing
+        // SHIFTED pids under every carry consumer): a method generic
+        // that reuses an impl-level name (`implement<A, B> … { fn
+        // map<B, F: fn(Item<Self>) -> B> }` — Iterator's default map
+        // materialised onto ZipIter<A, B>) gets its OWN pid; the
+        // displaced impl binding is preserved for the
+        // GENERICNAME-CARRY fill so `descriptor.type_params` stays
+        // DENSE over 0..next_pid (mono binds by entry id; the
+        // reconnect probes resolve the METHOD slot via rposition).
+        let mut shadowed_impl_generics: Vec<(String, u16)> = Vec::new();
         for gp in func.generics.iter() {
             if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
                 let n = gname.name.to_string();
-                if !method_generic_param_map.contains_key(&n) {
-                    method_generic_param_map.insert(n, next_pid);
-                    next_pid += 1;
+                if let Some(prev) = method_generic_param_map.get(&n).copied() {
+                    shadowed_impl_generics.push((n.clone(), prev));
                 }
+                method_generic_param_map.insert(n, next_pid);
+                next_pid += 1;
             }
         }
 
@@ -16624,13 +16655,18 @@ impl VbcCodegen {
         // method-level-only fill would map `args[0]` onto the first
         // METHOD generic and skip the impl slot.
         {
-            let mut pid_ordered: Vec<(&String, u16)> = method_generic_param_map
+            // Include the SHADOWED impl slots (layered-map): the map
+            // keeps only the winner per name, but the descriptor's
+            // pid-vector must stay dense — a hole at the displaced
+            // impl pid would desync mono's by-entry binding.
+            let mut pid_ordered: Vec<(String, u16)> = method_generic_param_map
                 .iter()
-                .map(|(n, pid)| (n, *pid))
+                .map(|(n, pid)| (n.clone(), *pid))
+                .chain(shadowed_impl_generics.iter().cloned())
                 .collect();
             pid_ordered.sort_unstable_by_key(|(_, pid)| *pid);
             for (gname, pid) in pid_ordered {
-                let name_id = StringId(self.intern_string(gname));
+                let name_id = StringId(self.intern_string(&gname));
                 descriptor
                     .type_params
                     .push(crate::types::TypeParamDescriptor {

@@ -6704,7 +6704,7 @@ impl TypeChecker {
                     let tv_opt = scope_vars.get(gname.as_str()).copied().or_else(|| {
                         fd.generic_params
                             .iter()
-                            .position(|gp| gp.name == *gname)
+                            .rposition(|gp| gp.name == *gname)
                             .and_then(|i| {
                                 scope_vars
                                     .get(&format!("__generic_{}", i))
