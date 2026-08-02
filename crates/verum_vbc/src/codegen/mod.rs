@@ -16631,15 +16631,27 @@ impl VbcCodegen {
         // GENERICNAME-CARRY fill so `descriptor.type_params` stays
         // DENSE over 0..next_pid (mono binds by entry id; the
         // reconnect probes resolve the METHOD slot via rposition).
-        let mut shadowed_impl_generics: Vec<(String, u16)> = Vec::new();
+        // SHADOW WITHDRAWN for now (b83 measured): numbering the
+        // method's same-named generic separately is correct in
+        // PRINCIPLE (the zip-class root), but the fn-bound renderer
+        // (`substitute_fn_bound_for_generic`) resolves the bound's
+        // `Self`-side through THIS map too, so the receiver inside
+        // `fn(Item<ZipIter<A, B>>) -> B` rendered with the METHOD's
+        // B (`__generic_2`) instead of the impl's (`__generic_1`) —
+        // zip stayed red and `reduce` picked up a NEW disconnect.
+        // The complete fix must render bound-Self in the IMPL scope
+        // and the bound's return in the METHOD scope (layered
+        // rendering, not just layered numbering) — T0701 journal.
+        // Kept from this landing: declaration-order fn pids and the
+        // fallback gate (deterministic from_fn<T, F> numbering).
+        let shadowed_impl_generics: Vec<(String, u16)> = Vec::new();
         for gp in func.generics.iter() {
             if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
                 let n = gname.name.to_string();
-                if let Some(prev) = method_generic_param_map.get(&n).copied() {
-                    shadowed_impl_generics.push((n.clone(), prev));
+                if !method_generic_param_map.contains_key(&n) {
+                    method_generic_param_map.insert(n, next_pid);
+                    next_pid += 1;
                 }
-                method_generic_param_map.insert(n, next_pid);
-                next_pid += 1;
             }
         }
 
