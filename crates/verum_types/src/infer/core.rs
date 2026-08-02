@@ -2033,25 +2033,125 @@ impl TypeChecker {
                         .map(|gp| gp.name.as_str().to_string()),
                 )
                 .collect();
-            let ((params, return_ty), scope_vars): ((List<Type>, Type), _) =
-                crate::infer::helpers::with_declared_generic_names(declared_names, || {
-                    crate::infer::helpers::with_generic_var_scope_capture(|| {
-                        let params: List<Type> = fn_desc
-                            .params
+            let ((params, return_ty, hof_reconnect), scope_vars): (
+                (List<Type>, Type, Vec<(Text, Type)>),
+                _,
+            ) = crate::infer::helpers::with_declared_generic_names(declared_names, || {
+                crate::infer::helpers::with_generic_var_scope_capture(|| {
+                    // PARAMNAME-CARRY (T0701) pre-seed + alias: every
+                    // declared generic gets ONE scope var reachable under
+                    // BOTH its source name ("T") and its positional
+                    // placeholder ("__generic_0").  Carried verbatim
+                    // spellings and legacy TypeRef renders of the SAME
+                    // parameter otherwise intern to DISCONNECTED vars —
+                    // the receiver bind then constrains one while `Self`
+                    // instantiates the other.  `generic_params` is the
+                    // FULL pid-ordered list (impl level first) on v2.10+
+                    // bakes; `impl_generic_names` covers older bakes.
+                    let mut slot_names: Vec<String> = fn_desc
+                        .generic_params
+                        .iter()
+                        .map(|gp| gp.name.as_str().to_string())
+                        .collect();
+                    if slot_names.len() < fn_desc.impl_generic_names.len() {
+                        slot_names = fn_desc
+                            .impl_generic_names
                             .iter()
-                            .enumerate()
-                            .filter_map(|(i, p)| {
-                                if i == 0 && p.name.as_str() == "self" {
-                                    None
-                                } else {
-                                    Some(to_type(&p.ty))
-                                }
-                            })
+                            .map(|n| n.as_str().to_string())
                             .collect();
-                        let return_ty = to_type(&fn_desc.return_type);
-                        (params, return_ty)
-                    })
-                });
+                    }
+                    for (i, n) in slot_names.iter().enumerate() {
+                        if let Some(tv) =
+                            crate::infer::helpers::intern_scope_generic(n)
+                        {
+                            crate::infer::helpers::alias_scope_generic(
+                                &format!("__generic_{}", i),
+                                tv,
+                            );
+                        }
+                    }
+                    // HOF reconnection (T0701): a fn-bounded generic param
+                    // (`f: F` where `F: fn(Self.Item) -> B`) is DELIBERATELY
+                    // expanded to its structural fn-shape in `ty` (that
+                    // expansion types closure args at call sites) — but a
+                    // return type naming `F` (`-> MappedIter<Self, F>`) then
+                    // keeps a forever-free var.  The v2.10 `declared_ty`
+                    // carry says WHICH method generic the param IS; record
+                    // name → structural type here, substituted after parse.
+                    let method_generic_names: std::collections::HashSet<&str> =
+                        fn_desc
+                            .generic_params
+                            .iter()
+                            .skip(fn_desc.impl_generic_names.len())
+                            .map(|gp| gp.name.as_str())
+                            .collect();
+                    let mut hof_reconnect: Vec<(Text, Type)> = Vec::new();
+                    let params: List<Type> = fn_desc
+                        .params
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, p)| {
+                            if i == 0 && p.name.as_str() == "self" {
+                                None
+                            } else {
+                                let t = to_type(&p.ty);
+                                if !p.declared_ty.is_empty()
+                                    && method_generic_names
+                                        .contains(p.declared_ty.as_str())
+                                {
+                                    hof_reconnect
+                                        .push((p.declared_ty.clone(), t.clone()));
+                                }
+                                Some(t)
+                            }
+                        })
+                        .collect();
+                    let return_ty = to_type(&fn_desc.return_type);
+                    (params, return_ty, hof_reconnect)
+                })
+            });
+            // SELF-RECONNECT (T0701): the carried verbatim return of a
+            // materialized protocol default method spells the receiver as
+            // `Self` (`MappedIter<Self, F>`) — the archive render had
+            // collapsed it to the PTR sentinel (`__opaque_type_14`), i.e. a
+            // fresh var that no call site ever binds (E404 "not fully
+            // determined" on every un-annotated adapter binding).
+            // Instantiate: Self → THIS bucket's type applied to the
+            // impl-slot scope vars, so the receiver bind at the call site
+            // flows into the return type.
+            let impl_k = fn_desc.impl_generic_names.len();
+            let self_args: List<Type> = fn_desc
+                .impl_generic_names
+                .iter()
+                .filter_map(|n| scope_vars.get(n.as_str()).map(|tv| Type::Var(*tv)))
+                .collect();
+            let self_ty = if impl_k > 0 && self_args.len() == impl_k {
+                Type::Generic {
+                    name: type_name.clone(),
+                    args: self_args,
+                }
+            } else {
+                Type::Named {
+                    path: Self::text_to_path(type_name),
+                    args: List::new(),
+                }
+            };
+            let params: List<Type> = params
+                .iter()
+                .map(|t| self.substitute_self_type(t, &self_ty))
+                .collect();
+            let mut return_ty = self.substitute_self_type(&return_ty, &self_ty);
+            if !hof_reconnect.is_empty() {
+                let mut subst = crate::ty::Substitution::new();
+                for (gname, structural) in &hof_reconnect {
+                    if let Some(tv) = scope_vars.get(gname.as_str()) {
+                        subst.insert(*tv, structural.clone());
+                    }
+                }
+                if !subst.is_empty() {
+                    return_ty = return_ty.apply_subst(&subst);
+                }
+            }
             // Recursively collect referenced type names so the
             // lazy loader registers any types this method's
             // signature touches (Path, Metadata, IoResult, …).
@@ -2181,6 +2281,12 @@ impl TypeChecker {
                             }
                         }
                         impl_ordered.sort_by_key(|(i, _)| *i);
+                        // T0701: the pre-seed/alias step registers BOTH
+                        // spellings of an impl generic ("T" and
+                        // "__generic_0") onto the SAME TypeVar — dedup the
+                        // slot before the prefix-contiguity check or the
+                        // duplicate index clears the whole list.
+                        impl_ordered.dedup_by_key(|(i, _)| *i);
                         if !impl_ordered
                             .iter()
                             .enumerate()

@@ -559,9 +559,11 @@ fn register_module_metadata(
                                     &proto_param_id_to_name,
                                 )),
                                 // Protocol-method payloads are bare
-                                // TypeRefs — no default channel.
+                                // TypeRefs — no default channel and
+                                // no declared-spelling carry.
                                 has_default: false,
                                 default_literal: Maybe::None,
+                                declared_ty: Text::default(),
                             })
                             .collect();
                         let return_type = Text::from(type_ref_to_text_with_params(
@@ -923,20 +925,45 @@ fn register_module_metadata(
         let params: List<ParamDescriptor> = fn_desc
             .params
             .iter()
-            .map(|p| ParamDescriptor {
-                name: module
+            .map(|p| {
+                let rendered = type_ref_to_text(&p.type_ref, &type_id_to_name);
+                // PARAMNAME-CARRY (T0701): the v2.10 source-verbatim
+                // declared spelling.  Two uses:
+                //  * `declared_ty` — always surfaced so the scheme
+                //    builder can reconnect a fn-bounded generic
+                //    (`f: F`, expanded structurally in `ty`) with a
+                //    return type that names `F`;
+                //  * `ty` REPAIR — when the TypeRef render is lossy
+                //    (`__opaque_type_` = PTR-collapsed identity), the
+                //    carried spelling is strictly better.  Mirrors the
+                //    record-FIELD repair in `register_module_metadata`.
+                let carried = module
                     .strings
-                    .get(p.name)
-                    .map(Text::from)
-                    .unwrap_or_default(),
-                ty: Text::from(type_ref_to_text(&p.type_ref, &type_id_to_name)),
-                // BAKED-DEFAULT-ARG-1: surface the descriptor's
-                // default channel to the typechecker.
-                has_default: p.default.is_some(),
-                default_literal: p
-                    .default
-                    .map(|cid| render_param_default(module, cid))
-                    .unwrap_or(Maybe::None),
+                    .get(p.type_name)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+                let ty = match &carried {
+                    Some(v) if rendered.contains("__opaque_type_") => v.clone(),
+                    _ => rendered,
+                };
+                ParamDescriptor {
+                    name: module
+                        .strings
+                        .get(p.name)
+                        .map(Text::from)
+                        .unwrap_or_default(),
+                    ty: Text::from(ty),
+                    // BAKED-DEFAULT-ARG-1: surface the descriptor's
+                    // default channel to the typechecker.
+                    has_default: p.default.is_some(),
+                    default_literal: p
+                        .default
+                        .map(|cid| render_param_default(module, cid))
+                        .unwrap_or(Maybe::None),
+                    declared_ty: carried
+                        .map(|s| Text::from(s.as_str()))
+                        .unwrap_or_default(),
+                }
             })
             .collect();
         // SLICE-METHOD-TYPECHECK-E400 (#51): VBC TypeRefs have NO
@@ -947,16 +974,22 @@ fn register_module_metadata(
         // prefer it EXACTLY for the lossy class (slice/array spellings
         // containing '[') — broader verbatim use would leak `Self` /
         // local aliases that the TypeRef render correctly normalises.
+        let rendered_return = type_ref_to_text(&fn_desc.return_type, &type_id_to_name);
+        // T0701 widening: ALSO prefer the carried verbatim when the
+        // TypeRef render is `__opaque_type_`-lossy — there the render
+        // has already LOST the identity (PTR-collapsed `Self` /
+        // cross-module type), so "would leak Self" flips from a risk
+        // into the point: `MappedIter<Self, F>` reaches the scheme
+        // builder, which substitutes Self with the parent type and
+        // reconnects `F` via the param carry.  Renders without either
+        // marker keep the normalised TypeRef spelling as before.
         let carried_return = fn_desc
             .return_type_name
             .and_then(|sid| module.strings.get(sid))
-            .filter(|s| s.contains('['));
+            .filter(|s| s.contains('[') || rendered_return.contains("__opaque_type_"));
         let return_type = match carried_return {
             Some(verbatim) => Text::from(verbatim),
-            None => Text::from(type_ref_to_text(
-                &fn_desc.return_type,
-                &type_id_to_name,
-            )),
+            None => Text::from(rendered_return),
         };
 
         // Task #21 — disambiguate aliased-TypeId types in param /
@@ -1016,6 +1049,11 @@ fn register_module_metadata(
                         ty: rewrite_aliased_typeid(&p.ty, target, alias),
                         has_default: p.has_default,
                         default_literal: p.default_literal.clone(),
+                        declared_ty: rewrite_aliased_typeid(
+                            &p.declared_ty,
+                            target,
+                            alias,
+                        ),
                     })
                     .collect();
                 let return_type = rewrite_aliased_typeid(&return_type, target, alias);

@@ -1288,6 +1288,7 @@ impl<'a> Deserializer<'a> {
  type_ref,
  is_mut,
  default,
+ type_name: StringId::EMPTY,
  });
  }
 
@@ -1369,6 +1370,29 @@ impl<'a> Deserializer<'a> {
  } else {
  None
  };
+
+ // v2.10 — PARAMNAME-CARRY: per-param source-verbatim declared type
+ // spellings (see `ParamDescriptor::type_name`).  Self-describing:
+ // varint count then one optional StringId per param; zipped onto
+ // the params already decoded above.  Pre-10 archives have no such
+ // bytes → every param keeps `StringId::EMPTY`.
+ if fmt_minor >= 10 {
+ let carry_count = decode_varint(self.data, &mut self.offset)? as usize;
+ if carry_count > MAX_FN_TYPE_REF_PARAMS {
+ return Err(VbcError::TableTooLarge {
+ field: "fn_param_type_name_count",
+ count: carry_count.min(u32::MAX as usize) as u32,
+ max: MAX_FN_TYPE_REF_PARAMS as u32,
+ });
+ }
+ for i in 0..carry_count {
+ let carried = self.parse_optional_u32()?.map(StringId);
+ if let (Some(slot), Some(sid)) = (params.get_mut(i), carried) {
+ let slot: &mut ParamDescriptor = slot;
+ slot.type_name = sid;
+ }
+ }
+ }
 
  Ok(FunctionDescriptor {
  id,

@@ -16573,6 +16573,38 @@ impl VbcCodegen {
             }
         }
 
+        // GENERICNAME-CARRY (T0701): serialise the resolved pid→name map
+        // into `descriptor.type_params` — previously left EMPTY, so
+        // `archive_metadata::convert_generic_params` published no
+        // declared generic names and the typechecker's carried-verbatim
+        // signature strings ("F", "B") parsed as rigid `Named` instead
+        // of interning to scheme TypeVars.  FULL map in pid order (impl
+        // level first, then method level, ids = pids) — required by
+        // `mono::Substitution::from_function`, which binds by the
+        // ENTRIES' ids whenever `type_params.len() == args.len()`; a
+        // method-level-only fill would map `args[0]` onto the first
+        // METHOD generic and skip the impl slot.
+        {
+            let mut pid_ordered: Vec<(&String, u16)> = method_generic_param_map
+                .iter()
+                .map(|(n, pid)| (n, *pid))
+                .collect();
+            pid_ordered.sort_unstable_by_key(|(_, pid)| *pid);
+            for (gname, pid) in pid_ordered {
+                let name_id = StringId(self.intern_string(gname));
+                descriptor
+                    .type_params
+                    .push(crate::types::TypeParamDescriptor {
+                        name: name_id,
+                        id: crate::types::TypeParamId(pid),
+                        bounds: smallvec::SmallVec::new(),
+                        default: None,
+                        variance: crate::types::Variance::Invariant,
+                        type_bounds: smallvec::SmallVec::new(),
+                    });
+            }
+        }
+
         // Populate parameter descriptors for proper method dispatch matching.
         // This enables the interpreter to match methods by parameter count.
         //
@@ -16717,11 +16749,25 @@ impl VbcCodegen {
             // BAKED-DEFAULT-ARG-1: carry literal defaults through the
             // (previously dormant) descriptor channel.
             let default = self.param_default_const_id(param);
+            // PARAMNAME-CARRY (v2.10): the source-verbatim declared
+            // spelling, rendered by the same faithful authority as
+            // RETNAME-CARRY (`extract_type_name_at(_, top=false)` keeps
+            // `&`/`&mut`, `Self`, generic args, tuples, slices).  Self
+            // params carry EMPTY — their shape already round-trips via
+            // the task-#11 TypeRef encoding above.
+            let type_name = match &param.kind {
+                FunctionParamKind::Regular { ty, .. } => self
+                    .extract_type_name_at(ty, false)
+                    .map(|n| StringId(self.intern_string(&n)))
+                    .unwrap_or(StringId::EMPTY),
+                _ => StringId::EMPTY,
+            };
             descriptor.params.push(ParamDescriptor {
                 name: param_name_id,
                 type_ref,
                 is_mut: *is_mut,
                 default,
+                type_name,
             });
         }
         // Also fix return_type: the func_info.return_type was built
@@ -17121,6 +17167,7 @@ impl VbcCodegen {
                 type_ref,
                 is_mut: *is_mut,
                 default,
+                type_name: StringId::EMPTY,
             });
         }
         if func_info.is_generator {
@@ -19708,6 +19755,7 @@ impl VbcCodegen {
                     type_ref: TypeRef::Concrete(TypeId::UNIT),
                     is_mut: false,
                     default: stub_default_ids.get(i).copied().flatten(),
+                    type_name: StringId::EMPTY,
                 });
             }
             // Pad to declared param_count when fewer names were
@@ -19721,6 +19769,7 @@ impl VbcCodegen {
                     type_ref: TypeRef::Concrete(TypeId::UNIT),
                     is_mut: false,
                     default: stub_default_ids.get(i).copied().flatten(),
+                    type_name: StringId::EMPTY,
                 });
             }
             // PropertySet — only ASYNC matters for stubs; the rest
@@ -20015,6 +20064,7 @@ impl VbcCodegen {
                         type_ref: TypeRef::Concrete(TypeId::UNIT),
                         is_mut: false,
                         default: stub_default_ids.get(i).copied().flatten(),
+                        type_name: StringId::EMPTY,
                     });
                 }
                 while descriptor.params.len() < info.param_count {
@@ -20026,6 +20076,7 @@ impl VbcCodegen {
                         type_ref: TypeRef::Concrete(TypeId::UNIT),
                         is_mut: false,
                         default: stub_default_ids.get(i).copied().flatten(),
+                        type_name: StringId::EMPTY,
                     });
                 }
                 if info.is_async {

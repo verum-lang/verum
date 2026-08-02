@@ -16600,9 +16600,27 @@ impl TypeChecker {
                                 let subst_return_type = return_type.apply_subst(&combined_subst);
                                 let final_return_type = self.unifier.apply(&subst_return_type);
 
+                                if crate::ctor_trace_enabled() {
+                                    eprintln!(
+                                        "[ctor-trace] early-inherent {}.{} impl_vc={} fresh={} bind_limit={} ty={} ret={}",
+                                        type_name_text,
+                                        method_name_text,
+                                        impl_var_count,
+                                        ordered_fresh_vars.len(),
+                                        bind_limit,
+                                        method_ty,
+                                        final_return_type
+                                    );
+                                }
                                 return Ok(Some(InferResult::new(final_return_type)));
                             }
                             // signature_mismatch: fall through to protocol/fallback paths
+                            if crate::ctor_trace_enabled() {
+                                eprintln!(
+                                    "[ctor-trace] early-inherent {}.{} OVERLOAD-GUARD fallthrough ty={}",
+                                    type_name_text, method_name_text, method_ty
+                                );
+                            }
                         }
                     }
                 }

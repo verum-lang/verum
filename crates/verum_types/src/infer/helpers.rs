@@ -1468,6 +1468,36 @@ fn generic_var_scope_intern(name: &str) -> Option<crate::ty::TypeVar> {
     })
 }
 
+/// PARAMNAME-CARRY (T0701): pre-seed the ACTIVE generic-var scope with a
+/// SOURCE-NAME entry (`"T"`, `"F"`) before any signature string is parsed.
+/// The metadata scheme builder uses this for two connections the strings
+/// alone can't make:
+///   * impl-level generics that never APPEAR in the carried spellings
+///     still need slot-ordered scope vars (the `impl_ordered` name-arm
+///     matches scope keys against `impl_generic_names`), and
+///   * the `Self` substitution needs the impl vars to instantiate the
+///     parent (`Self` → `Parent<v_T…>`).
+/// Returns `None` when no scope is active.
+pub(crate) fn intern_scope_generic(name: &str) -> Option<crate::ty::TypeVar> {
+    generic_var_scope_intern(name)
+}
+
+/// PARAMNAME-CARRY (T0701): register `key` as an ALIAS spelling of an
+/// already-interned scope var.  A declared generic reaches the parser
+/// under TWO spellings — the source name (`"T"`, from carried verbatim
+/// strings) and the positional placeholder (`"__generic_0"`, from
+/// legacy TypeRef renders).  Both MUST intern to the SAME TypeVar or
+/// the receiver-arg bind and the `Self` instantiation land on
+/// disconnected variables.  No-op when the key is already present or
+/// no scope is active.
+pub(crate) fn alias_scope_generic(key: &str, tv: crate::ty::TypeVar) {
+    GENERIC_VAR_SCOPE.with(|s| {
+        if let Some(map) = s.borrow_mut().as_mut() {
+            map.entry(key.to_string()).or_insert(tv);
+        }
+    });
+}
+
 thread_local! {
     // SLICE-METHOD-TYPECHECK-E400 (#51): the descriptor's DECLARED
     // generic-param names (impl-level + method-level), active while

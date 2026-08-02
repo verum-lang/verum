@@ -466,7 +466,21 @@ fn register_module(
         let param_type_names: Vec<String> = fn_desc
             .params
             .iter()
-            .map(|p| type_ref_simple_name(&p.type_ref, module).unwrap_or_default())
+            .map(|p| {
+                // PARAMNAME-CARRY (v2.10): the source-verbatim declared
+                // spelling wins over the lossy TypeRef re-derivation
+                // (PTR sentinel → "", fn-bound expansion → shape-only)
+                // — the param twin of the RETNAME-CARRY preference
+                // below.  EMPTY carry (pre-2.10 bake / self param)
+                // keeps the legacy derivation.
+                module
+                    .strings
+                    .get(p.type_name)
+                    .filter(|s| !s.is_empty())
+                    .map(flatten_carried_param_name)
+                    .or_else(|| type_ref_simple_name(&p.type_ref, module))
+                    .unwrap_or_default()
+            })
             .collect();
 
         // For each param, extract the *closure-arg return-type
@@ -946,6 +960,36 @@ fn type_ref_payload_template(
             .and_then(|tp| module.strings.get(tp.name).map(|s| s.to_string()));
     }
     type_ref_simple_name(ty, module)
+}
+
+/// PARAMNAME-CARRY (v2.10) → `param_type_names` normal form.  The carry
+/// is FULL-fidelity ("&mut Text", "&Self") but `param_type_names`' one
+/// consumer — the call-site type-aware disambiguator — compares against
+/// `extract_expr_type_name` shapes, which flatten the top-level
+/// reference (the same dispatch contract `extract_type_name_from_ast`
+/// and `type_ref_simple_name` follow).  Strip ONE leading ref sigil so
+/// carried spellings keep matching where the legacy derivation matched.
+fn flatten_carried_param_name(s: &str) -> String {
+    let mut t = s.trim();
+    for p in [
+        "&checked mut ",
+        "&unsafe mut ",
+        "&checked ",
+        "&unsafe ",
+        "&mut ",
+        "&",
+    ] {
+        if let Some(rest) = t.strip_prefix(p) {
+            t = rest.trim_start();
+            break;
+        }
+    }
+    // Base-only, like `type_ref_simple_name`'s Instantiated arm — the
+    // disambiguator's other producers emit "List", not "List<Int>".
+    match t.find('<') {
+        Some(i) => t[..i].to_string(),
+        None => t.to_string(),
+    }
 }
 
 fn type_ref_simple_name(ty: &TypeRef, module: &VbcModule) -> Option<String> {
@@ -4723,7 +4767,15 @@ fn register_module_filtered(
             .params
             .iter()
             .map(|p| {
-                type_ref_simple_name(&p.type_ref, module).unwrap_or_default()
+                // PARAMNAME-CARRY (v2.10): mirror of the
+                // `populate_ctx_from_archive` sibling above.
+                module
+                    .strings
+                    .get(p.type_name)
+                    .filter(|s| !s.is_empty())
+                    .map(flatten_carried_param_name)
+                    .or_else(|| type_ref_simple_name(&p.type_ref, module))
+                    .unwrap_or_default()
             })
             .collect();
         // Mirror the closure-return-type extraction from

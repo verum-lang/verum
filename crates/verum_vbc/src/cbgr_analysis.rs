@@ -467,6 +467,7 @@ mod tests {
                 type_ref: TypeRef::Concrete(TypeId::INT),
                 is_mut: false,
                 default: None,
+                type_name: StringId::EMPTY,
             });
         }
         desc

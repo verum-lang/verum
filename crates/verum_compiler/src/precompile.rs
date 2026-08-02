@@ -2594,6 +2594,9 @@ fn inject_declared_module_free_fn_keys(
                                 ty: Text::from(render_type(ty).as_str()),
                                 has_default,
                                 default_literal,
+                                // Source-scan renders straight from the
+                                // AST — `ty` IS the declared spelling.
+                                declared_ty: Text::from(render_type(ty).as_str()),
                             })
                         }
                         // Free functions have no self; skip any

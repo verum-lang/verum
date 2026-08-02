@@ -1293,6 +1293,7 @@ impl VbcModule {
                         type_ref: crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
                         is_mut: false,
                         default: None,
+                        type_name: StringId::EMPTY,
                     })
                     .collect();
                 let desc = FunctionDescriptor {
@@ -2393,6 +2394,27 @@ pub struct ParamDescriptor {
     pub is_mut: bool,
     /// Default value (constant pool index, if any).
     pub default: Option<ConstId>,
+    /// PARAMNAME-CARRY (v2.10) — the source-verbatim spelling of the
+    /// param's DECLARED type (`"F"`, `"&mut Self"`, `"[T]"`), interned
+    /// into the module's string table.  The lowered `type_ref` is
+    /// deliberately lossy in two ways the loader cannot undo:
+    ///   * a cross-module / `Self` type collapses to
+    ///     `TypeRef::Concrete(TypeId::PTR)` (rendered
+    ///     `__opaque_type_14` — a fresh Var at the typechecker, so the
+    ///     signature loses all identity), and
+    ///   * a generic param with a fn-bound (`f: F` where
+    ///     `F: fn(Self.Item) -> B`) is SUBSTITUTED with the bound's
+    ///     structural `TypeRef::Function`
+    ///     (`substitute_fn_bound_for_generic`) — the declared name `F`
+    ///     vanishes, so a return type mentioning `F`
+    ///     (`-> MappedIter<Self, F>`) keeps a forever-free variable
+    ///     and every un-annotated `let it = xs.iter().map(f);` dies
+    ///     E404 "not fully determined".
+    /// Mirrors `FieldDescriptor::type_name` (the record-field twin,
+    /// v2.9) and `FunctionDescriptor::return_type_name` (v2.6).
+    /// `StringId::EMPTY` for self params and pre-2.10 archives.
+    #[serde(default)]
+    pub type_name: StringId,
 }
 
 impl Default for ParamDescriptor {
@@ -2402,6 +2424,7 @@ impl Default for ParamDescriptor {
             type_ref: TypeRef::Concrete(TypeId::UNIT),
             is_mut: false,
             default: None,
+            type_name: StringId::EMPTY,
         }
     }
 }

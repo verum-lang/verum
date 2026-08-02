@@ -1961,6 +1961,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         type_ref: eff_type,
                         is_mut: p.is_mut,
                         default: p.default,
+                        type_name: p.type_name,
                     }
                 })
                 .collect();

@@ -27787,6 +27787,7 @@ impl VbcCodegen {
             type_ref: crate::types::TypeRef::Concrete(crate::types::TypeId::PTR),
             is_mut: false,
             default: None,
+            type_name: crate::types::StringId::EMPTY,
         });
         for (i, param) in params.iter().enumerate() {
             let pname_id = crate::types::StringId(self.intern_string(param));
@@ -27810,6 +27811,7 @@ impl VbcCodegen {
                 type_ref,
                 is_mut: false,
                 default: None,
+                type_name: crate::types::StringId::EMPTY,
             });
         }
         // Store capture count in max_stack for LLVM prologue generation
@@ -28978,6 +28980,7 @@ impl VbcCodegen {
                 type_ref,
                 is_mut: false,
                 default: None,
+                type_name: crate::types::StringId::EMPTY,
             });
         }
         descriptor.return_type = crate::types::TypeRef::Concrete(crate::types::TypeId::INT);

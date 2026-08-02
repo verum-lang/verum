@@ -437,6 +437,19 @@ pub struct ParamDescriptor {
     /// — then only the arity relaxation applies.
     #[serde(default)]
     pub default_literal: Maybe<Text>,
+    /// PARAMNAME-CARRY (T0701): the param's DECLARED source spelling
+    /// (`"F"`, `"&Self"`), from the VBC v2.10 per-param carry.  `ty`
+    /// above stays the LOWERED render (a fn-bounded generic `f: F` is
+    /// deliberately expanded to its structural `fn(...) -> ...` shape
+    /// there — that expansion types closure arguments at call sites).
+    /// This field preserves the declared IDENTITY the expansion
+    /// erases: the scheme builder uses it to reconnect a return type
+    /// mentioning `F` (`-> MappedIter<Self, F>`) with the param's
+    /// structural type, and to repair `__opaque_type_`-lossy `ty`
+    /// renders.  Empty when the bake predates v2.10 or the param is a
+    /// self receiver.
+    #[serde(default)]
+    pub declared_ty: Text,
 }
 
 /// Protocol definition descriptor

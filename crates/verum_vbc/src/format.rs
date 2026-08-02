@@ -68,7 +68,17 @@ pub const VERSION_MAJOR: u16 = 2;
 /// `TypeRef::Concrete(TypeId::PTR)` and loses its identity; this field
 /// preserves the source-verbatim name so `archive_metadata` renders the
 /// real name instead of the fresh-var `__opaque_type_<PTR>` placeholder.
-pub const VERSION_MINOR: u16 = 9;
+/// Version 2.10: additive `ParamDescriptor.type_name` — PARAMNAME-CARRY
+/// (T0701), the param twin of RETNAME-CARRY (2.6) and the field carry
+/// (2.9).  Trailing self-describing section per function descriptor
+/// (varint count + one optional StringId per param), gated on minor
+/// >= 10.  Preserves the DECLARED param spelling that the lowered
+/// TypeRef erases in two ways: `Self`/cross-module types collapse to
+/// the PTR sentinel, and fn-bounded generics (`f: F`) are expanded to
+/// their structural fn-shape — so a return naming `F`
+/// (`-> MappedIter<Self, F>`) kept forever-free type variables and
+/// every un-annotated iterator-adapter binding failed E404.
+pub const VERSION_MINOR: u16 = 10;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

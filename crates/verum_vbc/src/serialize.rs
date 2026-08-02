@@ -661,6 +661,21 @@ impl Serializer {
         // minor >= 6.
         self.serialize_optional_u32(desc.return_type_name.map(|s| s.0));
 
+        // v2.10 — PARAMNAME-CARRY: per-param source-verbatim declared
+        // type spellings (the param twin of RETNAME-CARRY; see
+        // `ParamDescriptor::type_name`).  Self-describing trailing
+        // section — varint count (always the param count) then one
+        // optional StringId per param — gated on format minor >= 10.
+        encode_varint(desc.params.len() as u64, &mut self.output);
+        for param in &desc.params {
+            let carried = if param.type_name == crate::types::StringId::EMPTY {
+                None
+            } else {
+                Some(param.type_name.0)
+            };
+            self.serialize_optional_u32(carried);
+        }
+
         Ok(())
     }
 
