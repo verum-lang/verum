@@ -98,6 +98,23 @@ impl TypeChecker {
                 let mut constructors = verum_common::List::new();
 
                 for case in cases.iter() {
+                    // PARAM↔RETURN LINKAGE (T0701 qctor root, the gap the
+                    // consumer-side A2 freshen works around): the return's
+                    // generic slots and the payload's occurrences of the
+                    // SAME declared param must share ONE var, or
+                    // `Maybe.Some(5)` binds the payload var while the
+                    // return keeps an unrelated forever-free one — the
+                    // binding then judges phantom-E404 under the value
+                    // restriction.  Same #126 discipline as
+                    // `register_variant_signature_for_lazy`.
+                    let param_to_var: indexmap::IndexMap<
+                        verum_common::Text,
+                        crate::ty::TypeVar,
+                    > = type_desc
+                        .generic_params
+                        .iter()
+                        .map(|gp| (gp.name.clone(), crate::ty::TypeVar::fresh()))
+                        .collect();
                     let result_type = if type_desc.generic_params.is_empty() {
                         Type::Named {
                             path: Self::text_to_path(type_name),
@@ -106,13 +123,17 @@ impl TypeChecker {
                     } else {
                         Type::Generic {
                             name: type_name.clone(),
-                            args: type_desc
-                                .generic_params
-                                .iter()
-                                .map(|_| Type::Var(crate::ty::TypeVar::fresh()))
+                            args: param_to_var
+                                .values()
+                                .map(|tv| Type::Var(*tv))
                                 .collect(),
                         }
                     };
+                    let link_subst: indexmap::IndexMap<verum_common::Text, Type> =
+                        param_to_var
+                            .iter()
+                            .map(|(n, tv)| (n.clone(), Type::Var(*tv)))
+                            .collect();
 
                     // Task #41 — Parse payload type strings via the
                     // structural parser so "List<Byte>" / "Result<T, E>"
@@ -127,7 +148,21 @@ impl TypeChecker {
                     // because the variant-constructor dispatch arm's
                     // arg type-check throws `expected 'List<Byte>',
                     // found 'List<Byte>'` (rigid string mismatch).
-                    let parse = crate::infer::helpers::parse_descriptor_type_string;
+                    // Parse THEN link: a payload spelling that names a
+                    // declared generic param ("T", "List<T>") substitutes
+                    // to the SAME var the return carries.
+                    let parse = |s: &str| -> Type {
+                        let parsed =
+                            crate::infer::helpers::parse_descriptor_type_string(s);
+                        if link_subst.is_empty() {
+                            parsed
+                        } else {
+                            crate::infer::TypeChecker::substitute_named_params_in_type(
+                                &parsed,
+                                &link_subst,
+                            )
+                        }
+                    };
                     let constructor = match &case.payload {
                         verum_common::Maybe::None => {
                             InductiveConstructor::unit(case.name.clone(), result_type)

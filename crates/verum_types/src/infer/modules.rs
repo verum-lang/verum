@@ -21914,6 +21914,12 @@ impl TypeChecker {
                         }
 
                         let resolved_return = self.unifier.apply(return_type);
+                        if crate::ctor_trace_enabled() {
+                            eprintln!(
+                                "[ctor-trace] path-static ENV-QUALIFIED {} -> {}",
+                                qualified_name, resolved_return
+                            );
+                        }
                         return Ok(Some(InferResult::new(resolved_return)));
                     } else {
                         env_resolved = true; // Non-function type, treat as resolved
