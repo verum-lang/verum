@@ -123,7 +123,7 @@ jobs:
         # loudly instead of eating the 6h job limit.
         timeout-minutes: 45
         # Measured locally 2026-08-02 (T0709 journal): the 9-crate light
-        # tier = 4,363 tests green. verum_kernel is EXCLUDED for now — its
+        # tier = 4,363 tests green; verum_fast_parser adds 4,158 (measured same day). verum_kernel is EXCLUDED for now — its
         # k_arch_v_alignment pin is honest-red (160/2480 cogs missing
         # @arch_module attestation, tracked as its own task); a gate that
         # starts red gets silenced wholesale. Heavier pure crates
@@ -134,6 +134,7 @@ jobs:
           -p verum_common -p verum_ast -p verum_lexer
           -p verum_cbgr -p verum_modules
           -p verum_diagnostics -p verum_error -p verum_protocol_types
+          -p verum_fast_parser
 
   # ---------------------------------------------------------------------------
   # Job 2: VCS L0 (2,963 specs, 100%) + L1 (499 specs, 100%). Blocks merge.
