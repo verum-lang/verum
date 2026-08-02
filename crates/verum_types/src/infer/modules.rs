@@ -14183,6 +14183,74 @@ impl TypeChecker {
         false
     }
 
+    /// T0704 — does module `module_path` DECLARE or RE-EXPORT a
+    /// VALUE-namespace item (function / const) named `fn_name`?
+    ///
+    /// Twin of [`Self::module_publishes_type`] over the function
+    /// surface — same `cog.` canonicalisation, same
+    /// cheapest-authority-first order:
+    ///   1. the checker's own qualified env scheme
+    ///      (`<module>.<name>` — written by module processing for
+    ///      source-compiled modules),
+    ///   2. `core_metadata.functions`' qualified key (the archive's
+    ///      per-module descriptor),
+    ///   3. `core_metadata.functions`' SIMPLE key, counted only when
+    ///      the descriptor's own `module_path` names this module,
+    ///   4. `core_metadata.module_reexports` — a `public mount`
+    ///      chain makes the leaf part of this module's surface.
+    ///
+    /// Exists so the T0525 namespace-precedence rule treats every
+    /// explicitly mounted item kind alike: a mounted FUNCTION must
+    /// silence an ambient variant-constructor shadow exactly as a
+    /// mounted TYPE already does.  Measured pre-fix: with
+    /// `mount core.money.currency.{inr}` the call `inr()` still
+    /// resolved to `core/math/hott.vr`'s `Pushout.inr(b: B)` and
+    /// failed "inr expects 1 argument(s), got 0" — the ambient
+    /// bare-name table outranked the author's explicit mount.
+    pub(crate) fn module_publishes_fn(
+        &self,
+        module_path: &str,
+        fn_name: &str,
+    ) -> bool {
+        let canonical = module_path
+            .strip_prefix("cog.")
+            .unwrap_or(module_path);
+        if canonical.is_empty() || canonical == "cog" {
+            return false;
+        }
+        let qualified: verum_common::Text =
+            format!("{}.{}", canonical, fn_name).into();
+        if self.ctx.env.lookup(qualified.as_str()).is_some() {
+            return true;
+        }
+        let Maybe::Some(metadata) = &self.core_metadata else {
+            return false;
+        };
+        if metadata.functions.contains_key(&qualified) {
+            return true;
+        }
+        let simple: verum_common::Text = fn_name.into();
+        if let Some(fd) = metadata.functions.get(&simple) {
+            let owner = fd
+                .module_path
+                .as_str()
+                .strip_prefix("cog.")
+                .unwrap_or(fd.module_path.as_str());
+            if owner == canonical {
+                return true;
+            }
+        }
+        if let Some(leaves) =
+            metadata.module_reexports.get(&verum_common::Text::from(canonical))
+            && leaves.iter().any(|(local, true_name, _src)| {
+                local.as_str() == fn_name || true_name.as_str() == fn_name
+            })
+        {
+            return true;
+        }
+        false
+    }
+
     /// Try to build a variant type from inductive constructors.
     /// STDLIB-AGNOSTIC: This enables pattern matching on generic types like Maybe<T>
     /// when the variant info is stored in inductive_constructors rather than as Type::Variant.
@@ -14278,13 +14346,20 @@ impl TypeChecker {
         //      `parents.first()` (bake-declaration-order) pick with
         //      the owner the author actually named.
         //
-        //  (2) TYPE-NAMESPACE PRECEDENCE — when `name` is explicitly
-        //      mounted, the mounted item IS a type, and NO registered
-        //      parent comes from that module, then `name` denotes
-        //      that TYPE at this site, not an ambient constructor.
-        //      Decline, so the caller falls through to type-namespace
-        //      resolution instead of answering with a stranger sum
-        //      type's constructor.
+        //  (2) MOUNTED-ITEM PRECEDENCE — when `name` is explicitly
+        //      mounted, the mounted item IS a type OR a
+        //      value-namespace item (function / const), and NO
+        //      registered parent comes from that module, then `name`
+        //      denotes THAT item at this site, not an ambient
+        //      constructor.  Decline, so the caller falls through to
+        //      normal resolution instead of answering with a
+        //      stranger sum type's constructor.  (T0704 widened the
+        //      rule from types to functions: `mount
+        //      core.money.currency.{inr}` + `inr()` resolved to
+        //      `Pushout.inr(b: B)` from core/math/hott.vr and failed
+        //      arity 1≠0 — the mounted zero-arg FUNCTION lost to the
+        //      ambient constructor because only the type namespace
+        //      was consulted.)
         //
         // Measured pre-fix (shipped stdlib, Tier 0, T0509 census): 14
         // sum types spell a variant `IoError`; with
@@ -14314,12 +14389,13 @@ impl TypeChecker {
         });
         if mount_scoped.is_none()
             && let Some(src) = mount_source.as_ref()
-            && self.module_publishes_type(src.as_str(), name)
+            && (self.module_publishes_type(src.as_str(), name)
+                || self.module_publishes_fn(src.as_str(), name))
         {
             if crate::ctor_trace_enabled() {
                 eprintln!(
-                    "[ctor-trace]   T0525 decline: '{}' is an explicitly mounted TYPE from '{}'; \
-                     no ambient parent belongs to that module",
+                    "[ctor-trace]   T0525/T0704 decline: '{}' is an explicitly mounted \
+                     item from '{}'; no ambient parent belongs to that module",
                     name,
                     src.as_str()
                 );
@@ -15645,6 +15721,15 @@ impl TypeChecker {
                     })
                 })
                 .unwrap_or(false);
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace] qualified-ctor gate: recv={} canonical={} method={} is_variant_of_recv={}",
+                    recv_type_name,
+                    canonical_recv_type_name.as_str(),
+                    method.name,
+                    is_variant_of_recv
+                );
+            }
             if is_variant_of_recv
                 && let Some(ctor_ty) = self
                     .try_resolve_variant_constructor_with_arity_for(
@@ -18054,6 +18139,12 @@ impl TypeChecker {
 
         // Step 5: Extract the unique method signature
         let (protocol_path, method_ty) = &candidates[0];
+        if crate::ctor_trace_enabled() {
+            eprintln!(
+                "[ctor-trace] proto-search WINNER {}::{} ty={}",
+                protocol_path, method.name, method_ty
+            );
+        }
         #[cfg(debug_assertions)]
         if method.name.as_str() == "eq" {
             // #[cfg(debug_assertions)]
@@ -18102,6 +18193,12 @@ impl TypeChecker {
                 // After unifier.apply(), we may still have projections like ::Item[SliceIter<Int>]
                 // that need to be resolved to &Int by looking up the associated type definition.
                 let normalized_return = self.normalize_type(&resolved_return);
+                if crate::ctor_trace_enabled() {
+                    eprintln!(
+                        "[ctor-trace] proto-search RETURN {}",
+                        normalized_return
+                    );
+                }
                 Ok(InferResult::new(normalized_return))
             }
             _ => {
@@ -18134,6 +18231,12 @@ impl TypeChecker {
     ) -> Result<InferResult> {
         let method_name_str = method.name.as_str();
         let method_name: verum_common::Text = method.name.as_str().into();
+        if crate::ctor_trace_enabled() {
+            eprintln!(
+                "[ctor-trace] handle_empty_candidates method={} recv={}",
+                method_name_str, recv_ty
+            );
+        }
         if let Some(r) = self.try_type_var_bound_dispatch(&recv_ty, method, type_args, args, span)? {
             return Ok(r);
         }
