@@ -7439,7 +7439,20 @@ impl VbcCodegen {
                 .find(|f| f.descriptor.id.0 == func_id)
                 .map(|f| &f.descriptor)
             {
-                let generic = d.params.iter().any(|p| p.type_ref.is_generic())
+                // T0330 (b61 trace verdict): SIGNATURE TypeRefs are the
+                // WRONG genericity oracle for impl-generic methods —
+                // `implement<T: Display> Display for Maybe<T>`'s
+                // `fmt(self, f) -> Result<Unit, FmtError>` mentions T
+                // NOWHERE in its signature (live: param_trs=[UNIT,
+                // Formatter], ret=Result<Unit, FmtError>, zero Generic),
+                // yet the BODY is generic in T (v.fmt dispatch on the
+                // payload). The declared-genericity fact is
+                // `descriptor.type_params` (GENERICNAME-CARRY fills it
+                // pid-ordered, impl level first) — consult it FIRST;
+                // the TypeRef scan stays as the fallback for older
+                // descriptors with an empty fill.
+                let generic = !d.type_params.is_empty()
+                    || d.params.iter().any(|p| p.type_ref.is_generic())
                     || d.return_type.is_generic();
                 if !generic {
                     if std::env::var_os("VERUM_TRACE_MONO").is_some() {
@@ -7451,7 +7464,7 @@ impl VbcCodegen {
                         // NOT-generic here and silently kills the
                         // whole CallG derivation.
                         eprintln!(
-                            "[mono-record] '{}' id={} NOT-generic (params/ret carry no Generic) param_trs={:?} ret={:?}",
+                            "[mono-record] '{}' id={} NOT-generic (no type_params, params/ret carry no Generic) param_trs={:?} ret={:?}",
                             nm,
                             func_id,
                             d.params.iter().map(|p| p.type_ref.clone()).collect::<Vec<_>>(),
@@ -7573,6 +7586,45 @@ impl VbcCodegen {
                     // payload, so `print` emits the string, not the pointer-int.
                     if let Some(tr) = self.type_name_to_type_ref_mono(&stripped) {
                         bind_generic(ptr, &tr, &mut bindings);
+                    }
+                }
+            }
+        }
+        // T0330 — RECEIVER-INSTANTIATION binding for impl-level params.
+        // `implement<T: Display> Display for Maybe<T>`'s `fmt` mentions T
+        // nowhere in its signature, so the positional walk above derives
+        // nothing; the fact lives in the RECEIVER's instantiation:
+        // `m: Maybe<Int>` fixes impl-T := Int.  The parent type's own
+        // `type_params` count says how many leading pids are impl-level
+        // (GENERICNAME-CARRY numbers them FIRST by construction), and an
+        // `Instantiated { base = parent }` receiver arg maps onto them
+        // positionally.  Additive: `or_insert` semantics via bind's map
+        // entry — signature-derived bindings keep priority.
+        if let Some(desc) = self
+            .functions
+            .iter()
+            .find(|f| f.descriptor.id.0 == func_id)
+            .map(|f| &f.descriptor)
+            && let Some(parent_tid) = desc.parent_type
+        {
+            let impl_k = self
+                .types
+                .iter()
+                .find(|t| t.id == parent_tid)
+                .map(|t| t.type_params.len())
+                .unwrap_or(0);
+            if impl_k > 0
+                && let Some(recv) = args.first()
+                && let Some(recv_name) = self
+                    .infer_expr_type_name(recv)
+                    .or_else(|| Self::literal_default_type_name(recv))
+                && let Some(crate::types::TypeRef::Instantiated { base, args: rargs }) =
+                    self.type_name_to_type_ref_mono(&strip_ref(&recv_name))
+                && base == parent_tid
+            {
+                for (i, ra) in rargs.iter().take(impl_k).enumerate() {
+                    if !matches!(ra, crate::types::TypeRef::Generic(_)) {
+                        bindings.entry(i as u32).or_insert_with(|| ra.clone());
                     }
                 }
             }

@@ -500,6 +500,25 @@ impl<'s> CompilationPipeline<'s> {
                 t_user.elapsed().as_secs_f64() * 1000.0
             );
         }
+        // T0706 — supplemental archive merge from RESOLVED dispatch
+        // names.  The pre-codegen harvest reads the raw AST, so a
+        // method reachable only through a resolved receiver type
+        // (alias canonicalisation `Byte`→`UInt8`, prim-mangle
+        // `byte$to_hex`) never entered the keep set and its body was
+        // absent at dispatch.  The emitted instruction stream is the
+        // oracle; merge exactly what it names.  Runs BEFORE finalize
+        // so supplemental bodies join the id remap like every other
+        // merged body.
+        {
+            let extra = codegen.collect_post_codegen_dispatch_names();
+            if !extra.is_empty() {
+                let merged =
+                    CTX_CACHE.apply_lazy_supplemental(archive, &mut codegen, extra);
+                if merged > 0 {
+                    step_mark!("supplemental archive merge");
+                }
+            }
+        }
         let t_fin = std::time::Instant::now();
         let mut vbc_module = codegen
             .finalize_module()

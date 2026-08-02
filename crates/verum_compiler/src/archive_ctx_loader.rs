@@ -1670,6 +1670,16 @@ pub struct ArchiveCtxCache {
     /// `apply_lazy_with_types` call; subsequent compilations within
     /// the process reuse the cached graph (~free).
     graph: OnceLock<SymbolGraph>,
+    /// T0706 — per-archive-entry set of archive-local function ids whose
+    /// BODIES were already merged into a user codegen this compilation.
+    /// The supplemental post-typecheck pass consults this so a second
+    /// `merge_archive_function_bodies` call over the same entry never
+    /// re-merges a body ([[duplicate-emitter]] class: emission order
+    /// wins, a duplicate is a latent misdispatch).  Keyed per
+    /// compilation epoch — `begin_compilation_epoch` clears it, because
+    /// the cache outlives compilations (REPL / watch / test-runner) but
+    /// merged-ness is a property of ONE codegen instance.
+    merged_ids: std::sync::Mutex<std::collections::BTreeMap<String, std::collections::HashSet<u32>>>,
 }
 
 impl ArchiveCtxCache {
@@ -1678,7 +1688,36 @@ impl ArchiveCtxCache {
         Self {
             table: OnceLock::new(),
             graph: OnceLock::new(),
+            merged_ids: std::sync::Mutex::new(std::collections::BTreeMap::new()),
         }
+    }
+
+    /// T0706 — reset per-compilation merge bookkeeping.  Call at the
+    /// start of every `apply_lazy_with_types` (each user compilation
+    /// constructs a fresh codegen; carried merged-ids from a previous
+    /// compilation would wrongly suppress merges into the new one).
+    fn begin_compilation_epoch(&self) {
+        self.merged_ids
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clear();
+    }
+
+    /// T0706 — record which archive-local ids of `entry` had bodies
+    /// merged this epoch.
+    fn note_merged_ids<'a>(
+        &self,
+        entry: &str,
+        ids: impl Iterator<Item = &'a u32>,
+    ) {
+        let mut guard = self
+            .merged_ids
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        guard
+            .entry(entry.to_string())
+            .or_default()
+            .extend(ids.copied());
     }
 
     /// Lazily build the per-archive symbol graph (reachability index
@@ -1931,12 +1970,126 @@ impl ArchiveCtxCache {
     /// `wanted_module_prefixes`, function registration with id remap
     /// (Pass 3 + 4 from `register_module_filtered`) AND type-table
     /// import via `import_archive_module_types`.
+    /// T0706 — WANTED-HARVEST-POST-TYPECHECK second pass.  The primary
+    /// pass harvests names from the RAW AST, so a method reachable only
+    /// through a resolved receiver type never enters the keep set — the
+    /// canonical miss: `let b: Byte = …; b.to_hex()` dispatches as
+    /// `UInt8.to_hex` (alias canonicalisation + prim-mangle), a
+    /// qualified name the AST never spells.  After user codegen, the
+    /// emitted instruction stream IS the resolved-name oracle; this
+    /// entry merges bodies for exactly those names, reusing the SAME
+    /// register/type-import/merge machinery with the epoch's
+    /// merged-ids guard suppressing re-merges.
+    pub fn apply_lazy_supplemental(
+        &self,
+        archive: &VbcArchive,
+        codegen: &mut verum_vbc::codegen::VbcCodegen,
+        extra_wanted: std::collections::HashSet<String>,
+    ) -> usize {
+        if extra_wanted.is_empty() {
+            return 0;
+        }
+        // Names already resolvable in ctx (registered AND with a merged
+        // body, or an intrinsic intercept) don't need supplemental work.
+        let unresolved: std::collections::HashSet<String> = extra_wanted
+            .into_iter()
+            .filter(|n| codegen.ctx_mut().lookup_function(n).is_none())
+            .collect();
+        if unresolved.is_empty() {
+            return 0;
+        }
+        let graph = self.graph(archive);
+        let (reached_qualified, reached_module_idxs) = graph.reachable(&unresolved);
+        let mut wanted = unresolved;
+        for n in &reached_qualified {
+            wanted.insert(n.clone());
+        }
+        let target_entries: Vec<(usize, String)> = reached_module_idxs
+            .iter()
+            .filter_map(|idx| {
+                archive
+                    .index
+                    .get(*idx as usize)
+                    .map(|e| (*idx as usize, e.name.clone()))
+            })
+            .collect();
+        if target_entries.is_empty() {
+            return 0;
+        }
+        let decoded: Vec<(String, VbcModule)> = {
+            use rayon::prelude::*;
+            target_entries
+                .par_iter()
+                .filter_map(|(idx, name)| {
+                    archive
+                        .load_module_by_index(*idx)
+                        .ok()
+                        .map(|m| (name.clone(), m))
+                })
+                .collect()
+        };
+        let next_id_ptr: *mut u32 = codegen.next_func_id_mut() as *mut u32;
+        let mut merged_entries = 0usize;
+        for (entry_name, module) in &decoded {
+            let next_id_ref: &mut u32 = unsafe { &mut *next_id_ptr };
+            // Idempotent per the loader's contains_key guards — names
+            // registered by the primary pass stay first-wins.
+            let (func_id_remap, _registered) = register_module_filtered(
+                module,
+                entry_name,
+                codegen.ctx_mut(),
+                &wanted,
+                next_id_ref,
+            );
+            if !module.types.is_empty() {
+                codegen.import_archive_module_types(module);
+            }
+            // Merge ONLY bodies this epoch has not merged yet.
+            let already: std::collections::HashSet<u32> = self
+                .merged_ids
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .get(entry_name)
+                .cloned()
+                .unwrap_or_default();
+            let fresh_remap: HashMap<u32, verum_vbc::module::FunctionId> =
+                func_id_remap
+                    .iter()
+                    .filter(|(aid, _)| !already.contains(aid))
+                    .map(|(a, u)| (*a, *u))
+                    .collect();
+            if fresh_remap.is_empty() {
+                continue;
+            }
+            for fn_desc in module.functions.iter() {
+                if let Some(&user_fid) = fresh_remap.get(&fn_desc.id.0)
+                    && let Some(name) = module.strings.get(fn_desc.name)
+                    && !name.is_empty()
+                {
+                    codegen.record_archive_function_name(name, user_fid);
+                }
+            }
+            codegen.merge_archive_function_bodies(module, &fresh_remap);
+            self.note_merged_ids(entry_name, fresh_remap.keys());
+            merged_entries += 1;
+        }
+        if std::env::var("VERUM_TRACE_WANTED").is_ok() {
+            eprintln!(
+                "[wanted] supplemental pass: {} entries merged (wanted {})",
+                merged_entries,
+                wanted.len()
+            );
+        }
+        merged_entries
+    }
+
     pub fn apply_lazy_with_types(
         &self,
         archive: &VbcArchive,
         codegen: &mut verum_vbc::codegen::VbcCodegen,
         user_module: &verum_ast::Module,
     ) -> (usize, usize) {
+        self.begin_compilation_epoch();
         // **ONE-authority alias seeding** (T0695/T0692): every codegen
         // that loads the embedded archive gets the DECLARED type
         // aliases (`type Byte is UInt8`) and re-export renames from
@@ -2420,6 +2573,9 @@ impl ArchiveCtxCache {
         for (entry_name, pruned_remap) in &pruned_remaps {
             if let Some(module) = module_by_name.get(entry_name.as_str()).copied() {
                 codegen.merge_archive_function_bodies(module, pruned_remap);
+                // T0706: remember what this epoch merged so the
+                // supplemental post-typecheck pass never re-merges.
+                self.note_merged_ids(entry_name, pruned_remap.keys());
             }
         }
         // Unqualified-wanted second pass — same logic as apply_lazy's

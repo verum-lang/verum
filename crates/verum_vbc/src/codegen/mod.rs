@@ -22285,6 +22285,62 @@ impl VbcCodegen {
     /// Lazy: only the functions in `func_id_remap` are touched, so a
     /// hello-world that mounts five stdlib symbols pays for five
     /// bodies, not the full archive's ~7000.
+    /// T0706 — post-codegen resolved-dispatch oracle.  Walks the
+    /// EMITTED instruction stream and returns every method-dispatch
+    /// name the compiled bodies will ask the runtime to resolve, in
+    /// its ARCHIVE-qualified spelling:
+    ///   * prim-mangled names (`byte$to_hex`) map through the
+    ///     [`crate::prim_mangle`] authority to their declaring type's
+    ///     qualified form (`UInt8.to_hex`);
+    ///   * already-qualified `Type.method` spellings pass through.
+    /// Bare simple names are omitted — without a receiver type they
+    /// cannot be qualified here, and the primary AST harvest already
+    /// covered them.  The compiler's supplemental archive pass merges
+    /// bodies for exactly these names, closing the class where a name
+    /// is only knowable AFTER typecheck/codegen resolution (alias
+    /// receivers, mangle dispatch).
+    pub fn collect_post_codegen_dispatch_names(
+        &self,
+    ) -> std::collections::HashSet<String> {
+        let mut out = std::collections::HashSet::new();
+        let mut note = |name: &str| {
+            if let Some((width, method)) = crate::prim_mangle::demangle(name) {
+                out.insert(crate::prim_mangle::qualified(width, method));
+            } else if let Some((head, method)) = name.split_once('.') {
+                out.insert(name.to_string());
+                // Alias-canonical twin: the archive qualifies methods
+                // under the DECLARING type (`UInt8.to_hex`), while a
+                // dispatch site whose receiver is spelled through a
+                // declared alias emits the alias form (`Byte.to_hex`,
+                // zero archive hits — measured).  Chase the seeded
+                // alias chain so the supplemental merge asks for the
+                // spelling the archive actually has.
+                let mut canonical = head;
+                let mut hops = 0;
+                while let Some(t) = self.type_aliases.get(canonical) {
+                    if t.as_str() == canonical || hops > 8 {
+                        break;
+                    }
+                    canonical = t.as_str();
+                    hops += 1;
+                }
+                if canonical != head {
+                    out.insert(format!("{}.{}", canonical, method));
+                }
+            }
+        };
+        for f in &self.functions {
+            for ins in &f.instructions {
+                if let Instruction::CallM { method_id, .. } = ins
+                    && let Some(name) = self.ctx.strings.get(*method_id as usize)
+                {
+                    note(name);
+                }
+            }
+        }
+        out
+    }
+
     pub fn merge_archive_function_bodies(
         &mut self,
         archive_module: &crate::module::VbcModule,

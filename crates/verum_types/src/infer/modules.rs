@@ -10780,16 +10780,30 @@ impl TypeChecker {
             if resolved.free_vars().is_empty() {
                 continue;
             }
-            // SHAPE criterion (T0701/T0585 calibration): a free var in an
-            // ARGUMENT/PAYLOAD slot under a KNOWN nominal head is a
-            // deferred generic, not an ambiguity — `try_fold(0, |a,x|
-            // Result.Ok(a+x))` legitimately leaves `Result<Int, E>`'s E
-            // unconstrained when no path ever touches the Err payload.
-            // Judge E404 only when the binding's SHAPE is undetermined:
-            // the type IS a bare var, or a var sits in head position.
-            // (The conformance corpus is the arbiter: iterator tests
-            // expect payload-slot freedom to compile; the
-            // ambiguous_types spec's shapes are all head-undetermined.)
+            // SHAPE criterion v2 (T0585/T0701 calibration against BOTH
+            // ground truths — the ambiguous_types spec AND the
+            // conformance corpus):
+            //
+            //  E404 (shape undetermined):
+            //   * bare var / var-headed application;
+            //   * container positions whose free var IS the point of
+            //     the value — array/slice element (`[]` → `[_; 0]`),
+            //     function param/return (`|x| x` → `fn(_) -> _`),
+            //     tuple element;
+            //   * a nominal application whose EVERY argument is free
+            //     (`Maybe<_>`, `List<_>`, `Item<_>` — nothing about
+            //     the instantiation was ever determined).
+            //
+            //  Defaulted (compiles):
+            //   * a nominal application with AT LEAST ONE bound
+            //     argument, and a mixed variant body with a bound
+            //     payload slot — `try_fold`'s `Ok(Int) | Err(_)`
+            //     leaves only the never-constructed Err payload free;
+            //     that slot defaults (Never-style) instead of failing
+            //     the whole binding.
+            fn arg_free(ty: &Type) -> bool {
+                !ty.free_vars().is_empty()
+            }
             fn shape_undetermined(ty: &Type) -> bool {
                 match ty {
                     Type::Var(_) => true,
@@ -10801,6 +10815,32 @@ impl TypeChecker {
                     | Type::UnsafeReference { inner, .. }
                     | Type::Ownership { inner, .. } => shape_undetermined(inner),
                     Type::Tuple(parts) => parts.iter().any(shape_undetermined),
+                    Type::Array { element, .. } | Type::Slice { element } => {
+                        arg_free(element)
+                    }
+                    Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } => params.iter().any(arg_free) || arg_free(return_type),
+                    Type::Generic { args, .. } | Type::Named { args, .. }
+                        if !args.is_empty() =>
+                    {
+                        args.iter().all(arg_free)
+                    }
+                    Type::Variant(slots) => {
+                        // Mixed body with any BOUND payload defaults the
+                        // free slots; all-free (unit-only counts as
+                        // structure, not as a binding fact when every
+                        // payload-carrying slot is free) → undetermined.
+                        let payload_slots: Vec<&Type> = slots
+                            .iter()
+                            .map(|(_, p)| p)
+                            .filter(|p| !matches!(p, Type::Unit))
+                            .collect();
+                        !payload_slots.is_empty()
+                            && payload_slots.iter().all(|p| arg_free(p))
+                    }
                     _ => false,
                 }
             }
@@ -16630,7 +16670,15 @@ impl TypeChecker {
 
                                 // Apply substitution and unifier to get concrete return type
                                 let subst_return_type = return_type.apply_subst(&combined_subst);
-                                let final_return_type = self.unifier.apply(&subst_return_type);
+                                // T0707: reduce projections AT THE PRODUCER —
+                                // `peek() -> Maybe<&Item<Range<Int>>>` must hand
+                                // consumers `Maybe<&Int>`, or every downstream
+                                // unification (qualified-ctor payload checks,
+                                // assert_eq) fails against the opaque head
+                                // (`expected 'Item<Range<Int>>', found 'Int'`,
+                                // bisected to peekable/reduce/min producers).
+                                let final_return_type = self
+                                    .normalize_type(&self.unifier.apply(&subst_return_type));
 
                                 if crate::ctor_trace_enabled() {
                                     eprintln!(
@@ -21052,7 +21100,13 @@ impl TypeChecker {
                     })
                 });
             if let Some(scheme) = env_hit {
-                let func_type = self.unifier.apply(&scheme.ty);
+                // INSTANTIATE-AT-USE (persistent-var-leak class, the
+                // [[persistent-var-leak-value-position-variant]] twin):
+                // reading `scheme.ty` verbatim lets the FIRST call site
+                // bind the scheme's quantified vars globally — every
+                // later use of the same aliased fn inherits the first
+                // call's types.
+                let func_type = self.unifier.apply(&scheme.instantiate());
                 if let Type::Function {
                     params,
                     return_type,
@@ -21065,6 +21119,12 @@ impl TypeChecker {
                             self.check_expr(arg, &resolved_param)?;
                         }
                         let resolved_return = self.unifier.apply(return_type);
+                        if crate::ctor_trace_enabled() {
+                            eprintln!(
+                                "[ctor-trace] alias-arm env_hit {}.{} -> {}",
+                                module_path, method_name, resolved_return
+                            );
+                        }
                         return Ok(Some(InferResult::new(resolved_return)));
                     }
                 }
@@ -21093,6 +21153,12 @@ impl TypeChecker {
                                         self.check_expr(arg, &resolved_param)?;
                                     }
                                     let resolved_return = self.unifier.apply(return_type);
+                                    if crate::ctor_trace_enabled() {
+                                        eprintln!(
+                                            "[ctor-trace] alias-arm ast-walk {}.{} -> {}",
+                                            module_path, method_name, resolved_return
+                                        );
+                                    }
                                     return Ok(Some(InferResult::new(resolved_return)));
                                 }
                             }
@@ -21126,6 +21192,12 @@ impl TypeChecker {
                                         self.check_expr(arg, &resolved_param)?;
                                     }
                                     let resolved_return = self.unifier.apply(return_type);
+                                    if crate::ctor_trace_enabled() {
+                                        eprintln!(
+                                            "[ctor-trace] alias-arm ast-walk {}.{} -> {}",
+                                            module_path, method_name, resolved_return
+                                        );
+                                    }
                                     return Ok(Some(InferResult::new(resolved_return)));
                                 }
                             }
