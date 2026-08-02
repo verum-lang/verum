@@ -6603,6 +6603,31 @@ impl TypeChecker {
         };
 
         let fd = direct_fd.or(reexport_fd).or(onehop_fd)?;
+        if let Ok(want) = std::env::var("VERUM_TRACE_FNSCHEME")
+            && fd.name.as_str().contains(want.as_str())
+        {
+            let ps: Vec<String> = fd
+                .params
+                .iter()
+                .map(|p| {
+                    format!(
+                        "{}: ty=`{}` declared=`{}`",
+                        p.name.as_str(),
+                        p.ty.as_str(),
+                        p.declared_ty.as_str()
+                    )
+                })
+                .collect();
+            let gps: Vec<&str> =
+                fd.generic_params.iter().map(|g| g.name.as_str()).collect();
+            eprintln!(
+                "[fnscheme/S1] {} gp={:?} params=[{}] ret=`{}`",
+                fd.name.as_str(),
+                gps,
+                ps.join(", "),
+                fd.return_type.as_str()
+            );
+        }
 
         if fd.is_const {
             // Const re-exports flow through the Const arm; refuse to
@@ -6671,8 +6696,23 @@ impl TypeChecker {
             if !hof_reconnect.is_empty() {
                 let mut subst = crate::ty::Substitution::new();
                 for (gname, structural) in &hof_reconnect {
-                    if let Some(tv) = scope_vars.get(gname.as_str()) {
-                        subst.insert(*tv, structural.clone());
+                    // The scope interns by PLACEHOLDER spelling when the
+                    // signature strings carry `__generic_i` (the common
+                    // bake form) and by SOURCE NAME when verbatim carries
+                    // spell "F" — probe both (i = the declared param's
+                    // pid position in generic_params, GENERICNAME order).
+                    let tv_opt = scope_vars.get(gname.as_str()).copied().or_else(|| {
+                        fd.generic_params
+                            .iter()
+                            .position(|gp| gp.name == *gname)
+                            .and_then(|i| {
+                                scope_vars
+                                    .get(&format!("__generic_{}", i))
+                                    .copied()
+                            })
+                    });
+                    if let Some(tv) = tv_opt {
+                        subst.insert(tv, structural.clone());
                     }
                 }
                 if !subst.is_empty() {

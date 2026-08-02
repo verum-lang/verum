@@ -1895,8 +1895,24 @@ impl TypeChecker {
                         if !hof_reconnect.is_empty() {
                             let mut subst = crate::ty::Substitution::new();
                             for (gname, structural) in &hof_reconnect {
-                                if let Some(tv) = scope_vars.get(gname.as_str()) {
-                                    subst.insert(*tv, structural.clone());
+                                let tv_opt = scope_vars
+                                    .get(gname.as_str())
+                                    .copied()
+                                    .or_else(|| {
+                                        fd.generic_params
+                                            .iter()
+                                            .position(|gp| gp.name == *gname)
+                                            .and_then(|i| {
+                                                scope_vars
+                                                    .get(&format!(
+                                                        "__generic_{}",
+                                                        i
+                                                    ))
+                                                    .copied()
+                                            })
+                                    });
+                                if let Some(tv) = tv_opt {
+                                    subst.insert(tv, structural.clone());
                                 }
                             }
                             if !subst.is_empty() {
@@ -2264,8 +2280,23 @@ impl TypeChecker {
             if !hof_reconnect.is_empty() {
                 let mut subst = crate::ty::Substitution::new();
                 for (gname, structural) in &hof_reconnect {
-                    if let Some(tv) = scope_vars.get(gname.as_str()) {
-                        subst.insert(*tv, structural.clone());
+                    // The scope interns by PLACEHOLDER spelling when the
+                    // signature strings carry `__generic_i` (the common
+                    // bake form) and by SOURCE NAME when verbatim carries
+                    // spell "F" — probe both (i = the declared param's
+                    // pid position in generic_params, GENERICNAME order).
+                    let tv_opt = scope_vars.get(gname.as_str()).copied().or_else(|| {
+                        fn_desc.generic_params
+                            .iter()
+                            .position(|gp| gp.name == *gname)
+                            .and_then(|i| {
+                                scope_vars
+                                    .get(&format!("__generic_{}", i))
+                                    .copied()
+                            })
+                    });
+                    if let Some(tv) = tv_opt {
+                        subst.insert(tv, structural.clone());
                     }
                 }
                 if !subst.is_empty() {
