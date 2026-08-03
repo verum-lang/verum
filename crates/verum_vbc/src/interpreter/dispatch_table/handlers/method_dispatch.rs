@@ -4905,6 +4905,49 @@ pub(super) fn dispatch_primitive_method(
         method
     };
 
+    // T0706 — LATE BY-NAME PROBE for the width-normalised qualified
+    // form.  The normaliser above rewrites `Byte.to_hex` →
+    // `UInt8.to_hex` precisely so a registered compiled body can be
+    // resolved by name (its own comment says so) — but no probe
+    // existed on this path: the Int section's catch-all returned
+    // Ok(None) and the call died "not found" even when the merged
+    // body sat in the function table (measured: thx3's :x-desugar
+    // route vs the green typed-let twin, which bypasses CallM via a
+    // static Call devirtualised at codegen).  Narrow by construction:
+    // only a DOTTED method name (the width arms only produce one for
+    // non-width members), only a primitive-kind receiver (the class
+    // the width prefix describes), only a real body with matching
+    // arity.  Anything that used to reach an intercept still does —
+    // width MEMBERS normalise to the `$` form, never a dotted one.
+    if method.contains('.')
+        && (receiver.is_int() || receiver.is_float() || receiver.is_bool())
+        && let Some(fid) = state.module.find_function_by_name(method)
+        && state
+            .module
+            .get_function(fid)
+            .filter(|f| f.bytecode_length > 0)
+            .map(|f| f.params.len())
+            == Some(args.count as usize + 1)
+    {
+        // Nested-exec discipline: call_function_sync is the ONE safe
+        // primitive for invoking a body from inside a dispatch handler
+        // (a hand-rolled push_frame here clobbers pc/r0 — the
+        // documented nested-execution trap).
+        let caller_base = state.reg_base();
+        let mut call_args: Vec<Value> = Vec::with_capacity(args.count as usize + 1);
+        call_args.push(*receiver);
+        for i in 0..args.count {
+            call_args.push(
+                state
+                    .registers
+                    .get(caller_base, Reg(args.start.0 + i as u16)),
+            );
+        }
+        let result =
+            super::super::call_function_sync(state, fid, &call_args)?;
+        return Ok(Some(result));
+    }
+
     // CBGR register reference unwrapping: when a method is called on a CBGR register
     // reference (negative Int encoding), deref the reference to get the inner value
     // and dispatch the method on it (e.g., `.sub()` on a reference to a pointer).
