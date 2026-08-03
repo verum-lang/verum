@@ -151,6 +151,14 @@ jobs:
         timeout-minutes: 30
         run: cargo test --locked --tests -p verum_verification
 
+      # verum_smt tier: 1,759 tests measured green 2026-08-03. Its one
+      # flake source (a single-shot 10ms perf pin) was re-grounded as
+      # best-of-3 with 50ms headroom in the same landing that arms
+      # this step — intent (generation is O(fast)) unchanged.
+      - name: Run tests/ for verum_smt
+        timeout-minutes: 30
+        run: cargo test --locked --tests -p verum_smt
+
   # ---------------------------------------------------------------------------
   # Job 2: VCS L0 (2,963 specs, 100%) + L1 (499 specs, 100%). Blocks merge.
   # ---------------------------------------------------------------------------
