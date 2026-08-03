@@ -16,6 +16,37 @@ use crate::value::Value;
 /// - 0x00-0x03: Checked arithmetic (returns Maybe<Int>)
 /// - 0x10-0x12: Overflowing arithmetic (returns (result, overflowed))
 /// - 0x20-0x25: Polymorphic arithmetic (type-dispatched)
+
+/// T0714 — TOTAL register reads for envelope-family arms.  The
+/// envelope authority already guarantees stream re-alignment for a
+/// malformed carrier (under/over-declared operand counts), but an arm
+/// that reads a garbage register index gets a garbage VALUE — and the
+/// panicking accessors' debug_asserts turned that into a debug-build
+/// abort (the extended_envelope_pins contract is: wrong value maybe,
+/// dead stream never).  Release semantics are unchanged (the asserts
+/// compile out); these helpers make debug agree with release.
+#[inline]
+fn lenient_f64(v: crate::value::Value) -> f64 {
+    if v.is_float() {
+        v.as_f64()
+    } else if v.is_int() {
+        v.as_i64() as f64
+    } else {
+        0.0
+    }
+}
+
+#[inline]
+fn lenient_i64(v: crate::value::Value) -> i64 {
+    if v.is_int() {
+        v.as_i64()
+    } else if v.is_float() {
+        v.as_f64() as i64
+    } else {
+        0
+    }
+}
+
 pub(in super::super) fn handle_arith_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -41,8 +72,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
             emit_maybe(state, dst, a.checked_add(b).map(Value::from_i64))?;
             Ok(DispatchResult::Continue)
         }
@@ -51,8 +82,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
             emit_maybe(state, dst, a.checked_sub(b).map(Value::from_i64))?;
             Ok(DispatchResult::Continue)
         }
@@ -61,8 +92,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
             emit_maybe(state, dst, a.checked_mul(b).map(Value::from_i64))?;
             Ok(DispatchResult::Continue)
         }
@@ -71,8 +102,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
             emit_maybe(state, dst, a.checked_div(b).map(Value::from_i64))?;
             Ok(DispatchResult::Continue)
         }
@@ -84,8 +115,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-            let a = state.get_reg(a_reg).as_i64() as u64;
-            let b = state.get_reg(b_reg).as_i64() as u64;
+            let a = lenient_i64(state.get_reg(a_reg)) as u64;
+            let b = lenient_i64(state.get_reg(b_reg)) as u64;
             emit_maybe(
                 state,
                 dst,
@@ -98,8 +129,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-            let a = state.get_reg(a_reg).as_i64() as u64;
-            let b = state.get_reg(b_reg).as_i64() as u64;
+            let a = lenient_i64(state.get_reg(a_reg)) as u64;
+            let b = lenient_i64(state.get_reg(b_reg)) as u64;
             emit_maybe(
                 state,
                 dst,
@@ -112,8 +143,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-            let a = state.get_reg(a_reg).as_i64() as u64;
-            let b = state.get_reg(b_reg).as_i64() as u64;
+            let a = lenient_i64(state.get_reg(a_reg)) as u64;
+            let b = lenient_i64(state.get_reg(b_reg)) as u64;
             emit_maybe(
                 state,
                 dst,
@@ -136,7 +167,7 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let src = state.get_reg(src_reg).as_i64();
+            let src = lenient_i64(state.get_reg(src_reg));
             let (result, ok) = checked_neg(src, width, signed);
             emit_maybe_int(state, dst, result, ok)?;
             Ok(DispatchResult::Continue)
@@ -148,7 +179,7 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let src = state.get_reg(src_reg).as_i64();
+            let src = lenient_i64(state.get_reg(src_reg));
             let (result, ok) = checked_abs(src, width, signed);
             emit_maybe_int(state, dst, result, ok)?;
             Ok(DispatchResult::Continue)
@@ -162,8 +193,8 @@ fn arith_extended_body(
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
 
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
             let (result, overflowed) = a.overflowing_add(b);
 
             // Allocate tuple (Int, Bool)
@@ -187,8 +218,8 @@ fn arith_extended_body(
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
 
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
             let (result, overflowed) = a.overflowing_sub(b);
 
             let obj = state
@@ -211,8 +242,8 @@ fn arith_extended_body(
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
 
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
             let (result, overflowed) = a.overflowing_mul(b);
 
             let obj = state
@@ -484,8 +515,8 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
 
             let result = saturating_add(a, b, width, signed);
             state.set_reg(dst, Value::from_i64(result));
@@ -499,8 +530,8 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
 
             let result = saturating_sub(a, b, width, signed);
             state.set_reg(dst, Value::from_i64(result));
@@ -514,8 +545,8 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
 
             let result = saturating_mul(a, b, width, signed);
             state.set_reg(dst, Value::from_i64(result));
@@ -531,7 +562,7 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let src = state.get_reg(src_reg).as_i64();
+            let src = lenient_i64(state.get_reg(src_reg));
             let result = saturating_neg(src, width, signed);
             state.set_reg(dst, Value::from_i64(result));
             Ok(DispatchResult::Continue)
@@ -543,7 +574,7 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let src = state.get_reg(src_reg).as_i64();
+            let src = lenient_i64(state.get_reg(src_reg));
             let result = saturating_abs(src, width, signed);
             state.set_reg(dst, Value::from_i64(result));
             Ok(DispatchResult::Continue)
@@ -559,8 +590,8 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
 
             let result = wrapping_add(a, b, width, signed);
             state.set_reg(dst, Value::from_i64(result));
@@ -574,8 +605,8 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
 
             let result = wrapping_sub(a, b, width, signed);
             state.set_reg(dst, Value::from_i64(result));
@@ -589,8 +620,8 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
 
             let result = wrapping_mul(a, b, width, signed);
             state.set_reg(dst, Value::from_i64(result));
@@ -603,7 +634,7 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let src = state.get_reg(src_reg).as_i64();
+            let src = lenient_i64(state.get_reg(src_reg));
 
             let result = wrapping_neg(src, width, signed);
             state.set_reg(dst, Value::from_i64(result));
@@ -617,8 +648,8 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64() as u32;
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg)) as u32;
 
             let result = wrapping_shl(a, b, width, signed);
             state.set_reg(dst, Value::from_i64(result));
@@ -632,8 +663,8 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64() as u32;
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg)) as u32;
 
             let result = wrapping_shr(a, b, width, signed);
             state.set_reg(dst, Value::from_i64(result));
@@ -647,8 +678,8 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
             if b == 0 {
                 return Err(InterpreterError::DivisionByZero);
             }
@@ -664,8 +695,8 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let a = state.get_reg(a_reg).as_i64();
-            let b = state.get_reg(b_reg).as_i64();
+            let a = lenient_i64(state.get_reg(a_reg));
+            let b = lenient_i64(state.get_reg(b_reg));
             if b == 0 {
                 return Err(InterpreterError::DivisionByZero);
             }
@@ -680,7 +711,7 @@ fn arith_extended_body(
             let width = read_u8(state)?;
             let signed = read_u8(state)? != 0;
 
-            let src = state.get_reg(src_reg).as_i64();
+            let src = lenient_i64(state.get_reg(src_reg));
             let result = wrapping_abs(src, width, signed);
             state.set_reg(dst, Value::from_i64(result));
             Ok(DispatchResult::Continue)
@@ -693,7 +724,7 @@ fn arith_extended_body(
             // Count leading zeros (64-bit)
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let v = state.get_reg(src).as_i64() as u64;
+            let v = lenient_i64(state.get_reg(src)) as u64;
             let result = v.leading_zeros() as i64;
             state.set_reg(dst, Value::from_i64(result));
             Ok(DispatchResult::Continue)
@@ -703,7 +734,7 @@ fn arith_extended_body(
             // Count trailing zeros (64-bit)
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let v = state.get_reg(src).as_i64() as u64;
+            let v = lenient_i64(state.get_reg(src)) as u64;
             let result = v.trailing_zeros() as i64;
             state.set_reg(dst, Value::from_i64(result));
             Ok(DispatchResult::Continue)
@@ -713,7 +744,7 @@ fn arith_extended_body(
             // Population count - count set bits (64-bit)
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let v = state.get_reg(src).as_i64() as u64;
+            let v = lenient_i64(state.get_reg(src)) as u64;
             let result = v.count_ones() as i64;
             state.set_reg(dst, Value::from_i64(result));
             Ok(DispatchResult::Continue)
@@ -723,7 +754,7 @@ fn arith_extended_body(
             // Byte swap - reverse byte order (64-bit)
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let v = state.get_reg(src).as_i64() as u64;
+            let v = lenient_i64(state.get_reg(src)) as u64;
             let result = v.swap_bytes() as i64;
             state.set_reg(dst, Value::from_i64(result));
             Ok(DispatchResult::Continue)
@@ -733,7 +764,7 @@ fn arith_extended_body(
             // Bit reverse - reverse all bits (64-bit)
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let v = state.get_reg(src).as_i64() as u64;
+            let v = lenient_i64(state.get_reg(src)) as u64;
             let result = v.reverse_bits() as i64;
             state.set_reg(dst, Value::from_i64(result));
             Ok(DispatchResult::Continue)
@@ -744,8 +775,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let val_reg = read_reg(state)?;
             let amount_reg = read_reg(state)?;
-            let v = state.get_reg(val_reg).as_i64() as u64;
-            let amount = state.get_reg(amount_reg).as_i64() as u32;
+            let v = lenient_i64(state.get_reg(val_reg)) as u64;
+            let amount = lenient_i64(state.get_reg(amount_reg)) as u32;
             let result = v.rotate_left(amount) as i64;
             state.set_reg(dst, Value::from_i64(result));
             Ok(DispatchResult::Continue)
@@ -756,8 +787,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let val_reg = read_reg(state)?;
             let amount_reg = read_reg(state)?;
-            let v = state.get_reg(val_reg).as_i64() as u64;
-            let amount = state.get_reg(amount_reg).as_i64() as u32;
+            let v = lenient_i64(state.get_reg(val_reg)) as u64;
+            let amount = lenient_i64(state.get_reg(amount_reg)) as u32;
             let result = v.rotate_right(amount) as i64;
             state.set_reg(dst, Value::from_i64(result));
             Ok(DispatchResult::Continue)
@@ -780,9 +811,9 @@ fn arith_extended_body(
             let hi_reg = read_reg(state)?;
             let lo_reg = read_reg(state)?;
             let amount_reg = read_reg(state)?;
-            let hi = state.get_reg(hi_reg).as_i64() as u64;
-            let lo = state.get_reg(lo_reg).as_i64() as u64;
-            let n = (state.get_reg(amount_reg).as_i64() as u32) & 63;
+            let hi = lenient_i64(state.get_reg(hi_reg)) as u64;
+            let lo = lenient_i64(state.get_reg(lo_reg)) as u64;
+            let n = (lenient_i64(state.get_reg(amount_reg)) as u32) & 63;
             let result = if n == 0 {
                 hi
             } else {
@@ -803,9 +834,9 @@ fn arith_extended_body(
             let hi_reg = read_reg(state)?;
             let lo_reg = read_reg(state)?;
             let amount_reg = read_reg(state)?;
-            let hi = state.get_reg(hi_reg).as_i64() as u64;
-            let lo = state.get_reg(lo_reg).as_i64() as u64;
-            let n = (state.get_reg(amount_reg).as_i64() as u32) & 63;
+            let hi = lenient_i64(state.get_reg(hi_reg)) as u64;
+            let lo = lenient_i64(state.get_reg(lo_reg)) as u64;
+            let n = (lenient_i64(state.get_reg(amount_reg)) as u32) & 63;
             let result = if n == 0 {
                 lo
             } else {
@@ -823,8 +854,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let y_reg = read_reg(state)?;
             let x_reg = read_reg(state)?;
-            let y = state.get_reg(y_reg).as_f64();
-            let x = state.get_reg(x_reg).as_f64();
+            let y = lenient_f64(state.get_reg(y_reg));
+            let x = lenient_f64(state.get_reg(x_reg));
             let result = y.atan2(x);
             state.set_reg(dst, Value::from_f64(result));
             Ok(DispatchResult::Continue)
@@ -835,8 +866,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64();
-            let y = state.get_reg(y_reg).as_f64();
+            let x = lenient_f64(state.get_reg(x_reg));
+            let y = lenient_f64(state.get_reg(y_reg));
             let result = x.hypot(y);
             state.set_reg(dst, Value::from_f64(result));
             Ok(DispatchResult::Continue)
@@ -847,8 +878,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let mag_reg = read_reg(state)?;
             let sign_reg = read_reg(state)?;
-            let mag = state.get_reg(mag_reg).as_f64();
-            let sign = state.get_reg(sign_reg).as_f64();
+            let mag = lenient_f64(state.get_reg(mag_reg));
+            let sign = lenient_f64(state.get_reg(sign_reg));
             let result = mag.copysign(sign);
             state.set_reg(dst, Value::from_f64(result));
             Ok(DispatchResult::Continue)
@@ -859,8 +890,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let base_reg = read_reg(state)?;
             let exp_reg = read_reg(state)?;
-            let base = state.get_reg(base_reg).as_f64();
-            let exp = state.get_reg(exp_reg).as_f64();
+            let base = lenient_f64(state.get_reg(base_reg));
+            let exp = lenient_f64(state.get_reg(exp_reg));
             let result = base.powf(exp);
             state.set_reg(dst, Value::from_f64(result));
             Ok(DispatchResult::Continue)
@@ -871,8 +902,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let base_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64();
-            let base = state.get_reg(base_reg).as_f64();
+            let x = lenient_f64(state.get_reg(x_reg));
+            let base = lenient_f64(state.get_reg(base_reg));
             let result = x.log(base);
             state.set_reg(dst, Value::from_f64(result));
             Ok(DispatchResult::Continue)
@@ -883,8 +914,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64();
-            let y = state.get_reg(y_reg).as_f64();
+            let x = lenient_f64(state.get_reg(x_reg));
+            let y = lenient_f64(state.get_reg(y_reg));
             // fmod = x - trunc(x/y) * y
             let result = x - (x / y).trunc() * y;
             state.set_reg(dst, Value::from_f64(result));
@@ -896,8 +927,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64();
-            let y = state.get_reg(y_reg).as_f64();
+            let x = lenient_f64(state.get_reg(x_reg));
+            let y = lenient_f64(state.get_reg(y_reg));
             // IEEE 754 remainder = x - round(x/y) * y
             let result = x - (x / y).round() * y;
             state.set_reg(dst, Value::from_f64(result));
@@ -909,8 +940,8 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64();
-            let y = state.get_reg(y_reg).as_f64();
+            let x = lenient_f64(state.get_reg(x_reg));
+            let y = lenient_f64(state.get_reg(y_reg));
             let result = if x > y { x - y } else { 0.0 };
             state.set_reg(dst, Value::from_f64(result));
             Ok(DispatchResult::Continue)
@@ -927,7 +958,7 @@ fn arith_extended_body(
             let from_bits = read_u8(state)?;
             let _to_bits = read_u8(state)?; // VBC uses 64-bit values, so to_bits is implicit
 
-            let v = state.get_reg(src).as_i64();
+            let v = lenient_i64(state.get_reg(src));
 
             // Sign-extend from from_bits to 64 bits
             let result = match from_bits {
@@ -950,7 +981,7 @@ fn arith_extended_body(
             let from_bits = read_u8(state)?;
             let _to_bits = read_u8(state)?; // VBC uses 64-bit values, so to_bits is implicit
 
-            let v = state.get_reg(src).as_i64() as u64;
+            let v = lenient_i64(state.get_reg(src)) as u64;
 
             // Zero-extend by masking to from_bits
             let mask = if from_bits >= 64 {
@@ -970,7 +1001,7 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
 
-            let v = state.get_reg(src).as_f64();
+            let v = lenient_f64(state.get_reg(src));
             // Truncate to f32 and back to f64 for storage (VBC uses f64 internally)
             let result = (v as f32) as f64;
 
@@ -986,7 +1017,7 @@ fn arith_extended_body(
 
             // VBC stores f32 as f64, so this is effectively an identity operation
             // but ensures proper representation for f32 values
-            let v = state.get_reg(src).as_f64();
+            let v = lenient_f64(state.get_reg(src));
             // Ensure the value is in f32 range, then extend
             let result = (v as f32) as f64;
 
@@ -1001,7 +1032,7 @@ fn arith_extended_body(
             let src = read_reg(state)?;
             let to_bits = read_u8(state)?;
 
-            let v = state.get_reg(src).as_i64() as u64;
+            let v = lenient_i64(state.get_reg(src)) as u64;
 
             // Truncate by masking to to_bits
             let mask = if to_bits >= 64 {
@@ -1021,7 +1052,7 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
 
-            let v = state.get_reg(src).as_f64();
+            let v = lenient_f64(state.get_reg(src));
             let f32_val = v as f32;
             let bits = f32_val.to_bits() as i64;
 
@@ -1035,7 +1066,7 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
 
-            let bits = state.get_reg(src).as_i64() as u32;
+            let bits = lenient_i64(state.get_reg(src)) as u32;
             let f32_val = f32::from_bits(bits);
             let result = f32_val as f64;
 
@@ -1049,7 +1080,7 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
 
-            let v = state.get_reg(src).as_f64();
+            let v = lenient_f64(state.get_reg(src));
             let bits = v.to_bits();
 
             state.set_reg(dst, Value::from_i64(bits as i64));
@@ -1062,7 +1093,7 @@ fn arith_extended_body(
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
 
-            let bits = state.get_reg(src).as_i64() as u64;
+            let bits = lenient_i64(state.get_reg(src)) as u64;
             let result = f64::from_bits(bits);
 
             state.set_reg(dst, Value::from_f64(result));

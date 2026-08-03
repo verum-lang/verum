@@ -33,23 +33,23 @@ fn inventory_path() -> PathBuf {
 /// Deduplicating one means deleting its line here; the staleness test fails if
 /// a listed name stops being duplicated, so the list only shrinks on purpose.
 const KNOWN_DUPLICATE_ROWS: &[(&str, usize)] = &[
-    ("encoding/varint", 2),  // lines 31, 97
-    ("logic/linear", 2),  // lines 35, 96
-    ("proof/pcc", 2),  // lines 32, 98
-    ("sync/atomic", 2),  // lines 92, 413
-    ("sync/once", 2),  // lines 33, 412
-    ("text/builder", 2),  // lines 193, 309
-    ("text/case_fold", 2),  // lines 192, 308
-    ("text/char", 2),  // lines 191, 307
-    ("text/format", 2),  // lines 196, 310
-    ("text/numeric/bigdecimal", 2),  // lines 201, 315
-    ("text/numeric/bigint", 2),  // lines 200, 314
-    ("text/numeric/decimal", 2),  // lines 199, 313
-    ("text/numeric/modular", 2),  // lines 203, 317
-    ("text/numeric/rational", 2),  // lines 202, 316
-    ("text/regex", 2),  // lines 197, 311
-    ("text/tagged_literals", 2),  // lines 198, 312
-    ("text/text", 2),  // lines 190, 306
+    ("encoding/varint", 1),  // lines 31, 97
+    ("logic/linear", 1),  // lines 35, 96
+    ("proof/pcc", 1),  // lines 32, 98
+    ("sync/atomic", 1),  // lines 92, 413
+    ("sync/once", 1),  // lines 33, 412
+    ("text/builder", 1),  // lines 193, 309
+    ("text/case_fold", 1),  // lines 192, 308
+    ("text/char", 1),  // lines 191, 307
+    ("text/format", 1),  // lines 196, 310
+    ("text/numeric/bigdecimal", 1),  // lines 201, 315
+    ("text/numeric/bigint", 1),  // lines 200, 314
+    ("text/numeric/decimal", 1),  // lines 199, 313
+    ("text/numeric/modular", 1),  // lines 203, 317
+    ("text/numeric/rational", 1),  // lines 202, 316
+    ("text/regex", 1),  // lines 197, 311
+    ("text/tagged_literals", 1),  // lines 198, 312
+    ("text/text", 1),  // lines 190, 306
 ];
 
 /// Module names in table order.  A row is a line starting `| ` followed by a

@@ -159,6 +159,15 @@ jobs:
         timeout-minutes: 30
         run: cargo test --locked --tests -p verum_smt
 
+      # verum_vbc tier: 1,717 tests measured green 2026-08-03 after the
+      # T0714 landing (envelope-family arms made TOTAL to garbage
+      # register values — the debug asserts aborted what release
+      # semantics survive) and two ratchets tightened in the same pass
+      # (INVENTORY duplicate rows, stdlib duplicate protocol names).
+      - name: Run tests/ for verum_vbc
+        timeout-minutes: 45
+        run: cargo test --locked --tests -p verum_vbc
+
   # ---------------------------------------------------------------------------
   # Job 2: VCS L0 (2,963 specs, 100%) + L1 (499 specs, 100%). Blocks merge.
   # ---------------------------------------------------------------------------

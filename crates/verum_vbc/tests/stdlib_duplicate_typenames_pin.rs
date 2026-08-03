@@ -85,13 +85,7 @@ fn duplicated_protocol_names_are_the_known_set() {
     // Every one of these is silently shadowed at metadata-merge time, with
     // the winner decided by load order. Write, Numeric and Module are core protocols.
     let expected = [
-        "DecidableEq",
-        "InfinityTopos",
-        "Limit",
-        "Module",
-        "Mutator",
-        "Numeric",
-        "Write",
+        "DecidableEq", "Limit",
     ];
     assert_eq!(
         dupes,

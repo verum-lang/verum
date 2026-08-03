@@ -30,6 +30,37 @@ use crate::value::Value;
 /// - 0x60-0x67: Special F32
 /// - 0x68-0x6F: Classification F64 (is_nan, is_inf, is_finite)
 /// - 0x70-0x77: Classification F32
+
+/// T0714 — TOTAL register reads for envelope-family arms.  The
+/// envelope authority already guarantees stream re-alignment for a
+/// malformed carrier (under/over-declared operand counts), but an arm
+/// that reads a garbage register index gets a garbage VALUE — and the
+/// panicking accessors' debug_asserts turned that into a debug-build
+/// abort (the extended_envelope_pins contract is: wrong value maybe,
+/// dead stream never).  Release semantics are unchanged (the asserts
+/// compile out); these helpers make debug agree with release.
+#[inline]
+fn lenient_f64(v: crate::value::Value) -> f64 {
+    if v.is_float() {
+        v.as_f64()
+    } else if v.is_int() {
+        v.as_i64() as f64
+    } else {
+        0.0
+    }
+}
+
+#[inline]
+fn lenient_i64(v: crate::value::Value) -> i64 {
+    if v.is_int() {
+        v.as_i64()
+    } else if v.is_float() {
+        v.as_f64() as i64
+    } else {
+        0
+    }
+}
+
 pub(in super::super) fn handle_math_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -54,42 +85,42 @@ fn math_extended_body(
         Some(MathSubOpcode::SinF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.sin()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::CosF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.cos()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::TanF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.tan()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::AsinF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.asin()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::AcosF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.acos()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::AtanF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.atan()));
             Ok(DispatchResult::Continue)
         }
@@ -97,8 +128,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let y_reg = read_reg(state)?;
             let x_reg = read_reg(state)?;
-            let y = state.get_reg(y_reg).as_f64();
-            let x = state.get_reg(x_reg).as_f64();
+            let y = lenient_f64(state.get_reg(y_reg));
+            let x = lenient_f64(state.get_reg(x_reg));
             state.set_reg(dst, Value::from_f64(y.atan2(x)));
             Ok(DispatchResult::Continue)
         }
@@ -109,42 +140,42 @@ fn math_extended_body(
         Some(MathSubOpcode::SinF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.sin() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::CosF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.cos() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::TanF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.tan() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::AsinF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.asin() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::AcosF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.acos() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::AtanF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.atan() as f64));
             Ok(DispatchResult::Continue)
         }
@@ -152,8 +183,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let y_reg = read_reg(state)?;
             let x_reg = read_reg(state)?;
-            let y = state.get_reg(y_reg).as_f64() as f32;
-            let x = state.get_reg(x_reg).as_f64() as f32;
+            let y = lenient_f64(state.get_reg(y_reg)) as f32;
+            let x = lenient_f64(state.get_reg(x_reg)) as f32;
             state.set_reg(dst, Value::from_f64(y.atan2(x) as f64));
             Ok(DispatchResult::Continue)
         }
@@ -164,42 +195,42 @@ fn math_extended_body(
         Some(MathSubOpcode::SinhF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.sinh()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::CoshF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.cosh()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::TanhF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.tanh()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::AsinhF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.asinh()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::AcoshF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.acosh()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::AtanhF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.atanh()));
             Ok(DispatchResult::Continue)
         }
@@ -210,42 +241,42 @@ fn math_extended_body(
         Some(MathSubOpcode::SinhF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.sinh() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::CoshF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.cosh() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::TanhF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.tanh() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::AsinhF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.asinh() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::AcoshF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.acosh() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::AtanhF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.atanh() as f64));
             Ok(DispatchResult::Continue)
         }
@@ -256,49 +287,49 @@ fn math_extended_body(
         Some(MathSubOpcode::ExpF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.exp()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::Exp2F64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.exp2()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::Expm1F64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.exp_m1()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::LogF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.ln()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::Log2F64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.log2()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::Log10F64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.log10()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::Log1pF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.ln_1p()));
             Ok(DispatchResult::Continue)
         }
@@ -306,8 +337,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let base_reg = read_reg(state)?;
             let exp_reg = read_reg(state)?;
-            let base = state.get_reg(base_reg).as_f64();
-            let exp = state.get_reg(exp_reg).as_f64();
+            let base = lenient_f64(state.get_reg(base_reg));
+            let exp = lenient_f64(state.get_reg(exp_reg));
             state.set_reg(dst, Value::from_f64(base.powf(exp)));
             Ok(DispatchResult::Continue)
         }
@@ -315,8 +346,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let base_reg = read_reg(state)?;
             let exp_reg = read_reg(state)?;
-            let base = state.get_reg(base_reg).as_f64();
-            let exp = state.get_reg(exp_reg).as_i64() as i32;
+            let base = lenient_f64(state.get_reg(base_reg));
+            let exp = lenient_i64(state.get_reg(exp_reg)) as i32;
             state.set_reg(dst, Value::from_f64(base.powi(exp)));
             Ok(DispatchResult::Continue)
         }
@@ -327,49 +358,49 @@ fn math_extended_body(
         Some(MathSubOpcode::ExpF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.exp() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::Exp2F32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.exp2() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::Expm1F32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.exp_m1() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::LogF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.ln() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::Log2F32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.log2() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::Log10F32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.log10() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::Log1pF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.ln_1p() as f64));
             Ok(DispatchResult::Continue)
         }
@@ -377,8 +408,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let base_reg = read_reg(state)?;
             let exp_reg = read_reg(state)?;
-            let base = state.get_reg(base_reg).as_f64() as f32;
-            let exp = state.get_reg(exp_reg).as_f64() as f32;
+            let base = lenient_f64(state.get_reg(base_reg)) as f32;
+            let exp = lenient_f64(state.get_reg(exp_reg)) as f32;
             state.set_reg(dst, Value::from_f64(base.powf(exp) as f64));
             Ok(DispatchResult::Continue)
         }
@@ -386,8 +417,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let base_reg = read_reg(state)?;
             let exp_reg = read_reg(state)?;
-            let base = state.get_reg(base_reg).as_f64() as f32;
-            let exp = state.get_reg(exp_reg).as_i64() as i32;
+            let base = lenient_f64(state.get_reg(base_reg)) as f32;
+            let exp = lenient_i64(state.get_reg(exp_reg)) as i32;
             state.set_reg(dst, Value::from_f64(base.powi(exp) as f64));
             Ok(DispatchResult::Continue)
         }
@@ -398,14 +429,14 @@ fn math_extended_body(
         Some(MathSubOpcode::SqrtF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.sqrt()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::CbrtF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.cbrt()));
             Ok(DispatchResult::Continue)
         }
@@ -413,8 +444,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64();
-            let y = state.get_reg(y_reg).as_f64();
+            let x = lenient_f64(state.get_reg(x_reg));
+            let y = lenient_f64(state.get_reg(y_reg));
             state.set_reg(dst, Value::from_f64(x.hypot(y)));
             Ok(DispatchResult::Continue)
         }
@@ -425,14 +456,14 @@ fn math_extended_body(
         Some(MathSubOpcode::SqrtF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.sqrt() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::CbrtF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.cbrt() as f64));
             Ok(DispatchResult::Continue)
         }
@@ -440,8 +471,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64() as f32;
-            let y = state.get_reg(y_reg).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(x_reg)) as f32;
+            let y = lenient_f64(state.get_reg(y_reg)) as f32;
             state.set_reg(dst, Value::from_f64(x.hypot(y) as f64));
             Ok(DispatchResult::Continue)
         }
@@ -452,28 +483,28 @@ fn math_extended_body(
         Some(MathSubOpcode::FloorF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.floor()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::CeilF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.ceil()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::RoundF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.round()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::TruncF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.trunc()));
             Ok(DispatchResult::Continue)
         }
@@ -482,7 +513,7 @@ fn math_extended_body(
             // backs roundeven / rint / nearbyint. (FLOAT-ROUNDMODES-1)
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.round_ties_even()));
             Ok(DispatchResult::Continue)
         }
@@ -493,28 +524,28 @@ fn math_extended_body(
         Some(MathSubOpcode::FloorF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.floor() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::CeilF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.ceil() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::RoundF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.round() as f64));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::TruncF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.trunc() as f64));
             Ok(DispatchResult::Continue)
         }
@@ -525,7 +556,7 @@ fn math_extended_body(
         Some(MathSubOpcode::AbsF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_f64(x.abs()));
             Ok(DispatchResult::Continue)
         }
@@ -533,8 +564,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let mag_reg = read_reg(state)?;
             let sign_reg = read_reg(state)?;
-            let mag = state.get_reg(mag_reg).as_f64();
-            let sign = state.get_reg(sign_reg).as_f64();
+            let mag = lenient_f64(state.get_reg(mag_reg));
+            let sign = lenient_f64(state.get_reg(sign_reg));
             state.set_reg(dst, Value::from_f64(mag.copysign(sign)));
             Ok(DispatchResult::Continue)
         }
@@ -543,9 +574,9 @@ fn math_extended_body(
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
             let c_reg = read_reg(state)?;
-            let a = state.get_reg(a_reg).as_f64();
-            let b = state.get_reg(b_reg).as_f64();
-            let c = state.get_reg(c_reg).as_f64();
+            let a = lenient_f64(state.get_reg(a_reg));
+            let b = lenient_f64(state.get_reg(b_reg));
+            let c = lenient_f64(state.get_reg(c_reg));
             state.set_reg(dst, Value::from_f64(a.mul_add(b, c)));
             Ok(DispatchResult::Continue)
         }
@@ -553,8 +584,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64();
-            let y = state.get_reg(y_reg).as_f64();
+            let x = lenient_f64(state.get_reg(x_reg));
+            let y = lenient_f64(state.get_reg(y_reg));
             // Rust rem_euclid doesn't match fmod, use manual calculation
             state.set_reg(dst, Value::from_f64(x - (x / y).trunc() * y));
             Ok(DispatchResult::Continue)
@@ -563,8 +594,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64();
-            let y = state.get_reg(y_reg).as_f64();
+            let x = lenient_f64(state.get_reg(x_reg));
+            let y = lenient_f64(state.get_reg(y_reg));
             // IEEE 754 remainder: x - n*y where n = round-to-nearest, TIES TO EVEN
             // of x/y. `.round()` (ties away from zero) is IEEE-incorrect at exact
             // half-integer quotients — e.g. remainder(5,2) must be 1 (2.5 -> even
@@ -578,8 +609,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64();
-            let y = state.get_reg(y_reg).as_f64();
+            let x = lenient_f64(state.get_reg(x_reg));
+            let y = lenient_f64(state.get_reg(y_reg));
             state.set_reg(dst, Value::from_f64(if x > y { x - y } else { 0.0 }));
             Ok(DispatchResult::Continue)
         }
@@ -587,8 +618,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64();
-            let y = state.get_reg(y_reg).as_f64();
+            let x = lenient_f64(state.get_reg(x_reg));
+            let y = lenient_f64(state.get_reg(y_reg));
             // minnum: returns the minimum, NaN-propagating
             state.set_reg(dst, Value::from_f64(x.min(y)));
             Ok(DispatchResult::Continue)
@@ -597,8 +628,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64();
-            let y = state.get_reg(y_reg).as_f64();
+            let x = lenient_f64(state.get_reg(x_reg));
+            let y = lenient_f64(state.get_reg(y_reg));
             // maxnum: returns the maximum, NaN-propagating
             state.set_reg(dst, Value::from_f64(x.max(y)));
             Ok(DispatchResult::Continue)
@@ -610,7 +641,7 @@ fn math_extended_body(
         Some(MathSubOpcode::AbsF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_f64(x.abs() as f64));
             Ok(DispatchResult::Continue)
         }
@@ -618,8 +649,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let mag_reg = read_reg(state)?;
             let sign_reg = read_reg(state)?;
-            let mag = state.get_reg(mag_reg).as_f64() as f32;
-            let sign = state.get_reg(sign_reg).as_f64() as f32;
+            let mag = lenient_f64(state.get_reg(mag_reg)) as f32;
+            let sign = lenient_f64(state.get_reg(sign_reg)) as f32;
             state.set_reg(dst, Value::from_f64(mag.copysign(sign) as f64));
             Ok(DispatchResult::Continue)
         }
@@ -628,9 +659,9 @@ fn math_extended_body(
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
             let c_reg = read_reg(state)?;
-            let a = state.get_reg(a_reg).as_f64() as f32;
-            let b = state.get_reg(b_reg).as_f64() as f32;
-            let c = state.get_reg(c_reg).as_f64() as f32;
+            let a = lenient_f64(state.get_reg(a_reg)) as f32;
+            let b = lenient_f64(state.get_reg(b_reg)) as f32;
+            let c = lenient_f64(state.get_reg(c_reg)) as f32;
             state.set_reg(dst, Value::from_f64(a.mul_add(b, c) as f64));
             Ok(DispatchResult::Continue)
         }
@@ -638,8 +669,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64() as f32;
-            let y = state.get_reg(y_reg).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(x_reg)) as f32;
+            let y = lenient_f64(state.get_reg(y_reg)) as f32;
             state.set_reg(dst, Value::from_f64((x - (x / y).trunc() * y) as f64));
             Ok(DispatchResult::Continue)
         }
@@ -647,8 +678,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64() as f32;
-            let y = state.get_reg(y_reg).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(x_reg)) as f32;
+            let y = lenient_f64(state.get_reg(y_reg)) as f32;
             // Round-to-nearest TIES-TO-EVEN quotient (IEEE-754 remainder); matches
             // the AOT path and the F64 arm above. `.round()` (ties away) is wrong
             // at half-integer quotients. (T0250)
@@ -660,8 +691,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64() as f32;
-            let y = state.get_reg(y_reg).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(x_reg)) as f32;
+            let y = lenient_f64(state.get_reg(y_reg)) as f32;
             state.set_reg(
                 dst,
                 Value::from_f64(if x > y { (x - y) as f64 } else { 0.0 }),
@@ -672,8 +703,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64() as f32;
-            let y = state.get_reg(y_reg).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(x_reg)) as f32;
+            let y = lenient_f64(state.get_reg(y_reg)) as f32;
             state.set_reg(dst, Value::from_f64(x.min(y) as f64));
             Ok(DispatchResult::Continue)
         }
@@ -681,8 +712,8 @@ fn math_extended_body(
             let dst = read_reg(state)?;
             let x_reg = read_reg(state)?;
             let y_reg = read_reg(state)?;
-            let x = state.get_reg(x_reg).as_f64() as f32;
-            let y = state.get_reg(y_reg).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(x_reg)) as f32;
+            let y = lenient_f64(state.get_reg(y_reg)) as f32;
             state.set_reg(dst, Value::from_f64(x.max(y) as f64));
             Ok(DispatchResult::Continue)
         }
@@ -693,42 +724,42 @@ fn math_extended_body(
         Some(MathSubOpcode::IsNanF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_bool(x.is_nan()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::IsInfF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_bool(x.is_infinite()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::IsFiniteF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_bool(x.is_finite()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::IsSubnormalF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_bool(x.is_subnormal()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::IsSignNegativeF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_bool(x.is_sign_negative()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::IsSignPositiveF64) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64();
+            let x = lenient_f64(state.get_reg(src));
             state.set_reg(dst, Value::from_bool(x.is_sign_positive()));
             Ok(DispatchResult::Continue)
         }
@@ -739,21 +770,21 @@ fn math_extended_body(
         Some(MathSubOpcode::IsNanF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_bool(x.is_nan()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::IsInfF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_bool(x.is_infinite()));
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::IsFiniteF32) => {
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
-            let x = state.get_reg(src).as_f64() as f32;
+            let x = lenient_f64(state.get_reg(src)) as f32;
             state.set_reg(dst, Value::from_bool(x.is_finite()));
             Ok(DispatchResult::Continue)
         }

@@ -907,7 +907,6 @@ unexpected HEAD move.
 | `shell/dsl/kubectl` | 100 | 0 | 0 | 0 | **unverified** — inventoried mechanically by the T0220 S3 close (2026-08-01): the directory carried tests but no row. Status pending the first `make check-inventory-live` run. |
 | `storage/s3/client` | 103 | 0 | 0 | 0 | **unverified** — inventoried mechanically by the T0220 S3 close (2026-08-01): the directory carried tests but no row. Status pending the first `make check-inventory-live` run. |
 | `storage/s3/signing` | 115 | 0 | 0 | 0 | **unverified** — inventoried mechanically by the T0220 S3 close (2026-08-01): the directory carried tests but no row. Status pending the first `make check-inventory-live` run. |
-| `sys/mod` | 189 | 101 | 159 | 67 | **unverified** — inventoried mechanically by the T0220 S3 close (2026-08-01): the directory carried tests but no row. Status pending the first `make check-inventory-live` run. |
 | `sys/windows/io` | 68 | 173 | 118 | 83 | **unverified** — inventoried mechanically by the T0220 S3 close (2026-08-01): the directory carried tests but no row. Status pending the first `make check-inventory-live` run. |
 | `sys/windows/kernel32` | 527 | 337 | 344 | 105 | **unverified** — inventoried mechanically by the T0220 S3 close (2026-08-01): the directory carried tests but no row. Status pending the first `make check-inventory-live` run. |
 | `sys/windows/mod` | 181 | 128 | 78 | 49 | **unverified** — inventoried mechanically by the T0220 S3 close (2026-08-01): the directory carried tests but no row. Status pending the first `make check-inventory-live` run. |

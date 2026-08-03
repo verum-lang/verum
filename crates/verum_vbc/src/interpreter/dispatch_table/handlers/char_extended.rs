@@ -25,6 +25,42 @@ use crate::value::Value;
 ///
 /// CBGR tier analysis: char extended operations dispatched via sub-opcode byte after
 /// the primary CharExtended (0xCA) opcode. Unicode lookups take ~20-50ns.
+
+/// T0714 — TOTAL register reads for envelope-family arms.  The
+/// envelope authority already guarantees stream re-alignment for a
+/// malformed carrier (under/over-declared operand counts), but an arm
+/// that reads a garbage register index gets a garbage VALUE — and the
+/// panicking accessors' debug_asserts turned that into a debug-build
+/// abort (the extended_envelope_pins contract is: wrong value maybe,
+/// dead stream never).  Release semantics are unchanged (the asserts
+/// compile out); these helpers make debug agree with release.
+#[inline]
+fn lenient_f64(v: crate::value::Value) -> f64 {
+    if v.is_float() {
+        v.as_f64()
+    } else if v.is_int() {
+        v.as_i64() as f64
+    } else {
+        0.0
+    }
+}
+
+#[inline]
+fn lenient_i64(v: crate::value::Value) -> i64 {
+    if v.is_int() {
+        v.as_i64()
+    } else if v.is_float() {
+        v.as_f64() as i64
+    } else {
+        0
+    }
+}
+
+#[inline]
+fn lenient_char(v: crate::value::Value) -> char {
+    char::from_u32(lenient_i64(v) as u32).unwrap_or('\u{0}')
+}
+
 pub(in super::super) fn handle_char_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -49,7 +85,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsAlphabeticAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_ascii_alphabetic()));
             Ok(DispatchResult::Continue)
         }
@@ -57,7 +93,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsNumericAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_ascii_digit()));
             Ok(DispatchResult::Continue)
         }
@@ -65,7 +101,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsAlphanumericAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_ascii_alphanumeric()));
             Ok(DispatchResult::Continue)
         }
@@ -73,7 +109,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsWhitespaceAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_ascii_whitespace()));
             Ok(DispatchResult::Continue)
         }
@@ -81,7 +117,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsControlAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_ascii_control()));
             Ok(DispatchResult::Continue)
         }
@@ -89,7 +125,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsPunctuationAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_ascii_punctuation()));
             Ok(DispatchResult::Continue)
         }
@@ -97,7 +133,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsGraphicAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_ascii_graphic()));
             Ok(DispatchResult::Continue)
         }
@@ -105,7 +141,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsHexDigitAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_ascii_hexdigit()));
             Ok(DispatchResult::Continue)
         }
@@ -113,7 +149,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsLowercaseAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_ascii_lowercase()));
             Ok(DispatchResult::Continue)
         }
@@ -121,7 +157,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsUppercaseAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_ascii_uppercase()));
             Ok(DispatchResult::Continue)
         }
@@ -129,7 +165,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_ascii()));
             Ok(DispatchResult::Continue)
         }
@@ -140,7 +176,7 @@ fn char_extended_body(
         Some(CharSubOpcode::ToUppercaseAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_char(c.to_ascii_uppercase()));
             Ok(DispatchResult::Continue)
         }
@@ -148,7 +184,7 @@ fn char_extended_body(
         Some(CharSubOpcode::ToLowercaseAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_char(c.to_ascii_lowercase()));
             Ok(DispatchResult::Continue)
         }
@@ -156,7 +192,7 @@ fn char_extended_body(
         Some(CharSubOpcode::EqIgnoreCaseAscii) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             // Returns true if char equals its ASCII uppercase form
             // (i.e., it's already uppercase or not a letter)
             state.set_reg(dst, Value::from_bool(c == c.to_ascii_uppercase()));
@@ -169,7 +205,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsAlphabeticUnicode) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_alphabetic()));
             Ok(DispatchResult::Continue)
         }
@@ -177,7 +213,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsNumericUnicode) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_numeric()));
             Ok(DispatchResult::Continue)
         }
@@ -185,7 +221,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsAlphanumericUnicode) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_alphanumeric()));
             Ok(DispatchResult::Continue)
         }
@@ -193,7 +229,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsWhitespaceUnicode) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_whitespace()));
             Ok(DispatchResult::Continue)
         }
@@ -201,7 +237,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsControlUnicode) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_control()));
             Ok(DispatchResult::Continue)
         }
@@ -209,7 +245,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsLowercaseUnicode) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_lowercase()));
             Ok(DispatchResult::Continue)
         }
@@ -217,7 +253,7 @@ fn char_extended_body(
         Some(CharSubOpcode::IsUppercaseUnicode) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_bool(c.is_uppercase()));
             Ok(DispatchResult::Continue)
         }
@@ -228,7 +264,7 @@ fn char_extended_body(
         Some(CharSubOpcode::ToUppercaseUnicode) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             // Returns first char of uppercase mapping
             let result = c.to_uppercase().next().unwrap_or(c);
             state.set_reg(dst, Value::from_char(result));
@@ -238,7 +274,7 @@ fn char_extended_body(
         Some(CharSubOpcode::ToLowercaseUnicode) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             // Returns first char of lowercase mapping
             let result = c.to_lowercase().next().unwrap_or(c);
             state.set_reg(dst, Value::from_char(result));
@@ -248,7 +284,7 @@ fn char_extended_body(
         Some(CharSubOpcode::ToTitlecaseUnicode) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             // Titlecase often equals uppercase for most chars
             // For special cases like 'ǆ' → 'ǅ', we'd need Unicode tables
             // Fallback to uppercase which is correct for most chars
@@ -263,7 +299,7 @@ fn char_extended_body(
         Some(CharSubOpcode::ToCodePoint) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_i64(c as u32 as i64));
             Ok(DispatchResult::Continue)
         }
@@ -271,7 +307,7 @@ fn char_extended_body(
         Some(CharSubOpcode::FromCodePoint) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let code_point = state.get_reg(src_reg).as_i64() as u32;
+            let code_point = lenient_i64(state.get_reg(src_reg)) as u32;
             match char::from_u32(code_point) {
                 Some(c) => {
                     state.set_reg(dst, Value::from_char(c));
@@ -288,7 +324,7 @@ fn char_extended_body(
         Some(CharSubOpcode::LenUtf8) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_i64(c.len_utf8() as i64));
             Ok(DispatchResult::Continue)
         }
@@ -296,7 +332,7 @@ fn char_extended_body(
         Some(CharSubOpcode::LenUtf16) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             state.set_reg(dst, Value::from_i64(c.len_utf16() as i64));
             Ok(DispatchResult::Continue)
         }
@@ -329,7 +365,7 @@ fn char_extended_body(
             let src_char = read_reg(state)?;
             let src_buf = read_reg(state)?;
 
-            let c = state.get_reg(src_char).as_char();
+            let c = lenient_char(state.get_reg(src_char));
             let mut tmp = [0u8; 4];
             let encoded = c.encode_utf8(&mut tmp);
             let n_bytes = encoded.len();
@@ -445,7 +481,7 @@ fn char_extended_body(
             let idx_reg = read_reg(state)?;
 
             let bytes_val = state.get_reg(bytes_reg);
-            let idx = state.get_reg(idx_reg).as_i64();
+            let idx = lenient_i64(state.get_reg(idx_reg));
 
             // Recover the byte slice. Four cases:
             //   1. BYTE_SLICE byte view — the canonical `&[Byte]` from
@@ -536,7 +572,7 @@ fn char_extended_body(
             // Escape character for debug output
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             // Return escaped representation as code point value
             // (full implementation would return string)
             let escaped = c.escape_debug().next().unwrap_or(c);
@@ -617,7 +653,7 @@ fn char_extended_body(
 
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
+            let c = lenient_char(state.get_reg(src_reg));
             let cp = c as u32;
 
             // ASCII fast path — exact specific tag.
