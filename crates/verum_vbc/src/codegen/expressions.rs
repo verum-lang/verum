@@ -9317,7 +9317,10 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Reg>> {
         use verum_ast::expr::ResolvedCallTarget;
         match target {
-            ResolvedCallTarget::StaticCall { qualified_name } => {
+            ResolvedCallTarget::StaticCall {
+                qualified_name,
+                type_prefix_receiver,
+            } => {
                 // Raw-pointer arithmetic intercept (pre-resolved
                 // path): the typechecker stamps
                 // `self.entries.offset(idx)` on a `&unsafe Slot<K,V>`
@@ -9421,7 +9424,14 @@ impl VbcCodegen {
                 // bridges the pre-resolved fast path onto the same
                 // builtin-method dispatch surface that the legacy
                 // cascade reaches.
-                if let Some(recv) = receiver
+                // PROTO-STATIC-EXISTENTIAL (T0585): a type-prefix
+                // receiver is NOT a builtin value — redirecting through
+                // it discards the typechecker's implementor resolution
+                // and replays the cascade into an arbitrary first impl
+                // (measured: `let d: Int = Default.default();` returned
+                // the atomic-ordering variant `Relaxed`).
+                if !type_prefix_receiver
+                    && let Some(recv) = receiver
                     && let Some(redirect) = self.try_redirect_resolved_to_builtin(
                         qualified_name.as_str(),
                         method.name.as_str(),
@@ -9474,9 +9484,62 @@ impl VbcCodegen {
                 // cross-module import.
                 let info_opt = self.ctx.lookup_function(qualified_name.as_str()).cloned();
                 let info = match info_opt {
-                    Some(info) => info,
+                    Some(info) => {
+                        if std::env::var_os("VERUM_TRACE_PROTOSTAMP").is_some() {
+                            eprintln!(
+                                "[protostamp] static-call HIT '{}' -> fid={} body_len? param_count={}",
+                                qualified_name, info.id.0, info.param_count
+                            );
+                        }
+                        info
+                    }
                     None => {
+                        if std::env::var_os("VERUM_TRACE_PROTOSTAMP").is_some() {
+                            eprintln!(
+                                "[protostamp] static-call MISS '{}' (receiver={})",
+                                qualified_name,
+                                receiver.is_some()
+                            );
+                        }
                         if let Some(recv) = receiver {
+                            // PROTO-STATIC-EXISTENTIAL (T0585): when the stamp
+                            // names `{Impl}.{method}` but the impl body lives in
+                            // the BAKED archive (looked up above under the bare
+                            // qualified spelling, which the archive registers
+                            // module-qualified), re-entering with the ORIGINAL
+                            // receiver discards the typechecker's implementor
+                            // resolution — `Default.default()` replays the
+                            // cascade into the protocol's bodyless requirement
+                            // stub.  Re-enter with a synthesized receiver path
+                            // for the RESOLVED implementor head instead
+                            // (`Int.default()`), which the existing static
+                            // machinery + runtime by-name resolution handle
+                            // correctly.  Only when the stamped head differs
+                            // from the syntactic receiver — otherwise this is
+                            // the ordinary miss and the plain re-entry below
+                            // preserves historical behaviour.
+                            if *type_prefix_receiver
+                                && let Some((head, _)) =
+                                    qualified_name.as_str().rsplit_once('.')
+                                && !head.is_empty()
+                                && !head.contains('.')
+                                && let verum_ast::expr::ExprKind::Path(rp) = &recv.kind
+                                && rp.segments.len() == 1
+                                && rp.last_segment_name() != head
+                            {
+                                let head_expr = Expr::new(
+                                    verum_ast::expr::ExprKind::Path(
+                                        verum_ast::ty::Path::single(verum_ast::Ident::new(
+                                            head,
+                                            recv.span,
+                                        )),
+                                    ),
+                                    recv.span,
+                                );
+                                return self.compile_method_call(
+                                    &head_expr, method, args, None,
+                                );
+                            }
                             return self.compile_method_call(recv, method, args, None);
                         }
                         // [diag] see VERUM_TRACE_UNDEF_FN in compile_call.
@@ -10666,12 +10729,23 @@ impl VbcCodegen {
         // Phase 1: Pre-resolved fast path.
         // ──────────────────────────────────────────────────────────
         if let Some(target) = resolved_target {
+            if std::env::var_os("VERUM_TRACE_PROTOSTAMP").is_some() {
+                eprintln!(
+                    "[protostamp] fast-path method={} target={:?}",
+                    method.name, target
+                );
+            }
             return self.compile_resolved_call_target_with_receiver(
                 target,
                 Some(receiver),
                 args,
                 method,
             );
+        }
+        if std::env::var_os("VERUM_TRACE_PROTOSTAMP").is_some()
+            && method.name.as_str() == "default"
+        {
+            eprintln!("[protostamp] NO-STAMP method-call .{}()", method.name);
         }
 
         // ──────────────────────────────────────────────────────────

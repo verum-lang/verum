@@ -698,6 +698,22 @@ pub struct TypeChecker {
     /// ENCLOSING window (their vars may be constrained by enclosing
     /// use).
     pub(crate) pending_ambiguity: Vec<(Text, verum_ast::span::Span, Type)>,
+    /// PROTO-STATIC-EXISTENTIAL (T0585) — protocol-receiver static
+    /// calls (`Default.default()`, `From.from(42)`) instantiate `Self`
+    /// as a fresh implementor var α bounded by the protocol.  Each
+    /// call queues `(call_span, protocol_name, method_name, α)` here;
+    /// the function epilogue (same place the E404 ambiguity judge
+    /// runs, mark-disciplined like `pending_ambiguity`) discharges it:
+    /// α resolved to a concrete implementor → verify the impl exists
+    /// (ProtocolNotImplemented otherwise) and stamp
+    /// `resolved_call_targets[span] = StaticCall("{Impl}.{method}")`
+    /// so codegen emits the direct call instead of replaying the
+    /// name cascade into the protocol's bodyless requirement stub.
+    /// α still free → the binding-level E404 judge has already
+    /// reported it (bindings are the shapes that matter); nothing is
+    /// double-reported here.
+    pub(crate) pending_protocol_static_calls:
+        Vec<(verum_ast::span::Span, Text, Text, TypeVar)>,
     /// MOD-MED-2 — provenance side-table for glob-imported
     /// names. Maps each name registered by a glob mount to its
     /// `ImportProvenance { origin, module_path }`. Consulted at every

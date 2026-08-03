@@ -98,6 +98,7 @@ impl TypeChecker {
             span,
             verum_ast::expr::ResolvedCallTarget::StaticCall {
                 qualified_name: qualified_name.into(),
+                type_prefix_receiver: false,
             },
         );
     }
@@ -464,6 +465,7 @@ impl TypeChecker {
             diagnostics: List::new(),
             deferred_soundness_errors: Vec::new(),
             pending_ambiguity: Vec::new(),
+            pending_protocol_static_calls: Vec::new(),
             glob_import_provenance: std::collections::HashMap::new(),
             current_cog_name: verum_common::Text::from(""),
             dependent_enabled: true,
@@ -2577,6 +2579,7 @@ impl TypeChecker {
             diagnostics: List::new(),
             deferred_soundness_errors: Vec::new(),
             pending_ambiguity: Vec::new(),
+            pending_protocol_static_calls: Vec::new(),
             glob_import_provenance: std::collections::HashMap::new(),
             current_cog_name: verum_common::Text::from(""),
             dependent_enabled: true,

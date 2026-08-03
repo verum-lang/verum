@@ -2782,7 +2782,17 @@ pub enum ResolvedCallTarget {
     /// methods (`Duration.nanos`) and free functions reachable via
     /// method-syntax dispatch.  `qualified_name` is the canonical
     /// `"Type.method"` form codegen looks up via `lookup_function`.
-    StaticCall { qualified_name: Text },
+    StaticCall {
+        qualified_name: Text,
+        /// True when the call-site's syntactic receiver is a TYPE-LEVEL
+        /// prefix (protocol or type name) rather than a runtime value —
+        /// `Default.default()` stamped as `Int.default`.  Codegen must
+        /// not treat such a receiver as a builtin VALUE (the
+        /// builtin-collection redirect) nor compile it as a `self`
+        /// argument.  Instance-method stamps (`xs.len()` → `List.len`)
+        /// carry `false`.
+        type_prefix_receiver: bool,
+    },
     /// Variant constructor: `Maybe.Some(x)`, `Result.Ok(y)`,
     /// `Ordering.Less`, …  Codegen emits `MakeVariant{Typed}` rather
     /// than `Call` for these so the heap object carries the correct

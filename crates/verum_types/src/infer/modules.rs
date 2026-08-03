@@ -9914,6 +9914,11 @@ impl TypeChecker {
         // main's 14 recorded candidates with it — the spec reported
         // 1 E404 instead of 15).
         let ambiguity_mark = self.pending_ambiguity.len();
+        // PROTO-STATIC-EXISTENTIAL (T0585): same marker discipline as
+        // the ambiguity window — this function's protocol-static calls
+        // are discharged in its own epilogue, an aborted nested check
+        // cannot drain the enclosing function's queue.
+        let proto_static_mark = self.pending_protocol_static_calls.len();
 
         // Process generic parameters (type parameters and meta parameters)
         // Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Meta parameters for compile-time computation
@@ -10931,6 +10936,76 @@ impl TypeChecker {
                 span: bind_span,
             };
             self.diagnostics.push(e.to_diagnostic());
+        }
+
+        // PROTO-STATIC-EXISTENTIAL discharge (T0585): every protocol-
+        // receiver static call this function made either resolved its
+        // implementor var α — verify the impl and stamp the direct
+        // call target — or left it free, in which case the binding-
+        // level E404 judge above has already reported the ambiguity
+        // (the un-annotated `let` shapes are exactly the judged ones;
+        // reporting again here would double-count the same defect).
+        let proto_discharged: Vec<_> = self
+            .pending_protocol_static_calls
+            .drain(proto_static_mark..)
+            .collect();
+        for (call_span, proto_name, method_name, alpha) in proto_discharged {
+            let resolved = self.normalize_type(&self.unifier.apply(&Type::Var(alpha)));
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace] proto-static discharge {}.{} resolved={} span={:?}",
+                    proto_name, method_name, resolved, call_span
+                );
+            }
+            if !resolved.free_vars().is_empty() {
+                continue;
+            }
+            let impl_head: Option<Text> = match &resolved {
+                Type::Named { path, .. } => {
+                    Some(Text::from(path.last_segment_name()))
+                }
+                Type::Generic { name, .. } => Some(name.clone()),
+                // Primitive implementors (`let d: Int = Default.default()`)
+                // arrive as dedicated Type variants, not Named — measured
+                // on the first landing: `resolved=Int` fell through this
+                // match, no stamp was written, and the runtime cascade
+                // executed the protocol's bodyless requirement stub.
+                other => other.primitive_name().map(Text::from),
+            };
+            let Some(head) = impl_head else { continue };
+            let proto_path = verum_ast::ty::Path::single(verum_ast::Ident::new(
+                proto_name.as_str(),
+                call_span,
+            ));
+            let has_impl = matches!(
+                self.protocol_checker.read().find_impl(&resolved, &proto_path),
+                Maybe::Some(_)
+            );
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace] proto-static impl-check {} : {} -> has_impl={} stamp={}.{}",
+                    head, proto_name, has_impl, head, method_name
+                );
+            }
+            if has_impl {
+                self.resolved_call_targets.insert(
+                    call_span,
+                    verum_ast::expr::ResolvedCallTarget::StaticCall {
+                        qualified_name: Text::from(format!("{}.{}", head, method_name)),
+                        // The syntactic receiver is the PROTOCOL name —
+                        // a type-level prefix, not a runtime value.
+                        type_prefix_receiver: true,
+                    },
+                );
+            } else {
+                let e = TypeError::ProtocolNotImplemented {
+                    ty: head,
+                    protocol: proto_name,
+                    method: method_name,
+                    span: call_span,
+                };
+                self.diagnostics.push(e.to_diagnostic());
+            }
         }
 
         // QTT enforcement: if any parameter was annotated with a
@@ -22324,6 +22399,100 @@ impl TypeChecker {
                         has_local_type && has_this_inherent
                     };
                     if is_type_name && !user_type_shadows_this_method {
+                        // PROTO-STATIC-EXISTENTIAL (T0585): the receiver names a
+                        // PROTOCOL, not a concrete type (`Default.default()`,
+                        // `From.from(42)`).  `Self` in the protocol's signature is
+                        // EXISTENTIAL here — "some implementor, to be determined" —
+                        // and must instantiate as a fresh var α bounded by the
+                        // protocol, never as the protocol's own name.  Measured
+                        // pre-fix (b98): the general protocol-method fallback below
+                        // served these calls with the bake-flattened `Self`→`Default`
+                        // nominal, so `let d = Default.default();` judged fully
+                        // concrete (type `Default`, no E404) and at runtime the
+                        // by-name cascade executed the bodyless requirement stub /
+                        // an arbitrary first impl — `Default.default()` returned
+                        // `Relaxed`, and an annotated `let c: Counter =
+                        // Default.default();` returned const-zero instead of
+                        // calling the user's impl.
+                        //
+                        // α unresolved at fn end → the binding-level E404 judge
+                        // reports honest ambiguity.  α resolved → the epilogue
+                        // discharge verifies the implementor and stamps the direct
+                        // `{Impl}.{method}` call target for codegen.
+                        if self.protocol_checker.read().is_protocol_by_name(type_name) {
+                            let method_name_text = verum_common::Text::from(method_name);
+                            let proto_method_ty = {
+                                let pc = self.protocol_checker.read();
+                                pc.get_protocol(&verum_common::Text::from(type_name)).and_then(
+                                    |p| p.methods.get(&method_name_text).map(|m| m.ty.clone()),
+                                )
+                            };
+                            if let Some(raw_ty) = proto_method_ty
+                                && let Type::Function { ref params, .. } = raw_ty
+                                && params.len() == args.len()
+                            {
+                                // Freshen registration-time vars: protocol generic
+                                // params were interned ONCE at registration (and the
+                                // hardcoded baseline `Default` even carries the
+                                // globally shared `TypeVar(0)`); without per-call
+                                // freshening every call site would share their
+                                // unification state.
+                                let reg_vars: List<crate::ty::TypeVar> =
+                                    raw_ty.free_vars().into_iter().collect();
+                                let fresh_ty = if reg_vars.is_empty() {
+                                    raw_ty.clone()
+                                } else {
+                                    crate::context::TypeScheme::poly(reg_vars, raw_ty.clone())
+                                        .instantiate()
+                                };
+                                // Self ↦ α.  The bake flattens `Self` to the
+                                // protocol's own name (substitute_self_in_type_name
+                                // runs with the protocol as parent), so inside a
+                                // signature taken FROM this protocol both spellings
+                                // denote the implementor.
+                                let alpha = crate::ty::TypeVar::fresh();
+                                let subst: indexmap::IndexMap<verum_common::Text, Type> =
+                                    [
+                                        (verum_common::Text::from("Self"), Type::Var(alpha)),
+                                        (verum_common::Text::from(type_name), Type::Var(alpha)),
+                                    ]
+                                    .into_iter()
+                                    .collect();
+                                let inst =
+                                    TypeChecker::substitute_named_params_in_type(&fresh_ty, &subst);
+                                if let Type::Function {
+                                    params: inst_params,
+                                    return_type: inst_return,
+                                    ..
+                                } = &inst
+                                {
+                                    self.type_var_bounds.insert(alpha, {
+                                        let mut bounds: List<crate::protocol::ProtocolBound> =
+                                            List::new();
+                                        bounds.push(crate::protocol::ProtocolBound {
+                                            protocol: verum_ast::ty::Path::single(
+                                                verum_ast::Ident::new(type_name, span),
+                                            ),
+                                            args: List::new(),
+                                            is_negative: false,
+                                        });
+                                        bounds
+                                    });
+                                    for (arg, param_ty) in args.iter().zip(inst_params.iter()) {
+                                        let resolved_param = self.unifier.apply(param_ty);
+                                        self.check_expr(arg, &resolved_param)?;
+                                    }
+                                    self.pending_protocol_static_calls.push((
+                                        span,
+                                        verum_common::Text::from(type_name),
+                                        method_name_text,
+                                        alpha,
+                                    ));
+                                    let resolved_return = self.unifier.apply(inst_return);
+                                    return Ok(Some(InferResult::new(resolved_return)));
+                                }
+                            }
+                        }
                         // Build the lookup type from the type name.
                         // For generic types like Wrapper, this creates Wrapper with no args, and
                         // lookup_protocol_method will match it against Wrapper<T> implementations.

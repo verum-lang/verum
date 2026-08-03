@@ -1187,6 +1187,32 @@ impl TypeChecker {
                                         // Apply substitution: Self -> expected
                                         let result_type =
                                             self.substitute_self_type(return_type, expected);
+                                        // PROTO-STATIC-EXISTENTIAL (T0585): this
+                                        // bidirectional arm resolves the implementor
+                                        // from the EXPECTED type, but resolution that
+                                        // stops at the type tier leaves codegen to
+                                        // replay the by-name cascade — which lands on
+                                        // the protocol's bodyless requirement stub
+                                        // (measured: `let c: Counter =
+                                        // Default.default();` printed const-zero, the
+                                        // user's impl never ran).  Queue the same
+                                        // epilogue discharge the synth arm uses: α is
+                                        // pre-bound to the expected implementor, the
+                                        // discharge verifies the impl and stamps
+                                        // `resolved_call_targets[span]` with the
+                                        // direct `{Impl}.{method}` target.
+                                        let alpha = crate::ty::TypeVar::fresh();
+                                        let _ = self.unifier.unify(
+                                            &Type::Var(alpha),
+                                            &expected_normalized,
+                                            expr.span,
+                                        );
+                                        self.pending_protocol_static_calls.push((
+                                            expr.span,
+                                            verum_common::Text::from(name),
+                                            method_name_text.clone(),
+                                            alpha,
+                                        ));
                                         return Ok(InferResult::new(result_type));
                                     }
                                 }

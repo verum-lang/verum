@@ -1,0 +1,40 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L1
+// @tags: protocols, static-dispatch, existential-self
+//
+// Pin for the PROTO-STATIC-EXISTENTIAL fix (T0585): a static call
+// through a PROTOCOL receiver must dispatch to the ANNOTATION-selected
+// implementor's method — never to the protocol's bodyless requirement
+// stub, never to whichever impl registered first under the bare method
+// name.
+//
+// Measured pre-fix (b98): `let c: Counter = Default.default();`
+// printed c.n = 0.0 (const-zero — the user impl never ran), and the
+// un-annotated form silently typed as the protocol's OWN name and
+// executed an arbitrary first impl (returned the atomic-ordering
+// variant `Relaxed`).
+
+type Counter is { n: Int };
+
+implement Default for Counter {
+    fn default() -> Counter { Counter { n: 7 } }
+}
+
+fn main() {
+    // User-defined implementor selected by the let annotation.
+    let c: Counter = Default.default();
+    assert_eq(c.n, 7);
+
+    // Stdlib implementor (core/base/primitives.vr) selected the same
+    // way — proves the stamp path reaches BAKED impl bodies too.
+    let d: Int = Default.default();
+    assert_eq(d, 0);
+
+    // Implementor var bound through an argument position instead of a
+    // let annotation.
+    let t: Text = Default.default();
+    assert_eq(t.len(), 0);
+
+    print("protocol-static-dispatch-ok");
+}
