@@ -519,6 +519,43 @@ impl TypeChecker {
                 // This allows `let s: Signal = ();` without explicit wrapping
                 let inner_key = format!("__newtype_inner_{}", type_name);
                 self.ctx.define_type(inner_key, Type::Unit);
+
+                // GENERIC unit type (`type Phantom<T> is ();`, ERROR 13 of
+                // the ambiguous_types spec, T0585): the VALUE use
+                // `Phantom` must carry the phantom parameter as a fresh
+                // inference var PER USE — a poly scheme over
+                // `Generic { Phantom, [T] }`.  Pre-fix the value use
+                // synthesized bare `Named { Phantom, args: [] }` (this
+                // arm registered no value scheme at all, so resolution
+                // fell to the type-as-value fallback): the phantom
+                // parameter was silently DROPPED, `let phantom =
+                // Phantom;` typed fully concrete and the E404 ambiguity
+                // judge (which fires on all-args-free nominal
+                // applications) never saw it.  With the scheme,
+                // un-annotated use judges honest-E404; an annotated
+                // `let p: Phantom<Int> = Phantom;` instantiates and
+                // unifies the arg away.
+                if !type_decl.generics.is_empty() {
+                    use verum_ast::ty::GenericParamKind;
+                    let vars: List<crate::ty::TypeVar> = type_decl
+                        .generics
+                        .iter()
+                        .filter(|gp| {
+                            matches!(gp.kind, GenericParamKind::Type { .. })
+                        })
+                        .map(|_| crate::ty::TypeVar::fresh())
+                        .collect();
+                    if !vars.is_empty() {
+                        let generic_ty = Type::Generic {
+                            name: type_name.clone(),
+                            args: vars.iter().map(|v| Type::Var(*v)).collect(),
+                        };
+                        self.ctx.env.insert(
+                            type_name.clone(),
+                            crate::context::TypeScheme::poly(vars, generic_ty),
+                        );
+                    }
+                }
             }
             TypeDeclBody::Inductive(_) => {
                 // Dependent type features (v2.0+) - register as named type for now
