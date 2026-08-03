@@ -136,17 +136,14 @@ jobs:
           -p verum_diagnostics -p verum_error -p verum_protocol_types
           -p verum_fast_parser
 
-      # verum_types tier: 1,123 tests measured green 2026-08-03. ONE
-      # honest-red pin is carved out BY NAME with its tracking task —
-      # test_affine_pipeline_debug caught a real use-after-move
-      # soundness hole (T0713); the carve-out is removed in the same
-      # landing that fixes it. A named skip keeps 1,123 guards armed
-      # instead of holding the whole crate hostage to one known-red.
-      - name: Run tests/ for verum_types (T0713 carve-out)
+      # verum_types tier: 1,124 tests green (measured 2026-08-03). The
+      # affine pin sat red only because it asserted the pre-recovery
+      # error CHANNEL (Err) while STMT-RECOVERY-1 reports through
+      # diagnostics — enforcement itself was live (T0713, falsified);
+      # the pin now accepts either channel and the carve-out is gone.
+      - name: Run tests/ for verum_types
         timeout-minutes: 30
-        run: >
-          cargo test --locked --tests -p verum_types
-          -- --skip test_affine_pipeline_debug
+        run: cargo test --locked --tests -p verum_types
 
   # ---------------------------------------------------------------------------
   # Job 2: VCS L0 (2,963 specs, 100%) + L1 (499 specs, 100%). Blocks merge.

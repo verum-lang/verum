@@ -275,6 +275,12 @@ impl AffineTracker {
     pub fn bind(&mut self, name: impl Into<Text>, ty: Type, span: Span) {
         let name = name.into();
         let resource_kind = self.get_type_resource_kind(&ty);
+        if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
+            eprintln!(
+                "[affine] bind '{}' kind={:?} ty={}",
+                name, resource_kind, ty
+            );
+        }
 
         // Only track affine or linear types
         if resource_kind.is_at_most_once() {
@@ -373,6 +379,14 @@ impl AffineTracker {
     /// Also returns an error if the value is from outer scope and we're in a loop.
     /// Also returns an error if any field has been moved out (partial move).
     pub fn use_value(&mut self, name: &str, span: Span) -> Result<(), TypeError> {
+        if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
+            eprintln!(
+                "[affine] use '{}' tracked={} consumed={:?}",
+                name,
+                self.bindings.contains_key(&Text::from(name)),
+                self.bindings.get(&Text::from(name)).map(|b| b.is_consumed)
+            );
+        }
         if let Some(binding) = self.bindings.get_mut(&Text::from(name)) {
             if binding.is_consumed {
                 // Value already consumed
@@ -621,6 +635,14 @@ impl AffineTracker {
     ///
     /// Allowed for immutable borrows that don't move the value.
     pub fn borrow_value(&mut self, name: &str, _span: Span) -> Result<(), TypeError> {
+        if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
+            eprintln!(
+                "[affine] borrow '{}' tracked={} consumed={:?}",
+                name,
+                self.bindings.contains_key(&Text::from(name)),
+                self.bindings.get(&Text::from(name)).map(|b| b.is_consumed)
+            );
+        }
         // Borrowing is allowed as long as the value wasn't consumed
         if let Some(binding) = self.bindings.get(&Text::from(name))
             && binding.is_consumed

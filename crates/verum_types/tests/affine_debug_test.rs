@@ -74,17 +74,39 @@ fn main() {
         }
     }
 
-    // The check SHOULD fail due to use after move
+    // The check SHOULD fail due to use after move.
+    //
+    // CONTRACT UPDATE (T0713): since the stop-after-first-error
+    // recovery discipline landed (STMT-RECOVERY-1, T0584/T0585
+    // class), `check_item` deliberately returns `Ok` after PUSHING
+    // the error as a Diagnostic and recovering the statement binding
+    // — one bad statement no longer aborts the whole item.  The
+    // rejection therefore surfaces on EITHER channel: a hard `Err`
+    // (pre-recovery paths) or an Error-severity diagnostic.  This
+    // pin sat red for exactly that reason the day the tests/ tier
+    // was first measured (T0709) — the enforcement itself was live
+    // (E302 recorded), the pin just asserted the old channel.
+    let diag_msgs: Vec<String> = checker
+        .diagnostics()
+        .iter()
+        .map(|d| format!("{:?}", d))
+        .collect();
+    let rejected = result.is_err() || !diag_msgs.is_empty();
     assert!(
-        result.is_err(),
-        "Type check should fail due to use-after-move of h1"
+        rejected,
+        "Type check should fail due to use-after-move of h1 (no Err, no diagnostics)"
     );
 
-    let err = result.unwrap_err();
-    let err_msg = format!("{}", err);
+    let err_msg = match &result {
+        Err(e) => format!("{}", e),
+        Ok(()) => diag_msgs.join("\n"),
+    };
     println!("DEBUG: Error message = {}", err_msg);
     assert!(
-        err_msg.contains("moved") || err_msg.contains("use after") || err_msg.contains("already"),
+        err_msg.contains("moved")
+            || err_msg.contains("use after")
+            || err_msg.contains("used after")
+            || err_msg.contains("already"),
         "Expected move-related error, got: {}",
         err_msg
     );
