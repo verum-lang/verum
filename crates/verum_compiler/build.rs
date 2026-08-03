@@ -1853,6 +1853,21 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         // also owns the TypeId constants and the TypeRef wire shape, both
         // of which the precompiler emits directly.
         "crates/verum_vbc/src/types.rs",
+        // T0711 (measured trap, 2026-08-03): the VBC WIRE layer itself.
+        // v2.10 PARAMNAME-CARRY changed serialize/deserialize/module/
+        // format — none were in this list, so FOUR writer commits
+        // produced fresh compilers that silently embedded the b63-era
+        // sidecar ("cache HIT" while the wire format had moved; the
+        // declared_ty carry read as EMPTY at every consumer until a
+        // manual artefact delete forced a re-bake).  format.rs also
+        // carries VERSION_MINOR, so wire-version bumps invalidate
+        // automatically — no manual PRECOMPILE_SCHEMA_VERSION bump to
+        // forget.
+        "crates/verum_vbc/src/serialize.rs",
+        "crates/verum_vbc/src/deserialize.rs",
+        "crates/verum_vbc/src/module.rs",
+        "crates/verum_vbc/src/format.rs",
+        "crates/verum_vbc/src/archive.rs",
     ];
     hasher.update(b"codegen:");
     for rel in codegen_paths {
