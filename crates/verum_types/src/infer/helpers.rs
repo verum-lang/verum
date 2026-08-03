@@ -2192,13 +2192,39 @@ pub(crate) fn register_variant_signature_for_lazy(
         }
     };
 
+    // T0716 — these are module-level facts, so they go in the ROOT env
+    // scope via `insert_root`, not the current rib.  Lazy loading fires
+    // wherever inference first touches the parent type — often inside a
+    // temporary `push_scope` rib — and a plain `insert` dies with that
+    // rib.  Measured failure: `Maybe` claimed bare `None` first (correct,
+    // declaration order), its rib popped, then `GPUBackend`'s claim from
+    // a longer-lived rib repopulated the name and `let x = None;` typed
+    // as the GPU backend variant.  First-registered-wins (the guard
+    // below) is only meaningful if a claim, once made, survives.
     for (vname, payload_ty) in &variant_map {
         if *payload_ty == Type::Unit {
             if checker.ctx.env.lookup(vname.as_str()).is_none() {
-                checker.ctx.env.insert(vname.clone(), make_scheme());
+                if crate::ctor_trace_enabled() && vname.as_str() == "None" {
+                    eprintln!("[ctor-trace] unit-ctor env CLAIM 'None' by parent '{}'", name);
+                }
+                checker.ctx.env.insert_root(vname.clone(), make_scheme());
+            } else if crate::ctor_trace_enabled() && vname.as_str() == "None" {
+                eprintln!("[ctor-trace] unit-ctor env SKIP 'None' (occupied) wanted-parent '{}'", name);
             }
         }
         let qualified_name: Text = format!("{}.{}", name, vname).into();
+        // The qualified `Type.Variant` entry deliberately stays
+        // RIB-LOCAL (plain insert), unlike the bare unit-ctor above.
+        // Measured (T0716 diagnosis builds): making it durable at the
+        // root — even first-wins-guarded — regresses payload inference
+        // (`from_fn(|| … Maybe.Some(n*10) … )` judges
+        // `FromFn<fn() -> Maybe<_>>`, E404 ×2 in base/iterator).  A
+        // durable VariantBody-typed env entry hijacks the env-first
+        // application arm, which instantiates the body with fresh free
+        // vars and never unifies the payload against the call
+        // argument; when the entry dies with its rib, resolution falls
+        // through to the variant-constructor machinery, which links
+        // payload ↔ argument correctly.
         checker.ctx.env.insert(qualified_name, make_scheme());
     }
 

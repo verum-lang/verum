@@ -1305,6 +1305,28 @@ impl TypeEnv {
         self.bindings.insert(name_text, scheme);
     }
 
+    /// Insert a binding in the ROOT (module-level) scope, surviving
+    /// every `pop_scope` between here and the top.
+    ///
+    /// T0716 — lazy stdlib registration runs WHEREVER inference first
+    /// touches a type, which is frequently inside a temporary rib
+    /// (`push_scope`-ed block/function body).  A module-level fact
+    /// written with plain `insert` then dies with that rib: measured,
+    /// `Maybe` claimed the bare `None` unit-ctor first (correct
+    /// declaration order), the rib popped, and `GPUBackend`'s later
+    /// claim — from a longer-lived scope — repopulated the name, so
+    /// `let x = None;` silently typed as the GPU Backend variant.
+    /// Stdlib registration facts are module-level BY NATURE; they
+    /// belong to the root rib regardless of where laziness fired.
+    pub fn insert_root(&mut self, name: impl Into<Text>, scheme: TypeScheme) {
+        let name_text: Text = name.into();
+        let mut env: &mut Self = self;
+        while let Some(parent) = env.parent.as_deref_mut() {
+            env = parent;
+        }
+        env.bindings.insert(name_text, scheme);
+    }
+
     /// Insert a monomorphic type
     pub fn insert_mono(&mut self, name: impl Into<Text>, ty: Type) {
         self.insert(name, TypeScheme::mono(ty));

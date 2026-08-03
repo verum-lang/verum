@@ -1,0 +1,22 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L1
+// @tags: types, inference, variant, first-wins, error
+// @expected-error: E404 "Ambiguous type"
+// @expected-error-count: 1
+
+/// Pin for T0716 — bare `None` with no annotation must judge an HONEST
+/// E404 against the FIRST-registered parent (Maybe, per stdlib
+/// declaration order), never silently type as a later-registered
+/// sibling's unit variant (measured pre-fix: GPUBackend's `None`).
+///
+/// The E404 here is the correct behavior: the payload type parameter
+/// of Maybe cannot be inferred without an annotation.  Pre-fix this
+/// file CHECKED CLEAN because `None` bound to a fully-concrete unit
+/// variant of the wrong parent — a silent wrong type, strictly worse
+/// than the error.
+
+fn main() {
+    let none_val = None;
+    print("unreachable-under-correct-inference");
+}
