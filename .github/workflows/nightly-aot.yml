@@ -1,0 +1,81 @@
+# Nightly AOT lane (T0709 stage 2) — the tests/ surfaces the merge-gate
+# CANNOT run: AOT-heavy suites that build native binaries through LLVM
+# and are subject to the single-machine "never two AOT suites
+# concurrently" discipline (CLAUDE.md).  Nightly + manual dispatch,
+# NON-BLOCKING by design: this lane exists to MEASURE and to file
+# honest reds as tasks, not to gate merges — a lane nobody has timed
+# yet must not hold the merge queue hostage.  Promotion path: once a
+# suite here runs green for a week and its wall-clock is known, it
+# graduates into the merge-blocking `integration` job of ci.yml.
+#
+# Serialisation contract: ONE runner, `max-parallel: 1`, suites run
+# strictly in sequence inside a single job — this is the CI encoding
+# of the no-two-AOT-suites rule.
+name: Nightly AOT
+
+on:
+  schedule:
+    - cron: "20 3 * * *" # 03:20 UTC daily
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-aot
+  cancel-in-progress: false
+
+jobs:
+  aot-tests:
+    name: AOT-heavy tests/ (measure, non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: nightly-aot
+          cache-on-failure: true
+
+      # Sequential by construction — one suite at a time, each with its
+      # own timing line so the promotion decision has real numbers.
+      - name: verum_compiler tests/
+        continue-on-error: true
+        run: |
+          /usr/bin/time -v cargo test --locked --tests -p verum_compiler 2>&1 \
+            | tee compiler-tests.log | tail -40
+
+      - name: verum_cli tests/
+        continue-on-error: true
+        run: |
+          /usr/bin/time -v cargo test --locked --tests -p verum_cli 2>&1 \
+            | tee cli-tests.log | tail -40
+
+      - name: verum_codegen tests/
+        continue-on-error: true
+        run: |
+          /usr/bin/time -v cargo test --locked --tests -p verum_codegen 2>&1 \
+            | tee codegen-tests.log | tail -40
+
+      - name: verum_integration_tests tests/
+        continue-on-error: true
+        run: |
+          /usr/bin/time -v cargo test --locked --tests -p verum_integration_tests 2>&1 \
+            | tee integration-crate-tests.log | tail -40
+
+      - name: Upload suite logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-aot-logs
+          path: "*-tests.log"
+          retention-days: 14

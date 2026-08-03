@@ -54,10 +54,16 @@ SIMD degrades A10/T0112, Tier-0 ptr provenance A19/T0108. Prim-mangle
 totality T0695 + post-typecheck harvest T0706. cbgr_test SIGSEGV
 T0705.
 
-**R5. Gates that actually gate.** CI runs only `--lib --bins` — 849
-`tests/` files inert: T0709 (the single most release-blocking infra
-gap; every "landed CI-INERT" guard sits here). INVENTORY liveness
-T0220. FORCE_VERIFY sweep T0278.
+**R5. Gates that actually gate.** ~~CI runs only `--lib --bins`~~ —
+**LIVE since 2026-08-03 (T0709)**: the `integration` job arms
+11,182 measured-green `tests/` guards (light-8 4,363 + fast_parser
+4,158 + types 1,124 unskipped + verification 1,537). The first two
+sleeping pins it exposed are already adjudicated: T0713 (affine pin
+— falsified, enforcement was live on the diagnostics channel) and
+T0712 (attestation debt, real). Pending tiers: smt (one 10ms timing
+pin needs headroom), vbc (T0714 envelope-rewind pins), AOT-heavy
+nightly lane (draft below). INVENTORY liveness T0220. FORCE_VERIFY
+sweep T0278.
 
 **R6. Verification honesty.** `verify` reports Proved on a violated
 precondition T0657; higher-order reflection T0490; excluded-middle on
