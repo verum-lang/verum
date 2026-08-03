@@ -2168,14 +2168,47 @@ impl TypeChecker {
                             .map(|n| n.as_str().to_string())
                             .collect();
                     }
+                    // SHADOW BAND (T0701 variant C): a DUPLICATE name in
+                    // the pid-ordered list is a band entry — a method
+                    // generic that reuses an impl-level name, published
+                    // AFTER the dense vector with pid `0x8000 | seq`
+                    // (writer: compile_function's band construction;
+                    // dense names are unique by construction, so
+                    // duplicate ⇒ band, and the j-th duplicate carries
+                    // band seq j).  Band entries get their OWN var,
+                    // reachable under the band placeholder, and the
+                    // BARE name re-points to it (method slot wins —
+                    // measured pre-fix: reduce's verbatim-carried `f: F`
+                    // interned into the IMPL's F, the call-site closure
+                    // unified with the receiver's captured closure, and
+                    // `reduce`/`max` judged
+                    // `Some(Item<MappedIter<_, fn(_,_)->_>>)` E404).
+                    let mut seen_slot_names: std::collections::HashSet<&str> =
+                        std::collections::HashSet::new();
+                    let mut band_seq: usize = 0;
                     for (i, n) in slot_names.iter().enumerate() {
-                        if let Some(tv) =
-                            crate::infer::helpers::intern_scope_generic(n)
-                        {
-                            crate::infer::helpers::alias_scope_generic(
-                                &format!("__generic_{}", i),
-                                tv,
-                            );
+                        if seen_slot_names.insert(n.as_str()) {
+                            if let Some(tv) =
+                                crate::infer::helpers::intern_scope_generic(n)
+                            {
+                                crate::infer::helpers::alias_scope_generic(
+                                    &format!("__generic_{}", i),
+                                    tv,
+                                );
+                            }
+                        } else {
+                            // Band var pre-seeded under its placeholder so
+                            // every occurrence in the bound strings interns
+                            // to ONE var.  The BARE name deliberately stays
+                            // on the impl var: a global re-point (measured
+                            // b114/b115) starves the receiver-coupled paths
+                            // that resolve by source name and regressed
+                            // zip5 to the pre-band error; the parse-side
+                            // consumer that needs the band var reaches it
+                            // through the placeholder spelling.
+                            let band_key = format!("__generic_{}", 0x8000usize | band_seq);
+                            band_seq += 1;
+                            let _ = crate::infer::helpers::intern_scope_generic(&band_key);
                         }
                     }
                     // HOF reconnection (T0701): a fn-bounded generic param
@@ -2228,10 +2261,22 @@ impl TypeChecker {
             // impl-slot scope vars, so the receiver bind at the call site
             // flows into the return type.
             let impl_k = fn_desc.impl_generic_names.len();
-            let self_args: List<Type> = fn_desc
-                .impl_generic_names
-                .iter()
-                .filter_map(|n| scope_vars.get(n.as_str()).map(|tv| Type::Var(*tv)))
+            // SHADOW BAND (T0701 variant C): resolve the impl slots by
+            // POSITIONAL placeholder, not by source name — when a
+            // method generic shadows an impl name, the bare-name scope
+            // entry points at the METHOD's band var (parsing scope,
+            // where the shadowed spelling can only mean the method
+            // param), while `Self` instantiates in the IMPL scope.
+            // Measured on the name-keyed form: `ZipIter<A, B>`'s Self
+            // took the band B, the receiver bind never reached the
+            // impl slot, and zip regressed to "expected ListIter<Int>,
+            // found Int" with the band reader on.
+            let self_args: List<Type> = (0..impl_k)
+                .filter_map(|i| {
+                    scope_vars
+                        .get(format!("__generic_{}", i).as_str())
+                        .map(|tv| Type::Var(*tv))
+                })
                 .collect();
             let self_ty = if impl_k > 0 && self_args.len() == impl_k {
                 Type::Generic {

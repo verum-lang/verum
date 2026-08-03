@@ -1497,7 +1497,6 @@ pub(crate) fn alias_scope_generic(key: &str, tv: crate::ty::TypeVar) {
         }
     });
 }
-
 thread_local! {
     // SLICE-METHOD-TYPECHECK-E400 (#51): the descriptor's DECLARED
     // generic-param names (impl-level + method-level), active while

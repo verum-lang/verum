@@ -15022,11 +15022,22 @@ impl VbcCodegen {
             .iter()
             .enumerate()
             .map(|(i, tp)| {
+                // `Self` expands in the IMPL scope (T0701 variant C):
+                // when the passed map is the method's RENDER map, a
+                // colliding name resolves to the shadow band
+                // (0x8000+) — filter it out and fall back to the
+                // parent's declaration position, which IS the dense
+                // pid whenever the parent descriptor exists (map
+                // step 1 numbers parent params first, in this exact
+                // order).  b83 measured the unfiltered form: the
+                // receiver inside `fn(Item<ZipIter<A, B>>) -> B`
+                // rendered with the METHOD's B.
                 let pid = self
                     .ctx
                     .strings
                     .get(tp.name.0 as usize)
                     .and_then(|n| generic_param_map.get(n).copied())
+                    .filter(|pid| *pid < 0x8000)
                     .unwrap_or(i as u16);
                 TypeRef::Generic(crate::types::TypeParamId(pid))
             })
@@ -16705,15 +16716,49 @@ impl VbcCodegen {
         // Kept from this landing: declaration-order fn pids and the
         // fallback gate (deterministic from_fn<T, F> numbering).
         let shadowed_impl_generics: Vec<(String, u16)> = Vec::new();
+        // VARIANT C — SHADOW PID BAND (T0701 third landing, boundary
+        // proven by direct sidecar dump): a method generic that
+        // REUSES an impl-level name (Iterator's default `map<B, F>`
+        // materialised onto `ZipIter<A, B>`; `reduce<F>` onto
+        // `MappedIter<I, F>`) must NOT merge into the impl pid — the
+        // merge made the closure's return the receiver's second type
+        // arg (`zip.map(|p| 1)` → "expected ListIter<Int>, found
+        // Int") and unified every new Mapped closure with the
+        // previous one (the b85 reduce disconnect).  It must not
+        // renumber the dense pids either — b83/b85 measured every
+        // positional carry consumer desyncing.  Colliding names get a
+        // pid in a RESERVED BAND (0x8000 | seq) in a SEPARATE layer:
+        // the dense map keeps the impl binding for every existing
+        // consumer (Self-expansion included), while the RENDER map
+        // (band over dense) serves the method's own signature, where
+        // the source name can only mean the method's parameter.
+        const METHOD_SHADOW_BAND: u16 = 0x8000;
+        let mut method_shadow_band: std::collections::HashMap<String, u16> =
+            std::collections::HashMap::new();
+        let mut band_seq: u16 = 0;
         for gp in func.generics.iter() {
             if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
                 let n = gname.name.to_string();
                 if !method_generic_param_map.contains_key(&n) {
                     method_generic_param_map.insert(n, next_pid);
                     next_pid += 1;
+                } else if !method_shadow_band.contains_key(&n) {
+                    method_shadow_band.insert(n, METHOD_SHADOW_BAND | band_seq);
+                    band_seq += 1;
                 }
             }
         }
+        // The rendering scope for THIS method's own signature strings:
+        // band entries win by name; everything else falls through to
+        // the dense map.  `impl_self_type_ref` stays band-proof by
+        // filtering the band range (Self expands in the IMPL scope).
+        let render_generic_param_map: std::collections::HashMap<String, u16> = {
+            let mut m = method_generic_param_map.clone();
+            for (n, pid) in method_shadow_band.iter() {
+                m.insert(n.clone(), *pid);
+            }
+            m
+        };
 
         // GENERICNAME-CARRY (T0701): serialise the resolved pid→name map
         // into `descriptor.type_params` — previously left EMPTY, so
@@ -16735,6 +16780,13 @@ impl VbcCodegen {
                 .iter()
                 .map(|(n, pid)| (n.clone(), *pid))
                 .chain(shadowed_impl_generics.iter().cloned())
+                // VARIANT C: band entries are published AFTER the dense
+                // vector (sort puts 0x8000+ last) so the typechecker's
+                // scheme birth sees the method generic's DECLARED name
+                // and the `__generic_{0x8000+k}` placeholders in bound
+                // strings resolve; dense consumers (mono by-entry
+                // binding, positional carries) filter the band range.
+                .chain(method_shadow_band.iter().map(|(n, pid)| (n.clone(), *pid)))
                 .collect();
             pid_ordered.sort_unstable_by_key(|(_, pid)| *pid);
             for (gname, pid) in pid_ordered {
@@ -16812,7 +16864,7 @@ impl VbcCodegen {
             // the correct false-flag result.
             let type_ref = match &param.kind {
                 FunctionParamKind::Regular { ty, .. } => {
-                    let resolved = self.resolve_field_type_ref(ty, &method_generic_param_map);
+                    let resolved = self.resolve_field_type_ref(ty, &render_generic_param_map);
                     // **Closure expected-return-type plumbing (#26 residual).**
                     // When the user wrote `f: F` and the function declares
                     // `F: fn(...) -> X`, the resolved TypeRef is
@@ -16825,7 +16877,7 @@ impl VbcCodegen {
                     // and drive the call-site disambig push for closure
                     // arguments.  No-op when the param isn't a generic-param
                     // path or when the generic carries no fn bound.
-                    let resolved = self.substitute_fn_bound_for_generic(resolved, ty, &func.generics, &method_generic_param_map);
+                    let resolved = self.substitute_fn_bound_for_generic(resolved, ty, &func.generics, &render_generic_param_map);
                     // task #41: a scalar `&T` param keeps TypeRef::Reference so the
                     // AOT can deref a lone `&scalar` comparison operand (the
                     // interpreter auto-derefs the CBGR-ref at CmpI/CmpG runtime; the
@@ -16924,7 +16976,7 @@ impl VbcCodegen {
         // TypeRef::Generic(idx) instead of degrading to
         // TypeRef::Concrete(PTR).
         if let verum_common::Maybe::Some(ref ret_ty_ast) = func.return_type {
-            let resolved_return = self.resolve_field_type_ref(ret_ty_ast, &method_generic_param_map);
+            let resolved_return = self.resolve_field_type_ref(ret_ty_ast, &render_generic_param_map);
             // **`Self` return → concrete impl-type TypeId** (§F/§H
             // read-site).  `resolve_field_type_ref` has no notion of the
             // impl type, so a bare `-> Self` (a `PathSegment::SelfValue`

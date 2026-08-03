@@ -33,8 +33,21 @@ impl TypeSubstitution {
     /// Without this the substitution is empty and every `apply` is a no-op, so
     /// no `Generic` is ever replaced and no protocol-method call devirtualizes.
     pub fn from_function(func: &FunctionDescriptor, args: &[TypeRef]) -> Self {
-        if !func.type_params.is_empty() && func.type_params.len() == args.len() {
-            return Self::new(&func.type_params, args);
+        // VARIANT C (T0701): method generics that collide with an
+        // impl-level name are published in the SHADOW BAND (id ≥
+        // 0x8000) after the dense vector.  Receiver type args bind
+        // the DENSE entries only — a band param's concrete type comes
+        // from the call site (the closure), never from the receiver,
+        // so binding it positionally here would recreate the merge
+        // bug this band exists to kill.
+        let dense: Vec<crate::types::TypeParamDescriptor> = func
+            .type_params
+            .iter()
+            .filter(|tp| tp.id.0 < 0x8000)
+            .cloned()
+            .collect();
+        if !dense.is_empty() && dense.len() == args.len() {
+            return Self::new(&dense, args);
         }
         let mut bindings = HashMap::new();
         for (i, arg) in args.iter().enumerate() {
