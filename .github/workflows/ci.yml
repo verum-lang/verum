@@ -145,6 +145,12 @@ jobs:
         timeout-minutes: 30
         run: cargo test --locked --tests -p verum_types
 
+      # verum_verification tier: 1,537 tests measured green 2026-08-03,
+      # zero carve-outs.
+      - name: Run tests/ for verum_verification
+        timeout-minutes: 30
+        run: cargo test --locked --tests -p verum_verification
+
   # ---------------------------------------------------------------------------
   # Job 2: VCS L0 (2,963 specs, 100%) + L1 (499 specs, 100%). Blocks merge.
   # ---------------------------------------------------------------------------
