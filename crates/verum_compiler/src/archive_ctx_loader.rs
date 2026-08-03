@@ -2028,6 +2028,17 @@ impl ArchiveCtxCache {
                 })
                 .collect()
         };
+        if let Ok(f) = std::env::var("VERUM_TRACE_WANTED")
+            && f != "1"
+        {
+            let names: Vec<&str> =
+                decoded.iter().map(|(n, _)| n.as_str()).take(24).collect();
+            eprintln!(
+                "[wanted/supp] decoded {} entries: {:?}",
+                decoded.len(),
+                names
+            );
+        }
         let next_id_ptr: *mut u32 = codegen.next_func_id_mut() as *mut u32;
         let mut merged_entries = 0usize;
         for (entry_name, module) in &decoded {
@@ -2073,12 +2084,49 @@ impl ArchiveCtxCache {
             self.note_merged_ids(entry_name, fresh_remap.keys());
             merged_entries += 1;
         }
-        if std::env::var("VERUM_TRACE_WANTED").is_ok() {
+        if let Ok(filter) = std::env::var("VERUM_TRACE_WANTED") {
             eprintln!(
                 "[wanted] supplemental pass: {} entries merged (wanted {})",
                 merged_entries,
                 wanted.len()
             );
+            // T0706 thx3 instrument: when the flag carries a FILTER
+            // value (not just "1"), report that name's presence in the
+            // wanted set, its registration, and its merged-body status
+            // — the three facts the unsafe-fn shape dispute needs.
+            if filter != "1" && !filter.is_empty() {
+                let hits: Vec<&String> =
+                    wanted.iter().filter(|n| n.contains(&filter)).collect();
+                eprintln!(
+                    "[wanted/filter '{}'] in wanted: {:?}",
+                    filter, hits
+                );
+                let g = self.graph(archive);
+                for h in hits {
+                    let reg = codegen.ctx_mut().lookup_function(h).is_some();
+                    let in_graph = g.qualified_to_module.get(h.as_str()).copied();
+                    let entry = in_graph
+                        .and_then(|i| archive.index.get(i as usize))
+                        .map(|e| e.name.as_str())
+                        .unwrap_or("-");
+                    eprintln!(
+                        "[wanted/filter]   '{}' registered={} graph_module={:?}({})",
+                        h, reg, in_graph, entry
+                    );
+                }
+                let key_hits: Vec<String> = codegen
+                    .ctx_mut()
+                    .functions
+                    .keys()
+                    .filter(|k| k.contains(&filter))
+                    .take(12)
+                    .cloned()
+                    .collect();
+                eprintln!(
+                    "[wanted/filter] ctx.functions keys ~'{}': {:?}",
+                    filter, key_hits
+                );
+            }
         }
         merged_entries
     }
@@ -4592,6 +4640,30 @@ fn register_module_filtered(
     let lookup = |id: verum_vbc::types::StringId| -> Option<&str> {
         name_by_id.get(&id).copied()
     };
+    // T0706 — CANONICAL-SUFFIX acceptance for two-segment wanted names.
+    // A supplemental wanted entry spells the DISPATCH form
+    // (`UInt8.to_hex`), while the descriptor canonicalises to the
+    // promoted module chain (`core.base.primitives.UInt8.to_hex`) —
+    // none of the positional parent arms below match (first-dot
+    // `base`, last-dot `…UInt8`, second-to-last needs bare `UInt8`
+    // in wanted, leaf needs bare `to_hex`).  Accept when the
+    // qualified name's LAST TWO segments equal a dotted wanted entry
+    // — O(1) per function via this precomputed set (measured miss:
+    // the whole to_hex family sat in wanted with graph_module=core.base
+    // yet registered=false; by-example 14-cbgr dies on it).
+    let last2_wanted: std::collections::HashSet<&str> = wanted
+        .iter()
+        .filter(|w| w.bytes().filter(|b| *b == b'.').count() == 1)
+        .map(|w| w.as_str())
+        .collect();
+    fn last2_of(s: &str) -> Option<&str> {
+        let last = s.rfind('.')?;
+        match s[..last].rfind('.') {
+            Some(prev) => Some(&s[prev + 1..]),
+            None => Some(s),
+        }
+    }
+
     let mut type_id_to_name: HashMap<TypeId, String> = HashMap::new();
     for ty in &module.types {
         if let Some(name) = lookup(ty.name) {
@@ -4841,11 +4913,18 @@ fn register_module_filtered(
         let new_id = verum_vbc::module::FunctionId(*next_id);
         *next_id = next_id.saturating_add(1);
         func_id_remap.insert(fn_desc.id.0, new_id);
+        let last2_matches_wanted = last2_of(&qualified_borrowed)
+            .map(|l2| last2_wanted.contains(l2))
+            .unwrap_or(false)
+            || last2_of(simple_name_str)
+                .map(|l2| last2_wanted.contains(l2))
+                .unwrap_or(false);
         if !wanted.contains(simple_name_str)
             && !wanted.contains(&qualified_borrowed)
             && !is_method_of_wanted_type
             && !is_wholesale_module_mount
             && !last_segment_matches_wanted
+            && !last2_matches_wanted
         {
             // **XMOD-BAND-NAME-CARRY-1 final producing registration**
             // (T0277 leg B): the id above is already IN the remap, so
