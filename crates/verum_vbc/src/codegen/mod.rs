@@ -14979,19 +14979,18 @@ impl VbcCodegen {
         if parent_desc.type_params.is_empty() {
             return Some(TypeRef::Concrete(parent_tid));
         }
-        let args: Vec<TypeRef> = parent_desc
-            .type_params
-            .iter()
-            .enumerate()
-            .map(|(i, tp)| {
-                let pid = self
-                    .ctx
-                    .strings
-                    .get(tp.name.0 as usize)
-                    .and_then(|n| generic_param_map.get(n).copied())
-                    .unwrap_or(i as u16);
-                TypeRef::Generic(crate::types::TypeParamId(pid))
-            })
+        // POSITIONAL by contract (T0701 layered rendering): step-1 of
+        // `method_generic_param_map` numbers the parent's type_params
+        // 0..k-1 in declaration order — the i-th impl param IS pid i.
+        // The old name-keyed lookup re-read the map AFTER method-level
+        // entries landed, so a method generic SHADOWING an impl name
+        // (`fn map<B, …>` on `ZipIter<A, B>`) made Self expand with
+        // the METHOD's pid in the receiver slot
+        // (`Item<ZipIter<__g0,__g2>>`, measured b83) — the exact
+        // coupling that forced the first shadow landing's revert.
+        let _ = generic_param_map;
+        let args: Vec<TypeRef> = (0..parent_desc.type_params.len())
+            .map(|i| TypeRef::Generic(crate::types::TypeParamId(i as u16)))
             .collect();
         Some(TypeRef::Instantiated {
             base: parent_tid,
@@ -16631,27 +16630,25 @@ impl VbcCodegen {
         // GENERICNAME-CARRY fill so `descriptor.type_params` stays
         // DENSE over 0..next_pid (mono binds by entry id; the
         // reconnect probes resolve the METHOD slot via rposition).
-        // SHADOW WITHDRAWN for now (b83 measured): numbering the
-        // method's same-named generic separately is correct in
-        // PRINCIPLE (the zip-class root), but the fn-bound renderer
-        // (`substitute_fn_bound_for_generic`) resolves the bound's
-        // `Self`-side through THIS map too, so the receiver inside
-        // `fn(Item<ZipIter<A, B>>) -> B` rendered with the METHOD's
-        // B (`__generic_2`) instead of the impl's (`__generic_1`) —
-        // zip stayed red and `reduce` picked up a NEW disconnect.
-        // The complete fix must render bound-Self in the IMPL scope
-        // and the bound's return in the METHOD scope (layered
-        // rendering, not just layered numbering) — T0701 journal.
-        // Kept from this landing: declaration-order fn pids and the
-        // fallback gate (deterministic from_fn<T, F> numbering).
-        let shadowed_impl_generics: Vec<(String, u16)> = Vec::new();
+        // SHADOW, second landing (T0701): the b83 coupling is broken —
+        // `impl_self_type_ref` now expands Self POSITIONALLY (impl
+        // params ARE pids 0..k-1 by step-1 construction), so a method
+        // generic reusing an impl name (`fn map<B, F: fn(Item<Self>)
+        // -> B>` materialised onto `ZipIter<A, B>`) can safely take
+        // its OWN pid: the bound's receiver side renders impl slots,
+        // its return renders the method slot — layered by
+        // construction.  Displaced impl bindings are preserved so the
+        // GENERICNAME fill stays dense (mono binds by entry id;
+        // reconnect probes use rposition = method slot wins).
+        let mut shadowed_impl_generics: Vec<(String, u16)> = Vec::new();
         for gp in func.generics.iter() {
             if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
                 let n = gname.name.to_string();
-                if !method_generic_param_map.contains_key(&n) {
-                    method_generic_param_map.insert(n, next_pid);
-                    next_pid += 1;
+                if let Some(prev) = method_generic_param_map.get(&n).copied() {
+                    shadowed_impl_generics.push((n.clone(), prev));
                 }
+                method_generic_param_map.insert(n, next_pid);
+                next_pid += 1;
             }
         }
 
