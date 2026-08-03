@@ -5104,6 +5104,19 @@ fn register_module_filtered(
             fn_desc.params.iter().map(|p| p.type_ref.clone()).collect(),
         );
         ctx.register_function(qualified.clone(), info.clone());
+        // T0706 final leg: a last2-accepted descriptor's DISPATCH form
+        // is exactly its (dotted) simple name — the runtime by-name
+        // probe asks for `UInt8.to_hex`, not the canonical
+        // `core.base.UInt8.to_hex`.  The wanted-fanout below skips the
+        // `w == simple_name` case by design, so install the dispatch
+        // key here (first-wins; dotted-only, so the bare-leaf slot
+        // stays with free functions per the may_claim rule).
+        if last2_matches_wanted
+            && simple_name_str.contains('.')
+            && ctx.lookup_function(simple_name_str).is_none()
+        {
+            ctx.register_function(simple_name_str.to_string(), info.clone());
+        }
         // BAKED-DEFAULT-ARG-1: surface the descriptor's default-value
         // channel to the call-site injector under every lookup
         // spelling the FunctionInfo itself registers with.
@@ -5185,7 +5198,23 @@ fn register_module_filtered(
                 }
             }
             let prefixes_compatible = match (w.contains('.'), simple_name.contains('.')) {
-                (true, true) => path_to_leaf(w) == path_to_leaf(simple_name.as_str()),
+                // T0706: SUFFIX at a segment boundary, not strict
+                // equality.  The dispatch spelling `UInt8.to_hex`
+                // (path-to-leaf `UInt8`) must bind the promoted-chain
+                // descriptor `base.primitives.UInt8.to_hex`
+                // (path-to-leaf `base.primitives.UInt8`) — same
+                // export, deeper canonical path.  Anti-squat is
+                // preserved: DIFFERENT modules sharing a leaf
+                // (`async.future` vs `shell.interactive`) are not
+                // segment-suffixes of each other, so the #21/#26
+                // cross-pollination class stays closed.
+                (true, true) => {
+                    let wp = path_to_leaf(w);
+                    let sp = path_to_leaf(simple_name.as_str());
+                    wp == sp
+                        || sp.ends_with(&format!(".{}", wp))
+                        || wp.ends_with(&format!(".{}", sp))
+                }
                 // DELIM-FANOUT-SQUAT-1: a DOTTED wanted key bound to a
                 // BARE-named descriptor by leaf coincidence alone is
                 // unsound. The call-site harvester puts `Type.method`
