@@ -982,13 +982,38 @@ impl<'a> Deserializer<'a> {
  None
  };
 
+ // minor >= 11: TYPEBOUND-CARRY (T0701 fn-bound leg) — the
+ // Function-typed bound structure, mirror of the writer in
+ // serialize_type_param.  Pre-11 archives carry none.
+ let type_bounds = if self
+ .header
+ .as_ref()
+ .map_or(false, |h| h.version_minor >= 11)
+ {
+ let tb_count = decode_varint(self.data, &mut self.offset)? as usize;
+ if tb_count > MAX_BOUNDS_PER_TYPE_PARAM {
+ return Err(VbcError::TableTooLarge {
+ field: "type_param_type_bounds_count",
+ count: tb_count.min(u32::MAX as usize) as u32,
+ max: MAX_BOUNDS_PER_TYPE_PARAM as u32,
+ });
+ }
+ let mut tbs = SmallVec::with_capacity(tb_count);
+ for _ in 0..tb_count {
+ tbs.push(self.parse_type_ref()?);
+ }
+ tbs
+ } else {
+ smallvec::SmallVec::new()
+ };
+
  Ok(TypeParamDescriptor {
  name,
  id,
  bounds,
  default,
  variance,
-     type_bounds: smallvec::SmallVec::new(),
+     type_bounds,
  })
  }
 

@@ -78,7 +78,7 @@ pub const VERSION_MAJOR: u16 = 2;
 /// their structural fn-shape — so a return naming `F`
 /// (`-> MappedIter<Self, F>`) kept forever-free type variables and
 /// every un-annotated iterator-adapter binding failed E404.
-pub const VERSION_MINOR: u16 = 10;
+pub const VERSION_MINOR: u16 = 11;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

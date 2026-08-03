@@ -2141,8 +2141,8 @@ impl TypeChecker {
                         .map(|gp| gp.name.as_str().to_string()),
                 )
                 .collect();
-            let ((params, return_ty, hof_reconnect), scope_vars): (
-                (List<Type>, Type, Vec<(Text, Type)>),
+            let ((params, return_ty, hof_reconnect, fn_bounds_parsed), scope_vars): (
+                (List<Type>, Type, Vec<(Text, Type)>, Vec<(Text, Type)>),
                 _,
             ) = crate::infer::helpers::with_declared_generic_names(declared_names, || {
                 crate::infer::helpers::with_generic_var_scope_capture(|| {
@@ -2248,7 +2248,31 @@ impl TypeChecker {
                         })
                         .collect();
                     let return_ty = to_type(&fn_desc.return_type);
-                    (params, return_ty, hof_reconnect)
+                    // FN-BOUND-CARRY (T0701): parse each generic's
+                    // carried Function-typed bound UNDER THIS SCOPE so
+                    // the bound's structure shares vars with the
+                    // signature (`F: fn(Item<I>) -> B` — the B here IS
+                    // the return's B).  Attached to the scheme after
+                    // birth; the call-site rule unifies the structure
+                    // against the receiver-bound F value, extracting B.
+                    let mut fn_bounds_parsed: Vec<(Text, Type)> = Vec::new();
+                    for gp in fn_desc.generic_params.iter() {
+                        for tb in gp.type_bounds.iter() {
+                            fn_bounds_parsed.push((gp.name.clone(), to_type(tb)));
+                        }
+                    }
+                    if crate::ctor_trace_enabled()
+                        && matches!(method_name.as_str(), "next" | "reduce" | "max")
+                    {
+                        eprintln!(
+                            "[ctor-trace] fnbound-reader {}.{} gp={} bounds_parsed={}",
+                            type_name,
+                            method_name,
+                            fn_desc.generic_params.len(),
+                            fn_bounds_parsed.len(),
+                        );
+                    }
+                    (params, return_ty, hof_reconnect, fn_bounds_parsed)
                 })
             });
             // SELF-RECONNECT (T0701): the carried verbatim return of a
@@ -2566,6 +2590,47 @@ impl TypeChecker {
                     }
                     let mut s = TypeScheme::poly(var_list, fn_ty.clone());
                     s.impl_var_count = impl_count;
+                    // FN-BOUND-CARRY (T0701): attach the parsed
+                    // fn-bounds keyed by each generic's scope var
+                    // (source name first, positional placeholder as
+                    // the fallback — the two-key discipline).
+                    if !fn_bounds_parsed.is_empty() {
+                        let mut tb_map: verum_common::Map<
+                            crate::ty::TypeVar,
+                            List<Type>,
+                        > = verum_common::Map::new();
+                        for (gname, bound) in fn_bounds_parsed.iter() {
+                            let tv_opt = scope_vars
+                                .get(gname.as_str())
+                                .copied()
+                                .or_else(|| {
+                                    fn_desc
+                                        .generic_params
+                                        .iter()
+                                        .rposition(|gp| gp.name == *gname)
+                                        .and_then(|i| {
+                                            scope_vars
+                                                .get(&format!("__generic_{}", i))
+                                                .copied()
+                                        })
+                                });
+                            if let Some(tv) = tv_opt {
+                                let bucket = tb_map
+                                    .get_mut(&tv)
+                                    .map(|b| {
+                                        b.push(bound.clone());
+                                    });
+                                if bucket.is_none() {
+                                    let mut l: List<Type> = List::new();
+                                    l.push(bound.clone());
+                                    tb_map.insert(tv, l);
+                                }
+                            }
+                        }
+                        if !tb_map.is_empty() {
+                            s = s.with_type_bounds(tb_map);
+                        }
+                    }
                     if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() {
                         let p0 = if let crate::ty::Type::Function { params, .. } = &fn_ty {
                             params.first().map(|p| format!("{:?}", p)).unwrap_or_default()

@@ -705,6 +705,17 @@ pub struct VbcCodegen {
     sibling_pairing_counters:
         std::collections::HashMap<(&'static str, String, Vec<String>), u32>,
 
+    /// FN-BOUND-CARRY (T0701 next-leg): the CURRENT impl block's AST
+    /// generic params, armed around the impl-item compile loop.  The
+    /// GENERICNAME fill needs the impl-level `F: fn(I.Item) -> B`
+    /// bounds to serialise `TypeParamDescriptor.type_bounds` — an
+    /// impl-level existential like `B` (present in the impl list,
+    /// absent from the for-type args) is determined ONLY through a
+    /// sibling's fn-bound, and the reader can't reconstruct that
+    /// linkage without the carried structure.  `ctx.generic_type_params`
+    /// is a name-only HashSet, hence this parallel carry.
+    current_impl_ast_generics: Option<verum_common::List<verum_ast::ty::GenericParam>>,
+
     /// TypeIds claimed by ARCHIVE-imported descriptors
     /// (`register_archive_type_qualified`).  Carried fact for
     /// `claim_local_type_id`: a LOCAL `type X is …;` declaration whose
@@ -1830,6 +1841,7 @@ impl VbcCodegen {
             ambiguous_bare_type_names: std::collections::HashSet::new(),
             sibling_impl_counters: std::collections::HashMap::new(),
             sibling_pairing_counters: std::collections::HashMap::new(),
+            current_impl_ast_generics: None,
             type_name_to_id: {
                 let mut m = std::collections::HashMap::new();
                 use crate::types::TypeId;
@@ -4497,6 +4509,11 @@ impl VbcCodegen {
                 let (impl_type_generics, impl_const_generics, impl_ordered_generics) =
                     self.resolve_impl_generics(impl_decl);
 
+                // FN-BOUND-CARRY (T0701): arm the impl block's AST
+                // generics for the descriptor fill inside
+                // compile_function; cleared after the item loop.
+                self.current_impl_ast_generics = Some(impl_decl.generics.clone());
+
                 for impl_item in impl_decl.items.iter() {
                     // Honour `@cfg` gates on impl items. ImplItem and
                     // its inner FunctionDecl both carry attributes;
@@ -4655,6 +4672,7 @@ impl VbcCodegen {
                         }
                     }
                 }
+                self.current_impl_ast_generics = None;
             }
             ItemKind::Pattern(pat_decl) => {
                 self.ctx.generic_type_params.clear();
@@ -16789,7 +16807,95 @@ impl VbcCodegen {
                 .chain(method_shadow_band.iter().map(|(n, pid)| (n.clone(), *pid)))
                 .collect();
             pid_ordered.sort_unstable_by_key(|(_, pid)| *pid);
-            for (gname, pid) in pid_ordered {
+            // FN-BOUND-CARRY (T0701): serialise each generic's
+            // Function-typed bound (`F: fn(I.Item) -> B`) into
+            // `type_bounds`.  An impl-level existential (`B` in
+            // `implement<I, B, F: fn(I.Item) -> B>` — in the impl list
+            // but NOT in the for-type args) is determined ONLY through
+            // a sibling's fn-bound; without this carry the reader's
+            // scheme leaves it a forever-free var (`m.next()` judged
+            // `Some(_)` E404 while the receiver was fully concrete).
+            // Method-level (incl. band) bounds render in the METHOD
+            // scope; impl-level bounds render in the DENSE scope —
+            // same layering as the signature rendering above.
+            let fn_bound_for = |gname: &str,
+                                is_method_level: bool|
+             -> Option<TypeRef> {
+                use verum_ast::ty::{GenericParamKind, TypeBoundKind, TypeKind};
+                let probe = |gps: &verum_common::List<verum_ast::ty::GenericParam>|
+                 -> Option<verum_ast::ty::Type> {
+                    for gp in gps.iter() {
+                        let (n, bounds) = match &gp.kind {
+                            GenericParamKind::Type { name, bounds, .. } => {
+                                (name.name.as_str(), bounds)
+                            }
+                            GenericParamKind::HigherKinded { name, bounds, .. } => {
+                                (name.name.as_str(), bounds)
+                            }
+                            _ => continue,
+                        };
+                        if n != gname {
+                            continue;
+                        }
+                        for b in bounds.iter() {
+                            let bound_ty = match &b.kind {
+                                TypeBoundKind::Equality(ty) => ty,
+                                TypeBoundKind::GenericProtocol(ty) => ty,
+                                _ => continue,
+                            };
+                            if matches!(&bound_ty.kind, TypeKind::Function { .. }) {
+                                return Some(bound_ty.clone());
+                            }
+                        }
+                    }
+                    None
+                };
+                let ast_bound = if is_method_level {
+                    probe(&func.generics)
+                } else {
+                    self.current_impl_ast_generics
+                        .as_ref()
+                        .and_then(|gps| probe(gps))
+                        .or_else(|| probe(&func.generics))
+                };
+                ast_bound.map(|ty| {
+                    let map = if is_method_level {
+                        &render_generic_param_map
+                    } else {
+                        &method_generic_param_map
+                    };
+                    self.resolve_field_type_ref(&ty, map)
+                })
+            };
+            let fn_own_names: std::collections::HashSet<String> = func
+                .generics
+                .iter()
+                .filter_map(|gp| match &gp.kind {
+                    verum_ast::ty::GenericParamKind::Type { name, .. }
+                    | verum_ast::ty::GenericParamKind::HigherKinded { name, .. } => {
+                        Some(name.name.to_string())
+                    }
+                    _ => None,
+                })
+                .collect();
+            // Two phases: bound rendering borrows `self` immutably
+            // (resolve_field_type_ref), interning needs `&mut self`.
+            let rendered: Vec<(String, u16, Option<TypeRef>)> = pid_ordered
+                .into_iter()
+                .map(|(gname, pid)| {
+                    let is_method_level =
+                        pid >= 0x8000 || fn_own_names.contains(&gname);
+                    let tb = fn_bound_for(&gname, is_method_level);
+                    (gname, pid, tb)
+                })
+                .collect();
+            drop(fn_bound_for);
+            for (gname, pid, tb) in rendered {
+                let mut type_bounds: smallvec::SmallVec<[TypeRef; 1]> =
+                    smallvec::SmallVec::new();
+                if let Some(tb) = tb {
+                    type_bounds.push(tb);
+                }
                 let name_id = StringId(self.intern_string(&gname));
                 descriptor
                     .type_params
@@ -16799,7 +16905,7 @@ impl VbcCodegen {
                         bounds: smallvec::SmallVec::new(),
                         default: None,
                         variance: crate::types::Variance::Invariant,
-                        type_bounds: smallvec::SmallVec::new(),
+                        type_bounds,
                     });
             }
         }

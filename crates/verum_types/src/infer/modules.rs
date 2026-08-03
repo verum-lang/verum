@@ -16893,6 +16893,7 @@ impl TypeChecker {
                                     combined_subst.extend(subst);
                                 }
                             }
+                            self.apply_fn_bound_extraction(&type_bounds, span);
 
                             // OVERLOAD GUARD: If a closure argument doesn't match the parameter
                             // type (e.g., List.position(value: &T) called with closure), skip this
@@ -19949,6 +19950,8 @@ impl TypeChecker {
                         }
                     }
 
+                    self.apply_fn_bound_extraction(&type_bounds, span);
+
                     // OVERLOAD GUARD: same as early/primary paths
                     let params_cloned = params.clone();
                     let mut signature_mismatch = false;
@@ -20704,6 +20707,7 @@ impl TypeChecker {
                             combined_subst.extend(subst);
                         }
                     }
+                    self.apply_fn_bound_extraction(&type_bounds, span);
 
                     // Clone params for iteration to avoid borrow issues
                     let params_cloned = params.clone();

@@ -423,6 +423,20 @@ impl Serializer {
             self.output.push(0);
         }
 
+        // minor >= 11: TYPEBOUND-CARRY (T0701 fn-bound leg).  The
+        // Function-typed bound of a generic (`F: fn(I.Item) -> B`) is
+        // the ONLY determination of an impl-level existential like `B`
+        // (absent from the for-type args); pre-11 the wire dropped it,
+        // so the sidecar built from `archive.load_module` (a wire
+        // round-trip) lost the linkage and `m.next()` judged `Some(_)`
+        // E404 while the receiver was fully concrete.  Reader gates on
+        // header.version_minor; pre-11 readers reject via
+        // is_version_compatible.
+        encode_varint(param.type_bounds.len() as u64, &mut self.output);
+        for tb in &param.type_bounds {
+            self.serialize_type_ref(tb)?;
+        }
+
         Ok(())
     }
 

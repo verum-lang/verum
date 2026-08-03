@@ -2702,6 +2702,63 @@ impl TypeChecker {
         impl_var_count.min(fresh_vars_len).min(receiver_args_len)
     }
 
+    /// FN-BOUND EXTRACTION (T0701): an impl-level existential (`B` in
+    /// `implement<I, B, F: fn(I.Item) -> B>`) is absent from the
+    /// for-type args, so positional receiver-binding can never reach
+    /// it — its ONLY determination is a sibling generic's fn-bound.
+    /// For every carried bound whose var the receiver bind just
+    /// resolved to a concrete fn-type, unify the bound's RETURN slot
+    /// against the value's return: `F := fn(&Int) -> Int` flows
+    /// `B := Int`.  Return-slot only — the bound's param slots spell
+    /// projections (`Item<I>`) whose unify semantics belong to the
+    /// projection resolver, and a failed full-structure unify would
+    /// poison the vars.  Call after EVERY receiver-arg bind loop
+    /// (three sites share this).
+    pub(super) fn apply_fn_bound_extraction(
+        &mut self,
+        type_bounds: &Map<TypeVar, List<Type>>,
+        span: Span,
+    ) {
+        for (tv, bounds) in type_bounds.iter() {
+            let val = self.unifier.apply(&Type::Var(*tv));
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace] fnbound-rule tv={:?} val={} bounds={}",
+                    tv,
+                    val,
+                    bounds.len()
+                );
+            }
+            if let Type::Function {
+                return_type: val_ret,
+                ..
+            } = &val
+            {
+                for b in bounds.iter() {
+                    if let Type::Function {
+                        return_type: bound_ret,
+                        ..
+                    } = b
+                    {
+                        // EXTRACTION, not enforcement: unify only when
+                        // the bound's return still carries free vars
+                        // (the existential to extract).  A concrete
+                        // bound return (`F: fn(&Item)` → Unit) must not
+                        // constrain the value's return — discard-
+                        // coercion is legal there, and enforcing it
+                        // broke `inspect(|x| seen.push(*x)).map(...)`
+                        // with "expected Unit, found Int".
+                        let bound_ret_applied = self.unifier.apply(bound_ret);
+                        if !bound_ret_applied.free_vars().is_empty() {
+                            let _ =
+                                self.unifier.unify(&bound_ret_applied, val_ret, span);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Instantiate a method's type parameters and optionally unify with explicit type arguments.
     ///
     /// For generic methods like `fn collect<U>(&self) -> List<U>`, when called as
