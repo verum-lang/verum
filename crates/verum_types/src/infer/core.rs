@@ -89,6 +89,52 @@ impl TypeChecker {
     /// the function with canonical name `qualified_name`.  Called by
     /// `infer_method_call_inner_impl` at every static-method dispatch
     /// success point.
+    /// ONE guarded write-path for instance-method entries in the
+    /// single-slot `inherent_methods` bucket (T0585 ERROR-14).  Two
+    /// protocol instantiations implementing the same method for one
+    /// type (`Convertible<Int>` / `Convertible<Text>` for Text) must
+    /// not last-write-win — the slot is POISONED (removed and
+    /// remembered in `inherent_overloaded_methods`) so resolution
+    /// falls through to the protocol search, whose overload defer
+    /// selects by expected return.  Non-protocol collisions keep the
+    /// historical last-write-wins; identical re-registrations are
+    /// no-ops; a poisoned name is never resurrected.
+    pub(crate) fn register_inherent_method_guarded(
+        &mut self,
+        type_name: verum_common::Text,
+        method_name: verum_common::Text,
+        scheme: crate::context::TypeScheme,
+        from_protocol_impl: bool,
+    ) {
+        let overload_key = (type_name.clone(), method_name.clone());
+        if self.inherent_overloaded_methods.contains(&overload_key) {
+            if from_protocol_impl {
+                // Another protocol instantiation cannot resurrect a
+                // poisoned slot.
+                return;
+            }
+            // An INHERENT `implement T { fn m }` is more specific than
+            // the whole colliding protocol family — it un-poisons the
+            // name and claims the slot.
+            self.inherent_overloaded_methods.remove(&overload_key);
+        }
+        let mut methods_guard = self.inherent_methods.write();
+        let methods = methods_guard.entry(type_name).or_default();
+        if let Some(existing) = methods.get(&method_name) {
+            if existing.ty != scheme.ty {
+                if from_protocol_impl {
+                    methods.remove(&method_name);
+                    drop(methods_guard);
+                    self.inherent_overloaded_methods.insert(overload_key);
+                } else {
+                    methods.insert(method_name, scheme);
+                }
+            }
+        } else {
+            methods.insert(method_name, scheme);
+        }
+    }
+
     pub(crate) fn record_resolved_static_call(
         &mut self,
         span: verum_ast::span::Span,
@@ -99,6 +145,7 @@ impl TypeChecker {
             verum_ast::expr::ResolvedCallTarget::StaticCall {
                 qualified_name: qualified_name.into(),
                 type_prefix_receiver: false,
+                resolver_pinned: false,
             },
         );
     }
@@ -466,6 +513,8 @@ impl TypeChecker {
             deferred_soundness_errors: Vec::new(),
             pending_ambiguity: Vec::new(),
             pending_protocol_static_calls: Vec::new(),
+            pending_method_overloads: Vec::new(),
+            inherent_overloaded_methods: verum_common::Set::new(),
             glob_import_provenance: std::collections::HashMap::new(),
             current_cog_name: verum_common::Text::from(""),
             dependent_enabled: true,
@@ -2580,6 +2629,8 @@ impl TypeChecker {
             deferred_soundness_errors: Vec::new(),
             pending_ambiguity: Vec::new(),
             pending_protocol_static_calls: Vec::new(),
+            pending_method_overloads: Vec::new(),
+            inherent_overloaded_methods: verum_common::Set::new(),
             glob_import_provenance: std::collections::HashMap::new(),
             current_cog_name: verum_common::Text::from(""),
             dependent_enabled: true,

@@ -691,6 +691,20 @@ pub struct VbcCodegen {
     /// to the slot-winner's id and the dedupe kept one).
     sibling_impl_counters: std::collections::HashMap<String, u32>,
 
+    /// SIBLING-PAIRING tie-break (T0585 ERROR-14): when SEVERAL
+    /// sibling impls of one `(type, method)` share an IDENTICAL
+    /// parameter signature (two protocol instantiations differing only
+    /// in return type — `Convertible<Int>` / `Convertible<Text>` for
+    /// Text), content-pairing by `param_type_names` alone is
+    /// ambiguous: every body matched the FIRST ordinal key, so the
+    /// last-compiled body overwrote the first fid and the remaining
+    /// fids stayed empty (measured: `a=textform b=()`).  Each pairing
+    /// site walks decls in the same AST order as registration, so the
+    /// k-th same-signature LOOKUP pairs with the k-th same-signature
+    /// ordinal key.  Keyed by (qualified_name, param_type_names).
+    sibling_pairing_counters:
+        std::collections::HashMap<(&'static str, String, Vec<String>), u32>,
+
     /// TypeIds claimed by ARCHIVE-imported descriptors
     /// (`register_archive_type_qualified`).  Carried fact for
     /// `claim_local_type_id`: a LOCAL `type X is …;` declaration whose
@@ -1815,6 +1829,7 @@ impl VbcCodegen {
             type_name_first_qualifier: std::collections::HashMap::new(),
             ambiguous_bare_type_names: std::collections::HashSet::new(),
             sibling_impl_counters: std::collections::HashMap::new(),
+            sibling_pairing_counters: std::collections::HashMap::new(),
             type_name_to_id: {
                 let mut m = std::collections::HashMap::new();
                 use crate::types::TypeId;
@@ -7887,13 +7902,17 @@ impl VbcCodegen {
                                             .lookup_function(&format!("{}#impl2", qualified))
                                             .is_some()
                                     {
+                                        // Same-signature siblings tie-break
+                                        // POSITIONALLY (T0585 ERROR-14) —
+                                        // see `sibling_pairing_counters`.
+                                        let mut matches: Vec<u32> = Vec::new();
                                         let mut key = qualified.clone();
                                         let mut n = 1u32;
                                         loop {
                                             match self.ctx.lookup_function(&key) {
                                                 Some(cand) => {
                                                     if cand.param_type_names == decl_types {
-                                                        return cand.id.0;
+                                                        matches.push(cand.id.0);
                                                     }
                                                 }
                                                 None if n > 1 => break,
@@ -7901,6 +7920,25 @@ impl VbcCodegen {
                                             }
                                             n += 1;
                                             key = format!("{}#impl{}", qualified, n);
+                                        }
+                                        if !matches.is_empty() {
+                                            let pick = if matches.len() == 1 {
+                                                0
+                                            } else {
+                                                let c = self
+                                                    .sibling_pairing_counters
+                                                    .entry((
+                                                        "table",
+                                                        qualified.clone(),
+                                                        decl_types.clone(),
+                                                    ))
+                                                    .or_insert(0);
+                                                let k =
+                                                    (*c as usize).min(matches.len() - 1);
+                                                *c += 1;
+                                                k
+                                            };
+                                            return matches[pick];
                                         }
                                     }
                                     self.ctx
@@ -15874,6 +15912,14 @@ impl VbcCodegen {
                     })
                     .collect();
                 let mut chosen = func_info;
+                // Collect EVERY ordinal key whose candidate matches the
+                // declared parameter signature, then tie-break same-
+                // signature siblings POSITIONALLY (k-th compile visit ↔
+                // k-th matching key) via `sibling_pairing_counters` —
+                // param-only pairing collapsed return-only-differing
+                // protocol impls onto one fid (T0585 ERROR-14).
+                let mut matches: Vec<(String, crate::codegen::context::FunctionInfo)> =
+                    Vec::new();
                 let mut key = qualified.clone();
                 let mut n = 1u32;
                 loop {
@@ -15881,25 +15927,39 @@ impl VbcCodegen {
                         if cand.param_count == param_count
                             && cand.param_type_names == decl_param_types
                         {
-                            chosen = cand.clone();
-                            // The ordinal key becomes THIS body's
-                            // canonical name end-to-end (descriptor,
-                            // current_fn_lookup_name, archive entry) —
-                            // user-side loads then register the three
-                            // sibling bodies under DISTINCT keys and
-                            // the call-site resolver can pick by the
-                            // residual's base type.  Without this the
-                            // uniqueness existed only inside the bake
-                            // codegen's ctx and collapsed again at
-                            // archive load.
-                            lookup_name = key.clone();
-                            break;
+                            matches.push((key.clone(), cand.clone()));
                         }
                     } else if n > 1 {
                         break;
                     }
                     n += 1;
                     key = format!("{}#impl{}", qualified, n);
+                }
+                if !matches.is_empty() {
+                    let pick = if matches.len() == 1 {
+                        0
+                    } else {
+                        let c = self
+                            .sibling_pairing_counters
+                            .entry(("body", qualified.clone(), decl_param_types.clone()))
+                            .or_insert(0);
+                        let k = (*c as usize).min(matches.len() - 1);
+                        *c += 1;
+                        k
+                    };
+                    let (picked_key, picked_info) = &matches[pick];
+                    chosen = picked_info.clone();
+                    // The ordinal key becomes THIS body's
+                    // canonical name end-to-end (descriptor,
+                    // current_fn_lookup_name, archive entry) —
+                    // user-side loads then register the three
+                    // sibling bodies under DISTINCT keys and
+                    // the call-site resolver can pick by the
+                    // residual's base type.  Without this the
+                    // uniqueness existed only inside the bake
+                    // codegen's ctx and collapsed again at
+                    // archive load.
+                    lookup_name = picked_key.clone();
                 }
                 chosen
             } else {

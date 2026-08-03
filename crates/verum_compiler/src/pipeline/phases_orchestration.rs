@@ -987,6 +987,15 @@ impl<'s> CompilationPipeline<'s> {
     /// phase so the codegen's `compile_method_call` fast path picks
     /// up the resolutions.
     pub(super) fn apply_resolved_call_targets(&self, module: &mut Module) {
+        if std::env::var_os("VERUM_TRACE_PROTOSTAMP").is_some() {
+            eprintln!(
+                "[protostamp] apply: {} stamped spans",
+                self.resolved_call_targets.len()
+            );
+            for (span, target) in self.resolved_call_targets.iter().take(8) {
+                eprintln!("[protostamp]   span={:?} -> {:?}", span, target);
+            }
+        }
         verum_types::apply_resolved_call_targets(module, &self.resolved_call_targets);
     }
 

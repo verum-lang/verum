@@ -4925,17 +4925,22 @@ impl TypeChecker {
                             self.ctx.remove_type(&param_name);
                         }
 
-                        // Get or create the methods map for this type (using shared RwLock)
-                        {
-                            let mut methods_guard = self.inherent_methods.write();
-                            let methods = methods_guard.entry(type_name_text.clone()).or_default();
-                            #[cfg(debug_assertions)]
-                            if func.name.name.as_str() == "cmp" {
-                                // eprintln!("[DEBUG import_impl_blocks] Registering 'cmp' method for '{}' with scheme:\n {:?}",
-                                // type_name, method_scheme);
-                            }
-                            methods.insert(method_name_text.clone(), method_scheme);
-                        }
+                        // Guarded ONE write-path into the single-slot
+                        // inherent bucket (T0585 ERROR-14): a second
+                        // protocol instantiation's same-name method
+                        // POISONS the slot (resolution then falls to the
+                        // protocol search and its overload defer);
+                        // non-protocol collisions keep last-write-wins.
+                        let is_protocol_impl = matches!(
+                            &impl_decl.kind,
+                            verum_ast::decl::ImplKind::Protocol { .. }
+                        );
+                        self.register_inherent_method_guarded(
+                            type_name_text.clone(),
+                            method_name_text.clone(),
+                            method_scheme,
+                            is_protocol_impl,
+                        );
 
                         // Store the impl self-type arg pattern for specialization filtering.
                         // Only store when the impl has type args (i.e., it's a generic/specialized impl).
@@ -9919,6 +9924,7 @@ impl TypeChecker {
         // are discharged in its own epilogue, an aborted nested check
         // cannot drain the enclosing function's queue.
         let proto_static_mark = self.pending_protocol_static_calls.len();
+        let overload_mark = self.pending_method_overloads.len();
 
         // Process generic parameters (type parameters and meta parameters)
         // Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Meta parameters for compile-time computation
@@ -10995,6 +11001,7 @@ impl TypeChecker {
                         // The syntactic receiver is the PROTOCOL name —
                         // a type-level prefix, not a runtime value.
                         type_prefix_receiver: true,
+                        resolver_pinned: true,
                     },
                 );
             } else {
@@ -11005,6 +11012,95 @@ impl TypeChecker {
                     span: call_span,
                 };
                 self.diagnostics.push(e.to_diagnostic());
+            }
+        }
+
+        // PARAMETERIZED-PROTOCOL OVERLOAD discharge (T0585 ERROR-14):
+        // by now the body has bound (or failed to bind) each deferred
+        // overload's return var.  Resolved → the unique candidate whose
+        // return matches gets its codegen key stamped; zero matches is a
+        // real type error; several matches — or a still-free var (the
+        // binding judge above already reported that shape) — stay
+        // unstamped, and the multi-match case reports its own E404.
+        let overload_discharged: Vec<_> = self
+            .pending_method_overloads
+            .drain(overload_mark..)
+            .collect();
+        for (call_span, head, method_name, alpha, cands) in overload_discharged {
+            let resolved_ret =
+                self.normalize_type(&self.unifier.apply(&Type::Var(alpha)));
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace] overload-discharge {}.{} resolved_ret={} cands={}",
+                    head,
+                    method_name,
+                    resolved_ret,
+                    cands.len(),
+                );
+            }
+            if !resolved_ret.free_vars().is_empty() {
+                continue;
+            }
+            let matching: Vec<&(usize, Type)> = cands
+                .iter()
+                .filter(|(_, r)| {
+                    let r_applied = self.unifier.apply(r);
+                    self.types_compatible(&resolved_ret, &r_applied)
+                        || self.types_compatible(&r_applied, &resolved_ret)
+                })
+                .collect();
+            match matching.len() {
+                1 => {
+                    let (ord, _) = matching[0];
+                    let qualified = if *ord == 1 {
+                        format!("{}.{}", head, method_name)
+                    } else {
+                        format!("{}.{}#impl{}", head, method_name, ord)
+                    };
+                    self.resolved_call_targets.insert(
+                        call_span,
+                        verum_ast::expr::ResolvedCallTarget::StaticCall {
+                            qualified_name: Text::from(qualified),
+                            type_prefix_receiver: false,
+                            resolver_pinned: true,
+                        },
+                    );
+                }
+                0 => {
+                    let e = TypeError::OtherWithCodeSpanned {
+                        code: Text::from("E400"),
+                        msg: Text::from(format!(
+                            "no implementation of `{}` on `{}` returns `{}` — the \
+                             available protocol implementations return: {}",
+                            method_name,
+                            head,
+                            resolved_ret,
+                            cands
+                                .iter()
+                                .map(|(_, r)| format!("`{}`", r))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        )),
+                        span: call_span,
+                    };
+                    self.diagnostics.push(e.to_diagnostic());
+                }
+                _ => {
+                    let e = TypeError::OtherWithCodeSpanned {
+                        code: Text::from("E404"),
+                        msg: Text::from(format!(
+                            "Ambiguous method `{}` for `{}`: {} protocol \
+                             implementations match the expected return `{}` — \
+                             disambiguate with a more specific annotation",
+                            method_name,
+                            head,
+                            matching.len(),
+                            resolved_ret,
+                        )),
+                        span: call_span,
+                    };
+                    self.diagnostics.push(e.to_diagnostic());
+                }
             }
         }
 
@@ -17872,6 +17968,17 @@ impl TypeChecker {
         // Track which protocols we've already seen to avoid duplicates from generic/blanket impls
         let mut seen_protocols: verum_common::Set<Text> = verum_common::Set::new();
         let mut candidates: List<(Path, Type)> = List::new();
+        // PARAMETERIZED-PROTOCOL OVERLOADS (T0585 ERROR-14): bookkeeping
+        // alongside the candidate walk.  `own_method_ordinal` counts impls
+        // that declare the method in their OWN block, in registration
+        // (= declaration) order — the SAME counting
+        // `register_impl_function` uses to mint the codegen keys
+        // `Type.method` / `Type.method#impl{N}`, so an ordinal captured
+        // here addresses the exact compiled body.  `overload_candidates`
+        // snapshots (ordinal, substituted fn type) for the
+        // defer-by-return step at the ambiguity gate below.
+        let mut own_method_ordinal: usize = 0;
+        let mut overload_candidates: Vec<(usize, Type)> = Vec::new();
 
         // Scope the read guard tightly to avoid borrow conflicts later
         {
@@ -18081,6 +18188,12 @@ impl TypeChecker {
             for impl_ in impls {
                 // Check if this implementation has the method directly
                 let method_ty_opt = impl_.methods.get(&method_name).cloned();
+                let own_method_ordinal_here = if method_ty_opt.is_some() {
+                    own_method_ordinal += 1;
+                    own_method_ordinal
+                } else {
+                    0
+                };
 
                 // #129 — protocol-default-method dispatch. When the impl
                 // block doesn't override the method, the protocol's OWN
@@ -18136,11 +18249,32 @@ impl TypeChecker {
                 };
 
                 if let Some((method_ty, source_protocol)) = method_ty_with_source {
-                    // Deduplicate by protocol name to avoid "AmbiguousMethod" for same protocol
-                    let protocol_key = source_protocol
-                        .as_ident()
-                        .map(|id| id.name.clone())
-                        .unwrap_or_else(|| format!("{:?}", source_protocol).into());
+                    // Deduplicate by protocol name to avoid "AmbiguousMethod" for same protocol.
+                    //
+                    // T0585 ERROR-14: the key must include the protocol's
+                    // TYPE ARGUMENTS.  Keying by bare name collapsed
+                    // `Convertible<Int> for Text` and `Convertible<Text>
+                    // for Text` into one candidate — the second impl was
+                    // silently DROPPED here (before any ambiguity
+                    // handling could see it), so `let a: Int =
+                    // text.convert();` type-errored against whichever
+                    // instantiation registered first.
+                    let protocol_key: Text = {
+                        let base = source_protocol
+                            .as_ident()
+                            .map(|id| id.name.clone())
+                            .unwrap_or_else(|| format!("{:?}", source_protocol).into());
+                        if impl_.protocol_args.is_empty() {
+                            base
+                        } else {
+                            let rendered: Vec<String> = impl_
+                                .protocol_args
+                                .iter()
+                                .map(|a| format!("{}", a))
+                                .collect();
+                            format!("{}<{}>", base, rendered.join(",")).into()
+                        }
+                    };
                     // #[cfg(debug_assertions)]
                     // if method_name.as_str() == "next" {
                     //  eprintln!("[DEBUG dedup] protocol_key={:?}, already_seen={}", protocol_key, seen_protocols.contains(&protocol_key));
@@ -18242,6 +18376,10 @@ impl TypeChecker {
                             // method_ty,
                             // substituted_method_ty
                             // );
+                        }
+                        if own_method_ordinal_here > 0 {
+                            overload_candidates
+                                .push((own_method_ordinal_here, substituted_method_ty.clone()));
                         }
                         candidates.push((source_protocol, substituted_method_ty));
                     }
@@ -18361,8 +18499,32 @@ impl TypeChecker {
                     })
                     .collect();
 
-                // If all inherited methods share the same origin, keep just the first candidate
-                if candidate_origins.len() == 1 {
+                // If all inherited methods share the same origin, keep just the first candidate.
+                //
+                // T0585 ERROR-14: origins key by protocol NAME, so two
+                // instantiations of ONE parameterized protocol
+                // (`Convertible<Int>` / `Convertible<Text>`) share an
+                // origin — but they are NOT interchangeable.  Skip the
+                // collapse when every candidate is an own-method impl
+                // and the return types differ; the defer-by-return gate
+                // below owns that shape.
+                let overload_shape = overload_candidates.len() == candidates.len()
+                    && candidates.iter().all(|(_, t)| {
+                        matches!(t, Type::Function { .. })
+                    })
+                    && {
+                        let rets: Vec<&Type> = candidates
+                            .iter()
+                            .filter_map(|(_, t)| match t {
+                                Type::Function { return_type, .. } => {
+                                    Some(return_type.as_ref())
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        rets.iter().any(|r| *r != rets[0])
+                    };
+                if candidate_origins.len() == 1 && !overload_shape {
                     // All candidates inherit from the same superprotocol, keep first
                     candidates.truncate(1);
                 }
@@ -18370,6 +18532,85 @@ impl TypeChecker {
         }
 
         if candidates.len() > 1 {
+            // PARAMETERIZED-PROTOCOL OVERLOADS (T0585 ERROR-14): when
+            // EVERY remaining candidate comes from an impl's own method
+            // block, the parameter lists agree structurally, and the
+            // RETURN types differ, silently keeping the first candidate
+            // picks an arbitrary protocol instantiation
+            // (`Convertible<Int>` vs `Convertible<Text>` for Text) —
+            // measured: `let a: Int = text.convert();` type-errored
+            // against the other impl's return.  Defer instead: check the
+            // arguments against the shared parameters, return a fresh
+            // var, and queue the (ordinal, return) candidates.  The
+            // function epilogue discharges it — an annotation-determined
+            // return selects the unique matching impl and stamps its
+            // codegen key (`Type.method` / `Type.method#impl{N}`); a
+            // still-free var is judged honest-E404 by the binding judge.
+            let fn_shapes: Option<Vec<(&List<Type>, &Type)>> = candidates
+                .iter()
+                .map(|(_, t)| {
+                    if let Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } = t
+                    {
+                        Some((params, return_type.as_ref()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace] overload-gate method={} candidates={} own={} shapes_fn={}",
+                    method.name,
+                    candidates.len(),
+                    overload_candidates.len(),
+                    fn_shapes.is_some(),
+                );
+            }
+            if overload_candidates.len() == candidates.len()
+                && let Some(shapes) = fn_shapes
+                && shapes.windows(2).all(|w| w[0].0 == w[1].0)
+                && shapes.iter().any(|(_, r)| *r != shapes[0].1)
+            {
+                let recv_head: Option<Text> = match &resolved_ty {
+                    Type::Named { path, .. } => {
+                        Some(Text::from(path.last_segment_name()))
+                    }
+                    Type::Generic { name, .. } => Some(name.clone()),
+                    other => other.primitive_name().map(Text::from),
+                };
+                if let Some(head) = recv_head {
+                    if args.len() == shapes[0].0.len() {
+                        for (arg, param_ty) in args.iter().zip(shapes[0].0.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+                        let alpha = crate::ty::TypeVar::fresh();
+                        let rets: Vec<(usize, Type)> = overload_candidates
+                            .iter()
+                            .map(|(ord, t)| {
+                                let ret = if let Type::Function { return_type, .. } = t {
+                                    (**return_type).clone()
+                                } else {
+                                    Type::Unknown
+                                };
+                                (*ord, ret)
+                            })
+                            .collect();
+                        self.pending_method_overloads.push((
+                            span,
+                            head,
+                            Text::from(method.name.as_str()),
+                            alpha,
+                            rets,
+                        ));
+                        return Ok(InferResult::new(Type::Var(alpha)));
+                    }
+                }
+            }
             // Multiple candidates remain after inheritance filtering.
             // Rather than erroring, pick the first candidate. Methods like
             // `to_string()` and `clone()` may appear in multiple protocols

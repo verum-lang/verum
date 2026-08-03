@@ -5558,14 +5558,16 @@ impl TypeChecker {
                                         self.ctx.remove_type(&param_name);
                                     }
 
-                                    // Register in inherent_methods map (using shared RwLock)
-                                    {
-                                        let mut methods_guard = self.inherent_methods.write();
-                                        let methods = methods_guard
-                                            .entry(type_name_text.clone())
-                                            .or_default();
-                                        methods.insert(method_name_text.clone(), method_scheme);
-                                    }
+                                    // Register in inherent_methods map — guarded ONE
+                                    // write-path (T0585 ERROR-14); inherent
+                                    // registrations keep last-write-wins and may
+                                    // reclaim a protocol-poisoned slot.
+                                    self.register_inherent_method_guarded(
+                                        type_name_text.clone(),
+                                        method_name_text.clone(),
+                                        method_scheme,
+                                        false,
+                                    );
 
                                     // Per-instantiation gate: record the impl
                                     // block's `for_type` arg pattern so the
@@ -5858,13 +5860,16 @@ impl TypeChecker {
                                     self.ctx.remove_type(&param_name);
                                 }
 
-                                // Register in inherent_methods for cross-pass visibility
-                                {
-                                    let mut methods_guard = self.inherent_methods.write();
-                                    let type_methods =
-                                        methods_guard.entry(type_name_text.clone()).or_default();
-                                    type_methods.insert(method_name_text.clone(), method_scheme);
-                                }
+                                // Register in inherent_methods for cross-pass visibility.
+                                // Guarded write (T0585 ERROR-14): a second protocol
+                                // instantiation's same-name method poisons the
+                                // single slot instead of last-write-winning.
+                                self.register_inherent_method_guarded(
+                                    type_name_text.clone(),
+                                    method_name_text.clone(),
+                                    method_scheme,
+                                    true,
+                                );
 
                                 tracing::debug!(
                                     "Registered protocol instance method: {}.{} (from {})",

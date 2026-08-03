@@ -1,0 +1,45 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L1
+// @tags: protocols, overload, parameterized, dispatch
+//
+// Pin for PARAMETERIZED-PROTOCOL OVERLOADS (T0585 ERROR-14): when two
+// instantiations of one parameterized protocol implement the SAME
+// method for one type — identical parameters, different returns — the
+// expected type must select the impl on BOTH tiers:
+//   * types: candidates must not collapse (dedup keys on protocol
+//     ARGS; the origin/ambiguity truncates defer by return instead of
+//     keeping an arbitrary first);
+//   * codegen/runtime: each body keeps its OWN function id (positional
+//     tie-break of same-signature siblings), and the stamped target is
+//     honoured verbatim (resolver_pinned bypasses the builtin
+//     redirect).
+//
+// Measured pre-fix: `let a: Int = text.convert();` type-errored
+// against the other impl's return; after the types fix both calls ran
+// but BOTH dispatched one body (a printed the Convertible<Text>
+// result, b printed unit from the never-filled sibling fid).
+
+type Convertible<T> is protocol {
+    fn convert(&self) -> T;
+};
+
+implement Convertible<Int> for Text {
+    fn convert(&self) -> Int { self.len() as Int }
+}
+
+implement Convertible<Text> for Text {
+    fn convert(&self) -> Text { "textform" }
+}
+
+fn main() {
+    let text = "hello";
+
+    let a: Int = text.convert();
+    assert_eq(a, 5);
+
+    let b: Text = text.convert();
+    assert_eq(b, "textform");
+
+    print("parameterized-overload-dispatch-ok");
+}

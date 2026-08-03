@@ -2792,6 +2792,16 @@ pub enum ResolvedCallTarget {
         /// argument.  Instance-method stamps (`xs.len()` → `List.len`)
         /// carry `false`.
         type_prefix_receiver: bool,
+        /// True when the typechecker PINNED this exact target after a
+        /// non-trivial selection (protocol-static implementor discharge,
+        /// parameterized-protocol overload selection by expected
+        /// return).  A pinned target must be honoured verbatim: the
+        /// builtin-collection redirect (which re-enters the by-name
+        /// cascade "for canonical runtime layout") would discard the
+        /// selection and dispatch an arbitrary same-name body.  Legacy
+        /// `<Builtin>.<method>` convenience stamps carry `false` and
+        /// keep the redirect.
+        resolver_pinned: bool,
     },
     /// Variant constructor: `Maybe.Some(x)`, `Result.Ok(y)`,
     /// `Ordering.Less`, …  Codegen emits `MakeVariant{Typed}` rather

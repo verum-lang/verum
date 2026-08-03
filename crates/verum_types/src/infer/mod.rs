@@ -714,6 +714,32 @@ pub struct TypeChecker {
     /// double-reported here.
     pub(crate) pending_protocol_static_calls:
         Vec<(verum_ast::span::Span, Text, Text, TypeVar)>,
+    /// PARAMETERIZED-PROTOCOL OVERLOADS (T0585 ERROR-14) — instance
+    /// method calls where several protocol instantiations implement the
+    /// SAME method for the receiver with identical parameters but
+    /// different returns (`Convertible<Int>`/`Convertible<Text>` for
+    /// Text).  Each entry is `(call_span, receiver_head, method_name,
+    /// α, [(impl_ordinal, return_ty)])`; the epilogue discharge picks
+    /// the unique candidate whose return unifies with the resolved α
+    /// and stamps its codegen key (`Head.method` for ordinal 1,
+    /// `Head.method#impl{N}` beyond — the exact keys
+    /// `register_impl_function` mints in the same declaration order).
+    pub(crate) pending_method_overloads: Vec<(
+        verum_ast::span::Span,
+        Text,
+        Text,
+        TypeVar,
+        Vec<(usize, Type)>,
+    )>,
+    /// (type_name, method_name) pairs whose single-slot
+    /// `inherent_methods` entry was POISONED because two protocol
+    /// instantiations registered structurally different signatures for
+    /// the same method (T0585 ERROR-14).  Poisoned names skip the
+    /// inherent bucket permanently — resolution falls through to the
+    /// protocol search, whose overload defer selects by expected
+    /// return.  The set also stops a later re-registration from
+    /// resurrecting the slot.
+    pub(crate) inherent_overloaded_methods: verum_common::Set<(Text, Text)>,
     /// MOD-MED-2 — provenance side-table for glob-imported
     /// names. Maps each name registered by a glob mount to its
     /// `ImportProvenance { origin, module_path }`. Consulted at every

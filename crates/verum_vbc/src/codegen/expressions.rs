@@ -9320,6 +9320,7 @@ impl VbcCodegen {
             ResolvedCallTarget::StaticCall {
                 qualified_name,
                 type_prefix_receiver,
+                resolver_pinned,
             } => {
                 // Raw-pointer arithmetic intercept (pre-resolved
                 // path): the typechecker stamps
@@ -9424,13 +9425,15 @@ impl VbcCodegen {
                 // bridges the pre-resolved fast path onto the same
                 // builtin-method dispatch surface that the legacy
                 // cascade reaches.
-                // PROTO-STATIC-EXISTENTIAL (T0585): a type-prefix
-                // receiver is NOT a builtin value — redirecting through
-                // it discards the typechecker's implementor resolution
-                // and replays the cascade into an arbitrary first impl
-                // (measured: `let d: Int = Default.default();` returned
-                // the atomic-ordering variant `Relaxed`).
+                // PROTO-STATIC-EXISTENTIAL / OVERLOAD-PIN (T0585): a
+                // pinned target must be honoured verbatim — the redirect
+                // re-enters the by-name cascade and dispatches an
+                // arbitrary same-name body (measured: `let d: Int =
+                // Default.default();` returned the atomic-ordering
+                // variant `Relaxed`; `let a: Int = text.convert();`
+                // executed the Convertible<Text> body).
                 if !type_prefix_receiver
+                    && !resolver_pinned
                     && let Some(recv) = receiver
                     && let Some(redirect) = self.try_redirect_resolved_to_builtin(
                         qualified_name.as_str(),
