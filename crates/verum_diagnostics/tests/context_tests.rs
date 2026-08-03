@@ -80,11 +80,17 @@ fn test_backtrace() {
 
     let frame2 = StackFrame::new("main");
 
+    // Note: backtrace.captured depends on RUST_BACKTRACE=1 — under it,
+    // `capture()` harvests REAL process frames (CI sets it: 26 frames
+    // captured, so an absolute `len == 2` assert reads 28).  Assert the
+    // DELTA and the identity of the two appended frames instead, which
+    // holds regardless of capture status.
+    let baseline = Backtrace::capture().frames.len();
     let backtrace = Backtrace::capture().add_frame(frame1).add_frame(frame2);
-
-    // Note: backtrace.captured depends on RUST_BACKTRACE=1 environment variable.
-    // We only check that frames are added correctly regardless of capture status.
-    assert_eq!(backtrace.frames.len(), 2);
+    assert_eq!(backtrace.frames.len(), baseline + 2);
+    let n = backtrace.frames.len();
+    assert_eq!(backtrace.frames[n - 2].function.as_str(), "calculate");
+    assert_eq!(backtrace.frames[n - 1].function.as_str(), "main");
 }
 
 #[test]
