@@ -28,6 +28,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     steps:
+      # First measured run (30873194571) died mid-suite on ENOSPC: the
+      # 14GB-free hosted runner cannot hold debug-profile verum_llvm_sys
+      # artifacts + the AOT test binaries. Reclaim the ~30GB of
+      # preinstalled toolchains we never use BEFORE any build output.
+      - name: Free runner disk
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache/CodeQL \
+            /usr/share/dotnet /usr/local/.ghcup /opt/ghc || true
+          sudo docker image prune --all --force || true
+          df -h /
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
