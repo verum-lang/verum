@@ -31,7 +31,11 @@ impl TryFrom<MlirDiagnosticSeverity> for DiagnosticSeverity {
             MlirDiagnosticSeverity_MlirDiagnosticNote => Self::Note,
             MlirDiagnosticSeverity_MlirDiagnosticRemark => Self::Remark,
             MlirDiagnosticSeverity_MlirDiagnosticWarning => Self::Warning,
-            _ => return Err(Error::UnknownDiagnosticSeverity(severity)),
+            // `as u32`: the bindgen alias is `i32` on MSVC (plain C
+            // enums are signed there) and `u32` elsewhere; severity
+            // codes are small and non-negative, so the cast is exact
+            // on every platform.
+            _ => return Err(Error::UnknownDiagnosticSeverity(severity as u32)),
         })
     }
 }
