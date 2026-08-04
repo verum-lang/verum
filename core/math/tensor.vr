@@ -221,7 +221,7 @@ implement TensorHandle {
 // WIRE CONTRACT (PINNED): each enum below is the ONE authority for
 // its op family across core/math (nn and distributed mount these), and
 // its variant ORDER mirrors the interpreter wire enums in
-// `verum_vbc::instruction` (TensorBinaryOp / TensorUnaryOp /
+// `verum_vbc.instruction` (TensorBinaryOp / TensorUnaryOp /
 // TensorReduceOp) plus the TENSOR_CMP op table. The runtime passes the
 // variant tag straight through `from_byte`, so reordering variants
 // here silently reroutes every tensor operation (the pre-consolidation

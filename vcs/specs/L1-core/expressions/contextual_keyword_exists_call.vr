@@ -24,7 +24,7 @@ fn forall(x: Int) -> Int {
 }
 
 fn main() {
-    // Bare call of the stdlib fs::exists — the T0688 headline shape.
+    // Bare call of the stdlib fs.exists — the T0688 headline shape.
     let p = Path.from_str(&"/nonexistent-t0688-probe".to_text());
     let e = exists(&p);
     print(f"file exists: {e}");

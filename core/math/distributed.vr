@@ -131,7 +131,7 @@ public fn world_size() -> USize {
 // family, not TENSOR_REDUCE. Mechanically unifying the two would trade
 // a name for a semantic lie.
 // WIRE CONTRACT (PINNED): variant order mirrors the collective
-// `ReduceOp` in `verum_vbc::interpreter::kernel` (Sum=0, Mean/Avg=1,
+// `ReduceOp` in `verum_vbc.interpreter.kernel` (Sum=0, Mean/Avg=1,
 // Max=2, Min=3, Prod/Product=4) — the pre-pin order swapped Min/Max.
 public type CollectiveReduceOp is
     // Sum of all values
