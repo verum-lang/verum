@@ -1,0 +1,53 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: types, generics, alias, mount, inference
+// @timeout: 30000
+
+/// T0683 — mounting a generic stdlib type ALIAS must not make its
+/// parameter name a rigid type in the mounting file.
+///
+/// Pre-fix, `mount core.base.panic.{CatchResult}` (an alias
+/// `CatchResult<T> is Result<T, PanicInfo>`) lazily registered the
+/// alias from the middle of the FIRST annotation resolution in the
+/// file; the declaration's parameter `T` was written to the global
+/// flat type table for the duration of registration, and the
+/// triggering resolution's retry lookup found that rigid `Named{T}`
+/// — every later unannotated generic inference in the file then
+/// collided with it (93 tests in base/panic went red from ONE
+/// file-wide E400 "expected 'T', found 'Int'").
+///
+/// The fix scopes declaration parameters to a registration FRAME
+/// (innermost-only, popped before control returns to the trigger),
+/// so this file must check clean:
+///  - a bare `T` annotation stays an ordinary implicit type var;
+///  - unannotated `Result.Ok` / `Maybe.Some` infer freely;
+///  - the alias still EXPANDS positionally
+///    (`CatchResult<Text>` = `Result<Text, PanicInfo>`).
+
+module test_mounted_generic_alias_no_rigid_param;
+
+mount core.base.panic.{CatchResult};
+mount base.{Result, Maybe};
+
+fn bare_param_annotation_stays_free() {
+    let x: T = 5;
+    let _ = x;
+}
+
+fn unannotated_generic_inference_survives_the_mount() {
+    let r = Result.Ok(7);
+    let m = Maybe.Some(42);
+    let _ = r;
+    let _ = m;
+}
+
+fn alias_expansion_still_works() {
+    let c: CatchResult<Text> = Result.Ok("hi");
+    let _ = c;
+}
+
+public fn main() {
+    bare_param_annotation_stays_free();
+    unannotated_generic_inference_survives_the_mount();
+    alias_expansion_still_works();
+}

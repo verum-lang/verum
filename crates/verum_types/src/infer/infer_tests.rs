@@ -6,6 +6,75 @@ pub(super) use super::{
 };
 
 #[cfg(test)]
+mod decl_param_frame_tests {
+    //! T0683 — declaration generic-parameter scope frames. A
+    //! declaration's parameter names resolve ONLY while its own
+    //! body registers (innermost frame), never from outside and
+    //! never from a lazily-nested other registration.
+    use super::TypeChecker;
+    use crate::ty::Type;
+    use verum_common::Text;
+
+    fn named(name: &str) -> Type {
+        Type::Named {
+            path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                name,
+                verum_ast::span::Span::default(),
+            )),
+            args: verum_common::List::new(),
+        }
+    }
+
+    #[test]
+    fn frame_is_visible_only_while_pushed() {
+        let mut checker = TypeChecker::new();
+        assert!(checker.lookup_decl_param("T").is_none(), "clean start");
+
+        let mut frame = indexmap::IndexMap::new();
+        frame.insert(Text::from("T"), named("T"));
+        checker.push_decl_param_frame(frame);
+        assert!(
+            matches!(checker.lookup_decl_param("T"), Some(Type::Named { .. })),
+            "inside the registration window the declaration sees its own T"
+        );
+
+        checker.pop_decl_param_frame();
+        assert!(
+            checker.lookup_decl_param("T").is_none(),
+            "the window closes with the pop — a triggering outer \
+             resolution can never observe the parameter (the T0683 leak)"
+        );
+    }
+
+    #[test]
+    fn inner_frame_shadows_and_restores_outer() {
+        let mut checker = TypeChecker::new();
+        let mut outer = indexmap::IndexMap::new();
+        outer.insert(Text::from("T"), named("OuterT"));
+        checker.push_decl_param_frame(outer);
+
+        // A lazily-entered nested registration pushes ITS frame; the
+        // outer declaration's parameters are not its lexical scope.
+        let mut inner = indexmap::IndexMap::new();
+        inner.insert(Text::from("U"), named("U"));
+        checker.push_decl_param_frame(inner);
+        assert!(
+            checker.lookup_decl_param("T").is_none(),
+            "innermost-only: the nested registration must NOT see the \
+             outer declaration's T"
+        );
+        assert!(checker.lookup_decl_param("U").is_some());
+
+        checker.pop_decl_param_frame();
+        assert!(
+            checker.lookup_decl_param("T").is_some(),
+            "outer frame restores after the nested pop"
+        );
+        checker.pop_decl_param_frame();
+    }
+}
+
+#[cfg(test)]
 mod qtt_v2_enforcement_tests {
     //! QTT V2 enforcement pass tests. Validates the
     //! integration: `@quantity(0|1|omega)` attribute on a parameter

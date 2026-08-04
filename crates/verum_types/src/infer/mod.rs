@@ -903,6 +903,25 @@ pub struct TypeChecker {
     /// Current self type when checking methods in implement blocks
     /// Used to bind `self` parameters in method contexts
     pub(crate) current_self_type: Maybe<Type>,
+    /// Generic-parameter scope frames for type-declaration
+    /// registration, innermost-last. A declaration's parameter
+    /// names (`T`, `E`, …) are visible ONLY while ITS body
+    /// registers — `resolve_type_name` consults the top frame
+    /// before any global table.
+    ///
+    /// Why not the flat `ctx.type_defs` (the previous mechanism):
+    /// registration can be entered LAZILY from the middle of
+    /// resolving an unrelated annotation (mounting a generic stdlib
+    /// alias triggers its registration on first use), and the
+    /// post-registration retry lookup then found the WINDOW-OPEN
+    /// rigid `Named{T}` parameter and rigidified every later
+    /// bare-`T` in the importing file (T0683, 93 tests). Frames
+    /// are pushed/popped strictly around the registering body, so
+    /// the window closes BEFORE control returns to whatever
+    /// resolution triggered it. The old flat-table cleanup also
+    /// deleted any LEGITIMATE same-named global type — frames
+    /// don't.
+    pub(crate) decl_param_frames: Vec<indexmap::IndexMap<Text, Type>>,
     /// Capability checker for context attenuation
     /// Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0 - Capability Attenuation
     capability_checker: crate::capability::CapabilityChecker,

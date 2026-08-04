@@ -121,6 +121,32 @@ impl TypeChecker {
         self.register_type_declaration_inner(type_decl)
     }
 
+    /// Push a declaration's generic-parameter scope frame. Innermost
+    /// frame wins in [`Self::lookup_decl_param`]; pop MUST pair every
+    /// push (RAII-by-discipline — the registration bodies below run
+    /// their fallible section inside an immediately-invoked closure
+    /// precisely so the pop is unconditional).
+    pub(crate) fn push_decl_param_frame(
+        &mut self,
+        frame: indexmap::IndexMap<verum_common::Text, Type>,
+    ) {
+        self.decl_param_frames.push(frame);
+    }
+
+    /// Pop the innermost declaration parameter frame.
+    pub(crate) fn pop_decl_param_frame(&mut self) {
+        self.decl_param_frames.pop();
+    }
+
+    /// Resolve a name against the INNERMOST declaration parameter
+    /// frame only — a declaration's parameters are lexically scoped
+    /// to that declaration; an inner (lazily-entered) registration
+    /// must not see an outer declaration's parameters and vice
+    /// versa.
+    pub(crate) fn lookup_decl_param(&self, name: &str) -> Option<&Type> {
+        self.decl_param_frames.last().and_then(|f| f.get(name))
+    }
+
     fn register_type_declaration_inner(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
         use crate::context::TypeScheme;
         use indexmap::IndexMap;
@@ -213,6 +239,10 @@ impl TypeChecker {
         // This mapping is used when registering variant constructors
         let mut type_param_vars: indexmap::IndexMap<Text, TypeVar> = indexmap::IndexMap::new();
 
+        // This declaration's parameter scope, pushed as ONE frame
+        // below (see the comment at the push site).
+        let mut param_frame: indexmap::IndexMap<Text, Type> = indexmap::IndexMap::new();
+
         // Register generic type parameters first
         // This allows us to resolve types like T in Maybe<T>
         //
@@ -263,7 +293,7 @@ impl TypeChecker {
                 // and that type aliases like IoResult<File> can substitute T with File
                 let type_var = TypeVar::fresh();
                 let param_type = Type::Var(type_var);
-                self.ctx.define_type(param_name.clone(), param_type);
+                param_frame.insert(param_name.clone(), param_type);
                 type_param_vars.insert(param_name.clone(), type_var);
             } else {
                 // For record types: use Named type for bidirectional type inference
@@ -275,10 +305,22 @@ impl TypeChecker {
                     )),
                     args: List::new(),
                 };
-                self.ctx.define_type(param_name.clone(), param_type);
+                param_frame.insert(param_name.clone(), param_type);
             }
             type_param_names.push(param_name);
         }
+        // The frame — not the global flat table — carries this
+        // declaration's parameters for the duration of its body.
+        // Registration can be ENTERED lazily from the middle of an
+        // unrelated annotation's resolution (mount + first use of a
+        // generic stdlib alias); flat-table parameters left a window
+        // where that outer resolution's retry lookup found a rigid
+        // `Named{T}` and rigidified every later bare `T` in the
+        // importing file (T0683). The frame pops before control
+        // returns to the trigger, and — unlike the old flat-table
+        // cleanup — popping cannot delete a legitimate same-named
+        // GLOBAL type either.
+        self.push_decl_param_frame(param_frame);
 
         // For simple type aliases, register the type in the environment
         // More complex types (records, variants) are handled during type checking.
@@ -681,14 +723,11 @@ impl TypeChecker {
         Ok(())
         })();
 
-        // CRITICAL: Clean up type parameters from the type context —
+        // CRITICAL: Pop this declaration's parameter frame —
         // unconditionally, on BOTH success and failure of the body above
-        // (GENERIC-PARAM-LEAK, T0148).  This prevents generic type
-        // parameters from one type (e.g., T from Maybe<T>) from polluting
-        // the environment and interfering with other types.
-        for param_name in type_param_names {
-            self.ctx.remove_type(&param_name);
-        }
+        // (GENERIC-PARAM-LEAK, T0148; frame mechanism, T0683).
+        self.pop_decl_param_frame();
+        let _ = type_param_names;
         body_result?;
 
         // NOTE: Cleanup of types_being_registered is now done in register_type_declaration_inner
@@ -868,10 +907,11 @@ impl TypeChecker {
                         let new_names: std::collections::BTreeSet<&str> =
                             variants.iter().map(|v| v.name.name.as_str()).collect();
                         if existing_names != new_names {
-                            // Different variant structure — protect the explicitly imported type.
-                            for param_name in &type_param_names {
-                                self.ctx.remove_type(param_name);
-                            }
+                            // Different variant structure — protect the
+                            // explicitly imported type. The parameter
+                            // frame pops unconditionally at the outer
+                            // cleanup, so this early return needs no
+                            // local parameter cleanup of its own.
                             return Ok(());
                         }
                     }
@@ -2394,6 +2434,9 @@ impl TypeChecker {
         // Save type parameter names so we can clean them up later
         let mut type_param_names = List::new();
 
+        // This declaration's parameter scope frame (T0683).
+        let mut param_frame: indexmap::IndexMap<Text, Type> = indexmap::IndexMap::new();
+
         // Determine if this is a variant type for choosing parameter representation
         let is_variant_type = matches!(&type_decl.body, verum_ast::decl::TypeDeclBody::Variant(_));
 
@@ -2420,7 +2463,7 @@ impl TypeChecker {
                 // This ensures that variant constructors like Some(v) can unify T with Int
                 let type_var = TypeVar::fresh();
                 let param_type = Type::Var(type_var);
-                self.ctx.define_type(param_name.clone(), param_type);
+                param_frame.insert(param_name.clone(), param_type);
             } else {
                 // For record types: use Named type for bidirectional type inference
                 let param_type = Type::Named {
@@ -2430,7 +2473,7 @@ impl TypeChecker {
                     )),
                     args: List::new(),
                 };
-                self.ctx.define_type(param_name.clone(), param_type);
+                param_frame.insert(param_name.clone(), param_type);
             }
             type_param_names.push(param_name);
         }
@@ -2445,7 +2488,7 @@ impl TypeChecker {
         if is_variant_type && !type_param_names.is_empty() {
             let mut new_type_vars: List<Type> = List::new();
             for param_name in &type_param_names {
-                if let verum_common::Maybe::Some(Type::Var(tv)) = self.ctx.lookup_type(param_name) {
+                if let Some(Type::Var(tv)) = param_frame.get(param_name.as_str()) {
                     new_type_vars.push(Type::Var(*tv));
                 }
             }
@@ -2456,13 +2499,16 @@ impl TypeChecker {
             }
         }
 
+        // Same frame discipline as `register_type_declaration_body`
+        // (T0683): parameters scope to THIS declaration's resolution
+        // only.
+        self.push_decl_param_frame(param_frame);
+
         // Now resolve the actual type definition (similar to register_type_declaration)
         let result = self.resolve_type_body(type_decl, &type_name);
 
-        // Clean up type parameters
-        for param_name in type_param_names {
-            self.ctx.remove_type(&param_name);
-        }
+        self.pop_decl_param_frame();
+        let _ = type_param_names;
 
         // Pop from resolution stack
         resolution_stack.pop();

@@ -2003,8 +2003,24 @@ impl TypeContext {
     }
 
     /// Add a type definition (unqualified, for backward compatibility)
+    ///
+    /// `VERUM_TRACE_DEFTYPE` is a FILTER, not a flag: set it to the
+    /// exact name to trace (or `1` for everything). `#[track_caller]`
+    /// prints the REGISTRAR's file:line — release backtraces are
+    /// unsymbolicated, which is what cost the first T0683 hunt.
+    #[track_caller]
     pub fn define_type(&mut self, name: impl Into<Text>, ty: Type) {
         let name = name.into();
+        if let Ok(filter) = std::env::var("VERUM_TRACE_DEFTYPE")
+            && (filter == "1" || filter == name.as_str())
+        {
+            eprintln!(
+                "[deftype] {:?} <- {:?} at {}",
+                name,
+                ty,
+                std::panic::Location::caller()
+            );
+        }
         // TYPE-REDEFINE TRAP (#41): overwriting a registered VARIANT type's
         // definition with a DIFFERENT shape (e.g. an applied instance
         // replacing the template) poisons every later use of the type.
@@ -2023,7 +2039,26 @@ impl TypeContext {
     }
 
     /// Remove a type definition (for cleanup of temporary type parameters)
+    ///
+    /// Same `VERUM_TRACE_DEFTYPE` filter as [`Self::define_type`] —
+    /// the define/remove interleaving is the whole story when a
+    /// parameter name leaks (T0683).
+    #[track_caller]
     pub fn remove_type(&mut self, name: &Text) {
+        if let Ok(filter) = std::env::var("VERUM_TRACE_DEFTYPE")
+            && (filter == "1" || filter == name.as_str())
+        {
+            eprintln!(
+                "[deftype] {:?} REMOVED (was: {}) at {}",
+                name,
+                if self.type_defs.contains_key(name) {
+                    "present"
+                } else {
+                    "ABSENT"
+                },
+                std::panic::Location::caller()
+            );
+        }
         self.type_defs.remove(name);
     }
 

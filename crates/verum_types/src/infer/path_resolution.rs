@@ -36,6 +36,18 @@ impl TypeChecker {
             }
         }
 
+        // Step 0.25: the registering declaration's OWN generic
+        // parameters (innermost frame only — lexical scope). This is
+        // the frame mechanism that replaced flat-table parameter
+        // registration: parameters resolve here ONLY while their
+        // declaration's body registers, so a lazily-entered
+        // registration can never leak `T` into the resolution that
+        // triggered it (T0683). Checked before import-ambiguity —
+        // a parameter is more local than any import.
+        if let Some(ty) = self.lookup_decl_param(name) {
+            return Ok(ty.clone());
+        }
+
         // Check for import ambiguity first
         // Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Import Ambiguity
         if let Some(sources) = self.imported_names.get(&verum_common::Text::from(name)) {
