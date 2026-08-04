@@ -247,13 +247,17 @@ pub struct BytecodeSpecializer<'a> {
     /// Instantiation graph for looking up specialized functions.
     graph: &'a InstantiationGraph,
     /// Type layouts for SIZE_OF_G/ALIGN_OF_G.
+    #[allow(dead_code)] // persistent-cache read side, parked — T0134
     type_layouts: HashMap<TypeId, TypeLayout>,
     /// Instantiated type cache: (base_type, type_args) -> concrete TypeId.
+    #[allow(dead_code)] // T0134
     instantiated_types: HashMap<(TypeId, Vec<TypeRef>), TypeId>,
     /// Next type ID for new instantiated types.
+    #[allow(dead_code)] // T0134
     next_type_id: u32,
     /// Register type tracking for devirtualization.
     /// Maps register index -> known type at that register.
+    #[allow(dead_code)] // T0134
     register_types: HashMap<u16, TypeRef>,
     /// New constants generated during specialization.
     new_constants: Vec<Constant>,
@@ -853,6 +857,7 @@ impl<'a> BytecodeSpecializer<'a> {
     /// Looks up a protocol implementation for a concrete type.
     ///
     /// Returns the function ID for the method if the type implements the protocol.
+    #[allow(dead_code)] // parked, T0134
     fn lookup_protocol_impl(
         &self,
         type_ref: &TypeRef,
@@ -895,6 +900,7 @@ impl<'a> BytecodeSpecializer<'a> {
     // ========================================================================
 
     /// Gets type size for a TypeRef.
+    #[allow(dead_code)] // parked, T0134
     fn get_type_size(&self, type_ref: &TypeRef) -> u32 {
         match type_ref {
             TypeRef::Concrete(id) => {
@@ -918,6 +924,7 @@ impl<'a> BytecodeSpecializer<'a> {
     }
 
     /// Gets type alignment for a TypeRef.
+    #[allow(dead_code)] // parked, T0134
     fn get_type_alignment(&self, type_ref: &TypeRef) -> u32 {
         match type_ref {
             TypeRef::Concrete(id) => {
@@ -950,6 +957,7 @@ impl<'a> BytecodeSpecializer<'a> {
     ///
     /// This is a CRITICAL operation for monomorphization correctness.
     /// Creates a new concrete type for a generic type instantiated with specific type arguments.
+    #[allow(dead_code)] // parked, T0134
     fn get_or_create_instantiated_type(&mut self, base: TypeId, args: &[TypeRef]) -> TypeId {
         // Check cache first
         let key = (base, args.to_vec());
@@ -1029,6 +1037,7 @@ impl<'a> BytecodeSpecializer<'a> {
     }
 
     /// Computes size and alignment for an instantiated generic type.
+    #[allow(dead_code)] // parked, T0134
     fn compute_instantiated_layout(&self, base: TypeId, args: &[TypeRef]) -> (u32, u32) {
         // Get base type layout
         let base_layout = self.type_layouts.get(&base).copied().unwrap_or(TypeLayout {
@@ -1116,6 +1125,7 @@ impl<'a> BytecodeSpecializer<'a> {
     // ========================================================================
 
     /// Reads a register from bytecode.
+    #[allow(dead_code)] // parked, T0134
     fn read_reg(&self, bytecode: &[u8], pc: &mut usize) -> Result<u16, SpecializationError> {
         if *pc >= bytecode.len() {
             return Err(SpecializationError::InvalidBytecode {
@@ -1147,6 +1157,7 @@ impl<'a> BytecodeSpecializer<'a> {
     /// LEB128 reader mirroring the private writers retired in 076db4d70 — a
     /// matched pair of re-implementations is how a wire-format divergence
     /// stays invisible to a round-trip test (T0132).
+    #[allow(dead_code)] // parked, T0134
     fn read_varint(&self, bytecode: &[u8], pc: &mut usize) -> Result<u64, SpecializationError> {
         crate::encoding::decode_varint(bytecode, pc).map_err(|e| {
             SpecializationError::InvalidBytecode {
@@ -1157,6 +1168,7 @@ impl<'a> BytecodeSpecializer<'a> {
     }
 
     /// Reads a TypeRef from bytecode.
+    #[allow(dead_code)] // parked, T0134
     fn read_type_ref(
         &self,
         bytecode: &[u8],

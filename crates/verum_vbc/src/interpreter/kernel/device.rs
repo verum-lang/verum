@@ -241,8 +241,9 @@ impl DeviceRegistry {
  // Always detect CPU
  registry.detect_cpu();
 
- // Detect GPUs
- #[cfg(target_os = "macos")]
+ // Detect GPUs — the stub variant makes the call portable, so no
+ // cfg here (the doubled gate left the non-macos stub 'never used'
+ // under -D warnings on Linux builders).
  registry.detect_metal();
 
  // Select best default device

@@ -2480,7 +2480,13 @@ fn ffi_extended_body(
             let dst = read_reg(state)?;
             #[cfg(unix)]
             let tid: u64 = {
+                // On macOS the 0 init is the out-param seed; elsewhere the
+                // binding is assigned exactly once below (the seed would be
+                // 'never read' under -D warnings on Linux builders).
+                #[cfg(target_os = "macos")]
                 let mut tid: u64 = 0;
+                #[cfg(not(target_os = "macos"))]
+                let tid: u64;
                 // SAFETY: `tid` is a live stack u64. `pthread_threadid_np` writes
                 // exactly one u64 via the provided pointer when the first arg is
                 // 0 (self). The Apple libc contract is well-defined.

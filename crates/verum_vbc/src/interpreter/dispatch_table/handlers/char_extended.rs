@@ -34,16 +34,8 @@ use crate::value::Value;
 /// abort (the extended_envelope_pins contract is: wrong value maybe,
 /// dead stream never).  Release semantics are unchanged (the asserts
 /// compile out); these helpers make debug agree with release.
-#[inline]
-fn lenient_f64(v: crate::value::Value) -> f64 {
-    if v.is_float() {
-        v.as_f64()
-    } else if v.is_int() {
-        v.as_i64() as f64
-    } else {
-        0.0
-    }
-}
+// (lenient_f64 deliberately absent here — char arms consume ints and
+// chars only; the float twin lives in math_extended/arith_extended.)
 
 #[inline]
 fn lenient_i64(v: crate::value::Value) -> i64 {
