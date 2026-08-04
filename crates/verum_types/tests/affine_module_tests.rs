@@ -170,22 +170,33 @@ fn main() {
 
     println!("Type check result: {:?}", result);
 
-    // The check should fail with a MovedValueUsed error
-    match result {
-        Err(e) => {
-            let err_msg = format!("{}", e);
-            assert!(
-                err_msg.contains("moved")
-                    || err_msg.contains("use after")
-                    || err_msg.contains("already"),
-                "Expected move-related error, got: {}",
-                err_msg
-            );
-        }
-        Ok(_) => {
-            panic!("Type check should have failed due to use after move");
-        }
-    }
+    // The check must reject the use-after-move — through EITHER
+    // channel.  STMT-RECOVERY-1 discipline (T0584/T0713): checkers
+    // push an Error diagnostic and continue instead of aborting with
+    // Err, so an Err-only assertion is a stale-channel pin (same fix
+    // as the affine_debug_test sibling).
+    let diag_msgs: Vec<String> = checker
+        .diagnostics()
+        .iter()
+        .map(|d| format!("{:?}", d))
+        .collect();
+    let rejected = result.is_err() || !diag_msgs.is_empty();
+    assert!(
+        rejected,
+        "Type check should have failed due to use after move (no Err, no diagnostics)"
+    );
+    let err_msg = match &result {
+        Err(e) => format!("{}", e),
+        Ok(()) => diag_msgs.join("\n"),
+    };
+    assert!(
+        err_msg.contains("moved")
+            || err_msg.contains("use after")
+            || err_msg.contains("used after")
+            || err_msg.contains("already"),
+        "Expected move-related error, got: {}",
+        err_msg
+    );
 }
 
 // Diagnostic test to understand type propagation
