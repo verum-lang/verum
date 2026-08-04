@@ -2142,7 +2142,12 @@ impl TypeChecker {
                 )
                 .collect();
             let ((params, return_ty, hof_reconnect, fn_bounds_parsed), scope_vars): (
-                (List<Type>, Type, Vec<(Text, Type)>, Vec<(Text, Type)>),
+                (
+                    List<Type>,
+                    Type,
+                    Vec<(Text, Type)>,
+                    Vec<(verum_common::Maybe<u16>, Text, Type)>,
+                ),
                 _,
             ) = crate::infer::helpers::with_declared_generic_names(declared_names, || {
                 crate::infer::helpers::with_generic_var_scope_capture(|| {
@@ -2255,10 +2260,12 @@ impl TypeChecker {
                     // the return's B).  Attached to the scheme after
                     // birth; the call-site rule unifies the structure
                     // against the receiver-bound F value, extracting B.
-                    let mut fn_bounds_parsed: Vec<(Text, Type)> = Vec::new();
+                    let mut fn_bounds_parsed: Vec<(verum_common::Maybe<u16>, Text, Type)> =
+                        Vec::new();
                     for gp in fn_desc.generic_params.iter() {
                         for tb in gp.type_bounds.iter() {
-                            fn_bounds_parsed.push((gp.name.clone(), to_type(tb)));
+                            fn_bounds_parsed
+                                .push((gp.pid, gp.name.clone(), to_type(tb)));
                         }
                     }
                     if crate::ctor_trace_enabled()
@@ -2599,21 +2606,41 @@ impl TypeChecker {
                             crate::ty::TypeVar,
                             List<Type>,
                         > = verum_common::Map::new();
-                        for (gname, bound) in fn_bounds_parsed.iter() {
-                            let tv_opt = scope_vars
-                                .get(gname.as_str())
-                                .copied()
-                                .or_else(|| {
-                                    fn_desc
-                                        .generic_params
-                                        .iter()
-                                        .rposition(|gp| gp.name == *gname)
-                                        .and_then(|i| {
-                                            scope_vars
-                                                .get(&format!("__generic_{}", i))
-                                                .copied()
-                                        })
-                                });
+                        for (gpid, gname, bound) in fn_bounds_parsed.iter() {
+                            // BAND-PID ATTACH (T0701 LEG 1): a bound on a
+                            // SHADOW-BAND entry (declared pid >= 0x8000 —
+                            // read from the carried GenericParam.pid, never
+                            // re-derived from duplicate order) constrains
+                            // the METHOD's var, which the pre-seed interned
+                            // under the band placeholder.  Keying by bare
+                            // name attached BOTH same-name bounds to the
+                            // impl var (measured b121: one tv, bounds=2 —
+                            // the extraction rule then unified the method
+                            // bound's return against the impl F value).
+                            let band_tv = match gpid {
+                                verum_common::Maybe::Some(pid) if *pid >= 0x8000 => {
+                                    scope_vars
+                                        .get(&format!("__generic_{}", pid))
+                                        .copied()
+                                }
+                                _ => None,
+                            };
+                            let tv_opt = band_tv.or_else(|| {
+                                scope_vars
+                                    .get(gname.as_str())
+                                    .copied()
+                                    .or_else(|| {
+                                        fn_desc
+                                            .generic_params
+                                            .iter()
+                                            .rposition(|gp| gp.name == *gname)
+                                            .and_then(|i| {
+                                                scope_vars
+                                                    .get(&format!("__generic_{}", i))
+                                                    .copied()
+                                            })
+                                    })
+                            });
                             if let Some(tv) = tv_opt {
                                 let bucket = tb_map
                                     .get_mut(&tv)

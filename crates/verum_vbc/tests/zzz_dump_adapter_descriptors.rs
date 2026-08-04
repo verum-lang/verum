@@ -39,10 +39,25 @@ fn dump_adapter_descriptors() {
                 .type_params
                 .iter()
                 .map(|tp| {
+                    // Print carried fn-bounds too — their CONTENT was the
+                    // blind spot that hid the b122 census poison (the
+                    // descriptor looked byte-correct while type_bounds
+                    // carried shifted slots).
+                    let tbs: Vec<String> = tp
+                        .type_bounds
+                        .iter()
+                        .map(|tb| format!("{:?}", tb))
+                        .collect();
+                    let tb_suffix = if tbs.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" bounds=[{}]", tbs.join("; "))
+                    };
                     format!(
-                        "{}#{}",
+                        "{}#{}{}",
                         m.strings.get(tp.name).unwrap_or("<?>"),
-                        tp.id.0
+                        tp.id.0,
+                        tb_suffix
                     )
                 })
                 .collect();
