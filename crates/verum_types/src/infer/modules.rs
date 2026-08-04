@@ -10915,13 +10915,24 @@ impl TypeChecker {
                         // free slots; all-free (unit-only counts as
                         // structure, not as a binding fact when every
                         // payload-carrying slot is free) → undetermined.
+                        //
+                        // Slots are judged by THIS criterion recursively,
+                        // not by the blunt any-free-var test: `Maybe.Some(
+                        // Result.Ok(text))` judges `Some(Ok(Text) | Err(_))
+                        // | None(Unit)` — the Some slot carries a free var
+                        // (the never-constructed inner Err payload), but
+                        // its own shape is a MIXED variant with a bound
+                        // slot, exactly the try_fold shape this judge
+                        // documents as defaultable.  The flat `arg_free`
+                        // read E404'd it (VCS move_patterns.vr, 19-spec
+                        // 'Typecheck unexpectedly failed' cluster).
                         let payload_slots: Vec<&Type> = slots
                             .iter()
                             .map(|(_, p)| p)
                             .filter(|p| !matches!(p, Type::Unit))
                             .collect();
                         !payload_slots.is_empty()
-                            && payload_slots.iter().all(|p| arg_free(p))
+                            && payload_slots.iter().all(|p| shape_undetermined(p))
                     }
                     _ => false,
                 }
