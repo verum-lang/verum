@@ -1276,6 +1276,10 @@ impl HoareLogic {
                 let substituted = body.substitute(var, bound_expr);
                 self.formula_to_z3(&substituted)
             }
+
+            // Semantically transparent — labels carry blame metadata
+            // only (see `HoareZ3Verifier::verify_labeled_formula`).
+            Formula::Labeled(_, inner) => self.formula_to_z3(inner),
         }
     }
 

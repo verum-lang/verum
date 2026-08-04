@@ -47,6 +47,9 @@ proptest = { workspace = true }
 quickcheck = { workspace = true }
 criterion = { workspace = true }
 tempfile = { workspace = true }
+# Tests pin wp/call-site-obligation semantics against REAL parsed
+# syntax (fn f(..) requires P { .. }) instead of hand-built ASTs.
+verum_fast_parser = { workspace = true }
 
 [features]
 default = []

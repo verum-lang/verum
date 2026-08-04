@@ -335,6 +335,100 @@ impl<'ctx> HoareZ3Verifier<'ctx> {
         }
     }
 
+    /// Verify a formula carrying [`Formula::Labeled`] obligations,
+    /// blaming the exact obligations a counterexample violates.
+    ///
+    /// One solver query for the whole formula. On `Sat` (invalid),
+    /// every labeled subformula is re-evaluated IN THE MODEL; the
+    /// ids of those that evaluate to false are returned so the
+    /// caller can name the precise obligation (call-site
+    /// precondition, division guard, …) instead of reporting only
+    /// "the composite VC failed". An id can be absent from the
+    /// result if the model leaves it undetermined — callers must
+    /// treat `failed_labels` as best-effort blame, never as the
+    /// validity verdict (that is `valid`).
+    pub fn verify_labeled_formula(
+        &self,
+        formula: &Formula,
+    ) -> Result<LabeledVerificationResult, WPError> {
+        let solver = self.context.solver();
+
+        let mut params = z3::Params::new();
+        params.set_u32("timeout", self.timeout_ms);
+        solver.set_params(&params);
+
+        let free_vars = self.collect_free_variables(formula);
+        let var_decls = self.declare_variables(&free_vars);
+
+        let z3_formula = self.translate_formula(formula, &var_decls)?;
+        solver.assert(z3_formula.not());
+
+        match solver.check() {
+            z3::SatResult::Unsat => Ok(LabeledVerificationResult {
+                valid: true,
+                failed_labels: Vec::new(),
+                counterexample: Map::new(),
+            }),
+            z3::SatResult::Sat => {
+                let mut failed_labels = Vec::new();
+                let mut counterexample = Map::new();
+                if let Some(model) = solver.get_model() {
+                    counterexample = self.extract_counterexample(&model, &var_decls);
+
+                    let mut labeled = Vec::new();
+                    collect_labeled_subformulas(formula, &mut labeled);
+                    for (id, subformula) in labeled {
+                        if let Ok(z3_sub) = self.translate_formula(subformula, &var_decls)
+                            && let Some(value) =
+                                model.eval(&z3_sub, true).and_then(|v| v.as_bool())
+                            && !value
+                        {
+                            failed_labels.push(id);
+                        }
+                    }
+                }
+                Ok(LabeledVerificationResult {
+                    valid: false,
+                    failed_labels,
+                    counterexample,
+                })
+            }
+            z3::SatResult::Unknown => {
+                let reason = solver
+                    .get_reason_unknown()
+                    .map(|s| Text::from(s.to_string()))
+                    .unwrap_or_else(|| Text::from("unknown"));
+                Err(WPError::Unknown {
+                    reason,
+                    location: None,
+                })
+            }
+        }
+    }
+
+    /// A Z3-safe symbol suffix for a sort: its display form with
+    /// every non-alphanumeric character folded to `_` (sort names
+    /// like `(Array Int Int)` are not valid symbol characters).
+    fn sort_symbol_suffix(sort: &z3::Sort) -> String {
+        format!("{}", sort)
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect()
+    }
+
+    /// Uninterpreted read from a container the sort system could
+    /// not type as a Z3 array. Declared over the operands' ACTUAL
+    /// sorts (name-mangled by the container sort so distinct
+    /// signatures never collide on one symbol), returning Int.
+    fn uninterpreted_select(arr: &z3::ast::Dynamic, idx: &z3::ast::Dynamic) -> z3::ast::Dynamic {
+        use z3::ast::Ast;
+        let arr_sort = arr.get_sort();
+        let idx_sort = idx.get_sort();
+        let name = format!("select_uf_{}", Self::sort_symbol_suffix(&arr_sort));
+        let func = z3::FuncDecl::new(name.as_str(), &[&arr_sort, &idx_sort], &z3::Sort::int());
+        func.apply(&[arr, idx])
+    }
+
     /// Collect all free variables from a formula
     fn collect_free_variables(&self, formula: &Formula) -> Vec<(Text, VarSort)> {
         let mut vars = Vec::new();
@@ -382,6 +476,7 @@ impl<'ctx> HoareZ3Verifier<'ctx> {
                 self.collect_vars_expr(bound_expr, vars);
                 self.collect_vars_formula(body, vars);
             }
+            Formula::Labeled(_, inner) => self.collect_vars_formula(inner, vars),
             Formula::True | Formula::False => {}
         }
     }
@@ -582,50 +677,44 @@ impl<'ctx> HoareZ3Verifier<'ctx> {
             Formula::Eq(left, right) => {
                 let z3_left = self.translate_expr(left, vars)?;
                 let z3_right = self.translate_expr(right, vars)?;
-                Ok(z3_left.eq(&z3_right))
+                let (l, r) = Self::coerce_same_sort(z3_left, z3_right)?;
+                Ok(l.eq(&r))
             }
             Formula::Ne(left, right) => {
                 let z3_left = self.translate_expr(left, vars)?;
                 let z3_right = self.translate_expr(right, vars)?;
-                Ok(z3_left.eq(&z3_right).not())
+                let (l, r) = Self::coerce_same_sort(z3_left, z3_right)?;
+                Ok(l.eq(&r).not())
             }
-            Formula::Lt(left, right) => {
-                let z3_left = self.translate_expr_as_int(left, vars)?;
-                let z3_right = self.translate_expr_as_int(right, vars)?;
-                Ok(z3_left.lt(&z3_right))
-            }
-            Formula::Le(left, right) => {
-                let z3_left = self.translate_expr_as_int(left, vars)?;
-                let z3_right = self.translate_expr_as_int(right, vars)?;
-                Ok(z3_left.le(&z3_right))
-            }
-            Formula::Gt(left, right) => {
-                let z3_left = self.translate_expr_as_int(left, vars)?;
-                let z3_right = self.translate_expr_as_int(right, vars)?;
-                Ok(z3_left.gt(&z3_right))
-            }
-            Formula::Ge(left, right) => {
-                let z3_left = self.translate_expr_as_int(left, vars)?;
-                let z3_right = self.translate_expr_as_int(right, vars)?;
-                Ok(z3_left.ge(&z3_right))
-            }
+            Formula::Lt(left, right) => self.translate_ordering(left, right, vars, |l, r| l.lt(r)),
+            Formula::Le(left, right) => self.translate_ordering(left, right, vars, |l, r| l.le(r)),
+            Formula::Gt(left, right) => self.translate_ordering(left, right, vars, |l, r| l.gt(r)),
+            Formula::Ge(left, right) => self.translate_ordering(left, right, vars, |l, r| l.ge(r)),
             Formula::Predicate(name, args) => {
                 // Handle special predicates
                 if name.as_str() == "is_true" && args.len() == 1 {
                     let z3_arg = self.translate_expr(&args[0], vars)?;
-                    return z3_arg.as_bool().ok_or_else(|| {
-                        WPError::TypeError(Text::from("is_true requires boolean argument"))
-                    });
+                    if let Some(b) = z3_arg.as_bool() {
+                        return Ok(b);
+                    }
+                    // Non-boolean term under a boolean context the
+                    // translator could not decode structurally: an
+                    // uninterpreted `is_true : Int -> Bool` atom is
+                    // the honest total encoding — erroring out here
+                    // killed WHOLE composite VCs over one opaque
+                    // guard.
                 }
 
                 // General predicate - create uninterpreted function
-                let arg_sorts: Vec<_> = args.iter().map(|_| z3::Sort::int()).collect();
-                let arg_sort_refs: Vec<_> = arg_sorts.iter().collect();
-                let func_decl = z3::FuncDecl::new(name.as_str(), &arg_sort_refs, &z3::Sort::bool());
-
+                // over the arguments' ACTUAL sorts (see the
+                // `SmtExpr::Apply` arm for why all-Int aborts).
+                use z3::ast::Ast;
                 let z3_args: Result<Vec<_>, _> =
                     args.iter().map(|a| self.translate_expr(a, vars)).collect();
                 let z3_args = z3_args?;
+                let arg_sorts: Vec<_> = z3_args.iter().map(|a| a.get_sort()).collect();
+                let arg_sort_refs: Vec<_> = arg_sorts.iter().collect();
+                let func_decl = z3::FuncDecl::new(name.as_str(), &arg_sort_refs, &z3::Sort::bool());
                 let arg_refs: Vec<_> = z3_args.iter().map(|a| a as &dyn z3::ast::Ast).collect();
 
                 func_decl.apply(&arg_refs).as_bool().ok_or_else(|| {
@@ -638,6 +727,9 @@ impl<'ctx> HoareZ3Verifier<'ctx> {
                 new_vars.insert(bound_var.smtlib_name(), z3_bound);
                 self.translate_formula(body, &new_vars)
             }
+            // Semantically transparent — the label only carries
+            // blame metadata (see `verify_labeled_formula`).
+            Formula::Labeled(_, inner) => self.translate_formula(inner, vars),
         }
     }
 
@@ -692,9 +784,7 @@ impl<'ctx> HoareZ3Verifier<'ctx> {
                         if let (Some(z3_arr), Some(z3_idx)) = (arr.as_array(), idx.as_int()) {
                             return Ok(z3_arr.select(&z3_idx));
                         }
-                        return Err(WPError::TypeError(Text::from(
-                            "Select requires array and integer index",
-                        )));
+                        return Ok(Self::uninterpreted_select(&arr, &idx));
                     }
                 };
                 Ok(result.into())
@@ -727,14 +817,18 @@ impl<'ctx> HoareZ3Verifier<'ctx> {
                 }
             }
             SmtExpr::Apply(name, args) => {
-                // Uninterpreted function application
-                let arg_sorts: Vec<_> = args.iter().map(|_| z3::Sort::int()).collect();
-                let arg_sort_refs: Vec<_> = arg_sorts.iter().collect();
-                let func_decl = z3::FuncDecl::new(name.as_str(), &arg_sort_refs, &z3::Sort::int());
-
+                // Uninterpreted function application. The domain is
+                // declared over the arguments' ACTUAL sorts — the
+                // previous all-Int declaration made `Z3_mk_app`
+                // abort the process the moment an argument carried
+                // a real sort (`len(arr)` over a typed array).
+                use z3::ast::Ast;
                 let z3_args: Result<Vec<_>, _> =
                     args.iter().map(|a| self.translate_expr(a, vars)).collect();
                 let z3_args = z3_args?;
+                let arg_sorts: Vec<_> = z3_args.iter().map(|a| a.get_sort()).collect();
+                let arg_sort_refs: Vec<_> = arg_sorts.iter().collect();
+                let func_decl = z3::FuncDecl::new(name.as_str(), &arg_sort_refs, &z3::Sort::int());
                 let arg_refs: Vec<_> = z3_args.iter().map(|a| a as &dyn z3::ast::Ast).collect();
 
                 Ok(func_decl.apply(&arg_refs))
@@ -746,9 +840,11 @@ impl<'ctx> HoareZ3Verifier<'ctx> {
                 if let (Some(arr_val), Some(idx_val)) = (z3_arr.as_array(), z3_idx.as_int()) {
                     Ok(arr_val.select(&idx_val))
                 } else {
-                    Err(WPError::TypeError(Text::from(
-                        "Select requires array and integer index",
-                    )))
+                    // Container of unknown sort: an uninterpreted
+                    // read is the honest total encoding — a
+                    // translation error here killed the WHOLE
+                    // composite VC over one untyped access.
+                    Ok(Self::uninterpreted_select(&z3_arr, &z3_idx))
                 }
             }
             SmtExpr::Store(arr, idx, val) => {
@@ -759,9 +855,18 @@ impl<'ctx> HoareZ3Verifier<'ctx> {
                 if let (Some(arr_val), Some(idx_val)) = (z3_arr.as_array(), z3_idx.as_int()) {
                     Ok(arr_val.store(&idx_val, &z3_val).into())
                 } else {
-                    Err(WPError::TypeError(Text::from(
-                        "Store requires array and integer index",
-                    )))
+                    // Same totalization as Select above.
+                    use z3::ast::Ast;
+                    let arr_sort = z3_arr.get_sort();
+                    let idx_sort = z3_idx.get_sort();
+                    let val_sort = z3_val.get_sort();
+                    let name = format!("store_uf_{}", Self::sort_symbol_suffix(&arr_sort));
+                    let func = z3::FuncDecl::new(
+                        name.as_str(),
+                        &[&arr_sort, &idx_sort, &val_sort],
+                        &z3::Sort::int(),
+                    );
+                    Ok(func.apply(&[&z3_arr, &z3_idx, &z3_val]))
                 }
             }
             SmtExpr::Ite(cond, then_e, else_e) => {
@@ -797,6 +902,77 @@ impl<'ctx> HoareZ3Verifier<'ctx> {
         z3_expr
             .as_int()
             .ok_or_else(|| WPError::TypeError(Text::from("Expected integer expression")))
+    }
+
+    /// Bring two operands to one sort for equality: identical sorts
+    /// pass through; an Int/Real mix lifts the Int side to Real.
+    /// `Dynamic::eq` over MISMATCHED sorts is not an error in the
+    /// z3 crate — it aborts the process (Z3_mk_eq returns an
+    /// invalid AST), which is how `requires denominator != 0.0`
+    /// (Real variable, Int zero) took the whole verifier down once
+    /// contract formulas actually started being discharged.
+    fn coerce_same_sort(
+        l: z3::ast::Dynamic,
+        r: z3::ast::Dynamic,
+    ) -> Result<(z3::ast::Dynamic, z3::ast::Dynamic), WPError> {
+        use z3::ast::Ast;
+        if l.get_sort() == r.get_sort() {
+            return Ok((l, r));
+        }
+        match (l.as_int(), r.as_real(), l.as_real(), r.as_int()) {
+            (Some(li), Some(rr), _, _) => Ok((li.to_real().into(), rr.into())),
+            (_, _, Some(lr), Some(ri)) => Ok((lr.into(), ri.to_real().into())),
+            _ => Err(WPError::TypeError(Text::from(format!(
+                "cannot compare values of sorts {} and {}",
+                l.get_sort(),
+                r.get_sort()
+            )))),
+        }
+    }
+
+    /// Translate an ordering comparison totally over Int and Real
+    /// operands (Int lifts to Real on a mixed pair). The previous
+    /// Int-only path rejected every Float contract clause.
+    fn translate_ordering(
+        &self,
+        left: &SmtExpr,
+        right: &SmtExpr,
+        vars: &Map<Text, z3::ast::Dynamic>,
+        cmp: impl Fn(&z3::ast::Real, &z3::ast::Real) -> z3::ast::Bool,
+    ) -> Result<z3::ast::Bool, WPError> {
+        let l = self.translate_expr(left, vars)?;
+        let r = self.translate_expr(right, vars)?;
+        // Int × Int keeps integer semantics.
+        if let (Some(li), Some(ri)) = (l.as_int(), r.as_int()) {
+            // The closure is typed over Real; integer pairs use the
+            // native Int comparisons via to_real (order-isomorphic).
+            return Ok(cmp(&li.to_real(), &ri.to_real()));
+        }
+        let lr = l
+            .as_real()
+            .or_else(|| l.as_int().map(|i| i.to_real()))
+            .ok_or_else(|| {
+                WPError::TypeError(Text::from(format!(
+                    "ordering comparison over non-numeric sort {}",
+                    {
+                        use z3::ast::Ast;
+                        l.get_sort()
+                    }
+                )))
+            })?;
+        let rr = r
+            .as_real()
+            .or_else(|| r.as_int().map(|i| i.to_real()))
+            .ok_or_else(|| {
+                WPError::TypeError(Text::from(format!(
+                    "ordering comparison over non-numeric sort {}",
+                    {
+                        use z3::ast::Ast;
+                        r.get_sort()
+                    }
+                )))
+            })?;
+        Ok(cmp(&lr, &rr))
     }
 
     /// Extract counterexample from Z3 model
@@ -849,6 +1025,54 @@ pub struct HoareVerificationResult {
     pub counterexample: Option<Map<Text, Text>>,
     /// Proof string if generated
     pub proof: Option<Text>,
+}
+
+/// Result of [`HoareZ3Verifier::verify_labeled_formula`]: the
+/// validity verdict plus best-effort per-obligation blame.
+#[derive(Debug, Clone)]
+pub struct LabeledVerificationResult {
+    /// Whether the composite formula is valid (negation UNSAT)
+    pub valid: bool,
+    /// Ids of [`Formula::Labeled`] obligations the counterexample
+    /// model evaluates to false. Diagnostic only — an empty list on
+    /// an invalid result means the model did not pin any single
+    /// label, not that the formula held.
+    pub failed_labels: Vec<u64>,
+    /// Variable assignment from the counterexample model
+    pub counterexample: Map<Text, Text>,
+}
+
+/// Collect every [`Formula::Labeled`] subformula, outermost-first.
+fn collect_labeled_subformulas<'f>(formula: &'f Formula, out: &mut Vec<(u64, &'f Formula)>) {
+    match formula {
+        Formula::Labeled(id, inner) => {
+            out.push((*id, inner));
+            collect_labeled_subformulas(inner, out);
+        }
+        Formula::Not(inner) => collect_labeled_subformulas(inner, out),
+        Formula::And(fs) | Formula::Or(fs) => {
+            for f in fs.iter() {
+                collect_labeled_subformulas(f, out);
+            }
+        }
+        Formula::Implies(a, b) | Formula::Iff(a, b) => {
+            collect_labeled_subformulas(a, out);
+            collect_labeled_subformulas(b, out);
+        }
+        Formula::Forall(_, inner) | Formula::Exists(_, inner) | Formula::Let(_, _, inner) => {
+            collect_labeled_subformulas(inner, out);
+        }
+        Formula::True
+        | Formula::False
+        | Formula::Var(_)
+        | Formula::Eq(_, _)
+        | Formula::Ne(_, _)
+        | Formula::Lt(_, _)
+        | Formula::Le(_, _)
+        | Formula::Gt(_, _)
+        | Formula::Ge(_, _)
+        | Formula::Predicate(_, _) => {}
+    }
 }
 
 impl HoareVerificationResult {

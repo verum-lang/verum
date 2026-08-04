@@ -5735,6 +5735,7 @@ dependencies = [
  "verum_ast",
  "verum_common",
  "verum_diagnostics",
+ "verum_fast_parser",
  "verum_kernel",
  "verum_smt",
  "verum_types",

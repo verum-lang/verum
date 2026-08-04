@@ -111,17 +111,22 @@ impl CounterExample {
     pub fn format_with_suggestions(&self, suggestions: &[Text]) -> Text {
         let mut output = Text::new();
 
-        output.push_str("Counterexample:\n");
+        // A model with no variable assignments (e.g. a violated
+        // obligation over literals only) has nothing to list — the
+        // header would dangle over an empty block.
+        if !self.assignments.is_empty() {
+            output.push_str("Counterexample:\n");
 
-        // Show assignments
-        let mut items: List<_> = self.assignments.iter().collect();
-        items.sort_by_key(|(k, _)| *k);
+            let mut items: List<_> = self.assignments.iter().collect();
+            items.sort_by_key(|(k, _)| *k);
 
-        for (name, value) in items {
-            output.push_str(&format!("  {} = {}\n", name, value));
+            for (name, value) in items {
+                output.push_str(&format!("  {} = {}\n", name, value));
+            }
+            output.push_str("\n");
         }
 
-        output.push_str(&format!("\nViolates: {}\n", self.violated_constraint));
+        output.push_str(&format!("Violates: {}\n", self.violated_constraint));
 
         // Add suggestions
         if !suggestions.is_empty() {

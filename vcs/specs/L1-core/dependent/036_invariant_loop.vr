@@ -80,8 +80,15 @@ fn gcd(a: Positive, b: Positive) -> Positive
 fn factorial(n: Natural) -> Positive {
     let mut result: Positive = 1;
     let mut i: Natural = 1;
+    // `i >= 1` is load-bearing: invariant preservation is checked
+    // for EVERY state satisfying the invariant, and without the
+    // lower bound the state `i = 0` is admissible — where
+    // `result * i = 0` breaks `result > 0`. A live checker
+    // (T0657 made this VC actually discharge) rightly rejects the
+    // weaker invariant.
     while i <= n
         invariant result > 0
+        invariant i >= 1
         decreases n - i + 1
     {
         result = result * i;

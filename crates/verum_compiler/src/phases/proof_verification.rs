@@ -27,8 +27,8 @@
 use std::time::{Duration, Instant};
 
 use verum_ast::decl::{
-    CalcRelation, CalculationChain, ProofBody, ProofCase, ProofMethod, ProofStep, ProofStepKind,
-    ProofStructure, TacticExpr, TacticMatchArm, TheoremDecl,
+    CalcRelation, CalculationChain, FunctionParamKind, ProofBody, ProofCase, ProofMethod,
+    ProofStep, ProofStepKind, ProofStructure, TacticExpr, TacticMatchArm, TheoremDecl,
 };
 use verum_ast::expr::ExprKind;
 use verum_ast::literal::LiteralKind;
@@ -1664,12 +1664,40 @@ pub fn verify_proof_body_with_aliases_and_graph(
     // translator just encodes it as a fresh uninterpreted integer, making
     // every `-> Bool` theorem with a `proof by …` body unprovable for
     // reasons entirely unrelated to the mathematical content of the claim.
+    // The convention applies ONLY while the name `result` is free:
+    // a theorem may legitimately declare a PARAMETER named `result`
+    // (`theorem t(result: TranslationResult) ensures
+    // result.quality >= 0`), and substituting the literal `true`
+    // over it rewrote the goal into nonsense
+    // (`true.quality >= 0`) — the T0480 binder-capture. A declared
+    // parameter always wins over the elaboration convention.
+    let result_is_a_parameter = theorem.params.iter().any(|p| {
+        matches!(
+            &p.kind,
+            FunctionParamKind::Regular { pattern, .. }
+                if matches!(
+                    &pattern.kind,
+                    verum_ast::pattern::PatternKind::Ident { name, .. }
+                        if name.as_str() == "result"
+                )
+        )
+    });
     let raw_proposition = theorem.proposition.as_ref().clone();
-    let proposition = substitute_result_with_true(&raw_proposition);
+    let proposition = if result_is_a_parameter {
+        raw_proposition.clone()
+    } else {
+        substitute_result_with_true(&raw_proposition)
+    };
     let mut hypotheses: List<Expr> = theorem
         .requires
         .iter()
-        .map(|e| substitute_result_with_true(e))
+        .map(|e| {
+            if result_is_a_parameter {
+                e.clone()
+            } else {
+                substitute_result_with_true(e)
+            }
+        })
         .collect();
 
     // Inline refinement hypotheses.

@@ -1,0 +1,53 @@
+// @test: verify-pass
+// @level: L1
+// @tags: verify, contracts, precondition, call-site, wp
+// @timeout: 30000
+
+/// T0657 companion (GREEN half) — call-site precondition
+/// obligations must carry their real proof context, not fire
+/// context-free.
+///
+/// The obligations are WOVEN into the wp formula
+/// (`verum_verification::vcgen`), which is what lets each of the
+/// shapes below discharge:
+///  - a branch guard scopes the obligation of the code it guards;
+///  - a `let`-bound argument flows in by substitution (wp folds
+///    the tail expression BEFORE the statements above it);
+///  - the caller's own `requires` is a hypothesis for every body
+///    obligation (Hoare-triple closure).
+///
+/// The RED half — an unconditionally-violating literal call —
+/// lives in L0-critical/verification/
+/// call_site_precondition_violation.vr. Semantic-core pins:
+/// crates/verum_verification/tests/vcgen_call_site_obligations.rs.
+
+module test_call_site_precondition_flow;
+
+@verify(proof)
+public fn divide(a: Int, b: Int) -> Int requires b != 0 {
+    a / b
+}
+
+// PASS: the guard establishes the callee's exact precondition.
+@verify(proof)
+public fn guarded(a: Int, b: Int) -> Int {
+    if b != 0 { divide(a, b) } else { 0 }
+}
+
+// PASS: the let-bound literal satisfies the precondition through
+// wp substitution.
+@verify(proof)
+public fn let_bound_ok(a: Int) -> Int {
+    let d = 5;
+    divide(a, d)
+}
+
+// PASS: the caller's stronger `requires` implies the callee's.
+@verify(proof)
+public fn requires_flows(a: Int, b: Int) -> Int requires b > 3 {
+    divide(a, b)
+}
+
+public fn main() -> Int {
+    guarded(10, 2) + let_bound_ok(10) + requires_flows(10, 4)
+}

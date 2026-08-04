@@ -197,7 +197,7 @@ impl fmt::Display for SourceLocation {
 ///
 /// Variables are uniquely identified by name and an optional SSA version
 /// for handling mutable state in wp computation.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Variable {
     /// Variable name
     pub name: Text,
@@ -205,6 +205,26 @@ pub struct Variable {
     pub version: Maybe<u64>,
     /// Type hint for SMT encoding
     pub ty: Maybe<VarType>,
+}
+
+/// Identity is (name, version) — `ty` is an ENCODING HINT, not
+/// identity. A `Variable::new("i")` built for substitution must find
+/// the typed `Variable::typed("i", Int)` the translator produced for
+/// the same source variable; deriving `PartialEq` over `ty` silently
+/// broke every such substitution the moment paths became sort-aware.
+impl PartialEq for Variable {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.version == other.version
+    }
+}
+
+impl Eq for Variable {}
+
+impl std::hash::Hash for Variable {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.version.hash(state);
+    }
 }
 
 impl Variable {
@@ -510,6 +530,87 @@ impl SmtExpr {
         }
     }
 
+    /// Render in Verum source notation (infix), for diagnostics.
+    /// `to_smtlib` stays the solver-facing form; user-facing
+    /// obligation messages use THIS so a violated `requires b != 0`
+    /// is reported as `b != 0`, not `(distinct b 0)`.
+    pub fn to_source_notation(&self) -> Text {
+        match self {
+            SmtExpr::Var(v) => v.smtlib_name(),
+            SmtExpr::IntConst(n) => Text::from(format!("{}", n)),
+            SmtExpr::BoolConst(b) => Text::from(if *b { "true" } else { "false" }),
+            SmtExpr::RealConst(r) => Text::from(format!("{}", r)),
+            SmtExpr::BitVecConst(v, w) => Text::from(format!("{}u{}", v, w)),
+            SmtExpr::BinOp(op, left, right) => {
+                let op_str = match op {
+                    SmtBinOp::Add => "+",
+                    SmtBinOp::Sub => "-",
+                    SmtBinOp::Mul => "*",
+                    SmtBinOp::Div => "/",
+                    SmtBinOp::Mod => "%",
+                    SmtBinOp::Pow => "^",
+                    SmtBinOp::Select => "[]",
+                };
+                if matches!(op, SmtBinOp::Select) {
+                    Text::from(format!(
+                        "{}[{}]",
+                        left.to_source_notation(),
+                        right.to_source_notation()
+                    ))
+                } else {
+                    Text::from(format!(
+                        "({} {} {})",
+                        left.to_source_notation(),
+                        op_str,
+                        right.to_source_notation()
+                    ))
+                }
+            }
+            SmtExpr::UnOp(op, expr) => {
+                let op_str = match op {
+                    SmtUnOp::Neg => "-",
+                    SmtUnOp::Abs => "abs ",
+                    SmtUnOp::Deref => "*",
+                    SmtUnOp::Len => "len ",
+                    SmtUnOp::GetVariantValue => "variant_value ",
+                };
+                Text::from(format!("{}{}", op_str, expr.to_source_notation()))
+            }
+            SmtExpr::Apply(name, args) => {
+                if args.is_empty() {
+                    name.clone()
+                } else {
+                    let args_str: List<Text> =
+                        args.iter().map(|a| a.to_source_notation()).collect();
+                    Text::from(format!("{}({})", name, args_str.join(", ")))
+                }
+            }
+            SmtExpr::Select(arr, idx) => Text::from(format!(
+                "{}[{}]",
+                arr.to_source_notation(),
+                idx.to_source_notation()
+            )),
+            SmtExpr::Store(arr, idx, val) => Text::from(format!(
+                "{}[{} := {}]",
+                arr.to_source_notation(),
+                idx.to_source_notation(),
+                val.to_source_notation()
+            )),
+            SmtExpr::Ite(cond, then_e, else_e) => Text::from(format!(
+                "if {} {{ {} }} else {{ {} }}",
+                cond.to_source_notation(),
+                then_e.to_source_notation(),
+                else_e.to_source_notation()
+            )),
+            SmtExpr::Let(var, bound, body) => Text::from(format!(
+                "let {} = {} in {}",
+                var.smtlib_name(),
+                bound.to_source_notation(),
+                body.to_source_notation()
+            )),
+        }
+    }
+
     /// Convert to SMT-LIB format
     pub fn to_smtlib(&self) -> Text {
         match self {
@@ -644,6 +745,18 @@ pub enum Formula {
     Predicate(Text, List<SmtExpr>),
     /// Let binding in formulas
     Let(Variable, Box<SmtExpr>, Box<Formula>),
+    /// A labeled sub-obligation woven into a larger formula.
+    ///
+    /// Logically transparent: `Labeled(id, f)` ≡ `f` for every
+    /// semantic operation (SMT encoding, substitution, free
+    /// variables). The id indexes the generating
+    /// [`VCGenerator`]'s obligation-metadata table so a failing
+    /// composite VC can be blamed on the exact obligation
+    /// (call-site precondition, division guard, bounds check) by
+    /// evaluating each labeled subformula in the counterexample
+    /// model — one solver query per function body, per-obligation
+    /// diagnostics on failure.
+    Labeled(u64, Box<Formula>),
 }
 
 impl Formula {
@@ -814,6 +927,9 @@ impl Formula {
                     )
                 }
             }
+            Formula::Labeled(id, inner) => {
+                Formula::Labeled(*id, Box::new(inner.substitute(var, replacement)))
+            }
         }
     }
 
@@ -872,6 +988,7 @@ impl Formula {
                 new_bound.insert(bound_var.clone());
                 body.collect_free_vars(vars, &new_bound);
             }
+            Formula::Labeled(_, inner) => inner.collect_free_vars(vars, bound),
         }
     }
 
@@ -972,12 +1089,119 @@ impl Formula {
                 bound.to_smtlib(),
                 body.to_smtlib()
             )),
+            Formula::Labeled(_, inner) => inner.to_smtlib(),
+        }
+    }
+
+    /// Render in Verum source notation (infix), for diagnostics.
+    /// The solver-facing form stays `to_smtlib`; obligation
+    /// messages shown to users go through THIS so a violated
+    /// `requires b != 0` reads as written, not as
+    /// `(distinct b 0)`.
+    pub fn to_source_notation(&self) -> Text {
+        match self {
+            Formula::True => Text::from("true"),
+            Formula::False => Text::from("false"),
+            Formula::Var(v) => v.smtlib_name(),
+            Formula::Not(inner) => Text::from(format!("!({})", inner.to_source_notation())),
+            Formula::And(formulas) => {
+                let fs: List<Text> = formulas.iter().map(|f| f.to_source_notation()).collect();
+                Text::from(format!("({})", fs.join(" && ")))
+            }
+            Formula::Or(formulas) => {
+                let fs: List<Text> = formulas.iter().map(|f| f.to_source_notation()).collect();
+                Text::from(format!("({})", fs.join(" || ")))
+            }
+            Formula::Implies(ante, cons) => Text::from(format!(
+                "({} -> {})",
+                ante.to_source_notation(),
+                cons.to_source_notation()
+            )),
+            Formula::Iff(left, right) => Text::from(format!(
+                "({} <-> {})",
+                left.to_source_notation(),
+                right.to_source_notation()
+            )),
+            Formula::Forall(vars, inner) => {
+                let names: List<Text> = vars.iter().map(|v| v.smtlib_name()).collect();
+                Text::from(format!(
+                    "forall {}. {}",
+                    names.join(", "),
+                    inner.to_source_notation()
+                ))
+            }
+            Formula::Exists(vars, inner) => {
+                let names: List<Text> = vars.iter().map(|v| v.smtlib_name()).collect();
+                Text::from(format!(
+                    "exists {}. {}",
+                    names.join(", "),
+                    inner.to_source_notation()
+                ))
+            }
+            Formula::Eq(l, r) => Text::from(format!(
+                "{} == {}",
+                l.to_source_notation(),
+                r.to_source_notation()
+            )),
+            Formula::Ne(l, r) => Text::from(format!(
+                "{} != {}",
+                l.to_source_notation(),
+                r.to_source_notation()
+            )),
+            Formula::Lt(l, r) => Text::from(format!(
+                "{} < {}",
+                l.to_source_notation(),
+                r.to_source_notation()
+            )),
+            Formula::Le(l, r) => Text::from(format!(
+                "{} <= {}",
+                l.to_source_notation(),
+                r.to_source_notation()
+            )),
+            Formula::Gt(l, r) => Text::from(format!(
+                "{} > {}",
+                l.to_source_notation(),
+                r.to_source_notation()
+            )),
+            Formula::Ge(l, r) => Text::from(format!(
+                "{} >= {}",
+                l.to_source_notation(),
+                r.to_source_notation()
+            )),
+            Formula::Predicate(name, args) => {
+                if args.is_empty() {
+                    name.clone()
+                } else {
+                    let args_str: List<Text> =
+                        args.iter().map(|a| a.to_source_notation()).collect();
+                    Text::from(format!("{}({})", name, args_str.join(", ")))
+                }
+            }
+            Formula::Let(var, bound, body) => Text::from(format!(
+                "let {} = {} in {}",
+                var.smtlib_name(),
+                bound.to_source_notation(),
+                body.to_source_notation()
+            )),
+            Formula::Labeled(_, inner) => inner.to_source_notation(),
         }
     }
 
     /// Simplify the formula (basic simplifications)
     pub fn simplify(&self) -> Formula {
         match self {
+            Formula::Labeled(id, inner) => {
+                let simplified = inner.simplify();
+                if simplified == Formula::True {
+                    // A trivially-true obligation needs no blame
+                    // tracking — collapsing it lets an obligation-free
+                    // body VC simplify all the way to True and skip
+                    // the solver round entirely.
+                    Formula::True
+                } else {
+                    Formula::Labeled(*id, Box::new(simplified))
+                }
+            }
             Formula::Not(inner) => {
                 let simplified = inner.simplify();
                 match simplified {
@@ -1067,6 +1291,14 @@ pub enum VCKind {
     Assertion,
     /// Termination (variant decreases)
     Termination,
+    /// Composite body-safety condition: `P => wp(body, true)` — the
+    /// conjunction of every obligation woven into the body's wp
+    /// (call-site preconditions, division guards, bounds checks),
+    /// discharged as ONE solver query with per-obligation blame via
+    /// [`Formula::Labeled`]. The declared postcondition is NOT part
+    /// of this VC — it is checked by whichever pipeline requested
+    /// body-obligation generation.
+    BodySafety,
     /// Custom/user-defined check
     Custom,
 }
@@ -1081,6 +1313,10 @@ impl VCKind {
             | VCKind::LoopInvariantPreserve
             | VCKind::LoopInvariantExit => ObligationKind::LoopInvariant,
             VCKind::RefinementCheck => ObligationKind::RefinementConstraint,
+            // Body safety aggregates call-site preconditions (its
+            // dominant member); the per-obligation kinds live in the
+            // generator's metadata table.
+            VCKind::BodySafety => ObligationKind::Precondition,
             _ => ObligationKind::Custom,
         }
     }
@@ -1100,6 +1336,7 @@ impl VCKind {
             VCKind::Overflow => "integer overflow",
             VCKind::Assertion => "assertion",
             VCKind::Termination => "termination",
+            VCKind::BodySafety => "body safety",
             VCKind::Custom => "custom check",
         }
     }
@@ -1460,6 +1697,61 @@ impl SymbolTable {
 // VC Generator
 // =============================================================================
 
+/// How a loop body drives an assigned variable, for havoc entry
+/// bounds: strictly-positive constant increments (`Grow`),
+/// decrements (`Shrink`), or anything else (`Chaos` — full havoc,
+/// no entry hypothesis).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HavocDir {
+    Grow,
+    Shrink,
+    Chaos,
+}
+
+/// The quantification recipe for one loop's mutable state: fresh
+/// bound stand-ins for every assigned variable, the rename pairs to
+/// rewrite loop-scoped formulas onto the stand-ins, and the
+/// entry-bound hypothesis contributed by monotonic variables.
+#[derive(Debug, Clone)]
+struct HavocPlan {
+    bound: List<Variable>,
+    renames: Vec<(Variable, Variable)>,
+    entry_hypothesis: Formula,
+}
+
+impl HavocPlan {
+    fn is_empty(&self) -> bool {
+        self.bound.is_empty()
+    }
+
+    /// Rewrite `formula` onto the quantified stand-ins.
+    fn apply(&self, formula: &Formula) -> Formula {
+        let mut out = formula.clone();
+        for (old, fresh) in &self.renames {
+            out = out.substitute(old, &SmtExpr::Var(fresh.clone()));
+        }
+        out
+    }
+}
+
+/// Metadata for one labeled obligation woven into a wp formula.
+///
+/// Indexed by the id carried in [`Formula::Labeled`]. Consumers use
+/// it to turn a failing composite VC into per-obligation blame:
+/// evaluate each labeled subformula in the counterexample model and
+/// report the metadata of every one that evaluates to false.
+#[derive(Debug, Clone)]
+pub struct ObligationMeta {
+    /// What kind of obligation this is (call-site precondition,
+    /// division guard, bounds check, …)
+    pub kind: VCKind,
+    /// Human-readable description naming the obligation, e.g.
+    /// `"call to 'divide' requires b != 0"`
+    pub message: Text,
+    /// Where in the source the obligation arose
+    pub location: SourceLocation,
+}
+
 /// Verification Condition Generator
 ///
 /// Generates verification conditions from Verum AST using Dijkstra's weakest
@@ -1471,6 +1763,19 @@ pub struct VCGenerator {
     pub vcs: List<VerificationCondition>,
     /// Symbol table for type and function information
     pub symbol_table: SymbolTable,
+    /// Metadata for every labeled obligation created by this
+    /// generator, indexed by [`Formula::Labeled`] id.
+    obligation_meta: Vec<ObligationMeta>,
+    /// Fresh-name counter for otherwise-untranslatable expressions.
+    /// Every unsupported expression MUST become a DISTINCT
+    /// uninterpreted term: a shared `unknown()` constant would let
+    /// the solver prove two unrelated unknown expressions equal —
+    /// a false-`Proved` channel (T0657). `Cell` because translation
+    /// helpers take `&self`.
+    fresh_unknown: std::cell::Cell<u64>,
+    /// Fresh-name counter for havoc stand-ins (`i__it3`), so nested
+    /// loops over the same variable quantify distinct names.
+    havoc_counter: std::cell::Cell<u64>,
     /// Current function being analyzed
     current_function: Maybe<Text>,
     /// Precondition of the function currently under VC generation.
@@ -1512,6 +1817,9 @@ impl VCGenerator {
         Self {
             vcs: List::new(),
             symbol_table: SymbolTable::new(),
+            obligation_meta: Vec::new(),
+            fresh_unknown: std::cell::Cell::new(0),
+            havoc_counter: std::cell::Cell::new(0),
             current_function: Maybe::None,
             current_precondition: Maybe::None,
             next_loop_id: 0,
@@ -1524,6 +1832,48 @@ impl VCGenerator {
     pub fn with_source_file(mut self, file: impl Into<Text>) -> Self {
         self.source_file = file.into();
         self
+    }
+
+    /// Seed the symbol table (typically one built by
+    /// [`VCGenerator::build_module_contract_table`] so call-site
+    /// precondition obligations know every sibling's contract).
+    pub fn with_symbol_table(mut self, table: SymbolTable) -> Self {
+        self.symbol_table = table;
+        self
+    }
+
+    /// Metadata for a labeled obligation, by [`Formula::Labeled`] id.
+    pub fn obligation_meta(&self, id: u64) -> Option<&ObligationMeta> {
+        self.obligation_meta.get(id as usize)
+    }
+
+    /// Wrap `formula` as a labeled obligation, recording its blame
+    /// metadata. The returned formula is semantically identical to
+    /// the input; the label lets a failing composite VC name this
+    /// exact obligation.
+    fn label_obligation(
+        &mut self,
+        kind: VCKind,
+        message: impl Into<Text>,
+        span: Span,
+        formula: Formula,
+    ) -> Formula {
+        let id = self.obligation_meta.len() as u64;
+        self.obligation_meta.push(ObligationMeta {
+            kind,
+            message: message.into(),
+            location: SourceLocation::from_span(span, self.source_file.clone()),
+        });
+        Formula::Labeled(id, Box::new(formula))
+    }
+
+    /// A fresh uninterpreted nullary term for an expression the
+    /// translator cannot model. Distinct per call site — see the
+    /// `fresh_unknown` field for why sharing one name is unsound.
+    fn fresh_unknown_term(&self) -> SmtExpr {
+        let n = self.fresh_unknown.get();
+        self.fresh_unknown.set(n + 1);
+        SmtExpr::Apply(Text::from(format!("__vc_unknown_{}", n)), List::new())
     }
 
     /// Make termination obligations mandatory (the `@verify(thorough)`
@@ -1559,6 +1909,30 @@ impl VCGenerator {
     ///  VC(f) = forall params. Precondition => wp(body, Postcondition)
     /// The wp is computed backwards from the postcondition through the function body.
     pub fn generate_vcs(&mut self, func: &FunctionDecl) -> List<VerificationCondition> {
+        self.generate_vcs_inner(func, None)
+    }
+
+    /// Generate ONLY the body-obligation conditions for a function:
+    /// the main VC becomes `P => wp(body, true)` (kind
+    /// [`VCKind::BodySafety`]) — carrying every woven obligation
+    /// (call-site preconditions, division guards, bounds checks) —
+    /// plus the side-channel loop family. The declared postcondition
+    /// is deliberately excluded: callers of this entry point (the
+    /// `verum verify` pipeline) discharge `ensures` through the
+    /// richer `verum_smt` translator and must not have this
+    /// coarser translation second-guess it.
+    pub fn generate_body_obligation_vcs(
+        &mut self,
+        func: &FunctionDecl,
+    ) -> List<VerificationCondition> {
+        self.generate_vcs_inner(func, Some(Formula::True))
+    }
+
+    fn generate_vcs_inner(
+        &mut self,
+        func: &FunctionDecl,
+        post_override: Option<Formula>,
+    ) -> List<VerificationCondition> {
         let func_name = func.name.as_str();
         self.current_function = Maybe::Some(Text::from(func_name));
 
@@ -1578,7 +1952,9 @@ impl VCGenerator {
         }
 
         // Get precondition and postcondition (from attributes or defaults)
-        let (precondition, postcondition) = self.extract_contract(func);
+        let (precondition, extracted_postcondition) = self.extract_contract(func);
+        let body_safety_only = post_override.is_some();
+        let postcondition = post_override.unwrap_or(extracted_postcondition);
 
         // Arm the body-context precondition so every intermediate VC
         // pushed during wp generation (callee preconditions, bounds
@@ -1600,7 +1976,13 @@ impl VCGenerator {
         // Generate VC for function body if present
         if let Some(body) = &func.body {
             let body_wp = match body {
-                verum_ast::decl::FunctionBody::Block(block) => self.wp_block(block, &postcondition),
+                verum_ast::decl::FunctionBody::Block(block) => {
+                    // Forward environment scan first — wp folds
+                    // backwards, and obligations deep in the body
+                    // need the let bindings' sorts and lengths.
+                    self.preseed_symbol_table(block);
+                    self.wp_block(block, &postcondition)
+                }
                 verum_ast::decl::FunctionBody::Expr(expr) => {
                     // For expression body, treat as return expr
                     self.wp_return(Some(expr), &postcondition)
@@ -1610,15 +1992,32 @@ impl VCGenerator {
             // Main function VC: Precondition => wp(body, Postcondition)
             // Pushed with `vcs.push` directly — the implication is
             // already explicit, no double-wrap needed.
-            let main_vc = VerificationCondition::new(
-                Formula::implies(precondition.clone(), body_wp.simplify()),
-                SourceLocation::from_span(func.span, self.source_file.clone()),
-                VCKind::Postcondition,
-                format!("Function '{}' postcondition", func_name),
-            )
-            .with_function(func_name);
+            let main_formula = Formula::implies(precondition.clone(), body_wp.simplify()).simplify();
+            let (main_kind, main_desc) = if body_safety_only {
+                (
+                    VCKind::BodySafety,
+                    format!("Function '{}' body obligations", func_name),
+                )
+            } else {
+                (
+                    VCKind::Postcondition,
+                    format!("Function '{}' postcondition", func_name),
+                )
+            };
+            // An obligation-free body simplifies to True — skip the
+            // trivial VC so obligation-less functions cost no solver
+            // round.
+            if !(body_safety_only && main_formula == Formula::True) {
+                let main_vc = VerificationCondition::new(
+                    main_formula,
+                    SourceLocation::from_span(func.span, self.source_file.clone()),
+                    main_kind,
+                    main_desc,
+                )
+                .with_function(func_name);
 
-            self.vcs.push(main_vc);
+                self.vcs.push(main_vc);
+            }
         }
 
         // Drop the body-context precondition so subsequent functions
@@ -1664,16 +2063,23 @@ impl VCGenerator {
     pub fn wp_block(&mut self, block: &Block, postcondition: &Formula) -> Formula {
         let mut current_post = postcondition.clone();
 
-        // Process statements in reverse order
-        // Collect into Vec to support reverse iteration
+        // The trailing expression executes LAST, so in a backwards
+        // wp computation it must be folded FIRST — before the
+        // statements above it. The pre-fix order folded the
+        // statements first, which applied every `let` substitution
+        // to Q alone and left the tail's own formulas (its woven
+        // obligations, its result binding) outside their scope:
+        // `let d = 5; divide(a, d)` kept `d` free in the call's
+        // precondition obligation and failed a trivially-safe
+        // call (T0657).
+        if let Some(expr) = &block.expr {
+            current_post = self.wp_return(Some(expr), &current_post);
+        }
+
+        // Then the statements, in reverse order.
         let stmts: Vec<_> = block.stmts.iter().collect();
         for stmt in stmts.iter().rev() {
             current_post = self.wp_stmt(stmt, &current_post);
-        }
-
-        // Handle trailing expression
-        if let Some(expr) = &block.expr {
-            current_post = self.wp_return(Some(expr), &current_post);
         }
 
         current_post
@@ -1696,6 +2102,11 @@ impl VCGenerator {
                         if let Some(length) = self.extract_type_length(ty) {
                             self.symbol_table.add_array_length(name.as_str(), length);
                         }
+                        // Record the declared sort so later reads of
+                        // this binding translate with the right Z3
+                        // sort (arrays select, booleans stay Bool).
+                        let var_ty = self.translate_type(ty);
+                        self.symbol_table.add_variable(name.as_str(), var_ty);
                     }
                     // Also track length from initializer expression if it's an array literal
                     if let Some(val_expr) = value {
@@ -1706,7 +2117,22 @@ impl VCGenerator {
                 }
 
                 if let Some(val_expr) = value {
-                    self.wp_assignment(pattern, val_expr, postcondition)
+                    // Obligations of evaluating the initializer are
+                    // woven in as conjuncts so enclosing
+                    // substitutions and branch guards carry their
+                    // context (T0657); the callee's postcondition —
+                    // when the initializer is a contracted call —
+                    // becomes a hypothesis for the rest of the
+                    // block (modular reasoning).
+                    let obligations = self.obligations_expr(val_expr);
+                    let substituted = self.wp_assignment(pattern, val_expr, postcondition);
+                    let with_knowledge = match self.call_contract(val_expr) {
+                        Some((_, post_knowledge)) if post_knowledge != Formula::True => {
+                            Formula::implies(post_knowledge, substituted)
+                        }
+                        _ => substituted,
+                    };
+                    Formula::and([obligations, with_knowledge])
                 } else {
                     postcondition.clone()
                 }
@@ -1718,12 +2144,14 @@ impl VCGenerator {
                 ..
             } => {
                 // wp(let pat = e else { div }, Q) = (matches(e, pat) => Q[pat/e]) && (!matches(e, pat) => wp(else_block, false))
+                let obligations = self.obligations_expr(value);
                 let smt_value = self.translate_expr(value);
                 let match_cond = self.pattern_match_condition(pattern, &smt_value);
                 let q_subst = self.wp_assignment(pattern, value, postcondition);
                 let else_wp = self.wp_block(else_block, &Formula::False);
 
                 Formula::and([
+                    obligations,
                     Formula::implies(match_cond.clone(), q_subst),
                     Formula::implies(Formula::not(match_cond), else_wp),
                 ])
@@ -1805,6 +2233,1030 @@ impl VCGenerator {
         }
     }
 
+    /// The contract consequences of a direct call expression:
+    /// `(labeled precondition obligation, postcondition knowledge)`.
+    ///
+    /// Substitutes the actual arguments for the callee's parameter
+    /// names in both formulas; the postcondition's `result` binds to
+    /// the uninterpreted application `callee(args…)` so downstream
+    /// facts about the call's value line up with how
+    /// `translate_expr` renders the same call. Returns `None` when
+    /// the callee is unknown to the symbol table or the expression
+    /// is not a plain-path call.
+    fn call_contract(&mut self, expr: &Expr) -> Option<(Maybe<Formula>, Formula)> {
+        let ExprKind::Call { func, args, .. } = &expr.kind else {
+            return None;
+        };
+        let ExprKind::Path(path) = &func.kind else {
+            return None;
+        };
+        let func_name = path
+            .segments
+            .iter()
+            .map(path_segment_to_str)
+            .collect::<List<_>>()
+            .join(".");
+        let Maybe::Some(sig) = self.symbol_table.get_function(func_name.as_str()) else {
+            return None;
+        };
+
+        let args_smt: Vec<SmtExpr> = args.iter().map(|a| self.translate_expr(a)).collect();
+        let subst_params = |formula: &Formula| -> Formula {
+            let mut out = formula.clone();
+            for (i, (param_name, _)) in sig.params.iter().enumerate() {
+                if let Some(arg_smt) = args_smt.get(i) {
+                    out = out.substitute(&Variable::new(param_name.clone()), arg_smt);
+                }
+            }
+            out
+        };
+
+        let pre_obligation = if sig.precondition == Formula::True {
+            Maybe::None
+        } else {
+            // Fold statically-known array lengths AFTER argument
+            // substitution: `requires len(arr) >= 3` called with a
+            // 5-element local becomes the decidable `5 >= 3`.
+            let pre_subst = self.fold_known_lengths(&subst_params(&sig.precondition));
+            Maybe::Some(self.label_obligation(
+                VCKind::Precondition,
+                format!(
+                    "call to '{}' requires {}",
+                    func_name,
+                    sig.precondition.to_source_notation()
+                ),
+                expr.span,
+                pre_subst,
+            ))
+        };
+
+        let post_knowledge = if sig.postcondition == Formula::True {
+            Formula::True
+        } else {
+            let call_term = SmtExpr::Apply(func_name.clone(), args_smt.iter().cloned().collect());
+            self.fold_known_lengths(
+                &subst_params(&sig.postcondition).substitute(&Variable::result(), &call_term),
+            )
+        };
+
+        Some((pre_obligation, post_knowledge))
+    }
+
+    /// The safety obligations of *evaluating* `expr`, as one formula.
+    ///
+    /// This is the value-position half of the wp calculus: for every
+    /// subexpression it conjoins the labeled obligations its
+    /// evaluation incurs — call-site preconditions, division/modulo
+    /// guards, index bounds — respecting evaluation guards
+    /// (short-circuit `&&`/`||`, `if`/`match` branch conditions
+    /// scope the obligations of the code they guard).
+    ///
+    /// Contract: every expression form either appears here or is a
+    /// statement form handled by `wp_expr` — a subexpression must be
+    /// walked by exactly one of the two. Forms whose obligations are
+    /// not yet modeled (closure bodies, comprehensions) contribute
+    /// `True` — the same as before this walk existed; extending them
+    /// tightens the net further.
+    fn obligations_expr(&mut self, expr: &Expr) -> Formula {
+        match &expr.kind {
+            ExprKind::Literal(_) | ExprKind::Path(_) => Formula::True,
+
+            ExprKind::Binary { op, left, right } => {
+                let left_obl = self.obligations_expr(left);
+                match op {
+                    // Short-circuit: the right operand only
+                    // evaluates when the left permits it.
+                    BinOp::And => {
+                        let guard = self.translate_expr_to_formula(left);
+                        let right_obl = self.obligations_expr(right);
+                        Formula::and([left_obl, Formula::implies(guard, right_obl)])
+                    }
+                    BinOp::Or => {
+                        let guard = self.translate_expr_to_formula(left);
+                        let right_obl = self.obligations_expr(right);
+                        Formula::and([
+                            left_obl,
+                            Formula::implies(Formula::not(guard), right_obl),
+                        ])
+                    }
+                    BinOp::Div | BinOp::Rem | BinOp::DivAssign | BinOp::RemAssign => {
+                        let right_obl = self.obligations_expr(right);
+                        let divisor = self.translate_expr(right);
+                        let guard = self.label_obligation(
+                            VCKind::DivisionByZero,
+                            "divisor is non-zero",
+                            expr.span,
+                            Formula::Ne(Box::new(divisor), Box::new(SmtExpr::int(0))),
+                        );
+                        Formula::and([left_obl, right_obl, guard])
+                    }
+                    _ => Formula::and([left_obl, self.obligations_expr(right)]),
+                }
+            }
+
+            ExprKind::Unary { expr: inner, .. }
+            | ExprKind::Paren(inner)
+            | ExprKind::Field { expr: inner, .. }
+            | ExprKind::OptionalChain { expr: inner, .. }
+            | ExprKind::TupleIndex { expr: inner, .. }
+            | ExprKind::Cast { expr: inner, .. }
+            | ExprKind::Try(inner)
+            | ExprKind::Throw(inner)
+            | ExprKind::Yield(inner)
+            | ExprKind::Typeof(inner)
+            | ExprKind::Await(inner)
+            | ExprKind::NamedArg { value: inner, .. } => self.obligations_expr(inner),
+
+            ExprKind::Call { args, .. } => {
+                let mut parts: Vec<Formula> =
+                    args.iter().map(|a| self.obligations_expr(a)).collect();
+                if let Some((pre, _)) = self.call_contract(expr) {
+                    if let Maybe::Some(obl) = pre {
+                        parts.push(obl);
+                    }
+                }
+                Formula::and(parts)
+            }
+
+            ExprKind::MethodCall { receiver, args, .. } => {
+                let mut parts = vec![self.obligations_expr(receiver)];
+                for a in args.iter() {
+                    parts.push(self.obligations_expr(a));
+                }
+                Formula::and(parts)
+            }
+
+            ExprKind::Index { expr: arr_expr, index } => {
+                let mut parts = vec![self.obligations_expr(arr_expr)];
+                // Bounds obligations fire only against a KNOWN
+                // length — see `known_array_length` for why an
+                // uninterpreted `len(arr)` obligation would be
+                // unprovable noise on every unrefined `List` index.
+                let known_length = self.known_array_length(arr_expr);
+                match &index.kind {
+                    ExprKind::Range {
+                        start,
+                        end,
+                        inclusive,
+                    } => {
+                        if let Some(s) = start {
+                            parts.push(self.obligations_expr(s));
+                        }
+                        if let Some(e) = end {
+                            parts.push(self.obligations_expr(e));
+                        }
+                        if let Some(length_expr) = known_length {
+                            let start_smt = match start {
+                                Some(s) => self.translate_expr(s),
+                                None => SmtExpr::int(0),
+                            };
+                            let end_smt = match end {
+                                Some(e) => self.translate_expr(e),
+                                None => length_expr.clone(),
+                            };
+                            let mut bounds = vec![
+                                Formula::ge(start_smt.clone(), SmtExpr::int(0)),
+                                Formula::le(start_smt, end_smt.clone()),
+                            ];
+                            if *inclusive {
+                                bounds.push(Formula::lt(end_smt, length_expr));
+                            } else {
+                                bounds.push(Formula::le(end_smt, length_expr));
+                            }
+                            parts.push(self.label_obligation(
+                                VCKind::ArrayBounds,
+                                "slice bounds valid: 0 <= start <= end <= length",
+                                expr.span,
+                                Formula::and(bounds),
+                            ));
+                        }
+                    }
+                    _ => {
+                        parts.push(self.obligations_expr(index));
+                        if let Some(length_expr) = known_length {
+                            let idx_smt = self.translate_expr(index);
+                            let bounds = Formula::and([
+                                Formula::ge(idx_smt.clone(), SmtExpr::int(0)),
+                                Formula::lt(idx_smt, length_expr),
+                            ]);
+                            parts.push(self.label_obligation(
+                                VCKind::ArrayBounds,
+                                "array index within bounds: 0 <= index < length",
+                                expr.span,
+                                bounds,
+                            ));
+                        }
+                    }
+                }
+                Formula::and(parts)
+            }
+
+            ExprKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                let cond_obl = self.obligations_condition(condition);
+                let cond_formula = self.translate_condition(condition);
+                let then_obl = self.wp_block(then_branch, &Formula::True);
+                let else_obl = match else_branch {
+                    Some(e) => self.obligations_expr(e),
+                    None => Formula::True,
+                };
+                Formula::and([
+                    cond_obl,
+                    Formula::implies(cond_formula.clone(), then_obl),
+                    Formula::implies(Formula::not(cond_formula), else_obl),
+                ])
+            }
+
+            ExprKind::Match { expr: scrutinee, arms } => {
+                let mut parts = vec![self.obligations_expr(scrutinee)];
+                let scrutinee_smt = self.translate_expr(scrutinee);
+                for arm in arms.iter() {
+                    let arm_cond =
+                        self.pattern_match_condition(&arm.pattern, &scrutinee_smt);
+                    let guard_formula = match &arm.guard {
+                        Maybe::Some(g) => {
+                            let g_obl = self.obligations_expr(g);
+                            parts.push(Formula::implies(arm_cond.clone(), g_obl));
+                            self.translate_expr_to_formula(g)
+                        }
+                        Maybe::None => Formula::True,
+                    };
+                    let mut body_obl = self.obligations_expr(&arm.body);
+                    // A bare identifier pattern binds the whole
+                    // scrutinee — thread the value through so
+                    // obligations over the binder stay provable.
+                    if let PatternKind::Ident { name, .. } = &arm.pattern.kind {
+                        body_obl = body_obl
+                            .substitute(&Variable::new(name.as_str()), &scrutinee_smt);
+                    }
+                    parts.push(Formula::implies(
+                        Formula::and([arm_cond, guard_formula]),
+                        body_obl,
+                    ));
+                }
+                Formula::and(parts)
+            }
+
+            ExprKind::Block(block) => self.wp_block(block, &Formula::True),
+
+            ExprKind::Tuple(exprs) => Formula::and(
+                exprs
+                    .iter()
+                    .map(|e| self.obligations_expr(e))
+                    .collect::<Vec<_>>(),
+            ),
+
+            ExprKind::Range { start, end, .. } => {
+                let mut parts = Vec::new();
+                if let Some(s) = start {
+                    parts.push(self.obligations_expr(s));
+                }
+                if let Some(e) = end {
+                    parts.push(self.obligations_expr(e));
+                }
+                Formula::and(parts)
+            }
+
+            ExprKind::InterpolatedString { exprs, .. } => Formula::and(
+                exprs
+                    .iter()
+                    .map(|e| self.obligations_expr(e))
+                    .collect::<Vec<_>>(),
+            ),
+
+            ExprKind::Record { fields, base, .. } => {
+                let mut parts: Vec<Formula> = fields
+                    .iter()
+                    .filter_map(|f| match &f.value {
+                        Maybe::Some(v) => Some(self.obligations_expr(v)),
+                        Maybe::None => None,
+                    })
+                    .collect();
+                if let Maybe::Some(b) = base {
+                    parts.push(self.obligations_expr(b));
+                }
+                Formula::and(parts)
+            }
+
+            ExprKind::NullCoalesce { left, right } | ExprKind::Pipeline { left, right } => {
+                Formula::and([self.obligations_expr(left), self.obligations_expr(right)])
+            }
+
+            // Statement-shaped forms reached in value position defer
+            // to their wp arms with a trivial postcondition: the wp
+            // result IS their obligation set.
+            ExprKind::While { .. }
+            | ExprKind::For { .. }
+            | ExprKind::Loop { .. }
+            | ExprKind::Return(_) => self.wp_expr(expr, &Formula::True),
+
+            // Not yet modeled: closure/comprehension bodies run
+            // under binders this translator does not model;
+            // spawned/async bodies run on another schedule. Their
+            // obligations are future work — contributing True here
+            // matches the pre-walk state of the art.
+            _ => Formula::True,
+        }
+    }
+
+    /// Names assigned anywhere inside `block` (plain and compound
+    /// assignments through a path head). Used to HAVOC loop-carried
+    /// state: obligations inside and after a loop body must hold for
+    /// EVERY value of a variable the body mutates, not for its
+    /// entry value — reading `i` as its pre-loop constant proved
+    /// `5 - i != 0` for a loop that drives `i` to 5 (false
+    /// `Proved`). Mutation through `&mut` arguments is not yet
+    /// tracked here; extending this set only tightens the net.
+    fn collect_assigned_vars(block: &Block, out: &mut HashSet<Text>) {
+        fn walk_expr(expr: &Expr, out: &mut HashSet<Text>) {
+            match &expr.kind {
+                ExprKind::Binary { op, left, right } if op.is_assignment() => {
+                    if let ExprKind::Path(path) = &left.kind
+                        && let Some(seg) = path.segments.first()
+                    {
+                        out.insert(Text::from(path_segment_to_str(seg)));
+                    }
+                    walk_expr(right, out);
+                }
+                ExprKind::Binary { left, right, .. } => {
+                    walk_expr(left, out);
+                    walk_expr(right, out);
+                }
+                ExprKind::Unary { expr: inner, .. }
+                | ExprKind::Paren(inner)
+                | ExprKind::Field { expr: inner, .. }
+                | ExprKind::OptionalChain { expr: inner, .. }
+                | ExprKind::TupleIndex { expr: inner, .. }
+                | ExprKind::Cast { expr: inner, .. }
+                | ExprKind::Try(inner)
+                | ExprKind::Throw(inner)
+                | ExprKind::Yield(inner)
+                | ExprKind::Await(inner)
+                | ExprKind::NamedArg { value: inner, .. } => walk_expr(inner, out),
+                ExprKind::Call { func, args, .. } => {
+                    walk_expr(func, out);
+                    for a in args.iter() {
+                        walk_expr(a, out);
+                    }
+                }
+                ExprKind::MethodCall { receiver, args, .. } => {
+                    walk_expr(receiver, out);
+                    for a in args.iter() {
+                        walk_expr(a, out);
+                    }
+                }
+                ExprKind::Index { expr: arr, index } => {
+                    walk_expr(arr, out);
+                    walk_expr(index, out);
+                }
+                ExprKind::Tuple(exprs) => {
+                    for e in exprs.iter() {
+                        walk_expr(e, out);
+                    }
+                }
+                ExprKind::If {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    for c in condition.conditions.iter() {
+                        match c {
+                            verum_ast::expr::ConditionKind::Expr(e) => walk_expr(e, out),
+                            verum_ast::expr::ConditionKind::Let { value, .. } => {
+                                walk_expr(value, out)
+                            }
+                        }
+                    }
+                    VCGenerator::collect_assigned_vars(then_branch, out);
+                    if let Some(e) = else_branch {
+                        walk_expr(e, out);
+                    }
+                }
+                ExprKind::Match { expr: scrutinee, arms } => {
+                    walk_expr(scrutinee, out);
+                    for arm in arms.iter() {
+                        if let Maybe::Some(g) = &arm.guard {
+                            walk_expr(g, out);
+                        }
+                        walk_expr(&arm.body, out);
+                    }
+                }
+                ExprKind::Block(block) | ExprKind::Loop { body: block, .. } => {
+                    VCGenerator::collect_assigned_vars(block, out);
+                }
+                ExprKind::While {
+                    condition, body, ..
+                } => {
+                    walk_expr(condition, out);
+                    VCGenerator::collect_assigned_vars(body, out);
+                }
+                ExprKind::For { iter, body, .. } => {
+                    walk_expr(iter, out);
+                    VCGenerator::collect_assigned_vars(body, out);
+                }
+                ExprKind::Return(Some(inner)) => walk_expr(inner, out),
+                _ => {}
+            }
+        }
+
+        for stmt in block.stmts.iter() {
+            match &stmt.kind {
+                StmtKind::Expr { expr, .. } | StmtKind::Defer(expr) | StmtKind::Errdefer(expr) => {
+                    walk_expr(expr, out)
+                }
+                StmtKind::Let {
+                    value: Some(v), ..
+                } => walk_expr(v, out),
+                StmtKind::LetElse {
+                    value, else_block, ..
+                } => {
+                    walk_expr(value, out);
+                    VCGenerator::collect_assigned_vars(else_block, out);
+                }
+                _ => {}
+            }
+        }
+        if let Some(expr) = &block.expr {
+            walk_expr(expr, out);
+        }
+    }
+
+    /// How a loop body drives one of its assigned variables.
+    fn monotonic_direction(body: &Block, var: &str) -> HavocDir {
+        fn positive_int_literal(expr: &Expr) -> bool {
+            matches!(
+                &expr.kind,
+                ExprKind::Literal(lit)
+                    if matches!(&lit.kind, verum_ast::literal::LiteralKind::Int(i) if i.value > 0)
+            )
+        }
+        fn is_var(expr: &Expr, var: &str) -> bool {
+            if let ExprKind::Path(path) = &expr.kind
+                && path.segments.len() == 1
+                && let Some(seg) = path.segments.first()
+            {
+                return path_segment_to_str(seg) == var;
+            }
+            false
+        }
+        /// Classify one assignment's effect on `var`; `None` when
+        /// the statement does not assign it.
+        fn classify(expr: &Expr, var: &str) -> Option<HavocDir> {
+            let ExprKind::Binary { op, left, right } = &expr.kind else {
+                return None;
+            };
+            if !op.is_assignment() || !is_var(left, var) {
+                return None;
+            }
+            match op {
+                BinOp::AddAssign if positive_int_literal(right) => Some(HavocDir::Grow),
+                BinOp::SubAssign if positive_int_literal(right) => Some(HavocDir::Shrink),
+                BinOp::Assign => match &right.kind {
+                    ExprKind::Binary {
+                        op: BinOp::Add,
+                        left: l,
+                        right: r,
+                    } if (is_var(l, var) && positive_int_literal(r))
+                        || (is_var(r, var) && positive_int_literal(l)) =>
+                    {
+                        Some(HavocDir::Grow)
+                    }
+                    ExprKind::Binary {
+                        op: BinOp::Sub,
+                        left: l,
+                        right: r,
+                    } if is_var(l, var) && positive_int_literal(r) => Some(HavocDir::Shrink),
+                    _ => Some(HavocDir::Chaos),
+                },
+                _ => Some(HavocDir::Chaos),
+            }
+        }
+
+        fn walk(block: &Block, var: &str, acc: &mut Option<HavocDir>) {
+            fn combine(acc: &mut Option<HavocDir>, dir: HavocDir) {
+                *acc = Some(match acc {
+                    None => dir,
+                    Some(prev) if *prev == dir => dir,
+                    Some(_) => HavocDir::Chaos,
+                });
+            }
+            fn walk_expr(expr: &Expr, var: &str, acc: &mut Option<HavocDir>) {
+                if let Some(dir) = classify(expr, var) {
+                    combine(acc, dir);
+                    return;
+                }
+                match &expr.kind {
+                    ExprKind::If {
+                        then_branch,
+                        else_branch,
+                        ..
+                    } => {
+                        walk(then_branch, var, acc);
+                        if let Some(e) = else_branch {
+                            walk_expr(e, var, acc);
+                        }
+                    }
+                    ExprKind::Match { arms, .. } => {
+                        for arm in arms.iter() {
+                            walk_expr(&arm.body, var, acc);
+                        }
+                    }
+                    ExprKind::Block(b)
+                    | ExprKind::While { body: b, .. }
+                    | ExprKind::Loop { body: b, .. }
+                    | ExprKind::For { body: b, .. } => walk(b, var, acc),
+                    ExprKind::Paren(inner) => walk_expr(inner, var, acc),
+                    _ => {}
+                }
+            }
+            for stmt in block.stmts.iter() {
+                if let StmtKind::Expr { expr, .. } = &stmt.kind {
+                    walk_expr(expr, var, acc);
+                }
+            }
+            if let Some(expr) = &block.expr {
+                walk_expr(expr, var, acc);
+            }
+        }
+
+        let mut acc = None;
+        walk(body, var, &mut acc);
+        acc.unwrap_or(HavocDir::Chaos)
+    }
+
+    /// Build the havoc plan for a loop body: every assigned
+    /// variable gets a FRESH quantified stand-in, and variables the
+    /// body drives monotonically contribute an entry-bound
+    /// hypothesis relating the stand-in to the entry value.
+    ///
+    /// The hypothesis is what keeps canonical counting loops
+    /// provable without a written invariant: for
+    /// `let mut i = 0; while i < n { a[i]; i = i + 1 }` the plan
+    /// yields `forall i'. i' >= i && i' < n => 0 <= i' < len(a)`,
+    /// and the OUTER wp substitution of `let mut i = 0` rewrites
+    /// the free entry occurrence to `0` — the lower bound arrives
+    /// through the calculus itself, no inference pass needed.
+    fn havoc_plan(&self, body: &Block) -> HavocPlan {
+        let mut assigned: HashSet<Text> = HashSet::new();
+        Self::collect_assigned_vars(body, &mut assigned);
+
+        let mut names: Vec<Text> = assigned.into_iter().collect();
+        names.sort();
+
+        let mut plan = HavocPlan {
+            bound: List::new(),
+            renames: Vec::new(),
+            entry_hypothesis: Formula::True,
+        };
+        let mut hyps: Vec<Formula> = Vec::new();
+        for name in names {
+            let n = self.havoc_counter.get();
+            self.havoc_counter.set(n + 1);
+            let fresh = Variable::new(format!("{}__it{}", name.as_str(), n));
+            let old = Variable::new(name.as_str());
+            match Self::monotonic_direction(body, name.as_str()) {
+                HavocDir::Grow => hyps.push(Formula::ge(
+                    SmtExpr::Var(fresh.clone()),
+                    SmtExpr::Var(old.clone()),
+                )),
+                HavocDir::Shrink => hyps.push(Formula::le(
+                    SmtExpr::Var(fresh.clone()),
+                    SmtExpr::Var(old.clone()),
+                )),
+                HavocDir::Chaos => {}
+            }
+            plan.bound.push(fresh.clone());
+            plan.renames.push((old, fresh));
+        }
+        plan.entry_hypothesis = Formula::and(hyps);
+        plan
+    }
+
+    /// Environment pre-pass: record every let binding's declared
+    /// sort and statically-known array length BEFORE wp runs.
+    ///
+    /// wp folds the function backwards (tail first), so by the time
+    /// a call deep in the body asks "what is `arr`'s length?", the
+    /// `let arr = [1, 2, 3]` above it has not been visited yet —
+    /// the table would answer only for parameters. One forward scan
+    /// makes the whole body's environment available to every
+    /// obligation regardless of fold order.
+    fn preseed_symbol_table(&mut self, block: &Block) {
+        fn walk_expr(this: &mut VCGenerator, expr: &Expr) {
+            match &expr.kind {
+                ExprKind::Block(b) => this.preseed_symbol_table(b),
+                ExprKind::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    this.preseed_symbol_table(then_branch);
+                    if let Some(e) = else_branch {
+                        walk_expr(this, e);
+                    }
+                }
+                ExprKind::Match { arms, .. } => {
+                    for arm in arms.iter() {
+                        walk_expr(this, &arm.body);
+                    }
+                }
+                ExprKind::While { body, .. }
+                | ExprKind::Loop { body, .. }
+                | ExprKind::For { body, .. } => this.preseed_symbol_table(body),
+                ExprKind::Paren(inner) => walk_expr(this, inner),
+                _ => {}
+            }
+        }
+
+        for stmt in block.stmts.iter() {
+            match &stmt.kind {
+                StmtKind::Let { pattern, ty, value } => {
+                    if let PatternKind::Ident { name, .. } = &pattern.kind {
+                        if let Some(ty) = ty {
+                            if let Some(length) = self.extract_type_length(ty) {
+                                self.symbol_table.add_array_length(name.as_str(), length);
+                            }
+                            let var_ty = self.translate_type(ty);
+                            self.symbol_table.add_variable(name.as_str(), var_ty);
+                        } else if let Some(val_expr) = value
+                            && let Some(var_ty) = Self::var_type_from_literal(val_expr)
+                        {
+                            // Un-annotated binding initialized by a
+                            // literal: the sort is evident from the
+                            // literal itself. Without it,
+                            // `let arr = [1, 2, 3]` leaves `arr` at
+                            // the Int default and every `arr[i]`
+                            // dies in translation ("Select requires
+                            // array").
+                            self.symbol_table.add_variable(name.as_str(), var_ty);
+                        }
+                        if let Some(val_expr) = value {
+                            if let Some(length) = self.extract_array_literal_length(val_expr) {
+                                self.symbol_table.add_array_length(name.as_str(), length);
+                            }
+                        }
+                    }
+                    if let Some(val_expr) = value {
+                        walk_expr(self, val_expr);
+                    }
+                }
+                StmtKind::LetElse {
+                    pattern,
+                    value,
+                    else_block,
+                    ..
+                } => {
+                    if let PatternKind::Ident { name, .. } = &pattern.kind
+                        && let Some(length) = self.extract_array_literal_length(value)
+                    {
+                        self.symbol_table.add_array_length(name.as_str(), length);
+                    }
+                    walk_expr(self, value);
+                    self.preseed_symbol_table(else_block);
+                }
+                StmtKind::Expr { expr, .. } => walk_expr(self, expr),
+                _ => {}
+            }
+        }
+        if let Some(expr) = &block.expr {
+            walk_expr(self, expr);
+        }
+    }
+
+    /// Infer a binding's verification sort from a literal
+    /// initializer: scalar literals map to their sorts, array
+    /// literals to `Array(Int, elem)` with the element sort taken
+    /// from the first element (homogeneous by the type system).
+    fn var_type_from_literal(expr: &Expr) -> Option<VarType> {
+        use verum_ast::expr::ArrayExpr;
+        use verum_ast::literal::LiteralKind;
+        match &expr.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                LiteralKind::Int(_) => Some(VarType::Int),
+                LiteralKind::Bool(_) => Some(VarType::Bool),
+                LiteralKind::Float(_) => Some(VarType::Real),
+                _ => None,
+            },
+            ExprKind::Array(arr) => {
+                let elem = match arr {
+                    ArrayExpr::List(elems) => elems.first().and_then(Self::var_type_from_literal),
+                    ArrayExpr::Repeat { value, .. } => Self::var_type_from_literal(value),
+                };
+                Some(VarType::Array(
+                    Box::new(VarType::Int),
+                    Box::new(elem.unwrap_or(VarType::Int)),
+                ))
+            }
+            ExprKind::Paren(inner) => Self::var_type_from_literal(inner),
+            _ => None,
+        }
+    }
+
+    /// Fold `len(v)` / `Len v` applications over variables whose
+    /// length the symbol table knows into that length expression, so
+    /// substituted contract formulas like `len(arr) >= 3` become
+    /// decidable facts (`5 >= 3`) instead of uninterpreted atoms.
+    fn fold_known_lengths(&self, formula: &Formula) -> Formula {
+        fn fold_expr(this: &VCGenerator, e: &SmtExpr) -> SmtExpr {
+            let known_len_of = |inner: &SmtExpr| -> Option<SmtExpr> {
+                if let SmtExpr::Var(v) = inner {
+                    if let Maybe::Some(l) = this.symbol_table.get_array_length(v.name.as_str()) {
+                        return Some(l);
+                    }
+                }
+                None
+            };
+            match e {
+                SmtExpr::Apply(name, args) if name.as_str() == "len" && args.len() == 1 => {
+                    if let Some(l) = known_len_of(&args[0]) {
+                        return l;
+                    }
+                    SmtExpr::Apply(name.clone(), args.iter().map(|a| fold_expr(this, a)).collect())
+                }
+                SmtExpr::UnOp(SmtUnOp::Len, inner) => {
+                    if let Some(l) = known_len_of(inner) {
+                        return l;
+                    }
+                    SmtExpr::UnOp(SmtUnOp::Len, Box::new(fold_expr(this, inner)))
+                }
+                SmtExpr::Var(_)
+                | SmtExpr::IntConst(_)
+                | SmtExpr::BoolConst(_)
+                | SmtExpr::RealConst(_)
+                | SmtExpr::BitVecConst(_, _) => e.clone(),
+                SmtExpr::BinOp(op, l, r) => SmtExpr::BinOp(
+                    *op,
+                    Box::new(fold_expr(this, l)),
+                    Box::new(fold_expr(this, r)),
+                ),
+                SmtExpr::UnOp(op, inner) => SmtExpr::UnOp(*op, Box::new(fold_expr(this, inner))),
+                SmtExpr::Apply(name, args) => SmtExpr::Apply(
+                    name.clone(),
+                    args.iter().map(|a| fold_expr(this, a)).collect(),
+                ),
+                SmtExpr::Select(a, i) => SmtExpr::Select(
+                    Box::new(fold_expr(this, a)),
+                    Box::new(fold_expr(this, i)),
+                ),
+                SmtExpr::Store(a, i, v) => SmtExpr::Store(
+                    Box::new(fold_expr(this, a)),
+                    Box::new(fold_expr(this, i)),
+                    Box::new(fold_expr(this, v)),
+                ),
+                SmtExpr::Ite(c, t, f) => SmtExpr::Ite(
+                    Box::new(this.fold_known_lengths(c)),
+                    Box::new(fold_expr(this, t)),
+                    Box::new(fold_expr(this, f)),
+                ),
+                SmtExpr::Let(v, b, body) => SmtExpr::Let(
+                    v.clone(),
+                    Box::new(fold_expr(this, b)),
+                    Box::new(fold_expr(this, body)),
+                ),
+            }
+        }
+
+        match formula {
+            Formula::True | Formula::False | Formula::Var(_) => formula.clone(),
+            Formula::Not(inner) => Formula::not(self.fold_known_lengths(inner)),
+            Formula::And(fs) => {
+                Formula::And(fs.iter().map(|f| self.fold_known_lengths(f)).collect())
+            }
+            Formula::Or(fs) => Formula::Or(fs.iter().map(|f| self.fold_known_lengths(f)).collect()),
+            Formula::Implies(a, b) => Formula::implies(
+                self.fold_known_lengths(a),
+                self.fold_known_lengths(b),
+            ),
+            Formula::Iff(a, b) => Formula::Iff(
+                Box::new(self.fold_known_lengths(a)),
+                Box::new(self.fold_known_lengths(b)),
+            ),
+            Formula::Forall(vars, inner) => {
+                Formula::Forall(vars.clone(), Box::new(self.fold_known_lengths(inner)))
+            }
+            Formula::Exists(vars, inner) => {
+                Formula::Exists(vars.clone(), Box::new(self.fold_known_lengths(inner)))
+            }
+            Formula::Eq(l, r) => Formula::Eq(
+                Box::new(fold_expr(self, l)),
+                Box::new(fold_expr(self, r)),
+            ),
+            Formula::Ne(l, r) => Formula::Ne(
+                Box::new(fold_expr(self, l)),
+                Box::new(fold_expr(self, r)),
+            ),
+            Formula::Lt(l, r) => Formula::Lt(
+                Box::new(fold_expr(self, l)),
+                Box::new(fold_expr(self, r)),
+            ),
+            Formula::Le(l, r) => Formula::Le(
+                Box::new(fold_expr(self, l)),
+                Box::new(fold_expr(self, r)),
+            ),
+            Formula::Gt(l, r) => Formula::Gt(
+                Box::new(fold_expr(self, l)),
+                Box::new(fold_expr(self, r)),
+            ),
+            Formula::Ge(l, r) => Formula::Ge(
+                Box::new(fold_expr(self, l)),
+                Box::new(fold_expr(self, r)),
+            ),
+            Formula::Predicate(name, args) => Formula::Predicate(
+                name.clone(),
+                args.iter().map(|a| fold_expr(self, a)).collect(),
+            ),
+            Formula::Let(v, b, body) => Formula::Let(
+                v.clone(),
+                Box::new(fold_expr(self, b)),
+                Box::new(self.fold_known_lengths(body)),
+            ),
+            Formula::Labeled(id, inner) => {
+                Formula::Labeled(*id, Box::new(self.fold_known_lengths(inner)))
+            }
+        }
+    }
+
+    /// The formula a refinement type contributes about `subject`
+    /// (a parameter variable or `result`): the predicate expression
+    /// with its binder — explicit name, or the implicit
+    /// `self`/`it` — substituted by the subject. `None` when the
+    /// type carries no refinement.
+    fn refinement_predicate_formula(
+        &self,
+        ty: &verum_ast::ty::Type,
+        subject: &SmtExpr,
+    ) -> Option<Formula> {
+        use verum_ast::ty::TypeKind;
+        match &ty.kind {
+            TypeKind::Refined { predicate, .. } => {
+                let mut f =
+                    self.parse_contract_expr(&predicate.expr, ContractContext::Precondition);
+                if let Maybe::Some(binder) = &predicate.binding {
+                    f = f.substitute(&Variable::new(binder.name.as_str()), subject);
+                }
+                f = f.substitute(&Variable::new("self"), subject);
+                f = f.substitute(&Variable::new("it"), subject);
+                Some(f)
+            }
+            TypeKind::Reference { inner, .. }
+            | TypeKind::CheckedReference { inner, .. }
+            | TypeKind::UnsafeReference { inner, .. } => {
+                self.refinement_predicate_formula(inner, subject)
+            }
+            _ => None,
+        }
+    }
+
+    /// Translate a first-class quantifier (`ExprKind::Forall` /
+    /// `ExprKind::Exists`) into its `Formula` counterpart:
+    /// range domains become arithmetic bounds, collection domains
+    /// become `in` predicates, `where` guards conjoin, and the
+    /// body translates in the same contract context.
+    fn translate_quantifier(
+        &self,
+        bindings: &List<verum_ast::expr::QuantifierBinding>,
+        body: &Expr,
+        context: ContractContext,
+        is_forall: bool,
+    ) -> Formula {
+        let mut vars: List<Variable> = List::new();
+        let mut constraints: Vec<Formula> = Vec::new();
+
+        for binding in bindings.iter() {
+            let PatternKind::Ident { name, .. } = &binding.pattern.kind else {
+                // Non-identifier binders are not yet modeled — an
+                // opaque fresh atom keeps the formula honest
+                // (unprovable) instead of silently wrong.
+                return self.expr_to_formula(&self.fresh_unknown_term());
+            };
+            let var = match &binding.ty {
+                Maybe::Some(ty) => Variable::typed(name.as_str(), self.translate_type(ty)),
+                Maybe::None => Variable::new(name.as_str()),
+            };
+
+            if let Maybe::Some(domain) = &binding.domain {
+                match &domain.kind {
+                    ExprKind::Range {
+                        start,
+                        end,
+                        inclusive,
+                    } => {
+                        if let Some(s) = start {
+                            constraints.push(Formula::ge(
+                                SmtExpr::Var(var.clone()),
+                                self.translate_expr(s),
+                            ));
+                        }
+                        if let Some(e) = end {
+                            let end_smt = self.translate_expr(e);
+                            constraints.push(if *inclusive {
+                                Formula::le(SmtExpr::Var(var.clone()), end_smt)
+                            } else {
+                                Formula::lt(SmtExpr::Var(var.clone()), end_smt)
+                            });
+                        }
+                    }
+                    _ => {
+                        constraints.push(Formula::Predicate(
+                            Text::from("in"),
+                            vec![SmtExpr::Var(var.clone()), self.translate_expr(domain)].into(),
+                        ));
+                    }
+                }
+            }
+            if let Maybe::Some(guard) = &binding.guard {
+                constraints.push(self.parse_contract_expr(guard, context));
+            }
+            vars.push(var);
+        }
+
+        let body_formula = self.parse_contract_expr(body, context);
+        if is_forall {
+            Formula::Forall(
+                vars,
+                Box::new(Formula::implies(Formula::and(constraints), body_formula)),
+            )
+        } else {
+            Formula::Exists(
+                vars,
+                Box::new(Formula::and(
+                    constraints.into_iter().chain([body_formula]),
+                )),
+            )
+        }
+    }
+
+    /// Whether a loop body contains an early exit (`return` /
+    /// `break`) on some path. The termination VC encodes "the
+    /// measure strictly decreases across the body" via
+    /// `wp(body, measure < snapshot)` — but an early exit LEAVES
+    /// the loop, so the measure owes nothing there; folding the
+    /// target through `wp(return e, Q)` demands
+    /// `measure < snapshot` in an UNCHANGED state, an obligation
+    /// that is false by construction. Until the calculus models
+    /// exit paths separately, a body with an early exit generates
+    /// no measure-decrease VC (matching the pre-T0657 state, where
+    /// the VC existed but nothing discharged it).
+    fn block_has_early_exit(block: &Block) -> bool {
+        fn expr_has_exit(expr: &Expr) -> bool {
+            match &expr.kind {
+                ExprKind::Return(_) | ExprKind::Break { .. } => true,
+                ExprKind::Paren(inner)
+                | ExprKind::Unary { expr: inner, .. }
+                | ExprKind::Try(inner) => expr_has_exit(inner),
+                ExprKind::Binary { left, right, .. } => {
+                    expr_has_exit(left) || expr_has_exit(right)
+                }
+                ExprKind::Block(b) => VCGenerator::block_has_early_exit(b),
+                ExprKind::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    VCGenerator::block_has_early_exit(then_branch)
+                        || else_branch.as_ref().is_some_and(|e| expr_has_exit(e))
+                }
+                ExprKind::Match { arms, .. } => {
+                    arms.iter().any(|arm| expr_has_exit(&arm.body))
+                }
+                // A `return` inside a NESTED loop still exits the
+                // enclosing function; a nested `break` exits only
+                // the nested loop, but distinguishing them needs
+                // label resolution — treat both as early exits
+                // (conservative toward fewer false obligations).
+                ExprKind::While { body, .. }
+                | ExprKind::Loop { body, .. }
+                | ExprKind::For { body, .. } => VCGenerator::block_has_early_exit(body),
+                _ => false,
+            }
+        }
+        block.stmts.iter().any(|stmt| match &stmt.kind {
+            StmtKind::Expr { expr, .. } => expr_has_exit(expr),
+            StmtKind::Let {
+                value: Some(v), ..
+            } => expr_has_exit(v),
+            StmtKind::LetElse { value, .. } => expr_has_exit(value),
+            _ => false,
+        }) || block.expr.as_ref().is_some_and(|e| expr_has_exit(e))
+    }
+
+    /// Obligations of evaluating an `if` condition list.
+    fn obligations_condition(&mut self, cond: &verum_ast::expr::IfCondition) -> Formula {
+        let mut parts = Vec::new();
+        for c in cond.conditions.iter() {
+            match c {
+                verum_ast::expr::ConditionKind::Expr(e) => parts.push(self.obligations_expr(e)),
+                verum_ast::expr::ConditionKind::Let { value, .. } => {
+                    parts.push(self.obligations_expr(value))
+                }
+            }
+        }
+        Formula::and(parts)
+    }
+
     /// Weakest precondition for an expression
     fn wp_expr(&mut self, expr: &Expr, postcondition: &Formula) -> Formula {
         match &expr.kind {
@@ -1813,7 +3265,9 @@ impl VCGenerator {
                 then_branch,
                 else_branch,
             } => {
-                // wp(if b then S1 else S2, Q) = (b => wp(S1, Q)) && (!b => wp(S2, Q))
+                // wp(if b then S1 else S2, Q) =
+                //   obligations(b) && (b => wp(S1, Q)) && (!b => wp(S2, Q))
+                let cond_obl = self.obligations_condition(condition);
                 let cond_formula = self.translate_condition(condition);
                 let then_wp = self.wp_block(then_branch, postcondition);
                 let else_wp = match else_branch {
@@ -1822,6 +3276,7 @@ impl VCGenerator {
                 };
 
                 Formula::and([
+                    cond_obl,
                     Formula::implies(cond_formula.clone(), then_wp),
                     Formula::implies(Formula::not(cond_formula), else_wp),
                 ])
@@ -1842,6 +3297,8 @@ impl VCGenerator {
                 // (previously DISCARDED — the `invariants: _` pattern
                 // silently dropped source-level annotations), else
                 // the trivial invariant.
+                let has_user_invariant = self.symbol_table.loop_invariants.get(&loop_id).is_some()
+                    || !loop_invs.is_empty();
                 let invariant = match self.symbol_table.loop_invariants.get(&loop_id) {
                     Some(inv) => inv.clone(),
                     None => {
@@ -1860,33 +3317,47 @@ impl VCGenerator {
                 };
 
                 let cond_formula = self.translate_expr_to_formula(condition);
-                let body_wp = self.wp_block(body, &invariant);
 
-                // Generate three VCs:
-                // 1. Initialization: precondition => I (handled at function level)
-                // 2. Preservation: I && b => wp(body, I)
-                let preserve_vc = VerificationCondition::new(
-                    Formula::implies(
-                        Formula::and([invariant.clone(), cond_formula.clone()]),
-                        body_wp,
-                    ),
-                    SourceLocation::from_span(expr.span, self.source_file.clone()),
-                    VCKind::LoopInvariantPreserve,
-                    "Loop invariant preservation",
-                );
-                self.push_vc(preserve_vc);
+                // The classic invariant triad only carries meaning
+                // when the author supplied an invariant. With the
+                // trivial `true` invariant the preserve VC is a
+                // quantifier-and-UF thicket asserting nothing (its
+                // conclusion is `wp(body, true)` under premises the
+                // solver cannot relate), and the exit VC
+                // `true && !b => Q` is Q minus every fact the loop
+                // established — both burned full solver timeouts on
+                // ordinary un-annotated loops once Step 3 started
+                // discharging them. The invariant-free path below
+                // handles obligations honestly instead.
+                if has_user_invariant {
+                    let body_wp = self.wp_block(body, &invariant);
 
-                // 3. Exit: I && !b => Q
-                let exit_vc = VerificationCondition::new(
-                    Formula::implies(
-                        Formula::and([invariant.clone(), Formula::not(cond_formula.clone())]),
-                        postcondition.clone(),
-                    ),
-                    SourceLocation::from_span(expr.span, self.source_file.clone()),
-                    VCKind::LoopInvariantExit,
-                    "Loop invariant implies postcondition",
-                );
-                self.push_vc(exit_vc);
+                    // Generate three VCs:
+                    // 1. Initialization: precondition => I (handled at function level)
+                    // 2. Preservation: I && b => wp(body, I)
+                    let preserve_vc = VerificationCondition::new(
+                        Formula::implies(
+                            Formula::and([invariant.clone(), cond_formula.clone()]),
+                            body_wp,
+                        ),
+                        SourceLocation::from_span(expr.span, self.source_file.clone()),
+                        VCKind::LoopInvariantPreserve,
+                        "Loop invariant preservation",
+                    );
+                    self.push_vc(preserve_vc);
+
+                    // 3. Exit: I && !b => Q
+                    let exit_vc = VerificationCondition::new(
+                        Formula::implies(
+                            Formula::and([invariant.clone(), Formula::not(cond_formula.clone())]),
+                            postcondition.clone(),
+                        ),
+                        SourceLocation::from_span(expr.span, self.source_file.clone()),
+                        VCKind::LoopInvariantExit,
+                        "Loop invariant implies postcondition",
+                    );
+                    self.push_vc(exit_vc);
+                }
 
                 // 4. Termination: the `decreases` measure is
                 // well-founded — non-negative while the loop runs,
@@ -1901,7 +3372,12 @@ impl VCGenerator {
                 // `decreases` entirely: the acceptance example
                 // `while c { … } decreases n - i;` produced zero
                 // termination VCs even with a valid measure. T0671)
-                for decreases_expr in decreases {
+                //
+                // Bodies with an early exit are excluded — see
+                // `block_has_early_exit` for why folding the target
+                // through a `return` fabricates a false obligation.
+                let measure_vc_sound = !Self::block_has_early_exit(body);
+                for decreases_expr in decreases.iter().filter(|_| measure_vc_sound) {
                     let variant = self.translate_expr(decreases_expr);
                     let snapshot = Variable::new(format!("__variant0_l{}", loop_id));
 
@@ -1940,8 +3416,52 @@ impl VCGenerator {
                     self.push_missing_measure_vc(expr.span, "`while` loop");
                 }
 
-                // Return invariant as wp
-                invariant
+                let cond_obl = self.obligations_expr(condition);
+                if has_user_invariant {
+                    // Classic triad: the invariant is what survives
+                    // the loop (the exit VC carries Q).
+                    Formula::and([cond_obl, invariant])
+                } else {
+                    // Invariant-free honest path: the body's woven
+                    // obligations must hold on EVERY iteration and Q
+                    // must hold after the loop — both under a HAVOC
+                    // of the variables the body assigns, because
+                    // reading them at their entry values proves
+                    // obligations about states the loop never
+                    // reaches (a false-`Proved` channel). The loop
+                    // guard scopes each side, and monotonic
+                    // variables keep their entry bound (see
+                    // `havoc_plan`) so canonical counting loops
+                    // stay provable.
+                    let body_obl = self.wp_block(body, &Formula::True);
+                    let plan = self.havoc_plan(body);
+                    if plan.is_empty() {
+                        let step = Formula::implies(cond_formula.clone(), body_obl);
+                        let after =
+                            Formula::implies(Formula::not(cond_formula), postcondition.clone());
+                        Formula::and([cond_obl, step, after])
+                    } else {
+                        let cond_r = plan.apply(&cond_formula);
+                        let step = Formula::implies(
+                            Formula::and([plan.entry_hypothesis.clone(), cond_r.clone()]),
+                            plan.apply(&body_obl),
+                        );
+                        let after = Formula::implies(
+                            Formula::and([
+                                plan.entry_hypothesis.clone(),
+                                Formula::not(cond_r),
+                            ]),
+                            plan.apply(postcondition),
+                        );
+                        Formula::and([
+                            cond_obl,
+                            Formula::Forall(
+                                plan.bound.clone(),
+                                Box::new(Formula::and([step, after])),
+                            ),
+                        ])
+                    }
+                }
             }
             ExprKind::For {
                 label: _,
@@ -1975,6 +3495,8 @@ impl VCGenerator {
                 self.next_loop_id += 1;
 
                 // Get or infer loop invariant (combine all invariants with conjunction)
+                let has_user_invariant = self.symbol_table.loop_invariants.get(&loop_id).is_some()
+                    || !loop_invs.is_empty();
                 let invariant = match self.symbol_table.loop_invariants.get(&loop_id) {
                     Some(inv) => inv.clone(),
                     None => {
@@ -1998,7 +3520,7 @@ impl VCGenerator {
                 // Extract iteration bounds from the iterator expression
                 let (start_bound, end_bound, is_range) = self.extract_for_bounds(iter);
 
-                if is_range {
+                if is_range && has_user_invariant {
                     // Range-based for loop: for x in start..end
 
                     // 1. Entry VC: precondition implies invariant at start
@@ -2059,28 +3581,7 @@ impl VCGenerator {
                         "For loop postcondition holds at exit",
                     );
                     self.push_vc(exit_vc);
-
-                    // 4. Termination VC: if decreases clause present
-                    for decreases_expr in decreases {
-                        let variant = self.translate_expr(decreases_expr);
-                        let next_variant = variant.substitute(&loop_var, &next_var_expr);
-
-                        // Variant must be non-negative
-                        let non_neg = Formula::ge(variant.clone(), SmtExpr::int(0));
-                        let decreases_formula = Formula::lt(next_variant, variant);
-
-                        let term_vc = VerificationCondition::new(
-                            Formula::and(vec![
-                                Formula::implies(invariant.clone(), non_neg),
-                                Formula::implies(invariant.clone(), decreases_formula),
-                            ]),
-                            SourceLocation::from_span(expr.span, self.source_file.clone()),
-                            VCKind::Termination,
-                            "For loop terminates",
-                        );
-                        self.push_vc(term_vc);
-                    }
-                } else {
+                } else if !is_range && has_user_invariant {
                     // Collection-based for loop: for x in collection
                     // Use abstract iteration with forall quantification
 
@@ -2108,7 +3609,34 @@ impl VCGenerator {
                         "For loop invariant preservation over collection",
                     );
                     self.push_vc(preserve_vc);
+                }
 
+                // 4. Termination VC (range form): if decreases clause
+                // present. Meaningful with or without an invariant —
+                // the trivial invariant just weakens the premises.
+                if is_range {
+                    let next_var_expr =
+                        SmtExpr::add(SmtExpr::Var(loop_var.clone()), SmtExpr::int(1));
+                    for decreases_expr in decreases {
+                        let variant = self.translate_expr(decreases_expr);
+                        let next_variant = variant.substitute(&loop_var, &next_var_expr);
+
+                        // Variant must be non-negative
+                        let non_neg = Formula::ge(variant.clone(), SmtExpr::int(0));
+                        let decreases_formula = Formula::lt(next_variant, variant);
+
+                        let term_vc = VerificationCondition::new(
+                            Formula::and(vec![
+                                Formula::implies(invariant.clone(), non_neg),
+                                Formula::implies(invariant.clone(), decreases_formula),
+                            ]),
+                            SourceLocation::from_span(expr.span, self.source_file.clone()),
+                            VCKind::Termination,
+                            "For loop terminates",
+                        );
+                        self.push_vc(term_vc);
+                    }
+                } else {
                     // Non-range `for`: the iterator's finiteness is
                     // not structural (infinite adapters exist —
                     // cycle, repeat_with), so mandatory termination
@@ -2123,31 +3651,90 @@ impl VCGenerator {
                     }
                 }
 
-                invariant
+                let iter_obl = self.obligations_expr(iter);
+                if has_user_invariant {
+                    Formula::and([iter_obl, invariant])
+                } else {
+                    // Invariant-free honest path (see the `while`
+                    // arm): body obligations for EVERY iteration
+                    // state, Q after the loop, both under a havoc of
+                    // the body's assigned variables plus the loop
+                    // binder. The range form additionally scopes the
+                    // body's obligations to `start <= v < end`.
+                    let body_obl = self.wp_block(body, &Formula::True);
+                    let mut plan = self.havoc_plan(body);
+                    // The loop binder is fresh state per iteration
+                    // too; its bound comes from the range itself.
+                    let n = self.havoc_counter.get();
+                    self.havoc_counter.set(n + 1);
+                    let lv_fresh =
+                        Variable::new(format!("{}__it{}", loop_var.name.as_str(), n));
+                    plan.bound.push(lv_fresh.clone());
+                    plan.renames.push((loop_var.clone(), lv_fresh.clone()));
+                    if is_range {
+                        plan.entry_hypothesis = Formula::and([
+                            plan.entry_hypothesis,
+                            Formula::ge(SmtExpr::Var(lv_fresh.clone()), start_bound.clone()),
+                            Formula::lt(SmtExpr::Var(lv_fresh.clone()), end_bound.clone()),
+                        ]);
+                    }
+                    let step = Formula::implies(
+                        plan.entry_hypothesis.clone(),
+                        plan.apply(&body_obl),
+                    );
+                    // Q after the loop: the binder is out of scope;
+                    // the assigned variables stay havocked (their
+                    // stand-ins remain quantified, Q is rewritten
+                    // onto them).
+                    let after = plan.apply(postcondition);
+                    Formula::and([
+                        iter_obl,
+                        Formula::Forall(
+                            plan.bound.clone(),
+                            Box::new(Formula::and([step, after])),
+                        ),
+                    ])
+                }
             }
             ExprKind::Loop {
                 label: _,
                 body,
-                invariants: _,
+                invariants: loop_invs,
             } => {
                 // Infinite loop: wp(loop { S }, Q) = I (invariant must be established)
                 let loop_id = self.next_loop_id;
                 self.next_loop_id += 1;
 
+                let has_user_invariant = self.symbol_table.loop_invariants.get(&loop_id).is_some()
+                    || !loop_invs.is_empty();
                 let invariant = match self.symbol_table.loop_invariants.get(&loop_id) {
                     Some(inv) => inv.clone(),
-                    None => Formula::True,
+                    None => {
+                        if loop_invs.is_empty() {
+                            Formula::True
+                        } else {
+                            let formulas: Vec<Formula> = loop_invs
+                                .iter()
+                                .map(|inv_expr| self.translate_contract(inv_expr))
+                                .collect();
+                            formulas
+                                .into_iter()
+                                .fold(Formula::True, |acc, f| Formula::and(vec![acc, f]))
+                        }
+                    }
                 };
 
-                let body_wp = self.wp_block(body, &invariant);
+                if has_user_invariant {
+                    let body_wp = self.wp_block(body, &invariant);
 
-                let preserve_vc = VerificationCondition::new(
-                    Formula::implies(invariant.clone(), body_wp),
-                    SourceLocation::from_span(expr.span, self.source_file.clone()),
-                    VCKind::LoopInvariantPreserve,
-                    "Infinite loop invariant preservation",
-                );
-                self.push_vc(preserve_vc);
+                    let preserve_vc = VerificationCondition::new(
+                        Formula::implies(invariant.clone(), body_wp),
+                        SourceLocation::from_span(expr.span, self.source_file.clone()),
+                        VCKind::LoopInvariantPreserve,
+                        "Infinite loop invariant preservation",
+                    );
+                    self.push_vc(preserve_vc);
+                }
 
                 // The `loop` form cannot even carry a `decreases`
                 // measure — under mandatory termination it is
@@ -2162,7 +3749,30 @@ impl VCGenerator {
                     self.push_vc(vc);
                 }
 
-                invariant
+                if has_user_invariant {
+                    invariant
+                } else {
+                    // Invariant-free: the body's woven obligations
+                    // under a havoc of its assigned variables. Code
+                    // after an infinite loop is only reachable via
+                    // `break`, whose paths this calculus does not
+                    // yet model — Q is not propagated (matching the
+                    // previous behaviour of returning the trivial
+                    // invariant).
+                    let body_obl = self.wp_block(body, &Formula::True);
+                    let plan = self.havoc_plan(body);
+                    if plan.is_empty() {
+                        body_obl
+                    } else {
+                        Formula::Forall(
+                            plan.bound.clone(),
+                            Box::new(Formula::implies(
+                                plan.entry_hypothesis.clone(),
+                                plan.apply(&body_obl),
+                            )),
+                        )
+                    }
+                }
             }
             ExprKind::Return(maybe_expr) => match maybe_expr {
                 Some(ret_expr) => self.wp_return(Some(ret_expr), postcondition),
@@ -2170,160 +3780,50 @@ impl VCGenerator {
             },
             ExprKind::Block(block) => self.wp_block(block, postcondition),
             ExprKind::Binary { op, left, right } if op.is_assignment() => {
-                // Assignment: wp(x = e, Q) = Q[x/e]
+                // Assignment: wp(x = e, Q) = obligations(e) && Q[x/e].
+                // An indexed target (`a[i] = e`) contributes its own
+                // bounds obligation via the left-side walk.
+                let lhs_obligations = if matches!(&left.kind, ExprKind::Path(_)) {
+                    Formula::True
+                } else {
+                    self.obligations_expr(left)
+                };
+                let obligations =
+                    Formula::and([lhs_obligations, self.obligations_expr(right)]);
                 if let ExprKind::Path(path) = &left.kind
                     && let Some(seg) = path.segments.first()
                 {
                     let var = Variable::new(path_segment_to_str(seg));
                     let smt_value = self.translate_expr(right);
-                    return postcondition.substitute(&var, &smt_value);
+                    return Formula::and([
+                        obligations,
+                        postcondition.substitute(&var, &smt_value),
+                    ]);
                 }
-                postcondition.clone()
-            }
-            ExprKind::Index {
-                expr: arr_expr,
-                index,
-            } => {
-                // Array/slice access: generate bounds check VCs
-                let arr_smt = self.translate_expr(arr_expr);
-                let length_expr = self.get_array_length_expr(arr_expr, &arr_smt);
-
-                // Check if this is a range index (slice access) or simple index
-                match &index.kind {
-                    ExprKind::Range {
-                        start,
-                        end,
-                        inclusive,
-                    } => {
-                        // Slice access: arr[start..end] or arr[start..=end]
-                        // Generate VCs for:
-                        // 1. 0 <= start
-                        // 2. start <= end (or start < end for exclusive)
-                        // 3. end <= length (or end < length for exclusive)
-
-                        let start_smt = match start {
-                            Some(s) => self.translate_expr(s),
-                            None => SmtExpr::int(0),
-                        };
-
-                        let end_smt = match end {
-                            Some(e) => self.translate_expr(e),
-                            None => length_expr.clone(),
-                        };
-
-                        let mut bounds_constraints = vec![
-                            // Start >= 0
-                            Formula::ge(start_smt.clone(), SmtExpr::int(0)),
-                            // Start <= end
-                            Formula::le(start_smt.clone(), end_smt.clone()),
-                        ];
-
-                        // End bound depends on inclusive vs exclusive
-                        if *inclusive {
-                            // For ..= (inclusive): end < length (since end is included)
-                            bounds_constraints
-                                .push(Formula::lt(end_smt.clone(), length_expr.clone()));
-                        } else {
-                            // For .. (exclusive): end <= length
-                            bounds_constraints
-                                .push(Formula::le(end_smt.clone(), length_expr.clone()));
-                        }
-
-                        let bounds_formula = Formula::and(bounds_constraints);
-
-                        let bounds_vc = VerificationCondition::new(
-                            bounds_formula,
-                            SourceLocation::from_span(expr.span, self.source_file.clone()),
-                            VCKind::ArrayBounds,
-                            "Slice bounds valid: 0 <= start <= end <= length",
-                        );
-                        self.push_vc(bounds_vc);
-                    }
-                    _ => {
-                        // Simple index access: arr[i]
-                        // Generate VC: 0 <= index < length
-                        let idx_smt = self.translate_expr(index);
-
-                        let lower_bound = Formula::ge(idx_smt.clone(), SmtExpr::int(0));
-                        let upper_bound = Formula::lt(idx_smt.clone(), length_expr.clone());
-
-                        let bounds_formula = Formula::and([lower_bound, upper_bound]);
-
-                        let bounds_vc = VerificationCondition::new(
-                            bounds_formula,
-                            SourceLocation::from_span(expr.span, self.source_file.clone()),
-                            VCKind::ArrayBounds,
-                            "Array index within bounds: 0 <= index < length",
-                        );
-                        self.push_vc(bounds_vc);
-                    }
-                }
-
-                postcondition.clone()
-            }
-            ExprKind::Binary {
-                op: BinOp::Div,
-                left: _,
-                right,
-            }
-            | ExprKind::Binary {
-                op: BinOp::Rem,
-                left: _,
-                right,
-            } => {
-                // Division: generate division by zero check
-                let divisor = self.translate_expr(right);
-
-                let div_vc = VerificationCondition::new(
-                    Formula::Ne(Box::new(divisor), Box::new(SmtExpr::int(0))),
-                    SourceLocation::from_span(expr.span, self.source_file.clone()),
-                    VCKind::DivisionByZero,
-                    "Division by non-zero",
-                );
-                self.push_vc(div_vc);
-
-                postcondition.clone()
-            }
-            ExprKind::Call { func, args, .. } => {
-                // Function call: check callee precondition, assume postcondition
-                if let ExprKind::Path(path) = &func.kind {
-                    let func_name = path
-                        .segments
-                        .iter()
-                        .map(path_segment_to_str)
-                        .collect::<List<_>>()
-                        .join(".");
-
-                    if let Maybe::Some(sig) = self.symbol_table.get_function(func_name.as_str()) {
-                        // Generate VC for precondition
-                        let mut pre_subst = sig.precondition.clone();
-                        for (i, (param_name, _)) in sig.params.iter().enumerate() {
-                            if let Some(arg) = args.get(i) {
-                                let var = Variable::new(param_name.clone());
-                                let arg_smt = self.translate_expr(arg);
-                                pre_subst = pre_subst.substitute(&var, &arg_smt);
-                            }
-                        }
-
-                        let call_vc = VerificationCondition::new(
-                            pre_subst,
-                            SourceLocation::from_span(expr.span, self.source_file.clone()),
-                            VCKind::Precondition,
-                            format!("Call to '{}' precondition", func_name),
-                        );
-                        // push_vc applies BOTH the function-name tag AND
-                        // the Hoare-triple precondition wrap (S2). The
-                        // earlier branched form duplicated the
-                        // function-name handling; using push_vc unifies
-                        // both transforms in one place.
-                        self.push_vc(call_vc);
-                    }
-                }
-                postcondition.clone()
+                Formula::and([obligations, postcondition.clone()])
             }
             _ => {
-                // Default: expression doesn't affect postcondition
-                postcondition.clone()
+                // Every remaining expression form is a value
+                // computation: it does not transform Q, but
+                // evaluating it incurs obligations — call-site
+                // preconditions, division guards, index bounds — via
+                // `obligations_expr`. Weaving them into the RETURNED
+                // formula (instead of pushing side-channel VCs, the
+                // pre-fix shape) is what lets enclosing `let`
+                // substitutions and branch guards give each
+                // obligation its real context: a guarded
+                // `if b != 0 { divide(a, b) }` discharges, a
+                // tail-position `divide(10, 0)` fails (T0657). When
+                // the value is a contracted call, its postcondition
+                // additionally becomes a hypothesis for Q.
+                let obligations = self.obligations_expr(expr);
+                let with_knowledge = match self.call_contract(expr) {
+                    Some((_, post_knowledge)) if post_knowledge != Formula::True => {
+                        Formula::implies(post_knowledge, postcondition.clone())
+                    }
+                    _ => postcondition.clone(),
+                };
+                Formula::and([obligations, with_knowledge])
             }
         }
     }
@@ -2338,13 +3838,28 @@ impl VCGenerator {
 
     /// Weakest precondition for return statement
     ///
-    /// wp(return e, Q) = Q[result/e]
+    /// wp(return e, Q) = obligations(e) && Q[result/e]
+    ///
+    /// Evaluating the returned expression incurs its own woven
+    /// obligations (call-site preconditions, division guards …) —
+    /// pre-fix they were dropped here entirely, which is how a
+    /// tail-position `divide(10, 0)` produced zero obligations
+    /// (T0657). When the tail IS a contracted call, its
+    /// postcondition becomes a hypothesis for Q.
     fn wp_return(&mut self, value: Option<&Expr>, postcondition: &Formula) -> Formula {
         let result_var = Variable::result();
         match value {
             Some(expr) => {
+                let obligations = self.obligations_expr(expr);
                 let smt_value = self.translate_expr(expr);
-                postcondition.substitute(&result_var, &smt_value)
+                let substituted = postcondition.substitute(&result_var, &smt_value);
+                let with_knowledge = match self.call_contract(expr) {
+                    Some((_, post_knowledge)) if post_knowledge != Formula::True => {
+                        Formula::implies(post_knowledge, substituted)
+                    }
+                    _ => substituted,
+                };
+                Formula::and([obligations, with_knowledge])
             }
             None => {
                 // Return unit: substitute result with unit value
@@ -2432,7 +3947,13 @@ impl VCGenerator {
                     .map(path_segment_to_str)
                     .collect::<List<_>>()
                     .join(".");
-                SmtExpr::var(name)
+                // Thread the declared sort through: an untyped
+                // variable defaults to Int downstream, which breaks
+                // array selects and boolean atoms alike.
+                match self.symbol_table.get_variable_type(name.as_str()) {
+                    Maybe::Some(ty) => SmtExpr::Var(Variable::typed(name, ty)),
+                    Maybe::None => SmtExpr::var(name),
+                }
             }
             ExprKind::Binary { op, left, right } => {
                 let left_smt = self.translate_expr(left);
@@ -2460,14 +3981,20 @@ impl VCGenerator {
                 then_branch,
                 else_branch,
             } => {
-                let cond_smt = self.translate_condition_to_expr(condition);
+                // `translate_condition` handles `if let` arms via
+                // `pattern_match_condition`. The retired
+                // `translate_condition_to_expr` rendered every
+                // `if let` condition as the constant `true`, which
+                // made the else-branch formula `!true => …` —
+                // vacuously provable, a false-`Proved` channel.
+                let cond_formula = self.translate_condition(condition);
                 let then_smt = self.translate_block_to_expr(then_branch);
                 let else_smt = match else_branch {
                     Some(e) => self.translate_expr(e),
                     None => SmtExpr::Apply(Text::from("unit"), List::new()),
                 };
                 SmtExpr::Ite(
-                    Box::new(self.expr_to_formula(&cond_smt)),
+                    Box::new(cond_formula),
                     Box::new(then_smt),
                     Box::new(else_smt),
                 )
@@ -2508,9 +4035,50 @@ impl VCGenerator {
             }
             ExprKind::Block(block) => self.translate_block_to_expr(block),
             ExprKind::Paren(inner) => self.translate_expr(inner),
+            ExprKind::Array(arr_expr) => {
+                // An array literal is a REAL term: a store chain over
+                // a fresh array base, so `[1,2,3][0] == 1` is a fact
+                // the solver computes. Rendering literals as opaque
+                // unknowns severed every contract about a
+                // literal-initialized array from its contents
+                // (`requires sorted(arr)` could never discharge).
+                use verum_ast::expr::ArrayExpr;
+                let n = self.fresh_unknown.get();
+                self.fresh_unknown.set(n + 1);
+                let elem_ty = Self::var_type_from_literal(expr)
+                    .map(|t| match t {
+                        VarType::Array(_, elem) => *elem,
+                        other => other,
+                    })
+                    .unwrap_or(VarType::Int);
+                let base = SmtExpr::Var(Variable::typed(
+                    format!("__vc_arr_{}", n),
+                    VarType::Array(Box::new(VarType::Int), Box::new(elem_ty)),
+                ));
+                match arr_expr {
+                    ArrayExpr::List(elems) => elems.iter().enumerate().fold(
+                        base,
+                        |acc, (i, e)| {
+                            SmtExpr::Store(
+                                Box::new(acc),
+                                Box::new(SmtExpr::int(i as i64)),
+                                Box::new(self.translate_expr(e)),
+                            )
+                        },
+                    ),
+                    // Repeat contents are uniform but the count may
+                    // be symbolic — the typed fresh base alone is
+                    // the sound encoding until a forall axiom is
+                    // worth emitting.
+                    ArrayExpr::Repeat { .. } => base,
+                }
+            }
             _ => {
-                // For unsupported expressions, create an uninterpreted function
-                SmtExpr::Apply(Text::from("unknown"), List::new())
+                // Unsupported expression: a FRESH uninterpreted term.
+                // Never a shared constant — `unknown() == unknown()`
+                // let Z3 prove two unrelated unmodeled expressions
+                // equal, a false-`Proved` channel (T0657).
+                self.fresh_unknown_term()
             }
         }
     }
@@ -2522,6 +4090,17 @@ impl VCGenerator {
     }
 
     /// Convert SMT expression to formula
+    ///
+    /// Comparison and boolean-connective applications produced by
+    /// `translate_binop`/`translate_unop` are decoded STRUCTURALLY
+    /// into their `Formula` counterparts. The pre-fix fallback
+    /// wrapped them all in the uninterpreted `is_true(...)`
+    /// predicate, which severed a branch guard from the identically-
+    /// shaped native obligation: `if b != 0 { divide(a, b) }`
+    /// produced `is_true(distinct(b,0)) => Ne(b,0)` — an
+    /// implication between an opaque UF atom and a real disequality
+    /// that Z3 rightly refuted with `is_true(..)=true, b=0` (T0657
+    /// guarded-call false failure).
     fn expr_to_formula(&self, expr: &SmtExpr) -> Formula {
         match expr {
             SmtExpr::BoolConst(b) => {
@@ -2532,28 +4111,37 @@ impl VCGenerator {
                 }
             }
             SmtExpr::Var(v) => Formula::Var(v.clone()),
-            _ => Formula::Predicate(Text::from("is_true"), vec![expr.clone()].into()),
-        }
-    }
-
-    /// Translate condition to SMT expression
-    fn translate_condition_to_expr(&self, cond: &verum_ast::expr::IfCondition) -> SmtExpr {
-        let mut exprs = List::new();
-        for c in cond.conditions.iter() {
-            match c {
-                verum_ast::expr::ConditionKind::Expr(e) => {
-                    exprs.push(self.translate_expr(e));
+            SmtExpr::Apply(name, args) => match (name.as_str(), args.len()) {
+                ("=", 2) => Formula::Eq(Box::new(args[0].clone()), Box::new(args[1].clone())),
+                ("distinct", 2) => {
+                    Formula::Ne(Box::new(args[0].clone()), Box::new(args[1].clone()))
                 }
-                verum_ast::expr::ConditionKind::Let { .. } => {
-                    // Let bindings in conditions translate to true for simplicity
-                    exprs.push(SmtExpr::bool(true));
+                ("<", 2) => Formula::Lt(Box::new(args[0].clone()), Box::new(args[1].clone())),
+                ("<=", 2) => Formula::Le(Box::new(args[0].clone()), Box::new(args[1].clone())),
+                (">", 2) => Formula::Gt(Box::new(args[0].clone()), Box::new(args[1].clone())),
+                (">=", 2) => Formula::Ge(Box::new(args[0].clone()), Box::new(args[1].clone())),
+                ("and", _) => {
+                    Formula::and(args.iter().map(|a| self.expr_to_formula(a)))
                 }
+                ("or", _) => Formula::or(args.iter().map(|a| self.expr_to_formula(a))),
+                ("not", 1) => Formula::not(self.expr_to_formula(&args[0])),
+                ("=>", 2) => Formula::implies(
+                    self.expr_to_formula(&args[0]),
+                    self.expr_to_formula(&args[1]),
+                ),
+                _ => Formula::Predicate(Text::from("is_true"), vec![expr.clone()].into()),
+            },
+            SmtExpr::Ite(cond, then_e, else_e) => {
+                // Boolean ite decodes to (c => then) && (!c => else)
+                Formula::and([
+                    Formula::implies((**cond).clone(), self.expr_to_formula(then_e)),
+                    Formula::implies(
+                        Formula::not((**cond).clone()),
+                        self.expr_to_formula(else_e),
+                    ),
+                ])
             }
-        }
-        if exprs.len() == 1 {
-            exprs.pop().unwrap_or_else(|| SmtExpr::bool(true))
-        } else {
-            SmtExpr::Apply(Text::from("and"), exprs)
+            _ => Formula::Predicate(Text::from("is_true"), vec![expr.clone()].into()),
         }
     }
 
@@ -2716,6 +4304,16 @@ impl VCGenerator {
                 // For tuples, use an uninterpreted sort
                 VarType::Sort(Text::from(format!("Tuple_{}", types.len())))
             }
+            // References are transparent for verification sorts: a
+            // `&[Int; 10]` variable must carry the Array sort or
+            // every `aref[i]` translation dies with "Select requires
+            // array"; the reference tier is a memory-safety fact,
+            // not a logical one.
+            TypeKind::Reference { inner, .. }
+            | TypeKind::CheckedReference { inner, .. }
+            | TypeKind::UnsafeReference { inner, .. } => self.translate_type(inner),
+            // A refined type's logical sort is its base's.
+            TypeKind::Refined { base, .. } => self.translate_type(base),
             _ => VarType::Sort(Text::from("Unknown")),
         }
     }
@@ -2818,6 +4416,12 @@ impl VCGenerator {
                 size.as_ref()
                     .map(|size_expr| self.translate_expr(size_expr))
             }
+            // A reference to a sized array carries the same length:
+            // `&[Int; 10]` indexes exactly like `[Int; 10]`.
+            TypeKind::Reference { inner, .. }
+            | TypeKind::CheckedReference { inner, .. }
+            | TypeKind::UnsafeReference { inner, .. } => self.extract_type_length(inner),
+            TypeKind::Refined { base, .. } => self.extract_type_length(base),
             _ => None, // Not an array type
         }
     }
@@ -2857,8 +4461,17 @@ impl VCGenerator {
     /// Resolves array length for bounds check elimination. Checks symbol table
     /// for known variables with tracked length, method calls like arr.len(),
     /// field accesses, and falls back to uninterpreted len() for SMT solving.
-    fn get_array_length_expr(&self, arr_expr: &Expr, arr_smt: &SmtExpr) -> SmtExpr {
-        // Source 1: Check if array is a simple variable with known length in symbol table
+    /// The array's length expression when it is STATICALLY KNOWN —
+    /// declared `[T; N]` types, array literals, or a tracked
+    /// refinement — and `None` otherwise. Obligation generation
+    /// keys on this: a bounds obligation against an unknown length
+    /// is unprovable by construction (the uninterpreted `len(arr)`
+    /// admits every model), so emitting it would paint every
+    /// index on an unrefined `List` red. Until length refinements
+    /// flow here, unknown-length indexing carries no bounds
+    /// obligation — exactly the pre-T0657 net (which was none).
+    fn known_array_length(&self, arr_expr: &Expr) -> Option<SmtExpr> {
+        // Source 1: simple variable with a tracked length
         if let ExprKind::Path(path) = &arr_expr.kind {
             let name = path
                 .segments
@@ -2867,46 +4480,27 @@ impl VCGenerator {
                 .collect::<List<_>>()
                 .join(".");
             if let Maybe::Some(length) = self.symbol_table.get_array_length(name.as_str()) {
-                return length;
+                return Some(length);
             }
         }
 
-        // Source 2: Check for method call like arr.len() which would be translated
-        if let ExprKind::MethodCall {
-            receiver,
-            method,
-            args,
-            ..
-        } = &arr_expr.kind
+        // Source 2: field access with a tracked length (e.g. self.data)
+        if let ExprKind::Field { expr, field } = &arr_expr.kind
+            && let ExprKind::Path(path) = &expr.kind
         {
-            if method.as_str() == "len" && args.is_empty() {
-                // This IS a len() call, so just translate the receiver and wrap with len
-                let recv_smt = self.translate_expr(receiver);
-                return SmtExpr::UnOp(SmtUnOp::Len, Box::new(recv_smt));
+            let base_name = path
+                .segments
+                .iter()
+                .map(path_segment_to_str)
+                .collect::<List<_>>()
+                .join(".");
+            let full_name = format!("{}.{}", base_name, field.as_str());
+            if let Maybe::Some(length) = self.symbol_table.get_array_length(full_name.as_str()) {
+                return Some(length);
             }
         }
 
-        // Source 3: For field accesses (e.g., self.data), check if we track that
-        if let ExprKind::Field { expr, field } = &arr_expr.kind {
-            if let ExprKind::Path(path) = &expr.kind {
-                let base_name = path
-                    .segments
-                    .iter()
-                    .map(path_segment_to_str)
-                    .collect::<List<_>>()
-                    .join(".");
-                let full_name = format!("{}.{}", base_name, field.as_str());
-                if let Maybe::Some(length) = self.symbol_table.get_array_length(full_name.as_str())
-                {
-                    return length;
-                }
-            }
-        }
-
-        // Fallback: Use uninterpreted len() function on the array expression
-        // This allows the SMT solver to reason about array lengths abstractly
-        // The solver will treat len(arr) as an unknown but consistent value
-        SmtExpr::UnOp(SmtUnOp::Len, Box::new(arr_smt.clone()))
+        None
     }
 
     /// Push a verification condition.
@@ -2960,6 +4554,44 @@ impl VCGenerator {
     fn extract_contract(&self, func: &FunctionDecl) -> (Formula, Formula) {
         let mut preconditions = List::new();
         let mut postconditions = List::new();
+
+        // Modern clause syntax first: `fn f(...) requires P ensures Q`
+        // parses into the `FunctionDecl.requires` / `.ensures` FIELDS.
+        // Pre-fix this function read only the legacy `@requires` /
+        // `@ensures` ATTRIBUTE spelling, so every field-declared
+        // contract arrived here as `Formula::True` — the wp engine
+        // saw no precondition to check at call sites and no
+        // postcondition to establish (T0657).
+        for req in func.requires.iter() {
+            preconditions.push(self.parse_contract_expr(req, ContractContext::Precondition));
+        }
+        for ens in func.ensures.iter() {
+            postconditions.push(self.parse_contract_expr(ens, ContractContext::Postcondition));
+        }
+
+        // Inline refinement types are contracts too: a parameter
+        // `m: Int{> 0}` carries the precondition `m > 0`, and a
+        // return `-> Int{>= 0}` the postcondition `result >= 0`.
+        // Without them a division guard inside the body reported
+        // `m = 0` as a "counterexample" the type system already
+        // excludes.
+        for param in func.params.iter() {
+            if let verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } = &param.kind
+                && let PatternKind::Ident { name, .. } = &pattern.kind
+            {
+                if let Some(f) =
+                    self.refinement_predicate_formula(ty, &SmtExpr::Var(Variable::new(name.as_str())))
+                {
+                    preconditions.push(f);
+                }
+            }
+        }
+        if let Maybe::Some(ret_ty) = &func.return_type
+            && let Some(f) =
+                self.refinement_predicate_formula(ret_ty, &SmtExpr::Var(Variable::result()))
+        {
+            postconditions.push(f);
+        }
 
         // Parse contract attributes: @requires, @ensures, @invariant, @decreases
         for attr in func.attributes.iter() {
@@ -3141,6 +4773,20 @@ impl VCGenerator {
                         self.expr_to_formula(&smt_expr)
                     }
                 }
+            }
+
+            // First-class quantifiers (`forall i in 0..n => P`,
+            // `exists x: T. P`) — the grammar's `forall_expr` /
+            // `exists_expr` productions. Pre-fix only the legacy
+            // `forall(x, body)` CALL spelling translated; the
+            // first-class form fell to the default arm and became a
+            // fresh uninterpreted term — every contract written in
+            // the documented syntax was silently unprovable.
+            ExprKind::Forall { bindings, body } => {
+                self.translate_quantifier(bindings, body, context, true)
+            }
+            ExprKind::Exists { bindings, body } => {
+                self.translate_quantifier(bindings, body, context, false)
             }
 
             // Unary not becomes formula negation
@@ -3850,6 +5496,10 @@ impl VCGenerator {
                 Box::new(self.transform_old_in_expr(left, old_vars)),
                 Box::new(self.transform_old_in_expr(right, old_vars)),
             ),
+            Formula::Labeled(id, inner) => Formula::Labeled(
+                *id,
+                Box::new(self.transform_old_in_postcondition(inner, old_vars)),
+            ),
             _ => formula.clone(),
         }
     }
@@ -3900,6 +5550,53 @@ impl VCGenerator {
     /// Register a function signature for call verification
     pub fn register_function(&mut self, name: impl Into<Text>, sig: FunctionSignature) {
         self.symbol_table.add_function(name, sig);
+    }
+
+    /// Register the contract of every top-level function in `module`
+    /// so call sites inside wp generation know their callee's
+    /// precondition (and can assume its postcondition).
+    ///
+    /// Without this, `symbol_table.get_function` misses at every
+    /// call site and the call-site precondition obligation is
+    /// silently skipped — the exact false-`Proved` of T0657. No
+    /// production path populated the table before that fix.
+    pub fn register_module_contracts(&mut self, module: &verum_ast::Module) {
+        for item in module.items.iter() {
+            if let verum_ast::ItemKind::Function(fd) = &item.kind {
+                let mut params: List<(Text, VarType)> = List::new();
+                for param in fd.params.iter() {
+                    if let verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } =
+                        &param.kind
+                        && let PatternKind::Ident { name, .. } = &pattern.kind
+                    {
+                        params.push((Text::from(name.as_str()), self.translate_type(ty)));
+                    }
+                }
+                let return_type = match &fd.return_type {
+                    Maybe::Some(ty) => self.translate_type(ty),
+                    Maybe::None => VarType::Int,
+                };
+                let (precondition, postcondition) = self.extract_contract(fd);
+                self.symbol_table.add_function(
+                    fd.name.as_str(),
+                    FunctionSignature {
+                        params,
+                        return_type,
+                        precondition,
+                        postcondition,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Build a symbol table carrying every top-level function
+    /// contract of `module` — the shared seed for per-function
+    /// generators (`VCGenerator::new().with_symbol_table(t.clone())`).
+    pub fn build_module_contract_table(module: &verum_ast::Module) -> SymbolTable {
+        let mut seed = VCGenerator::new();
+        seed.register_module_contracts(module);
+        seed.symbol_table
     }
 }
 

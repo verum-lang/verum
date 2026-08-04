@@ -1,0 +1,44 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L0
+// @tags: verification, contracts, precondition, call-site, soundness
+// @timeout: 30000
+// @expected-error: precondition
+//
+// T0657 — soundness guardrail (L0-critical).
+//
+// Invariant being pinned: `verum verify` MUST reject a call site
+// whose literal argument unconditionally violates the callee's
+// `requires` clause. Pre-fix the pipeline generated ZERO
+// obligations from function bodies — `caller() { divide(10, 0) }`
+// against `requires b != 0` reported Proved on both the callee and
+// the caller, inverting the tool's core promise (a false `Proved`,
+// not a missing feature).
+//
+// The fix wove call-site precondition obligations into the wp
+// formula (verum_verification::vcgen, discharged by
+// verify_cmd Step 3), so this file MUST fail verification with a
+// counterexample naming the divide precondition.
+//
+// Companion pins:
+//   - crates/verum_verification/tests/vcgen_call_site_obligations.rs
+//     (semantic core: guard flow, let flow, requires flow, blame)
+//   - L1-core/verification_phase/call_site_precondition_flow.vr
+//     (the GREEN half: satisfiable call sites must keep verifying)
+
+module test_call_site_precondition_violation;
+
+@verify(proof)
+public fn divide(a: Int, b: Int) -> Int requires b != 0 {
+    a / b
+}
+
+// FAIL: b = 0 unconditionally violates `requires b != 0`.
+@verify(proof)
+public fn caller_with_literal_zero() -> Int {
+    divide(10, 0)
+}
+
+public fn main() -> Int {
+    caller_with_literal_zero()
+}

@@ -368,6 +368,15 @@ impl<'s> VerifyCommand<'s> {
             variant_axioms.len(),
         );
 
+        // Contract table for BODY-OBLIGATION generation (Step 3 of
+        // verify_function): every sibling's requires/ensures, so a
+        // call site inside any body yields a precondition obligation
+        // with the actual arguments substituted in. Before this table
+        // existed, `verum verify` generated ZERO obligations from
+        // function bodies — `caller() { divide(10, 0) }` against
+        // `divide requires b != 0` reported Proved (T0657).
+        let contract_table = verum_verification::VCGenerator::build_module_contract_table(module);
+
         for item in &module.items {
             if let ItemKind::Function(func) = &item.kind {
                 // Skip if filter doesn't match
@@ -394,6 +403,7 @@ impl<'s> VerifyCommand<'s> {
                     &alias_map,
                     &reflection_registry,
                     &callee_signatures_for_module,
+                    &contract_table,
                 );
                 let elapsed = start_time.elapsed();
 
@@ -450,7 +460,10 @@ impl<'s> VerifyCommand<'s> {
                     },
                     Err(e) => VerificationResult::Failed {
                         counterexample: Some(format!("{}", e).to_text()),
-                        elapsed: timeout,
+                        // Solver/translation errors surface
+                        // immediately — reporting the timeout
+                        // constant here read as a 120s hang.
+                        elapsed: start_time.elapsed(),
                     },
                 };
 
@@ -693,6 +706,7 @@ impl<'s> VerifyCommand<'s> {
         alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
         reflection_registry: &verum_smt::refinement_reflection::RefinementReflectionRegistry,
         callee_signatures_for_module: &[(Text, Vec<Text>, Text)],
+        contract_table: &verum_verification::SymbolTable,
     ) -> Result<verum_smt::ProofResult, VerificationError> {
         let start = Instant::now();
 
@@ -714,11 +728,27 @@ impl<'s> VerifyCommand<'s> {
         let implicit_requires = self.synthesize_alias_refinement_requires(func, alias_map);
         let has_implicit_requires = !implicit_requires.is_empty();
 
+        // Body obligations (Step 3): wp-woven call-site
+        // preconditions, division guards, bounds checks, and the
+        // loop-invariant family. Generated for EVERY function —
+        // a caller with no contracts of its own still has to honour
+        // its callees' preconditions; the pre-fix short-circuit
+        // below returned "no_verification"-Proved without ever
+        // looking at the body, which is how `divide(10, 0)` against
+        // `requires b != 0` verified (T0657). Generation is pure
+        // formula construction (no solver), so doing it before the
+        // short-circuit costs nothing measurable.
+        let mut body_vcgen = verum_verification::VCGenerator::new()
+            .with_symbol_table(contract_table.clone());
+        let body_vcs = body_vcgen.generate_body_obligation_vcs(func);
+        let has_body_obligations = !body_vcs.is_empty();
+
         if !has_requires
             && !has_ensures
             && !has_refined_params
             && !has_refined_return
             && !has_implicit_requires
+            && !has_body_obligations
         {
             // Return a proof result with zero cost
             return Ok(verum_smt::ProofResult::new(
@@ -966,6 +996,21 @@ impl<'s> VerifyCommand<'s> {
         // function without losing any soundness: the predicate is still
         // the postcondition hypothesis.
 
+        // Step 3: discharge the body obligations generated above —
+        // `P => wp(body, true)` with every call-site precondition,
+        // division guard and bounds check woven in as a labeled
+        // conjunct, plus the loop-invariant side family. One solver
+        // query per VC; a Sat model is re-evaluated per label so the
+        // failure names the exact obligation, not just "the body".
+        if has_body_obligations {
+            let step3_start = Instant::now();
+            let step3 =
+                self.verify_body_obligations(&body_vcgen, &body_vcs, func, timeout, start);
+            self.record_obligation("body obligations", step3_start.elapsed());
+            step3?;
+            debug!("Body obligations verified for {}", func.name);
+        }
+
         // All checks passed - create proof result with cost tracking
         let cost = verum_smt::VerificationCost::new(
             func.name.as_str().into(),
@@ -974,6 +1019,130 @@ impl<'s> VerifyCommand<'s> {
         );
 
         Ok(verum_smt::ProofResult::new(cost))
+    }
+
+    /// Step 3 worker: discharge wp-generated body-obligation VCs
+    /// through the Hoare Z3 backend, translating a failure into the
+    /// same `CannotProve`/`Timeout` surface Steps 1-2 use.
+    fn verify_body_obligations(
+        &self,
+        body_vcgen: &verum_verification::VCGenerator,
+        body_vcs: &verum_common::List<verum_verification::VerificationCondition>,
+        func: &FunctionDecl,
+        timeout: Duration,
+        fn_start: Instant,
+    ) -> Result<(), VerificationError> {
+        // A fresh context per function keeps solver state disjoint
+        // from the Steps 1-2 context (different translator, different
+        // variable universe).
+        let config = ContextConfig {
+            timeout: Some(timeout),
+            ..Default::default()
+        };
+        let body_ctx = SmtContext::with_config(config);
+        let verifier = verum_verification::HoareZ3Verifier::new(&body_ctx)
+            .with_timeout(timeout.as_millis().min(u32::MAX as u128) as u32);
+
+        for vc in body_vcs.iter() {
+            // Trivial formulas were already skipped at generation;
+            // simplify() here catches the loop-family VCs that are
+            // pushed unsimplified.
+            let formula = vc.formula.simplify();
+            if formula == verum_verification::Formula::True {
+                continue;
+            }
+
+            let outcome = match verifier.verify_labeled_formula(&formula) {
+                Ok(o) => o,
+                Err(verum_verification::WPError::Unknown { .. }) => {
+                    return Err(VerificationError::Timeout {
+                        constraint: Text::from(format!(
+                            "{}: {}",
+                            func.name.as_str(),
+                            vc.description.as_str()
+                        )),
+                        timeout,
+                        cost: verum_smt::VerificationCost::new(
+                            func.name.as_str().into(),
+                            fn_start.elapsed(),
+                            false,
+                        )
+                        .with_timeout(),
+                    });
+                }
+                Err(e) => {
+                    return Err(VerificationError::SolverError(Text::from(format!(
+                        "body obligation '{}': {}",
+                        vc.description.as_str(),
+                        e
+                    ))));
+                }
+            };
+
+            if outcome.valid {
+                continue;
+            }
+
+            // Blame: name the exact violated obligations when the
+            // model pins them; fall back to the VC description.
+            let mut blamed: Vec<Text> = Vec::new();
+            for label in &outcome.failed_labels {
+                if let Some(meta) = body_vcgen.obligation_meta(*label) {
+                    blamed.push(Text::from(format!(
+                        "{} ({})",
+                        meta.message.as_str(),
+                        meta.kind.description()
+                    )));
+                }
+            }
+            let constraint = if blamed.is_empty() {
+                Text::from(vc.description.as_str())
+            } else {
+                Text::from(blamed.join("; "))
+            };
+
+            // Model assignment → structured counterexample, minus
+            // the translator's internal fresh terms.
+            let mut assignments: verum_common::Map<Text, verum_smt::CounterExampleValue> =
+                verum_common::Map::new();
+            for (name, value) in outcome.counterexample.iter() {
+                if name.as_str().starts_with("__vc_") {
+                    continue;
+                }
+                let as_str = value.as_str();
+                let typed = if let Ok(i) = as_str.parse::<i64>() {
+                    verum_smt::CounterExampleValue::Int(i)
+                } else if as_str == "true" {
+                    verum_smt::CounterExampleValue::Bool(true)
+                } else if as_str == "false" {
+                    verum_smt::CounterExampleValue::Bool(false)
+                } else if let Ok(f) = as_str.parse::<f64>() {
+                    verum_smt::CounterExampleValue::Float(f)
+                } else {
+                    verum_smt::CounterExampleValue::Unknown(value.clone())
+                };
+                assignments.insert(name.clone(), typed);
+            }
+            // The constraint text already names the violated
+            // obligation ("call to 'divide' requires b != 0"); the
+            // display path renders it after "Violates:", so no
+            // extra prefix here.
+            let counterexample =
+                verum_smt::CounterExample::new(assignments, constraint.clone());
+
+            return Err(VerificationError::CannotProve {
+                constraint,
+                counterexample: Some(counterexample),
+                cost: verum_smt::VerificationCost::new(
+                    func.name.as_str().into(),
+                    fn_start.elapsed(),
+                    false,
+                ),
+                suggestions: List::new(),
+            });
+        }
+
+        Ok(())
     }
 
     /// Check if function has any refinement types in parameters
@@ -1601,7 +1770,17 @@ impl<'s> VerifyCommand<'s> {
                         elapsed.as_secs_f64()
                     );
                     if let Some(ce) = counterexample {
-                        println!("      Counterexample: {}", ce.as_str().yellow());
+                        // The formatted counterexample is a multi-line
+                        // block that already opens with its own
+                        // "Counterexample:" header — indent it as-is
+                        // rather than prefixing a second header.
+                        for line in ce.as_str().lines() {
+                            if line.is_empty() {
+                                println!();
+                            } else {
+                                println!("      {}", line.yellow());
+                            }
+                        }
                     }
                 }
                 VerificationResult::Timeout { elapsed, timeout } => {

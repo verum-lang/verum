@@ -288,8 +288,8 @@ pub use hoare_logic::{
 };
 pub use integration::{
     CodegenIntegration, HeapCounterexample, HoareVerificationResult, HoareZ3Verifier,
-    SepLogicVerificationResult, SeparationLogicZ3Verifier, SmtIntegration, TypeSystemIntegration,
-    VarSort,
+    LabeledVerificationResult, SepLogicVerificationResult, SeparationLogicZ3Verifier,
+    SmtIntegration, TypeSystemIntegration, VarSort,
 };
 pub use kernel_recheck::{KernelRecheck, KernelRecheckError};
 pub use level::{
@@ -426,6 +426,7 @@ pub use vcgen::{
     SmtExpr,
     SmtUnOp,
     // Helper types
+    ObligationMeta,
     SourceLocation as VCSourceLocation,
     SymbolTable,
     // Generator

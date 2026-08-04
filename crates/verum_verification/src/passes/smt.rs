@@ -174,6 +174,7 @@ impl SmtVerificationPass {
         func: &FunctionDecl,
         ctx: &VerificationContext,
         smt_context: &SmtContext,
+        contract_table: &crate::vcgen::SymbolTable,
     ) -> SmtVerificationResult {
         let start = Instant::now();
         let func_name = Text::from(func.name.as_str());
@@ -240,9 +241,13 @@ impl SmtVerificationPass {
             };
         }
 
-        // Generate verification conditions
-        let mut vc_gen =
-            VCGenerator::new().with_mandatory_termination(self.mandatory_termination);
+        // Generate verification conditions. The module contract
+        // table makes call sites yield precondition obligations —
+        // an empty-table generator silently skips every one
+        // (T0657).
+        let mut vc_gen = VCGenerator::new()
+            .with_mandatory_termination(self.mandatory_termination)
+            .with_symbol_table(contract_table.clone());
         let vcs = vc_gen.generate_vcs(func);
 
         // Create Z3 verifier
@@ -325,10 +330,14 @@ impl VerificationPass for SmtVerificationPass {
         self.results = List::new();
         self.stats = SmtVerificationStats::default();
 
+        // Every sibling's contract, so call-site precondition
+        // obligations fire inside each function body.
+        let contract_table = VCGenerator::build_module_contract_table(module);
+
         // Verify each function in the module
         for item in module.items.iter() {
             if let verum_ast::decl::ItemKind::Function(func) = &item.kind {
-                let result = self.verify_function(func, ctx, &smt_context);
+                let result = self.verify_function(func, ctx, &smt_context, &contract_table);
 
                 // Update stats
                 self.stats.total_vcs += result.vc_count;
