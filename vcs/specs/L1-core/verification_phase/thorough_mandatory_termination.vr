@@ -1,0 +1,36 @@
+// @test: verify-pass
+// @level: L1
+// @tags: verify, thorough, termination, decreases, strategy-ladder
+// @timeout: 30000
+
+/// T0671 — the GREEN half of `--mode=thorough` mandatoriness: a
+/// loop carrying a valid well-founded `decreases` measure (plus the
+/// invariant its preservation needs) verifies at the strict rung.
+///
+/// The RED half — the SAME loop with no measure MUST fail under
+/// `--mode=thorough` while still passing at the default rung —
+/// is pinned end-to-end in
+/// crates/verum_compiler/tests/verify_thorough_live_path.rs
+/// (both directions plus the leniency control; a strategy flag that
+/// changes nothing is indistinguishable from an unwired one).
+/// This file additionally verifies under DEFAULT `verum verify`,
+/// which is the runner's invocation.
+
+module test_thorough_mandatory_termination;
+
+public fn count_up(n: Int) -> Int {
+    let mut i = 0;
+    let mut acc = 0;
+    while i < n
+        invariant i >= 0
+        decreases n - i
+    {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+public fn main() -> Int {
+    count_up(3)
+}

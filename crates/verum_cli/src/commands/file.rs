@@ -15,7 +15,7 @@ use crate::error::CliError;
 use crate::ui;
 
 use verum_compiler::{
-    options::{CompilerOptions, OutputFormat, VerifyMode},
+    options::{CompilerOptions, OutputFormat, VerifyMode, VerifyStrategy},
     pipeline::CompilationPipeline,
     profile_cmd::ProfileCommand,
     repl::Repl,
@@ -26,19 +26,26 @@ use verum_compiler::{
 /// Parse verify mode from string.
 ///
 /// Accepts the three core verify modes (`auto`, `runtime`, `proof`) plus
-/// the focused tactic-family aliases `cubical` and `dependent`. The
-/// tactic-family aliases route through the proof pipeline at the
-/// `VerifyMode` layer (the underlying tactic dispatch happens inside
+/// the focused tactic-family aliases `cubical` and `dependent` and the
+/// strategy rungs `thorough` / `certified` (proof pipeline at a
+/// stricter `VerifyStrategy` — mandatory termination obligations,
+/// Certified adds the kernel recheck; T0671). The tactic-family
+/// aliases route through the proof pipeline at the `VerifyMode` layer
+/// (the underlying tactic dispatch happens inside
 /// `verum_smt::tactic_evaluation` based on the obligation shape, not the
 /// CLI mode); the CLI just acknowledges the user's intent so the
 /// invocation doesn't error out.
-fn parse_verify_mode(mode: &str) -> Result<VerifyMode, CliError> {
+fn parse_verify_mode(mode: &str) -> Result<(VerifyMode, VerifyStrategy), CliError> {
     match mode.to_lowercase().as_str() {
-        "auto" => Ok(VerifyMode::Auto),
-        "runtime" => Ok(VerifyMode::Runtime),
-        "proof" | "cubical" | "dependent" | "compare" => Ok(VerifyMode::Proof),
+        "auto" => Ok((VerifyMode::Auto, VerifyStrategy::Proof)),
+        "runtime" => Ok((VerifyMode::Runtime, VerifyStrategy::Proof)),
+        "proof" | "cubical" | "dependent" | "compare" => {
+            Ok((VerifyMode::Proof, VerifyStrategy::Proof))
+        }
+        "thorough" => Ok((VerifyMode::Proof, VerifyStrategy::Thorough)),
+        "certified" => Ok((VerifyMode::Proof, VerifyStrategy::Certified)),
         _ => Err(CliError::InvalidArgument(format!(
-            "Invalid verify mode: {}. Must be one of: auto, runtime, proof, cubical, dependent, compare",
+            "Invalid verify mode: {}. Must be one of: auto, runtime, proof, thorough, certified, cubical, dependent, compare",
             mode
         ))),
     }
@@ -74,7 +81,7 @@ pub fn build(
         .unwrap_or_default();
     ui::status("Compiling", &format!("{} (AOT){}", file, target_label));
 
-    let verify_mode = parse_verify_mode(verify_mode)?;
+    let (verify_mode, verify_strategy) = parse_verify_mode(verify_mode)?;
 
     // If no output specified, the pipeline will use target/<profile>/<name>
     // If output is specified, use it as-is
@@ -87,6 +94,7 @@ pub fn build(
         input: input.clone(),
         output: output_path.clone(),
         verify_mode,
+        verify_strategy,
         smt_timeout_secs: timeout,
         show_verification_costs: show_costs,
         optimization_level: opt_level,
@@ -1782,7 +1790,7 @@ pub fn verify(
         return Err(CliError::FileNotFound(file.to_string()));
     }
 
-    let verify_mode = parse_verify_mode(mode)?;
+    let (verify_mode, verify_strategy) = parse_verify_mode(mode)?;
     let language_features = crate::feature_overrides::scratch_features()?;
     // Always validate the --solver input so typos error out regardless of
     // the `verification` feature. The parsed choice is only forwarded to the
@@ -1802,6 +1810,7 @@ pub fn verify(
     let options = CompilerOptions {
         input,
         verify_mode,
+        verify_strategy,
         smt_timeout_secs: timeout,
         smt_solver: smt_solver_choice,
         show_verification_costs: show_costs,

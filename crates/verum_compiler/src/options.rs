@@ -51,6 +51,36 @@ impl OutputFormat {
     }
 }
 
+/// Verification strategy strictness for the `verum verify` live
+/// path, mirroring the upper rungs of the `@verify(...)` strategy
+/// ladder (`grammar/verum.ebnf`): `Proof` is today's behaviour;
+/// `Thorough` makes termination obligations MANDATORY (a loop with
+/// no provable `decreases` measure fails the run — absence is an
+/// error, not silence); `Certified` additionally runs the proof
+/// kernel's K-rule recheck over every function before SMT. (T0671)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VerifyStrategy {
+    /// Standard proof obligations (contracts, body safety)
+    #[default]
+    Proof,
+    /// Proof + mandatory invariant/termination obligations
+    Thorough,
+    /// Thorough + kernel formation recheck
+    Certified,
+}
+
+impl VerifyStrategy {
+    /// Whether termination obligations are mandatory at this rung.
+    pub fn mandatory_termination(self) -> bool {
+        matches!(self, VerifyStrategy::Thorough | VerifyStrategy::Certified)
+    }
+
+    /// Whether the kernel recheck preamble runs at this rung.
+    pub fn kernel_recheck(self) -> bool {
+        matches!(self, VerifyStrategy::Certified)
+    }
+}
+
 /// Verification mode for refinement types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum VerifyMode {
@@ -292,6 +322,11 @@ pub struct CompilerOptions {
     // Verification Options
     /// Verification mode for refinement types
     pub verify_mode: VerifyMode,
+
+    /// Strategy strictness for the verify live path (T0671):
+    /// `Thorough`+ makes every loop's termination obligation
+    /// mandatory; `Certified` adds the kernel recheck preamble.
+    pub verify_strategy: VerifyStrategy,
 
     /// SMT solver timeout in seconds
     pub smt_timeout_secs: u64,
@@ -607,6 +642,7 @@ impl Default for CompilerOptions {
             input: PathBuf::new(),
             output: PathBuf::new(),
             verify_mode: VerifyMode::default(),
+            verify_strategy: VerifyStrategy::default(),
             smt_timeout_secs: 30,
             smt_solver: verum_smt::backend_switcher::BackendChoice::Z3,
             verification_budget_secs: None,

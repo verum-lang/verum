@@ -728,6 +728,35 @@ impl<'s> VerifyCommand<'s> {
         let implicit_requires = self.synthesize_alias_refinement_requires(func, alias_map);
         let has_implicit_requires = !implicit_requires.is_empty();
 
+        // Certified strategy: run the proof kernel's K-rule recheck
+        // over the function's refinement surface BEFORE any SMT.
+        // A kernel formation error is a hard failure no SMT proof
+        // can recover (same short-circuit contract as
+        // `SmtVerificationPass`). (T0671)
+        let strategy = self.session.options().verify_strategy;
+        if strategy.kernel_recheck() {
+            for (label, outcome) in
+                verum_verification::KernelRecheck::recheck_function(func).iter()
+            {
+                if let Err(err) = outcome {
+                    return Err(VerificationError::CannotProve {
+                        constraint: Text::from(format!(
+                            "kernel recheck rejected {}: {}",
+                            label.as_str(),
+                            err
+                        )),
+                        counterexample: None,
+                        cost: verum_smt::VerificationCost::new(
+                            func.name.as_str().into(),
+                            start.elapsed(),
+                            false,
+                        ),
+                        suggestions: List::new(),
+                    });
+                }
+            }
+        }
+
         // Body obligations (Step 3): wp-woven call-site
         // preconditions, division guards, bounds checks, and the
         // loop-invariant family. Generated for EVERY function —
@@ -738,7 +767,13 @@ impl<'s> VerifyCommand<'s> {
         // `requires b != 0` verified (T0657). Generation is pure
         // formula construction (no solver), so doing it before the
         // short-circuit costs nothing measurable.
+        //
+        // Under `--mode=thorough|certified` termination obligations
+        // are MANDATORY for every loop (T0671); per-function
+        // `@verify(thorough|certified)` attributes force the same
+        // inside the generator regardless of the session strategy.
         let mut body_vcgen = verum_verification::VCGenerator::new()
+            .with_mandatory_termination(strategy.mandatory_termination())
             .with_symbol_table(contract_table.clone());
         let body_vcs = body_vcgen.generate_body_obligation_vcs(func);
         let has_body_obligations = !body_vcs.is_empty();

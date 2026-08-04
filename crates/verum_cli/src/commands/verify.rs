@@ -67,6 +67,13 @@ pub enum VerificationMode {
     Runtime,
     /// Compile-time proofs (slow compile, 0ns runtime)
     Proof,
+    /// Proof + MANDATORY invariant/termination obligations — a loop
+    /// with no provable `decreases` measure FAILS (`@verify(thorough)`
+    /// rung of the strategy ladder, T0671)
+    Thorough,
+    /// Thorough + proof-kernel formation recheck before SMT
+    /// (`@verify(certified)` rung)
+    Certified,
     /// Compare both modes and show cost/benefit
     Compare,
     /// Cubical type theory tactics (path induction, glue, hcomp, …)
@@ -81,10 +88,21 @@ impl VerificationMode {
         match s {
             "runtime" => Ok(Self::Runtime),
             "proof" => Ok(Self::Proof),
+            "thorough" => Ok(Self::Thorough),
+            "certified" => Ok(Self::Certified),
             "compare" => Ok(Self::Compare),
             "cubical" => Ok(Self::Cubical),
             "dependent" => Ok(Self::Dependent),
             other => Err(format!("unknown verification mode '{}'", other)),
+        }
+    }
+
+    /// The compiler-side strategy this CLI mode requests.
+    fn strategy(self) -> verum_compiler::VerifyStrategy {
+        match self {
+            VerificationMode::Thorough => verum_compiler::VerifyStrategy::Thorough,
+            VerificationMode::Certified => verum_compiler::VerifyStrategy::Certified,
+            _ => verum_compiler::VerifyStrategy::Proof,
         }
     }
 }
@@ -386,7 +404,7 @@ pub fn execute(
     } else {
         VerificationMode::parse(mode).map_err(|e| {
             CliError::verification_failed(format!(
-                "{e}. Accepted values: runtime, proof, compare, cubical, dependent"
+                "{e}. Accepted values: runtime, proof, thorough, certified, compare, cubical, dependent"
             ))
         })?
     };
@@ -400,16 +418,28 @@ pub fn execute(
         return execute_interactive(timeout);
     }
 
+    let strategy = mode.strategy();
     let stats = match mode {
         VerificationMode::Compare => execute_compare_mode(timeout, show_cost, backend, &profile)?,
-        VerificationMode::Proof => execute_proof_mode(timeout, show_cost, backend, &profile)?,
+        // Thorough / Certified are the proof pipeline at a stricter
+        // strategy rung — the strictness travels via
+        // `CompilerOptions.verify_strategy` (T0671).
+        VerificationMode::Proof
+        | VerificationMode::Thorough
+        | VerificationMode::Certified => {
+            execute_proof_mode(timeout, show_cost, backend, &profile, strategy)?
+        }
         VerificationMode::Runtime => execute_runtime_mode()?,
         // Cubical and Dependent both run through the proof pipeline; the tactic
         // routing happens inside `verum_smt::tactic_evaluation` based on the
         // discovered obligations. The CLI distinction is kept so users can
         // request the focused tactic family explicitly via `--mode=cubical|dependent`.
-        VerificationMode::Cubical => execute_proof_mode(timeout, show_cost, backend, &profile)?,
-        VerificationMode::Dependent => execute_proof_mode(timeout, show_cost, backend, &profile)?,
+        VerificationMode::Cubical => {
+            execute_proof_mode(timeout, show_cost, backend, &profile, strategy)?
+        }
+        VerificationMode::Dependent => {
+            execute_proof_mode(timeout, show_cost, backend, &profile, strategy)?
+        }
     };
     let _ = backend; // retained for future use outside proof/compare modes
 
@@ -495,12 +525,14 @@ fn verify_file_proof(
     show_cost: bool,
     backend: SolverChoice,
     profile: &ProfileConfig,
+    strategy: verum_compiler::VerifyStrategy,
 ) -> std::result::Result<bool, String> {
     use verum_compiler::verify_cmd::VerifyCommand;
 
     let options = CompilerOptions {
         input: path.clone(),
         verify_mode: VerifyMode::Proof,
+        verify_strategy: strategy,
         smt_timeout_secs: timeout,
         smt_solver: backend.into(),
         show_verification_costs: show_cost,
@@ -554,6 +586,7 @@ fn verify_file_proof(
     _show_cost: bool,
     _backend: SolverChoice,
     _profile: &ProfileConfig,
+    _strategy: verum_compiler::VerifyStrategy,
 ) -> std::result::Result<bool, String> {
     // Without Z3, run type-checking only
     let options = CompilerOptions {
@@ -602,6 +635,7 @@ fn execute_proof_mode(
     show_cost: bool,
     backend: SolverChoice,
     profile: &ProfileConfig,
+    strategy: verum_compiler::VerifyStrategy,
 ) -> Result<VerificationStats> {
     #[cfg(not(feature = "verification"))]
     {
@@ -661,7 +695,14 @@ fn execute_proof_mode(
         stats.total_files += 1;
 
         let file_start = Instant::now();
-        match verify_file_proof(source, timeout, show_cost, backend, &per_file_profile) {
+        match verify_file_proof(
+            source,
+            timeout,
+            show_cost,
+            backend,
+            &per_file_profile,
+            strategy,
+        ) {
             Ok(true) => {
                 let elapsed = file_start.elapsed();
                 stats.files_verified += 1;
@@ -740,7 +781,14 @@ fn execute_compare_mode(
 
         // Measure proof mode time
         let proof_start = Instant::now();
-        let proof_ok = verify_file_proof(source, timeout, show_cost, backend, profile);
+        let proof_ok = verify_file_proof(
+            source,
+            timeout,
+            show_cost,
+            backend,
+            profile,
+            verum_compiler::VerifyStrategy::Proof,
+        );
         let proof_time = proof_start.elapsed();
 
         // Measure check-only (runtime) time
@@ -894,6 +942,7 @@ fn execute_interactive_impl(timeout: u64) -> Result<()> {
             false,
             SolverChoice::Z3,
             &ProfileConfig::default(),
+            verum_compiler::VerifyStrategy::Proof,
         ) {
             Ok(false) => {
                 problem_files.push((display_path, "Verification failed".to_string()));
@@ -1010,6 +1059,7 @@ fn investigate_file(path: &str, timeout: u64) {
         true,
         SolverChoice::Z3,
         &ProfileConfig::default(),
+        verum_compiler::VerifyStrategy::Proof,
     ) {
         Ok(true) => {
             let elapsed = start.elapsed();

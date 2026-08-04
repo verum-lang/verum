@@ -3376,7 +3376,22 @@ impl VCGenerator {
                 // Bodies with an early exit are excluded — see
                 // `block_has_early_exit` for why folding the target
                 // through a `return` fabricates a false obligation.
+                // Under MANDATORY termination that exclusion may not
+                // be silent: an unmodeled measure is a failing
+                // obligation naming the limitation, because a
+                // strictness rung that quietly skips what it cannot
+                // check is indistinguishable from one that is not
+                // wired (this pool's false-green doctrine). (T0671)
                 let measure_vc_sound = !Self::block_has_early_exit(body);
+                if !measure_vc_sound && !decreases.is_empty() && self.termination_required {
+                    let vc = VerificationCondition::new(
+                        Formula::False,
+                        SourceLocation::from_span(expr.span, self.source_file.clone()),
+                        VCKind::Termination,
+                        "`decreases` on a loop body with an early exit (`return`/`break`) is not yet modeled — mandatory termination cannot skip it silently; restructure the loop or verify at a lower strategy",
+                    );
+                    self.push_vc(vc);
+                }
                 for decreases_expr in decreases.iter().filter(|_| measure_vc_sound) {
                     let variant = self.translate_expr(decreases_expr);
                     let snapshot = Variable::new(format!("__variant0_l{}", loop_id));

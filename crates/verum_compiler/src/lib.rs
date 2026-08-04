@@ -304,7 +304,7 @@ pub use linker_config::{
     ProjectConfig,
 };
 pub use literal_registry::{LiteralRegistry, ParsedLiteral, TaggedLiteralHandler};
-pub use options::{CompilerOptions, OutputFormat, VerifyMode};
+pub use options::{CompilerOptions, OutputFormat, VerifyMode, VerifyStrategy};
 pub use pipeline::{
     BuildMode, CheckResult, CompilationMode, CompilationPipeline, CompilerPass,
     TestExecutionResult, get_cached_stdlib_registry, reset_test_isolation,
