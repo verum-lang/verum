@@ -118,6 +118,20 @@ pub struct ElabContext {
     /// Global axiom registry. Each axiom is one entry whose body is
     /// the canonical `Term` representing the axiom's witness.
     global_axioms: BTreeMap<String, AxiomEntry>,
+    /// The goal the current proof body must inhabit — the theorem's
+    /// translated conclusion, set by [`elaborate_theorem`] BEFORE
+    /// the body elaborates. Goal-directed tactics read it:
+    /// `reflexivity` against a conclusion `Id(A, a, b)` emits
+    /// `Refl(a)` (the kernel's def-eq then decides `a ≡ b`), which
+    /// is what turns rfl-class lemmas into real certificates
+    /// instead of `UnsupportedTactic` rejections. (T0679)
+    expected_conclusion: Option<Term>,
+    /// How many hypothesis binders (generics + params + requires)
+    /// wrap the conclusion in the goal's Pi-chain. Goal-directed
+    /// tactics that do not yet model binder introduction refuse
+    /// honestly when this is non-zero instead of emitting a term
+    /// the kernel will reject with an opaque de-Bruijn error.
+    expected_hypotheses: usize,
 }
 
 /// One row in the global axiom registry. An axiom is a *typed*
@@ -190,6 +204,53 @@ impl ElabContext {
     /// Number of local binders currently in scope.
     pub fn depth(&self) -> usize {
         self.local_binders.len()
+    }
+
+    /// Arm the goal for goal-directed tactics: the theorem's
+    /// translated conclusion plus the number of hypothesis binders
+    /// wrapping it in the goal Pi-chain.
+    pub fn set_goal(&mut self, conclusion: Option<Term>, hypotheses: usize) {
+        self.expected_conclusion = conclusion;
+        self.expected_hypotheses = hypotheses;
+    }
+
+    /// The armed conclusion, if any.
+    pub fn expected_conclusion(&self) -> Option<&Term> {
+        self.expected_conclusion.as_ref()
+    }
+
+    /// Number of hypothesis binders wrapping the armed conclusion.
+    pub fn expected_hypotheses(&self) -> usize {
+        self.expected_hypotheses
+    }
+
+    /// Structural type synthesis over the shapes the elaborator
+    /// emits, WITHOUT invoking the kernel: an axiom reference's
+    /// type is its registered `claimed_type` (closed, so no
+    /// shifting), `Refl(a)` types at `Id(ty a, a, a)`. Returns
+    /// `None` for shapes that need real inference — callers fall
+    /// back to their previous encoding. This is untrusted
+    /// convenience: a wrong answer is caught by
+    /// `Certificate::verify`, never accepted.
+    pub fn synthesize_type(&self, term: &Term) -> Option<Term> {
+        match term {
+            Term::Var(i) if *i >= self.local_binders.len() => {
+                let axiom_index = *i - self.local_binders.len();
+                self.global_axioms
+                    .values()
+                    .nth(axiom_index)
+                    .map(|a| a.claimed_type.clone())
+            }
+            Term::Refl(value) => {
+                let ty = self.synthesize_type(value)?;
+                Some(Term::Id {
+                    ty: Box::new(ty),
+                    lhs: value.clone(),
+                    rhs: value.clone(),
+                })
+            }
+            _ => None,
+        }
     }
 }
 
@@ -337,6 +398,27 @@ pub fn proposition_to_term(prop: &Expr, ctx: &ElabContext) -> Result<Term, ElabE
             expr_to_term(prop, ctx)
         }
         ExprKind::Binary { op, left, right } => {
+            // Equality gets the kernel's NATIVE identity type when
+            // the carrier type is synthesizable: `a == b` becomes
+            // `Id(A, a, b)` — the foundational primitive `Refl`/`J`
+            // eliminate — so rfl-class lemmas certify through the
+            // trusted def-eq instead of an opaque `eq` axiom no
+            // rule can discharge. Falls through to the opaque
+            // connective encoding when the carrier is not
+            // synthesizable (open terms, unregistered heads):
+            // strictly-more-provable, never less. (T0679)
+            if matches!(op, verum_ast::expr::BinOp::Eq) {
+                let lhs_t = expr_to_term(left, ctx)?;
+                let rhs_t = expr_to_term(right, ctx)?;
+                if let Some(ty) = ctx.synthesize_type(&lhs_t) {
+                    return Ok(Term::Id {
+                        ty: Box::new(ty),
+                        lhs: Box::new(lhs_t),
+                        rhs: Box::new(rhs_t),
+                    });
+                }
+            }
+
             // Opaque-axiom connective encoding. The connective is
             // registered as a polymorphic operator (claimed type
             // `Universe(0)`); the proposition translates to an `App`
@@ -596,14 +678,32 @@ pub fn elaborate_tactic(tactic: &TacticExpr, ctx: &mut ElabContext) -> Result<Te
             Ok(build_app_chain(head, arg_terms))
         }
         TacticExpr::Reflexivity => {
-            // Stand-in: refl returns a reference to the innermost
-            // binder. Replacing this with a real
-            // `DefinitionalEquality::Refl` witness requires extending
-            // the kernel checker with a Refl-term form.
+            // Goal-directed: against an armed `Id(A, a, b)`
+            // conclusion, `reflexivity` IS the kernel's `Refl(a)` —
+            // `infer` synthesizes `Id(A, a, a)` and the
+            // certificate's def-eq decides `a ≡ b`. This is the
+            // real rfl-class certificate path (T0679); the kernel
+            // has carried `Refl`/`Id`/`J` since the identity-type
+            // extension, so the old "needs a DefinitionalEquality
+            // witness" refusal was stale.
+            if let Some(Term::Id { lhs, .. }) = ctx.expected_conclusion() {
+                if ctx.expected_hypotheses() > 0 {
+                    return Err(ElabError::UnsupportedTactic(
+                        "Reflexivity under hypothesis/parameter binders — \
+                         binder introduction for goal-directed refl is not \
+                         yet modeled; state the lemma without parameters or \
+                         use an explicit proof term"
+                            .into(),
+                    ));
+                }
+                return Ok(Term::Refl(lhs.clone()));
+            }
+            // Legacy positional fallback: inside a binder context the
+            // innermost binder can witness goals of the
+            // `intro a; reflexivity` shape.
             if ctx.depth() == 0 {
                 return Err(ElabError::UnsupportedTactic(
-                    "Reflexivity in empty context — needs a \
-                     DefinitionalEquality witness"
+                    "Reflexivity with no Id-shaped goal and empty context"
                         .into(),
                 ));
             }
@@ -860,13 +960,35 @@ pub fn elaborate_theorem(
     use crate::verification_goal::{TheoremKind, from_theorem_decl};
 
     let body = theorem.proof.as_ref().ok_or(ElabError::NoProofBody)?;
-    let body_term = elaborate_proof_body(body, ctx)?;
 
-    let (body_type, prop_translation_status) =
-        match from_theorem_decl(theorem, TheoremKind::Theorem, ctx) {
-            Ok(goal) => (goal.to_term(), "verification_goal"),
-            Err(_) => (placeholder_proposition(), "placeholder"),
-        };
+    // Free proposition atoms are GENERALIZED: an unregistered name
+    // in the proposition (`ensures foo == foo` with no `foo` in
+    // scope) postulates an opaque constant, which
+    // `close_over_axioms` then turns into an outermost Pi-binder —
+    // the certificate honestly proves the UNIVERSAL statement
+    // `Π(foo : U0). ...`. Without this, any proposition naming a
+    // user atom died in `UndeclaredApplyTarget` before elaboration
+    // began. (T0679)
+    register_free_proposition_atoms(theorem, ctx);
+
+    // Goal FIRST: goal-directed tactics (`reflexivity` against an
+    // `Id` conclusion) need the armed conclusion while the body
+    // elaborates. (T0679)
+    let goal = from_theorem_decl(theorem, TheoremKind::Theorem, ctx);
+    match &goal {
+        Ok(g) => ctx.set_goal(Some(g.conclusion.clone()), g.hypotheses.len()),
+        Err(_) => ctx.set_goal(None, 0),
+    }
+    let body_term = elaborate_proof_body(body, ctx);
+    // Disarm before any early return so a later theorem in the same
+    // context never sees a stale goal.
+    ctx.set_goal(None, 0);
+    let body_term = body_term?;
+
+    let (body_type, prop_translation_status) = match goal {
+        Ok(goal) => (goal.to_term(), "verification_goal"),
+        Err(_) => (placeholder_proposition(), "placeholder"),
+    };
 
     let (closed_term, closed_type) = close_over_axioms(ctx, body_term, body_type);
     let mut metadata = BTreeMap::new();
@@ -877,6 +999,47 @@ pub fn elaborate_theorem(
         prop_translation_status.to_string(),
     );
     finalise_certificate(closed_term, closed_type, metadata)
+}
+
+/// Register every free atom (Path / dotted-Field name) appearing in
+/// the theorem's proposition or `requires` clauses that is neither a
+/// local binder nor an already-registered axiom, as an opaque
+/// constant of type `Universe(0)`.
+///
+/// Semantics: generalization. `close_over_axioms` lifts every
+/// registered axiom into an outermost Pi-binder, so a postulated
+/// atom makes the certificate claim the universal statement over
+/// it — never a hidden assumption. Call sites in argument position
+/// inside `Call` expressions get the same treatment (their heads
+/// resolve through the same registry).
+pub fn register_free_proposition_atoms(theorem: &TheoremDecl, ctx: &mut ElabContext) {
+    fn walk(expr: &Expr, ctx: &mut ElabContext) {
+        match &expr.kind {
+            ExprKind::Path(_) | ExprKind::Field { .. } => {
+                if let Some(name) = expr_to_path_name(expr) {
+                    if ctx.lookup_local(&name).is_none() && ctx.get_axiom(&name).is_none() {
+                        ctx.register_axiom(name, Term::universe(0));
+                    }
+                }
+            }
+            ExprKind::Call { func, args, .. } => {
+                walk(func, ctx);
+                for a in args.iter() {
+                    walk(a, ctx);
+                }
+            }
+            ExprKind::Binary { left, right, .. } => {
+                walk(left, ctx);
+                walk(right, ctx);
+            }
+            ExprKind::Unary { expr: inner, .. } | ExprKind::Paren(inner) => walk(inner, ctx),
+            _ => {}
+        }
+    }
+    walk(theorem.proposition.as_ref(), ctx);
+    for req in theorem.requires.iter() {
+        walk(req, ctx);
+    }
 }
 
 /// **Path → name extraction.** Walks an Expr tree expecting
@@ -1651,9 +1814,12 @@ mod tests {
     }
 
     #[test]
-    fn proposition_to_term_binary_eq_translates_via_connective_axiom() {
-        // Binary `a == b` translates via the registered Eq
-        // connective axiom. `App(App(Eq, a), b)` is the encoding.
+    fn proposition_to_term_binary_eq_translates_to_native_id() {
+        // Binary `a == b` over synthesizable-carrier operands
+        // translates to the kernel's NATIVE identity type
+        // `Id(Universe(0), a, b)` — the primitive `Refl`/`J`
+        // eliminate — not the opaque `eq` connective axiom.
+        // (T0679: this is what makes rfl-class lemmas certify.)
         let span = Span::dummy();
         let prop = Expr::new(
             ExprKind::Binary {
@@ -1668,17 +1834,138 @@ mod tests {
         ctx.register_axiom("a", Term::universe(0));
         ctx.register_axiom("b", Term::universe(0));
         let term = proposition_to_term(&prop, &ctx).unwrap();
-        // Term is App(App(Var(eq_idx), Var(a_idx)), Var(b_idx)) — exact
-        // indices depend on BTreeMap key order; just check the shape.
         match term {
-            Term::App(outer, b_arg) => match (*outer, *b_arg) {
-                (Term::App(eq, a_arg), Term::Var(_)) => {
-                    assert!(matches!(*eq, Term::Var(_)), "head should be Var");
-                    assert!(matches!(*a_arg, Term::Var(_)), "lhs arg should be Var");
-                }
-                _ => panic!("expected App(App(_, _), Var), got differently-shaped term"),
+            Term::Id { ty, lhs, rhs } => {
+                assert_eq!(*ty, Term::universe(0), "carrier from the axiom registry");
+                assert!(matches!(*lhs, Term::Var(_)), "lhs resolves to the axiom slot");
+                assert!(matches!(*rhs, Term::Var(_)), "rhs resolves to the axiom slot");
+            }
+            other => panic!("expected native Id encoding, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rfl_class_lemma_produces_nonempty_certificate_that_round_trips() {
+        // T0679 acceptance: `theorem foo_self() ensures foo == foo
+        // { proof { reflexivity } }` produces a REAL certificate —
+        // conclusion `Id(U0, foo, foo)`, witness `Refl(foo)` — the
+        // kernel re-verifies it, and the serialized form
+        // deserializes to a certificate that verifies again
+        // (nonempty round-trip).
+        use verum_ast::decl::TheoremDecl;
+        let span = Span::dummy();
+        let prop = Expr::new(
+            ExprKind::Binary {
+                op: verum_ast::BinOp::Eq,
+                left: verum_common::Heap::new(path_expr("foo")),
+                right: verum_common::Heap::new(path_expr("foo")),
             },
-            other => panic!("expected App, got {:?}", other),
+            span,
+        );
+        let mut theorem = TheoremDecl::new(
+            Ident {
+                name: "foo_self".into(),
+                span,
+            },
+            prop,
+            span,
+        );
+        theorem.proof = verum_common::Maybe::Some(ProofBody::Tactic(TacticExpr::Reflexivity));
+
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("foo", Term::universe(0));
+
+        let cert = elaborate_theorem(&theorem, &mut ctx)
+            .expect("rfl-class lemma must certify (T0679)");
+        cert.verify().expect("kernel re-verification");
+        assert_eq!(
+            cert.metadata.get("claimed_type_source").map(|s| s.as_str()),
+            Some("verification_goal"),
+            "the Id-encoded proposition must come from the goal path, not the placeholder",
+        );
+
+        // Nonempty serialized round-trip.
+        let json = serde_json::to_string(&cert).expect("serialize");
+        assert!(!json.is_empty(), "certificate JSON must be nonempty");
+        assert!(
+            json.contains("Refl"),
+            "the witness must be the real Refl term, got: {json}"
+        );
+        let back: Certificate = serde_json::from_str(&json).expect("deserialize");
+        back.verify()
+            .expect("round-tripped certificate must still verify");
+        assert_eq!(back.term, cert.term, "witness term must round-trip losslessly");
+        assert_eq!(
+            back.claimed_type, cert.claimed_type,
+            "claimed type must round-trip losslessly"
+        );
+        assert_eq!(back.metadata, cert.metadata, "metadata must round-trip losslessly");
+    }
+
+    #[test]
+    fn rfl_on_distinct_terms_is_rejected_by_the_kernel() {
+        // The negative direction: `ensures foo == bar` with
+        // `reflexivity` must NOT certify — `Refl(foo)` synthesizes
+        // `Id(_, foo, foo)` and def-eq refuses `foo ≡ bar`. A
+        // reflexivity that certifies unequal endpoints would be a
+        // soundness hole, not a feature.
+        use verum_ast::decl::TheoremDecl;
+        let span = Span::dummy();
+        let prop = Expr::new(
+            ExprKind::Binary {
+                op: verum_ast::BinOp::Eq,
+                left: verum_common::Heap::new(path_expr("foo")),
+                right: verum_common::Heap::new(path_expr("bar")),
+            },
+            span,
+        );
+        let mut theorem = TheoremDecl::new(
+            Ident {
+                name: "foo_is_bar".into(),
+                span,
+            },
+            prop,
+            span,
+        );
+        theorem.proof = verum_common::Maybe::Some(ProofBody::Tactic(TacticExpr::Reflexivity));
+
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("bar", Term::universe(0));
+        ctx.register_axiom("foo", Term::universe(0));
+
+        let err = elaborate_theorem(&theorem, &mut ctx)
+            .expect_err("refl over distinct terms must be rejected");
+        assert!(
+            matches!(err, ElabError::KernelRejection(_)),
+            "rejection must come from the kernel's def-eq, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn proposition_to_term_binary_eq_falls_back_to_connective_for_open_operands() {
+        // When the carrier is NOT synthesizable (operand under a
+        // local binder — no registered type), the opaque
+        // connective encoding remains: strictly-more-provable,
+        // never less.
+        let span = Span::dummy();
+        let prop = Expr::new(
+            ExprKind::Binary {
+                op: verum_ast::BinOp::Eq,
+                left: verum_common::Heap::new(path_expr("x")),
+                right: verum_common::Heap::new(path_expr("x")),
+            },
+            span,
+        );
+        let mut ctx = ElabContext::new();
+        register_propositional_connectives(&mut ctx);
+        ctx.push_binder("x");
+        let term = proposition_to_term(&prop, &ctx).unwrap();
+        ctx.pop_binder();
+        match term {
+            Term::App(outer, _) => {
+                assert!(matches!(*outer, Term::App(_, _)), "App(App(eq, x), x) shape");
+            }
+            other => panic!("expected opaque connective App fallback, got {:?}", other),
         }
     }
 
@@ -1822,10 +2109,14 @@ mod tests {
     }
 
     #[test]
-    fn elaborate_theorem_complex_proposition_without_connectives_falls_back() {
-        // Theorem with `Binary` proposition (a == b) BUT without
-        // calling `register_propositional_connectives` — the Eq axiom
-        // is missing, so the elaborator falls back to placeholder.
+    fn elaborate_theorem_eq_with_wrong_witness_is_honestly_rejected() {
+        // `ensures a == b` now translates to the REAL goal
+        // `Id(U0, a, b)` (free atoms auto-generalize, T0679), so an
+        // `apply witness` whose witness types at `Universe(0)` — not
+        // at the Id — is REJECTED by the kernel. Pre-T0679 this very
+        // shape fell back to the `Universe(0)` placeholder and
+        // certified vacuously; the pin now guards the honest
+        // direction.
         use verum_ast::decl::TheoremDecl;
         let span = Span::dummy();
         let prop = Expr::new(
@@ -1850,15 +2141,52 @@ mod tests {
         }));
         let mut ctx = ElabContext::new();
         ctx.register_axiom("witness", Term::universe(0));
-        // Note: connectives NOT registered, so Eq axiom is undeclared.
+
+        let err = elaborate_theorem(&theorem, &mut ctx)
+            .expect_err("a Universe(0) witness must not inhabit Id(U0, a, b)");
+        assert!(
+            matches!(err, ElabError::KernelRejection(_)),
+            "rejection must come from the kernel checker, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn elaborate_theorem_untranslatable_proposition_falls_back_to_placeholder() {
+        // A proposition the translator genuinely cannot encode —
+        // arithmetic `a + b` is not a propositional connective —
+        // still falls back to the placeholder claimed type with the
+        // downgrade recorded in metadata.
+        use verum_ast::decl::TheoremDecl;
+        let span = Span::dummy();
+        let prop = Expr::new(
+            ExprKind::Binary {
+                op: verum_ast::BinOp::Add,
+                left: verum_common::Heap::new(path_expr("a")),
+                right: verum_common::Heap::new(path_expr("b")),
+            },
+            span,
+        );
+        let mut theorem = TheoremDecl::new(
+            Ident {
+                name: "arith_prop".into(),
+                span,
+            },
+            prop,
+            span,
+        );
+        theorem.proof = verum_common::Maybe::Some(ProofBody::Tactic(TacticExpr::Apply {
+            lemma: verum_common::Heap::new(path_expr("witness")),
+            args: List::new(),
+        }));
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("witness", Term::universe(0));
 
         let cert = elaborate_theorem(&theorem, &mut ctx).unwrap();
         cert.verify().unwrap();
-        // Fallback recorded in metadata.
         assert_eq!(
             cert.metadata.get("claimed_type_source").map(|s| s.as_str()),
             Some("placeholder"),
-            "Binary proposition without connectives registered should fall back",
+            "untranslatable proposition should fall back with the downgrade recorded",
         );
     }
 
