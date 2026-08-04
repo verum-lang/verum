@@ -1412,6 +1412,10 @@ fn convert_generic_params(
                     ))
                 })
                 .collect(),
+            // T0701 band-PID carry: the declared TypeParamId, verbatim.
+            // Band membership (shadow pids 0x8000+) is decided from
+            // this field alone — see the doc on GenericParam::pid.
+            pid: verum_common::Maybe::Some(tp.id.0),
         })
         .collect()
 }

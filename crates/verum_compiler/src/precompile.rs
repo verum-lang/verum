@@ -2626,6 +2626,9 @@ fn inject_declared_module_free_fn_keys(
                             bounds: List::new(),
                             default: Maybe::None,
                             type_bounds: List::new(),
+                            // Source-scan injector: no VBC descriptor, no
+                            // band possible — pid honestly unknown.
+                            pid: Maybe::None,
                         })
                     })
                     .collect();

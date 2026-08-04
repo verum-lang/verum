@@ -245,6 +245,18 @@ pub struct GenericParam {
     /// precompiled CoreMetadata.
     #[serde(default)]
     pub type_bounds: List<Text>,
+
+    /// **Declared TypeParamId** (T0701 band-PID carry).  `Maybe::None`
+    /// on pre-carry sidecars.  The SHADOW BAND contract (variant C):
+    /// a method generic that reuses an impl-level name is published
+    /// with `pid >= 0x8000` AFTER the dense vector — band membership
+    /// must be read from THIS field, never re-derived by counting
+    /// duplicate names (the order-coupled heuristic desynced from the
+    /// writer's band_seq on pid-sorted multi-dup lists and poisoned
+    /// the base/iterator census — measured, four-build A/B matrix on
+    /// the T0701 journal).
+    #[serde(default)]
+    pub pid: Maybe<u16>,
 }
 
 /// Kind of type descriptor

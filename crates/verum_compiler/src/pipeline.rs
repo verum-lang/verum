@@ -1726,6 +1726,9 @@ impl<'s> CompilationPipeline<'s> {
                 bounds,
                 default: Maybe::None,
                 type_bounds: List::new(),
+                // Parsed from a type-decl string: declaration generics
+                // are unique by construction, no band — pid unknown.
+                pid: Maybe::None,
             });
         }
 
