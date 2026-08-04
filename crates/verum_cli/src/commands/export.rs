@@ -64,6 +64,11 @@ pub enum ExportFormat {
     /// flag axioms / InverseObjectProperties. BTreeMap-sorted output
     /// for byte-deterministic round-trip.
     Owl2Fs,
+    /// Canonical versioned typed-AST artefact — the general
+    /// external-backend seam (T0675; design:
+    /// `docs/architecture/deterministic-profile-and-typed-export.md`
+    /// §4). Single-file, checked-before-export, byte-deterministic.
+    TypedIr,
 }
 
 impl ExportFormat {
@@ -76,10 +81,11 @@ impl ExportFormat {
             "agda" => Ok(Self::Agda),
             "metamath" | "mm" => Ok(Self::Metamath),
             "owl2-fs" | "owl2_fs" | "ofn" => Ok(Self::Owl2Fs),
+            "typed-ir" | "typed_ir" | "vtir" => Ok(Self::TypedIr),
             other => Err(CliError::InvalidArgument(
                 format!(
                     "unknown export format: `{}` (expected `dedukti`, \
-                     `coq`, `lean`, `agda`, `metamath`, or `owl2-fs`)",
+                     `coq`, `lean`, `agda`, `metamath`, `owl2-fs`, or `typed-ir`)",
                     other
                 )
                 .into(),
@@ -96,6 +102,7 @@ impl ExportFormat {
             Self::Agda => "agda",
             Self::Metamath => "metamath",
             Self::Owl2Fs => "owl2-fs",
+            Self::TypedIr => "typed-ir",
         }
     }
 
@@ -108,6 +115,7 @@ impl ExportFormat {
             Self::Agda => "agda",
             Self::Metamath => "mm",
             Self::Owl2Fs => "ofn",
+            Self::TypedIr => "vtir",
         }
     }
 }
@@ -189,6 +197,8 @@ struct Declaration {
 /// Options for the `verum export` command.
 pub struct ExportOptions {
     pub format: ExportFormat,
+    /// Source file for single-file formats (`typed-ir`).
+    pub input: Maybe<PathBuf>,
     pub output: Maybe<PathBuf>,
     /// emit a
     /// per-declaration provenance JSON sidecar alongside the main
@@ -196,8 +206,90 @@ pub struct ExportOptions {
     pub with_provenance: bool,
 }
 
+/// `verum export --to typed-ir <file> [-o out.vtir]` — emit the
+/// canonical versioned typed-AST artefact (T0675).
+///
+/// The source is parsed and TYPE-CHECKED first — the artefact's
+/// contract is "the checked program", so a file that does not check
+/// does not export. Conversion and canonical-bytes discipline live
+/// in `verum_compiler::typed_export` (the schema is the stability
+/// boundary; see that module's header).
+fn run_typed_ir(options: ExportOptions) -> Result<()> {
+    use verum_compiler::options::VerifyMode;
+    use verum_compiler::typed_export;
+
+    let input = match &options.input {
+        Maybe::Some(p) => p.clone(),
+        Maybe::None => {
+            return Err(CliError::InvalidArgument(
+                "`--to typed-ir` exports one file: `verum export --to typed-ir <file.vr>`"
+                    .into(),
+            ));
+        }
+    };
+
+    ui::step(&format!("Exporting typed IR for {}", input.display()));
+
+    // 1. Check. `run_check_only` runs the full front end (parse,
+    //    registration, type inference) and fails on any diagnostic.
+    let check_options = CompilerOptions {
+        input: input.clone(),
+        verify_mode: VerifyMode::Runtime,
+        check_only: true,
+        ..Default::default()
+    };
+    let mut session = Session::new(check_options);
+    let mut pipeline = CompilationPipeline::new(&mut session);
+    pipeline.run_check_only().map_err(|e| {
+        CliError::Custom(format!("typed-IR export requires a checking program: {}", e).into())
+    })?;
+
+    // 2. Parse again for the conversion walk (the checked module's
+    //    AST; the check above guarantees it is well-typed).
+    let source = std::fs::read_to_string(&input)
+        .map_err(|e| CliError::Custom(format!("reading {}: {}", input.display(), e).into()))?;
+    let module = verum_fast_parser::FastParser::new()
+        .parse_module_str(&source, verum_common::FileId::new(0))
+        .map_err(|e| CliError::Custom(format!("parse {}: {:?}", input.display(), e).into()))?;
+
+    // 3. Convert + canonical bytes.
+    let artifact = typed_export::build_typed_ir(&module);
+    let bytes = typed_export::to_canonical_bytes(&artifact);
+
+    let output_path = match options.output {
+        Maybe::Some(p) => p,
+        Maybe::None => input.with_extension("vtir"),
+    };
+    if let Some(parent) = output_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                CliError::Custom(
+                    format!("creating output directory {}: {}", parent.display(), e).into(),
+                )
+            })?;
+        }
+    }
+    std::fs::write(&output_path, &bytes)
+        .map_err(|e| CliError::Custom(format!("writing {}: {}", output_path.display(), e).into()))?;
+
+    ui::success(&format!(
+        "typed IR ({} v{}) → {} ({} bytes)",
+        typed_export::TYPED_IR_SCHEMA,
+        typed_export::TYPED_IR_VERSION,
+        output_path.display(),
+        bytes.len()
+    ));
+    Ok(())
+}
+
 /// Entry point for `verum export --to <format> [--output <path>]`.
 pub fn run(options: ExportOptions) -> Result<()> {
+    // The typed-IR artefact is a different pipeline entirely:
+    // single file, CHECKED before export, canonical bytes. It does
+    // not walk the proof-declaration surface below.
+    if options.format == ExportFormat::TypedIr {
+        return run_typed_ir(options);
+    }
     ui::step(&format!(
         "Exporting to {} certificate",
         options.format.as_str()
@@ -263,6 +355,10 @@ pub fn run(options: ExportOptions) -> Result<()> {
         ExportFormat::Agda => emit_agda(&declarations, &replay_registry),
         ExportFormat::Metamath => emit_metamath(&declarations, &replay_registry),
         ExportFormat::Owl2Fs => emit_owl2_fs(&owl2_graph, &manifest_name),
+        // Handled by the early `run_typed_ir` return at the top of `run` —
+        // typed-IR export consumes the type-checked module, not the
+        // declaration walk above.
+        ExportFormat::TypedIr => unreachable!("typed-ir handled by run_typed_ir"),
     };
 
     let output_path = match options.output {

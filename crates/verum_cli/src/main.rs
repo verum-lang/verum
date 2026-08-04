@@ -1826,9 +1826,16 @@ enum Commands {
     /// Export proofs to an external assistant's format
     #[command(display_order = 400)]
     Export {
- /// Target format: `dedukti` | `coq` | `lean` | `metamath`.
+ /// Target format: `dedukti` | `coq` | `lean` | `metamath`
+ /// | `typed-ir` (the canonical versioned typed-AST artefact —
+ /// the general external-backend seam).
         #[clap(long, value_name = "FORMAT")]
         to: String,
+ /// Source file for single-file formats (`typed-ir`). The
+ /// proof-certificate formats walk the whole project and
+ /// ignore this.
+        #[clap(value_name = "FILE")]
+        input: Option<std::path::PathBuf>,
  /// Output file path (defaults to
  /// `certificates/<format>/export.<ext>`).
         #[clap(long, short, value_name = "PATH")]
@@ -1850,6 +1857,9 @@ enum Commands {
  /// Target format: `dedukti` | `coq` | `lean` | `metamath`.
         #[clap(long, value_name = "FORMAT")]
         to: String,
+ /// Source file for single-file formats (`typed-ir`).
+        #[clap(value_name = "FILE")]
+        input: Option<std::path::PathBuf>,
  /// Output file path (defaults to
  /// `certificates/<format>/export.<ext>`).
         #[clap(long, short, value_name = "PATH")]
@@ -4380,17 +4390,23 @@ fn run_command(cli: Cli) -> Result<()> {
         }
         Commands::Export {
             to,
+            input,
             output,
             with_provenance,
         }
         | Commands::ExportProofs {
             to,
+            input,
             output,
             with_provenance,
         } => {
             let format = commands::export::ExportFormat::parse(&to)?;
             let options = commands::export::ExportOptions {
                 format,
+                input: match input {
+                    Some(p) => verum_common::Maybe::Some(p),
+                    None => verum_common::Maybe::None,
+                },
                 output: match output {
                     Some(p) => verum_common::Maybe::Some(p),
                     None => verum_common::Maybe::None,

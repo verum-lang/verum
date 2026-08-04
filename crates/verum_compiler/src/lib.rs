@@ -216,6 +216,7 @@ pub mod session;
 pub mod stdlib_coercion_registry;
 pub mod unified_dashboard;
 pub mod verification_profiler;
+pub mod typed_export;
 pub mod verify_cmd;
 
 // Context system is in verum_runtime::context
