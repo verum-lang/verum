@@ -1754,6 +1754,8 @@ impl HoareLogic {
     /// Convert a tuple field access to Z3
     ///
     /// Tuples are modeled as arrays indexed by field position.
+    // Unwired z3 lowering helpers — parked; wiring/deletion tracked by T0132.
+    #[allow(dead_code)]
     fn expr_to_z3_tuple_access(&self, tuple: &SmtExpr, field_idx: i64) -> Result<Dynamic, WPError> {
         let tuple_name = match tuple {
             SmtExpr::Var(v) => v.smtlib_name(),
@@ -2445,6 +2447,7 @@ impl HoareLogic {
     /// - Field access: `obj.field = ...` (modeled as obj_field)
     /// - Array index: `arr[i] = ...` (modeled as arr_i)
     /// - Dereference: `*ptr = ...` (modeled as deref_ptr)
+    #[allow(dead_code)] // parked, T0132
     fn expr_to_variable(&self, expr: &Expr) -> Result<Variable, WPError> {
         match &expr.kind {
             ExprKind::Path(path) => {
@@ -2524,7 +2527,7 @@ impl HoareLogic {
                 // Parenthesized pattern: unwrap
                 self.pattern_to_variable(inner)
             }
-            PatternKind::Record { path, fields, .. } => {
+            PatternKind::Record { path, fields: _, .. } => {
                 // Record pattern: use the type name as a prefix
                 let type_name = path
                     .segments
@@ -3184,6 +3187,7 @@ impl HoareLogic {
     }
 
     /// Convert a pattern literal to SMT expression
+    #[allow(dead_code)] // parked, T0132
     fn pattern_to_smt_expr(&self, pattern: &Pattern) -> Result<SmtExpr, WPError> {
         match &pattern.kind {
             PatternKind::Literal(lit) => self.literal_to_smt(lit),

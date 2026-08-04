@@ -360,7 +360,7 @@ impl<'ctx> HoareZ3Verifier<'ctx> {
                 self.collect_vars_formula(ante, vars);
                 self.collect_vars_formula(cons, vars);
             }
-            Formula::Forall(bound, inner) | Formula::Exists(bound, inner) => {
+            Formula::Forall(_bound, inner) | Formula::Exists(_bound, inner) => {
                 // Don't collect bound variables
                 self.collect_vars_formula(inner, vars);
             }
@@ -1218,7 +1218,7 @@ impl<'ctx> SeparationLogicZ3Verifier<'ctx> {
                 let new_domain = domain.store(&z3_addr, &z3::ast::Bool::from_bool(false));
                 Ok((heap.clone(), new_domain))
             }
-            HeapCommand::Load(var, addr) => {
+            HeapCommand::Load(_var, _addr) => {
                 // Load doesn't modify heap
                 Ok((heap.clone(), domain.clone()))
             }

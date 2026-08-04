@@ -804,7 +804,7 @@ impl GroupBuilder {
         use verum_ast::span::Span;
 
         let span = Span::dummy();
-        let var_a = create_var_expr("a", span);
+        let _var_a = create_var_expr("a", span);
         let var_b = create_var_expr("b", span);
         let var_c = create_var_expr("c", span);
 
@@ -1941,7 +1941,7 @@ fn parse_axiom_description(
 
     // Extract quantified variables from "forall a, b, c:" prefix
     let mut quantified_vars = List::new();
-    let formula_text = if let Some(forall_idx) = description.find("forall") {
+    let _formula_text = if let Some(forall_idx) = description.find("forall") {
         let after_forall = &description[forall_idx + 6..];
         if let Some(colon_idx) = after_forall.find(':') {
             let vars_str = &after_forall[..colon_idx];

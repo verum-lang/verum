@@ -2270,7 +2270,7 @@ impl ProofValidator {
     /// Validate assumption proof term
     fn validate_assumption(
         &self,
-        id: usize,
+        _id: usize,
         formula: &Expr,
         expected: &Expr,
     ) -> ValidationResult<()> {
@@ -2347,7 +2347,7 @@ impl ProofValidator {
         expected: &Expr,
     ) -> ValidationResult<()> {
         // Get conclusions of premise and implication
-        let premise_conclusion = premise.conclusion();
+        let _premise_conclusion = premise.conclusion();
         let impl_conclusion = implication.conclusion();
 
         // Extract P and Q from implication (P → Q)
@@ -3493,7 +3493,7 @@ impl ProofValidator {
             // Binary operations: infer result type based on operator and operands
             ExprKind::Binary { op, left, right } => {
                 let left_type = self.infer_witness_type(left)?;
-                let right_type = self.infer_witness_type(right)?;
+                let _right_type = self.infer_witness_type(right)?;
 
                 // Determine result type based on operator
                 match op {
@@ -6603,7 +6603,7 @@ impl ProofValidator {
     /// NNF positive: validates transformation to negation normal form for a positive formula.
     fn validate_nnf_pos(
         &self,
-        formula: &Expr,
+        _formula: &Expr,
         result: &Expr,
         expected: &Expr,
     ) -> ValidationResult<()> {
@@ -6627,7 +6627,7 @@ impl ProofValidator {
     /// NNF negative: validates transformation to negation normal form for a negated formula.
     fn validate_nnf_neg(
         &self,
-        formula: &Expr,
+        _formula: &Expr,
         result: &Expr,
         expected: &Expr,
     ) -> ValidationResult<()> {
@@ -7007,7 +7007,7 @@ impl ProofValidator {
             }
 
             // Constructor pattern: Some(x), Pair(a, b), etc.
-            ExprKind::Call { func, args, .. } => {
+            ExprKind::Call { func: _, args, .. } => {
                 // The constructor is in func, bindings are in args
                 // Add each argument as a binding with a derived type
                 for (idx, arg) in args.iter().enumerate() {
@@ -8579,7 +8579,7 @@ impl ProofCertificateGenerator {
     }
 
     /// Generate SMT-LIB2 certificate
-    fn generate_smtlib2(&self, proof: &ProofTerm, proposition: &Expr) -> Text {
+    fn generate_smtlib2(&self, _proof: &ProofTerm, proposition: &Expr) -> Text {
         format!(
             "; SMT-LIB2 proof certificate\n\
              (assert {:?})\n\

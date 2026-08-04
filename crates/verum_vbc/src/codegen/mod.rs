@@ -10263,6 +10263,10 @@ impl VbcCodegen {
             .join(".")
     }
 
+    /// Drains `pending_imports` and registers each deferred
+    /// cross-module import now that every module's declarations are
+    /// collected (two-phase mount resolution — see the queueing site
+    /// in `collect_declarations`' mount arm).
     pub fn resolve_pending_imports(&mut self) {
         // Take ownership of pending imports to avoid borrow issues
         let pending = std::mem::take(&mut self.pending_imports);
@@ -22627,6 +22631,11 @@ impl VbcCodegen {
         out
     }
 
+    /// Copies the baked archive's function bodies into the module
+    /// under compilation, re-interning strings and remapping ids so
+    /// interpreter dispatch sees ONE coherent function table (the
+    /// interp-tier archive merger; the AOT twin lives in
+    /// verum_codegen — T0277 tracks unifying them).
     pub fn merge_archive_function_bodies(
         &mut self,
         archive_module: &crate::module::VbcModule,

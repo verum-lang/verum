@@ -208,7 +208,7 @@ impl Heap {
     }
 
     /// Write to the heap at an address
-    pub fn store(&self, addr: &Address, val: &Value) -> Heap {
+    pub fn store(&self, _addr: &Address, _val: &Value) -> Heap {
         // Create a new heap variable representing the updated heap
         let new_name = Text::from(format!("{}_updated", self.array.name));
         Heap {
@@ -1113,8 +1113,8 @@ impl FrameRule {
     ///
     /// Returns true if the command doesn't modify the frame R
     pub fn can_frame(
-        pre: &SepProp,
-        post: &SepProp,
+        _pre: &SepProp,
+        _post: &SepProp,
         frame: &SepProp,
         modifies: &List<Address>,
     ) -> bool {

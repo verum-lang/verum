@@ -60,6 +60,18 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Select Xcode 16 (macOS only)
+        if: runner.os == 'macOS'
+        # The bundled z3-src C++ build fails under the macos-14 image's
+        # default Xcode 15 clang ('no matching constructor for
+        # initialization of key_data' in obj_hashtable.h); clang 16+
+        # compiles the same source cleanly (verified on a local
+        # Darwin 25 toolchain). Pick the newest Xcode 16 on the image.
+        run: |
+          XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          clang++ --version
+
       - name: Install Rust toolchain (pinned via rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
         with:
@@ -353,6 +365,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Select Xcode 16 (macOS only)
+        if: runner.os == 'macOS'
+        # The bundled z3-src C++ build fails under the macos-14 image's
+        # default Xcode 15 clang ('no matching constructor for
+        # initialization of key_data' in obj_hashtable.h); clang 16+
+        # compiles the same source cleanly (verified on a local
+        # Darwin 25 toolchain). Pick the newest Xcode 16 on the image.
+        run: |
+          XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          clang++ --version
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master

@@ -2597,6 +2597,9 @@ pub struct SourceMapEntry {
 /// the ONE feature-independent authority (the codegen method of the
 /// same name delegates here — the interpreter's object-dispatch arm
 /// needs it without the `codegen` feature).
+/// Strips a trailing `<...>` generic-argument list from a type-name
+/// spelling (`"Maybe<Int>"` → `"Maybe"`); names without one pass
+/// through unchanged.
 pub fn strip_generic_args(type_name: &str) -> &str {
     match type_name.find('<') {
         Some(idx) => &type_name[..idx],
@@ -2604,6 +2607,8 @@ pub fn strip_generic_args(type_name: &str) -> &str {
     }
 }
 
+/// A module this module depends on, recorded for cache invalidation
+/// (name + content hash of the dependency at bake time).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleDependency {
     /// Module name.

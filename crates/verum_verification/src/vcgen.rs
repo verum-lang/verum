@@ -2263,12 +2263,12 @@ impl VCGenerator {
             }
             ExprKind::Binary {
                 op: BinOp::Div,
-                left,
+                left: _,
                 right,
             }
             | ExprKind::Binary {
                 op: BinOp::Rem,
-                left,
+                left: _,
                 right,
             } => {
                 // Division: generate division by zero check
@@ -3342,6 +3342,8 @@ impl VCGenerator {
     }
 
     /// Extract variable type from type expression
+    // Unwired type-extraction helper — parked; T0132.
+    #[allow(dead_code)]
     fn extract_var_type(&self, type_expr: &Expr) -> VarType {
         if let ExprKind::Path(path) = &type_expr.kind {
             let name = path
@@ -3736,7 +3738,7 @@ impl VCGenerator {
         &mut self,
         func: &FunctionDecl,
         precondition: &Formula,
-        postcondition: &Formula,
+        _postcondition: &Formula,
     ) {
         let func_name = func.name.as_str();
         let location = SourceLocation::from_span(func.span, self.source_file.clone());

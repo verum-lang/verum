@@ -431,6 +431,18 @@ fn main() {
                 .current_dir(project_root)
                 .env("VERUM_NO_AUTO_PRECOMPILE", "1") // prevent recursion
                 .env("CARGO_TARGET_DIR", &nested_target) // belt-and-braces
+                // LINT-POLICY ISOLATION: the OUTER build's RUSTFLAGS
+                // (CI exports `-D warnings`) must not leak into this
+                // nested compile — the bake's job is to produce the
+                // stdlib artifact, not to enforce lint policy (the
+                // dedicated Lint job does that).  Measured on CI:
+                // ordinary `missing documentation` / `unused variable`
+                // warnings in verum_vbc/verum_verification became hard
+                // errors HERE, the bake died, and build.rs:1749
+                // panicked 'stdlib precompile FAILED' on every
+                // ubuntu Unit-tests job.
+                .env_remove("RUSTFLAGS")
+                .env_remove("CARGO_ENCODED_RUSTFLAGS")
                 // Bake into THIS build's private staging dir; the publish
                 // below renames the pair into the shared location only on
                 // success (readers never see a torn/partial archive).

@@ -1445,6 +1445,8 @@ impl SubsumptionChecker {
     /// 1. Extracting bounds from pred1 (the antecedent)
     /// 2. Finding a value satisfying pred1 but potentially violating pred2
     /// 3. Falling back to heuristic values based on variable names
+    // Unwired counterexample heuristics — parked; T0132.
+    #[allow(dead_code)]
     fn extract_syntactic_counterexample(
         &self,
         pred1: &Expr,
@@ -1513,6 +1515,7 @@ impl SubsumptionChecker {
     }
 
     /// Try to extract variable bounds from a predicate
+    #[allow(dead_code)] // parked, T0132
     fn extract_bounds_from_predicate(
         &self,
         pred: &Expr,

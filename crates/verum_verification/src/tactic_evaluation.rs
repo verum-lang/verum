@@ -4290,6 +4290,8 @@ impl TacticEvaluator {
     ///
     /// This uses Z3's tactic framework for more powerful transformations than
     /// simple simplify(). Returns the list of subgoals produced by the tactic.
+    // Unwired z3-tactic plumbing — parked; T0132.
+    #[allow(dead_code)]
     fn apply_z3_tactic_to_goal(
         &self,
         tactic_name: &str,
@@ -4405,6 +4407,7 @@ impl TacticEvaluator {
     /// - `or_else`: Try alternative if first fails
     /// - `repeat`: Apply tactic until fixed point
     /// - `try_for`: Apply with timeout
+    #[allow(dead_code)] // parked, T0132
     fn apply_z3_tactic_strategy(
         &mut self,
         strategy: &Z3TacticStrategy,
@@ -4503,6 +4506,7 @@ impl TacticEvaluator {
     }
 
     /// Build a Z3 tactic from our strategy representation
+    #[allow(dead_code)] // parked, T0132
     fn build_z3_tactic(&self, strategy: &Z3TacticStrategy) -> TacticResult<z3::Tactic> {
         match strategy {
             Z3TacticStrategy::Named(name) => Ok(z3::Tactic::new(name.as_str())),
@@ -4588,7 +4592,7 @@ impl TacticEvaluator {
     // ==================== SMT-based Tactics ====================
 
     /// Apply simp tactic - simplification with lemmas
-    fn apply_simp(&mut self, lemmas: &List<Expr>, at_target: Option<&Ident>) -> TacticResult<()> {
+    fn apply_simp(&mut self, _lemmas: &List<Expr>, _at_target: Option<&Ident>) -> TacticResult<()> {
         // Use Z3 simplification tactic
         let strategy = StrategyBuilder::new()
             .then(TacticKind::Simplify)
@@ -4623,7 +4627,7 @@ impl TacticEvaluator {
     }
 
     /// Apply auto tactic - automated proof search
-    fn apply_auto(&mut self, with_hints: &List<Ident>) -> TacticResult<()> {
+    fn apply_auto(&mut self, _with_hints: &List<Ident>) -> TacticResult<()> {
         // Auto tactic uses SMT solver with simplification preprocessing
         let strategy = StrategyBuilder::new()
             .then(TacticKind::Simplify)
@@ -4646,7 +4650,7 @@ impl TacticEvaluator {
     }
 
     /// Apply smt tactic - general SMT solver
-    fn apply_smt(&mut self, solver: Option<&Text>, timeout: Maybe<u64>) -> TacticResult<()> {
+    fn apply_smt(&mut self, _solver: Option<&Text>, timeout: Maybe<u64>) -> TacticResult<()> {
         let mut strategy = StrategyBuilder::new()
             .then(TacticKind::Simplify)
             .then(TacticKind::SMT);

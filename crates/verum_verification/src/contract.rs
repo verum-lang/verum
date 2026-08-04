@@ -1861,8 +1861,12 @@ enum ClauseKind {
 #[derive(Debug)]
 pub struct ContractSmtTranslator {
     /// Variable declarations
+    // Written but not yet read back — the SMT-LIB render path that
+    // consumes them is unwired; T0132.
+    #[allow(dead_code)]
     declarations: List<(Text, VarType)>,
     /// Generated SMT assertions
+    #[allow(dead_code)]
     assertions: List<Text>,
 }
 

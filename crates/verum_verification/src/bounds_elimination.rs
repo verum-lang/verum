@@ -924,7 +924,7 @@ impl BoundsCheckEliminator {
             // Greater than or equal: var >= lower OR lower <= var
             Expression::Binary {
                 op: BinaryOp::Ge,
-                left,
+                left: _,
                 right,
             } => {
                 // var >= lower implies lower is a lower bound
@@ -1107,6 +1107,9 @@ impl BoundsCheckEliminator {
         Expression::int(min_const.unwrap_or(i64::MAX))
     }
 
+    // Unwired bounds-extraction helpers — parked pending the range-
+    // analysis wiring; deletion/wiring tracked by T0132.
+    #[allow(dead_code)]
     fn extract_lower_bound(&self, expr: &Expression) -> Result<Expression, BoundsError> {
         // Pattern: 0 <= index or index >= 0
         match expr {
@@ -1136,6 +1139,7 @@ impl BoundsCheckEliminator {
         }
     }
 
+    #[allow(dead_code)] // parked, T0132
     fn extract_upper_bound(&self, expr: &Expression) -> Result<Expression, BoundsError> {
         // Pattern: index < N or index <= N
         match expr {
@@ -1613,7 +1617,7 @@ impl BoundsCheckEliminator {
         }
 
         // Pattern 2: Linear expression (i * k + c)
-        if let Expression::Binary { op, left, right } = index {
+        if let Expression::Binary { op, left: _, right } = index {
             match op {
                 BinaryOp::Mul => {
                     // i * k: worst case is upper_bound * k
@@ -1689,7 +1693,7 @@ impl BoundsCheckEliminator {
     /// Batch analyze array accesses in a loop
     pub fn eliminate_in_loop(
         &mut self,
-        loop_id: LoopId,
+        _loop_id: LoopId,
         accesses: &List<ArrayAccess>,
     ) -> Result<List<CheckDecision>, BoundsError> {
         let mut decisions = List::new();
@@ -1798,7 +1802,7 @@ impl DataflowAnalyzer {
                 ValueRange::new(Expression::int(*n), Expression::int(*n)).with_proven(true)
             }
             // Variable: try to look up in reaching definitions
-            Expression::Var(name) => {
+            Expression::Var(_name) => {
                 // If we have a definition for this variable, use it
                 // Otherwise, return symbolic range
                 ValueRange::new(Expression::int(0), expr.clone()).with_proven(false)
@@ -2356,7 +2360,7 @@ impl std::error::Error for BoundsError {}
 /// This is a convenience function for single-access analysis.
 pub fn analyze_bounds_check(
     access: &ArrayAccess,
-    cfg: &ControlFlowGraph,
+    _cfg: &ControlFlowGraph,
 ) -> Result<CheckDecision, BoundsError> {
     let mut eliminator = BoundsCheckEliminator::new();
     eliminator.analyze_array_access(access)
@@ -2365,7 +2369,7 @@ pub fn analyze_bounds_check(
 /// Batch analyze array accesses in a function
 pub fn analyze_function_bounds(
     accesses: &List<ArrayAccess>,
-    cfg: &ControlFlowGraph,
+    _cfg: &ControlFlowGraph,
 ) -> Result<List<CheckDecision>, BoundsError> {
     let mut eliminator = BoundsCheckEliminator::new();
 

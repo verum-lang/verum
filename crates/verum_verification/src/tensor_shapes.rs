@@ -2106,7 +2106,7 @@ impl ShapeVerifier {
         }
 
         // All shapes must have same rank
-        for (i, shape) in shapes.iter().enumerate().skip(1) {
+        for (_i, shape) in shapes.iter().enumerate().skip(1) {
             if shape.rank() != rank {
                 return Err(ShapeError::ShapeMismatch {
                     expected: rank,
