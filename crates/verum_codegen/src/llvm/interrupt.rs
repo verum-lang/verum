@@ -352,6 +352,7 @@ pub struct InterruptLowering<'ctx> {
     /// Reference to the builder for generating instructions.
     builder: &'ctx Builder<'ctx>,
     /// Type lowering helper.
+    #[allow(dead_code)] // parked with the bare-metal interrupt legs; T0386 kin
     types: &'ctx TypeLowering<'ctx>,
     /// Target architecture.
     arch: TargetArch,
@@ -515,7 +516,7 @@ impl<'ctx> InterruptLowering<'ctx> {
         // For simplicity, we use inline assembly to save flags and disable
 
         let i64_type = self.context.i64_type();
-        let ptr_type = self.context.ptr_type(Default::default());
+        let _ptr_type = self.context.ptr_type(Default::default());
 
         // Allocate space for saved flags
         let saved = self
@@ -536,7 +537,7 @@ impl<'ctx> InterruptLowering<'ctx> {
         );
 
         // Call the inline asm
-        let call_result = self
+        let _call_result = self
             .builder
             .build_indirect_call(asm_fn, asm, &[], "flags")
             .or_llvm_err()?;
@@ -581,7 +582,7 @@ impl<'ctx> InterruptLowering<'ctx> {
     /// ARM: Disable interrupts using CPSID instruction.
     fn arm_disable_interrupts(&self, priority_mask: Option<u8>) -> Result<PointerValue<'ctx>> {
         let i32_type = self.context.i32_type();
-        let ptr_type = self.context.ptr_type(Default::default());
+        let _ptr_type = self.context.ptr_type(Default::default());
 
         // Allocate space for saved state
         let saved = self

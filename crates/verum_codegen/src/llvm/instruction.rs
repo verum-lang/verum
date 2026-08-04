@@ -4517,7 +4517,7 @@ pub fn lower_instruction<'ctx>(
             } else if ctx.is_map_register(iterable.0) {
                 // Map iteration: create iterator [tag=3, map_ptr, slot=0]
                 let i64_type = ctx.types().i64_type();
-                let ptr_type = ctx.types().ptr_type();
+                let _ptr_type = ctx.types().ptr_type();
                 let module = ctx.get_module();
                 let iter_size = i64_type.const_int(24, false);
                 let iter_ptr = checked_malloc_instr(ctx, module, iter_size, "map_iter")?;
@@ -5250,7 +5250,7 @@ pub fn lower_instruction<'ctx>(
 
         Instruction::Switch {
             value,
-            default_offset,
+            default_offset: _,
             cases,
         } => {
             // Use LLVM's native switch instruction for O(1) dispatch
@@ -6092,7 +6092,7 @@ pub fn lower_instruction<'ctx>(
 
             let module = ctx.get_module();
             let i1_type = ctx.types().bool_type();
-            let ptr_type = ctx.types().ptr_type();
+            let _ptr_type = ctx.types().ptr_type();
 
             // Inline assert_fail: puts(msg) + _exit(1). Exit code 1
             // matches the interpreter's behavior (InterpreterError →
@@ -6126,7 +6126,7 @@ pub fn lower_instruction<'ctx>(
 
             // Fail block: puts(message) then _exit(1)
             ctx.builder().position_at_end(then_bb);
-            let i32_ty = ctx.types().i32_type();
+            let _i32_ty = ctx.types().i32_type();
             let i64_type = ctx.types().i64_type();
             let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
             let fn_type = ctx
@@ -6168,11 +6168,11 @@ pub fn lower_instruction<'ctx>(
                 .unwrap_or("explicit panic");
 
             let module = ctx.get_module();
-            let ptr_type = ctx.types().ptr_type();
+            let _ptr_type = ctx.types().ptr_type();
 
             // Inline panic: puts(msg) + _exit(1). Unified exit code
             // with interpreter (was: abort() → exit 134).
-            let i32_ty = ctx.types().i32_type();
+            let _i32_ty = ctx.types().i32_type();
             let i64_type = ctx.types().i64_type();
             let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
             let fn_type = ctx
@@ -6985,7 +6985,7 @@ pub fn lower_instruction<'ctx>(
             } else if ctx.is_map_register(iterable.0) {
                 // Map iteration: create iterator [tag=3, map_ptr, slot=0]
                 let i64_type = ctx.types().i64_type();
-                let ptr_type = ctx.types().ptr_type();
+                let _ptr_type = ctx.types().ptr_type();
                 let iter_size = i64_type.const_int(24, false);
                 let iter_ptr = checked_malloc_instr(ctx, module, iter_size, "map_iter")?;
                 ctx.builder()
@@ -7025,7 +7025,7 @@ pub fn lower_instruction<'ctx>(
             } else if ctx.is_set_register(iterable.0) {
                 // Set iteration: same layout as map iterator [tag=3, set_ptr, slot=0]
                 let i64_type = ctx.types().i64_type();
-                let ptr_type = ctx.types().ptr_type();
+                let _ptr_type = ctx.types().ptr_type();
                 let iter_size = i64_type.const_int(24, false);
                 let iter_ptr = checked_malloc_instr(ctx, module, iter_size, "set_iter")?;
                 ctx.builder()
@@ -7667,7 +7667,7 @@ pub fn lower_instruction<'ctx>(
             timeout,
         } => {
             let i64_type = ctx.types().i64_type();
-            let ptr_type = ctx.types().ptr_type();
+            let _ptr_type = ctx.types().ptr_type();
             let module = ctx.get_module();
 
             // Declare verum_io_poll(engine: i64, results: i64, max: i64, timeout_ns: i64) -> i64
@@ -8962,7 +8962,7 @@ pub fn lower_instruction<'ctx>(
         Instruction::RandomFloat { dst, low, high } => {
             let low_val = ctx.get_register(low.0)?;
             let high_val = ctx.get_register(high.0)?;
-            let i64_ty = ctx.types().i64_type();
+            let _i64_ty = ctx.types().i64_type();
             let f64_ty = ctx.types().f64_type();
             let module = ctx.get_module();
             // Call verum_random_float() to get [0,1), then scale to [low, high)
@@ -10097,9 +10097,9 @@ fn emit_permission_panic<'ctx>(
 ) -> Result<()> {
     let module = ctx.get_module();
     let llvm_ctx = ctx.llvm_context();
-    let i32_ty = llvm_ctx.i32_type();
+    let _i32_ty = llvm_ctx.i32_type();
     let i64_ty = llvm_ctx.i64_type();
-    let ptr_ty = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
+    let _ptr_ty = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
 
     let scope_name = scope_tag_name(scope_tag);
     let msg = format!(
@@ -12509,7 +12509,7 @@ fn lower_call<'ctx>(
         || func_name == "verum_atomic_fetch_or"
         || func_name == "verum_atomic_fetch_xor"
     {
-        let i64_type = ctx.types().i64_type();
+        let _i64_type = ctx.types().i64_type();
         let rmw_op = match func_name {
             "verum_atomic_fetch_add" => AtomicRMWBinOp::Add,
             "verum_atomic_fetch_sub" => AtomicRMWBinOp::Sub,
@@ -12811,7 +12811,7 @@ fn lower_call<'ctx>(
         let text_get_ptr_fn = super::error::get_or_declare_function(module, "verum_text_get_ptr", fn_type);
         // Helper: get or declare verum_text_from_cstr
         let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-        let text_from_cstr_fn = super::error::get_or_declare_function(module, "verum_text_from_cstr", fn_type);
+        let _text_from_cstr_fn = super::error::get_or_declare_function(module, "verum_text_from_cstr", fn_type);
 
         match intrinsic_key {
             // ============================================================
@@ -14465,7 +14465,7 @@ fn lower_call_method<'ctx>(
                                     }
                                 };
                                 if fname.ends_with(&method_suffix) && name_matches {
-                                    if let Some(llvm_fn) = ctx.get_module().get_function(fname) {
+                                    if let Some(_llvm_fn) = ctx.get_module().get_function(fname) {
                                         if seen_dyn_tids.insert(type_desc.id.0) {
                                             dispatch_entries
                                                 .push((type_desc.id.0, fname.to_string()));
@@ -15888,7 +15888,7 @@ fn lower_call_method<'ctx>(
                         "is_notempty",
                     )
                     .or_llvm_err()?;
-                let entry_bb = ctx
+                let _entry_bb = ctx
                     .builder()
                     .get_insert_block()
                     .or_internal("no insert block")?;
@@ -16016,7 +16016,7 @@ fn lower_call_method<'ctx>(
                         "is_notempty",
                     )
                     .or_llvm_err()?;
-                let entry_bb = ctx
+                let _entry_bb = ctx
                     .builder()
                     .get_insert_block()
                     .or_internal("no insert block")?;
@@ -16120,7 +16120,7 @@ fn lower_call_method<'ctx>(
                 let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
                 let i64_type = ctx.types().i64_type();
                 let ptr_type = ctx.types().ptr_type();
-                let module = ctx.get_module();
+                let _module = ctx.get_module();
                 // Clone via LLVM IR helper (emitted by define_list_ir_helpers)
                 let module = ctx.get_module();
                 let fn_type = ptr_type.fn_type(&[ptr_type.into()], false);
@@ -18410,7 +18410,7 @@ fn lower_call_method<'ctx>(
     // they chain through more generic calls that can't dispatch correctly.
     // Check if receiver has unknown type (not tracked as any known type).
     // This indicates a generic parameter where protocol dispatch is needed.
-    let receiver_is_untyped = !ctx.is_text_register(receiver.0)
+    let _receiver_is_untyped = !ctx.is_text_register(receiver.0)
         && !ctx.is_string_register(receiver.0)
         && !ctx.is_list_register(receiver.0)
         && !ctx.is_map_register(receiver.0)
@@ -22775,7 +22775,7 @@ fn lower_text_extended<'ctx>(
             let text_val = ctx.get_register(op_reg(operands, 1))?;
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
-            let f64_ty = ctx.types().f64_type();
+            let _f64_ty = ctx.types().f64_type();
             let ptr_type = ctx.types().ptr_type();
             let text_i64 = as_i64(ctx, text_val, "parse_float_text_i64")?;
             let get_ptr_fn = super::error::get_or_declare_function(
@@ -22946,7 +22946,7 @@ fn lower_text_extended<'ctx>(
             let dst = op_reg(operands, 0);
             let val = ctx.get_register(op_reg(operands, 1))?;
             let module = ctx.get_module();
-            let ptr_ty = ctx.types().ptr_type();
+            let _ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
             // Prefer verum_int_to_text (LLVM IR, snprintf-based) — compiled Text.from_int has broken push_byte.
             let fn_type = i64_ty.fn_type(&[i64_ty.into()], false);
@@ -23802,7 +23802,7 @@ fn lower_cbgr_extended<'ctx>(
                     .build_ptr_to_int(start.into_pointer_value(), i64_ty, "start_i")
                     .or_llvm_err()?
             };
-            let offset = ctx
+            let _offset = ctx
                 .builder()
                 .build_int_mul(start_i, i64_ty.const_int(8, false), "slice_off")
                 .or_llvm_err()?;
@@ -24443,7 +24443,7 @@ fn lower_cbgr_extended<'ctx>(
                 .or_llvm_err()?;
             // Allocate new fat ref
             let module = ctx.get_module();
-            let malloc_fn = module
+            let _malloc_fn = module
                 .get_function("verum_cbgr_allocate")
                 .unwrap_or_else(|| {
                     let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
@@ -24465,8 +24465,8 @@ fn lower_cbgr_extended<'ctx>(
             let dst2 = op_reg(operands, 1);
             let src = ctx.get_register(op_reg(operands, 2))?;
             let mid = ctx.get_register(op_reg(operands, 3))?;
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
+            let _i64_ty = ctx.types().i64_type();
+            let _ptr_ty = ctx.types().ptr_type();
             // Load base and len from source fat ref. Registers can hold
             // either PointerValue or i64 (NaN-boxed), so route through
             // `as_ptr`.
@@ -24640,7 +24640,7 @@ fn lower_cbgr_extended<'ctx>(
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             let module = ctx.get_module();
-            let malloc_fn = module
+            let _malloc_fn = module
                 .get_function("verum_cbgr_allocate")
                 .unwrap_or_else(|| {
                     let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
@@ -32637,7 +32637,7 @@ fn safe_int_div<'ctx>(
 ) -> Result<verum_llvm::values::IntValue<'ctx>> {
     let module = ctx.get_module();
     let i64_type = ctx.types().i64_type();
-    let ptr_type = ctx.types().ptr_type();
+    let _ptr_type = ctx.types().ptr_type();
     let zero = i64_type.const_zero();
 
     let is_zero = ctx
@@ -32663,7 +32663,7 @@ fn safe_int_div<'ctx>(
 
     // Panic block: puts("...") + _exit(1) — unified with interpreter
     ctx.builder().position_at_end(panic_bb);
-    let i32_ty = ctx.types().i32_type();
+    let _i32_ty = ctx.types().i32_type();
     let i64_type = ctx.types().i64_type();
     let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
     let fn_type = ctx
@@ -32797,7 +32797,7 @@ fn safe_int_rem<'ctx>(
 ) -> Result<verum_llvm::values::IntValue<'ctx>> {
     let module = ctx.get_module();
     let i64_type = ctx.types().i64_type();
-    let ptr_type = ctx.types().ptr_type();
+    let _ptr_type = ctx.types().ptr_type();
     let zero = i64_type.const_zero();
 
     let is_zero = ctx
@@ -32823,7 +32823,7 @@ fn safe_int_rem<'ctx>(
 
     // Panic block
     ctx.builder().position_at_end(panic_bb);
-    let i32_ty = ctx.types().i32_type();
+    let _i32_ty = ctx.types().i32_type();
     let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
     let i64_type = ctx.types().i64_type();
     let fn_type = ctx
@@ -34053,7 +34053,7 @@ fn lower_get_element<'ctx>(
 
     // For list registers, arr_ptr is a NewG object: [header(24)][ptr:i64][len:i64][cap:i64].
     // Load the backing pointer from LIST_PTR_OFFSET (field 0 = offset 24).
-    let data_ptr = if is_list {
+    let _data_ptr = if is_list {
         let ptr_type = ctx.types().ptr_type();
         let i8_type = ctx.types().i8_type();
         // SAFETY: GEP into the List object (NewG layout) to read the backing data pointer at LIST_PTR_OFFSET (24)
@@ -36097,7 +36097,7 @@ fn lower_tensor_extended<'ctx>(
             let shape_size = get_arg(ctx, 0)?;
             let fill_value = get_arg(ctx, 1)?;
             let dtype = get_arg(ctx, 2)?;
-            let ptr_ty = ctx.types().ptr_type();
+            let _ptr_ty = ctx.types().ptr_type();
             let f64_ty = ctx.types().f64_type();
             let shape_alloca = ctx
                 .builder()
@@ -36502,7 +36502,7 @@ fn lower_tensor_extended<'ctx>(
         }
         Some(TensorSubOpcode::Bincount) => {
             let tensor = get_arg(ctx, 0)?;
-            let bins = get_arg(ctx, 1)?;
+            let _bins = get_arg(ctx, 1)?;
             let result = call_tensor_runtime_i64(ctx, "verum_tensor_clone", &[tensor], "bincount")?;
             ctx.set_register(dst_reg, result.into());
         }
@@ -36703,7 +36703,7 @@ fn lower_tensor_extended<'ctx>(
         // ==================================================================
         Some(TensorSubOpcode::SampleTopP) => {
             let logits = get_arg(ctx, 0)?;
-            let p = get_arg(ctx, 1)?;
+            let _p = get_arg(ctx, 1)?;
             let result = call_tensor_runtime_i64(
                 ctx,
                 "verum_tensor_argmax",
@@ -38506,7 +38506,7 @@ fn lower_cmp_generic<'ctx>(
         // String comparison via strcmp on the underlying char* data
         let ptr_type = ctx.types().ptr_type();
         let i64_type = ctx.types().i64_type();
-        let i8_type = ctx.llvm_context().i8_type();
+        let _i8_type = ctx.llvm_context().i8_type();
 
         // Extract char* from Text objects via verum_text_get_ptr
         let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
@@ -40979,7 +40979,7 @@ fn lower_spawn<'ctx>(
     }
     let i64_type = ctx.types().i64_type();
     let ptr_type = ctx.types().ptr_type();
-    let i32_type = ctx.types().i32_type();
+    let _i32_type = ctx.types().i32_type();
     let module = ctx.get_module();
 
     if let Some(vbc_mod) = ctx.vbc_module() {
@@ -41230,7 +41230,7 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
             .or_llvm_err()?;
     } else if ctx.is_float_register(value.0) {
         // Float register: use printf("%g\n", val)
-        let f64_type = ctx.types().f64_type();
+        let _f64_type = ctx.types().f64_type();
         let fn_type = ctx.types().i32_type().fn_type(&[ptr_type.into()], true);
         let printf_fn = super::error::get_or_declare_function(module, "printf", fn_type);
         let f64_val = as_f64(ctx, val, "debug_f64")?;

@@ -257,7 +257,7 @@ pub struct AsyncSetStateOp;
 
 impl AsyncSetStateOp {
     pub fn build<'c>(
-        context: &'c Context,
+        _context: &'c Context,
         location: Location<'c>,
         state_machine: Value<'c, '_>,
         new_state: Value<'c, '_>,

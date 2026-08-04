@@ -383,7 +383,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_load(i64_type, data_ptr_slot, "data_int")
             .or_llvm_err()?
             .into_int_value();
-        let data_ptr = builder
+        let _data_ptr = builder
             .build_int_to_ptr(data_as_int, ptr_type, "data_ptr")
             .or_llvm_err()?;
 
@@ -1139,7 +1139,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         is_text_register: bool,
     ) -> Result<PointerValue<'ctx>> {
         let i64_type = self.context.i64_type();
-        let i8_type = self.context.i8_type();
+        let _i8_type = self.context.i8_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
 
         // Allocate 32 bytes: [tag, data_ptr, index, len]
@@ -5398,7 +5398,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let f64_type = ctx.f64_type();
+        let _f64_type = ctx.f64_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
@@ -6446,7 +6446,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let ptr_type = self.context.ptr_type(AddressSpace::default());
 
         // Declare libc functions we need
-        let open_fn = self.get_or_declare_open(module);
+        let _open_fn = self.get_or_declare_open(module);
         let close_fn = self.get_or_declare_close(module);
         let read_fn = self.get_or_declare_read(module);
         let write_fn = self.get_or_declare_write(module);
@@ -9871,7 +9871,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 f
             }
         };
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let _ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
         let i8_type = self.context.i8_type();
 
@@ -10458,6 +10458,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // =========================================================================
 
     /// Byte-swap a 16-bit port value (host → network byte order).
+    #[allow(dead_code)] // net-IR helpers parked with T0310 residue
     fn build_htons(
         &self,
         builder: &Builder<'ctx>,
@@ -10484,6 +10485,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// (via `#[cfg]`) would silently miscompile cross builds — Linux
     /// targets would receive a Darwin-shaped sockaddr that the kernel
     /// rejects with EINVAL, or vice versa.
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn build_sockaddr_in(
         &self,
         builder: &Builder<'ctx>,
@@ -10565,12 +10567,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // entry and never controls the shape. The former C-width
     // fallback arms were dead second owners of the same names —
     // the T0278 duplicate-declaration class.
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_socket(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
         super::error::get_or_declare_function(module, "socket", fn_type)
     }
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_bind(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
@@ -10578,12 +10582,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
         super::error::get_or_declare_function(module, "bind", fn_type)
     }
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_listen_libc(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
         super::error::get_or_declare_function(module, "listen", fn_type)
     }
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_accept_libc(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
@@ -10591,6 +10597,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         super::error::get_or_declare_function(module, "accept", fn_type)
     }
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_connect_libc(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
@@ -10598,6 +10605,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         super::error::get_or_declare_function(module, "connect", fn_type)
     }
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_send_libc(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
@@ -10605,6 +10613,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         super::error::get_or_declare_function(module, "send", fn_type)
     }
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_recv_libc(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
@@ -10612,6 +10621,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         super::error::get_or_declare_function(module, "recv", fn_type)
     }
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_setsockopt(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
@@ -10640,6 +10650,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// don't need updating.
     ///
     /// See `docs/architecture/no-libc-architecture.md`.
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_inet_pton(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let wrapper_name = "verum_internal_inet_pton";
         if let Some(f) = module.get_function(wrapper_name) {
@@ -10749,7 +10760,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let is_nul = builder
             .build_int_compare(verum_llvm::IntPredicate::EQ, c, nul_ch, "is_nul")
             .expect("nul");
-        let is_dot_or_nul = builder.build_or(is_dot, is_nul, "dot_or_nul").expect("or1");
+        let _is_dot_or_nul = builder.build_or(is_dot, is_nul, "dot_or_nul").expect("or1");
 
         builder
             .build_conditional_branch(is_digit, on_digit, on_dot_or_nul)
@@ -10912,6 +10923,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         func
     }
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_getsockname(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         // Registry-canonical (T0218: this helper's former C-width
         // spelling `i32 (i32, ptr, ptr)` raced the bake's i64 FFI
@@ -10927,6 +10939,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         super::error::get_or_declare_function(module, "getsockname", fn_type)
     }
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_sendto(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
@@ -10934,6 +10947,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         super::error::get_or_declare_function(module, "sendto", fn_type)
     }
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_recvfrom(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
@@ -10943,12 +10957,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     // --- Libc process declarations ---
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_fork(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let fn_type = i64_type.fn_type(&[], false);
         super::error::get_or_declare_function(module, "fork", fn_type)
     }
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_pipe(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
@@ -10964,12 +10980,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
         super::error::get_or_declare_function(module, "pipe", expected_fn_type)
     }
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_dup2(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
         super::error::get_or_declare_function(module, "dup2", fn_type)
     }
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn get_or_declare_execvp(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
@@ -10988,6 +11006,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // TCP/UDP Networking — LLVM IR (replaces verum_platform.c networking)
     // =========================================================================
 
+    #[allow(dead_code)] // legacy libc net path, superseded by syscalls; T0310
     fn emit_verum_networking_functions(&self, module: &Module<'ctx>) -> Result<()> {
         let i8_type = self.context.i8_type();
         let i16_type = self.context.i16_type();
@@ -13371,7 +13390,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .build_load(i8_type, byte_ptr, "byte")
             .or_llvm_err()?
             .into_int_value();
-        let byte_i64 = builder
+        let _byte_i64 = builder
             .build_int_z_extend(byte, i64_type, "byte_i64")
             .or_llvm_err()?;
         let is_zero = builder
@@ -17096,7 +17115,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             }
         }
 
-        let i64_type = self.context.i64_type();
+        let _i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let void_type = self.context.void_type();
         let fn_type = void_type.fn_type(&[ptr_type.into()], false);

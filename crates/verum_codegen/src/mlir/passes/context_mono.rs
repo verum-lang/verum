@@ -409,7 +409,7 @@ impl ContextAnalysisEngine {
         let func_name = op
             .attribute("sym_name")
             .ok()
-            .and_then(|attr| {
+            .and_then(|_attr| {
                 // Try to extract string value
                 Some(Text::from("function"))
             })
@@ -419,17 +419,17 @@ impl ContextAnalysisEngine {
         self.stats.functions_analyzed += 1;
 
         // Extract required contexts from attributes
-        if let Ok(required_attr) = op.attribute(attr_names::REQUIRED_CONTEXTS) {
+        if let Ok(_required_attr) = op.attribute(attr_names::REQUIRED_CONTEXTS) {
             // Parse required contexts
-            if let Some(info) = self.functions.get_mut(&func_id) {
+            if let Some(_info) = self.functions.get_mut(&func_id) {
                 // Would extract from array attribute
             }
         }
 
         // Extract provided contexts from attributes
-        if let Ok(provided_attr) = op.attribute(attr_names::PROVIDED_CONTEXTS) {
+        if let Ok(_provided_attr) = op.attribute(attr_names::PROVIDED_CONTEXTS) {
             // Parse provided contexts
-            if let Some(info) = self.functions.get_mut(&func_id) {
+            if let Some(_info) = self.functions.get_mut(&func_id) {
                 // Would extract from array attribute
             }
         }
@@ -508,14 +508,14 @@ impl ContextAnalysisEngine {
         let context_name = op
             .attribute(attr_names::CONTEXT_NAME)
             .ok()
-            .and_then(|attr| Some(Text::from("context")))
+            .and_then(|_attr| Some(Text::from("context")))
             .unwrap_or_else(|| Text::from("unknown"));
 
         let get_id = self.new_context_get_id();
         let mut get_info = ContextGetInfo::new(get_id, context_name.clone(), func_id);
 
         // Check resolution strategy from attribute
-        if let Ok(resolution_attr) = op.attribute(attr_names::CONTEXT_RESOLUTION) {
+        if let Ok(_resolution_attr) = op.attribute(attr_names::CONTEXT_RESOLUTION) {
             // Parse resolution strategy
             get_info.type_info = Some(ContextTypeInfo::new(context_name.clone()));
         }
@@ -541,7 +541,7 @@ impl ContextAnalysisEngine {
         let context_name = op
             .attribute(attr_names::CONTEXT_NAME)
             .ok()
-            .and_then(|attr| Some(Text::from("context")))
+            .and_then(|_attr| Some(Text::from("context")))
             .unwrap_or_else(|| Text::from("unknown"));
 
         // Add to function's provided contexts
@@ -572,7 +572,7 @@ impl ContextAnalysisEngine {
                 let func_name = op
                     .attribute("sym_name")
                     .ok()
-                    .and_then(|attr| Some(Text::from("function")))
+                    .and_then(|_attr| Some(Text::from("function")))
                     .unwrap_or_else(|| Text::from("anonymous"));
 
                 if let Some(&func_id) = self.function_names.get(&func_name) {
@@ -647,7 +647,7 @@ impl ContextAnalysisEngine {
         let callee_name = op
             .attribute("callee")
             .ok()
-            .and_then(|attr| Some(Text::from("callee")))
+            .and_then(|_attr| Some(Text::from("callee")))
             .unwrap_or_else(|| Text::from("unknown"));
 
         // Get or create callee function
@@ -718,7 +718,7 @@ impl ContextAnalysisEngine {
     /// Phase 4: Identify specialization opportunities.
     fn identify_specializations(&mut self) -> Result<()> {
         // Check each call site for specialization opportunities
-        for (call_site_id, call_site) in self.call_sites.iter_mut() {
+        for (_call_site_id, call_site) in self.call_sites.iter_mut() {
             let callee_id = call_site.callee;
 
             // Check if callee has context gets
@@ -749,7 +749,7 @@ impl ContextAnalysisEngine {
         }
 
         // Mark functions for cloning
-        for (func_id, func_info) in self.functions.iter_mut() {
+        for (_func_id, func_info) in self.functions.iter_mut() {
             if func_info.context_gets.is_empty() {
                 continue;
             }
@@ -920,7 +920,7 @@ impl ContextMonomorphizationPass {
     /// Apply monomorphization transformations.
     fn apply_transformations(
         &self,
-        module: &mut Module<'_>,
+        _module: &mut Module<'_>,
         engine: &ContextAnalysisEngine,
     ) -> Result<bool> {
         let clone_candidates = engine.get_clone_candidates();

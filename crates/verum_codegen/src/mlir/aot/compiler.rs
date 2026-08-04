@@ -158,6 +158,7 @@ pub struct AotCompiler<'c> {
     config: AotConfig,
 
     /// MLIR context.
+    #[allow(dead_code)] // held for lifetime coupling; T0179
     mlir_ctx: &'c MlirContext,
 
     /// LLVM backend (when feature enabled).
@@ -301,8 +302,8 @@ impl<'c> AotCompiler<'c> {
     /// Compile a module to assembly.
     pub fn compile_to_assembly(
         &self,
-        module: &Module<'c>,
-        output_path: &Path,
+        _module: &Module<'c>,
+        _output_path: &Path,
     ) -> Result<CompilationResult> {
         #[cfg(feature = "aot-llvm")]
         if let Some(ref backend) = self.llvm_backend {
@@ -317,8 +318,8 @@ impl<'c> AotCompiler<'c> {
     /// Compile a module to LLVM bitcode.
     pub fn compile_to_bitcode(
         &self,
-        module: &Module<'c>,
-        output_path: &Path,
+        _module: &Module<'c>,
+        _output_path: &Path,
     ) -> Result<CompilationResult> {
         #[cfg(feature = "aot-llvm")]
         if let Some(ref backend) = self.llvm_backend {

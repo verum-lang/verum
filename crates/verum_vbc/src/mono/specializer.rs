@@ -1314,6 +1314,7 @@ impl<'a> BytecodeSpecializer<'a> {
     // ========================================================================
 
     /// Writes a register to bytecode.
+    #[allow(dead_code)] // parked, T0134
     fn write_reg(&self, output: &mut Vec<u8>, reg: u16) {
         if reg < 128 {
             output.push(reg as u8);
@@ -1328,16 +1329,19 @@ impl<'a> BytecodeSpecializer<'a> {
     /// copy of the LEB128 loop; the two agreed byte for byte, but a private
     /// re-implementation of a wire format is a divergence waiting to happen
     /// — the bytes it writes are read by `decode_varint` (T0132).
+    #[allow(dead_code)] // parked, T0134
     fn write_varint(&self, output: &mut Vec<u8>, value: u64) {
         crate::encoding::encode_varint(value, output);
     }
 
     /// Writes a signed varint (ZigZag encoded).
+    #[allow(dead_code)] // parked, T0134
     fn write_signed_varint(&self, output: &mut Vec<u8>, value: i64) {
         crate::encoding::encode_signed_varint(value, output);
     }
 
     /// Writes a TypeRef to bytecode.
+    #[allow(dead_code)] // parked, T0134
     fn write_type_ref(&self, output: &mut Vec<u8>, type_ref: &TypeRef) {
         match type_ref {
             TypeRef::Concrete(id) => {

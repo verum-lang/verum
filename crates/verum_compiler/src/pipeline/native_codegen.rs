@@ -1215,14 +1215,16 @@ impl<'s> CompilationPipeline<'s> {
             // headers are the offending-value printouts belonging to the
             // preceding header; a code-class header poisons the batch.
             let mut code_class_lines: Vec<&str> = Vec::new();
-            let mut in_debug_assertion = false;
             for line in err_str.split("\\n").flat_map(|l| l.split('\n')) {
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
                     continue;
                 }
                 if trimmed.ends_with('!') {
-                    in_debug_assertion = is_debug_info_line(trimmed);
+                    // The flag is header-local (assigned and read in this
+                    // branch only) — the loop-carried `mut` seed was a
+                    // dead write under -D warnings.
+                    let in_debug_assertion = is_debug_info_line(trimmed);
                     if !in_debug_assertion {
                         code_class_lines.push(trimmed);
                     }

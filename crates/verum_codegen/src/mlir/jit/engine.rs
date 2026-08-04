@@ -786,7 +786,7 @@ impl JitEngine {
     /// Load and register verum_std symbols.
     pub fn load_verum_std(&self) -> Result<usize> {
         self.symbol_resolver.load_verum_std()?;
-        let count = self.symbol_resolver.preload_stdlib_symbols()?;
+        let _count = self.symbol_resolver.preload_stdlib_symbols()?;
         self.register_symbols_from_resolver()
     }
 

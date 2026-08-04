@@ -648,7 +648,7 @@ impl RefinementAnalysisEngine {
         let predicate_str = op
             .attribute(attr_names::REFINEMENT_PREDICATE)
             .ok()
-            .and_then(|attr| Some(Text::from("predicate")))
+            .and_then(|_attr| Some(Text::from("predicate")))
             .unwrap_or_else(|| Text::from("unknown"));
 
         let predicate = Predicate::parse(predicate_str.as_str()).unwrap_or(Predicate::Custom {
@@ -693,7 +693,7 @@ impl RefinementAnalysisEngine {
                     let value_id = self.get_or_create_value(&value);
 
                     // Mark as boolean
-                    if let Some(vp) = self.value_predicates.get_mut(&value_id) {
+                    if let Some(_vp) = self.value_predicates.get_mut(&value_id) {
                         // Would extract actual comparison details
                     }
                 }
@@ -737,7 +737,7 @@ impl RefinementAnalysisEngine {
         while !self.worklist.is_empty() && self.iterations < self.max_iterations {
             self.iterations += 1;
 
-            let value_id = self.worklist.pop_front().unwrap();
+            let _value_id = self.worklist.pop_front().unwrap();
 
             // In a full implementation, we would:
             // 1. Look at all uses of this value
@@ -754,7 +754,7 @@ impl RefinementAnalysisEngine {
     /// Phase 4: Identify redundant checks.
     fn identify_redundant_checks(&mut self) -> Result<()> {
         // For each check, see if it's implied by known predicates
-        for (check_id, check_info) in self.checks.iter_mut() {
+        for (_check_id, check_info) in self.checks.iter_mut() {
             if check_info.is_redundant {
                 continue; // Already marked
             }
@@ -870,7 +870,7 @@ impl RefinementPropagationPass {
     /// Apply optimizations.
     fn apply_optimizations(
         &self,
-        module: &mut Module<'_>,
+        _module: &mut Module<'_>,
         engine: &RefinementAnalysisEngine,
     ) -> Result<bool> {
         let redundant = engine.get_redundant_checks();

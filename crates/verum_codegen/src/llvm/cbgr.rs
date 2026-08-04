@@ -253,7 +253,7 @@ impl<'ctx> CbgrLowering<'ctx> {
         let i16_type = self.context.i16_type();
         let i32_type = self.context.i32_type();
         let i64_type = self.context.i64_type();
-        let ptr_type = self.context.ptr_type(Default::default());
+        let _ptr_type = self.context.ptr_type(Default::default());
 
         // 1. Compute header address: ptr - 32
         //  GEP with i8 and index -32 to get byte-level offset.
@@ -491,8 +491,8 @@ impl<'ctx> CbgrLowering<'ctx> {
     /// Drop a reference (invalidate generation).
     pub fn drop_ref(
         &mut self,
-        builder: &Builder<'ctx>,
-        ref_val: StructValue<'ctx>,
+        _builder: &Builder<'ctx>,
+        _ref_val: StructValue<'ctx>,
         tier: RefTier,
     ) -> Result<()> {
         match tier {

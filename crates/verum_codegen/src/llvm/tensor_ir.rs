@@ -858,7 +858,7 @@ impl<'ctx> TensorIR<'ctx> {
         let i32_type = ctx.i32_type();
         let i8_type = ctx.i8_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let f64_type = ctx.f64_type();
+        let _f64_type = ctx.f64_type();
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
 
         let func = match self.get_or_declare_new(module, "verum_tensor_new", fn_type) {
@@ -2334,7 +2334,7 @@ impl<'ctx> TensorIR<'ctx> {
                 "is_max",
             )
             .or_llvm_err()?;
-        let is_min = builder
+        let _is_min = builder
             .build_int_compare(
                 IntPredicate::EQ,
                 op,
@@ -2385,8 +2385,8 @@ impl<'ctx> TensorIR<'ctx> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
         let f64_type = ctx.f64_type();
-        let i8_type = ctx.i8_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let _i8_type = ctx.i8_type();
+        let _ptr_type = ctx.ptr_type(AddressSpace::default());
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
 
         let func = match self.get_or_declare_new(module, "verum_tensor_reduce", fn_type) {
@@ -3270,7 +3270,7 @@ impl<'ctx> TensorIR<'ctx> {
 
     fn emit_grad_tape(&self, module: &Module<'ctx>) {
         let ctx = self.context;
-        let i64_type = ctx.i64_type();
+        let _i64_type = ctx.i64_type();
         let i32_type = ctx.i32_type();
         let f64_type = ctx.f64_type();
         let void_type = ctx.void_type();
@@ -3524,7 +3524,7 @@ impl<'ctx> TensorIR<'ctx> {
         let i64_type = ctx.i64_type();
         let i32_type = ctx.i32_type();
         let f64_type = ctx.f64_type();
-        let void_type = ctx.void_type();
+        let _void_type = ctx.void_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         // i64(i64) signatures

@@ -257,7 +257,7 @@ pub struct ClosureCallOp;
 
 impl ClosureCallOp {
     pub fn build<'c>(
-        context: &'c Context,
+        _context: &'c Context,
         location: Location<'c>,
         closure: Value<'c, '_>,
         args: &[Value<'c, '_>],

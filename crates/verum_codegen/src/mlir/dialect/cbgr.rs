@@ -235,7 +235,7 @@ pub struct CbgrReallocOp;
 
 impl CbgrReallocOp {
     pub fn build<'c>(
-        context: &'c Context,
+        _context: &'c Context,
         location: Location<'c>,
         reference: Value<'c, '_>,
         new_value: Value<'c, '_>,
@@ -346,7 +346,7 @@ pub struct CbgrIncGenOp;
 
 impl CbgrIncGenOp {
     pub fn build<'c>(
-        context: &'c Context,
+        _context: &'c Context,
         location: Location<'c>,
         reference: Value<'c, '_>,
         result_type: Type<'c>,

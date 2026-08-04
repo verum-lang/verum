@@ -16893,7 +16893,6 @@ impl VbcCodegen {
                     (gname, pid, tb)
                 })
                 .collect();
-            drop(fn_bound_for);
             for (gname, pid, tb) in rendered {
                 let mut type_bounds: smallvec::SmallVec<[TypeRef; 1]> =
                     smallvec::SmallVec::new();

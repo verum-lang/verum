@@ -87,6 +87,7 @@ impl<'ctx> PlatformIR<'ctx> {
     ///
     /// The truncation is bit-correct for all valid fd / opt-id
     /// values (which fit in i32 by definition).
+    #[allow(dead_code)] // parked with T0310 residue
     fn fd_to_i32(
         &self,
         builder: &verum_llvm::builder::Builder<'ctx>,
@@ -104,6 +105,7 @@ impl<'ctx> PlatformIR<'ctx> {
     /// but Verum-side return slots are `i64`.  Use this helper at
     /// every libc-call return site to sign-extend (preserving
     /// negative-error semantics: `-1` stays `-1` in i64).
+    #[allow(dead_code)] // parked, T0310
     fn i32_ret_to_i64(
         &self,
         builder: &verum_llvm::builder::Builder<'ctx>,
@@ -779,7 +781,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_raw_open3(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         // verum_raw_open3: call syscall(SYS_open, path, flags, mode) to bypass
@@ -3130,7 +3132,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_threading(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let _ptr_type = ctx.ptr_type(AddressSpace::default());
 
         // Thread operations — extern declarations resolved at link time.
         // pthread_create requires a C function pointer callback, so these
@@ -3237,7 +3239,7 @@ impl<'ctx> PlatformIR<'ctx> {
     // Panic handler
     // ========================================================================
 
-    fn emit_panic(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+    fn emit_panic(&self, _module: &Module<'ctx>) -> super::error::Result<()> {
         // verum_panic is already declared in emit_core_declarations with noreturn attribute.
         Ok(())
     }
@@ -4089,7 +4091,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn ensure_io_syscalls_declared(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         // verum_raw_open3(path: ptr, flags: i64, mode: i64) -> i64
@@ -4149,7 +4151,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let do_open = ctx.append_basic_block(func, "do_open");
 
         builder.position_at_end(entry);
-        let path = func
+        let _path = func
             .get_nth_param(0)
             .or_internal("missing param 0")?
             .into_pointer_value();
@@ -4165,7 +4167,7 @@ impl<'ctx> PlatformIR<'ctx> {
         // target triple, NOT the host `#[cfg(target_os)]`.  Cross-
         // compile from x86_64-darwin to arm64-linux MUST emit
         // Linux flag values into the IR.
-        let (o_rdonly, o_wronly_creat_trunc, o_wronly_creat_append) =
+        let (_o_rdonly, o_wronly_creat_trunc, _o_wronly_creat_append) =
             if super::target_triple::target_is_linux(module) {
                 (0i64, 0x0001 | 0x0040 | 0x0200, 0x0001 | 0x0040 | 0x0400)
             } else {
@@ -4307,7 +4309,7 @@ impl<'ctx> PlatformIR<'ctx> {
         self.ensure_io_syscalls_declared(module)?;
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
         let func = self.get_or_declare_fn(module, "verum_file_close", fn_type);
@@ -4339,7 +4341,7 @@ impl<'ctx> PlatformIR<'ctx> {
         self.ensure_io_syscalls_declared(module)?;
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         let i8_type = ctx.i8_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
@@ -4504,8 +4506,8 @@ impl<'ctx> PlatformIR<'ctx> {
         self.ensure_io_syscalls_declared(module)?;
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
-        let i8_type = ctx.i8_type();
+        let _i32_type = ctx.i32_type();
+        let _i8_type = ctx.i8_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
@@ -4781,7 +4783,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_llvm_err()?;
 
         // Update phi incoming for loop back-edge
-        let new_len = builder.build_int_add(cur_len, n, "nl").or_llvm_err()?;
+        let _new_len = builder.build_int_add(cur_len, n, "nl").or_llvm_err()?;
         // We need to fix this — the new_len must be computed before the branch
         // Let me restructure: compute new_len in check_read before branching
 
@@ -5345,7 +5347,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ctx = self.context;
         let i8_type = ctx.i8_type();
         let i16_type = ctx.i16_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         // sockaddr_in = { i8 sin_len (macOS), i8 sin_family, u16 sin_port, u32 sin_addr, [8 x i8] pad }
         // On macOS: first byte is sin_len, second is sin_family
         // On Linux: first two bytes are sin_family (u16)
@@ -5470,7 +5472,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ret_fail = ctx.append_basic_block(func, "ret_fail");
 
         builder.position_at_end(entry);
-        let host = func
+        let _host = func
             .get_nth_param(0)
             .or_internal("missing param 0")?
             .into_pointer_value();
@@ -5695,7 +5697,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
         let i32_type = ctx.i32_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let _ptr_type = ctx.ptr_type(AddressSpace::default());
         let i8_type = ctx.i8_type();
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
@@ -5745,7 +5747,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_tcp_send_text(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
@@ -5828,7 +5830,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_tcp_recv_text(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         let i8_type = ctx.i8_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
@@ -6495,7 +6497,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_tcp_close(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_tcp_close"); }
@@ -6712,7 +6714,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_udp_recv_text(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         let i8_type = ctx.i8_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
@@ -6841,7 +6843,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_udp_close(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_udp_close"); }
@@ -6951,7 +6953,7 @@ impl<'ctx> PlatformIR<'ctx> {
         self.ensure_io_syscalls_declared(module)?;
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         let i8_type = ctx.i8_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
@@ -7135,7 +7137,7 @@ impl<'ctx> PlatformIR<'ctx> {
         self.ensure_io_syscalls_declared(module)?;
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
 
         let fn_type = ctx.void_type().fn_type(&[i64_type.into()], false);
         let func = self.get_or_declare_fn(module, "verum_fd_close", fn_type);
@@ -9195,7 +9197,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
         let i8_type = ctx.i8_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
         let func = self.get_or_declare_fn(
             module,
@@ -9217,7 +9219,7 @@ impl<'ctx> PlatformIR<'ctx> {
         // The wrappers internally branch Linux→inline-syscall vs
         // macOS→libSystem so this call site sees ONE FunctionValue
         // regardless of target.
-        let sched_yield_fn = self.emit_or_get_verum_sched_yield(module)?;
+        let _sched_yield_fn = self.emit_or_get_verum_sched_yield(module)?;
         let clock_gettime_fn = self.emit_or_get_verum_clock_gettime(module)?;
 
         let builder = ctx.create_builder();
@@ -10080,9 +10082,9 @@ impl<'ctx> PlatformIR<'ctx> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
         let i8_type = ctx.i8_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let void_type = ctx.void_type();
+        let _void_type = ctx.void_type();
         let func = self.get_or_declare_fn(
             module,
             "verum_select_channels",
@@ -10414,6 +10416,7 @@ impl<'ctx> PlatformIR<'ctx> {
     /// Helper: build a kevent struct on the stack with given params.
     /// kevent on macOS arm64: { i64 ident, i16 filter, u16 flags, u32 fflags, i64 data, ptr udata } = 32 bytes
     /// Returns pointer to the stack-allocated kevent.
+    #[allow(dead_code)] // parked, T0310
     fn build_kevent_on_stack<'a>(
         &self,
         builder: &verum_llvm::builder::Builder<'ctx>,
@@ -11155,7 +11158,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i64_type = ctx.i64_type();
         let i8_type = ctx.i8_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let void_type = ctx.void_type();
+        let _void_type = ctx.void_type();
 
         let func = self.get_or_declare_fn(
             module,
@@ -11577,7 +11580,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
         let i8_type = ctx.i8_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let func = self.get_or_declare_fn(
@@ -11777,7 +11780,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i64_type = ctx.i64_type();
         let i8_type = ctx.i8_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let void_type = ctx.void_type();
+        let _void_type = ctx.void_type();
 
         self.ensure_sync_helpers_declared(module)?;
         let func = self.get_or_declare_fn(
@@ -12045,7 +12048,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
         let i8_type = ctx.i8_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
         let void_type = ctx.void_type();
 
@@ -12393,7 +12396,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_pool_global(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let _ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let func =
             self.get_or_declare_fn(module, "verum_pool_global", i64_type.fn_type(&[], false));
@@ -12593,7 +12596,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_async_accept(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i8_type = ctx.i8_type();
+        let _i8_type = ctx.i8_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let func = self.get_or_declare_fn(
@@ -13059,7 +13062,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
         let i8_type = ctx.i8_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into(), ptr_type.into()], false);
@@ -14125,7 +14128,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_thread_is_done_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i8_type = ctx.i8_type();
+        let _i8_type = ctx.i8_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
@@ -15852,12 +15855,14 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// ExecutionContext layout constants (verified with offsetof).
     const EC_SIZE: u64 = 239168;
+    #[allow(dead_code)] // parked, T0310
     const EC_CACHED_EPOCH: u64 = 0;
     const EC_EXECUTION_TIER: u64 = 8;
     const EC_STACK_FRAMES: u64 = 16;
     const EC_STACK_DEPTH: u64 = 6160;
     const EC_CONTEXTS: u64 = 6168;
     const EC_CONTEXT_COUNT: u64 = 7704;
+    #[allow(dead_code)] // parked, T0310
     const EC_THREAD_NAME: u64 = 7720;
     const EC_TLS_SLOTS: u64 = 7728;
     const EC_EXCEPTION_HANDLERS: u64 = 9776;
@@ -15872,7 +15877,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_tls_and_context_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
+        let _i32_type = ctx.i32_type();
         let i8_type = ctx.i8_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
         let void_type = ctx.void_type();
@@ -16385,7 +16390,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_panic_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i8_type = ctx.i8_type();
+        let _i8_type = ctx.i8_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
         let void_type = ctx.void_type();
 
@@ -17572,7 +17577,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .get_nth_param(1)
             .or_internal("missing param 1")?
             .into_pointer_value();
-        let bufsize = func
+        let _bufsize = func
             .get_nth_param(2)
             .or_internal("missing param 2")?
             .into_int_value();
@@ -17613,8 +17618,8 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_llvm_err()?;
 
         // Use alloca for position tracking
-        let pos_alloca = builder.build_alloca(i64_type, "pos").or_llvm_err()?;
-        let abs_alloca = builder.build_alloca(i64_type, "abs_v").or_llvm_err()?;
+        let _pos_alloca = builder.build_alloca(i64_type, "pos").or_llvm_err()?;
+        let _abs_alloca = builder.build_alloca(i64_type, "abs_v").or_llvm_err()?;
 
         // Rebuild nonzero to set up allocas
         while nonzero.get_instructions().count() > 0 {
@@ -17658,7 +17663,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_load(i64_type, abs_alloca, "av")
             .or_llvm_err()?
             .into_int_value();
-        let pos = builder
+        let _pos = builder
             .build_load(i64_type, pos_alloca, "p")
             .or_llvm_err()?
             .into_int_value();
@@ -18526,7 +18531,7 @@ impl<'ctx> PlatformIR<'ctx> {
             "get_or_create_context",
             ptr_type.fn_type(&[], false),
         );
-        let futex_wake_fn = self.get_or_declare_fn(
+        let _futex_wake_fn = self.get_or_declare_fn(
             module,
             "verum_futex_wake",
             i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),

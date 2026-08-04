@@ -38,7 +38,7 @@ impl VerumPass for LlvmLoweringPass {
         "llvm-lowering"
     }
 
-    fn run(&self, module: &mut Module<'_>) -> Result<PassResult> {
+    fn run(&self, _module: &mut Module<'_>) -> Result<PassResult> {
         // LLVM lowering is handled by melior's conversion passes
         // This pass is a placeholder for any Verum-specific lowering logic
         //

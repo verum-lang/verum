@@ -527,7 +527,7 @@ pub struct ContextPushFrameOp;
 
 impl ContextPushFrameOp {
     pub fn build<'c>(
-        context: &'c Context,
+        _context: &'c Context,
         location: Location<'c>,
         frame_type: Type<'c>,
     ) -> Result<Operation<'c>> {

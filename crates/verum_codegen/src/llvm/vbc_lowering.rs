@@ -2547,7 +2547,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         }
                     } else {
                         // Create DW_TAG_variable for locals
-                        let di_local = db.create_auto_variable(
+                        let _di_local = db.create_auto_variable(
                             scope,
                             var_name,
                             *file,
@@ -4131,7 +4131,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     ctx.push_exception_handler(handler);
 
                     let module = ctx.get_module();
-                    let i64_type = ctx.types().i64_type();
+                    let _i64_type = ctx.types().i64_type();
                     let ptr_type = ctx.types().ptr_type();
                     let i32_type = ctx.types().context().i32_type();
 

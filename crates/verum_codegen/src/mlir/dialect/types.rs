@@ -255,7 +255,7 @@ impl RefType {
     pub fn to_mlir_type_string(&self) -> Text {
         // For now, represent as a pointer type with metadata
         // The actual structure depends on CBGR tier
-        let inner_str = self.inner.to_mlir_type_string();
+        let _inner_str = self.inner.to_mlir_type_string();
         match self.tier {
             RefTier::Managed => {
                 // ThinRef structure: { ptr, gen: i32, epoch_caps: i32 }

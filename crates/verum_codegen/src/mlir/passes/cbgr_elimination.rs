@@ -429,7 +429,7 @@ impl EscapeAnalysisEngine {
                     if op_name == op_names::CBGR_ALLOC {
                         value_info.is_cbgr_ref = true;
                         // Extract tier from attributes
-                        if let Ok(tier_attr) = op.attribute(attr_names::CBGR_TIER) {
+                        if let Ok(_tier_attr) = op.attribute(attr_names::CBGR_TIER) {
                             // Try to extract the tier value
                             value_info.tier = Some(RefTier::Managed); // Default
                         }
@@ -450,7 +450,7 @@ impl EscapeAnalysisEngine {
             // Extract function name from attributes
             op.attribute("sym_name")
                 .ok()
-                .and_then(|attr| {
+                .and_then(|_attr| {
                     // Extract string from attribute
                     Some(Text::from("function"))
                 })
@@ -618,7 +618,7 @@ impl EscapeAnalysisEngine {
     /// Analyze escape behavior of a specific use.
     fn analyze_use_escape(
         &self,
-        value_info: &ValueInfo,
+        _value_info: &ValueInfo,
         op_info: &OperationInfo,
     ) -> EscapeCategory {
         let op_name = op_info.name.as_str();
@@ -704,7 +704,7 @@ impl EscapeAnalysisEngine {
 
     /// Determine optimization actions for all CBGR checks.
     pub fn determine_actions(&mut self, aggressive: bool) {
-        for (op_id, op_info) in self.operations.iter_mut() {
+        for (_op_id, op_info) in self.operations.iter_mut() {
             if !op_info.is_cbgr_check {
                 continue;
             }
@@ -918,7 +918,7 @@ impl CbgrEliminationPass {
     /// Apply optimizations based on escape analysis.
     fn apply_optimizations(
         &self,
-        module: &mut Module<'_>,
+        _module: &mut Module<'_>,
         engine: &EscapeAnalysisEngine,
     ) -> Result<bool> {
         let start = std::time::Instant::now();

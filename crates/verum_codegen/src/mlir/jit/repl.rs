@@ -571,7 +571,7 @@ impl ReplSession {
         }
 
         let eval_num = self.eval_count.fetch_add(1, Ordering::Relaxed);
-        let start = instant::Instant::now();
+        let _start = instant::Instant::now();
 
         // Honour `ReplConfig.verbose` — emit a structured trace
         // event on every eval entry so debuggers / log tailers can
@@ -635,7 +635,7 @@ impl ReplSession {
 
     /// Internal evaluation (placeholder).
     fn eval_internal(&self, input: &str, eval_num: u64) -> Result<EvalResult> {
-        let compile_start = instant::Instant::now();
+        let _compile_start = instant::Instant::now();
 
         // Detect declaration vs expression
         let trimmed = input.trim();

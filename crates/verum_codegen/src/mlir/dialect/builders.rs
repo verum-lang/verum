@@ -1072,7 +1072,7 @@ impl<'c> VerumOpBuilder<'c> {
     pub fn truncf_op(
         &self,
         value: Value<'c, '_>,
-        result_type: Type<'c>,
+        _result_type: Type<'c>,
         location: Location<'c>,
     ) -> Operation<'c> {
         arith::truncf(value, location)

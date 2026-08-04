@@ -383,6 +383,7 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
         RankedTensorType::new(&[DYNAMIC, DYNAMIC], elem, None).into()
     }
 
+    #[allow(dead_code)] // parked, T0179 GPU epic
     fn dynamic_nd_tensor(&self, ndims: usize, elem: Type<'ctx>) -> Type<'ctx> {
         let shape = vec![DYNAMIC; ndims];
         RankedTensorType::new(&shape, elem, None).into()
@@ -394,6 +395,7 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
         MemRefType::new(elem, &[-1, -1], None, Some(ms_attr)).into()
     }
 
+    #[allow(dead_code)] // parked, T0179 GPU epic
     fn tensor_dtype_to_mlir(&self, dtype: TensorDType) -> Type<'ctx> {
         match dtype {
             TensorDType::F64 => Type::float64(self.context),
@@ -611,8 +613,8 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
                 kernel_id,
                 grid,
                 block: blk,
-                shared_mem,
-                stream,
+                shared_mem: _,
+                stream: _,
                 args,
             } => {
                 let mut operands = Vec::with_capacity(6 + args.len());
@@ -649,7 +651,7 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
             Instruction::GpuMemcpy {
                 dst,
                 src,
-                direction,
+                direction: _,
             } => {
                 let d = self.get_value(block, *dst, location);
                 let s = self.get_value(block, *src, location);
@@ -657,7 +659,7 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
                 self.stats.memory_transfers += 1;
             }
 
-            Instruction::GpuAlloc { dst, size, device } => {
+            Instruction::GpuAlloc { dst, size, device: _ } => {
                 let size_val = self.get_index_value(block, *size, location);
                 let memref_type = self.gpu_memref_2d(self.f64_type());
                 self.build_and_store(
@@ -723,7 +725,7 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
                 v,
                 mask,
                 scale,
-                causal,
+                causal: _,
             } => {
                 let mut operands = vec![
                     self.get_value(block, *q, location),

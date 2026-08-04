@@ -344,7 +344,7 @@ impl<'ctx> MetalIR<'ctx> {
     fn emit_ensure_init(&self, module: &Module<'ctx>) -> Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let _ptr_type = ctx.ptr_type(AddressSpace::default());
         let void_type = ctx.void_type();
 
         let fn_type = void_type.fn_type(&[], false);
@@ -991,7 +991,7 @@ impl<'ctx> MetalIR<'ctx> {
     fn emit_buffer_contents(&self, module: &Module<'ctx>) -> Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let _ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
         let func = match self.get_or_declare_new(module, "verum_metal_buffer_contents", fn_type) {
@@ -1040,7 +1040,7 @@ impl<'ctx> MetalIR<'ctx> {
     fn emit_buffer_length(&self, module: &Module<'ctx>) -> Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let _ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
         let func = match self.get_or_declare_new(module, "verum_metal_buffer_length", fn_type) {
@@ -1447,7 +1447,7 @@ impl<'ctx> MetalIR<'ctx> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let i8_type = ctx.i8_type();
+        let _i8_type = ctx.i8_type();
 
         let pipeline_ptr = self.handle_to_ptr(builder, pipeline_handle, "pipeline_ptr")?;
 
