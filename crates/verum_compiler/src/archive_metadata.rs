@@ -1165,9 +1165,30 @@ fn register_module_metadata(
             } else {
                 simple_name.clone()
             };
-            if let Some(td) = meta.types.get_mut(parent_name) {
-                if !td.methods.iter().any(|m| m == &simple_method_name) {
-                    td.methods.push(simple_method_name.clone());
+            // THREE-MIRRORS FIX (T0690/R1, found via Shared.clone erosion):
+            // a type lives in meta.types under up to THREE keys — bare,
+            // module-qualified and (v2.12) file-qualified — each holding
+            // its OWN descriptor CLONE. Pushing the method onto the bare
+            // key only left the qualified copies method-less; whichever
+            // key the checker's type-load happened to use then reported
+            // 'no such inherent method', the lookup fell to the bare
+            // protocol scheme, and Self-erosion typed a.clone() as the
+            // PAYLOAD (Shared<Int> -> Int). One method fact, EVERY key.
+            let mut method_keys: Vec<Text> = vec![parent_name.clone()];
+            if !module_name.is_empty() {
+                method_keys.push(format!("{}.{}", module_name, parent_name).into());
+            }
+            if let Some(td) = meta.types.get(parent_name) {
+                if let Maybe::Some(om) = &td.origin_module_path {
+                    let om = om.clone();
+                    method_keys.push(format!("{}.{}", om, parent_name).into());
+                }
+            }
+            for key in method_keys {
+                if let Some(td) = meta.types.get_mut(&key) {
+                    if !td.methods.iter().any(|m| m == &simple_method_name) {
+                        td.methods.push(simple_method_name.clone());
+                    }
                 }
             }
             // Also alias the descriptor under the qualified key so
