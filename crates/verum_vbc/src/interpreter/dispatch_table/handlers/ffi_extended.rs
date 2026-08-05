@@ -3973,10 +3973,12 @@ fn ffi_extended_body(
         // Allocator-internal realloc (0xA4) — the 4-arg
         // `cbgr_realloc(ptr, old_size, new_size, align)` form used by
         // `core/mem/allocator.vr`.  Mirrors the CbgrAlloc conventions:
-        // fresh raw allocation via std::alloc, min(old, new) bytes copied,
-        // result packaged as `Ok((ptr, generation, epoch))`.  The old
-        // block is intentionally NOT freed (same leak-over-double-free
-        // policy as CbgrDealloc above).
+        // fresh raw allocation, min(old, new) bytes copied, result
+        // packaged as `Ok((ptr, generation, epoch))`.  OWNERSHIP CONTRACT
+        // (T0463, matching the .vr semantic specification): once the copy
+        // is safe the TRACKED old block is released; an untracked old
+        // pointer keeps the historical leak-over-double-free policy —
+        // never free memory this allocator does not own.
         //
         // HISTORY: this sub-op used to be EMITTED as 0x63 — which decodes
         // as PtrAdd — so every inline-sequence reallocation either
@@ -4016,7 +4018,14 @@ fn ffi_extended_body(
                 cbgr_user_allocate(state, new_size, raw_align)
             };
             if ptr == 0 {
-                state.set_reg(dst, Value::nil());
+                // The .vr contract is Result<(ptr, gen, epoch), AllocError> —
+                // a bare nil here desynced the caller's match (T0463).
+                let err_val = super::method_dispatch::make_result_variant(
+                    state,
+                    verum_common::well_known_types::result_error_tag(),
+                    Value::nil(),
+                )?;
+                state.set_reg(dst, err_val);
                 return Ok(DispatchResult::Continue);
             }
             // Preserve min(old, new) bytes from the previous block.

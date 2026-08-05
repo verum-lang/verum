@@ -11791,7 +11791,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         return_count: 0,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrDealloc),
         mlir_op: Some("verum.cbgr_dealloc"),
-        doc: "Deallocate CBGR-tracked memory",
+        doc: "Internal 3-arg dealloc arm (ptr, size, align). The .vr cbgr_dealloc is 1-arg and routes through the cbgr_deallocate bridge instead (T0463) - do NOT put @intrinsic(cbgr_dealloc) on it; the arity mismatch under-reads the operand stream",
     },
     Intrinsic {
         name: "cbgr_realloc",

@@ -1,0 +1,57 @@
+// @test: run
+// @level: L1
+// @tier: all
+// @expected-exit: 0
+// @description: cbgr_alloc / cbgr_realloc / cbgr_dealloc run on ONE
+//   allocation model (T0463). Allocation is intrinsic-mapped to the host
+//   header-model allocator; release and reallocation must go through the
+//   SAME model. Pre-fix, cbgr_dealloc walked the .vr page-heap path whose
+//   get_header_from_ptr dispatches methods on a raw address — every
+//   dealloc (and therefore realloc) died with the opcode-0x78
+//   increment_generation null-deref, so this spec cannot pass vacuously.
+
+mount core.mem.allocator.{cbgr_alloc, cbgr_dealloc, cbgr_realloc};
+
+fn main() {
+    // alloc → dealloc round-trip.
+    match cbgr_alloc(64, 8) {
+        Result.Ok(t) => {
+            let (p, _gen, _ep) = t;
+            match cbgr_dealloc(p) {
+                Result.Ok(_) => print("dealloc ok"),
+                Result.Err(_) => panic("dealloc must succeed"),
+            }
+        }
+        Result.Err(_) => panic("alloc must succeed"),
+    }
+
+    // alloc → realloc (grow) → dealloc chain: the realloc arm copies
+    // min(old,new), releases the tracked old block, and returns the
+    // (ptr, gen, epoch) tuple per the .vr semantic specification.
+    match cbgr_alloc(32, 8) {
+        Result.Ok(t2) => {
+            let (p2, _g2, _e2) = t2;
+            match cbgr_realloc(p2, 32, 128, 8) {
+                Result.Ok(t3) => {
+                    let (p3, _g3, _e3) = t3;
+                    match cbgr_dealloc(p3) {
+                        Result.Ok(_) => print("realloc chain ok"),
+                        Result.Err(_) => panic("dealloc of realloc'd block must succeed"),
+                    }
+                }
+                Result.Err(_) => panic("realloc must succeed"),
+            }
+        }
+        Result.Err(_) => panic("alloc must succeed"),
+    }
+
+    // Null-pointer honesty: dealloc(0) reports InvalidPointer, never a
+    // crash.
+    let zero: Int = 0;
+    match cbgr_dealloc(zero as &unsafe Byte) {
+        Result.Ok(_) => panic("dealloc(0) must not succeed"),
+        Result.Err(_) => print("null dealloc rejected"),
+    }
+
+    print("cbgr one-model ok");
+}

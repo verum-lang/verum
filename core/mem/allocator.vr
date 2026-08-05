@@ -68,6 +68,7 @@ mount super.capability.{CAP_READ, CAP_WRITE, CAP_OWNED};
 mount super.epoch.{GLOBAL_EPOCH};
 
 // Import intrinsics as functions
+mount core.intrinsics.runtime.cbgr.{cbgr_deallocate};
 mount core.intrinsics.{
     ptr_read, ptr_write, ptr_offset,
     slice_from_raw_parts, slice_from_raw_parts_mut,
@@ -1261,8 +1262,16 @@ public fn cbgr_dealloc(ptr: &unsafe Byte) -> Result<(), AllocError> {
         return Result.Err(AllocError.InvalidPointer);
     }
 
-    let heap = get_local_heap();
-    heap.dealloc(ptr)
+    // ONE allocation model (T0463): `cbgr_alloc` above is intrinsic-mapped
+    // to the host header-model allocator, so releasing through the .vr page
+    // heap freed with a DIFFERENT model than allocation — and its
+    // `get_header_from_ptr` path dispatches methods on a raw address (the
+    // opcode-0x78 null-deref). Route the release through the same
+    // header-model bridge the allocation came from (`cbgr_deallocate`,
+    // sub-op CbgrDeallocUser — a no-op on untracked pointers, keeping the
+    // leak-over-double-free policy for foreign blocks).
+    cbgr_deallocate(ptr as Int);
+    Result.Ok(())
 }
 
 /// Reallocate memory to new size.
@@ -1290,6 +1299,13 @@ public fn cbgr_dealloc(ptr: &unsafe Byte) -> Result<(), AllocError> {
 ///  callers got back an error AND lost the new
 ///  allocation, doubling the impact of any rare
 ///  dealloc-side failure.
+/// Mapped to the `cbgr_realloc` intrinsic (FfiSubOpcode 0xA4) exactly like
+/// `cbgr_alloc` → 0xA0: the body below is the SEMANTIC specification and
+/// the sub-op is the execution path, so allocation, reallocation and
+/// deallocation all run on the ONE header-model allocator (T0463). The arm
+/// matches this contract: copy min(old, new) bytes, release the tracked
+/// old block once its contents are safe, package Ok((ptr, gen, epoch)).
+@intrinsic("cbgr_realloc")
 public fn cbgr_realloc(
     ptr: &unsafe Byte,
     old_size: Int,
