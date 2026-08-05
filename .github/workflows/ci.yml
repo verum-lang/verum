@@ -400,6 +400,14 @@ jobs:
       - name: Check no host-#[cfg(target_os)] in codegen
         run: python3 scripts/ci/check_no_host_cfg.py --strict
 
+      # **Panic-surface ratchet** (T0424).
+      # New IR-emitting code must use the fallible idiom
+      # (`.or_llvm_err()?`), not `.unwrap()`/`.expect()` — any NET
+      # INCREASE over the committed baseline blocks merge; the T0131
+      # sweeps re-rot without this gate.
+      - name: Check codegen panic-surface ratchet
+        run: python3 scripts/ci/check_panic_surface_ratchet.py
+
       # **No-libc dynamic linkage** (#80).
       # Builds a smoke .vr program and verifies the produced binary
       # only links the platform's permitted system boundary

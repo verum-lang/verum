@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census
+.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census check-panic-surface
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -44,6 +44,9 @@ check-stdlib-proofs: ## Gate (T0230): stdlib theorem-proof ratchet — clean fil
 
 check-internal-refs: ## Gate: no references to the internal/ directory in tracked files
 	bash scripts/ci/check_no_internal_refs.sh
+
+check-panic-surface: ## Gate (T0424): no net increase of unwrap/expect in verum_codegen/src/llvm production code
+	python3 scripts/ci/check_panic_surface_ratchet.py
 
 check-bake-prepass-parity: ## Gate (T0640): every collect_all_declarations pre-pass is classified for the stdlib bake
 	python3 scripts/ci/check_bake_prepass_parity.py
