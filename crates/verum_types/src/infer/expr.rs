@@ -3454,6 +3454,11 @@ impl TypeChecker {
                                 let result = self.infer_binop(*op, left, right, e.span)?;
                                 value_stack.push(result.ty);
                             } else {
+                                // LANGUAGE LAW E432 — the iterative walker's
+                                // entry is the ONLY point that still holds
+                                // both operand ASTs; same shared engine as
+                                // infer_binop (atom probe needs no inference).
+                                self.law_check_bool_eq_conjunction(*op, left, right)?;
                                 // Schedule work in reverse order (LIFO)
                                 // 1. After both operands ready, compute result
                                 work_stack.push(InferWork::BinaryOpResult {

@@ -11275,6 +11275,52 @@ with .to_float() or .to_int() (at {:?})",
         }
     }
 
+    /// LANGUAGE LAW E432 — BOOLEAN-EQUALITY-CLARITY, ONE engine for
+    /// both binop paths (recursive infer_binop AND the iterative
+    /// work-stack walker). Both operands of the conjunction are (or
+    /// will be) Bool; if either side is an UNPARENTHESIZED `==`/`!=`
+    /// whose own operands are Bool atoms, both precedence readings
+    /// type-check and the mis-parse is silent — in requires/ensures it
+    /// vacuates proof obligations. Paren nodes never trip this.
+    pub(super) fn law_check_bool_eq_conjunction(
+        &self,
+        op: BinOp,
+        left: &Expr,
+        right: &Expr,
+    ) -> Result<()> {
+        use BinOp::*;
+        if !matches!(op, And | Or) {
+            return Ok(());
+        }
+        let op_str = if matches!(op, And) { "&&" } else { "||" };
+        for side in [left, right] {
+            if let verum_ast::expr::ExprKind::Binary {
+                op: eq_op,
+                left: el,
+                right: er,
+                ..
+            } = &side.kind
+                && matches!(eq_op, BinOp::Eq | BinOp::Ne)
+                && self.expr_types_as_bool(el)
+                && self.expr_types_as_bool(er)
+            {
+                let eq_str = if matches!(eq_op, BinOp::Eq) { "==" } else { "!=" };
+                self.language_law(
+                    "E432",
+                    format!(
+                        "Bool {} Bool inside '{}' needs parentheses: this \
+                         parses as `… {} (a {} b)`, and with Bool operands \
+                         both readings type-check — the mis-parse is silent",
+                        eq_str, op_str, op_str, eq_str,
+                    ),
+                    "parenthesize the intended grouping explicitly".to_string(),
+                    side.span,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn infer_binop(
         &mut self,
         op: BinOp,
@@ -11579,45 +11625,8 @@ with .to_float() or .to_int() (at {:?})",
             And | Or => {
                 self.check_expr(left, &Type::bool())?;
                 self.check_expr(right, &Type::bool())?;
-                // LANGUAGE LAW E432 — BOOLEAN-EQUALITY-CLARITY
-                // (docs/architecture/language-law-visibility-and-boolean-
-                // clarity.md §2, normative block beside logical_and_expr in
-                // grammar/verum.ebnf). Both operands just type-checked Bool,
-                // so if either side is an UNPARENTHESIZED `==`/`!=` whose
-                // own operands are Bool, both precedence readings
-                // type-check and the mis-parse is silent — in
-                // requires/ensures it vacuates proof obligations. A
-                // parenthesized equality arrives here as ExprKind::Paren
-                // and never trips this.
-                let op_str = if matches!(op, And) { "&&" } else { "||" };
-                for side in [left, right] {
-                    if let verum_ast::expr::ExprKind::Binary {
-                        op: eq_op,
-                        left: el,
-                        right: er,
-                        ..
-                    } = &side.kind
-                        && matches!(eq_op, BinOp::Eq | BinOp::Ne)
-                        && self.expr_types_as_bool(el)
-                        && self.expr_types_as_bool(er)
-                    {
-                        self.language_law(
-                            "E432",
-                            format!(
-                                "Bool {} Bool inside '{}' needs parentheses: this \
-                                 parses as `… {} (a {} b)`, and with Bool operands \
-                                 both readings type-check — the mis-parse is silent",
-                                if matches!(eq_op, BinOp::Eq) { "==" } else { "!=" },
-                                op_str,
-                                op_str,
-                                if matches!(eq_op, BinOp::Eq) { "==" } else { "!=" },
-                            ),
-                            "parenthesize the intended grouping explicitly"
-                                .to_string(),
-                            side.span,
-                        )?;
-                    }
-                }
+// LANGUAGE LAW E432 — see law_check_bool_eq_conjunction.
+                self.law_check_bool_eq_conjunction(op, left, right)?;
                 Ok(InferResult::new(Type::bool()))
             }
 
