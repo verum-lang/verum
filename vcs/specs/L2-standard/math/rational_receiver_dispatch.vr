@@ -1,0 +1,45 @@
+// @test: run
+// @level: L2
+// @tier: all
+// @expected-exit: 0
+// @description: Same-named stdlib types dispatch methods by RECEIVER module
+//   (T0165). The stdlib carries two public `Rational`s — the Int-backed one
+//   in core.math.number_theory and the BigInt-backed canonical one in
+//   core.text.numeric.rational. A bare `Rational.mul` first-wins key used to
+//   route a BigInt receiver to the Int body (Int arithmetic over BigInt heap
+//   pointers → null numerator → crash), so `reciprocal(3)` and every
+//   product-producing law failed at Tier-1 while interp passed. This spec is
+//   the end-to-end pin for receiver-qualified method dispatch on BOTH tiers.
+
+mount core.*;
+mount core.text.numeric.rational.{Rational};
+
+fn main() {
+    let a = Rational.from_int(6);
+    let b = Rational.from_int(7);
+
+    // Product must run the BigInt body: 6 * 7 = 42, exactly.
+    let p = a.mul(&b);
+    assert_eq(p.to_text(), "42");
+
+    // Reciprocal exercises div through the same dispatch surface.
+    let r = Rational.from_int(3);
+    let rec = r.reciprocal();
+    match rec {
+        Result.Ok(v) => assert_eq(v.to_text(), "1/3"),
+        Result.Err(_) => panic("reciprocal(3) must succeed"),
+    }
+
+    // Round-trip: (1/3) * 3 = 1 — the add/mul/normalize chain stays on
+    // BigInt bodies end to end.
+    let three = Rational.from_int(3);
+    match rec {
+        Result.Ok(v) => {
+            let one = v.mul(&three);
+            assert_eq(one.to_text(), "1");
+        }
+        Result.Err(_) => panic("unreachable"),
+    }
+
+    print("rational receiver dispatch ok");
+}

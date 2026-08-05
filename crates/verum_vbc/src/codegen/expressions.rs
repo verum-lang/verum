@@ -9506,7 +9506,28 @@ impl VbcCodegen {
                 // typechecker resolution stamps qualified names
                 // whose codegen-registry shape didn't survive
                 // cross-module import.
-                let info_opt = self.ctx.lookup_function(qualified_name.as_str()).cloned();
+                // PILLAR-2 METHOD-QUALIFICATION (T0165 / T0144): the
+                // typechecker stamps an instance method as a BARE
+                // `Type.method` qualified name (e.g. "Rational.mul").
+                // When the stdlib carries same-named types — an Int
+                // `Rational` in core.math.number_theory and the BigInt
+                // `Rational` in core.text.numeric.rational — that bare key
+                // first-wins to whichever registered first, mis-dispatching
+                // a BigInt-Rational's `.mul` to the Int body (Int
+                // arithmetic over BigInt heap pointers → null → crash).
+                // Re-key by the RECEIVER TYPE's canonical defining module
+                // (its mount authority) and prefer the module-qualified
+                // method when one exists. Qualified-first / bare-fallback
+                // is monotonic: it only adds disambiguation for a
+                // same-named-type collision, and can never regress a name
+                // that resolves today (falls straight through to the bare
+                // lookup when no qualified entry exists). This is the
+                // archive/AOT reader face of the Pillar-2 canonical-
+                // identity root; the free-function face is
+                // `module_qualified_lookup` in compile_call.
+                let info_opt = self
+                    .resolve_receiver_qualified_method(qualified_name.as_str(), receiver.is_some())
+                    .or_else(|| self.ctx.lookup_function(qualified_name.as_str()).cloned());
                 let info = match info_opt {
                     Some(info) => {
                         if std::env::var_os("VERUM_TRACE_PROTOSTAMP").is_some() {
@@ -10268,6 +10289,80 @@ impl VbcCodegen {
             let candidate = format!("{}.{}.{}", module, base_type, method);
             if self.ctx.lookup_function(&candidate).is_some() {
                 return Some(candidate);
+            }
+        }
+        None
+    }
+
+    /// **T0165 / T0144 — archive/AOT method-dispatch reader-flip.** The
+    /// typechecker stamps an instance method as a BARE `Type.method`
+    /// `ResolvedCallTarget::StaticCall` (e.g. "Rational.mul"). When the
+    /// stdlib carries same-named types — the Int `Rational` in
+    /// `core.math.number_theory` and the BigInt `Rational` in
+    /// `core.text.numeric.rational` — that bare key first-wins in the
+    /// function table to whichever registered first, mis-dispatching a
+    /// BigInt-`Rational`'s `.mul` to the Int body (Int arithmetic over
+    /// BigInt heap pointers → null → crash). Re-key by the RECEIVER
+    /// TYPE's canonical defining module: its `mounted_types` /
+    /// `pending_mount_aliases` mount path, right-truncated LONGEST-first
+    /// to absorb the archive submodule leaf-drop (a `rational.vr` in
+    /// module `core.text.numeric.rational` bundles its `Rational` under
+    /// the parent name `core.text.numeric.Rational`; same normalization
+    /// as `resolve_record_type_key` §2). Returns the receiver-qualified
+    /// method's `FunctionInfo` when a module-qualified entry exists;
+    /// `None` → the caller falls back to the plain bare `lookup_function`
+    /// (qualified-first / bare-fallback is MONOTONIC — it only adds
+    /// disambiguation for a same-named-type collision and can never
+    /// regress a name that resolves today).
+    ///
+    /// Forward-compat (one seam): when fund-typeidentity's shared
+    /// `canonical_defining_module(type)` lands (it lifts this same
+    /// longest-first truncation out of `resolve_record_type_key`), the
+    /// mount-path + truncation here collapses to `module + ".Type.method"`
+    /// against that helper — no divergent identity notion, this local copy
+    /// is dropped. Sibling of the module-authority
+    /// `qualify_method_with_module_authority` (the legacy-cascade path).
+    fn resolve_receiver_qualified_method(
+        &self,
+        qualified_name: &str,
+        has_receiver: bool,
+    ) -> Option<FunctionInfo> {
+        // Instance-method call sites only (a receiver is present) and only
+        // the bare `Type.method` shape (exactly one dot). An already
+        // module-qualified name (more dots) or a dotless free-function
+        // name is left untouched to the plain lookup.
+        if !has_receiver {
+            return None;
+        }
+        let dot = qualified_name.find('.')?;
+        let method = &qualified_name[dot + 1..];
+        if method.contains('.') {
+            return None;
+        }
+        let base_type = &qualified_name[..dot];
+        for path in [
+            self.ctx.mounted_types.get(base_type).cloned(),
+            self.ctx.pending_mount_aliases.get(base_type).cloned(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            // `path` is `<module...>.<Type>`; the last segment is the type
+            // leaf. Probe `<module-prefix>.<Type>.<method>` from the
+            // longest module prefix down — the leaf-inclusive form first
+            // (byte-identical to an unambiguous world), then shorter forms
+            // to reach the archive-dropped leaf.
+            let segs: Vec<&str> = path.split('.').collect();
+            if segs.len() < 2 {
+                continue;
+            }
+            let type_leaf = segs[segs.len() - 1];
+            for parent_len in (1..segs.len()).rev() {
+                let candidate =
+                    format!("{}.{}.{}", segs[..parent_len].join("."), type_leaf, method);
+                if let Some(info) = self.ctx.lookup_function(&candidate) {
+                    return Some(info.clone());
+                }
             }
         }
         None

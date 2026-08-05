@@ -445,56 +445,64 @@ public fn sum_divisors(n: Int) -> Int {
 }
 
 // =============================================================================
-// 7. Rational Numbers
+// 7. Int Fractions (machine-width rationals)
 // =============================================================================
 
-/// A rational number p/q in lowest terms with q > 0.
-public type Rational is {
+/// A machine-width fraction p/q in lowest terms with q > 0.
+///
+/// Deliberately named `IntFraction`, NOT `Rational` (T0165): the canonical
+/// arbitrary-precision `Rational` lives in `core.text.numeric.rational`
+/// (BigInt-backed). This module used to declare a second public `Rational`,
+/// and the bare `Rational.mul` first-wins dispatch key then routed BigInt
+/// receivers into these Int bodies at Tier-1 — Int arithmetic over BigInt
+/// heap pointers. One name, one type; the width-bounded helper carries its
+/// own name.
+public type IntFraction is {
     numerator: Int,
     denominator: Int,
 };
 
-implement Rational {
+implement IntFraction {
     /// Create a rational in lowest terms.
-    public fn new(p: Int, q: Int) -> Rational {
+    public fn new(p: Int, q: Int) -> IntFraction {
         let g = gcd(p, q);
         let sign = if q < 0 { -1 } else { 1 };
-        Rational {
+        IntFraction {
             numerator: sign * p / g,
             denominator: sign * q / g,
         }
     }
 
     /// Addition of rationals.
-    public fn add(&self, other: &Rational) -> Rational {
-        Rational.new(
+    public fn add(&self, other: &IntFraction) -> IntFraction {
+        IntFraction.new(
             self.numerator * other.denominator + other.numerator * self.denominator,
             self.denominator * other.denominator,
         )
     }
 
     /// Subtraction of rationals.
-    public fn sub(&self, other: &Rational) -> Rational {
-        Rational.new(
+    public fn sub(&self, other: &IntFraction) -> IntFraction {
+        IntFraction.new(
             self.numerator * other.denominator - other.numerator * self.denominator,
             self.denominator * other.denominator,
         )
     }
 
     /// Multiplication of rationals.
-    public fn mul(&self, other: &Rational) -> Rational {
-        Rational.new(
+    public fn mul(&self, other: &IntFraction) -> IntFraction {
+        IntFraction.new(
             self.numerator * other.numerator,
             self.denominator * other.denominator,
         )
     }
 
     /// Division of rationals (by nonzero).
-    public fn div(&self, other: &Rational) -> Maybe<Rational> {
+    public fn div(&self, other: &IntFraction) -> Maybe<IntFraction> {
         if other.numerator == 0 {
             Maybe.None
         } else {
-            Maybe.Some(Rational.new(
+            Maybe.Some(IntFraction.new(
                 self.numerator * other.denominator,
                 self.denominator * other.numerator,
             ))
@@ -502,23 +510,23 @@ implement Rational {
     }
 
     /// Negation.
-    public fn negate(&self) -> Rational {
-        Rational { numerator: 0 - self.numerator, denominator: self.denominator }
+    public fn negate(&self) -> IntFraction {
+        IntFraction { numerator: 0 - self.numerator, denominator: self.denominator }
     }
 
     /// Reciprocal for nonzero rationals.
-    public fn reciprocal(&self) -> Maybe<Rational> {
+    public fn reciprocal(&self) -> Maybe<IntFraction> {
         if self.numerator == 0 {
             Maybe.None
         } else {
-            Maybe.Some(Rational.new(self.denominator, self.numerator))
+            Maybe.Some(IntFraction.new(self.denominator, self.numerator))
         }
     }
 
     /// Absolute value.
-    public fn abs(&self) -> Rational {
+    public fn abs(&self) -> IntFraction {
         let n = if self.numerator < 0 { 0 - self.numerator } else { self.numerator };
-        Rational { numerator: n, denominator: self.denominator }
+        IntFraction { numerator: n, denominator: self.denominator }
     }
 
     /// Convert to Float.
