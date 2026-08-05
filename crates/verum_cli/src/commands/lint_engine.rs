@@ -111,6 +111,7 @@ pub fn passes() -> &'static [&'static (dyn LintPass + 'static)] {
         &PublicMustHaveDocPass,
         &UnsafeWithoutCapabilityPass,
         &FfiWithoutCapabilityPass,
+        &BoolEqInConjunctionPass,
         &CustomAstRulesPass,
     ];
     // The cast widens the trait-object bound; both `LintPass` and
@@ -2516,6 +2517,253 @@ impl LintPass for FfiWithoutCapabilityPass {
 
 // ===================================================================
 
+// ===================================================================
+// Pass: bool-eq-in-conjunction (T0485)
+// ===================================================================
+//
+// `==` binds tighter than `&&`/`||` (grammar/verum.ebnf logical_and_expr),
+// which is conventional — but when the operands are BOOLEAN both readings
+// type-check, so the mis-parse is silent:
+//
+//   ensures a && a == a     parses as  a && (a == a)  =  a && true  =  a
+//   ensures true && a == a  parses as  true && (a == a)             =  true
+//
+// Nineteen boolean-algebra laws in core/math/tactics.vr were written this
+// way; ten "proved" because the mis-parse was a tautology and entered the
+// rewrite-rule set unproved. A silent mis-parse that makes a proof
+// obligation VACUOUS is worse than one that fails.
+//
+// Selectivity: only fires when the eq/ne operands AND the sibling
+// conjunct are bool ATOMS (a `true`/`false` literal, or an identifier
+// this function declares as `Bool` — parameter or annotated let). That
+// keeps the common correct shapes quiet (`poly_bound >= 0 && flag ==
+// true`, `x == a || x == b`). Warning-level inside requires/ensures
+// (where a vacuous obligation is invisible), hint-level in bodies.
+// ===================================================================
+
+struct BoolEqInConjunctionPass;
+
+impl LintPass for BoolEqInConjunctionPass {
+    fn name(&self) -> &'static str {
+        "bool-eq-in-conjunction"
+    }
+    fn description(&self) -> &'static str {
+        "Bool == Bool as a direct operand of &&/|| — the silent mis-parse that vacuates boolean laws"
+    }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Warning
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Verification
+    }
+
+    fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
+        use verum_ast::BinOp;
+
+        fn type_is_bool(ty: &Type) -> bool {
+            match &ty.kind {
+                TypeKind::Bool => true,
+                TypeKind::Path(p) => p
+                    .as_ident()
+                    .map(|i| i.name.as_str() == "Bool")
+                    .unwrap_or(false),
+                _ => false,
+            }
+        }
+
+        fn expr_ident(e: &verum_ast::Expr) -> Option<&str> {
+            if let ExprKind::Path(p) = &e.kind
+                && p.segments.len() == 1
+                && let verum_ast::ty::PathSegment::Name(id) = &p.segments[0]
+            {
+                return Some(id.name.as_str());
+            }
+            None
+        }
+
+        fn is_bool_atom(e: &verum_ast::Expr, bools: &std::collections::HashSet<String>) -> bool {
+            match &e.kind {
+                ExprKind::Literal(Literal {
+                    kind: LiteralKind::Bool(_),
+                    ..
+                }) => true,
+                ExprKind::Paren(inner) => is_bool_atom(inner, bools),
+                _ => expr_ident(e).map(|n| bools.contains(n)).unwrap_or(false),
+            }
+        }
+
+        /// The eq/ne shape whose BOTH operands are bool atoms.
+        fn is_bool_eq(e: &verum_ast::Expr, bools: &std::collections::HashSet<String>) -> bool {
+            if let ExprKind::Binary { op, left, right, .. } = &e.kind
+                && matches!(op, BinOp::Eq | BinOp::Ne)
+            {
+                return is_bool_atom(left, bools) && is_bool_atom(right, bools);
+            }
+            false
+        }
+
+        fn walk(
+            e: &verum_ast::Expr,
+            bools: &std::collections::HashSet<String>,
+            in_clause: bool,
+            source: &str,
+            file: &Path,
+            issues: &mut Vec<LintIssue>,
+        ) {
+            if let ExprKind::Binary { op, left, right, .. } = &e.kind
+                && matches!(op, BinOp::And | BinOp::Or)
+            {
+                let op_str = if matches!(op, BinOp::And) { "&&" } else { "||" };
+                for (eq_side, other) in [(&**left, &**right), (&**right, &**left)] {
+                    let sibling_ok = is_bool_atom(other, bools) || is_bool_eq(other, bools);
+                    if is_bool_eq(eq_side, bools) && sibling_ok {
+                        let (line, col) = span_to_line_col(source, e.span.start);
+                        issues.push(LintIssue {
+                            rule: "bool-eq-in-conjunction",
+                            level: if in_clause {
+                                LintLevel::Warning
+                            } else {
+                                LintLevel::Hint
+                            },
+                            file: file.to_path_buf(),
+                            line,
+                            column: col,
+                            message: format!(
+                                "`==` binds tighter than `{op_str}`: this parses as `… {op_str} \
+                                 (a == b)`, not `(… {op_str} a) == b` — with Bool operands both \
+                                 readings type-check, so a mis-stated law proves vacuously"
+                            ),
+                            suggestion: Some(
+                                "parenthesize the intended grouping explicitly".into(),
+                            ),
+                            fixable: false,
+                        });
+                        break;
+                    }
+                }
+            }
+            // Track annotated Bool lets inside blocks as we descend? Kept to
+            // the function-level set: precise, and locals shadowing a Bool
+            // param with a non-Bool type are rare enough that the atom test
+            // staying param-driven is the conservative direction.
+            visit_children(e, bools, in_clause, source, file, issues);
+        }
+
+        fn visit_children(
+            e: &verum_ast::Expr,
+            bools: &std::collections::HashSet<String>,
+            in_clause: bool,
+            source: &str,
+            file: &Path,
+            issues: &mut Vec<LintIssue>,
+        ) {
+            use verum_ast::visitor::{self, Visitor};
+            struct V<'a> {
+                bools: &'a std::collections::HashSet<String>,
+                in_clause: bool,
+                source: &'a str,
+                file: &'a Path,
+                issues: &'a mut Vec<LintIssue>,
+                root: *const verum_ast::Expr,
+            }
+            impl<'a> Visitor for V<'a> {
+                fn visit_expr(&mut self, expr: &verum_ast::Expr) {
+                    if std::ptr::eq(expr, self.root) {
+                        visitor::walk_expr(self, expr);
+                        return;
+                    }
+                    walk(
+                        expr,
+                        self.bools,
+                        self.in_clause,
+                        self.source,
+                        self.file,
+                        self.issues,
+                    );
+                }
+            }
+            let mut v = V {
+                bools,
+                in_clause,
+                source,
+                file,
+                issues,
+                root: e as *const _,
+            };
+            visitor::walk_expr(&mut v, e);
+        }
+
+        let mut issues = Vec::new();
+        for item in &ctx.module.items {
+            let ItemKind::Function(func) = &item.kind else {
+                continue;
+            };
+            let mut bools: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for param in func.params.iter() {
+                if let verum_ast::FunctionParamKind::Regular { pattern, ty, .. } = &param.kind
+                    && type_is_bool(ty)
+                {
+                    let name = verum_ast::pretty::format_pattern(pattern);
+                    bools.insert(name.as_str().to_string());
+                }
+            }
+            for clause in func.requires.iter().chain(func.ensures.iter()) {
+                walk(clause, &bools, true, ctx.source, ctx.file, &mut issues);
+            }
+            if let Some(body) = &func.body {
+                let block = match body {
+                    verum_ast::FunctionBody::Block(b) => Some(b),
+                    verum_ast::FunctionBody::Expr(e) => {
+                        walk(e, &bools, false, ctx.source, ctx.file, &mut issues);
+                        None
+                    }
+                };
+                if let Some(block) = block {
+                    for stmt in block.stmts.iter() {
+                        if let verum_ast::StmtKind::Let {
+                            pattern,
+                            ty: Some(ty),
+                            ..
+                        } = &stmt.kind
+                            && type_is_bool(ty)
+                        {
+                            bools.insert(
+                                verum_ast::pretty::format_pattern(pattern)
+                                    .as_str()
+                                    .to_string(),
+                            );
+                        }
+                    }
+                    struct B<'a> {
+                        bools: &'a std::collections::HashSet<String>,
+                        source: &'a str,
+                        file: &'a Path,
+                        issues: &'a mut Vec<LintIssue>,
+                    }
+                    impl<'a> Visitor for B<'a> {
+                        fn visit_expr(&mut self, expr: &verum_ast::Expr) {
+                            walk(expr, self.bools, false, self.source, self.file, self.issues);
+                        }
+                    }
+                    let mut b = B {
+                        bools: &bools,
+                        source: ctx.source,
+                        file: ctx.file,
+                        issues: &mut issues,
+                    };
+                    for stmt in block.stmts.iter() {
+                        b.visit_stmt(stmt);
+                    }
+                    if let Some(tail) = &block.expr {
+                        b.visit_expr(tail);
+                    }
+                }
+            }
+        }
+        issues
+    }
+}
+
 struct CustomAstRulesPass;
 
 impl LintPass for CustomAstRulesPass {
@@ -3634,6 +3882,105 @@ mod tests {
         let issues = RedundantRefinementPass.check(&ctx);
         assert_eq!(issues.len(), 1, "expected one issue, got {:?}", issues);
         assert_eq!(issues[0].rule, "redundant-refinement");
+    }
+
+    #[test]
+    fn bool_eq_in_conjunction_fires_in_ensures() {
+        // The exact tactics.vr shape: both readings type-check, the
+        // mis-parse `a && (a == a)` proves vacuously.
+        let src = "fn law_absorb(a: Bool) -> Bool ensures a && a == a { a }\n";
+        let module = parse_module(src);
+        let path = std::path::PathBuf::from("test.vr");
+        let ctx = LintCtx {
+            file: &path,
+            source: src,
+            module: &module,
+            config: None,
+        };
+        let issues = BoolEqInConjunctionPass.check(&ctx);
+        assert_eq!(issues.len(), 1, "expected one issue, got {:?}", issues);
+        assert_eq!(issues[0].rule, "bool-eq-in-conjunction");
+        assert_eq!(issues[0].level, LintLevel::Warning, "clause position warns");
+        assert!(issues[0].message.contains("binds tighter"));
+    }
+
+    #[test]
+    fn bool_eq_in_conjunction_literal_left_fires() {
+        // `true && a == a` — the tautology form that 'proved' ten laws.
+        let src = "fn law_id(a: Bool) -> Bool ensures true && a == a { a }\n";
+        let module = parse_module(src);
+        let path = std::path::PathBuf::from("test.vr");
+        let ctx = LintCtx {
+            file: &path,
+            source: src,
+            module: &module,
+            config: None,
+        };
+        let issues = BoolEqInConjunctionPass.check(&ctx);
+        assert_eq!(issues.len(), 1, "expected one issue, got {:?}", issues);
+    }
+
+    #[test]
+    fn bool_eq_in_conjunction_correct_shapes_silent() {
+        // The two shapes the spec names as the correct majority:
+        // a non-atom conjunct keeps `flag == true` quiet, and Int
+        // comparisons never fire.
+        let src = "fn ok(flag: Bool, poly_bound: Int, x: Int, a: Int, b: Int) -> Bool {\n\
+                       let c1 = poly_bound >= 0 && flag == true;\n\
+                       let c2 = x == a || x == b;\n\
+                       c1 && c2\n\
+                   }\n";
+        let module = parse_module(src);
+        let path = std::path::PathBuf::from("test.vr");
+        let ctx = LintCtx {
+            file: &path,
+            source: src,
+            module: &module,
+            config: None,
+        };
+        let issues = BoolEqInConjunctionPass.check(&ctx);
+        assert!(issues.is_empty(), "correct shapes must stay silent: {:?}", issues);
+    }
+
+    #[test]
+    fn bool_eq_in_conjunction_parenthesized_silent() {
+        // The explicit grouping is the suggested fix — it must not warn
+        // (acceptance: tactics.vr, now parenthesized, stays clean).
+        let src = "fn law(a: Bool) -> Bool ensures (a && a) == a { a }\n";
+        let module = parse_module(src);
+        let path = std::path::PathBuf::from("test.vr");
+        let ctx = LintCtx {
+            file: &path,
+            source: src,
+            module: &module,
+            config: None,
+        };
+        let issues = BoolEqInConjunctionPass.check(&ctx);
+        assert!(issues.is_empty(), "parenthesized law must be clean: {:?}", issues);
+    }
+
+    #[test]
+    fn bool_eq_in_conjunction_tactics_vr_stays_clean() {
+        // The acceptance's second half: the nineteen boolean-algebra laws
+        // in core/math/tactics.vr are explicitly parenthesized now — the
+        // lint must keep them clean (a regression here means either the
+        // file regressed or the lint over-fires).
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../core/math/tactics.vr");
+        let src = std::fs::read_to_string(&path).expect("tactics.vr must exist");
+        let module = parse_module(&src);
+        let ctx = LintCtx {
+            file: &path,
+            source: &src,
+            module: &module,
+            config: None,
+        };
+        let issues = BoolEqInConjunctionPass.check(&ctx);
+        assert!(
+            issues.is_empty(),
+            "tactics.vr must stay clean under bool-eq-in-conjunction: {:?}",
+            issues
+        );
     }
 
     #[test]
