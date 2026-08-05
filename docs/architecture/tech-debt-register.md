@@ -75,6 +75,51 @@ polymorphism T0696; QTT channels T0697; region polymorphism T0698;
 contract-carrying archives T0699 — the innovation tier, after R1-R6
 hold.
 
+**R-addendum (2026-08-05 session census — systemic classes surfaced
+while closing T0272/T0555/T0165/T0463/T0523/T0424/T0438/T0485).**
+
+* **R1 residual, ACTIVE:** the receiver-qualified method reader-flip
+  landed (T0165) and archive Sum types now register their variant
+  ctors (ARCHIVE-VARIANT-CTOR-1, T0555) — but a bare variant mounted
+  through a RE-EXPORTING module still dies in VBC codegen
+  (`undefined variable: UoInsert`), and the module-surface answer for
+  one path comes from THREE unreconciled sources (`ModuleInfo.exports`
+  / `module_reexports` / `metadata_known_module_items`). ONE
+  module-surface authority belongs in the T0691 stone.
+* **R2 new class, half-closed:** archive entry granularity is the
+  DIRECTORY module, so every type in a multi-file stdlib module lost
+  its declaring file submodule — v2.12 `origin_module` carry landed
+  (T0555); the remaining half is consumers that still key on the
+  entry path.
+* **R4 missing artifact:** Tier-1 has no written VALUE-MODEL contract.
+  The i128 wide-slot model added a fourth way registers carry facts
+  (the LLVM value's own type, beside f64 slots, class marks and
+  prescan sets), and the i128 call-boundary is a documented residual —
+  a one-page "what form crosses a call/collection boundary per type
+  class" contract is the cheapest way to stop per-type re-derivation.
+* **R5 additions, LIVE:** three arch-gates landed this session —
+  panic-surface ratchet (T0424, baseline 664), dup-emitter +
+  dead-libc-body census with runtime definer backstop (T0438; its Arm
+  B immediately found a LIVE breach: EnvGet lowers to libc `getenv`
+  with no syscall leg — tied to T0310's env leg), and the
+  bool-eq-in-conjunction lint (T0485, both acceptance halves as live
+  `--lib` pins).
+* **R5 tooling class, NEW:** instruments that report unverified
+  success keep recurring — the script VBC cache ignored the stdlib
+  snapshot (T0523, closed: `resolved_stdlib_identity` in both cache
+  keys) and `VERUM_CORE_PATH` was silently inert for `verum run` (now
+  warned). Standing rule worth a gate: every cache key names EVERY
+  input the cached artifact was built from.
+* **R6 update:** the verify spine is honest end-to-end now — T0657
+  (woven wp obligations + Labeled blame) and T0671
+  (thorough/certified mandatory termination) are closed on main.
+* **R-infra, NEW:** parallel sessions serialize on the HARDCODED
+  shared `target/precompile-bootstrap` (observed 1h23m flock wait),
+  and the bake cache key is a hand-curated file list — a missed entry
+  silently re-embeds a stale archive. Candidates: session-scoped
+  bootstrap target dir; derive the key set from the cargo graph
+  instead of curation.
+
 ---
 
 ## A. Compiler / runtime (Rust crates)
