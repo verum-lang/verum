@@ -1354,11 +1354,34 @@ fn run_interp_file_subprocess(
     } else {
         None
     };
+    // CRASH-RETRY ESCALATION (T0394): a crashed batch used to attribute
+    // its death to EVERY unreported sibling — dozens of nondeterministic
+    // failing names between identical-binary sweeps, with real
+    // regressions hidden in the collateral. Escalate instead: each
+    // unreported test re-runs in its OWN subprocess. The actual crasher
+    // crashes alone (honest Fail carrying its own signal); innocent
+    // siblings pass. Bounded by the file's test count, and only on the
+    // crash path.
+    let mut solo_results: std::collections::HashMap<String, TestResult> =
+        std::collections::HashMap::new();
+    if crash_note.is_some() {
+        for t in expected.iter() {
+            if reported.contains_key(t.name.as_str()) {
+                continue;
+            }
+            solo_results.insert(
+                t.name.as_str().to_string(),
+                run_interp_single_subprocess(&exe, t.name.as_str(), ignore_mode, skip),
+            );
+        }
+    }
     expected
         .iter()
         .map(|t| {
-            let result = reported.remove(t.name.as_str()).unwrap_or_else(|| {
-                TestResult::Fail {
+            let result = reported
+                .remove(t.name.as_str())
+                .or_else(|| solo_results.remove(t.name.as_str()))
+                .unwrap_or_else(|| TestResult::Fail {
                     duration: start.elapsed(),
                     stdout: String::new(),
                     stderr: String::from_utf8_lossy(&out.stderr)
@@ -1374,11 +1397,115 @@ fn run_interp_file_subprocess(
                     error: crash_note.clone().unwrap_or_else(|| {
                         "interp batch runner reported no outcome for this test".to_string()
                     }),
-                }
-            });
+                });
             (t.name.clone(), result)
         })
         .collect()
+}
+
+/// T0394 crash-retry leg: run ONE test in its own interp subprocess and
+/// parse its single JSON outcome. Used only when a batch child died —
+/// the per-test process isolates the crash domain, so the crasher fails
+/// with ITS OWN signal and every innocent sibling reports its true
+/// result instead of quarantine collateral.
+fn run_interp_single_subprocess(
+    exe: &Path,
+    name: &str,
+    ignore_mode: IgnoreMode,
+    skip: &[Text],
+) -> TestResult {
+    let start = Instant::now();
+    let mut cmd = Command::new(exe);
+    cmd.arg("test")
+        .arg("--interp")
+        .arg("--format")
+        .arg("json")
+        .arg("--exact")
+        .arg("--filter")
+        .arg(name);
+    for a in ignore_mode.child_args() {
+        cmd.arg(a);
+    }
+    for p in skip {
+        cmd.arg("--skip").arg(p.as_str());
+    }
+    let out = match cmd.env("VERUM_TEST_INTERP_CHILD", "1").output() {
+        Ok(o) => o,
+        Err(e) => {
+            return TestResult::CompileError {
+                duration: start.elapsed(),
+                error: format!("failed to spawn per-test retry subprocess: {}", e),
+            };
+        }
+    };
+    let stdout_text = String::from_utf8_lossy(&out.stdout);
+    for line in stdout_text.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
+        if v.get("event").and_then(|e| e.as_str()) != Some("test")
+            || v.get("name").and_then(|n| n.as_str()) != Some(name)
+        {
+            continue;
+        }
+        let duration = Duration::from_millis(
+            v.get("duration_ms").and_then(|d| d.as_u64()).unwrap_or(0),
+        );
+        let error = v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("")
+            .to_string();
+        return match v.get("outcome").and_then(|o| o.as_str()) {
+            Some("ok") => TestResult::Pass {
+                duration,
+                stdout: String::new(),
+                stderr: String::new(),
+            },
+            Some("ignored") => TestResult::Pass {
+                duration,
+                stdout: String::from("ignored (per-test retry)"),
+                stderr: String::new(),
+            },
+            Some("compile-error") => TestResult::CompileError { duration, error },
+            _ => TestResult::Fail {
+                duration,
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: None,
+                error,
+            },
+        };
+    }
+    // No outcome even alone: THIS is the crasher. Report its own death
+    // honestly — signal/exit attached to the one test that owns it.
+    #[cfg(unix)]
+    let sig = {
+        use std::os::unix::process::ExitStatusExt;
+        out.status.signal()
+    };
+    #[cfg(not(unix))]
+    let sig: Option<i32> = None;
+    let error = match (sig, out.status.code()) {
+        (Some(s), _) => format!("test crashed its own process with signal {}", s),
+        (None, Some(c)) => format!("test's own process exited {} without reporting", c),
+        (None, None) => "test's own process vanished without reporting".to_string(),
+    };
+    TestResult::Fail {
+        duration: start.elapsed(),
+        stdout: String::new(),
+        stderr: String::from_utf8_lossy(&out.stderr)
+            .lines()
+            .rev()
+            .take(10)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n"),
+        exit_code: out.status.code(),
+        error,
+    }
 }
 
 fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult {
