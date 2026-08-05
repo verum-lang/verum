@@ -39040,7 +39040,29 @@ fn lower_cmp_generic<'ctx>(
         // Coerce to same bit width if different (e.g., i64 vs i1 from bool return)
         let lw = lhs_int.get_type().get_bit_width();
         let rw = rhs_int.get_type().get_bit_width();
-        if lw != rw {
+        // T0272: a wide-slot i128 operand keeps the WHOLE compare at
+        // 128 bits (sext the narrower side — signed is the value
+        // default). Pre-fix an i128 flowed RAW into the i64-ABI
+        // verum_generic_eq call below — at the ABI the i128 takes two
+        // slots, the second argument shifts, and `assert_eq(Int128,
+        // literal)` compared the value against its own HIGH word
+        // (measured: 'left != right' with both sides printing equal).
+        let wide128 = lw > 64 || rw > 64;
+        if wide128 {
+            let i128_ty = ctx.types().i128_type();
+            if lw < 128 {
+                lhs_int = ctx
+                    .builder()
+                    .build_int_s_extend(lhs_int, i128_ty, "cmpg_lwide")
+                    .or_llvm_err()?;
+            }
+            if rw < 128 {
+                rhs_int = ctx
+                    .builder()
+                    .build_int_s_extend(rhs_int, i128_ty, "cmpg_rwide")
+                    .or_llvm_err()?;
+            }
+        } else if lw != rw {
             let wider = ctx.types().i64_type();
             if lw < 64 {
                 lhs_int = ctx
@@ -39065,10 +39087,14 @@ fn lower_cmp_generic<'ctx>(
             || ctx.is_bool_register(b.0)
             || ctx.is_list_register(b.0)
             || ctx.is_map_register(b.0);
-        if eq && !a_has_type && !b_has_type {
+        if eq && !a_has_type && !b_has_type && !wide128 {
             // Use verum_generic_eq for runtime type-aware comparison.
             // This handles Map<Text, V> keys correctly by checking at runtime
             // whether values are Text objects and using strcmp for those.
+            // (wide128 operands skip this route entirely: an i128 is a
+            // SCALAR by construction — never a heap object — and the
+            // helper's i64 ABI cannot carry it; the native icmp below
+            // is the correct authority.)
             let i64_type = ctx.types().i64_type();
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
             let module = ctx.get_module();
