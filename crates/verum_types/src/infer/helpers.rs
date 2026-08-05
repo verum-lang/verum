@@ -1836,6 +1836,25 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
             mutable: false,
         };
     }
+    // Raw-pointer spellings (T0690 R1 / T0108 phantom class): the bake
+    // renders `*const T` / `*mut T` verbatim (codegen's Pointer arm), but
+    // this parser had NO arm for them — the whole spelling fell to the
+    // Named tail, so every mounted pointer-param intrinsic scheme carried
+    // a garbage nominal and its calls failed E400
+    // ("expected 'core.intrinsics', found '*const Int'") with no .vr
+    // workaround (prelude does not seed the volatile names).
+    if let Some(rest) = trimmed.strip_prefix("*mut ") {
+        return Type::Pointer {
+            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            mutable: true,
+        };
+    }
+    if let Some(rest) = trimmed.strip_prefix("*const ") {
+        return Type::Pointer {
+            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            mutable: false,
+        };
+    }
     if let Some(rest) = trimmed.strip_prefix("&mut ") {
         return Type::Reference {
             inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
