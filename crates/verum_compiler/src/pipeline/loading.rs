@@ -1178,8 +1178,26 @@ impl<'s> CompilationPipeline<'s> {
 
         for (name, td) in metadata.types.iter() {
             let mp = td.module_path.as_str().to_string();
+            // v2.12 TYPE-ORIGIN-MODULE (T0555): `module_path` is the archive
+            // ENTRY (directory) module; a type declared in a FILE submodule
+            // carries the precise path in `origin_module_path`. The
+            // synthesized registry must expose the type on BOTH — the entry
+            // umbrella keeps working, and the file submodule stops reporting
+            // only its re-export leaves (the probed-exports E401: mounting
+            // `ext.hooks.{AaInsert}` saw a 5-entry surface because every own
+            // type had been sharded under `...ext`).
+            let mut paths: Vec<String> = Vec::new();
             if !mp.is_empty() {
-                let shard = module_map.entry(mp).or_default();
+                paths.push(mp);
+            }
+            if let verum_common::Maybe::Some(om) = &td.origin_module_path {
+                let om = om.as_str().to_string();
+                if !om.is_empty() && !paths.contains(&om) {
+                    paths.push(om);
+                }
+            }
+            for path in paths {
+                let shard = module_map.entry(path).or_default();
                 shard.0.push(name.as_str().to_string());
                 // Also export variant constructors so `Ok`, `Some`, `None`, etc.
                 // are in scope after `mount core.base.*`.

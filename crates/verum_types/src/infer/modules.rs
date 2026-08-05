@@ -2448,6 +2448,14 @@ impl TypeChecker {
                             .public_exports()
                             .map(|e| e.name.clone())
                             .collect();
+                        // T0555 module-surface trace: names WHICH of the three
+                        // surface sources answered (and with what) before this E401.
+                        if std::env::var("VERUM_TRACE_MODSURFACE").is_ok() {
+                            eprintln!(
+                                "[modsurface] site=probed-exports module={} item={} surface=probed_module_info.exports count={}",
+                                module_path.as_str(), item_name, available_items.len()
+                            );
+                        }
                         return Err(TypeError::ImportItemNotFound {
                             item_name: Text::from(item_name),
                             module_path: module_path.clone(),
@@ -3135,6 +3143,14 @@ impl TypeChecker {
                                 .collect();
 
                             if !self.stdlib_single_file_mode {
+                                // T0555 module-surface trace: names WHICH of the three
+                                // surface sources answered (and with what) before this E401.
+                                if std::env::var("VERUM_TRACE_MODSURFACE").is_ok() {
+                                    eprintln!(
+                                        "[modsurface] site=module_info-exports module={} item={} surface=ModuleInfo.exports count={}",
+                                        resolved_module_path.as_str(), item_name, available_items.len()
+                                    );
+                                }
                                 return Err(TypeError::ImportItemNotFound {
                                     item_name: Text::from(item_name),
                                     module_path: resolved_module_path.clone(),
@@ -3363,6 +3379,14 @@ impl TypeChecker {
                 if let Some(available_items) =
                     self.metadata_known_module_items(module_path.as_str())
                 {
+                    // T0555 module-surface trace: names WHICH of the three
+                    // surface sources answered (and with what) before this E401.
+                    if std::env::var("VERUM_TRACE_MODSURFACE").is_ok() {
+                        eprintln!(
+                            "[modsurface] site=T0528-metadata module={} item={} surface=metadata_known_module_items count={}",
+                            module_path.as_str(), item_name, available_items.len()
+                        );
+                    }
                     return Err(TypeError::ImportItemNotFound {
                         item_name: Text::from(item_name),
                         module_path: module_path.clone(),
