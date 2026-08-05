@@ -25,6 +25,74 @@ static EMBEDDED_RUNTIME_VBC: &[u8] = include_bytes!(env!("STDLIB_RUNTIME_VBC_PAT
 /// gets a `&'static VbcArchive`.
 static RUNTIME_ARCHIVE: OnceLock<Option<VbcArchive>> = OnceLock::new();
 
+/// blake3 hex digest of the embedded archive BYTES, computed once.
+static EMBEDDED_DIGEST: OnceLock<String> = OnceLock::new();
+
+/// Identity of the stdlib THIS process will actually execute against
+/// (T0523) — a stable string suitable as a cache-key contributor:
+///
+/// * `emb:<blake3>` — digest of the embedded `.vbca` bytes (the normal
+///   `verum run` path). Changes exactly when a rebuilt binary embeds a
+///   different bake.
+/// * `src:<blake3>` — when `VERUM_STDLIB_PATH` overrides the stdlib with
+///   a source tree: a content hash over every `*.vr` file (sorted
+///   relative path + content, the aot_object_cache framing), so editing
+///   ANY stdlib source changes the identity.
+/// * `none` — no embedded archive and no override (legacy source path).
+///
+/// The script VBC cache folds this into its key; without it, a core/
+/// edit silently reran bytecode compiled against the OLD stdlib and
+/// reported green — the instrument-reports-unverified-success class.
+pub fn resolved_stdlib_identity() -> String {
+    if let Ok(root) = std::env::var("VERUM_STDLIB_PATH") {
+        let root = std::path::PathBuf::from(root);
+        if root.is_dir() {
+            let mut files: Vec<std::path::PathBuf> = walkdir_vr(&root);
+            files.sort();
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(&(files.len() as u64).to_le_bytes());
+            for f in &files {
+                let rel = f.strip_prefix(&root).unwrap_or(f);
+                let rel_s = rel.to_string_lossy();
+                hasher.update(&(rel_s.len() as u64).to_le_bytes());
+                hasher.update(rel_s.as_bytes());
+                let content = std::fs::read(f).unwrap_or_default();
+                hasher.update(&(content.len() as u64).to_le_bytes());
+                hasher.update(&content);
+            }
+            return format!("src:{}", hasher.finalize().to_hex());
+        }
+    }
+    if EMBEDDED_RUNTIME_VBC.is_empty() {
+        return "none".to_string();
+    }
+    format!(
+        "emb:{}",
+        EMBEDDED_DIGEST
+            .get_or_init(|| blake3::hash(EMBEDDED_RUNTIME_VBC).to_hex().to_string())
+    )
+}
+
+/// Minimal recursive `*.vr` walk (no external walkdir dependency).
+fn walkdir_vr(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("vr") {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
 /// Returns the embedded runtime VBC archive, or `None` when the
 /// compiler binary was built without one (`target/precompiled-stdlib/
 /// runtime.vbca` missing at build time).

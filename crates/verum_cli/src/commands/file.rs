@@ -425,7 +425,16 @@ pub fn run_with_tier_and_flags(
                     &ScriptContextOptions {
                         flags: permission_flags.clone(),
                         compiler_version: env!("CARGO_PKG_VERSION").to_string(),
-                        extra_cache_flags: aot_cache_flag_inputs(),
+                        extra_cache_flags: {
+                            let mut f = aot_cache_flag_inputs();
+                            // T0523: same stdlib-identity contributor as the
+                            // interpreted script cache.
+                            f.push(format!(
+                                "stdlib={}",
+                                verum_compiler::embedded_stdlib_vbc::resolved_stdlib_identity()
+                            ));
+                            f
+                        },
                     },
                 )
                 .map_err(|e| CliError::Custom(format!("script context: {e}")))?;
@@ -707,6 +716,25 @@ fn run_script_interpreted(
     // future codegen-emitted permission asserts will encode the
     // resolved set into the bytecode.)
     let mut extra_flags = cache_flag_inputs(&options);
+    // T0523: the stdlib the script will execute against is a cache-key
+    // contributor — without it, editing core/ and rerunning the SAME
+    // script executed bytecode compiled against the OLD stdlib and
+    // reported green (the false-green A/B loop).
+    extra_flags.push(format!(
+        "stdlib={}",
+        verum_compiler::embedded_stdlib_vbc::resolved_stdlib_identity()
+    ));
+    // Adjacent honesty (same finding): VERUM_CORE_PATH does NOT drive
+    // `verum run` — the embedded archive stays authoritative unless
+    // VERUM_STDLIB_PATH points at a core/ SOURCE tree. Say so instead of
+    // letting a corrupt-core control run green.
+    if std::env::var_os("VERUM_CORE_PATH").is_some()
+        && std::env::var_os("VERUM_STDLIB_PATH").is_none()
+    {
+        ui::warn(
+            "VERUM_CORE_PATH is inert for `verum run` (embedded stdlib stays              authoritative); use VERUM_STDLIB_PATH=<core dir> to override",
+        );
+    }
     if permission_flags.allow_all {
         extra_flags.push("perm=allow-all".to_string());
     }
