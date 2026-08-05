@@ -1489,17 +1489,20 @@ impl<'ctx> MetalIR<'ctx> {
         let body_bb = ctx.append_basic_block(func, "bind_body");
         let after_bb = ctx.append_basic_block(func, "after_bind");
 
+        // The phi's zero-entry must name the ACTUAL predecessor — the
+        // block we are branching FROM. Capture it BEFORE the branch:
+        // after position_at_end(loop_bb), get_insert_block() is loop_bb
+        // itself, and a phi entry naming a non-predecessor is invalid IR
+        // ("PHI node entries do not match predecessors!") that SIGSEGVs
+        // the pass pipeline on every module carrying these helpers.
+        let entry_pred = builder
+            .get_insert_block()
+            .or_internal("no insert block")?;
         builder.build_unconditional_branch(loop_bb).or_llvm_err()?;
 
         builder.position_at_end(loop_bb);
         let phi_i = builder.build_phi(i64_type, "i").or_llvm_err()?;
-        phi_i.add_incoming(&[(
-            &i64_type.const_int(0, false),
-            builder.get_insert_block().or_internal("no insert block")?,
-        )]);
-        // Fix: we need the predecessor block — but we already branched. Use the block before loop_bb.
-        // Actually phi_i already got its incoming from the branch above. Let's re-do:
-        // The phi needs incoming from entry (=0) and from body (=i+1).
+        phi_i.add_incoming(&[(&i64_type.const_int(0, false), entry_pred)]);
         let i_val = phi_i.as_basic_value().into_int_value();
         let cmp = builder
             .build_int_compare(IntPredicate::ULT, i_val, buffer_count, "cmp_i")
