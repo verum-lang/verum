@@ -14846,6 +14846,16 @@ impl TypeChecker {
             if !self_named_placeholder {
                 return None;
             }
+        } else if let Maybe::Some(metadata) = &self.core_metadata
+            && metadata.types.contains_key(&Text::from(name))
+        {
+            // Not yet lazily loaded, but the baked stdlib DECLARES a type
+            // of this name (metadata.types is keyed by type names only —
+            // variant cases never appear there). The genuine-type
+            // precedence applies identically; this resolver is &self so
+            // it cannot trigger the lazy load itself — declining lets the
+            // normal type path do so.
+            return None;
         }
                 // ── LANGUAGE LAW E430/E431 — CONSTRUCTOR-VISIBILITY-HORIZON ──
         // (docs/architecture/language-law-visibility-and-boolean-clarity
