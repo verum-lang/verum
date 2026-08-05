@@ -3848,6 +3848,34 @@ impl TypeChecker {
                     if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &Type::Unknown) {
                         return Ok(ctor_fn);
                     }
+                    // UNIT-CTOR twin of the payload arm above (T0555 layer 4):
+                    // a metadata-only sum type's import registers each CASE as
+                    // a SELF-NAMED `Named{case}` placeholder (import_type_export
+                    // has no AST to fully register against), and the payload
+                    // arm deliberately passes on unit ctors — so a bare
+                    // `UoInsert` in value position resolved to the placeholder
+                    // TYPE and every use failed E400 "expected 'UpdateOp',
+                    // found 'UoInsert'". A self-referential placeholder is not
+                    // a genuine type binding (the T0617 ctor-nominal
+                    // discipline): when the name is a registered variant case
+                    // and the type-table answer is exactly `Named{name}` with
+                    // no args, prefer the constructor. A REAL same-named type
+                    // (`Maybe` the type vs some `Maybe` case) never matches —
+                    // its table entry is not self-named-argless, or the name
+                    // is not in the parents table.
+                    if self
+                        .variant_constructor_parents
+                        .contains_key(&verum_common::Text::from(name))
+                        && matches!(
+                            &ty,
+                            Type::Named { path, args }
+                                if args.is_empty()
+                                    && path.as_ident().map(|i| i.name.as_str()) == Some(name)
+                        )
+                        && let Some(ctor_ty) = self.try_resolve_variant_constructor(name)
+                    {
+                        return Ok(ctor_ty);
+                    }
                     // IMPORTANT: If this type has generic parameters but was referenced without
                     // explicit type arguments, create fresh type variables for the missing params.
                     // This enables proper inference for types like `PendingFuture<T>` used as `PendingFuture`.

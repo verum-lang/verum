@@ -2062,6 +2062,23 @@ pub(crate) fn register_variant_signature_for_lazy(
     cases: &List<crate::core_metadata::VariantCase>,
     pending: &mut Vec<Text>,
 ) {
+    // T0555 layer 3: publish each case into `variant_constructor_parents`
+    // — the AMBIENT table `try_resolve_variant_constructor*` resolves bare
+    // constructors through. Its only writer was the AST path
+    // (decls.rs `register_type_declaration`), so a sum type reaching the
+    // checker EXCLUSIVELY via metadata (the embedded-registry route: the
+    // synthesized ModuleInfo has no AST, full registration falls to the
+    // Named placeholder) registered its ctor SCHEMES but never the
+    // parent mapping — a bare `UoInsert` then typed as the placeholder
+    // type `UoInsert` and `op_name(&o)` failed E400
+    // "expected 'UpdateOp', found 'UoInsert'".
+    for case in cases.iter() {
+        let vn: Text = case.name.clone();
+        let parents = checker.variant_constructor_parents.entry(vn).or_default();
+        if !parents.iter().any(|p| p.as_str() == name.as_str()) {
+            parents.push(name.clone());
+        }
+    }
     // Push payload type names → pending so the lazy loader
     // closure picks them up.
     for case in cases.iter() {

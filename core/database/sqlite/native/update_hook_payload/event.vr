@@ -8,41 +8,35 @@
 module core.database.sqlite.native.update_hook_payload.event;
 
 mount base.{Bool, Text, Int64};
+// The op taxonomy is owned by `hooks_api.op` (UpdateOp, sqlite3.h numeric
+// codes via op_numeric/op_name/is_write). This module used to declare a
+// THIRD public enum with the same variant spellings (`UpdateHookOp` —
+// sibling of the deleted ext.hooks `ExtUpdateOp`); duplicate variant
+// names across types made the bare constructors unresolvable (T0555).
+// Re-export the canon; `UpdateHookOp` stays as an alias for source
+// compatibility, and the payload-specific helpers delegate.
+public mount core.database.sqlite.native.hooks_api.op.{
+    UpdateOp, UoInsert, UoUpdate, UoDelete, op_numeric, op_name,
+};
 
-public type UpdateHookOp is
-    | UoInsert      // SQLITE_INSERT = 18
-    | UoUpdate      // SQLITE_UPDATE = 23
-    | UoDelete      // SQLITE_DELETE =  9
-    ;
+public type UpdateHookOp is UpdateOp;
 
-public fn op_code(o: &UpdateHookOp) -> Int {
-    match o {
-        UoInsert => 18,
-        UoUpdate => 23,
-        UoDelete =>  9,
-    }
+public fn op_code(o: &UpdateOp) -> Int {
+    op_numeric(o)
 }
 
-public fn op_name(o: &UpdateHookOp) -> Text {
-    match o {
-        UoInsert => "INSERT".clone(),
-        UoUpdate => "UPDATE".clone(),
-        UoDelete => "DELETE".clone(),
-    }
-}
-
-public fn is_insert(o: &UpdateHookOp) -> Bool { match o { UoInsert => true, _ => false } }
-public fn is_update(o: &UpdateHookOp) -> Bool { match o { UoUpdate => true, _ => false } }
-public fn is_delete(o: &UpdateHookOp) -> Bool { match o { UoDelete => true, _ => false } }
+public fn is_insert(o: &UpdateOp) -> Bool { match o { UoInsert => true, _ => false } }
+public fn is_update(o: &UpdateOp) -> Bool { match o { UoUpdate => true, _ => false } }
+public fn is_delete(o: &UpdateOp) -> Bool { match o { UoDelete => true, _ => false } }
 
 public type UpdateEvent is {
-    op: UpdateHookOp,
+    op: UpdateOp,
     db_name: Text,      // "main" / "temp" / attached name
     table: Text,
     rowid: Int64,
 };
 
-public fn event(op: UpdateHookOp, db_name: Text, table: Text, rowid: Int64) -> UpdateEvent {
+public fn event(op: UpdateOp, db_name: Text, table: Text, rowid: Int64) -> UpdateEvent {
     UpdateEvent { op: op, db_name: db_name, table: table, rowid: rowid }
 }
 
