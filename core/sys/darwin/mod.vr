@@ -91,6 +91,13 @@ public mount .libsystem.{
 };
 
 // libsystem types
+// PLATFORM-SHADOW fix (T0435): libsystem declares these Darwin-prefixed
+// (DarwinStat 16-field BSD layout, DarwinSockaddrIn6 with sin6_len, …).
+// The old bare re-exports were DANGLING — the published bare names
+// resolved to the LINUX layouts (st_mode/st_nlink swapped; no sin6_len),
+// the confident-wrong FFI class. Re-export the REAL declarations under
+// the platform-local bare names via `as`, so `sys.darwin.…{Stat}`
+// consumers get the Darwin bytes.
 public mount .libsystem.{
     Timespec,
     Timeval,
@@ -300,7 +307,8 @@ public mount .io.{
 // =============================================================================
 
 public mount .thread.{
-    // Types
+    // Types (T0435: declarations are Darwin-prefixed; bare names were
+    // dangling and squatted by the sync/runtime generic layouts)
     ThreadError,
     Thread,
     ThreadFn,

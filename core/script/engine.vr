@@ -203,6 +203,20 @@ implement Engine {
         Session { raw: script_engine_link(self.raw, sources) }
     }
 
+    /// COMPILE-ONCE handle for a single script (T0349): compile `source`
+    /// now, call its functions many times by name via the returned
+    /// [`Session`] — no per-call recompilation. This is the API-parity
+    /// answer the tier table implies: `Engine.eval`/`call`/`call_args`
+    /// are deliberately ONE-SHOT (source travels on every invocation);
+    /// `Session` — from `load`/`link`/`link2` — is the compile-once tier
+    /// (call by name alone, shared heap); [`World`] is the persistent
+    /// EVAL tier (whole-script re-entry against a carried heap).
+    public fn load(&self, source: Text) -> Session {
+        let mut sources: List<Text> = List.new();
+        sources.push(source);
+        self.link(sources)
+    }
+
     /// The text this engine's most recent `eval` / `call` wrote to stdout
     /// (empty before any run). Read it right after an `eval`/`call` to capture
     /// a script's printed output — the `ScriptResult` carries only the value.

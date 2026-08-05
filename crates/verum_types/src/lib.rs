@@ -240,6 +240,26 @@ pub mod variance;
 /// The env var is read ONCE per process — several of these diagnostics sit on
 /// the hottest unifier path (`bind_var`), where a per-call `env::var` lookup
 /// is a measurable cost.
+/// LANGUAGE-LAWS mode (docs/architecture/
+/// language-law-visibility-and-boolean-clarity.md §4). Stage W default
+/// is WARN; `VERUM_LANGUAGE_LAWS=strict` upgrades E430/E431/E432 to
+/// hard TypeErrors; `=legacy` (post-flip escape hatch) silences them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LanguageLawsMode {
+    Legacy,
+    Warn,
+    Strict,
+}
+
+pub fn language_laws_mode() -> LanguageLawsMode {
+    static ONCE: std::sync::OnceLock<LanguageLawsMode> = std::sync::OnceLock::new();
+    *ONCE.get_or_init(|| match std::env::var("VERUM_LANGUAGE_LAWS").as_deref() {
+        Ok("strict") => LanguageLawsMode::Strict,
+        Ok("legacy") => LanguageLawsMode::Legacy,
+        _ => LanguageLawsMode::Warn,
+    })
+}
+
 pub fn ctor_trace_enabled() -> bool {
     static ONCE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ONCE.get_or_init(|| std::env::var("VERUM_TRACE_CTOR").is_ok())
@@ -532,6 +552,18 @@ use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 /// - E500-E509: Concurrency errors (data race, Send/Sync)
 #[derive(Debug, Error)]
 pub enum TypeError {
+    /// LANGUAGE LAWS E430/E431/E432 (docs/architecture/
+    /// language-law-visibility-and-boolean-clarity.md). One variant for
+    /// the whole family — the code rides in the payload so the strict
+    /// mode reuses one renderer and the warn mode prints the same text.
+    #[error("{code}: {message}")]
+    LanguageLaw {
+        code: &'static str,
+        message: String,
+        help: String,
+        span: verum_ast::span::Span,
+    },
+
     #[error("Type mismatch: expected '{expected}', found '{actual}'")]
     Mismatch {
         expected: Text,
@@ -1998,6 +2030,7 @@ impl TypeError {
             StackAllocationExceedsLimit { span, .. } => *span,
             UnboundedRecursionDetected { span, .. } => *span,
             // Import resolution error spans
+            LanguageLaw { span, .. } => *span,
             ImportItemNotFound { span, .. } => *span,
             ImportModuleNotFound { span, .. } => *span,
             UndefinedFunction { span, .. } => *span,
@@ -3489,6 +3522,22 @@ impl TypeError {
                 builder = builder.add_note(
                     "add @allow(unbounded_recursion) to suppress this warning if intentional",
                 );
+                builder.build()
+            }
+
+            LanguageLaw {
+                code,
+                message,
+                help,
+                span,
+            } => {
+                let mut builder = DiagnosticBuilder::error()
+                    .code(*code)
+                    .message(message.clone());
+                if let Some(diag_span) = convert_span(*span) {
+                    builder = builder.span(diag_span);
+                }
+                builder = builder.help(help.clone());
                 builder.build()
             }
 

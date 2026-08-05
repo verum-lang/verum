@@ -1,0 +1,65 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @expected-exit: 0
+// @description: Engine/Session/World tier parity (T0349): Engine.load gives
+//   a compile-once Session for one script — same answers as one-shot
+//   Engine.call and persistent World.eval — and N reused calls through the
+//   Session beat N one-shot Engine.call compiles by a measured margin.
+
+mount core.*;
+mount core.script.engine.{Engine, World, ScriptResult, ScriptValue};
+mount core.time.instant.{Instant};
+
+fn unwrap_int(r: ScriptResult) -> Int {
+    match r {
+        ScriptResult.Ok(v) => match v {
+            ScriptValue.Int(n) => n,
+            _ => panic("expected Int script value"),
+        },
+        ScriptResult.Err(e) => panic(f"script error: {e}"),
+    }
+}
+
+fn main() {
+    let src = "fn compute() -> Int { let mut s = 0; let mut i = 0; while i < 100 { s = s + i; i = i + 1; } s } fn main() -> Int { compute() }";
+
+    // --- Parity: three tiers, one answer -------------------------------
+    let engine = Engine.new();
+    let one_shot = unwrap_int(engine.call(src.clone(), "compute".clone()));
+
+    let session = engine.load(src.clone());
+    let compiled_once = unwrap_int(session.call("compute".clone()));
+    assert_eq(one_shot, compiled_once);
+
+    let world = World.new();
+    let world_eval = unwrap_int(world.eval(src.clone()));
+    assert_eq(one_shot, world_eval);
+    assert_eq(one_shot, 4950);
+
+    // --- Reuse speedup: N calls by name vs N recompiles ----------------
+    let n = 20;
+    let t0 = Instant.now();
+    let mut i = 0;
+    while i < n {
+        let _ = unwrap_int(session.call("compute".clone()));
+        i = i + 1;
+    }
+    let reuse_ns = t0.elapsed().as_nanos();
+
+    let t1 = Instant.now();
+    let mut j = 0;
+    while j < n {
+        let _ = unwrap_int(engine.call(src.clone(), "compute".clone()));
+        j = j + 1;
+    }
+    let oneshot_ns = t1.elapsed().as_nanos();
+
+    print(f"reuse_ns={reuse_ns} oneshot_ns={oneshot_ns}");
+    // Compile-once must win with real margin; 2x is far below the
+    // observed gap (per-call recompile dwarfs a 100-iteration loop) yet
+    // safely above scheduler noise.
+    assert(reuse_ns * 2 < oneshot_ns);
+
+    print("compile-once parity ok");
+}

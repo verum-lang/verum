@@ -712,3 +712,18 @@ implement FutexCondvar {
         let _ = futex_wake(&self.seq as &Int, Int.MAX);
     }
 }
+
+// =============================================================================
+// Platform-local bare aliases (T0435) — the darwin/mod.vr re-exports
+// published these bare names while the declarations are Darwin-prefixed;
+// the dangling names resolved to the generic sync/runtime layouts
+// (different field sets). One alias per declaration, the
+// libsystem.vr `SockaddrIn = DarwinSockaddrIn` canon.
+// =============================================================================
+public type ThreadError = DarwinThreadError;
+public type Thread = DarwinThread;
+public type ThreadFn = DarwinThreadFn;
+public type Mutex = DarwinMutex;
+public type Condvar = DarwinCondvar;
+public type SpinLock = DarwinSpinLock;
+public type Once = DarwinOnce;

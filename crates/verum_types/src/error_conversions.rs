@@ -11,6 +11,9 @@ impl From<TypeError> for VerumError {
     fn from(err: TypeError) -> Self {
         match err {
             // Direct mappings to VerumError variants
+            TypeError::LanguageLaw { code, message, .. } => VerumError::Other {
+                message: verum_common::Text::from(format!("{code}: {message}")),
+            },
             TypeError::Mismatch {
                 expected, actual, ..
             } => VerumError::TypeMismatch {

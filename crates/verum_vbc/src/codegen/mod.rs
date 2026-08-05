@@ -8694,7 +8694,7 @@ impl VbcCodegen {
             .iter()
             .filter_map(|p| {
                 if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
-                    let name = Self::extract_type_name_from_ast(ty);
+                    let name = Self::extract_scheme_type_name_from_ast(ty);
                     if !name.is_empty() && name != "()" {
                         Some(name)
                     } else {
@@ -19482,6 +19482,36 @@ impl VbcCodegen {
     /// SIGNATURE-PREPASS-1) derives stub `return_type_name`s from AST
     /// signatures with the SAME canonical rendering codegen uses —
     /// two extractors would drift.
+    /// SCHEME-facing param/return type render (T0690 R1): unlike
+    /// `extract_type_name_from_ast` — whose documented contract FLATTENS
+    /// `&T`/`&checked T` to `T` for the field-type-carrier consumers —
+    /// the v2.10 signature carry feeds the CHECKER's call schemes, where
+    /// reference-ness is call semantics. Losing it baked
+    /// `other: &Shared<T>` as `Shared<__generic_0>`, and every
+    /// `a.ptr_eq(&b)` failed E400 (expected the value type, found the
+    /// reference's peel). Top-level `&` family preserved verbatim in the
+    /// exact spellings `parse_descriptor_type_string` decodes; inner
+    /// rendering delegates unchanged.
+    pub fn extract_scheme_type_name_from_ast(ty: &verum_ast::ty::Type) -> String {
+        use verum_ast::ty::TypeKind;
+        match &ty.kind {
+            TypeKind::Reference { inner, mutable } => format!(
+                "&{}{}",
+                if *mutable { "mut " } else { "" },
+                Self::extract_type_name_from_ast(inner)
+            ),
+            TypeKind::CheckedReference { inner, mutable } => format!(
+                "&checked {}{}",
+                if *mutable { "mut " } else { "" },
+                Self::extract_type_name_from_ast(inner)
+            ),
+            _ => Self::extract_type_name_from_ast(ty),
+        }
+    }
+
+    /// Canonical FIELD-CARRIER type-name render (see the scheme-facing
+    /// twin above for the call-scheme contract difference: this one
+    /// deliberately flattens `&T`/`&checked T` to `T`).
     pub fn extract_type_name_from_ast(ty: &verum_ast::ty::Type) -> String {
         use verum_ast::ty::{GenericArg, PathSegment, TypeKind};
         if let Some(name) = ty.kind.primitive_name() {

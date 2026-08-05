@@ -16845,9 +16845,21 @@ impl TypeChecker {
                         let impl_vc = scheme.impl_var_count;
                         let (ty, fresh_vars, type_bounds) =
                             scheme.instantiate_with_type_bounds();
+                        if crate::ctor_trace_enabled() {
+                            eprintln!(
+                                "[ctor-trace] early-inherent HIT {}.{} impl_vc={} inst={:?}",
+                                type_name_text, method_name_text, impl_vc, ty
+                            );
+                        }
                         ((ty, fresh_vars, impl_vc), type_bounds)
                     })
                 };
+                if crate::ctor_trace_enabled() && early_method_info.is_none() {
+                    eprintln!(
+                        "[ctor-trace] early-inherent MISS {}.{}",
+                        type_name_text, method_name_text
+                    );
+                }
 
                 if let Some(((method_ty, ordered_fresh_vars, impl_var_count), type_bounds)) =
                     early_method_info

@@ -211,7 +211,8 @@ public mount .io.{
 // =============================================================================
 
 public mount .thread.{
-    // Types
+    // Types (T0435: declarations are Linux-prefixed; the bare re-exports
+    // were dangling — same confident-wrong shadow class as darwin/mod.vr)
     Thread,
     ThreadFn,
     ThreadError,
@@ -231,7 +232,8 @@ public mount .thread.{
     FUTEX_WAIT, FUTEX_WAKE, FUTEX_REQUEUE,
     FUTEX_PRIVATE_FLAG, FUTEX_BITSET_MATCH_ANY,
 
-    // Synchronization primitives
+    // Synchronization primitives (T0435: Linux-prefixed declarations,
+    // bare re-exports were dangling)
     SpinLock,
     Mutex,
     Condvar,

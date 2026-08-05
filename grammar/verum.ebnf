@@ -612,6 +612,16 @@ predicate_expr = expression ;
 sigma_type = sigma_bindings ;
 
 variant_list    = [ '|' ] , variant , { '|' , variant } ;
+
+(* CONSTRUCTOR-VISIBILITY-HORIZON (language law, 2026-08-05):
+   a bare IDENT resolving to a variant constructor is well-formed
+   iff the owning sum type is (a) declared in this file, (b) named
+   by an explicit non-glob mount of this file, or (c) one of the
+   pinned prelude carriers Maybe | Result | Ordering.  Otherwise
+   the constructor must be written qualified: Type '.' Variant.
+   Glob mounts do not extend the bare-constructor horizon.
+   Diagnostics: E430 (outside horizon) / E431 (ambiguous in horizon).
+   Spec: docs/architecture/language-law-visibility-and-boolean-clarity.md *)
 (* Variants can have attributes for serialization, defaults, deprecation *)
 (* Example: @default Ok | @deprecated Legacy | Error(Text) *)
 (*                                                                        *)
@@ -1472,6 +1482,15 @@ range_expr      = logical_or_expr , [ range_op , logical_or_expr ] ;
 
 logical_or_expr = logical_and_expr , { '||' , logical_and_expr } ;
 logical_and_expr= equality_expr , { '&&' , equality_expr } ;
+
+(* BOOLEAN-EQUALITY-CLARITY (language law, 2026-08-05): within a
+   logical_and_expr / logical_or_expr, an equality_expr using '=='
+   or '!=' whose operands BOTH type as Bool is ill-formed unless
+   parenthesized, when the adjacent conjunct operand is itself of
+   type Bool.  With Bool operands both precedence readings
+   type-check, so the mis-parse is silent and — in requires/ensures
+   — makes proof obligations vacuous.  Diagnostic: E432.
+   Spec: docs/architecture/language-law-visibility-and-boolean-clarity.md *)
 
 equality_expr   = is_relational_expr , { ( '==' | '!=' ) , is_relational_expr } ;
 

@@ -744,3 +744,15 @@ implement LinuxCondvar {
 /// EAGAIN constant for error handling
 const EAGAIN: Int = 11;
 const ETIMEDOUT: Int = 110;
+
+// =============================================================================
+// Platform-local bare aliases (T0435) — same canon as darwin: the
+// declarations are Linux-prefixed, the mod.vr re-exports publish bare
+// names; pre-fix those were dangling.
+// =============================================================================
+public type Thread = LinuxThread;
+public type ThreadFn = LinuxThreadFn;
+public type ThreadError = LinuxThreadError;
+public type SpinLock = LinuxSpinLock;
+public type Mutex = LinuxMutex;
+public type Condvar = LinuxCondvar;
