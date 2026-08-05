@@ -14772,6 +14772,7 @@ impl TypeChecker {
                     || want.rsplit('.').next() == Some(ps)
             }).cloned()
         });
+        let hint_selected = hinted.is_some();
         let parent_name = if let Some(h) = hinted {
             h
         } else if let Some(m) = mount_scoped {
@@ -14824,77 +14825,91 @@ impl TypeChecker {
         } else {
             parents.first()?.clone()
         };
+        // ── HORIZON FACTS (computed once; the precedence rule and the
+        // language law below SHARE them — one definition of "horizon",
+        // per docs/architecture/language-law-visibility-and-boolean-
+        // clarity.md §1.4) ─────────────────────────────────────────────
+        // Judged only for THIS file's own body: stranger modules' bodies
+        // (imports in flight) keep their own resolution — the same
+        // in-flight guard mount-scoped selection uses.
+        let judging_this_file = self.imports_in_progress.is_empty()
+            && self.glob_imports_in_progress.is_empty();
+        // Pinned prelude carriers come from the ONE canonical registry
+        // (well_known_types — already layout-pinned there), never a
+        // local string list (the crate's no-hardcoded-stdlib rule; the
+        // LAW spec §1.4 defines the trio as a LANGUAGE fact and the
+        // registry is where language facts live).
+        let parent_is_trio = matches!(
+            parent_name.as_str(),
+            n if n == verum_common::well_known_types::type_names::MAYBE
+                || n == verum_common::well_known_types::type_names::RESULT
+                || n == verum_common::well_known_types::type_names::ORDERING
+        );
+        // Horizon membership: the pinned trio, an explicit mount of the
+        // TYPE or of the CONSTRUCTOR leaf, or the type declared in-file
+        // (current_module_declared_types tracks those).
+        let in_horizon = parent_is_trio
+            || self.explicit_imports.contains(parent_name.as_str())
+            || self.explicit_imports.contains(name)
+            || self
+                .current_module_declared_types
+                .contains(parent_name.as_str());
         // ── TYPE-NAME PRECEDENCE over ambient constructors ────────────
         // (name-resolution.md rule the law made LOUD on its first live
         // run: bare `Shared` — the prelude TYPE — was being answered by
         // the ambient table as IsolationLevel.Shared, a stranger enum's
-        // variant.) A name that resolves to a GENUINE type binding —
-        // prelude, mounted, or declared; NOT the self-named argless
-        // placeholder the metadata import registers for cases (that
-        // exact shape is the unit-ctor guard's domain) — is that TYPE at
-        // value/ctor position; decline the constructor answer entirely
-        // so the normal type/static path serves it. Mirrors rule (2)
-        // MOUNTED-ITEM PRECEDENCE below, widened to every genuine type
-        // binding.
-        if let Option::Some(existing) = self.ctx.lookup_type(name) {
-            let self_named_placeholder = matches!(
-                &existing,
-                Type::Named { path, args }
-                    if args.is_empty()
-                        && path.as_ident().map(|i| i.name.as_str()) == Some(name)
+        // variant.) The resolution ladder is monotone:
+        //     explicit horizon  >  genuine/baked TYPE  >  ambient pick.
+        // Inside the horizon the user has SAID which sum type owns the
+        // bare name — the ambient answer is the law-blessed one and no
+        // type may veto it. Outside the horizon, a name that is a
+        // GENUINE type — bound in ctx (prelude/mounted/declared; NOT the
+        // self-named argless placeholder the unit-ctor CLAIM registers
+        // for cases) or DECLARED by the baked stdlib metadata
+        // (metadata.types is keyed by type names only; this resolver is
+        // &self so it cannot lazy-load — declining lets the normal type
+        // path do so) — is that TYPE at value/ctor position: decline the
+        // constructor answer entirely so the type/static path serves it.
+        // A HINT-selected parent is exempt: the caller's expected type
+        // NAMED the owner (`let cf: ControlFlow = Continue(42)`) — the
+        // resolution is correct by construction, and a type sharing the
+        // ctor's spelling must not veto it (the law still warns; Stage M
+        // adds the mount).
+        if judging_this_file && !in_horizon && !hint_selected {
+            let genuine_in_ctx = match self.ctx.lookup_type(name) {
+                Option::Some(existing) => !matches!(
+                    &existing,
+                    Type::Named { path, args }
+                        if args.is_empty()
+                            && path.as_ident().map(|i| i.name.as_str())
+                                == Some(name)
+                ),
+                Option::None => false,
+            };
+            let baked_type = matches!(
+                &self.core_metadata,
+                Maybe::Some(m) if m.types.contains_key(&Text::from(name))
             );
-            if !self_named_placeholder {
+            if genuine_in_ctx || baked_type {
+                if crate::ctor_trace_enabled() {
+                    eprintln!(
+                        "[ctor-trace] type-precedence DECLINE '{}' \
+                         (ctx={} baked={}) — ambient pick was '{}'",
+                        name, genuine_in_ctx, baked_type, parent_name
+                    );
+                }
                 return None;
             }
-        } else if let Maybe::Some(metadata) = &self.core_metadata
-            && metadata.types.contains_key(&Text::from(name))
-        {
-            // Not yet lazily loaded, but the baked stdlib DECLARES a type
-            // of this name (metadata.types is keyed by type names only —
-            // variant cases never appear there). The genuine-type
-            // precedence applies identically; this resolver is &self so
-            // it cannot trigger the lazy load itself — declining lets the
-            // normal type path do so.
-            return None;
         }
-                // ── LANGUAGE LAW E430/E431 — CONSTRUCTOR-VISIBILITY-HORIZON ──
+        // ── LANGUAGE LAW E430/E431 — CONSTRUCTOR-VISIBILITY-HORIZON ──
         // (docs/architecture/language-law-visibility-and-boolean-clarity
         // .md §1; normative block beside variant_list in verum.ebnf).
         // The heuristics above chose SOME parent; the law asks a
         // stricter question: is the chosen owner inside this file's
-        // mount horizon (file-declared / explicitly mounted / the
-        // pinned prelude trio)? Outside it, the very fact resolution
-        // needed an ambient pick is the hazard — warn (Stage W) or
-        // reject (strict) with the qualify-it help. Skipped while
-        // imports are in flight (stranger modules' own bodies must not
-        // be judged by this file's horizon — the same in-flight guard
-        // mount-scoped selection uses).
-        if self.imports_in_progress.is_empty()
-            && self.glob_imports_in_progress.is_empty()
-            // Pinned prelude carriers come from the ONE canonical
-            // registry (well_known_types — already layout-pinned there),
-            // never a local string list (the crate's no-hardcoded-stdlib
-            // rule; the LAW spec §1.4 defines the trio as a LANGUAGE
-            // fact and the registry is where language facts live).
-            && !matches!(
-                parent_name.as_str(),
-                n if n == verum_common::well_known_types::type_names::MAYBE
-                    || n == verum_common::well_known_types::type_names::RESULT
-                    || n == verum_common::well_known_types::type_names::ORDERING
-            )
-            && !self.explicit_imports.contains(parent_name.as_str())
-            && !self.explicit_imports.contains(name)
-        {
-            // Horizon membership: explicit mount of the TYPE or of the
-            // CONSTRUCTOR leaf, or the type declared in-file. In-file
-            // declarations register through define_type_in_current_module,
-            // which the current-module parents preference above already
-            // models — `local` picks only fire for in-file owners, so a
-            // NON-local winner outside explicit_imports is by
-            // construction outside the horizon.
-            let in_horizon = self
-                .current_module_declared_types
-                .contains(parent_name.as_str());
+        // mount horizon? Outside it, the very fact resolution needed an
+        // ambient pick is the hazard — warn (Stage W) or reject
+        // (strict) with the qualify-it help.
+        if judging_this_file {
             if !in_horizon {
                 let sibling_owners: Vec<&str> = parents
                     .iter()
