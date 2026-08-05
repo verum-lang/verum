@@ -14824,7 +14824,30 @@ impl TypeChecker {
         } else {
             parents.first()?.clone()
         };
-        // ── LANGUAGE LAW E430/E431 — CONSTRUCTOR-VISIBILITY-HORIZON ──
+        // ── TYPE-NAME PRECEDENCE over ambient constructors ────────────
+        // (name-resolution.md rule the law made LOUD on its first live
+        // run: bare `Shared` — the prelude TYPE — was being answered by
+        // the ambient table as IsolationLevel.Shared, a stranger enum's
+        // variant.) A name that resolves to a GENUINE type binding —
+        // prelude, mounted, or declared; NOT the self-named argless
+        // placeholder the metadata import registers for cases (that
+        // exact shape is the unit-ctor guard's domain) — is that TYPE at
+        // value/ctor position; decline the constructor answer entirely
+        // so the normal type/static path serves it. Mirrors rule (2)
+        // MOUNTED-ITEM PRECEDENCE below, widened to every genuine type
+        // binding.
+        if let Option::Some(existing) = self.ctx.lookup_type(name) {
+            let self_named_placeholder = matches!(
+                &existing,
+                Type::Named { path, args }
+                    if args.is_empty()
+                        && path.as_ident().map(|i| i.name.as_str()) == Some(name)
+            );
+            if !self_named_placeholder {
+                return None;
+            }
+        }
+                // ── LANGUAGE LAW E430/E431 — CONSTRUCTOR-VISIBILITY-HORIZON ──
         // (docs/architecture/language-law-visibility-and-boolean-clarity
         // .md §1; normative block beside variant_list in verum.ebnf).
         // The heuristics above chose SOME parent; the law asks a
