@@ -1,0 +1,26 @@
+// @test: run
+// @level: L1
+// @tier: all
+// @expected-exit: 0
+// @description: ptr_read_volatile / ptr_write_volatile round-trip through a
+//   scalar static-mut cell on BOTH tiers (T0188's own pin, dependency-free).
+//   The sibling volatile_ptr_round_trip.vr composes the channel with
+//   cbgr_alloc and therefore ALSO exercises the cbgr AOT bridge (T0463) —
+//   this spec isolates the volatile channel itself: registration, the LLVM
+//   volatile flag, and address decode over the native static-mut cell.
+
+mount core.intrinsics.{ptr_read_volatile, ptr_write_volatile};
+
+static mut CELL: Int = 0;
+
+fn main() {
+    unsafe {
+        let p = &mut CELL as *mut Int;
+        ptr_write_volatile(p, 777);
+        let back = ptr_read_volatile(p as *const Int);
+        assert_eq(back, 777);
+        ptr_write_volatile(p, -12345);
+        assert_eq(ptr_read_volatile(p as *const Int), -12345);
+    }
+    print("volatile scalar static ok");
+}

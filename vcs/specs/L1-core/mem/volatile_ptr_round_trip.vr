@@ -9,6 +9,9 @@
 //   dedicated sub-ops stamp the LLVM volatile flag (never elided or
 //   reordered); at Tier-0 the interpreter's execute-everything model makes
 //   plain accesses equivalent, and the arms still use host volatile ops.
+//   COMPOSED pin: routes the address through cbgr_alloc, so the Tier-1 leg
+//   ALSO exercises the cbgr allocator AOT bridge (T0463) — the channel
+//   itself is pinned dependency-free by volatile_ptr_scalar_static.vr.
 
 mount core.mem.allocator.{cbgr_alloc, cbgr_dealloc};
 mount core.intrinsics.{ptr_read_volatile, ptr_write_volatile};
