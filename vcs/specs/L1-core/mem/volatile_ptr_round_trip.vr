@@ -1,0 +1,33 @@
+// @test: run
+// @level: L1
+// @tier: all
+// @expected-exit: 0
+// @description: ptr_read_volatile / ptr_write_volatile are REGISTERED and
+//   round-trip through real memory on both tiers (T0188). Pre-fix both
+//   names were silent LoadNil — the calls type-checked and produced nil —
+//   while their non-volatile twins worked from the same file. At AOT the
+//   dedicated sub-ops stamp the LLVM volatile flag (never elided or
+//   reordered); at Tier-0 the interpreter's execute-everything model makes
+//   plain accesses equivalent, and the arms still use host volatile ops.
+
+mount core.mem.allocator.{cbgr_alloc, cbgr_dealloc};
+mount core.intrinsics.{ptr_read_volatile, ptr_write_volatile};
+
+fn main() {
+    match cbgr_alloc(16, 8) {
+        Result.Ok(t) => {
+            let (p, _gen, _ep) = t;
+            let mp = p as *mut Int;
+            unsafe {
+                ptr_write_volatile(mp, 777);
+                let back = ptr_read_volatile(mp as *const Int);
+                assert_eq(back, 777);
+                ptr_write_volatile(mp, -12345);
+                assert_eq(ptr_read_volatile(mp as *const Int), -12345);
+            }
+            let _ = cbgr_dealloc(p);
+            print("volatile round trip ok");
+        }
+        Result.Err(_) => panic("alloc must succeed"),
+    }
+}

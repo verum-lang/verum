@@ -4996,6 +4996,15 @@ pub enum SystemSubOpcode {
     /// CBGR validation; caller takes responsibility per the FFI
     /// contract.
     DerefRawSigned = 0x67,
+    /// Volatile pointer READ (T0188): the AOT arm emits an LLVM load
+    /// with the volatile flag set — never elided/reordered; the Tier-0
+    /// arm is the plain DerefRaw twin (documented equivalence: the
+    /// interpreter performs every operation, so plain reads already
+    /// satisfy the volatile contract there). Wire: [dst][ptr][width].
+    PtrReadVolatile = 0x68,
+    /// Volatile pointer WRITE (T0188) — store + volatile flag at AOT;
+    /// DerefMutRaw twin at Tier-0. Wire: [ptr][value][width].
+    PtrWriteVolatile = 0x69,
 
     // ========================================================================
     // Time Operations (0x70-0x7F)
@@ -5773,6 +5782,8 @@ impl SystemSubOpcode {
             0x61 => Some(Self::DerefMutRaw),
             0x62 => Some(Self::DerefRawPtr),
             0x67 => Some(Self::DerefRawSigned),
+            0x68 => Some(Self::PtrReadVolatile),
+            0x69 => Some(Self::PtrWriteVolatile),
             0x63 => Some(Self::PtrAdd),
             0x64 => Some(Self::PtrSub),
             0x65 => Some(Self::PtrDiff),
@@ -5951,6 +5962,8 @@ impl SystemSubOpcode {
             Self::DerefMutRaw            => m!("FFI_DEREF_MUT_RAW",          RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::DerefRawPtr            => m!("FFI_DEREF_RAW_PTR",          RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::DerefRawSigned         => m!("FFI_DEREF_RAW_SIGNED",       RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::PtrReadVolatile        => m!("FFI_PTR_READ_VOLATILE",      RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::PtrWriteVolatile       => m!("FFI_PTR_WRITE_VOLATILE",     RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrAdd                 => m!("FFI_PTR_ADD",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrSub                 => m!("FFI_PTR_SUB",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrDiff                => m!("FFI_PTR_DIFF",               RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
@@ -16447,14 +16460,14 @@ mod tests {
 
     #[test]
     fn system_meta_count_pinned_at_one_hundred_eleven() {
-        // 111 currently reachable variants spread over twelve 16-byte
+        // 113 currently reachable variants spread over twelve 16-byte
         // bands.  Bumping this assertion is the explicit signal that
         // a new SystemSubOpcode entry has landed and the
         // corresponding meta() arm is in place.
         let mut count = 0;
         for_every_system_sub_opcode(|_| count += 1);
-        assert_eq!(count, 112,
-            "SystemSubOpcode variant count drift: expected 112, got {}",
+        assert_eq!(count, 114,
+            "SystemSubOpcode variant count drift: expected 114, got {}",
             count);
     }
 

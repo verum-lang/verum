@@ -1175,6 +1175,85 @@ fn ffi_extended_body(
             Ok(DispatchResult::Continue)
         }
 
+        // T0188 volatile qualified-access twins. EQUIVALENCE CONTRACT
+        // (documented at the sub-op decl): the interpreter executes every
+        // instruction — nothing is elided or reordered — so a plain
+        // read/write already satisfies the volatile contract at Tier-0;
+        // std::ptr::read/write_volatile is used anyway so the host
+        // compiler cannot fold repeated MMIO-style probes inside ONE
+        // dispatch either. The AOT arm is where the flag is load-bearing.
+        Some(SystemSubOpcode::PtrReadVolatile) => {
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let size = read_u8(state)?;
+            let val = state.get_reg(ptr_reg);
+            let ptr: *mut u8 = if val.is_fat_ref() {
+                val.as_fat_ref().ptr()
+            } else if val.is_thin_ref() {
+                val.as_thin_ref().ptr
+            } else if val.is_regular_ptr() {
+                val.as_ptr()
+            } else {
+                val.as_i64() as *mut u8
+            };
+            if ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
+            // SAFETY: null-checked; caller supplies a pointer valid for
+            // `size`-byte reads (raw-pointer contract, mirrors DerefRaw).
+            let value = unsafe {
+                match size {
+                    1 => std::ptr::read_volatile(ptr) as i64,
+                    2 => std::ptr::read_volatile(ptr as *const u16) as i64,
+                    4 => std::ptr::read_volatile(ptr as *const u32) as i64,
+                    8 => std::ptr::read_volatile(ptr as *const i64),
+                    _ => {
+                        return Err(InterpreterError::InvalidOperand {
+                            message: format!("invalid volatile read size: {}", size),
+                        });
+                    }
+                }
+            };
+            state.set_reg(dst, Value::from_i64(value));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(SystemSubOpcode::PtrWriteVolatile) => {
+            let ptr_reg = read_reg(state)?;
+            let value_reg = read_reg(state)?;
+            let size = read_u8(state)?;
+            let val = state.get_reg(ptr_reg);
+            let ptr: *mut u8 = if val.is_fat_ref() {
+                val.as_fat_ref().ptr()
+            } else if val.is_thin_ref() {
+                val.as_thin_ref().ptr
+            } else if val.is_regular_ptr() {
+                val.as_ptr()
+            } else {
+                val.as_i64() as *mut u8
+            };
+            if ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
+            let v = state.get_reg(value_reg).as_i64();
+            // SAFETY: null-checked; caller supplies a pointer valid for
+            // `size`-byte writes (raw-pointer contract, mirrors DerefMutRaw).
+            unsafe {
+                match size {
+                    1 => std::ptr::write_volatile(ptr, v as u8),
+                    2 => std::ptr::write_volatile(ptr as *mut u16, v as u16),
+                    4 => std::ptr::write_volatile(ptr as *mut u32, v as u32),
+                    8 => std::ptr::write_volatile(ptr as *mut i64, v),
+                    _ => {
+                        return Err(InterpreterError::InvalidOperand {
+                            message: format!("invalid volatile write size: {}", size),
+                        });
+                    }
+                }
+            }
+            Ok(DispatchResult::Continue)
+        }
+
         Some(SystemSubOpcode::DerefRawSigned) => {
             // Sign-extending sibling of `DerefRaw`. Format and layout
             // identical (`dst:reg, ptr:reg, size:u8`) — only the

@@ -31838,6 +31838,41 @@ impl VbcCodegen {
                 // register isn't left undefined for the caller.
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
             }
+            // Qualified-access reads/writes (T0188): dedicated sub-ops so
+            // the AOT arm can stamp the LLVM volatile flag — aliasing to
+            // plain Deref would emit elidable/reorderable accesses, the
+            // lying-alias the contract forbids. Width byte 8: the .vr
+            // surface is generic over T but every current caller moves a
+            // Value-width slot; narrower widths join with the unaligned
+            // family when it lands.
+            InlineSequenceId::PtrReadVolatile => {
+                if let Some(ptr) = args.first() {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, dest.0);
+                    Self::write_reg(&mut operands, ptr.0);
+                    operands.push(8);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x68, // PtrReadVolatile
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            InlineSequenceId::PtrWriteVolatile => {
+                if args.len() >= 2 {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, args[0].0);
+                    Self::write_reg(&mut operands, args[1].0);
+                    operands.push(8);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x69, // PtrWriteVolatile
+                        operands,
+                    });
+                }
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            }
+
             InlineSequenceId::Memcmp => {
                 // Format: dst:reg, ptr1:reg, ptr2:reg, size:reg
                 // Returns: i64 comparison result

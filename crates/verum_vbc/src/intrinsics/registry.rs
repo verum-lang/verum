@@ -278,6 +278,10 @@ pub enum InlineSequenceId {
     SecureZero,
     /// memcmp: compare with early exit
     Memcmp,
+    /// Volatile pointer read (T0188) — SystemSubOpcode::PtrReadVolatile.
+    PtrReadVolatile,
+    /// Volatile pointer write (T0188) — SystemSubOpcode::PtrWriteVolatile.
+    PtrWriteVolatile,
     /// fetch_add: CAS loop for atomic add
     AtomicFetchAdd,
     /// fetch_sub: CAS loop for atomic sub
@@ -1442,6 +1446,42 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::DirectOpcode(Opcode::Deref),
         mlir_op: Some("llvm.load"),
         doc: "Read value from pointer",
+    },
+    Intrinsic {
+        name: "ptr_read_volatile",
+        category: IntrinsicCategory::Memory,
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Generic,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 1, // ptr
+        return_count: 1,
+        // Dedicated sub-op (T0188): aliasing to plain ptr_read would
+        // type-check but emit a NON-volatile LLVM load the optimizer may
+        // elide/reorder — the lying-alias the task forbids. The AOT arm
+        // sets the volatile flag; Tier-0 is the DerefRaw twin (the
+        // interpreter executes every op, so the contract holds there by
+        // construction — documented at the sub-op).
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PtrReadVolatile),
+        mlir_op: Some("llvm.load"),
+        doc: "Volatile read from pointer (never elided/reordered at AOT)",
+    },
+    Intrinsic {
+        name: "ptr_write_volatile",
+        category: IntrinsicCategory::Memory,
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Generic,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 2, // ptr, value
+        return_count: 0,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PtrWriteVolatile),
+        mlir_op: Some("llvm.store"),
+        doc: "Volatile write through pointer (never elided/reordered at AOT)",
     },
     Intrinsic {
         name: "intrinsic_ptr_read",

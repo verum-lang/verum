@@ -42,7 +42,7 @@ use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::FunctionType;
 use verum_llvm::values::{
-    BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue,
+    BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue,
 };
 use verum_llvm::{AddressSpace, IntPredicate};
 use verum_vbc::instruction::SystemSubOpcode;
@@ -413,6 +413,75 @@ impl<'ctx> FfiLowering<'ctx> {
             .into_int_value();
 
         Ok(result)
+    }
+
+    /// Volatile twin of `lower_deref_raw` (T0188): identical widths and
+    /// zero-extension story, but the load carries the LLVM volatile flag
+    /// so the optimizer can neither elide nor reorder it — the exact
+    /// contract `ptr_read_volatile` documents. Mirrors the mmio.rs
+    /// volatile discipline.
+    pub fn lower_deref_raw_volatile(
+        &mut self,
+        builder: &Builder<'ctx>,
+        ptr: PointerValue<'ctx>,
+        size_bytes: u8,
+    ) -> Result<IntValue<'ctx>> {
+        self.stats.raw_ptr_ops += 1;
+        let int_type = match size_bytes {
+            1 => self.context.i8_type(),
+            2 => self.context.i16_type(),
+            4 => self.context.i32_type(),
+            8 => self.context.i64_type(),
+            _ => {
+                return Err(LlvmLoweringError::internal(format!(
+                    "Invalid volatile deref size: {}",
+                    size_bytes
+                )));
+            }
+        };
+        let loaded = builder
+            .build_load(int_type, ptr, "deref_raw_volatile")
+            .or_llvm_err()?;
+        if let Some(instr) = loaded.as_instruction_value() {
+            let _ = instr.set_volatile(true);
+        }
+        Ok(loaded.into_int_value())
+    }
+
+    /// Volatile twin of `lower_deref_mut_raw` (T0188): the store carries
+    /// the LLVM volatile flag.
+    pub fn lower_deref_mut_raw_volatile(
+        &mut self,
+        builder: &Builder<'ctx>,
+        ptr: PointerValue<'ctx>,
+        value: IntValue<'ctx>,
+        size_bytes: u8,
+    ) -> Result<()> {
+        self.stats.raw_ptr_ops += 1;
+        let truncated: BasicValueEnum = match size_bytes {
+            1 => builder
+                .build_int_truncate(value, self.context.i8_type(), "trunc_v8")
+                .or_llvm_err()?
+                .into(),
+            2 => builder
+                .build_int_truncate(value, self.context.i16_type(), "trunc_v16")
+                .or_llvm_err()?
+                .into(),
+            4 => builder
+                .build_int_truncate(value, self.context.i32_type(), "trunc_v32")
+                .or_llvm_err()?
+                .into(),
+            8 => value.into(),
+            _ => {
+                return Err(LlvmLoweringError::internal(format!(
+                    "Invalid volatile store size: {}",
+                    size_bytes
+                )));
+            }
+        };
+        let store = builder.build_store(ptr, truncated).or_llvm_err()?;
+        let _ = store.set_volatile(true);
+        Ok(())
     }
 
     /// Lower raw pointer write (store).

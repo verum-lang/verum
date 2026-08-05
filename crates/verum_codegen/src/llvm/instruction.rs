@@ -30172,6 +30172,40 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        // T0188 volatile qualified-access arms — same operand layout as
+        // DerefRaw/DerefMutRaw; the ffi lowerers stamp the LLVM volatile
+        // flag, which is the whole point of the dedicated sub-ops.
+        Some(SystemSubOpcode::PtrReadVolatile) => {
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "PtrReadVolatile: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let size_bytes = operands[2];
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "vol_read_ptr")?;
+            let mut ffi = FfiLowering::new(ctx.llvm_context());
+            let value = ffi.lower_deref_raw_volatile(ctx.builder(), ptr, size_bytes)?;
+            ctx.set_register(dst_reg, value.into());
+            Ok(())
+        }
+        Some(SystemSubOpcode::PtrWriteVolatile) => {
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "PtrWriteVolatile: insufficient operands",
+                ));
+            }
+            let ptr_reg = op_reg(operands, 0);
+            let value_reg = op_reg(operands, 1);
+            let size_bytes = operands[2];
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "vol_write_ptr")?;
+            let value = as_i64(ctx, ctx.get_register(value_reg)?, "vol_write_val")?;
+            let mut ffi = FfiLowering::new(ctx.llvm_context());
+            ffi.lower_deref_mut_raw_volatile(ctx.builder(), ptr, value, size_bytes)?;
+            Ok(())
+        }
+
         Some(SystemSubOpcode::PtrAdd) => {
             // Format: dst:reg, ptr:reg, offset:reg
             if operands.len() < 3 {
