@@ -122,12 +122,27 @@ mod ctx_slot_tests {
 
     #[test]
     fn set_overwrites_keeping_single_entry() {
+        // SAME-frame overwrite: replaced, not stacked (flat within a
+        // frame).
+        let mut stack = ContextStack::new();
+        ctx_slot_set(&mut stack, 10, 100, 1);
+        ctx_slot_set(&mut stack, 10, 200, 1);
+        assert_eq!(ctx_slot_get(&stack, 10), 200);
+        assert_eq!(stack.len(), 1);
+    }
+
+    #[test]
+    fn set_from_inner_frame_shadows_outer() {
+        // Depth-aware set (T0317 leg 2): an INNER frame's set SHADOWS
+        // the outer entry instead of destroying it — the frame-return
+        // end_scope restores the outer value (the divergence the
+        // ctx_nested_provide pins encode). The topmost entry answers
+        // reads while both remain on the stack.
         let mut stack = ContextStack::new();
         ctx_slot_set(&mut stack, 10, 100, 1);
         ctx_slot_set(&mut stack, 10, 200, 2);
         assert_eq!(ctx_slot_get(&stack, 10), 200);
-        // Flat-slot invariant: overwrite replaced, not stacked.
-        assert_eq!(stack.len(), 1);
+        assert_eq!(stack.len(), 2);
     }
 
     #[test]

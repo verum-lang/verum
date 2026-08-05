@@ -5973,7 +5973,7 @@ impl SystemSubOpcode {
             Self::DerefRawSigned         => m!("FFI_DEREF_RAW_SIGNED",       RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrReadVolatile        => m!("FFI_PTR_READ_VOLATILE",      RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrWriteVolatile       => m!("FFI_PTR_WRITE_VOLATILE",     RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::StaticMutAddrSized     => m!("FFI_STATIC_MUT_ADDR_SIZED",  MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::StaticMutAddrSized     => m!("FFI_STATIC_MUT_ADDR_SIZED",  RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrAdd                 => m!("FFI_PTR_ADD",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrSub                 => m!("FFI_PTR_SUB",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrDiff                => m!("FFI_PTR_DIFF",               RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
@@ -16601,7 +16601,8 @@ mod tests {
         // and use CbgrDealloc).  Pin both counts.
         //
         // NOT allocators by this contract (alloc=false in meta):
-        // StaticMutAddr (process-lifetime cell, no reclaim pair by
+        // StaticMutAddr / StaticMutAddrSized (process-lifetime cells,
+        // no reclaim pair by
         // design), the RawLoad/RawStore family and TlsSlot* family
         // (pure loads/stores over existing memory), and EnvGet/EnvSet/
         // EnvUnset (results are CBGR-tracked values, not paired-
@@ -16621,14 +16622,16 @@ mod tests {
     fn system_meta_mnemonic_uniqueness() {
         // Every mnemonic must be distinct so debug output stays
         // unambiguous.
-        let mut seen: Vec<&'static str> = Vec::with_capacity(77);
+        let mut seen: Vec<&'static str> = Vec::with_capacity(115);
         for_every_system_sub_opcode(|op| {
             let m = op.mnemonic();
             assert!(!seen.contains(&m),
                 "duplicate mnemonic {:?} on variant {:?}", m, op);
             seen.push(m);
         });
-        assert_eq!(seen.len(), 112);
+        // Mirrors the system_meta_count pin: 112 + the T0188/T0133
+        // trio (PtrReadVolatile / PtrWriteVolatile / StaticMutAddrSized).
+        assert_eq!(seen.len(), 115);
     }
 
     // ========================================================================
