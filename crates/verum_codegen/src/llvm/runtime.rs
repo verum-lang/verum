@@ -2119,6 +2119,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 bb.delete().ok();
             }
         }
+        // Synthetic replacement body: no source mapping — detach the
+        // compiled body's subprogram so the verifier's !dbg-on-inlinable-
+        // call rule (which SIGSEGVs opt when violated) no longer applies.
+        func.clear_subprogram();
 
         let ctx = self.context;
         let i64_type = ctx.i64_type();
@@ -2199,6 +2203,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 bb.delete().ok();
             }
         }
+        // Synthetic replacement body: no source mapping — detach the
+        // compiled body's subprogram so the verifier's !dbg-on-inlinable-
+        // call rule (which SIGSEGVs opt when violated) no longer applies.
+        func.clear_subprogram();
 
         let ctx = self.context;
         let i64_type = ctx.i64_type();
@@ -2600,6 +2608,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 bb.delete().ok();
             }
         }
+        // Synthetic replacement body: no source mapping — detach the
+        // compiled body's subprogram so the verifier's !dbg-on-inlinable-
+        // call rule (which SIGSEGVs opt when violated) no longer applies.
+        func.clear_subprogram();
 
         let ctx = self.context;
         let i64_type = ctx.i64_type();
@@ -2964,6 +2976,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 bb.delete().ok();
             }
         }
+        // Synthetic replacement body: no source mapping — detach the
+        // compiled body's subprogram so the verifier's !dbg-on-inlinable-
+        // call rule (which SIGSEGVs opt when violated) no longer applies.
+        func.clear_subprogram();
 
         let ctx = self.context;
         let i64_type = ctx.i64_type();
@@ -3408,6 +3424,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 bb.delete().ok();
             }
         }
+        // Synthetic replacement body: no source mapping — detach the
+        // compiled body's subprogram so the verifier's !dbg-on-inlinable-
+        // call rule (which SIGSEGVs opt when violated) no longer applies.
+        func.clear_subprogram();
 
         let ctx = self.context;
         let i64_type = ctx.i64_type();

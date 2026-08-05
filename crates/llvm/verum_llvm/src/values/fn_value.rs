@@ -508,6 +508,15 @@ impl<'ctx> FunctionValue<'ctx> {
         unsafe { LLVMSetSubprogram(self.as_value_ref(), subprogram.metadata_ref) }
     }
 
+    /// Detach the debug info descriptor. For functions whose compiled
+    /// body is synthetically REPLACED (runtime fixups): the new
+    /// instructions map to no source, and LLVM's verifier requires a
+    /// `!dbg` location on every inlinable call inside a function that
+    /// still carries a subprogram — detaching is the honest state.
+    pub fn clear_subprogram(self) {
+        unsafe { LLVMSetSubprogram(self.as_value_ref(), std::ptr::null_mut()) }
+    }
+
     /// Get the debug info descriptor
     pub fn get_subprogram(self) -> Option<DISubprogram<'ctx>> {
         let metadata_ref = unsafe { LLVMGetSubprogram(self.as_value_ref()) };
