@@ -14527,6 +14527,99 @@ impl TypeChecker {
         sources.iter().next().cloned()
     }
 
+    /// MOUNT AUTHORITY FOR THE VALUE NAMESPACE (the free-fn twin of
+    /// T0525's mount-scoped ctor selection; T0148's largest red
+    /// cluster). A bare name the file EXPLICITLY mounts denotes the
+    /// mounted module's item — never the flat bare slot's first-wins
+    /// winner. Measured: `mount core.base.ulid.{parse}` +
+    /// `parse("…")` resolved to semver's `parse` (`fn(&Text) ->
+    /// Result<SemVer, SemVerError>` occupied the bare env slot), so
+    /// ulid/snowflake/semver_constraint tests dispatched to stranger
+    /// modules' functions (wrong arity E102, phantom SemVer methods).
+    ///
+    /// Answers only when: this file's own body is being judged (the
+    /// in-flight guards), the name is explicitly mounted from exactly
+    /// one module, and no function-local binding shadows it. The
+    /// scheme comes from the module-qualified slot; `None` falls back
+    /// to the normal chain (a mounted TYPE has no qualified fn scheme
+    /// and keeps its type-namespace route).
+    /// The CALLEE-scheme authority chain: explicit mount first, bare
+    /// env slot second. Every place that answers "what scheme does a
+    /// bare single-segment callee have" must go through this — the
+    /// Call arm resolved callees straight from the env slot and
+    /// bypassed the mount authority (measured: `parse(&s)` in the
+    /// ulid tests still dispatched to semver's parse after the
+    /// path-position sites were fixed).
+    pub(super) fn callee_scheme_with_mount_authority(
+        &mut self,
+        name: &str,
+    ) -> Option<crate::TypeScheme> {
+        self.mount_authoritative_fn_scheme(name)
+            .or_else(|| self.ctx.env.lookup(name).cloned())
+    }
+
+    pub(super) fn mount_authoritative_fn_scheme(
+        &mut self,
+        name: &str,
+    ) -> Option<crate::TypeScheme> {
+        if !self.imports_in_progress.is_empty()
+            || !self.glob_imports_in_progress.is_empty()
+        {
+            return None;
+        }
+        if !self.explicit_imports.contains(name) {
+            return None;
+        }
+        if self.ctx.env.is_locally_bound(name) {
+            return None;
+        }
+        let src = match self.single_import_source(&verum_common::Text::from(name)) {
+            Some(s) => s,
+            None => {
+                if crate::ctor_trace_enabled() {
+                    eprintln!("[ctor-trace] mount-auth '{}': no single source", name);
+                }
+                return None;
+            }
+        };
+        let canonical = src.as_str().strip_prefix("cog.").unwrap_or(src.as_str());
+        if canonical.is_empty() {
+            return None;
+        }
+        let qualified = format!("{}.{}", canonical, name);
+        if let Some(s) = self.ctx.env.lookup(qualified.as_str()) {
+            if crate::ctor_trace_enabled() {
+                eprintln!("[ctor-trace] mount-auth '{}' -> env '{}'", name, qualified);
+            }
+            return Some(s.clone());
+        }
+        if let Maybe::Some(s) = self.lookup_function_in_module(qualified.as_str()) {
+            if crate::ctor_trace_enabled() {
+                eprintln!("[ctor-trace] mount-auth '{}' -> module '{}'", name, qualified);
+            }
+            return Some(s);
+        }
+        // Third leg: baked stdlib free fns keep their schemes ONLY in
+        // `metadata.functions` under the qualified key — env and
+        // module-context both carry bare names (trace-proven:
+        // 'core.base.ulid.parse' NOT FOUND in either). The metadata
+        // resolver is the existing ONE authority for exactly this
+        // (direct key + bake-spelling drift + re-export chains).
+        if let Some(s) = self.resolve_function_via_metadata_reexports(canonical, name) {
+            if crate::ctor_trace_enabled() {
+                eprintln!("[ctor-trace] mount-auth '{}' -> metadata '{}'", name, qualified);
+            }
+            return Some(s);
+        }
+        if crate::ctor_trace_enabled() {
+            eprintln!(
+                "[ctor-trace] mount-auth '{}': qualified '{}' NOT FOUND (env+module+metadata)",
+                name, qualified
+            );
+        }
+        None
+    }
+
     /// T0525 — does module `module_path` DECLARE or RE-EXPORT a type
     /// named `type_name`?
     ///

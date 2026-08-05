@@ -1376,6 +1376,23 @@ impl TypeEnv {
         scope.bindings.get(&Text::from(name))
     }
 
+    /// True when a NESTED (non-root) scope binds `name` — i.e. the
+    /// name is function-local at this point and shadows any
+    /// module-level item of the same spelling. Complements
+    /// [`Self::lookup_in_root_only`]: that answers "is there a
+    /// module-level item", this answers "does a local currently win".
+    pub fn is_locally_bound(&self, name: &str) -> bool {
+        let key = Text::from(name);
+        let mut scope = self;
+        while let Some(parent) = scope.parent.as_deref() {
+            if scope.bindings.contains_key(&key) {
+                return true;
+            }
+            scope = parent;
+        }
+        false
+    }
+
     /// Collect all names visible in this scope (current + parents).
     /// Used by error messages to compute "did you mean?" suggestions.
     /// Deduplicates inner-shadowing outer (inner scope wins, matching

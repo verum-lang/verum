@@ -3727,6 +3727,14 @@ impl TypeChecker {
                 }
             }
 
+            // MOUNT AUTHORITY (see mount_authoritative_fn_scheme): an
+            // explicitly mounted single-source name outranks the flat
+            // bare env slot — before the env chain, not after it.
+            if let Some(scheme) = self.mount_authoritative_fn_scheme(name) {
+                let ty = scheme.instantiate();
+                return Ok(self.unifier.apply(&ty));
+            }
+
             // Try local env first, then module context
             if let Some(scheme) = self.ctx.env.lookup(name).cloned() {
                 // =====================================================================
@@ -6138,6 +6146,13 @@ impl TypeChecker {
                 }));
             }
 
+            // MOUNT AUTHORITY (iterative-walker twin of the
+            // infer_path_expr arm — see mount_authoritative_fn_scheme).
+            if let Some(scheme) = self.mount_authoritative_fn_scheme(name) {
+                let ty = scheme.instantiate();
+                return Ok(InferResult::new(self.unifier.apply(&ty)));
+            }
+
             // COMPLETE module-level lookup: Try local env first, then module context
             match self.ctx.env.lookup(name) {
                 Some(scheme) => {
@@ -6697,7 +6712,7 @@ impl TypeChecker {
             // IMPORTANT: Explicit type args should only bind to EXPLICIT params.
             // Implicit parameters (marked with {T}) are inferred from context.
             if let Some(ref name) = callee_name {
-                if let Some(scheme) = self.ctx.env.lookup(name.as_str()).cloned() {
+                if let Some(scheme) = self.callee_scheme_with_mount_authority(name.as_str()) {
                     let (ty, fresh_vars, implicit_vars) =
                         scheme.instantiate_with_implicit_info();
                     // Also get protocol bounds mapped to fresh vars
@@ -6782,7 +6797,7 @@ impl TypeChecker {
             // unrelated variant (canonically `Backend.None` over
             // `Maybe.None`).
             if let Some(ref name) = callee_name {
-                if let Some(scheme) = self.ctx.env.lookup(name.as_str()).cloned() {
+                if let Some(scheme) = self.callee_scheme_with_mount_authority(name.as_str()) {
                     let has_proto_bounds = !scheme.var_protocol_bounds.is_empty();
                     let has_type_bounds = !scheme.var_type_bounds.is_empty();
                     if has_proto_bounds || has_type_bounds {
