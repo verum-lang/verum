@@ -2053,10 +2053,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             "emit_verum_generic_len",
             self.emit_verum_generic_len(module)
         );
-        step!(
-            "emit_verum_strlen_export",
-            self.emit_verum_strlen_export(module)
-        );
+        // verum_strlen_export is defined once by define_text_ir_helpers
+        // (Phase 0.5) — the duplicate emitter here was the last #91
+        // straggler, deleted per the T0438 census [D] row.
         step!("emit_verum_generic_eq", self.emit_verum_generic_eq(module));
         step!(
             "emit_verum_generic_hash",
@@ -4444,44 +4443,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
-    /// verum_strlen_export(s: ptr) -> i64
-    /// Thin wrapper around strlen.
-    fn emit_verum_strlen_export(&self, module: &Module<'ctx>) -> Result<()> {
-        if let Some(f) = module.get_function("verum_strlen_export") {
-            if f.count_basic_blocks() > 0 {
-                return Ok(());
-            }
-        }
-
-        let ctx = self.context;
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let i64_type = ctx.i64_type();
-
-        let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-        let func = super::error::get_or_declare_function(module, "verum_strlen_export", fn_type);
-
-        let entry = ctx.append_basic_block(func, "entry");
-        let builder = ctx.create_builder();
-        builder.position_at_end(entry);
-
-        let s = func
-            .get_nth_param(0)
-            .or_internal("missing param 0")?
-            .into_pointer_value();
-        let strlen_fn = self.get_or_declare_strlen(module);
-        let len = builder
-            .build_call(strlen_fn, &[s.into()], "len")
-            .or_llvm_err()?
-            .basic_value_or("call returned void")?
-            .into_int_value();
-        builder.build_return(Some(&len)).or_llvm_err()?;
-        Ok(())
-    }
-    // **Removed `emit_verum_text_from_static`** — dead duplicate of canonical `define_text_ir_helpers` emitter; see comment above (#91 perf cleanup).
-
-    /// Emit verum_is_text_object(val: i64) -> i1 as inline LLVM IR helper.
-    /// Heuristic: checks if val looks like a valid heap-allocated Text object.
-    /// Returns function that can be called from other emitted functions.
     fn emit_verum_is_text_object(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
         if let Some(f) = module.get_function("verum_is_text_object") {
             if f.count_basic_blocks() > 0 {

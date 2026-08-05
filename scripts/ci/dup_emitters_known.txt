@@ -14,7 +14,6 @@ verum_file_write_text	[A]	T0208[A] runtime-wins family; divergences tracked as T
 verum_pop_stack_frame	[C]	T0208 intentional last-wins override; consolidation recommended
 verum_process_wait	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
 verum_push_stack_frame	[C]	T0208 intentional last-wins override; consolidation recommended
-verum_strlen_export	[D]	#91 straggler - delete emit_verum_strlen_export
 verum_tcp_accept	[B]	#96 dead legacy runtime networking emitter - deletion candidate
 verum_tcp_close	[B]	#96 dead legacy runtime networking emitter - deletion candidate
 verum_tcp_connect	[B]	#96 dead legacy runtime networking emitter - deletion candidate
