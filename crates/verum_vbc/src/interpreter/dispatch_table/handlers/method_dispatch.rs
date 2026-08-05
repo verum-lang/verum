@@ -1498,12 +1498,49 @@ pub(in super::super) fn handle_call_method(
             };
 
             match base_method.as_str() {
-                "borrow" | "borrow_mut" => {
+                "borrow" | "borrow_mut" | "get" => {
                     // Return the inner value (or a reference to it)
                     // In VBC, we simplify by returning the value itself since
-                    // we're single-threaded and don't need actual borrow checking
+                    // we're single-threaded and don't need actual borrow checking.
+                    // `get` carries the same `&T` contract as `borrow`
+                    // (memory.vr documents it as the Deref-equivalent
+                    // accessor); pre-fix it fell into the auto-deref arm,
+                    // which forwarded a `Shared<Int>.get()` to the INNER
+                    // Int and panicked "method 'get' not found".
                     let inner = unsafe { *data_ptr.add(1) };
                     state.set_reg(dst, inner);
+                    return Ok(DispatchResult::Continue);
+                }
+                // **SHARED-PTREQ-1** — pointer identity over the interp
+                // repr. The COMPILED `Shared.ptr_eq` body compares
+                // `self.ptr`, a field of the SOURCE-level SharedInner
+                // layout that the interp repr `[refcount][value]` does
+                // not carry — here the Shared OBJECT ADDRESS is the
+                // identity (clone returns the same object, refcount
+                // bumped; distinct `new`s allocate distinct objects).
+                // Same repr-coupled class as SHARED-STRONGCOUNT-1
+                // below; pre-fix the auto-deref arm forwarded ptr_eq to
+                // the INNER value and dispatch panicked ("method
+                // 'Shared.ptr_eq' not found ... runtime kind Object").
+                "ptr_eq" if args.count >= 1 => {
+                    let caller_base = state.reg_base();
+                    let raw = state.registers.get(caller_base, Reg(args.start.0));
+                    // `&other` arrives as a CBGR register ref (locals),
+                    // a single-value FatRef (element refs), or the
+                    // Shared value itself (by-value pass) — peel to the
+                    // referent before comparing addresses.
+                    let other = if is_cbgr_ref(&raw) {
+                        let (abs_index, _) = decode_cbgr_ref(raw);
+                        state.registers.get_absolute(abs_index)
+                    } else if let Some(single) = fat_ref_single_referent(&raw) {
+                        single
+                    } else {
+                        raw
+                    };
+                    let same = other.is_ptr()
+                        && !other.is_nil()
+                        && std::ptr::eq(other.as_ptr::<u8>(), ptr);
+                    state.set_reg(dst, Value::from_bool(same));
                     return Ok(DispatchResult::Continue);
                 }
                 "clone" => {
