@@ -7,7 +7,7 @@
 meta fn test_is_ci() -> Bool using [MetaRuntime] {
     let ci = is_ci();
     // This is a boolean - may be true or false
-    ci == true || ci == false
+    (ci == true) || (ci == false)
 }
 
 // Test recursion_limit - get meta evaluation recursion limit

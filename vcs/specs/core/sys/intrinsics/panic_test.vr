@@ -124,7 +124,7 @@ fn test_panic_setup() {
 
     // Check that is_debug returns a boolean
     let debug_mode = is_debug();
-    assert(debug_mode == true || debug_mode == false);
+    assert((debug_mode == true) || (debug_mode == false));
 
     if debug_mode {
         print("Running in debug mode");

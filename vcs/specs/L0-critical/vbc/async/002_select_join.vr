@@ -178,7 +178,7 @@ async fn test_race_bool() {
     };
 
     // Either true or false
-    assert(result == true || result == false);
+    assert((result == true) || (result == false));
 }
 
 // =============================================================================

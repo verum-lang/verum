@@ -64,7 +64,7 @@ fn test_debug_mode_detection() {
     let debug = is_debug();
 
     // is_debug() returns a boolean
-    assert(debug == true || debug == false);
+    assert((debug == true) || (debug == false));
 
     // In test runs, we're typically in debug mode
     // but this test should pass in both modes
