@@ -995,6 +995,21 @@ fn register_module_metadata(
                     Some(v) if v.as_str().starts_with('&') && !rendered.starts_with('&') => {
                         v.clone()
                     }
+                    // T0108/T0188/T0133: RAW-POINTER spellings are the same
+                    // lossy class — VBC TypeRefs have no pointer form, so a
+                    // `*const Byte` param renders through whatever type-id
+                    // the codegen pinned (measured: the MODULE-named
+                    // descriptor — the checker then demanded
+                    // 'core.intrinsics' as the param type and every mounted
+                    // pointer intrinsic failed its pin). The carried
+                    // declared spelling is the truth.
+                    Some(v)
+                        if (v.as_str().starts_with("*const ")
+                            || v.as_str().starts_with("*mut "))
+                            && !rendered.starts_with('*') =>
+                    {
+                        v.clone()
+                    }
                     _ => rendered,
                 };
                 ParamDescriptor {
@@ -1037,7 +1052,15 @@ fn register_module_metadata(
         let carried_return = fn_desc
             .return_type_name
             .and_then(|sid| module.strings.get(sid))
-            .filter(|s| s.contains('[') || rendered_return.contains("__opaque_type_"));
+            .filter(|s| {
+                s.contains('[')
+                    || rendered_return.contains("__opaque_type_")
+                    // T0108: raw-pointer returns are the param-side class
+                    // exactly (`ptr_offset -> *const T` rendered through
+                    // the module-named descriptor id).
+                    || ((s.starts_with("*const ") || s.starts_with("*mut "))
+                        && !rendered_return.starts_with('*'))
+            });
         let return_type = match carried_return {
             Some(verbatim) => Text::from(verbatim),
             None => Text::from(rendered_return),

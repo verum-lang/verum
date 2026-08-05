@@ -6758,6 +6758,17 @@ impl TypeChecker {
             }
             ret
         };
+        // CANONICAL-NOMINAL note (Pillar-2, MEASURED AND REVERTED): the
+        // mount-scoped TYPE authority speaks QUALIFIED for literals
+        // while these schemes speak BARE — the semver/regression
+        // mismatch ('expected SemVer, found core.base.semver.SemVer').
+        // Qualifying HERE was tried and flipped the 10-file identity
+        // cluster back red: method lookup and the wider checker consume
+        // BARE nominals (inherent buckets, ctor registries), so a
+        // producer-side qualification splits the type into two
+        // non-unifying spellings ACROSS consumers. The canonical seam
+        // is the DefId campaign (T0690 umbrella): identity by id with
+        // names at edges — not a per-resolver spelling flip.
         let fn_ty = Type::function(params, return_ty);
 
         // BAKED-DEFAULT-ARG-1: relax the arity gate for defaulted

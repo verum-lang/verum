@@ -15590,6 +15590,22 @@ impl VbcCodegen {
             // carrier<dyn P> method calls route through `dyn:P.method`.
             // Mirrors the same rendering in extract_type_name_from_ast
             // (mod.rs DynProtocol arm) — one dyn spelling, both authorities.
+            // Raw pointers / unsafe references: the SPELLING is the
+            // dispatch fact (see extract_type_name_from_ast's twin arms)
+            // — and for the v2.10 param carry it is the ONLY faithful
+            // channel: VBC TypeRefs have no pointer form, so the render
+            // side degrades to whatever type-id the codegen pinned
+            // (measured: the MODULE-named descriptor — every mounted
+            // pointer intrinsic then demanded 'core.intrinsics' as its
+            // param type, T0108/T0188/T0133 pins).
+            TypeKind::Pointer { inner, mutable, .. } => {
+                let prefix = if *mutable { "*mut " } else { "*const " };
+                self.extract_type_name_at(inner, false)
+                    .map(|n| format!("{}{}", prefix, n))
+            }
+            TypeKind::UnsafeReference { inner, .. } => self
+                .extract_type_name_at(inner, false)
+                .map(|n| format!("&unsafe {}", n)),
             TypeKind::DynProtocol { bounds, .. } => {
                 let names: Vec<String> = bounds
                     .iter()
