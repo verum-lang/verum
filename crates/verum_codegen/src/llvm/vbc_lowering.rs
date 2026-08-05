@@ -887,6 +887,13 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         &self.module
     }
 
+    /// The LLVM context this lowering allocates in — needed by
+    /// `native_codegen` to fresh-parse the round-tripped module into
+    /// the SAME context before `run_passes` (#98).
+    pub fn llvm_context(&self) -> &'ctx Context {
+        self.context
+    }
+
     /// Replace the LLVM module wholesale.  Used by `native_codegen`
     /// to install a bitcode-roundtripped module before
     /// `Module::run_passes` (#98) — fresh-parsed modules carry no
@@ -2012,8 +2019,21 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             effective_params.len(),
                         );
                     }
-                    // SAFETY: declare phase — the stub has no uses yet;
-                    // deleting it cannot dangle any reference.
+                    // The id→fn MAP is a reference too: the stub's own
+                    // func_id was inserted when ITS descriptor declared.
+                    // Left in place it dangles after the delete, and a
+                    // reused allocation makes the stale id resolve to
+                    // whichever function LLVM hands out next — measured:
+                    // the stub id then LOWERED INTO the replacement
+                    // function, its failed prologue got unreachable-
+                    // patched, and the real body was APPENDED AFTER the
+                    // terminator (invalid SSA numbering, opt SIGSEGV on
+                    // int128_full_width). Purge every map entry naming
+                    // the stub BEFORE deleting it.
+                    self.functions.retain(|_, f| *f != existing);
+                    // SAFETY: declare phase — call sites are emitted
+                    // later, and the id map was purged above; nothing
+                    // references the stub any more.
                     unsafe { existing.delete() };
                     self.module.add_function(&func_name, fn_type, None)
                 } else if existing.count_params() as usize != effective_params.len() {
@@ -2332,6 +2352,24 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 .unwrap_or("<unknown>");
             LlvmLoweringError::MissingFunction(Text::from(name))
         })?;
+        // INVARIANT: one LLVM function receives at most ONE emission.
+        // A target that already carries basic blocks was lowered (or
+        // failure-patched) by an earlier descriptor — appending a
+        // second prologue lands AFTER that body's terminator, which is
+        // structurally invalid IR (duplicate implicit SSA numbers) and
+        // SIGSEGVs the pass pipeline. Whatever mapping defect routed
+        // two ids here, refusing the second emission keeps the module
+        // well-formed and the first body authoritative.
+        if llvm_fn.count_basic_blocks() > 0 {
+            tracing::warn!(
+                "skipping re-emission into '{}': LLVM function already has a body",
+                vbc_module
+                    .strings
+                    .get(vbc_func.descriptor.name)
+                    .unwrap_or("<unknown>")
+            );
+            return Ok(());
+        }
 
         // Set calling convention based on function descriptor
         let calling_convention = &vbc_func.descriptor.calling_convention;
