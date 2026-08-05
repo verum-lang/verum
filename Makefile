@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census check-panic-surface
+.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census check-panic-surface check-dup-emitters
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -47,6 +47,9 @@ check-internal-refs: ## Gate: no references to the internal/ directory in tracke
 
 check-panic-surface: ## Gate (T0424): no net increase of unwrap/expect in verum_codegen/src/llvm production code
 	python3 scripts/ci/check_panic_surface_ratchet.py
+
+check-dup-emitters: ## Gate (T0438): one definer per verum_* symbol + no libc-referencing emitter bodies without a syscall path
+	python3 scripts/ci/check_dup_emitters.py
 
 check-bake-prepass-parity: ## Gate (T0640): every collect_all_declarations pre-pass is classified for the stdlib bake
 	python3 scripts/ci/check_bake_prepass_parity.py

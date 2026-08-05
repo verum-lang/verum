@@ -1473,6 +1473,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // root cause (two emit paths fighting over one symbol's
             // ABI) is visible at compile time.
             super::error::check_no_signature_mismatches()?;
+            // T0438 backstop: emit-time duplicate-definer registry
+            // (warn-default; VERUM_STRICT_DEFINERS=1 hard-errors).
+            super::error::check_no_duplicate_definers()?;
             // Monomorphization-completeness gate: surface every Call that
             // degraded to a const-zero stub (unresolved target — typically an
             // un-monomorphized generic protocol dispatch).  Warning by default;

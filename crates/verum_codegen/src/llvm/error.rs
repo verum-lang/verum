@@ -483,6 +483,76 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 
 /// One observed signature collision.
+/// T0438 BACKSTOP — runtime definer registry, the emit-time sibling of
+/// the `check-dup-emitters` SOURCE census. The census sees dead bodies
+/// (its whole point); this registry sees whatever actually EMITS,
+/// including any definer using an idiom the census regexes miss.
+/// `#[track_caller]` records file:line for free and dedupes intra-fn
+/// self-rebuilds (same Location). Warn-by-default;
+/// `VERUM_STRICT_DEFINERS=1` upgrades duplicates to a hard error —
+/// the same drive-to-zero discipline as signature mismatches above.
+fn definer_registry()
+-> &'static Mutex<std::collections::HashMap<String, Vec<&'static std::panic::Location<'static>>>>
+{
+    static REGISTRY: OnceLock<
+        Mutex<std::collections::HashMap<String, Vec<&'static std::panic::Location<'static>>>>,
+    > = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Record that the CALLING emitter is about to define `symbol`'s body.
+/// New emitters should open their body-emission path with this; the
+/// registry is drained once per lowering by
+/// [`check_no_duplicate_definers`].
+#[track_caller]
+pub fn register_definer(symbol: &str) {
+    let loc = std::panic::Location::caller();
+    if let Ok(mut g) = definer_registry().lock() {
+        let entry = g.entry(symbol.to_string()).or_default();
+        if !entry.iter().any(|l| std::ptr::eq(*l, loc)) {
+            entry.push(loc);
+        }
+    }
+}
+
+/// Drain the definer registry and surface any symbol with more than one
+/// distinct defining Location. Warning by default (stderr);
+/// `VERUM_STRICT_DEFINERS=1` returns an error. Mirrors
+/// [`check_no_signature_mismatches`].
+pub fn check_no_duplicate_definers() -> Result<()> {
+    let dups: Vec<(String, Vec<String>)> = {
+        let Ok(mut g) = definer_registry().lock() else {
+            return Ok(());
+        };
+        std::mem::take(&mut *g)
+            .into_iter()
+            .filter(|(_, locs)| locs.len() > 1)
+            .map(|(sym, locs)| {
+                (
+                    sym,
+                    locs.iter()
+                        .map(|l| format!("{}:{}", l.file(), l.line()))
+                        .collect(),
+                )
+            })
+            .collect()
+    };
+    if dups.is_empty() {
+        return Ok(());
+    }
+    let mut msg = String::from("duplicate verum_* definers this lowering:\n");
+    for (sym, locs) in &dups {
+        msg.push_str(&format!("  {} <- {}\n", sym, locs.join(", ")));
+    }
+    if std::env::var_os("VERUM_STRICT_DEFINERS").is_some() {
+        return Err(LlvmLoweringError::internal(format!(
+            "{msg}one symbol, one definer (VERUM_STRICT_DEFINERS=1)"
+        )));
+    }
+    eprintln!("[dup-definers] WARNING: {msg}");
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct SignatureMismatch {
     /// LLVM symbol name (e.g. `"listen"`).

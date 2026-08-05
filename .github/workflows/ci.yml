@@ -408,6 +408,14 @@ jobs:
       - name: Check codegen panic-surface ratchet
         run: python3 scripts/ci/check_panic_surface_ratchet.py
 
+      # **Dup-emitter + dead-libc-body census** (T0438).
+      # One definer per verum_* symbol (a losing emitter leaves no IR
+      # trace, so only a source census sees both), and no emitter body
+      # referencing a forbidden-on-Linux libc extern without a
+      # target_is_linux syscall path (the T0436 landmine class).
+      - name: Check dup emitters and dead libc bodies
+        run: python3 scripts/ci/check_dup_emitters.py
+
       # **No-libc dynamic linkage** (#80).
       # Builds a smoke .vr program and verifies the produced binary
       # only links the platform's permitted system boundary

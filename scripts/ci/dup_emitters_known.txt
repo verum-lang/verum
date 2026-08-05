@@ -1,0 +1,30 @@
+# Known duplicate verum_* definers (T0438 gate baseline).
+# Format: symbol<TAB>bucket<TAB>task-ref/rationale.
+# [C] = intentional last-wins override (permanent allowlist).
+# [A]/[B]/[D] = tracked debt - resolving one makes the gate ask to drop its line.
+# A duplicate NOT listed here fails the build naming both sites.
+verum_fd_close	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
+verum_fd_read_all	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
+verum_file_append_all	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
+verum_file_close	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
+verum_file_open	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
+verum_file_read_all	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
+verum_file_read_text	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
+verum_file_write_all	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
+verum_file_write_text	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
+verum_pop_stack_frame	[C]	T0208 intentional last-wins override; consolidation recommended
+verum_process_wait	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
+verum_push_stack_frame	[C]	T0208 intentional last-wins override; consolidation recommended
+verum_strlen_export	[D]	#91 straggler - delete emit_verum_strlen_export
+verum_tcp_accept	[B]	#96 dead legacy runtime networking emitter - deletion candidate
+verum_tcp_close	[B]	#96 dead legacy runtime networking emitter - deletion candidate
+verum_tcp_connect	[B]	#96 dead legacy runtime networking emitter - deletion candidate
+verum_tcp_listen	[B]	#96 dead legacy runtime networking emitter - deletion candidate
+verum_tcp_recv_text	[B]	#96 dead legacy runtime networking emitter - deletion candidate
+verum_tcp_send_text	[B]	#96 dead legacy runtime networking emitter - deletion candidate
+verum_tls_get	[C]	T0208 intentional last-wins override; consolidation recommended
+verum_tls_set	[C]	T0208 intentional last-wins override; consolidation recommended
+verum_udp_bind	[B]	#96 dead legacy runtime networking emitter - deletion candidate
+verum_udp_recv_text	[B]	#96 dead legacy runtime networking emitter - deletion candidate
+verum_udp_send_text	[B]	#96 dead legacy runtime networking emitter - deletion candidate
+libc:lower_ffi_extended	[L]	T0310 native-Linux env leg: EnvGet lowers to libc getenv with no target_is_linux syscall path - needs the envp-from-_start machinery
