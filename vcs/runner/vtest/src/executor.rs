@@ -1301,10 +1301,30 @@ impl Executor {
         };
 
         match result {
-            Ok(()) => TestOutcome::Pass {
-                tier,
-                duration: start.elapsed(),
-            },
+            Ok(()) => {
+                // T0648: a passing typecheck must still honour its
+                // warning assertions — pre-fix these directives were
+                // parsed and silently ignored.
+                if let Err(reason) = self.check_expected_warnings(
+                    &diagnostics_str,
+                    &directives.expected_warnings,
+                    directives.expected_warning_count,
+                ) {
+                    return TestOutcome::Fail {
+                        tier,
+                        reason: format!("Typecheck passed but {}", reason).into(),
+                        expected: Some(
+                            format!("{:?}", directives.expected_warnings).into(),
+                        ),
+                        actual: Some(diagnostics_str.into()),
+                        duration: start.elapsed(),
+                    };
+                }
+                TestOutcome::Pass {
+                    tier,
+                    duration: start.elapsed(),
+                }
+            }
             Err(e) => {
                 // Collect error output from session diagnostics
                 let error_output = format!("{}", e);
@@ -2936,6 +2956,47 @@ impl Executor {
     }
 
     /// Check if actual errors match expected errors.
+    /// T0648: warning twin of `check_expected_errors` — `@expected-warning`
+    /// / `@expected-warning-count` were parsed and never compared, so the
+    /// five .vr tests carrying them could not fail on their warning
+    /// assertions. Same matching ladder (structured parse first,
+    /// string-match fallback); counts compare against parsed
+    /// warning-severity records. Returns `Err(reason)` naming exactly
+    /// what was missing.
+    fn check_expected_warnings(
+        &self,
+        diagnostics: &str,
+        expected: &[ExpectedError],
+        expected_count: Option<usize>,
+    ) -> Result<(), String> {
+        if expected.is_empty() && expected_count.is_none() {
+            return Ok(());
+        }
+        let actual = ParsedError::parse_stderr(diagnostics);
+        if let Some(count) = expected_count {
+            let actual_count = actual
+                .iter()
+                .filter(|e| e.severity == "warning")
+                .count();
+            if actual_count != count {
+                return Err(format!(
+                    "expected {} warning(s), diagnostics carry {}",
+                    count, actual_count
+                ));
+            }
+        }
+        for exp in expected {
+            let found = actual.iter().any(|a| a.matches(exp));
+            if !found && !exp.matches_stderr(diagnostics) {
+                return Err(format!(
+                    "expected warning {:?} not present in diagnostics",
+                    exp
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn check_expected_errors(&self, stderr: &str, expected: &[ExpectedError]) -> bool {
         if expected.is_empty() {
             // No specific errors expected, just check that there was an error
