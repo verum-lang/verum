@@ -622,6 +622,13 @@ pub(crate) fn do_return(
     }
 
     // Pop current frame
+    // T0317 leg 1: context entries provided AT this frame's depth end with
+    // the frame. Flat-slot sets (ctx_set) and any opcode provide whose
+    // CtxEnd an early return skipped would otherwise leak into the caller
+    // — end_scope was previously test-only, so the slot path could never
+    // shadow safely. Depth is read BEFORE the pop (entries were recorded
+    // with the departing frame's depth).
+    let departing_depth = state.call_stack.depth();
     let frame = match state.call_stack.pop_frame() {
         Ok(f) => f,
         Err(_) => {
@@ -629,6 +636,7 @@ pub(crate) fn do_return(
             return Ok(DispatchResult::FinalReturn(value));
         }
     };
+    state.context_stack.end_scope(departing_depth);
 
     // Pop registers
     state.registers.pop_frame(frame.reg_base);

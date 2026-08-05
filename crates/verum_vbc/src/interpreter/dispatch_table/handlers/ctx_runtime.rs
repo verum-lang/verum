@@ -77,9 +77,15 @@ pub(in super::super) fn ctx_slot_set(
     stack_depth: usize,
 ) {
     if let Some(key) = slot_key(slot) {
-        // Replace-topmost-else-push via the existing stack primitives —
-        // no parallel storage, no new ContextStack surface required.
-        stack.end_by_type(key);
+        // Depth-aware set (T0317 leg 2): replace only an entry this SAME
+        // frame provided; an OUTER frame's entry is shadowed by a push,
+        // and the frame-return end_scope (leg 1) restores it. The old
+        // end_by_type-then-provide destroyed the outer value — the exact
+        // divergence the ctx_nested_provide_pins encode (the opcode
+        // CtxProvide/CtxEnd path was always proper LIFO).
+        if stack.top_depth_by_type(key) == Some(stack_depth) {
+            stack.end_by_type(key);
+        }
         stack.provide(key, Value::from_i64(value), stack_depth);
     }
 }

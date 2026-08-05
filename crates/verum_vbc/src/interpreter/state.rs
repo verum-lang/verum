@@ -1028,6 +1028,18 @@ impl ContextStack {
     /// if an entry was removed.  Used by the V-LLSI raw intrinsic
     /// `__ctx_end_raw(type_id)` from `core.sys.context_ops`, which
     /// addresses the entry by type_id rather than by stack depth.
+    /// Depth of the topmost entry for `ctx_type`, if any (T0317 —
+    /// lets the flat-slot set distinguish same-frame overwrite from
+    /// an outer entry that must be SHADOWED, not destroyed).
+    pub fn top_depth_by_type(&self, ctx_type: u32) -> Option<usize> {
+        self.entries
+            .iter()
+            .rev()
+            .find(|e| e.ctx_type == ctx_type)
+            .map(|e| e.stack_depth)
+    }
+
+    /// Removes the most recent entry of the given context type.
     pub fn end_by_type(&mut self, ctx_type: u32) -> bool {
         if let Some(idx) = self.entries.iter().rposition(|e| e.ctx_type == ctx_type) {
             self.entries.remove(idx);

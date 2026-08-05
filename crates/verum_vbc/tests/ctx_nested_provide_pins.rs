@@ -14,7 +14,7 @@
 //! so the outer value is destroyed and nothing restores it.
 //!
 //! The first pin covers the opcode path and passes today.  The second
-//! states the semantics the slot path owes and is ignored until T0317
+//! states the semantics the slot path owes — armed since T0317 landed
 //! lands: making the slot path shadow rather than replace also requires
 //! `ContextStack::end_scope` to be driven by the interpreter's return
 //! path, which currently never happens outside tests — pushing without
@@ -50,7 +50,6 @@ fn opcode_path_restores_the_outer_value_after_a_nested_provide() {
 }
 
 #[test]
-#[ignore = "T0317: the flat slot surface replaces instead of shadowing"]
 fn slot_path_restores_the_outer_value_after_a_nested_set() {
     // Same nesting expressed through `ctx_set`. `ctx_slot_set` is
     // crate-private, so this drives the two `ContextStack` primitives it
@@ -60,14 +59,17 @@ fn slot_path_restores_the_outer_value_after_a_nested_set() {
 
     stack.provide(LOGGER, Value::from_i64(1), 1);
 
-    // What `ctx_slot_set` does today at a deeper call depth: drop the
-    // topmost entry for the type, then push the new one.
-    stack.end_by_type(LOGGER);
+    // What `ctx_slot_set` does since T0317 at a deeper call depth:
+    // replace ONLY a same-depth entry, otherwise SHADOW by pushing —
+    // mirrored here through the same primitives it composes.
+    if stack.top_depth_by_type(LOGGER) == Some(2) {
+        stack.end_by_type(LOGGER);
+    }
     stack.provide(LOGGER, Value::from_i64(2), 2);
     assert_eq!(stack.get(LOGGER).map(|v| v.as_i64()), Some(2));
 
-    // Leaving the inner scope must uncover the outer value. It cannot,
-    // because `end_by_type` already deleted it.
+    // Leaving the inner scope (the frame-return end_scope wired by
+    // T0317 leg 1) must uncover the outer value.
     stack.end_scope(2);
     assert_eq!(
         stack.get(LOGGER).map(|v| v.as_i64()),
@@ -85,7 +87,9 @@ fn a_repeated_set_at_one_depth_must_not_grow_the_store() {
     let mut stack = ContextStack::new();
 
     for i in 0..64 {
-        stack.end_by_type(LOGGER);
+        if stack.top_depth_by_type(LOGGER) == Some(1) {
+            stack.end_by_type(LOGGER);
+        }
         stack.provide(LOGGER, Value::from_i64(i), 1);
     }
 
