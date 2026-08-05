@@ -2364,6 +2364,52 @@ impl VbcCodegen {
             .map(|m| crate::types::StringId(self.ctx.intern_string_raw(&m)))
     }
 
+    /// T0133: declared byte width of a `static mut`'s type, for the
+    /// scalar-vs-wide cell decision. `Some(w)` only for shapes the
+    /// native cell model covers exactly: scalars (8) and fixed-length
+    /// arrays of scalars (elem_width * N; `[Byte; N]` packs at 1).
+    /// `None` = record/generic/unsized — those stay on the TLS path
+    /// unchanged (honest fallback, not a guess).
+    fn static_mut_byte_width(ty: &verum_ast::Type) -> Option<u32> {
+        use verum_ast::ty::TypeKind;
+        fn scalar_width(k: &TypeKind) -> Option<u32> {
+            match k {
+                TypeKind::Int | TypeKind::Float | TypeKind::Bool | TypeKind::Char => Some(8),
+                TypeKind::Path(p) => {
+                    let n = p.as_ident()?.name.as_str();
+                    if n == "Byte" || n == "UInt8" || n == "Int8" {
+                        Some(1)
+                    } else if verum_common::well_known_types::type_names::is_numeric_type(n)
+                        || n == "Bool"
+                        || n == "Char"
+                    {
+                        Some(8)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }
+        match &ty.kind {
+            TypeKind::Array { element, size } => {
+                let elem = scalar_width(&element.kind)?;
+                let n = match size {
+                    verum_common::Maybe::Some(e) => match &e.kind {
+                        verum_ast::expr::ExprKind::Literal(verum_ast::Literal {
+                            kind: verum_ast::LiteralKind::Int(il),
+                            ..
+                        }) => u32::try_from(il.value).ok()?,
+                        _ => return None,
+                    },
+                    verum_common::Maybe::None => return None,
+                };
+                elem.checked_mul(n)
+            }
+            k => scalar_width(k),
+        }
+    }
+
     fn extract_source_module_name(module: &Module) -> Option<String> {
         for item in module.items.iter() {
             if let ItemKind::Module(decl) = &item.kind {
@@ -8345,6 +8391,9 @@ impl VbcCodegen {
                         bare
                     );
                     let slot = self.ctx.register_thread_local(&mangled);
+                    if let Some(w) = Self::static_mut_byte_width(&static_decl.ty) {
+                        self.ctx.static_mut_byte_widths.insert(mangled.clone(), w);
+                    }
 
                     // Primitive discriminator for instruction selection
                     // (scope-aware `get_constant_type` resolves it).
@@ -8370,6 +8419,9 @@ impl VbcCodegen {
                     // Assign a TLS slot for this variable
                     let name = static_decl.name.name.to_string();
                     let slot = self.ctx.register_thread_local(&name);
+                    if let Some(w) = Self::static_mut_byte_width(&static_decl.ty) {
+                        self.ctx.static_mut_byte_widths.insert(name.clone(), w);
+                    }
 
                     // Also register with qualified name for cross-module imports
                     let module_name = &self.config.module_name;

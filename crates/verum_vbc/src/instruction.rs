@@ -5005,6 +5005,14 @@ pub enum SystemSubOpcode {
     /// Volatile pointer WRITE (T0188) — store + volatile flag at AOT;
     /// DerefMutRaw twin at Tier-0. Wire: [ptr][value][width].
     PtrWriteVolatile = 0x69,
+    /// Sized static-mut cell address (T0133): the wide twin of
+    /// `StaticMutAddr` for statics wider than 8 bytes (`[Int; 64]`,
+    /// packed byte arrays). Wire: [dst][slot_lo][slot_hi][size_lo][size_hi]
+    /// (size in BYTES; the interpreter allocates a stable 8-aligned cell
+    /// of ceil(size/8) words, zero-initialised, lazily per slot).
+    /// Additive beside 0x52 so pre-existing bytecode keeps its exact
+    /// operand shape — the encoder/decoder-drift class stays closed.
+    StaticMutAddrSized = 0x6A,
 
     // ========================================================================
     // Time Operations (0x70-0x7F)
@@ -5784,6 +5792,7 @@ impl SystemSubOpcode {
             0x67 => Some(Self::DerefRawSigned),
             0x68 => Some(Self::PtrReadVolatile),
             0x69 => Some(Self::PtrWriteVolatile),
+            0x6A => Some(Self::StaticMutAddrSized),
             0x63 => Some(Self::PtrAdd),
             0x64 => Some(Self::PtrSub),
             0x65 => Some(Self::PtrDiff),
@@ -5964,6 +5973,7 @@ impl SystemSubOpcode {
             Self::DerefRawSigned         => m!("FFI_DEREF_RAW_SIGNED",       RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrReadVolatile        => m!("FFI_PTR_READ_VOLATILE",      RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrWriteVolatile       => m!("FFI_PTR_WRITE_VOLATILE",     RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::StaticMutAddrSized     => m!("FFI_STATIC_MUT_ADDR_SIZED",  MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
             Self::PtrAdd                 => m!("FFI_PTR_ADD",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrSub                 => m!("FFI_PTR_SUB",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrDiff                => m!("FFI_PTR_DIFF",               RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
@@ -16460,14 +16470,14 @@ mod tests {
 
     #[test]
     fn system_meta_count_pinned_at_one_hundred_eleven() {
-        // 113 currently reachable variants spread over twelve 16-byte
+        // 114 currently reachable variants spread over twelve 16-byte
         // bands.  Bumping this assertion is the explicit signal that
         // a new SystemSubOpcode entry has landed and the
         // corresponding meta() arm is in place.
         let mut count = 0;
         for_every_system_sub_opcode(|_| count += 1);
-        assert_eq!(count, 114,
-            "SystemSubOpcode variant count drift: expected 114, got {}",
+        assert_eq!(count, 115,
+            "SystemSubOpcode variant count drift: expected 115, got {}",
             count);
     }
 

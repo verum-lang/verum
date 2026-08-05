@@ -31550,6 +31550,44 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        Some(SystemSubOpcode::StaticMutAddrSized) => {
+            // Wide twin (T0133): same runtime-helper pattern with the
+            // declared byte size as the second arg —
+            // `verum_static_mut_cell_addr_sized(slot, size) -> *mut u8`.
+            // Mirrors Tier-0's `static_mut_cell_addr_sized`.
+            if operands.len() < 5 {
+                return Err(LlvmLoweringError::internal(
+                    "StaticMutAddrSized: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let slot = ((operands[2] as u64) << 8) | (operands[1] as u64);
+            let size = ((operands[4] as u64) << 8) | (operands[3] as u64);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let fn_type = ptr_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
+            let helper_fn = super::error::get_or_declare_function(
+                module,
+                "verum_static_mut_cell_addr_sized",
+                fn_type,
+            );
+            let result = ctx
+                .builder()
+                .build_call(
+                    helper_fn,
+                    &[
+                        i64_ty.const_int(slot, false).into(),
+                        i64_ty.const_int(size, false).into(),
+                    ],
+                    "static_mut_addr_sized",
+                )
+                .or_llvm_err()?
+                .basic_value_or("StaticMutAddrSized: expected return value")?;
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
         Some(SystemSubOpcode::CreateCallback) => {
             // Format: dst:reg, fn_id:u32, signature_idx:u32 — emitted by
             // `compile_ffi_callback` (verum_vbc/src/codegen/expressions.rs)

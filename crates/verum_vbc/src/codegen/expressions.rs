@@ -24122,8 +24122,33 @@ impl VbcCodegen {
             None => return Ok(None),
         };
 
-        // Emit FfiExtended { StaticMutAddr, operands: [dst, slot_lo, slot_hi] }.
+        // T0133: a static wider than one word routes through the SIZED
+        // twin — the interpreter allocates a stable 8-aligned cell of the
+        // declared width instead of the 8-byte scalar cell (pre-fix,
+        // `static mut TABLE: [Int; 64]` never reached a native cell at
+        // all: the scalar-only gate sent it down the TLS fallback).
+        let width = self
+            .ctx
+            .static_mut_byte_widths
+            .get(&name)
+            .copied()
+            .unwrap_or(8);
         let dst = self.ctx.alloc_temp();
+        if width > 8 {
+            let mut operands = Vec::<u8>::with_capacity(6);
+            Self::write_reg(&mut operands, dst.0);
+            operands.push((slot & 0xFF) as u8);
+            operands.push(((slot >> 8) & 0xFF) as u8);
+            let w = width.min(u16::MAX as u32) as u16;
+            operands.push((w & 0xFF) as u8);
+            operands.push(((w >> 8) & 0xFF) as u8);
+            self.ctx.emit(Instruction::FfiExtended {
+                sub_op: SystemSubOpcode::StaticMutAddrSized.to_byte(),
+                operands,
+            });
+            self.ctx.mark_raw_pointer(dst);
+            return Ok(Some(dst));
+        }
         let mut operands = Vec::<u8>::with_capacity(4);
         Self::write_reg(&mut operands, dst.0);
         operands.push((slot & 0xFF) as u8);

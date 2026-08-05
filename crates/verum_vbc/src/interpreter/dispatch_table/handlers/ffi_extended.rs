@@ -1040,6 +1040,20 @@ fn ffi_extended_body(
             Ok(DispatchResult::Continue)
         }
 
+        Some(SystemSubOpcode::StaticMutAddrSized) => {
+            // Wide twin of StaticMutAddr (T0133): [dst][slot16][size16].
+            let dst = read_reg(state)?;
+            let slot_lo = read_u8(state)? as u16;
+            let slot_hi = read_u8(state)? as u16;
+            let size_lo = read_u8(state)? as u16;
+            let size_hi = read_u8(state)? as u16;
+            let slot = (slot_hi << 8) | slot_lo;
+            let size = (((size_hi << 8) | size_lo) as usize).max(1);
+            let cell_addr = state.static_mut_cell_addr_sized(slot, size);
+            state.set_reg(dst, Value::from_ptr::<u8>(cell_addr));
+            Ok(DispatchResult::Continue)
+        }
+
         // ================================================================
         // Struct Field Address (#37 — atomic-stdlib runtime enabler)
         // ================================================================

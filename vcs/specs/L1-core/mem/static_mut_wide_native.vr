@@ -1,0 +1,28 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @expected-exit: 0
+// @description: static mut cells WIDER than 8 bytes get a native stable
+//   address (T0133): &TABLE as *mut Int addresses a real ceil(N*8)-byte
+//   cell — distinct elements round-trip through ptr arithmetic without
+//   clobbering each other. Pre-fix the scalar-only gate sent wide statics
+//   down the TLS fallback and this pattern had no native address at all.
+
+mount core.intrinsics.{ptr_read, ptr_write, ptr_offset};
+
+static mut TABLE: [Int; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+
+fn main() {
+    unsafe {
+        let base = &mut TABLE as *mut Int;
+        ptr_write(base, 11);
+        let third = ptr_offset(base as &unsafe Byte, 16) as *mut Int;
+        ptr_write(third, 33);
+        assert_eq(ptr_read(base as *const Int), 11);
+        assert_eq(ptr_read(third as *const Int), 33);
+        // Neighbours untouched — the cell is real width, not one word.
+        let second = ptr_offset(base as &unsafe Byte, 8) as *const Int;
+        assert_eq(ptr_read(second), 0);
+    }
+    print("wide static native ok");
+}

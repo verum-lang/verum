@@ -747,6 +747,12 @@ pub struct CodegenContext {
     /// When writing, emits `TlsSet { slot, val }`.
     pub thread_local_vars: HashMap<String, u16>,
 
+    /// T0133: declared byte widths for `static mut` slots the native
+    /// cell model covers (scalars = 8; fixed scalar arrays = elem*N).
+    /// Missing entry = stays on the TLS path. Keyed like
+    /// `thread_local_vars` (mangled fn-local names included).
+    pub static_mut_byte_widths: HashMap<String, u32>,
+
     /// Next available TLS slot for `@thread_local` statics.
     pub next_tls_slot: u16,
 }
@@ -1516,6 +1522,7 @@ impl CodegenContext {
             context_aliases: HashMap::new(),
             active_pattern_cache: HashMap::new(),
             thread_local_vars: HashMap::new(),
+            static_mut_byte_widths: HashMap::new(),
             next_tls_slot: 0,
         }
     }
@@ -1540,6 +1547,7 @@ impl CodegenContext {
             context_aliases: HashMap::new(),
             active_pattern_cache: HashMap::new(),
             thread_local_vars: HashMap::new(),
+            static_mut_byte_widths: HashMap::new(),
             next_tls_slot: 0,
             ..Self::new()
         }

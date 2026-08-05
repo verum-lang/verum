@@ -684,6 +684,14 @@ pub struct InterpreterState {
     /// `__tls_init_<X>` ctor) — not required for the audit-ring closure.
     pub static_mut_cells: HashMap<u16, Box<std::cell::UnsafeCell<u64>>>,
 
+    /// WIDE static-mut cells (T0133): stable 8-aligned storage for
+    /// `static mut` declarations wider than 8 bytes (`[Int; 64]`,
+    /// `[Byte; N]`). `Box<[UnsafeCell<u64>]>` gives one stable base
+    /// address per slot for the interpreter's lifetime; length =
+    /// ceil(byte_size / 8) words, zero-initialised — same contract as
+    /// the scalar cells above, at width. Keyed by the SAME slot ids.
+    pub static_mut_wide_cells: HashMap<u16, Box<[std::cell::UnsafeCell<u64>]>>,
+
     /// Current CBGR epoch for capability-based generational reference tracking.
     ///
     /// The epoch is incremented by AdvanceEpoch to invalidate all references
@@ -2688,6 +2696,7 @@ impl InterpreterState {
             runtime_ctx_initialized: false,
             tls_slots: HashMap::new(),
             static_mut_cells: HashMap::new(),
+            static_mut_wide_cells: HashMap::new(),
             cbgr_epoch: 1,
             cbgr_bypass_depth: 0,
             cbgr_allocations: HashSet::new(),
@@ -3234,6 +3243,25 @@ impl InterpreterState {
             .entry(slot)
             .or_insert_with(|| Box::new(std::cell::UnsafeCell::new(0u64)));
         cell.get() as *mut u8
+    }
+
+    /// Wide twin of [`static_mut_cell_addr`] (T0133): lazily allocates a
+    /// zero-initialised cell of `ceil(size_bytes/8)` words and returns
+    /// its stable base address. A slot always resolves through ONE map —
+    /// the emitter picks the op by declared width, so scalar and wide
+    /// ids never alias.
+    pub fn static_mut_cell_addr_sized(&mut self, slot: u16, size_bytes: usize) -> *mut u8 {
+        let words = size_bytes.div_ceil(8).max(1);
+        let cell = self
+            .static_mut_wide_cells
+            .entry(slot)
+            .or_insert_with(|| {
+                (0..words)
+                    .map(|_| std::cell::UnsafeCell::new(0u64))
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            });
+        cell[0].get() as *mut u8
     }
 
     // ==================== FFI Runtime (libffi-based) ====================
