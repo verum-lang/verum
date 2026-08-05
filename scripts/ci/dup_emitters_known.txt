@@ -8,7 +8,6 @@ verum_fd_read_all	[A]	T0208[A] runtime-wins family; divergences tracked as T0436
 verum_file_append_all	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
 verum_file_close	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
 verum_file_open	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
-verum_file_read_all	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
 verum_file_read_text	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
 verum_file_write_all	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
 verum_file_write_text	[A]	T0208[A] runtime-wins family; divergences tracked as T0436/T0437/T0213
