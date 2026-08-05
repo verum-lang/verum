@@ -37,8 +37,8 @@ public module dispatcher;
 public module callback_registry;
 
 public mount .registration.{
-    HookRegistration, HookKind,
-    HkCommit, HkRollback, HkUpdate, HkPreupdate, HkWal, HkAutovacuumPages,
+    HookRegistration, EngineHookKind,
+    EhCommit, EhRollback, EhUpdate, EhPreupdate, EhWal, EhAutovacuumPages,
     new_registration, is_installed, kind_name,
 };
 

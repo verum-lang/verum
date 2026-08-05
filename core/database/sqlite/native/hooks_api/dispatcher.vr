@@ -62,8 +62,8 @@ mount core.database.sqlite.native.ext.hooks.{
 mount core.database.sqlite.native.hooks_api.op.{UpdateOp, UoInsert, UoUpdate, UoDelete};
 mount core.database.sqlite.native.progress.handler.{ProgressDecision, PdContinue, PdInterrupt};
 mount core.database.sqlite.native.hooks_api.registration.{
-    HookRegistration, HookKind,
-    HkCommit, HkRollback, HkUpdate, HkPreupdate, HkWal, HkAutovacuumPages,
+    HookRegistration, EngineHookKind,
+    EhCommit, EhRollback, EhUpdate, EhPreupdate, EhWal, EhAutovacuumPages,
     new_registration, is_installed,
 };
 mount core.database.sqlite.native.hooks_api.engine.{
@@ -94,10 +94,10 @@ public type ExtendedHooksEngine is {
 
 public fn new_extended_engine() -> ExtendedHooksEngine {
     ExtendedHooksEngine {
-        authorizer: new_registration(HkCommit,          "authorizer".clone(), 0 as Int64),
-        busy:       new_registration(HkCommit,          "busy".clone(),       0 as Int64),
-        progress:   new_registration(HkCommit,          "progress".clone(),   0 as Int64),
-        trace:      new_registration(HkCommit,          "trace".clone(),      0 as Int64),
+        authorizer: new_registration(EhCommit,          "authorizer".clone(), 0 as Int64),
+        busy:       new_registration(EhCommit,          "busy".clone(),       0 as Int64),
+        progress:   new_registration(EhCommit,          "progress".clone(),   0 as Int64),
+        trace:      new_registration(EhCommit,          "trace".clone(),      0 as Int64),
     }
 }
 

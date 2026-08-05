@@ -18,33 +18,40 @@ module core.database.sqlite.native.hooks_api.registration;
 mount core.*;
 mount base.{Bool, Text};
 
-public type HookKind is
-      HkCommit
-    | HkRollback
-    | HkUpdate
-    | HkPreupdate
-    | HkWal
-    | HkAutovacuumPages;
+// Named `EngineHookKind`/`Eh*`, NOT `HookKind`/`Hk*` (T0555 layer 5):
+// l7_api.hook_registry owns the user-facing `HookKind` with a DIFFERENT
+// variant order — two public enums sharing bare variant spellings made
+// the ambient constructor table first-wins to THIS one, so a user's
+// `HkUpdate` carried tag 2 and read back as l7's `HkCommit`. One
+// spelling, one type ([[vr-enum-tag-wire-byte-drift-class]]: variant
+// order IS the wire; renaming beats reordering).
+public type EngineHookKind is
+      EhCommit
+    | EhRollback
+    | EhUpdate
+    | EhPreupdate
+    | EhWal
+    | EhAutovacuumPages;
 
-public fn kind_name(k: &HookKind) -> Text {
+public fn kind_name(k: &EngineHookKind) -> Text {
     match k {
-        HkCommit            => "commit".clone(),
-        HkRollback          => "rollback".clone(),
-        HkUpdate            => "update".clone(),
-        HkPreupdate         => "preupdate".clone(),
-        HkWal               => "wal".clone(),
-        HkAutovacuumPages   => "autovacuum-pages".clone(),
+        EhCommit            => "commit".clone(),
+        EhRollback          => "rollback".clone(),
+        EhUpdate            => "update".clone(),
+        EhPreupdate         => "preupdate".clone(),
+        EhWal               => "wal".clone(),
+        EhAutovacuumPages   => "autovacuum-pages".clone(),
     }
 }
 
 public type HookRegistration is {
-    kind: HookKind,
+    kind: EngineHookKind,
     tag: Text,
     /// Opaque `pArg` value; 0 => no hook installed.
     handle: Int64,
 }
 
-public fn new_registration(kind: HookKind, tag: Text, handle: Int64) -> HookRegistration {
+public fn new_registration(kind: EngineHookKind, tag: Text, handle: Int64) -> HookRegistration {
     HookRegistration { kind: kind, tag: tag, handle: handle }
 }
 
