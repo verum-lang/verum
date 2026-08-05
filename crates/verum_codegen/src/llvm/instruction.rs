@@ -2418,10 +2418,27 @@ fn as_ptr<'ctx>(
 ) -> Result<verum_llvm::values::PointerValue<'ctx>> {
     match val {
         BasicValueEnum::PointerValue(p) => Ok(p),
-        BasicValueEnum::IntValue(i) => ctx
-            .builder()
-            .build_int_to_ptr(i, ctx.types().ptr_type(), name)
-            .or_llvm_err(),
+        BasicValueEnum::IntValue(i) => {
+            // T0272: registers under the wide pre-scan load as i128;
+            // `inttoptr i128` passes the verifier but its semantics here
+            // are the low-64 address bits — truncate explicitly so every
+            // consumer (deref, call, ret coercion) agrees with the i64
+            // address model.
+            let addr = if i.get_type().get_bit_width() > 64 {
+                ctx.builder()
+                    .build_int_truncate(
+                        i,
+                        ctx.types().i64_type(),
+                        &format!("{}_addr64", name),
+                    )
+                    .or_llvm_err()?
+            } else {
+                i
+            };
+            ctx.builder()
+                .build_int_to_ptr(addr, ctx.types().ptr_type(), name)
+                .or_llvm_err()
+        }
         BasicValueEnum::FloatValue(f) => {
             // Defensive: variant-payload extraction can flow a Float
             // register into a deref site (e.g. when a heap-tagged
@@ -29568,9 +29585,25 @@ fn coerce_value<'ctx>(
                     // `bitcast i64 -> float` is an illegal size-mismatched cast
                     // (64 vs 32 bits) — the previous code emitted exactly that for
                     // every Float32 parameter.
+                    // T0272: bitcast REQUIRES equal widths, and the value may
+                    // arrive i128 (wide-prescan slot) or narrower (i1/i32
+                    // flag registers) — normalize to i64 first; the float
+                    // pattern by construction lives in the low 64 bits.
+                    let i64_ty = ctx.types().i64_type();
+                    let bits64 = match i.get_type().get_bit_width() {
+                        64 => i,
+                        w if w > 64 => ctx
+                            .builder()
+                            .build_int_truncate(i, i64_ty, &format!("{}_bits64", name))
+                            .or_llvm_err()?,
+                        _ => ctx
+                            .builder()
+                            .build_int_z_extend(i, i64_ty, &format!("{}_bits64", name))
+                            .or_llvm_err()?,
+                    };
                     let as_f64 = ctx
                         .builder()
-                        .build_bit_cast(i, f64_ty, name)
+                        .build_bit_cast(bits64, f64_ty, name)
                         .or_llvm_err()?
                         .into_float_value();
                     if target_float == f64_ty {
@@ -29589,11 +29622,28 @@ fn coerce_value<'ctx>(
         BTE::PointerType(target_ptr) => {
             match val {
                 BVE::PointerValue(_) => Ok(val),
-                BVE::IntValue(i) => Ok(ctx
-                    .builder()
-                    .build_int_to_ptr(i, target_ptr, name)
-                    .or_llvm_err()?
-                    .into()),
+                BVE::IntValue(i) => {
+                    // T0272: a wide-prescan i128 register reaching a
+                    // ptr-returning coercion (Ret of a ptr-typed fn) means
+                    // the low-64 bits are the address — truncate before
+                    // inttoptr, mirroring `as_ptr`'s address model.
+                    let addr = if i.get_type().get_bit_width() > 64 {
+                        ctx.builder()
+                            .build_int_truncate(
+                                i,
+                                ctx.types().i64_type(),
+                                &format!("{}_addr64", name),
+                            )
+                            .or_llvm_err()?
+                    } else {
+                        i
+                    };
+                    Ok(ctx
+                        .builder()
+                        .build_int_to_ptr(addr, target_ptr, name)
+                        .or_llvm_err()?
+                        .into())
+                }
                 BVE::StructValue(s) => {
                     // CBGR ref struct {ptr, i32, i32} — extract the pointer (field 0)
                     if s.get_type().count_fields() > 0 {
