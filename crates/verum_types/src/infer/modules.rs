@@ -14838,9 +14838,16 @@ impl TypeChecker {
         // mount-scoped selection uses).
         if self.imports_in_progress.is_empty()
             && self.glob_imports_in_progress.is_empty()
+            // Pinned prelude carriers come from the ONE canonical
+            // registry (well_known_types — already layout-pinned there),
+            // never a local string list (the crate's no-hardcoded-stdlib
+            // rule; the LAW spec §1.4 defines the trio as a LANGUAGE
+            // fact and the registry is where language facts live).
             && !matches!(
                 parent_name.as_str(),
-                "Maybe" | "Result" | "Ordering"
+                n if n == verum_common::well_known_types::type_names::MAYBE
+                    || n == verum_common::well_known_types::type_names::RESULT
+                    || n == verum_common::well_known_types::type_names::ORDERING
             )
             && !self.explicit_imports.contains(parent_name.as_str())
             && !self.explicit_imports.contains(name)
