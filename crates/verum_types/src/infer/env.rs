@@ -11288,12 +11288,92 @@ with .to_float() or .to_int() (at {:?})",
         left: &Expr,
         right: &Expr,
     ) -> Result<()> {
+        self.law_check_bool_eq_conjunction_with(op, left, right, &|e| {
+            self.expr_types_as_bool(e)
+        })
+    }
+
+    /// LANGUAGE LAW E432 over CONTRACT clauses (spec §2.1 — the law's
+    /// original motivation: a mis-parsed boolean law in `ensures`
+    /// proves VACUOUSLY). Contract exprs never flow through body
+    /// inference, so the env-based Bool probe has no bindings there;
+    /// Bool-ness comes from the DECLARED annotations instead —
+    /// `bool_atoms` carries the Bool-annotated param names (plus
+    /// `result` when the return annotation is Bool). Walks the clause
+    /// recursively: every bare `&&`/`||` node is judged; Paren nodes
+    /// reset nothing (the law only fires on UNPARENTHESIZED equality
+    /// operands, which the engine checks per conjunction).
+    pub(super) fn law_check_contract_clause(
+        &self,
+        e: &Expr,
+        bool_atoms: &std::collections::HashSet<&str>,
+    ) -> Result<()> {
+        use verum_ast::expr::ExprKind;
+        fn atom_is_bool(
+            this: &TypeChecker,
+            e: &Expr,
+            atoms: &std::collections::HashSet<&str>,
+        ) -> bool {
+            match &e.kind {
+                ExprKind::Paren(inner) => atom_is_bool(this, inner, atoms),
+                ExprKind::Path(p) if p.segments.len() == 1 => {
+                    if let verum_ast::ty::PathSegment::Name(id) = &p.segments[0] {
+                        atoms.contains(id.name.as_str())
+                            || this.expr_types_as_bool(e)
+                    } else {
+                        false
+                    }
+                }
+                _ => this.expr_types_as_bool(e),
+            }
+        }
+        match &e.kind {
+            ExprKind::Binary { op, left, right } => {
+                self.law_check_bool_eq_conjunction_with(*op, left, right, &|x| {
+                    atom_is_bool(self, x, bool_atoms)
+                })?;
+                self.law_check_contract_clause(left, bool_atoms)?;
+                self.law_check_contract_clause(right, bool_atoms)
+            }
+            ExprKind::Paren(inner) => self.law_check_contract_clause(inner, bool_atoms),
+            ExprKind::Unary { expr: inner, .. } => {
+                self.law_check_contract_clause(inner, bool_atoms)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Shared E432 core: the conjunction check with a caller-supplied
+    /// Bool-atom probe (env-based for bodies, annotation-based for
+    /// contracts). ONE implementation of the law's firing condition.
+    pub(super) fn law_check_bool_eq_conjunction_with(
+        &self,
+        op: BinOp,
+        left: &Expr,
+        right: &Expr,
+        is_bool: &dyn Fn(&Expr) -> bool,
+    ) -> Result<()> {
         use BinOp::*;
         if !matches!(op, And | Or) {
             return Ok(());
         }
         let op_str = if matches!(op, And) { "&&" } else { "||" };
-        for side in [left, right] {
+        // Spec §2.2 precision clause: the equality side fires only when
+        // the SIBLING conjunct is itself a Bool atom or another such
+        // equality — exactly the shapes where both precedence readings
+        // type-check. `flag == other && n > 0` stays silent (the
+        // comparison sibling makes the alternative reading ill-typed),
+        // matching the T0485 lint's calibrated selectivity.
+        let bool_bool_eq = |e: &Expr| -> bool {
+            matches!(
+                &e.kind,
+                verum_ast::expr::ExprKind::Binary { op: eq, left: l, right: r }
+                    if matches!(eq, BinOp::Eq | BinOp::Ne)
+                        && is_bool(l)
+                        && is_bool(r)
+            )
+        };
+        for (side, sibling) in [(left, right), (right, left)] {
             if let verum_ast::expr::ExprKind::Binary {
                 op: eq_op,
                 left: el,
@@ -11301,8 +11381,9 @@ with .to_float() or .to_int() (at {:?})",
                 ..
             } = &side.kind
                 && matches!(eq_op, BinOp::Eq | BinOp::Ne)
-                && self.expr_types_as_bool(el)
-                && self.expr_types_as_bool(er)
+                && is_bool(el)
+                && is_bool(er)
+                && (is_bool(sibling) || bool_bool_eq(sibling))
             {
                 let eq_str = if matches!(eq_op, BinOp::Eq) { "==" } else { "!=" };
                 self.language_law(
@@ -11316,6 +11397,10 @@ with .to_float() or .to_int() (at {:?})",
                     "parenthesize the intended grouping explicitly".to_string(),
                     side.span,
                 )?;
+                // ONE diagnostic per conjunction node — when BOTH sides
+                // are qualifying equalities (`x == a && y == b`) the
+                // second side would repeat the identical message.
+                break;
             }
         }
         Ok(())

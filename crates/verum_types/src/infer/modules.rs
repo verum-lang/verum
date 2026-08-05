@@ -11480,6 +11480,60 @@ impl TypeChecker {
             }
         }
 
+        // ── LANGUAGE LAW E432 over the contract surface ──────────────
+        // (spec §2.1 — the ORIGINAL motivation: `ensures a && a == a`
+        // parses as `a && (a == a)` ≡ `a` and proves vacuously.)
+        // Contract clauses never flow through body inference, so the
+        // law walks them HERE, with Bool-ness taken from the DECLARED
+        // annotations (params + `result` for the return binding). The
+        // in-flight guard keeps stranger modules' own contracts out —
+        // they are judged when THEIR file is checked, same as E430.
+        if (!func.requires.is_empty() || !func.ensures.is_empty())
+            && self.imports_in_progress.is_empty()
+            && self.glob_imports_in_progress.is_empty()
+        {
+            use verum_ast::decl::FunctionParamKind;
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace] law-contract walk fn={} requires={} ensures={}",
+                    func.name.name.as_str(),
+                    func.requires.len(),
+                    func.ensures.len()
+                );
+            }
+            // `Bool` parses as the DEDICATED TypeKind::Bool primitive
+            // variant; a path spelling (alias, qualified) still reaches
+            // it as TypeKind::Path — accept both.
+            let ann_is_bool = |ty: &verum_ast::ty::Type| -> bool {
+                match &ty.kind {
+                    verum_ast::ty::TypeKind::Bool => true,
+                    verum_ast::ty::TypeKind::Path(tp) => {
+                        tp.last_segment_name() == "Bool"
+                    }
+                    _ => false,
+                }
+            };
+            let mut bool_atoms: std::collections::HashSet<&str> =
+                std::collections::HashSet::new();
+            for p in func.params.iter() {
+                if let FunctionParamKind::Regular { pattern, ty, .. } = &p.kind
+                    && let verum_ast::pattern::PatternKind::Ident { name, .. } =
+                        &pattern.kind
+                    && ann_is_bool(ty)
+                {
+                    bool_atoms.insert(name.name.as_str());
+                }
+            }
+            if let Maybe::Some(rt) = &func.return_type
+                && ann_is_bool(rt)
+            {
+                bool_atoms.insert("result");
+            }
+            for clause in func.requires.iter().chain(func.ensures.iter()) {
+                self.law_check_contract_clause(clause, &bool_atoms)?;
+            }
+        }
+
         // Register function contracts (requires/ensures) for call-site checking
         if !func.requires.is_empty() || !func.ensures.is_empty() {
             use verum_ast::decl::FunctionParamKind;
