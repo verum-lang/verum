@@ -1150,6 +1150,65 @@ impl<'s> CompilationPipeline<'s> {
             //   3. Check if `skip_body_count() > 0` modules emit
             //      partially-initialised bodies that confuse Use-list
             //      walks.
+            // **#98 round-trip — WIRED** (T0272 endgame): the in-memory
+            // module carries state the pass pipeline walks into —
+            // measured on int128_full_width: the pre-pass dump writes
+            // AND verifies clean, standalone `opt -passes='default<O2>'`
+            // and `llc -O2` on that text BOTH exit 0, while the
+            // in-process run_passes SIGSEGVs in instruction-list
+            // transfer. The serializer-crash era that shelved this plan
+            // (findings block above) is over — write_ir_to_file works on
+            // every module we produce. Serialize to text, fresh-parse in
+            // the SAME context, swap via replace_module: passes and
+            // emission then run on canonical IR exactly like standalone
+            // opt. Module-level consumers only after this point (passes,
+            // gpu probe, object emission) — cached FunctionValues are
+            // not consulted. VERUM_NO_BITCODE_ROUNDTRIP=1 opts out for
+            // bisection.
+            if std::env::var_os("VERUM_NO_BITCODE_ROUNDTRIP").is_none() {
+                let rt_path = build_dir.join(format!("{}.roundtrip.ll", module_name));
+                match lowering.write_ir_to_file(&rt_path) {
+                    Ok(()) => {
+                        let parsed = verum_codegen::llvm::verum_llvm::memory_buffer::MemoryBuffer::create_from_file(
+                            &rt_path,
+                        )
+                        .map_err(|e| e.to_string())
+                        .and_then(|buf| {
+                            lowering
+                                .llvm_context()
+                                .create_module_from_ir(buf)
+                                .map_err(|e| e.to_string())
+                        });
+                        match parsed {
+                            Ok(fresh) => {
+                                lowering.replace_module(fresh);
+                                if std::env::var("VERUM_TRACE_PASSES").is_ok() {
+                                    eprintln!(
+                                        "[verum-passes] #98 round-trip installed a fresh-parsed module"
+                                    );
+                                } else {
+                                    let _ = std::fs::remove_file(&rt_path);
+                                }
+                            }
+                            Err(e) => {
+                                // Parse failure means the textual form is
+                                // NOT clean — keep the original module (the
+                                // pre-round-trip behaviour) and leave the
+                                // .ll on disk as the diagnostic artifact.
+                                tracing::warn!(
+                                    "#98 round-trip parse failed (keeping in-memory module, \
+                                     IR at {}): {}",
+                                    rt_path.display(),
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("#98 round-trip IR write failed: {}", e);
+                    }
+                }
+            }
             if let Err(e) = lowering
                 .module()
                 .run_passes(&passes, &target_machine, pass_options)
