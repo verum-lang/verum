@@ -15598,6 +15598,16 @@ impl VbcCodegen {
             // (measured: the MODULE-named descriptor — every mounted
             // pointer intrinsic then demanded 'core.intrinsics' as its
             // param type, T0108/T0188/T0133 pins).
+            // Fixed arrays: size-stripped slice render — the same
+            // deliberate `[T]` spelling as extract_type_name_from_ast's
+            // Array arm (element identity is the dispatch/scheme fact;
+            // the size is not). Pre-fix `[Int; 5]` params fell to None
+            // and the render side degraded to the module-named
+            // descriptor ('expected core.collections, found [Int; 5]'
+            // across the base/ iterator+primitives+result files).
+            TypeKind::Array { element, .. } => self
+                .extract_type_name_at(element, false)
+                .map(|n| format!("[{}]", n)),
             TypeKind::Pointer { inner, mutable, .. } => {
                 let prefix = if *mutable { "*mut " } else { "*const " };
                 self.extract_type_name_at(inner, false)

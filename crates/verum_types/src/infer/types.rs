@@ -6757,8 +6757,27 @@ impl TypeChecker {
             ) => {
                 // Check that inner types are compatible
                 // Allow when either inner type is a type variable (will be resolved later)
+                // ARRAY/SLICE DECAY (T0133 canonical idiom): a reference to
+                // a fixed array or slice casts to a pointer to its ELEMENT
+                // — `&mut TABLE as *mut Int` for `static mut TABLE: [Int; 8]`
+                // is the designed static-mut addressing pattern (the codegen
+                // side, try_compile_static_mut_addr, already implements
+                // exactly this shape; the checker refused what the design
+                // blesses).
+                let element_decay = match ref_inner.as_ref() {
+                    Type::Array { element, .. } => {
+                        self.subtyping.is_subtype(element, ptr_inner)
+                            || self.subtyping.is_subtype(ptr_inner, element)
+                    }
+                    Type::Slice { element } => {
+                        self.subtyping.is_subtype(element, ptr_inner)
+                            || self.subtyping.is_subtype(ptr_inner, element)
+                    }
+                    _ => false,
+                };
                 if self.subtyping.is_subtype(ref_inner, ptr_inner)
                     || self.subtyping.is_subtype(ptr_inner, ref_inner)
+                    || element_decay
                     || matches!(ref_inner.as_ref(), Type::Var(_))
                     || matches!(ptr_inner.as_ref(), Type::Var(_))
                 {
