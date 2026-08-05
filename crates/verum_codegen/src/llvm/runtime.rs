@@ -2071,6 +2071,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
             self.emit_verum_uint_to_text(module)
         );
         step!(
+            "emit_verum_i128_to_text",
+            self.emit_verum_i128_to_text(module)
+        );
+        step!(
+            "emit_verum_u128_to_text",
+            self.emit_verum_u128_to_text(module)
+        );
+        step!(
             "emit_verum_float_to_text",
             self.emit_verum_float_to_text(module)
         );
@@ -5178,6 +5186,180 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?
             .basic_value_or("call returned void")?;
 
+        builder.build_return(Some(&result)).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// Shared tail for the 128-bit to-text emitters (T0272): given a
+    /// filled stack buffer + length, heap-copy, NUL-terminate and wrap in
+    /// a Text object — the exact allocation contract of the 64-bit
+    /// siblings above.
+    fn emit_decimal_buf_to_text(
+        &self,
+        builder: &verum_llvm::builder::Builder<'ctx>,
+        module: &Module<'ctx>,
+        buf: verum_llvm::values::PointerValue<'ctx>,
+        len: verum_llvm::values::IntValue<'ctx>,
+    ) -> Result<verum_llvm::values::BasicValueEnum<'ctx>> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let len_plus1 = builder
+            .build_int_add(len, i64_type.const_int(1, false), "len1")
+            .or_llvm_err()?;
+        let new_buf = self.emit_checked_malloc(builder, module, len_plus1, "newbuf")?;
+        let memcpy_fn = self.get_or_declare_memcpy(module);
+        builder
+            .build_call(memcpy_fn, &[new_buf.into(), buf.into(), len.into()], "")
+            .or_llvm_err()?;
+        let nul_ptr = unsafe {
+            builder
+                .build_gep(ctx.i8_type(), new_buf, &[len], "nul_p")
+                .or_llvm_err()?
+        };
+        builder
+            .build_store(nul_ptr, ctx.i8_type().const_zero())
+            .or_llvm_err()?;
+        let text_alloc = module
+            .get_function("verum_text_alloc")
+            .or_missing_fn("verum_text_alloc")?;
+        builder
+            .build_call(
+                text_alloc,
+                &[new_buf.into(), len.into(), len.into()],
+                "text_obj",
+            )
+            .or_llvm_err()?
+            .basic_value_or("call returned void")
+    }
+
+    /// verum_u128_to_text(value: i128) -> i64 (Text object pointer as i64)
+    ///
+    /// **Libc-free** 128-bit unsigned renderer (T0272): the raw bits are
+    /// the magnitude. Same stack-buffer/heap-copy contract as
+    /// `verum_uint_to_text`; the digit loop runs at i128 width via
+    /// `verum_internal_u128_to_decimal`.
+    fn emit_verum_u128_to_text(&self, module: &Module<'ctx>) -> Result<()> {
+        if let Some(f) = module.get_function("verum_u128_to_text") {
+            if f.count_basic_blocks() > 0 {
+                return Ok(());
+            }
+        }
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let i128_type = ctx.i128_type();
+        let fn_type = i64_type.fn_type(&[i128_type.into()], false);
+        let func = super::error::get_or_declare_function(module, "verum_u128_to_text", fn_type);
+        let entry = ctx.append_basic_block(func, "entry");
+        let builder = ctx.create_builder();
+        builder.position_at_end(entry);
+        let value = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_int_value();
+        // 48 bytes covers the 39-digit `u128::MAX` comfortably.
+        let buf = builder
+            .build_array_alloca(ctx.i8_type(), i64_type.const_int(48, false), "buf")
+            .or_llvm_err()?;
+        let to_dec = super::instruction::get_or_declare_internal_u128_to_decimal(ctx, module);
+        let len = builder
+            .build_call(to_dec, &[buf.into(), value.into()], "len")
+            .or_llvm_err()?
+            .basic_value_or("call returned void")?
+            .into_int_value();
+        let result = self.emit_decimal_buf_to_text(&builder, module, buf, len)?;
+        builder.build_return(Some(&result)).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// verum_i128_to_text(value: i128) -> i64 (Text object pointer as i64)
+    ///
+    /// **Libc-free** 128-bit SIGNED renderer (T0272). Negative values
+    /// write '-' then the magnitude; `Int128::MIN` is exact because the
+    /// two's-complement negate re-read as unsigned IS its magnitude
+    /// (2^127) — the same trick the 64-bit signed writer uses.
+    fn emit_verum_i128_to_text(&self, module: &Module<'ctx>) -> Result<()> {
+        if let Some(f) = module.get_function("verum_i128_to_text") {
+            if f.count_basic_blocks() > 0 {
+                return Ok(());
+            }
+        }
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let i128_type = ctx.i128_type();
+        let fn_type = i64_type.fn_type(&[i128_type.into()], false);
+        let func = super::error::get_or_declare_function(module, "verum_i128_to_text", fn_type);
+        let entry = ctx.append_basic_block(func, "entry");
+        let neg_bb = ctx.append_basic_block(func, "neg");
+        let join_bb = ctx.append_basic_block(func, "join");
+        let builder = ctx.create_builder();
+
+        builder.position_at_end(entry);
+        let value = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_int_value();
+        let buf = builder
+            .build_array_alloca(ctx.i8_type(), i64_type.const_int(48, false), "buf")
+            .or_llvm_err()?;
+        let is_neg = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::SLT,
+                value,
+                i128_type.const_zero(),
+                "is_neg",
+            )
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_neg, neg_bb, join_bb)
+            .or_llvm_err()?;
+
+        // neg: buf[0]='-'; magnitude = 0 - value (wraps exactly for MIN).
+        builder.position_at_end(neg_bb);
+        builder
+            .build_store(buf, ctx.i8_type().const_int(b'-' as u64, false))
+            .or_llvm_err()?;
+        let negated = builder
+            .build_int_sub(i128_type.const_zero(), value, "negated")
+            .or_llvm_err()?;
+        let buf1 = unsafe {
+            builder
+                .build_gep(
+                    ctx.i8_type(),
+                    buf,
+                    &[i64_type.const_int(1, false)],
+                    "buf1",
+                )
+                .or_llvm_err()?
+        };
+        builder.build_unconditional_branch(join_bb).or_llvm_err()?;
+
+        // join: PHI over (write_ptr, magnitude, sign_len).
+        builder.position_at_end(join_bb);
+        let ptr_phi = builder
+            .build_phi(ctx.ptr_type(Default::default()), "wptr")
+            .or_llvm_err()?;
+        let mag_phi = builder.build_phi(i128_type, "mag").or_llvm_err()?;
+        let sign_phi = builder.build_phi(i64_type, "sign_len").or_llvm_err()?;
+        ptr_phi.add_incoming(&[(&buf, entry), (&buf1, neg_bb)]);
+        mag_phi.add_incoming(&[(&value, entry), (&negated, neg_bb)]);
+        sign_phi.add_incoming(&[
+            (&i64_type.const_zero(), entry),
+            (&i64_type.const_int(1, false), neg_bb),
+        ]);
+        let wptr = ptr_phi.as_basic_value().into_pointer_value();
+        let mag = mag_phi.as_basic_value().into_int_value();
+        let sign_len = sign_phi.as_basic_value().into_int_value();
+
+        let to_dec = super::instruction::get_or_declare_internal_u128_to_decimal(ctx, module);
+        let digits_len = builder
+            .build_call(to_dec, &[wptr.into(), mag.into()], "dlen")
+            .or_llvm_err()?
+            .basic_value_or("call returned void")?
+            .into_int_value();
+        let len = builder
+            .build_int_add(digits_len, sign_len, "len")
+            .or_llvm_err()?;
+        let result = self.emit_decimal_buf_to_text(&builder, module, buf, len)?;
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
     }

@@ -1597,9 +1597,20 @@ impl VbcCodegen {
                 let forced_i128 = self.ctx.pending_i128_literal_signed.take();
                 let is_i128_typed = forced_i128.is_some()
                     || matches!(int_lit.suffix, Some(IntSuffix::I128) | Some(IntSuffix::U128));
-                let out_of_i64 =
-                    value < i64::MIN as i128 || value > i64::MAX as i128;
-                if is_i128_typed || out_of_i64 {
+                // Boxed-i128 criterion: 128-TYPED, or representable in NO
+                // 64-bit type at all. A literal in (i64::MAX, u64::MAX] with
+                // no 128-bit typing is a legitimate `UInt64` value
+                // (`18446744073709551615`, `1 << 63` masks all over the
+                // stdlib's hash/crypto code) and must stay on the untyped
+                // i64 BIT-PATTERN path: boxing it silently switched the
+                // surrounding u64 arithmetic to 128-bit semantics —
+                // `u64::MAX + 1` printed 18446744073709551616 instead of
+                // wrapping, and at Tier-1 the pre-scan gave every register
+                // its literal touched a wide slot (AeadState.seal grew i128
+                // slots from a mask constant).
+                let out_of_any_64 =
+                    value < i64::MIN as i128 || value > u64::MAX as i128;
+                if is_i128_typed || out_of_any_64 {
                     // Signedness precedence: an explicit suffix wins; else the
                     // annotation hint; else signed (a bare out-of-range literal
                     // is Int128). The stored bits are identical either way —
@@ -1611,6 +1622,16 @@ impl VbcCodegen {
                         _ => forced_i128.unwrap_or(true),
                     };
                     let const_id = self.ctx.add_const_i128(value as u128, signed);
+                    self.ctx.emit(Instruction::LoadK {
+                        dst: dest,
+                        const_id: const_id.0,
+                    });
+                } else if value > i64::MAX as i128 {
+                    // (i64::MAX, u64::MAX] without 128-bit typing: a u64
+                    // value carried as its exact 64-bit two's-complement
+                    // pattern (the pre-T0272 representation; unsigned render
+                    // ops and CmpU reinterpret the bits).
+                    let const_id = self.ctx.add_const_int(value as u64 as i64);
                     self.ctx.emit(Instruction::LoadK {
                         dst: dest,
                         const_id: const_id.0,
@@ -10459,8 +10480,30 @@ impl VbcCodegen {
         if args.is_empty() && matches!(method.name.as_str(), "to_text" | "to_string") {
             enum Conv {
                 Str,
+                UStr,
                 Char,
                 Float,
+            }
+            fn conv_for_primitive_name(name: Option<&str>) -> Option<Conv> {
+                match name {
+                    Some(
+                        "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "Isize"
+                        | "Bool",
+                    ) => Some(Conv::Str),
+                    // Unsigned receivers take the unsigned render op (T0364
+                    // signedness contract, same authority as the f-string leg
+                    // in `emit_value_to_text`): `ToString`'s signed slot would
+                    // print `UInt64::MAX.to_text()` as "-1". The handler is
+                    // width-aware, so `UInt128` renders full magnitude too
+                    // (T0272).
+                    Some(
+                        "UInt" | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128" | "Byte"
+                        | "Usize",
+                    ) => Some(Conv::UStr),
+                    Some("Char") => Some(Conv::Char),
+                    Some("Float" | "Float32" | "Float64") => Some(Conv::Float),
+                    _ => None,
+                }
             }
             let conv = match self.infer_expr_type_kind(receiver) {
                 Some(verum_ast::ty::TypeKind::Bool) | Some(verum_ast::ty::TypeKind::Int) => {
@@ -10469,18 +10512,27 @@ impl VbcCodegen {
                 Some(verum_ast::ty::TypeKind::Char) => Some(Conv::Char),
                 Some(verum_ast::ty::TypeKind::Float) => Some(Conv::Float),
                 Some(verum_ast::ty::TypeKind::Path(ref p)) => {
-                    match p.as_ident().map(|i| i.name.as_str()) {
-                        Some(
-                            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "UInt"
-                            | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128" | "Byte"
-                            | "Usize" | "Isize" | "Bool",
-                        ) => Some(Conv::Str),
-                        Some("Char") => Some(Conv::Char),
-                        Some("Float" | "Float32" | "Float64") => Some(Conv::Float),
-                        _ => None,
-                    }
+                    conv_for_primitive_name(p.as_ident().map(|i| i.name.as_str()))
                 }
-                _ => None,
+                // `self` inside an `implement <Primitive>` method (e.g. the
+                // stdlib Display impls) reaches here as a SelfValue path,
+                // which `infer_expr_type_kind` cannot classify. Fall back to
+                // the richer name oracle — `extract_expr_type_name` resolves
+                // `self` via the method context's receiver type — so
+                // `self.to_text()` on a primitive receiver takes the same
+                // conversion the interpolation path uses (T0272: the Int128 /
+                // UInt128 Display impls depend on this interception; without
+                // it they would fall through to protocol dispatch and recurse).
+                _ => conv_for_primitive_name(
+                    self.extract_expr_type_name(receiver)
+                        .map(|n| {
+                            crate::codegen::VbcCodegen::strip_generic_args(
+                                Self::strip_wrapper_type(&n),
+                            )
+                            .to_string()
+                        })
+                        .as_deref(),
+                ),
             };
             if let Some(conv) = conv {
                 let recv_reg = self
@@ -10495,6 +10547,13 @@ impl VbcCodegen {
                     Conv::Float => {
                         self.emit_intrinsic_library_call(
                             "verum_float_to_text",
+                            &[recv_reg],
+                            dst,
+                        )?;
+                    }
+                    Conv::UStr => {
+                        self.emit_intrinsic_library_call(
+                            "verum_uint_to_text",
                             &[recv_reg],
                             dst,
                         )?;
@@ -23518,6 +23577,70 @@ impl VbcCodegen {
                 sk
             }
         });
+
+        // 128-bit WIDENING cast (T0272): `x as Int128` / `x as UInt128` used
+        // to be a register passthrough, so the widen-multiply-divide idiom
+        // (`ticks as UInt128 * NANOS / freq`) silently overflowed at 64 bits.
+        // Materialise the widening as an identity op against a 128-bit pool
+        // constant — no new opcode, and BOTH tiers dispatch wide off the
+        // same mechanism (Tier-0: one boxed operand → wide arith; Tier-1:
+        // the i128 constant seeds the wide-slot pre-scan):
+        //   * signed source  → `src + 0_i128`   (sign-extends),
+        //   * unsigned source → `src & (2^64-1)` (the sext both tiers apply
+        //     to the narrow operand is then masked back to zero-extension),
+        // matching the source-signedness extension rule (`-1 as UInt128` is
+        // 2^128-1; `UInt64::MAX as Int128` is 2^64-1). A 128→128 cast is a
+        // bit-reinterpretation: plain passthrough.
+        {
+            let target_is_128 = match &ty.kind {
+                TypeKind::Path(path) => path
+                    .as_ident()
+                    .map(|ident| matches!(ident.name.as_str(), "Int128" | "UInt128"))
+                    .unwrap_or(false),
+                _ => false,
+            };
+            if target_is_128 {
+                use verum_common::well_known_types::type_names;
+                let src_is_128 = self
+                    .infer_expr_type_name(inner)
+                    .as_deref()
+                    .and_then(type_names::numeric_bit_width)
+                    == Some(128);
+                if src_is_128 {
+                    return Ok(Some(src_reg));
+                }
+                let dst = self.ctx.alloc_temp();
+                let const_reg = self.ctx.alloc_temp();
+                if self.infer_expr_is_unsigned(inner) {
+                    let mask_id = self.ctx.add_const_i128(u64::MAX as u128, false);
+                    self.ctx.emit(Instruction::LoadK {
+                        dst: const_reg,
+                        const_id: mask_id.0,
+                    });
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: crate::instruction::BitwiseOp::And,
+                        dst,
+                        a: src_reg,
+                        b: const_reg,
+                    });
+                } else {
+                    let zero_id = self.ctx.add_const_i128(0, true);
+                    self.ctx.emit(Instruction::LoadK {
+                        dst: const_reg,
+                        const_id: zero_id.0,
+                    });
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: crate::instruction::BinaryIntOp::Add,
+                        dst,
+                        a: src_reg,
+                        b: const_reg,
+                    });
+                }
+                self.ctx.free_temp(const_reg);
+                self.ctx.free_temp(src_reg);
+                return Ok(Some(dst));
+            }
+        }
 
         // Allocate destination register
         let dst = self.ctx.alloc_temp();
@@ -38183,13 +38306,7 @@ impl VbcCodegen {
             });
         } else if type_name == "Float" {
             self.emit_intrinsic_library_call("verum_float_to_text", &[expr_reg], str_reg)?;
-        } else if self.infer_expr_is_unsigned(expr)
-            && self
-                .infer_expr_type_name(expr)
-                .as_deref()
-                .and_then(type_names::numeric_bit_width)
-                != Some(128)
-        {
+        } else if self.infer_expr_is_unsigned(expr) {
             // Unsigned-integer display (T0364).  A `UInt64`/`Byte`/…
             // value with the high bit set carries correct BITS but no
             // signedness tag at runtime, so the signed `ToString` /
@@ -38203,15 +38320,29 @@ impl VbcCodegen {
             // never a fourth ad-hoc derivation; a signed `Int` fails
             // this predicate and stays on the unchanged path below.
             //
-            // The 128-bit exclusion (`numeric_bit_width != 128`, the
-            // canonical width authority — covers `UInt128`/`u128`/`U128`)
-            // is a T0272 INTERLOCK: a `UInt128` is boxed wider than the
-            // nan-box i64, so `verum_uint_to_text`'s `as_i64() as u64`
-            // would silently narrow it.  128-bit display stays on its
-            // own path until T0272 lands a width-aware arm.  An unknown
-            // width (nested `u64` arithmetic → `None`) is NOT 128 and
-            // correctly takes the u64 path.
+            // `UInt128` takes this arm too (T0272): the former 128-bit
+            // interlock is retired — `UIntToText`'s interpreter handler
+            // is width-aware (boxed-i128 renders full u128 magnitude),
+            // so the unsigned render op is correct at every width.
             self.emit_intrinsic_library_call("verum_uint_to_text", &[expr_reg], str_reg)?;
+        } else if self
+            .infer_expr_type_name(expr)
+            .as_deref()
+            .and_then(type_names::numeric_bit_width)
+            == Some(128)
+        {
+            // Signed 128-bit display (T0272 width-aware arm). `Int128`
+            // must NOT route through protocol Display dispatch: the
+            // stdlib `fmt` receives `self` through a call boundary that
+            // narrows to i64 today, and any user-visible fallback that
+            // narrows silently is exactly the defect class this task
+            // closes. `ToString`'s handler formats a boxed-i128 at full
+            // width (signed, per this static type), so emit it directly —
+            // the same one-instruction shape the other primitives use.
+            self.ctx.emit(Instruction::ToString {
+                dst: str_reg,
+                src: expr_reg,
+            });
         } else if !self.try_emit_display_dispatch(expr, expr_reg, str_reg)? {
             self.ctx.emit(Instruction::ToString {
                 dst: str_reg,

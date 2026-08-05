@@ -850,6 +850,165 @@ pub(crate) fn get_or_declare_internal_u64_to_decimal<'ctx>(
     func
 }
 
+/// Get or declare `verum_internal_u128_to_decimal(buf: ptr, value: i128) -> i64`
+/// — the 128-bit magnitude writer (T0272), structurally identical to the
+/// u64 sibling above but with the magnitude PHI at i128 width. Unsigned
+/// div/rem by the constant 10 lowers to LLVM's magic-multiply sequence, so
+/// no compiler-rt `__udivti3` dependency is introduced. Digit index and
+/// return length stay i64 (max 39 digits).
+pub(crate) fn get_or_declare_internal_u128_to_decimal<'ctx>(
+    llvm_ctx: &'ctx verum_llvm::context::Context,
+    module: &Module<'ctx>,
+) -> verum_llvm::values::FunctionValue<'ctx> {
+    let wrapper_name = "verum_internal_u128_to_decimal";
+    if let Some(f) = module.get_function(wrapper_name) {
+        return f;
+    }
+    let i8_type = llvm_ctx.i8_type();
+    let i64_type = llvm_ctx.i64_type();
+    let i128_type = llvm_ctx.i128_type();
+    let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
+
+    let fn_type = i64_type.fn_type(&[ptr_type.into(), i128_type.into()], false);
+    let func = module.add_function(wrapper_name, fn_type, None);
+    func.set_linkage(verum_llvm::module::Linkage::Internal);
+
+    let entry = llvm_ctx.append_basic_block(func, "entry");
+    let zero_branch = llvm_ctx.append_basic_block(func, "zero");
+    let digit_loop = llvm_ctx.append_basic_block(func, "digit_loop");
+    let after_digits = llvm_ctx.append_basic_block(func, "after_digits");
+    let reverse_loop = llvm_ctx.append_basic_block(func, "reverse_loop");
+    let reverse_swap = llvm_ctx.append_basic_block(func, "reverse_swap");
+    let return_val = llvm_ctx.append_basic_block(func, "return_val");
+
+    let builder = llvm_ctx.create_builder();
+
+    let buf_param = func.get_first_param().expect("buf").into_pointer_value();
+    let val_param = func.get_nth_param(1).expect("value").into_int_value();
+
+    let zero_i64 = i64_type.const_zero();
+    let one_i64 = i64_type.const_int(1, false);
+    let zero_i128 = i128_type.const_zero();
+    let ten_i128 = i128_type.const_int(10, false);
+    let zero_ch = i8_type.const_int(b'0' as u64, false);
+
+    // entry: branch on value == 0.
+    builder.position_at_end(entry);
+    let is_zero = builder
+        .build_int_compare(verum_llvm::IntPredicate::EQ, val_param, zero_i128, "is_zero")
+        .expect("is_zero");
+    builder
+        .build_conditional_branch(is_zero, zero_branch, digit_loop)
+        .expect("zero br");
+
+    // zero: buf[0] = '0'; return 1.
+    builder.position_at_end(zero_branch);
+    builder.build_store(buf_param, zero_ch).expect("store zero");
+    builder.build_return(Some(&one_i64)).expect("ret 1");
+
+    // digit_loop: PHI(mag: i128, i: i64); buf[i] = '0' + (mag % 10);
+    //             mag /= 10; i++; while mag != 0. Unsigned at 128 bits.
+    builder.position_at_end(digit_loop);
+    let mag_phi = builder.build_phi(i128_type, "mag").expect("mag phi");
+    let i_phi = builder.build_phi(i64_type, "i").expect("i phi");
+    mag_phi.add_incoming(&[(&val_param, entry)]);
+    i_phi.add_incoming(&[(&zero_i64, entry)]);
+    let mag_v = mag_phi.as_basic_value().into_int_value();
+    let i_v = i_phi.as_basic_value().into_int_value();
+
+    let digit = builder
+        .build_int_unsigned_rem(mag_v, ten_i128, "digit")
+        .expect("rem");
+    let digit_i8 = builder
+        .build_int_truncate(digit, i8_type, "digit_i8")
+        .expect("trunc");
+    let digit_ch = builder
+        .build_int_add(digit_i8, zero_ch, "digit_ch")
+        .expect("digit add");
+    let buf_i = unsafe {
+        builder
+            .build_gep(i8_type, buf_param, &[i_v], "buf_i")
+            .expect("gep")
+    };
+    builder.build_store(buf_i, digit_ch).expect("store digit");
+    let mag_next = builder
+        .build_int_unsigned_div(mag_v, ten_i128, "mag_next")
+        .expect("div");
+    let i_next = builder
+        .build_int_add(i_v, one_i64, "i_next")
+        .expect("i++");
+    let cont = builder
+        .build_int_compare(verum_llvm::IntPredicate::NE, mag_next, zero_i128, "cont")
+        .expect("cont");
+    builder
+        .build_conditional_branch(cont, digit_loop, after_digits)
+        .expect("loop br");
+    mag_phi.add_incoming(&[(&mag_next, digit_loop)]);
+    i_phi.add_incoming(&[(&i_next, digit_loop)]);
+
+    // after_digits: len = i_next; reverse in place (LSD-first order).
+    builder.position_at_end(after_digits);
+    let len_v = i_next;
+    let hi_init = builder
+        .build_int_sub(len_v, one_i64, "hi_init")
+        .expect("hi-1");
+    builder
+        .build_unconditional_branch(reverse_loop)
+        .expect("to rev loop");
+
+    builder.position_at_end(reverse_loop);
+    let lo_phi = builder.build_phi(i64_type, "lo").expect("lo phi");
+    let hi_phi = builder.build_phi(i64_type, "hi").expect("hi phi");
+    lo_phi.add_incoming(&[(&zero_i64, after_digits)]);
+    hi_phi.add_incoming(&[(&hi_init, after_digits)]);
+    let lo_v = lo_phi.as_basic_value().into_int_value();
+    let hi_v = hi_phi.as_basic_value().into_int_value();
+    let need_swap = builder
+        .build_int_compare(verum_llvm::IntPredicate::SLT, lo_v, hi_v, "need_swap")
+        .expect("lo<hi");
+    builder
+        .build_conditional_branch(need_swap, reverse_swap, return_val)
+        .expect("rev br");
+
+    builder.position_at_end(reverse_swap);
+    let buf_lo = unsafe {
+        builder
+            .build_gep(i8_type, buf_param, &[lo_v], "buf_lo")
+            .expect("gep lo")
+    };
+    let buf_hi = unsafe {
+        builder
+            .build_gep(i8_type, buf_param, &[hi_v], "buf_hi")
+            .expect("gep hi")
+    };
+    let tmp = builder
+        .build_load(i8_type, buf_lo, "tmp")
+        .expect("load lo")
+        .into_int_value();
+    let other = builder
+        .build_load(i8_type, buf_hi, "other")
+        .expect("load hi")
+        .into_int_value();
+    builder.build_store(buf_lo, other).expect("store lo");
+    builder.build_store(buf_hi, tmp).expect("store hi");
+    let lo_next = builder
+        .build_int_add(lo_v, one_i64, "lo_next")
+        .expect("lo++");
+    let hi_next = builder
+        .build_int_sub(hi_v, one_i64, "hi_next")
+        .expect("hi--");
+    builder
+        .build_unconditional_branch(reverse_loop)
+        .expect("rev back");
+    lo_phi.add_incoming(&[(&lo_next, reverse_swap)]);
+    hi_phi.add_incoming(&[(&hi_next, reverse_swap)]);
+
+    builder.position_at_end(return_val);
+    builder.build_return(Some(&len_v)).expect("ret len");
+
+    func
+}
+
 /// Get or declare a libc-free `strtod` replacement —
 /// `verum_internal_strtod(nptr: ptr) -> f64`.
 ///
@@ -2409,6 +2568,57 @@ fn untag_slot_ptr<'ctx>(
 /// This is the SINGLE point where type coercion happens for integer operations.
 /// Pointers are converted via ptrtoint at point-of-use (not at register load),
 /// preserving provenance for LLVM optimization passes.
+/// Coerce a register value to a native i128 (T0272 wide-int path).
+///
+/// Narrow ints SIGN-extend (the language's signed default — matching the
+/// wide-slot store in `FunctionContext::set_register`); floats and pointers
+/// carry their 64-bit bit-pattern zero-extended, mirroring the same store's
+/// coercions so a wide-slot round-trip is exact.
+fn as_i128<'ctx>(
+    ctx: &FunctionContext<'_, 'ctx>,
+    val: BasicValueEnum<'ctx>,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    let i128_type = ctx.types().i128_type();
+    match val {
+        BasicValueEnum::IntValue(i) => {
+            let bw = i.get_type().get_bit_width();
+            if bw == 128 {
+                Ok(i)
+            } else {
+                ctx.builder()
+                    .build_int_s_extend(i, i128_type, name)
+                    .or_llvm_err()
+            }
+        }
+        BasicValueEnum::FloatValue(f) => {
+            let bits = ctx
+                .builder()
+                .build_bit_cast(f, ctx.types().i64_type(), name)
+                .map(|v| v.into_int_value())
+                .or_llvm_err()?;
+            ctx.builder()
+                .build_int_z_extend(bits, i128_type, name)
+                .or_llvm_err()
+        }
+        BasicValueEnum::PointerValue(p) => {
+            let bits = ctx
+                .builder()
+                .build_ptr_to_int(p, ctx.types().i64_type(), name)
+                .or_llvm_err()?;
+            ctx.builder()
+                .build_int_z_extend(bits, i128_type, name)
+                .or_llvm_err()
+        }
+        _ => Ok(i128_type.const_zero()),
+    }
+}
+
+/// True iff this value is a native 128-bit integer (the T0272 wide carrier).
+fn value_is_i128(val: &BasicValueEnum<'_>) -> bool {
+    matches!(val, BasicValueEnum::IntValue(v) if v.get_type().get_bit_width() == 128)
+}
+
 fn as_i64<'ctx>(
     ctx: &FunctionContext<'_, 'ctx>,
     val: BasicValueEnum<'ctx>,
@@ -2793,8 +3003,17 @@ pub fn lower_instruction<'ctx>(
                     return Ok(());
                 }
             }
-            let lhs = as_i64(ctx, va, "lhs")?;
-            let rhs = as_i64(ctx, vb, "rhs")?;
+            // T0272 wide dispatch: a 128-bit operand makes the whole op
+            // 128-bit — the value's own LLVM type is the width fact (same
+            // pattern as the FloatValue check above). The op bodies below are
+            // width-agnostic; only the operand coercion differs, and the
+            // pre-scan guarantees dst has a wide slot whenever this fires.
+            let wide = value_is_i128(&va) || value_is_i128(&vb);
+            let (lhs, rhs) = if wide {
+                (as_i128(ctx, va, "lhs_w")?, as_i128(ctx, vb, "rhs_w")?)
+            } else {
+                (as_i64(ctx, va, "lhs")?, as_i64(ctx, vb, "rhs")?)
+            };
 
             let result = match op {
                 BinaryIntOp::Add => ctx
@@ -2881,7 +3100,14 @@ pub fn lower_instruction<'ctx>(
                 ctx.mark_float_register(dst.0);
                 return Ok(());
             }
-            let src_val = as_i64(ctx, value, "src_val")?;
+            // T0272: keep a 128-bit operand at its own width; the op
+            // bodies below are width-agnostic (zero/one derive from the
+            // operand's type).
+            let src_val = if value_is_i128(&value) {
+                as_i128(ctx, value, "src_val_w")?
+            } else {
+                as_i64(ctx, value, "src_val")?
+            };
 
             let result = match op {
                 UnaryIntOp::Neg => ctx
@@ -2890,7 +3116,7 @@ pub fn lower_instruction<'ctx>(
                     .or_llvm_err()?,
                 UnaryIntOp::Abs => {
                     // abs(x) = x < 0 ? -x : x
-                    let zero = ctx.types().i64_type().const_zero();
+                    let zero = src_val.get_type().const_zero();
                     let is_neg = ctx
                         .builder()
                         .build_int_compare(IntPredicate::SLT, src_val, zero, "is_neg")
@@ -2905,13 +3131,13 @@ pub fn lower_instruction<'ctx>(
                         .into_int_value()
                 }
                 UnaryIntOp::Inc => {
-                    let one = ctx.types().i64_type().const_int(1, false);
+                    let one = src_val.get_type().const_int(1, false);
                     ctx.builder()
                         .build_int_add(src_val, one, "inc")
                         .or_llvm_err()?
                 }
                 UnaryIntOp::Dec => {
-                    let one = ctx.types().i64_type().const_int(1, false);
+                    let one = src_val.get_type().const_int(1, false);
                     ctx.builder()
                         .build_int_sub(src_val, one, "dec")
                         .or_llvm_err()?
@@ -3005,8 +3231,16 @@ pub fn lower_instruction<'ctx>(
         // Bitwise Operations
         // ====================================================================
         Instruction::Bitwise { op, dst, a, b } => {
-            let lhs = as_i64(ctx, ctx.get_register(a.0)?, "lhs")?;
-            let rhs = as_i64(ctx, ctx.get_register(b.0)?, "rhs")?;
+            let va = ctx.get_register(a.0)?;
+            let vb = ctx.get_register(b.0)?;
+            // T0272: a 128-bit operand keeps the whole op at 128 bits (the
+            // shift-family in particular: `1 << 100` must not wrap at 64).
+            let wide = value_is_i128(&va) || value_is_i128(&vb);
+            let (lhs, rhs) = if wide {
+                (as_i128(ctx, va, "lhs_w")?, as_i128(ctx, vb, "rhs_w")?)
+            } else {
+                (as_i64(ctx, va, "lhs")?, as_i64(ctx, vb, "rhs")?)
+            };
 
             let result = match op {
                 BitwiseOp::And => ctx
@@ -3182,9 +3416,18 @@ pub fn lower_instruction<'ctx>(
                 // task #41: deref a lone scalar `&T` reference operand so we
                 // compare pointee values, not value-vs-pointer.
                 let lhs_raw = deref_if_lone_ref(ctx, a.0, b.0, "cmpi_lhs")?;
-                let lhs = as_i64(ctx, lhs_raw, "lhs")?;
                 let rhs_raw = deref_if_lone_ref(ctx, b.0, a.0, "cmpi_rhs")?;
-                let rhs = as_i64(ctx, rhs_raw, "rhs")?;
+                // T0272: a 128-bit operand compares at 128 bits — truncating
+                // through the i64 window would order `Int128::MAX` below 0.
+                let wide = value_is_i128(&lhs_raw) || value_is_i128(&rhs_raw);
+                let (lhs, rhs) = if wide {
+                    (
+                        as_i128(ctx, lhs_raw, "lhs_w")?,
+                        as_i128(ctx, rhs_raw, "rhs_w")?,
+                    )
+                } else {
+                    (as_i64(ctx, lhs_raw, "lhs")?, as_i64(ctx, rhs_raw, "rhs")?)
+                };
 
                 ctx.builder()
                     .build_int_compare(pred, lhs, rhs, "icmp")
@@ -6876,8 +7119,36 @@ pub fn lower_instruction<'ctx>(
         // Unsigned Comparison
         // ====================================================================
         Instruction::CmpU { sub_op, dst, a, b } => {
-            let lhs = as_i64(ctx, ctx.get_register(a.0)?, "lhs")?;
-            let rhs = as_i64(ctx, ctx.get_register(b.0)?, "rhs")?;
+            let va = ctx.get_register(a.0)?;
+            let vb = ctx.get_register(b.0)?;
+            // T0272: unsigned 128-bit compares stay at 128 bits. A narrow
+            // co-operand widens by ZERO-extension here — this is the unsigned
+            // compare family, so the operand's bits are magnitude.
+            let wide = value_is_i128(&va) || value_is_i128(&vb);
+            let (lhs, rhs) = if wide {
+                let i128_ty = ctx.types().i128_type();
+                let widen = |ctx: &FunctionContext<'_, 'ctx>,
+                             v: BasicValueEnum<'ctx>,
+                             nm: &str|
+                 -> Result<verum_llvm::values::IntValue<'ctx>> {
+                    match v {
+                        BasicValueEnum::IntValue(i)
+                            if i.get_type().get_bit_width() == 128 =>
+                        {
+                            Ok(i)
+                        }
+                        other => {
+                            let narrow = as_i64(ctx, other, nm)?;
+                            ctx.builder()
+                                .build_int_z_extend(narrow, i128_ty, nm)
+                                .or_llvm_err()
+                        }
+                    }
+                };
+                (widen(ctx, va, "lhs_wu")?, widen(ctx, vb, "rhs_wu")?)
+            } else {
+                (as_i64(ctx, va, "lhs")?, as_i64(ctx, vb, "rhs")?)
+            };
             let pred = match sub_op {
                 CmpSubOpcode::LtU => IntPredicate::ULT,
                 CmpSubOpcode::LeU => IntPredicate::ULE,
@@ -22948,6 +23219,27 @@ fn lower_text_extended<'ctx>(
             let module = ctx.get_module();
             let _ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
+            // T0272 width-aware arm: a wide (i128) operand renders through
+            // the 128-bit signed writer — the i64 coercion below would
+            // print the truncated low word.
+            if value_is_i128(&val) {
+                let i128_ty = ctx.types().i128_type();
+                let fn_type = i64_ty.fn_type(&[i128_ty.into()], false);
+                let to_text_fn = super::error::get_or_declare_function(
+                    module,
+                    "verum_i128_to_text",
+                    fn_type,
+                );
+                let wide = as_i128(ctx, val, "i128_to_text_arg")?;
+                let result = ctx
+                    .builder()
+                    .build_call(to_text_fn, &[wide.into()], "i128_to_text")
+                    .or_llvm_err()?
+                    .basic_value_or("IntToText/i128: expected return value")?;
+                ctx.set_register(dst, result);
+                ctx.mark_text_register(dst);
+                return Ok(());
+            }
             // Prefer verum_int_to_text (LLVM IR, snprintf-based) — compiled Text.from_int has broken push_byte.
             let fn_type = i64_ty.fn_type(&[i64_ty.into()], false);
         let to_text_fn = super::error::get_or_declare_function(module, "verum_int_to_text", fn_type);
@@ -22995,6 +23287,26 @@ fn lower_text_extended<'ctx>(
             let val = ctx.get_register(op_reg(operands, 1))?;
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
+            // T0272 width-aware arm: a wide (i128) operand renders through
+            // the 128-bit unsigned writer at full magnitude.
+            if value_is_i128(&val) {
+                let i128_ty = ctx.types().i128_type();
+                let fn_type = i64_ty.fn_type(&[i128_ty.into()], false);
+                let to_text_fn = super::error::get_or_declare_function(
+                    module,
+                    "verum_u128_to_text",
+                    fn_type,
+                );
+                let wide = as_i128(ctx, val, "u128_to_text_arg")?;
+                let result = ctx
+                    .builder()
+                    .build_call(to_text_fn, &[wide.into()], "u128_to_text")
+                    .or_llvm_err()?
+                    .basic_value_or("UIntToText/u128: expected return value")?;
+                ctx.set_register(dst, result);
+                ctx.mark_text_register(dst);
+                return Ok(());
+            }
             let fn_type = i64_ty.fn_type(&[i64_ty.into()], false);
             let to_text_fn =
                 super::error::get_or_declare_function(module, "verum_uint_to_text", fn_type);
@@ -32636,9 +32948,10 @@ fn safe_int_div<'ctx>(
     name: &str,
 ) -> Result<verum_llvm::values::IntValue<'ctx>> {
     let module = ctx.get_module();
-    let i64_type = ctx.types().i64_type();
     let _ptr_type = ctx.types().ptr_type();
-    let zero = i64_type.const_zero();
+    // Zero of the DIVISOR's own width — this guard serves every integer
+    // width (i64 and the T0272 wide i128 path alike).
+    let zero = rhs.get_type().const_zero();
 
     let is_zero = ctx
         .builder()
@@ -32741,8 +33054,8 @@ fn emit_div_zero_guard<'ctx>(
     rhs: verum_llvm::values::IntValue<'ctx>,
 ) -> Result<()> {
     let module = ctx.get_module();
-    let i64_type = ctx.types().i64_type();
-    let zero = i64_type.const_zero();
+    // Divisor-width zero (T0272: the wide i128 path reuses this guard).
+    let zero = rhs.get_type().const_zero();
     let is_zero = ctx
         .builder()
         .build_int_compare(verum_llvm::IntPredicate::EQ, rhs, zero, "div_zero_check")
@@ -32763,6 +33076,7 @@ fn emit_div_zero_guard<'ctx>(
         .or_llvm_err()?;
     ctx.builder().position_at_end(panic_bb);
     let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+    let i64_type = ctx.types().i64_type();
     let fn_type = ctx
         .llvm_context()
         .void_type()
@@ -32796,9 +33110,9 @@ fn safe_int_rem<'ctx>(
     name: &str,
 ) -> Result<verum_llvm::values::IntValue<'ctx>> {
     let module = ctx.get_module();
-    let i64_type = ctx.types().i64_type();
     let _ptr_type = ctx.types().ptr_type();
-    let zero = i64_type.const_zero();
+    // Divisor-width zero (T0272: the wide i128 path reuses this guard).
+    let zero = rhs.get_type().const_zero();
 
     let is_zero = ctx
         .builder()
@@ -32870,9 +33184,11 @@ fn lower_int_pow<'ctx>(
     base: verum_llvm::values::IntValue<'ctx>,
     exp: verum_llvm::values::IntValue<'ctx>,
 ) -> Result<verum_llvm::values::IntValue<'ctx>> {
-    let i64_type = ctx.types().i64_type();
-    let one = i64_type.const_int(1, false);
-    let zero = i64_type.const_zero();
+    // Operate at the OPERANDS' own width — this loop serves i64 and the
+    // T0272 wide i128 path alike (both operands arrive same-width).
+    let val_type = base.get_type();
+    let one = val_type.const_int(1, false);
+    let zero = val_type.const_zero();
 
     // Create basic blocks for the loop
     let current_fn = ctx.function();
@@ -32902,7 +33218,7 @@ fn lower_int_pow<'ctx>(
     ctx.builder().position_at_end(exit_block);
     let phi_result = ctx
         .builder()
-        .build_phi(i64_type, "pow_result")
+        .build_phi(val_type, "pow_result")
         .or_llvm_err()?;
     phi_result.add_incoming(&[(&zero, entry_block)]);
 
@@ -32910,15 +33226,15 @@ fn lower_int_pow<'ctx>(
     ctx.builder().position_at_end(loop_block);
     let result_phi = ctx
         .builder()
-        .build_phi(i64_type, "result")
+        .build_phi(val_type, "result")
         .or_llvm_err()?;
     let base_phi = ctx
         .builder()
-        .build_phi(i64_type, "base_cur")
+        .build_phi(val_type, "base_cur")
         .or_llvm_err()?;
     let exp_phi = ctx
         .builder()
-        .build_phi(i64_type, "exp_cur")
+        .build_phi(val_type, "exp_cur")
         .or_llvm_err()?;
 
     // Initial values from entry
@@ -38190,19 +38506,21 @@ fn lower_load_const<'ctx>(
     };
     let llvm_val = match constant {
         Constant::Int(v) => ctx.types().i64_type().const_int(*v as u64, true).into(),
-        // T0272 — AOT Int128 is NOT yet full-width. The AOT tier models every
-        // Value as one i64 register (NaN-box), with no shared boxed-i128 side
-        // table (that lives in the interpreter process). A correct AOT Int128
-        // needs a distinct 128-bit runtime carrier (heap-boxed 16-byte cell or
-        // an i128 register pair) threaded through every integer arith / compare
-        // / print lowering — a separate, sizeable change (see the T0272 dossier
-        // §AOT). Until then this arm emits the LOW 64 bits, which is EXACTLY the
-        // value AOT produced before (the shared literal lowering used to
-        // `value as i64` before ever reaching the const pool), so it is a
-        // parity placeholder, not a regression. The interpreter tier IS
-        // full-width.
+        // T0272 — full-width AOT Int128. The pool constant materialises as a
+        // native LLVM i128; the destination register is in the pre-scanned
+        // wide-slot set (the pre-scan seeds on exactly this arm), so
+        // `set_register` stores it through the register's i128 slot and every
+        // integer lowering downstream dispatches wide off the value's own
+        // 128-bit LLVM type — the same value-carries-the-fact pattern the
+        // float path uses. Signedness is not needed here: the two's-complement
+        // bits are the value; signed/unsigned selection happens at the
+        // consuming opcode (div/shift/compare/print).
         Constant::Int128 { raw, .. } => {
-            ctx.types().i64_type().const_int(*raw as u64, true).into()
+            let words = [*raw as u64, (*raw >> 64) as u64];
+            ctx.types()
+                .i128_type()
+                .const_int_arbitrary_precision(&words)
+                .into()
         }
         Constant::Float(v) => ctx.types().f64_type().const_float(*v).into(),
         Constant::String(str_id) => {
@@ -41345,6 +41663,28 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
             ctx.set_register(dst.0, i64_type.const_zero().into());
             ctx.mark_text_register(dst.0);
         }
+        return Ok(());
+    }
+
+    // 128-bit integer → Text (T0272): the wide carrier renders through the
+    // signed 128-bit writer. `ToString` is the SIGNED render slot — codegen
+    // routes `Int128` display here directly (`emit_value_to_text`'s
+    // width-aware arm) and unsigned 128-bit display through `UIntToText`.
+    if value_is_i128(&val) {
+        let module = ctx.get_module();
+        let i128_ty = ctx.types().i128_type();
+        let fn_type = i64_type.fn_type(&[i128_ty.into()], false);
+        let to_text_fn =
+            super::error::get_or_declare_function(&module, "verum_i128_to_text", fn_type);
+        let wide = as_i128(ctx, val, "tostr_i128")?;
+        let result = ctx
+            .builder()
+            .build_call(to_text_fn, &[wide.into()], "i128_tostr")
+            .or_llvm_err()?
+            .basic_value_or("ToString/i128: expected return value")?;
+        ctx.set_register(dst.0, result);
+        ctx.mark_text_register(dst.0);
+        ctx.mark_owned_text_register(dst.0);
         return Ok(());
     }
 

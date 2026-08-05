@@ -3056,6 +3056,127 @@ mod const_generic_value_carry_tests {
         );
     }
 
+    /// T0272 display leg: a 128-bit value renders at FULL width through the
+    /// f-string path. RED (pre-fix): the stdlib Display impl narrowed via
+    /// `.to_int()` and the `IntToText`/`ToString` handlers read the low-64
+    /// window, printing `Int128::MAX` as "-1".
+    #[test]
+    fn t0272_int128_display_full_width() {
+        assert_main_returns_int(
+            r#"
+            fn main() -> Int {
+                let big: Int128 = 170141183460469231731687303715884105727;
+                if f"{big}" == "170141183460469231731687303715884105727" { 1 } else { 0 }
+            }
+            "#,
+            1,
+        );
+        // Negative render carries the sign at full width.
+        assert_main_returns_int(
+            r#"
+            fn main() -> Int {
+                let big: Int128 = 170141183460469231731687303715884105727;
+                let neg = 0 - big;
+                if f"{neg}" == "-170141183460469231731687303715884105727" { 1 } else { 0 }
+            }
+            "#,
+            1,
+        );
+    }
+
+    /// T0272 display leg, unsigned: `UInt128::MAX` renders its full 39-digit
+    /// magnitude through the width-aware `UIntToText` arm. RED (pre-fix):
+    /// low-word "18446744073709551615" (or a signed "-1").
+    #[test]
+    fn t0272_uint128_display_full_width() {
+        assert_main_returns_int(
+            r#"
+            fn main() -> Int {
+                let umax: UInt128 = 340282366920938463463374607431768211455;
+                if f"{umax}" == "340282366920938463463374607431768211455" { 1 } else { 0 }
+            }
+            "#,
+            1,
+        );
+    }
+
+    /// T0272 interlock: a literal in (i64::MAX, u64::MAX] with NO 128-bit
+    /// typing is a `UInt64` VALUE, not an Int128 — it must stay on the
+    /// 64-bit bit-pattern path so u64 arithmetic keeps 64-bit (wrapping)
+    /// semantics. RED (over-widened): `u64::MAX + 1` evaluated to 2^64
+    /// (a boxed i128) instead of wrapping to 0, and at Tier-1 the wide
+    /// pre-scan grew i128 slots inside every stdlib function touching a
+    /// u64 mask constant (AeadState.seal).
+    #[test]
+    fn t0272_u64_literal_stays_64_bit() {
+        assert_main_returns_int(
+            r#"
+            fn main() -> Int {
+                let m: UInt64 = 18446744073709551615;
+                let y = m + 1;
+                if f"{y}" == "0" { 1 } else { 0 }
+            }
+            "#,
+            1,
+        );
+    }
+
+    /// T0272 comparison leg: `Int128::MAX > 0` must hold — a 64-bit collapse
+    /// reads the truncated -1 and flips the sign test.
+    #[test]
+    fn t0272_int128_compare_full_width() {
+        assert_main_returns_int(
+            r#"
+            fn main() -> Int {
+                let big: Int128 = 170141183460469231731687303715884105727;
+                if big > 0 { 1 } else { 0 }
+            }
+            "#,
+            1,
+        );
+    }
+
+    /// T0272 widening-cast leg: `as Int128` / `as UInt128` extend by SOURCE
+    /// signedness (sext for signed, zext for unsigned) instead of the former
+    /// register passthrough that kept the value 64-bit. The shift round-trip
+    /// fails if the cast did not actually widen.
+    #[test]
+    fn t0272_cast_widens_by_source_signedness() {
+        // Signed source sign-extends, then genuinely lives at 128 bits.
+        assert_main_returns_i128(
+            r#"
+            fn main() -> Int128 {
+                let small: Int = 7;
+                let w = small as Int128;
+                (w << 100) >> 100
+            }
+            "#,
+            7u128,
+        );
+        // -1 as Int128 sign-extends to -1 (all-ones), not 2^64-1.
+        assert_main_returns_int(
+            r#"
+            fn main() -> Int {
+                let neg_one: Int = -1;
+                let w = neg_one as Int128;
+                if w < 0 { 1 } else { 0 }
+            }
+            "#,
+            1,
+        );
+        // Unsigned source zero-extends: u64::MAX stays a magnitude.
+        assert_main_returns_int(
+            r#"
+            fn main() -> Int {
+                let u: UInt64 = 18446744073709551615;
+                let w = u as UInt128;
+                if f"{w}" == "18446744073709551615" { 1 } else { 0 }
+            }
+            "#,
+            1,
+        );
+    }
+
     /// Receiver-driven const witness: `let b = B<7>.new(); b.cap()` — the
     /// let-binding carries "B<7>" (constructor full-instantiation carry),
     /// the method callsite parses it back into [ConstValue(7)], and the

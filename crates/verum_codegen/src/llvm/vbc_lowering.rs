@@ -3793,9 +3793,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                 }
                                 verum_vbc::module::Constant::Int(_)
                                 | verum_vbc::module::Constant::Int128 { .. } => {
-                                    // T0272: AOT models Int128 as an i64 register
-                                    // (low-64 placeholder — see instruction.rs
-                                    // LoadK arm), so it types as Int here too.
+                                    // Both are the integer CLASS here; the
+                                    // 128-bit WIDTH fact rides on the LLVM
+                                    // value itself (i128 const → wide slot,
+                                    // T0272), not on this class mark.
                                     ctx.reg_types_mut()
                                         .set(dst.0, super::register_types::RegisterType::Int);
                                 }
@@ -3915,6 +3916,55 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         }
         if !float_regs_from_prescan.is_empty() {
             ctx.set_prescan_float_registers(float_regs_from_prescan);
+        }
+
+        // Pre-scan (T0272): registers that carry 128-bit integers get a WIDE
+        // (i128) alloca slot for the whole function — see
+        // `FunctionContext::wide_int_registers` for the slot invariant.
+        // Seed: `LoadK` of an `Int128` pool constant. Propagate forward
+        // through Mov and the integer ALU families; iterate to fixpoint
+        // because a loop back-edge can consume a wide register whose
+        // defining instruction appears later in the linear stream.
+        {
+            let mut wide_int_regs: std::collections::HashSet<u16> =
+                std::collections::HashSet::new();
+            loop {
+                let before = wide_int_regs.len();
+                for instr in vbc_func.instructions.iter() {
+                    match instr {
+                        Instruction::LoadK { dst, const_id } => {
+                            if let Some(verum_vbc::module::Constant::Int128 { .. }) =
+                                vbc_module.constants.get(*const_id as usize)
+                            {
+                                wide_int_regs.insert(dst.0);
+                            }
+                        }
+                        Instruction::Mov { dst, src } => {
+                            if wide_int_regs.contains(&src.0) {
+                                wide_int_regs.insert(dst.0);
+                            }
+                        }
+                        Instruction::BinaryI { dst, a, b, .. }
+                        | Instruction::Bitwise { dst, a, b, .. } => {
+                            if wide_int_regs.contains(&a.0) || wide_int_regs.contains(&b.0) {
+                                wide_int_regs.insert(dst.0);
+                            }
+                        }
+                        Instruction::UnaryI { dst, src, .. } => {
+                            if wide_int_regs.contains(&src.0) {
+                                wide_int_regs.insert(dst.0);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if wide_int_regs.len() == before {
+                    break;
+                }
+            }
+            if !wide_int_regs.is_empty() {
+                ctx.set_wide_int_registers(wide_int_regs);
+            }
         }
 
         // Pre-scan: mark registers that receive text values (Concat/ToString/CharToStr/LoadK String).

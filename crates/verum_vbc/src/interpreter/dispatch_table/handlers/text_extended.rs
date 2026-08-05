@@ -97,8 +97,17 @@ fn text_extended_body(
         }
         Some(TextSubOpcode::IntToText) => {
             let value_reg = read_reg(state)?;
-            let n = state.get_reg(value_reg).as_i64();
-            let s = format!("{}", n);
+            let v = state.get_reg(value_reg);
+            // Width-aware arm (T0272): a boxed-i128 renders at full width —
+            // `as_i64()` is the deliberate lossy low-64 window and would print
+            // `Int128::MAX` as `-1`. Signedness comes from the opcode (this is
+            // the signed render op), never from the box tag: an arithmetic
+            // result carries the constructor's default tag, not the static type.
+            let s = if v.is_boxed_i128() {
+                format!("{}", v.as_i128_raw() as i128)
+            } else {
+                format!("{}", v.as_i64())
+            };
             let text_val = super::string_helpers::alloc_string_value(state, &s)?;
             state.set_reg(dst, text_val);
         }
@@ -112,8 +121,16 @@ fn text_extended_body(
             // the high bit set prints its full magnitude instead of the
             // i64 two's-complement negative.
             let value_reg = read_reg(state)?;
-            let n = state.get_reg(value_reg).as_i64() as u64;
-            let s = format!("{}", n);
+            let v = state.get_reg(value_reg);
+            // Width-aware arm (T0272): a boxed-i128 read through the u64
+            // window would print `UInt128::MAX` as `18446744073709551615`
+            // (its low word). Render the full raw bits as u128 — unsigned
+            // by this opcode's contract, regardless of the box tag.
+            let s = if v.is_boxed_i128() {
+                format!("{}", v.as_i128_raw())
+            } else {
+                format!("{}", v.as_i64() as u64)
+            };
             let text_val = super::string_helpers::alloc_string_value(state, &s)?;
             state.set_reg(dst, text_val);
         }

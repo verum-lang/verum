@@ -22,6 +22,7 @@ pub struct TypeLowering<'ctx> {
     i16_type: IntType<'ctx>,
     i32_type: IntType<'ctx>,
     i64_type: IntType<'ctx>,
+    i128_type: IntType<'ctx>,
     f32_type: FloatType<'ctx>,
     f64_type: FloatType<'ctx>,
     void_type: VoidType<'ctx>,
@@ -38,6 +39,7 @@ impl<'ctx> TypeLowering<'ctx> {
             i16_type: context.i16_type(),
             i32_type: context.i32_type(),
             i64_type: context.i64_type(),
+            i128_type: context.i128_type(),
             f32_type: context.f32_type(),
             f64_type: context.f64_type(),
             void_type: context.void_type(),
@@ -209,6 +211,12 @@ impl<'ctx> TypeLowering<'ctx> {
     /// Get the LLVM i64 type.
     pub fn i64_type(&self) -> IntType<'ctx> {
         self.i64_type
+    }
+
+    /// Get the LLVM i128 type (T0272: the Tier-1 carrier for
+    /// `Int128`/`UInt128` values inside a function body).
+    pub fn i128_type(&self) -> IntType<'ctx> {
+        self.i128_type
     }
 
     /// Get the LLVM f32 type.

@@ -228,6 +228,17 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Tracks the LLVM type of each alloca register (for typed loads in alloca mode).
     alloca_register_types: HashMap<u16, BasicTypeEnum<'ctx>>,
 
+    /// Registers that carry 128-bit integer values somewhere in this function
+    /// (T0272 wide-slot model). Seeded by the VBC pre-scan (LoadK of an
+    /// `Constant::Int128`, propagated through Mov / integer arithmetic to
+    /// fixpoint). A wide register's alloca slot is `i128` for the WHOLE
+    /// function and every store widens into it (sext for ints, bit-pattern
+    /// zext for float/ptr), so narrow values round-trip exactly and a
+    /// basic-block merge can never read a half-written slot — the same
+    /// single-slot-per-register invariant the uniform-i64 model pins,
+    /// widened to 16 bytes only where the pre-scan proves it is needed.
+    wide_int_registers: std::collections::HashSet<u16>,
+
     /// Registers that hold string pointers (for correct DebugPrint dispatch).
     /// NOTE: Being replaced by text_registers. Kept during migration.
     string_registers: std::collections::HashSet<u16>,
@@ -779,6 +790,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             alloca_mode: false,
             alloca_registers: HashMap::new(),
             alloca_register_types: HashMap::new(),
+            wide_int_registers: std::collections::HashSet::new(),
             string_registers: std::collections::HashSet::new(),
             text_registers: std::collections::HashSet::new(),
             bool_registers: std::collections::HashSet::new(),
@@ -887,6 +899,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             alloca_mode: false,
             alloca_registers: HashMap::new(),
             alloca_register_types: HashMap::new(),
+            wide_int_registers: std::collections::HashSet::new(),
             string_registers: std::collections::HashSet::new(),
             text_registers: std::collections::HashSet::new(),
             bool_registers: std::collections::HashSet::new(),
@@ -1502,6 +1515,17 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Set pre-scanned float registers (survives set_register clearing).
     pub fn set_prescan_float_registers(&mut self, regs: std::collections::HashSet<u16>) {
         self.reg_types.set_prescan_float(regs);
+    }
+
+    /// Set the pre-scanned 128-bit-integer registers (T0272 wide-slot model).
+    /// See the `wide_int_registers` field docs for the invariant.
+    pub fn set_wide_int_registers(&mut self, regs: std::collections::HashSet<u16>) {
+        self.wide_int_registers = regs;
+    }
+
+    /// True iff this register's alloca slot is the 128-bit wide slot (T0272).
+    pub fn is_wide_int_register(&self, reg: u16) -> bool {
+        self.wide_int_registers.contains(&reg)
     }
 
     /// Check if a register was identified as float by VBC prescan (BinaryF/UnaryF operand).
@@ -2289,6 +2313,80 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         if self.alloca_mode {
             let i64_ty = self.types.i64_type();
 
+            // T0272 wide-slot route: a pre-scanned 128-bit register stores
+            // through ITS OWN i128 slot on EVERY path — one slot, one type,
+            // for the whole function, so mem2reg promotability and the
+            // cross-block single-slot invariant both hold at 16 bytes.
+            // Narrow values widen exactly (sext for ints — signed is the
+            // language default; bit-pattern zext for float/ptr) and narrow
+            // readers recover them exactly via the trunc in `as_i64`/
+            // `as_f64`/`as_ptr`.
+            if self.wide_int_registers.contains(&reg) {
+                let i128_ty = self.types.i128_type();
+                let wide: verum_llvm::values::IntValue<'ctx> = match value {
+                    BasicValueEnum::IntValue(v) => {
+                        let bw = v.get_type().get_bit_width();
+                        if bw < 128 {
+                            self.builder
+                                .build_int_s_extend(v, i128_ty, &format!("r{}_w_sext", reg))
+                                .expect("sext to i128 should not fail")
+                        } else {
+                            v
+                        }
+                    }
+                    BasicValueEnum::FloatValue(v) => {
+                        let bits = self
+                            .builder
+                            .build_bit_cast(v, i64_ty, &format!("r{}_w_fbits", reg))
+                            .expect("bitcast f64->i64 should not fail")
+                            .into_int_value();
+                        self.builder
+                            .build_int_z_extend(bits, i128_ty, &format!("r{}_w_fzext", reg))
+                            .expect("zext to i128 should not fail")
+                    }
+                    BasicValueEnum::PointerValue(v) => {
+                        let bits = self
+                            .builder
+                            .build_ptr_to_int(v, i64_ty, &format!("r{}_w_p2i", reg))
+                            .expect("ptrtoint should not fail");
+                        self.builder
+                            .build_int_z_extend(bits, i128_ty, &format!("r{}_w_pzext", reg))
+                            .expect("zext to i128 should not fail")
+                    }
+                    _ => i128_ty.const_zero(),
+                };
+                let slot = if let Some(&existing) = self.alloca_registers.get(&reg) {
+                    existing
+                } else {
+                    let entry = self
+                        .function
+                        .get_first_basic_block()
+                        .expect("function must have entry block");
+                    let saved_block = self.builder.get_insert_block();
+                    if let Some(first_instr) = entry.get_first_instruction() {
+                        self.builder.position_before(&first_instr);
+                    } else {
+                        self.builder.position_at_end(entry);
+                    }
+                    let alloca = self
+                        .builder
+                        .build_alloca(
+                            BasicTypeEnum::IntType(i128_ty),
+                            &format!("r{}_i128slot", reg),
+                        )
+                        .expect("alloca should not fail");
+                    if let Some(block) = saved_block {
+                        self.builder.position_at_end(block);
+                    }
+                    self.alloca_registers.insert(reg, alloca);
+                    alloca
+                };
+                let _ = self.builder.build_store(slot, wide);
+                self.alloca_register_types
+                    .insert(reg, BasicTypeEnum::IntType(i128_ty));
+                return;
+            }
+
             // alloca_register_types updated per-branch below
 
             // Coerce value to i64 for uniform storage (or f64 directly for floats)
@@ -2299,6 +2397,17 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                         self.builder
                             .build_int_z_extend(v, i64_ty, &format!("r{}_widen", reg))
                             .expect("zext should not fail")
+                            .into()
+                    } else if bw > 64 {
+                        // A wide (i128) value flowing into a register OUTSIDE
+                        // the pre-scanned wide set must narrow to the slot's
+                        // width — `store i128` into an 8-byte alloca writes
+                        // 16 bytes and corrupts the frame (T0272). Low-64
+                        // truncation is the uniform-slot contract; full-width
+                        // consumers live in wide-slot registers.
+                        self.builder
+                            .build_int_truncate(v, i64_ty, &format!("r{}_narrow", reg))
+                            .expect("trunc should not fail")
                             .into()
                     } else {
                         value

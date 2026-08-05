@@ -1,0 +1,54 @@
+// @test: run
+// @level: L0
+// @tier: all
+// @expected-exit: 0
+// @description: Int128/UInt128 stay full-width through literals, arithmetic,
+//   casts, comparisons and display on EVERY tier (T0272). Inputs are chosen
+//   where a 64-bit collapse MUST diverge: i128::MAX truncates to -1, so a
+//   narrowed pipeline flips the sign test, zeroes the division, and prints
+//   the wrong digits — none of these asserts can pass vacuously at 64 bits.
+
+mount core.prelude.*;
+
+fn main() {
+    // ---- literal channel: i128::MAX survives the constant pool ----
+    let big: Int128 = 170141183460469231731687303715884105727;
+    assert(big > 0);
+
+    // Division brings the value back into i64 range, so the assert is
+    // exact even for a 64-bit-only comparator; a truncated `big` (-1)
+    // divides to 0 instead.
+    let d = big / 100000000000000000000;
+    assert_eq(d, 1701411834604692317);
+
+    // ---- arithmetic width: products past 2^64 keep their high bits ----
+    let c: UInt128 = 1000000000000;
+    let p = c * c; // 10^24 — needs 80 bits
+    let back = p / 1000000000000;
+    assert_eq(back, 1000000000000);
+
+    // ---- shifts run mod-128, not mod-64 ----
+    let one: Int128 = 1;
+    let shifted = one << 100;
+    assert_eq(shifted >> 90, 1024);
+
+    // ---- display renders full width (signed and unsigned) ----
+    assert_eq(f"{big}", "170141183460469231731687303715884105727");
+    let umax: UInt128 = 340282366920938463463374607431768211455;
+    assert_eq(f"{umax}", "340282366920938463463374607431768211455");
+    let neg: Int128 = 0 - big;
+    assert_eq(f"{neg}", "-170141183460469231731687303715884105727");
+
+    // ---- widening casts extend by SOURCE signedness ----
+    let small: Int = 7;
+    let widened = (small as Int128) << 100;
+    assert_eq(widened >> 100, 7);
+    let neg_one: Int = -1;
+    let sext = neg_one as Int128;
+    assert(sext < 0); // sign-extended, not 2^64-1
+    let u_source: UInt64 = 18446744073709551615;
+    let zext = u_source as UInt128;
+    assert_eq(f"{zext}", "18446744073709551615"); // zero-extended magnitude
+
+    print("int128 full width ok");
+}
