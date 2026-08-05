@@ -192,3 +192,7 @@ public mount .propagation.TextMapPropagator;
 public mount .propagation.W3CTraceContext;
 public mount .propagation.inject_traceparent;
 public mount .propagation.extract_traceparent;
+
+// Production Tracer-context provider (T0351) — the bridge the
+// core.context.standard `Tracer` seam documents.
+public mount .provider.TracingTracer;

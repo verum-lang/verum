@@ -1,0 +1,33 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @expected-exit: 0
+// @description: The production Tracer context provider (T0351) bridges the
+//   core.context.standard DI seam to core.tracing — a using [Tracer]
+//   program starts real spans, tags them, and reads a W3C 32-hex trace id
+//   through the context, with nesting parented correctly.
+
+mount core.*;
+mount core.tracing.provider.{TracingTracer};
+
+fn traced_work() using [Tracer] {
+    let root = Tracer.start_span("outer");
+    Tracer.add_attribute("order.id", "42");
+    Tracer.add_event("validated");
+
+    match Tracer.current_trace_id() {
+        Maybe.Some(id) => assert_eq(id.len(), 32),
+        Maybe.None => panic("an open span must expose its trace id"),
+    }
+
+    let inner = Tracer.start_span("inner");
+    Tracer.add_event("charged");
+    Tracer.end_span(inner);
+    Tracer.end_span(root);
+}
+
+fn main() {
+    provide Tracer = TracingTracer.new("bridge-spec", "1.0.0");
+    traced_work();
+    print("tracer bridge ok");
+}

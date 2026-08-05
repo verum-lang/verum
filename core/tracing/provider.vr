@@ -1,0 +1,117 @@
+// =============================================================================
+// tracing/provider.vr — the PRODUCTION `Tracer` context provider (T0351)
+// =============================================================================
+// `core.context.standard` declares `public context Tracer` as the DI seam
+// and its doc promises "production code installs a provider that
+// delegates to `core.tracing.get_tracer(...)`". Until this module, that
+// sentence described an intention: no provider existed anywhere, so a
+// `using [Tracer]` program had no production binding and distributed
+// tracing was inert outside hand-provided test mocks.
+//
+// `TracingTracer` is that bridge. It resolves a named `TracerHandle`
+// through the global provider slot (`get_tracer`), keeps a LIFO of open
+// spans so the context's current-span operations (`add_attribute`,
+// `add_event`, `current_trace_id`) address the innermost open span, and
+// parents each new span on the previous top — the W3C trace stays
+// connected without explicit SpanContext threading.
+//
+//   provide Tracer = TracingTracer.new("order-service", "1.0.0");
+//   process_order(order); // fn process_order(...) using [Tracer]
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1")
+)
+module core.tracing.provider;
+
+mount core.*;
+mount base.{Text, Bool, Int, Maybe};
+mount collections.{List};
+mount core.tracing.tracer.{TracerHandle, get_tracer};
+mount core.tracing.data.{Span, SpanKind, KindInternal, AttributeSet, SpanLink};
+mount core.tracing.attribute.{AttributeValue};
+mount core.tracing.context.{SpanContext};
+
+/// Production `Tracer`-context provider delegating to `core.tracing`.
+public type TracingTracer is {
+    /// Named tracer resolved through the global provider slot.
+    handle: TracerHandle,
+    /// LIFO of spans started through this provider and not yet ended —
+    /// the top is the "current span" the context's attribute/event/id
+    /// operations address.
+    open: List<Span>,
+};
+
+implement TracingTracer {
+    /// Resolve `get_tracer(name, version)` and wrap it as the context
+    /// provider value.
+    public fn new(name: Text, version: Text) -> TracingTracer {
+        TracingTracer {
+            handle: get_tracer(&name, &version),
+            open: List.new(),
+        }
+    }
+
+    /// Start a span, parented on the current top-of-stack span (or as a
+    /// new root when none is open), and make it the current span.
+    public fn start_span(&mut self, name: Text) -> Span {
+        let parent = if self.open.len() > 0 {
+            self.open[self.open.len() - 1].context()
+        } else {
+            SpanContext.invalid()
+        };
+        let span = self.handle.start_span(
+            &name,
+            KindInternal,
+            AttributeSet.new(),
+            List.new(),
+            &parent,
+        );
+        self.open.push(span.clone());
+        span
+    }
+
+    /// End a span and drop it from the open stack (innermost match —
+    /// out-of-order ends of an outer span leave inner spans open, which
+    /// is the honest OTel shape rather than a silent mass-close).
+    public fn end_span(&mut self, span: Span) {
+        span.end();
+        let target = span.context().span_id();
+        let mut i = self.open.len();
+        while i > 0 {
+            i = i - 1;
+            if self.open[i].context().span_id() == target {
+                self.open.remove(i);
+                return;
+            }
+        }
+    }
+
+    /// Set a string attribute on the current (innermost open) span.
+    public fn add_attribute(&mut self, key: Text, value: Text) {
+        if self.open.len() > 0 {
+            self.open[self.open.len() - 1]
+                .set_attribute(key, AttributeValue.Text(value));
+        }
+    }
+
+    /// Add a timestamped event to the current span.
+    public fn add_event(&mut self, name: Text) {
+        if self.open.len() > 0 {
+            self.open[self.open.len() - 1].add_event_now(name);
+        }
+    }
+
+    /// W3C §2.2.2 32-hex trace id of the current span, when one is open.
+    public fn current_trace_id(&self) -> Maybe<Text> {
+        if self.open.len() > 0 {
+            Maybe.Some(
+                self.open[self.open.len() - 1].context().trace_id().to_hex(),
+            )
+        } else {
+            Maybe.None
+        }
+    }
+}
