@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.iter.outcome.{
-    StepOutcome, SoRow, SoDone, SoBusy, SoError, SoMisuse, SoOther,
+    RawStepOutcome, RawRow, RawDone, RawBusy, RawError, RawMisuse, RawOther,
     outcome_code, outcome_kind_name, has_row, is_terminal, is_retriable, from_code,
     SQLITE_ROW, SQLITE_DONE, SQLITE_BUSY, SQLITE_ERROR, SQLITE_MISUSE,
 };
@@ -24,27 +24,27 @@ mount base.{Bool};
 // -----------------------------------------------------------------------------
 
 fn test_outcome_codes_match_sqlite() {
-    assert_eq(outcome_code(&SoRow), SQLITE_ROW);
-    assert_eq(outcome_code(&SoDone), SQLITE_DONE);
-    assert_eq(outcome_code(&SoBusy), SQLITE_BUSY);
-    assert_eq(outcome_code(&SoMisuse), SQLITE_MISUSE);
+    assert_eq(outcome_code(&RawRow), SQLITE_ROW);
+    assert_eq(outcome_code(&RawDone), SQLITE_DONE);
+    assert_eq(outcome_code(&RawBusy), SQLITE_BUSY);
+    assert_eq(outcome_code(&RawMisuse), SQLITE_MISUSE);
 }
 
 fn test_has_row_only_for_row() {
-    assert(has_row(&SoRow));
-    assert(!has_row(&SoDone));
+    assert(has_row(&RawRow));
+    assert(!has_row(&RawDone));
 }
 
 fn test_is_terminal_for_done_error() {
-    assert(is_terminal(&SoDone));
-    assert(is_terminal(&SoError("x".clone())));
-    assert(!is_terminal(&SoRow));
-    assert(!is_terminal(&SoBusy));
+    assert(is_terminal(&RawDone));
+    assert(is_terminal(&RawError("x".clone())));
+    assert(!is_terminal(&RawRow));
+    assert(!is_terminal(&RawBusy));
 }
 
 fn test_is_retriable_only_for_busy() {
-    assert(is_retriable(&SoBusy));
-    assert(!is_retriable(&SoError("x".clone())));
+    assert(is_retriable(&RawBusy));
+    assert(!is_retriable(&RawError("x".clone())));
 }
 
 fn test_from_code_round_trips() {
@@ -58,9 +58,9 @@ fn test_from_code_round_trips() {
 // Cursor
 // -----------------------------------------------------------------------------
 
-fn fake_step_done(_id: Int64) -> StepOutcome { SoDone }
-fn fake_step_row(_id: Int64) -> StepOutcome { SoRow }
-fn fake_step_busy(_id: Int64) -> StepOutcome { SoBusy }
+fn fake_step_done(_id: Int64) -> RawStepOutcome { RawDone }
+fn fake_step_row(_id: Int64) -> RawStepOutcome { RawRow }
+fn fake_step_busy(_id: Int64) -> RawStepOutcome { RawBusy }
 fn noop_on_row(_id: Int64) {}
 
 fn test_cursor_initial_state_ready() {

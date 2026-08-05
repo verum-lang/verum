@@ -927,6 +927,20 @@ pub struct TypeDescriptor {
     /// VBC format v2.9; pre-2.9 archives decode `None`.
     #[serde(default)]
     pub alias_target_name: Option<StringId>,
+    /// The dotted path of the FILE submodule that declared this type
+    /// (`core.database.sqlite.native.ext.hooks`), interned in this
+    /// module's string table. The archive's entry granularity is the
+    /// DIRECTORY module (`...native.ext`), so without this carry every
+    /// type in a multi-file stdlib module inherits the directory path in
+    /// `archive_metadata` — `metadata_known_module_items` then reports a
+    /// file-submodule (`ext.hooks`) as exporting NOTHING of its own and
+    /// mounts of its payload variants die E401 (T0555 dedup fallout).
+    /// `None` = the type was declared at the entry module's own top
+    /// level (single-file modules, user code) — consumers fall back to
+    /// the entry name. Additive VBC format v2.12; pre-2.12 archives
+    /// decode `None`.
+    #[serde(default)]
+    pub origin_module: Option<StringId>,
     /// Single canonical flag: is this type a transparent wrapper
     /// whose values are represented at runtime as the inner value
     /// (no heap allocation, no field offsets, no type-tag preserved)?
@@ -961,6 +975,7 @@ impl Default for TypeDescriptor {
             id: TypeId::UNIT,
             name: StringId::EMPTY,
             kind: TypeKind::Unit,
+            origin_module: None,
             type_params: SmallVec::new(),
             fields: SmallVec::new(),
             variants: SmallVec::new(),

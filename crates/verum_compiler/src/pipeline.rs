@@ -1576,6 +1576,7 @@ impl<'s> CompilationPipeline<'s> {
                         .map(|(p, _)| p)
                         .unwrap_or(""),
                 ),
+                origin_module_path: verum_common::Maybe::None,
                 generic_params: Self::parse_generic_params_from_definition(&cached_type.definition),
                 kind: match cached_type.kind.as_str() {
                     "struct" | "record" => TypeDescriptorKind::Record {

@@ -203,7 +203,7 @@ public module soft_heap;
 public module deserialize;
 // - explain: EXPLAIN + EXPLAIN QUERY PLAN row shapes + tree formatter
 public module explain;
-// - iter: sqlite3_step result codes — StepOutcome + StmtCursor iteration
+// - iter: sqlite3_step result codes — RawStepOutcome + StmtCursor iteration
 public module iter;
 // - incrblob: sqlite3_blob_* incremental BLOB I/O — handle + flags + engine
 public module incrblob;

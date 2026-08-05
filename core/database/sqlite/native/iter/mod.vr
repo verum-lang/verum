@@ -13,7 +13,7 @@
 //
 
 // Submodules:
-//  * `outcome` — StepOutcome sum + sqlite3 numeric code
+//  * `outcome` — RawStepOutcome sum + sqlite3 numeric code
 //  * `cursor` — StmtCursor: iteration handle around PreparedStatement
 //  * `collect` — collect_into helper turning a cursor into a Vec
 // =============================================================================

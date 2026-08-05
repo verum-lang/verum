@@ -50,7 +50,7 @@ mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.ext.hooks.{
-    ExtUpdateOp, UoInsert, UoUpdate, UoDelete, update_op_name,
+    UpdateOp, UoInsert, UoUpdate, UoDelete, op_name,
     AuthAction, AuthDecision, AdAllow, AdDeny, AdIgnore,
 };
 
@@ -128,7 +128,7 @@ public fn hook_handle_is_valid(h: &HookHandle) -> Bool {
 // -----------------------------------------------------------------------------
 
 /// `sqlite3_update_hook` — fired by L4 VDBE Insert/Update/Delete.
-public type UpdateHookFn = fn(ExtUpdateOp, &Text, &Text, Int64);
+public type UpdateHookFn = fn(UpdateOp, &Text, &Text, Int64);
 
 /// `sqlite3_commit_hook` — fired by SqliteNativeConnection.commit_tx BEFORE the
 /// actual COMMIT.  Returns `true` to veto (turns commit into
@@ -323,7 +323,7 @@ implement HookHandleRegistry {
     /// receive the same signature — distinct slots so the L4 VDBE
     /// can choose which one to fire from its Insert/Update/Delete
     /// opcodes vs the pre-update interceptor).
-    public fn fire_update(&self, op: ExtUpdateOp, db: &Text, table: &Text, rowid: Int64) {
+    public fn fire_update(&self, op: UpdateOp, db: &Text, table: &Text, rowid: Int64) {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
@@ -337,7 +337,7 @@ implement HookHandleRegistry {
         }
     }
 
-    public fn fire_pre_update(&self, op: ExtUpdateOp, db: &Text, table: &Text, rowid: Int64) {
+    public fn fire_pre_update(&self, op: UpdateOp, db: &Text, table: &Text, rowid: Int64) {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
@@ -512,7 +512,7 @@ implement HookHandleRegistry {
 // Internal helpers
 // -----------------------------------------------------------------------------
 
-fn clone_update_op(o: &ExtUpdateOp) -> ExtUpdateOp {
+fn clone_update_op(o: &UpdateOp) -> UpdateOp {
     match o {
         UoInsert => UoInsert,
         UoUpdate => UoUpdate,

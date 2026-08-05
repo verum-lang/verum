@@ -995,6 +995,10 @@ impl<'a> BytecodeSpecializer<'a> {
         // Create new type descriptor (note: TypeDescriptor doesn't have type_args/generic_base)
         // The instantiation relationship is tracked in our instantiated_types cache instead
         let new_type_desc = TypeDescriptor {
+            // A monomorphized instantiation is synthesized here, not
+            // declared in any source file — same rationale as the
+            // cleared alias_target_name below (v2.12).
+            origin_module: None,
             id: new_id,
             name: base_desc.map(|d| d.name).unwrap_or_default(),
             kind: base_desc.map(|d| d.kind).unwrap_or_default(),

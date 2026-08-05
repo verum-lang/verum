@@ -929,6 +929,19 @@ impl<'a> Deserializer<'a> {
  } else {
  None
  };
+ // v2.12 — TYPE-ORIGIN-MODULE carry (T0555): version-gated trailing
+ // Option<StringId>. Pre-2.12 archives decode as `None` (entry-name
+ // fallback in archive_metadata).
+ let origin_module = if self
+ .header
+ .as_ref()
+ .map_or(0, |h| h.version_minor)
+ >= 12
+ {
+ self.parse_optional_u32()?.map(StringId)
+ } else {
+ None
+ };
  Ok(TypeDescriptor {
  id,
  name,
@@ -944,6 +957,7 @@ impl<'a> Deserializer<'a> {
  visibility,
  alias_target,
  alias_target_name,
+ origin_module,
  is_transparent_wrapper,
  })
  }

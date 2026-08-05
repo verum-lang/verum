@@ -24,19 +24,19 @@ mount core.database.sqlite.native.errors.code.{
 
 public type RbuStepOutcome is
       SoMoreWork
-    | SoDone
+    | RawDone
     | SoFailed { code: ExtendedCode, reason: Text };
 
 public fn step_is_ok(s: &RbuStepOutcome) -> Bool {
     match s {
-        SoMoreWork | SoDone => true,
+        SoMoreWork | RawDone => true,
         _ => false,
     }
 }
 
 public fn step_is_done(s: &RbuStepOutcome) -> Bool {
     match s {
-        SoDone => true,
+        RawDone => true,
         _ => false,
     }
 }

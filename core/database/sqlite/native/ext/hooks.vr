@@ -44,24 +44,24 @@ public type RollbackHook is protocol {
 // UpdateHook / PreUpdateHook — observe DML
 // -----------------------------------------------------------------------------
 
-public type ExtUpdateOp is UoInsert | UoUpdate | UoDelete;
-
-public fn update_op_name(o: &ExtUpdateOp) -> Text {
-    match o {
-        UoInsert => "INSERT".clone(),
-        UoUpdate => "UPDATE".clone(),
-        UoDelete => "DELETE".clone(),
-    }
-}
+// The operation taxonomy is owned by `hooks_api.op` (`UpdateOp`,
+// carrying the sqlite3.h numeric codes); re-exported here so the
+// protocol surface and its enum stay reachable from one mount path.
+// A second local enum with the same variant names used to live here —
+// duplicate variant spellings across two types made the bare
+// constructors unresolvable at the registration layer (T0555).
+public mount core.database.sqlite.native.hooks_api.op.{
+    UpdateOp, UoInsert, UoUpdate, UoDelete, op_name,
+};
 
 public type UpdateHook is protocol {
-    fn on_update(&mut self, op: ExtUpdateOp, db: &Text, table: &Text, rowid: Int64);
+    fn on_update(&mut self, op: UpdateOp, db: &Text, table: &Text, rowid: Int64);
 };
 
 public type PreUpdateHook is protocol {
     fn on_pre_update(
         &mut self,
-        op: ExtUpdateOp,
+        op: UpdateOp,
         db: &Text,
         table: &Text,
         old_row: &List<Register>,

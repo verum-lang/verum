@@ -138,6 +138,16 @@ pub struct TypeDescriptor {
     /// Module path (e.g., "std.collections")
     pub module_path: Text,
 
+    /// The declaring FILE submodule when it differs from `module_path`
+    /// (v2.12 TYPE-ORIGIN-MODULE, T0555): archive entries are DIRECTORY
+    /// modules, so `module_path` stays the entry path every existing
+    /// resolver route keys on, while this field records the precise
+    /// `module core.x.y.z;` declaration for module-surface queries
+    /// (`metadata_known_module_items`). `Maybe::None` = same as
+    /// `module_path` (single-file modules, pre-v2.12 archives).
+    #[serde(default)]
+    pub origin_module_path: Maybe<Text>,
+
     /// Generic parameters (e.g., ["T"] for List<T>)
     pub generic_params: List<GenericParam>,
 

@@ -400,6 +400,11 @@ impl Serializer {
         // read side.  Mirrors `return_type_name`'s optional-u32 encoding.
         self.serialize_optional_u32(desc.alias_target_name.map(|s| s.0));
 
+        // v2.12 — TYPE-ORIGIN-MODULE carry (T0555): the declaring FILE
+        // submodule's dotted path. Same trailing optional-u32 discipline;
+        // pre-2.12 readers stop before it and decode `None`.
+        self.serialize_optional_u32(desc.origin_module.map(|s| s.0));
+
         Ok(())
     }
 

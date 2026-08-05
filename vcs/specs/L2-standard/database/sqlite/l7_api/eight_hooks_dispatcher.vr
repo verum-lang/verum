@@ -21,8 +21,16 @@ mount core.database.sqlite.native.hooks_api.{
     BusyDecision, BdRetry, BdGiveUp,
     ProgressDecision, PdContinue, PdInterrupt,
     UpdateOp, UoInsert, UoUpdate, UoDelete,
-    UpdateHookCtx, PreUpdateHookCtx, AuthorizerCtx, TraceCtx,
-    TraceEvent, TeStmtPrepared, TeStmtRow, TeStmtClose, TeProfile,
+    UpdateHookCtx, PreUpdateHookCtx, AuthorizerCtx,
+    // TraceHookCtx, not TraceCtx: the bare name is owned by
+    // native/observability/span.vr (distributed-tracing span context)
+    // — two different concepts, two names (dedup discipline).
+    TraceHookCtx,
+    // TraceEventKind, not TraceEvent: THREE trace-event types coexist
+    // today (payload ext.hooks.TraceEvent, mask-tag SqliteTraceEvent,
+    // this ctx tag) — the ctx tag keeps its honest Kind name until the
+    // trace-event canonicalization collapses them (recorded in T0555).
+    TraceEventKind, TeStmtPrepared, TeStmtRow, TeStmtClose, TeProfile,
     fire_commit_hook, fire_rollback_hook,
     fire_update_hook, fire_pre_update_hook,
     fire_authorizer, fire_busy_handler, fire_progress_handler, fire_trace_hook,
@@ -142,7 +150,7 @@ fn progress_handler_no_handler() {
 
 fn trace_hook_no_handler() {
     let engine = new_extended_engine();
-    let ctx = TraceCtx {
+    let ctx = TraceHookCtx {
         event: TeStmtPrepared,
         sql: "SELECT 1".clone(),
         elapsed_ns: 0_i64,

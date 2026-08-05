@@ -41,7 +41,7 @@ mount core.database.sqlite.native.ext.window.{
 };
 mount core.database.sqlite.native.ext.hooks.{
     BusyHandler, ConstantBusyHandler, constant_busy,
-    ExtUpdateOp, UoInsert, UoUpdate, UoDelete, update_op_name,
+    UpdateOp, UoInsert, UoUpdate, UoDelete, op_name,
     AuthAction, AuthDecision, AdAllow, AdDeny, AaSelect, AaInsert,
     CommitDecision, CdAllow, CdAbort,
 };
@@ -239,9 +239,9 @@ fn test_busy_handler_bounded() {
 }
 
 fn test_update_op_names() {
-    assert(update_op_name(&UoInsert) == "INSERT".clone());
-    assert(update_op_name(&UoUpdate) == "UPDATE".clone());
-    assert(update_op_name(&UoDelete) == "DELETE".clone());
+    assert(op_name(&UoInsert) == "INSERT".clone());
+    assert(op_name(&UoUpdate) == "UPDATE".clone());
+    assert(op_name(&UoDelete) == "DELETE".clone());
 }
 
 // -----------------------------------------------------------------------------

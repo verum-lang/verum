@@ -30,7 +30,7 @@ mount core.database.sqlite.native.l4_vdbe.interpreter.{
     RowMutation, RowMutationKind, RmkInsert, RmkUpdate, RmkDelete,
 };
 mount core.database.sqlite.native.ext.hooks.{
-    ExtUpdateOp, UoInsert, UoUpdate, UoDelete,
+    UpdateOp, UoInsert, UoUpdate, UoDelete,
 };
 mount core.database.sqlite.native.l6_session.connection.SqliteNativeConnection;
 mount core.database.sqlite.native.l6_session.statement.PreparedStatement;
@@ -117,7 +117,7 @@ public fn fire_update_hooks(stmt: &PreparedStatement, conn: &mut SqliteNativeCon
     // require &mut so we resolve into a small (op, table_meta, rowid)
     // staging list first, then iterate calling the hook.
     let main_db: Text = "main".clone();
-    let mut staged: List<(ExtUpdateOp, Text, Text, Int64)> = List.new();
+    let mut staged: List<(UpdateOp, Text, Text, Int64)> = List.new();
     let mut i: Int = 0;
     while i < mutations.len() {
         let m = &mutations[i];

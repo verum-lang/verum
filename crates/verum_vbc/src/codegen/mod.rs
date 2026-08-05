@@ -2353,6 +2353,17 @@ impl VbcCodegen {
     /// declaration in the given AST module, if any. Stdlib `.vr` files
     /// start with exactly one such declaration; user files typically
     /// don't have one.
+    /// v2.12 TYPE-ORIGIN-MODULE (T0555): intern the current FILE
+    /// submodule's dotted path for a type descriptor being built.
+    /// `None` at an entry module's own top level (single-file modules,
+    /// user code) — consumers fall back to the entry name.
+    fn current_origin_module_sid(&mut self) -> Option<crate::types::StringId> {
+        self.ctx
+            .current_source_module
+            .clone()
+            .map(|m| crate::types::StringId(self.ctx.intern_string_raw(&m)))
+    }
+
     fn extract_source_module_name(module: &Module) -> Option<String> {
         for item in module.items.iter() {
             if let ItemKind::Module(decl) = &item.kind {
@@ -5280,8 +5291,62 @@ impl VbcCodegen {
                 self.type_field_layouts.entry(q).or_insert(names.clone());
             }
             self.type_field_layouts
-                .entry(simple_name)
+                .entry(simple_name.clone())
                 .or_insert(names);
+        }
+        // ARCHIVE-VARIANT-CTOR-1 (T0555): mirror
+        // `register_type_constructors`' variant registration for
+        // archive-imported Sum types. Without this, an archive-mounted
+        // sum type had a TypeDescriptor but NO constructor infos, so a
+        // bare `UoInsert` in user code fell past the function-registry
+        // suffix search straight to `undefined variable` — the same gap
+        // MOUNTED-UNIT-VALUE-1 closed for unit types, at the variant
+        // family. QUALIFIED names only (`Type.Variant`): the bare-name
+        // compile path resolves through `find_function_by_suffix`, and
+        // bare slots are collision-prone (the variant_collisions
+        // discipline) — the declaring compile owns them.
+        if matches!(ty.kind, crate::types::TypeKind::Sum) {
+            for (variant_index, v) in ty.variants.iter().enumerate() {
+                let Some(variant_name) = archive_strings
+                    .and_then(|st| st.get(v.name))
+                    .map(|s| s.to_string())
+                    .or_else(|| self.ctx.strings.get(v.name.0 as usize).cloned())
+                else {
+                    continue;
+                };
+                let qualified = format!("{}.{}", simple_name, variant_name);
+                if self.ctx.lookup_function(&qualified).is_some() {
+                    continue;
+                }
+                let param_count = match v.kind {
+                    crate::types::VariantKind::Unit => 0,
+                    crate::types::VariantKind::Tuple => v.arity as usize,
+                    crate::types::VariantKind::Record => v.fields.len(),
+                };
+                let info = FunctionInfo {
+                    id: FunctionId(u32::MAX - variant_index as u32),
+                    param_count,
+                    param_names: (0..param_count).map(|i| format!("_{}", i)).collect(),
+                    param_type_names: vec![],
+                    is_async: false,
+                    is_generator: false,
+                    contexts: vec![],
+                    return_type: None,
+                    yield_type: None,
+                    intrinsic_name: None,
+                    variant_tag: Some(v.tag),
+                    parent_type_name: Some(simple_name.clone()),
+                    variant_payload_types: None,
+                    is_partial_pattern: false,
+                    takes_self_mut_ref: false,
+                    return_type_name: Some(simple_name.clone()),
+                    return_type_inner: None,
+                    is_const: false,
+                    is_transparent_wrapper: false,
+                    param_closure_return_type_names: Vec::new(),
+                };
+                self.ctx.register_function(qualified, info);
+            }
         }
         self.push_type_dedupe(ty);
     }
@@ -5880,12 +5945,30 @@ impl VbcCodegen {
                     if let Some(witness) = qualified_witness {
                         let mut seen_keys: std::collections::HashSet<&str> =
                             std::collections::HashSet::new();
+                        // Separated = carries its own distinct
+                        // module-qualified registry key. The CURRENT
+                        // module's own declarations register under the
+                        // bare name only, so AT MOST ONE id in a
+                        // benign homonym group may be bare — a user
+                        // file declaring `Cell` next to two stdlib
+                        // modules' `Cell`s is the designed
+                        // module-locality state, not a
+                        // duplicate-registration bug. Two or more
+                        // bare ids under one name remain a genuine
+                        // same-scope split and still flag. (The
+                        // pre-fix all-must-be-qualified rule ICE'd
+                        // every test file that shadowed a stdlib type
+                        // name — base/protocols unit_test, T0148.)
+                        let mut bare_ids = 0usize;
                         let all_separated = ids.iter().all(|id| {
                             match witness.get(id) {
                                 Some(keys) if !keys.is_empty() => {
                                     keys.iter().any(|k| seen_keys.insert(k))
                                 }
-                                _ => false,
+                                _ => {
+                                    bare_ids += 1;
+                                    bare_ids <= 1
+                                }
                             }
                         });
                         if all_separated {
@@ -12442,10 +12525,12 @@ impl VbcCodegen {
                             .unwrap_or(crate::types::TypeRef::Concrete(
                                 crate::types::TypeId(0),
                             ));
+                        let origin_module = self.current_origin_module_sid();
                         let type_desc = crate::types::TypeDescriptor {
                             id: type_id,
                             name: name_id,
                             kind: crate::types::TypeKind::Alias,
+                            origin_module,
                             type_params: smallvec::SmallVec::new(),
                             fields: smallvec::SmallVec::new(),
                             variants: smallvec::SmallVec::new(),
@@ -12736,6 +12821,11 @@ impl VbcCodegen {
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Sum,
                     type_params: sum_type_params,
+                    // v2.12 TYPE-ORIGIN-MODULE (T0555): the declaring FILE
+                    // submodule — archive entries are directory modules, so
+                    // without this every multi-file stdlib type reports the
+                    // directory as its module in archive_metadata.
+                    origin_module: self.current_origin_module_sid(),
                     ..Default::default()
                 };
                 for (variant_index, variant) in variants.iter().enumerate() {
@@ -12922,6 +13012,8 @@ impl VbcCodegen {
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Record,
+                    // v2.12 TYPE-ORIGIN-MODULE (T0555) — see the Sum arm.
+                    origin_module: self.current_origin_module_sid(),
                     ..Default::default()
                 };
 
@@ -13365,10 +13457,12 @@ impl VbcCodegen {
                         });
                     }
                 }
+                let origin_module = self.current_origin_module_sid();
                 let type_desc = crate::types::TypeDescriptor {
                     id: type_id,
                     name: name_id,
                     kind: crate::types::TypeKind::Alias,
+                    origin_module,
                     type_params: alias_type_params,
                     fields: smallvec::SmallVec::new(),
                     variants: smallvec::SmallVec::new(),
@@ -19476,6 +19570,31 @@ impl VbcCodegen {
                     .collect();
                 format!("dyn:{}", bound_names.join("+"))
             }
+            // Function types render the canonical `fn(A, B) -> R`
+            // notation — the exact spelling
+            // `parse_descriptor_type_string`'s `fn(` decoder
+            // round-trips. Same truncated-Debug class as the
+            // Array / Tuple arms above: the catch-all produced the
+            // 20-char garbage name "Function { params: L", which
+            // the bake stored as an alias/field TARGET, the loader
+            // parsed as a rigid Named of that garbage, and every
+            // hook-callback registration (`register_update(fn)`)
+            // failed E400 against it (T0555).
+            TypeKind::Function {
+                params,
+                return_type,
+                ..
+            } => {
+                let param_names: Vec<String> = params
+                    .iter()
+                    .map(Self::extract_type_name_from_ast)
+                    .collect();
+                format!(
+                    "fn({}) -> {}",
+                    param_names.join(", "),
+                    Self::extract_type_name_from_ast(return_type)
+                )
+            }
             _ => format!("{:?}", ty.kind).chars().take(20).collect(),
         }
     }
@@ -20659,6 +20778,15 @@ impl VbcCodegen {
             if let Some(atn) = remapped_ty.alias_target_name {
                 if let Some(mapped) = string_id_map.get(atn.0 as usize) {
                     remapped_ty.alias_target_name = Some(*mapped);
+                }
+            }
+            // v2.12 TYPE-ORIGIN-MODULE (T0555): same codegen-index →
+            // canonical-StringId remap as every other StringId field in
+            // this walker; unmapped it reads as garbage from the written
+            // module and archive_metadata falls back to the entry name.
+            if let Some(om) = remapped_ty.origin_module {
+                if let Some(mapped) = string_id_map.get(om.0 as usize) {
+                    remapped_ty.origin_module = Some(*mapped);
                 }
             }
             // Remap field names from codegen string index to module StringId
@@ -22041,6 +22169,11 @@ impl VbcCodegen {
             id: new_id,
             name: new_name_id,
             kind: ty.kind.clone(),
+            // v2.12: re-intern the origin path into THIS module's table
+            // (same discipline as every other StringId in this copy).
+            origin_module: ty
+                .origin_module
+                .map(|sid| intern(self, sid)),
             type_params: new_type_params,
             fields: new_fields,
             variants: new_variants,
@@ -22373,6 +22506,7 @@ impl VbcCodegen {
                     id: codegen_id,
                     name: stub_name_id,
                     kind: crate::types::TypeKind::Protocol,
+                    origin_module: None,
                     type_params: smallvec::SmallVec::new(),
                     fields: smallvec::SmallVec::new(),
                     // CLEARED — see comment block above.

@@ -6,7 +6,7 @@
 
 // The catalogue-layer driver takes closures from the caller for:
 //  * prepare_fn : &Text -> Int64 // statement id, or -1 on error
-//  * step_fn : Int64 -> StepOutcome
+//  * step_fn : Int64 -> RawStepOutcome
 //  * read_row_fn: Int64 -> ExecRow
 //  * finalize_fn: Int64 -> ()
 //
@@ -26,7 +26,7 @@ mount core.*;
 mount base.{Bool, Text};
 mount collections.List;
 mount core.database.sqlite.native.iter.outcome.{
-    StepOutcome, has_row, is_terminal, SoError,
+    RawStepOutcome, has_row, is_terminal, RawError,
 };
 mount core.database.sqlite.native.exec.row.{
     ExecRow,
@@ -51,7 +51,7 @@ public fn outcome_name(o: &ExecOutcome) -> Text {
 public fn exec_statement(
     sql: Text,
     prepare_fn: fn(&Text) -> Int64,
-    step_fn: fn(Int64) -> StepOutcome,
+    step_fn: fn(Int64) -> RawStepOutcome,
     read_row_fn: fn(Int64) -> ExecRow,
     finalize_fn: fn(Int64),
     callback: fn(&ExecRow) -> CallbackDecision,
@@ -73,7 +73,7 @@ public fn exec_statement(
             continue;
         }
         match &o {
-            SoError(msg) => {
+            RawError(msg) => {
                 outcome = EoError(msg.clone());
                 break;
             }
@@ -91,7 +91,7 @@ public fn exec_statement(
 public fn exec_many(
     statements: &List<Text>,
     prepare_fn: fn(&Text) -> Int64,
-    step_fn: fn(Int64) -> StepOutcome,
+    step_fn: fn(Int64) -> RawStepOutcome,
     read_row_fn: fn(Int64) -> ExecRow,
     finalize_fn: fn(Int64),
     callback: fn(&ExecRow) -> CallbackDecision,

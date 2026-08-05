@@ -704,6 +704,7 @@ mod make_variant_typed_validation_tests {
             type_name: StringId::EMPTY,
         };
         let td = TypeDescriptor {
+            origin_module: None,
             id: TypeId(4000),
             name: tname,
             kind: TypeKind::Record,

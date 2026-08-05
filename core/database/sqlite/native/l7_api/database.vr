@@ -524,6 +524,36 @@ implement Database {
     // For the 90% case use `with_transaction(|d| body)`; for the
     // advanced manual case use `begin_tx_*` + `commit_tx`/`rollback_tx`.
 
+    /// SQL-classic BEGIN without an affine handle — the plain
+    /// `db.begin(); …; db.commit();` flow every sqlite3 user knows,
+    /// and the shape the L7 facade e2e specs exercise (T0555).
+    /// Prefer `with_transaction` (RAII) or `begin_tx` (explicit
+    /// affine handle) where transaction leaks must be impossible;
+    /// these thin wrappers trade that guarantee for the classic
+    /// surface.
+    public fn begin(&mut self) -> Result<(), SqliteApiDbError> {
+        match self.conn.begin_tx(TmDeferred) {
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(db_error_from_conn(e)),
+        }
+    }
+
+    /// SQL-classic COMMIT counterpart of [`Database::begin`].
+    public fn commit(&mut self) -> Result<(), SqliteApiDbError> {
+        match self.conn.commit_tx() {
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(db_error_from_conn(e)),
+        }
+    }
+
+    /// SQL-classic ROLLBACK counterpart of [`Database::begin`].
+    public fn rollback(&mut self) -> Result<(), SqliteApiDbError> {
+        match self.conn.rollback_tx() {
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(db_error_from_conn(e)),
+        }
+    }
+
     /// Begin a deferred transaction (BEGIN). Returns the affine
     /// handle the caller MUST consume.
     public fn begin_tx(&mut self) -> Result<SqliteTransaction, SqliteApiDbError> {

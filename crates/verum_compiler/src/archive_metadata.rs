@@ -307,6 +307,19 @@ fn register_module_metadata(
             Some(s) => Text::from(s),
             None => continue,
         };
+        // v2.12 TYPE-ORIGIN-MODULE (T0555): archive entries are DIRECTORY
+        // modules; the descriptor carries the declaring FILE submodule
+        // (`...native.ext.hooks`) when one exists. Without this, every
+        // type in a multi-file stdlib module claimed the directory path,
+        // `metadata_known_module_items(<file submodule>)` matched nothing
+        // of the module's own, and mounts of its payload-variant
+        // constructors died E401. Pre-2.12 archives decode `None` and
+        // keep the entry-name behaviour.
+        let ty_module_path: Text = ty
+            .origin_module
+            .and_then(|sid| module.strings.get(sid))
+            .map(Text::from)
+            .unwrap_or_else(|| module_path.clone());
 
         // MOUNT-TYPE-AUTHORITY-1: a colliding simple name must NOT
         // skip descriptor construction.  The historic early-continue
@@ -718,6 +731,16 @@ fn register_module_metadata(
         let descriptor = TypeDescriptor {
             name: type_name.clone(),
             module_path: module_path.clone(),
+            // v2.12: the precise declaring file submodule rides in its own
+            // field — `module_path` stays the entry path every existing
+            // resolver route (variant registration, protocol loading,
+            // reexport chains) keys on. Only module-surface queries read
+            // the origin.
+            origin_module_path: if ty_module_path.as_str() != module_path.as_str() {
+                Maybe::Some(ty_module_path.clone())
+            } else {
+                Maybe::None
+            },
             generic_params: convert_generic_params(&ty.type_params, module),
             kind,
             size: if ty.size > 0 {
@@ -794,6 +817,22 @@ fn register_module_metadata(
         };
         if insert_qualified {
             meta.types.insert(qualified_key, descriptor.clone());
+        }
+        // v2.12 TYPE-ORIGIN-MODULE (T0555): ALSO register under the FILE
+        // submodule's qualified key (`...native.ext.hooks.AuthAction`) so
+        // mount-scoped consumers of the file submodule resolve; the
+        // entry-level key above stays for compatibility. Same ranked
+        // collision policy.
+        if ty_module_path.as_str() != module_name {
+            let file_qualified: Text =
+                format!("{}.{}", ty_module_path, type_name).into();
+            let insert_file_q = match meta.types.get(&file_qualified) {
+                None => true,
+                Some(existing) => incoming_rank > rank(&existing.kind, &type_name),
+            };
+            if insert_file_q {
+                meta.types.insert(file_qualified, descriptor.clone());
+            }
         }
         if !simple_slot_was_occupied {
             meta.types.insert(type_name.clone(), descriptor);
@@ -1308,6 +1347,7 @@ fn register_module_metadata(
         let descriptor = TypeDescriptor {
             name: parent_name.clone(),
             module_path: Text::from(""),
+            origin_module_path: Maybe::None,
             generic_params: List::new(),
             // `Record` with no fields is the canonical "opaque
             // primitive" stub — the typechecker's

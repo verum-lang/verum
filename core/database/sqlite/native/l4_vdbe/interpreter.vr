@@ -62,9 +62,9 @@ public type StepResult is
     | Yield
     | ExecError(code: Int, msg: Text);
 
-/// Row-mutation kind — layer-neutral dual of `ext.hooks.ExtUpdateOp`.
+/// Row-mutation kind — layer-neutral dual of `hooks_api.op.UpdateOp`.
 /// Kept here so L4 (interpreter) doesn't have to pull in L7's hook
-/// surface; the L6 writeback bridge converts to `ExtUpdateOp` when it
+/// surface; the L6 writeback bridge converts to `UpdateOp` when it
 /// fires user-visible update_hook callbacks.
 public type RowMutationKind is RmkInsert | RmkUpdate | RmkDelete;
 

@@ -30,7 +30,7 @@ mount core.database.sqlite.native.l7_api.{
     hook_handle_registry_new,
 };
 mount core.database.sqlite.native.ext.hooks.{
-    ExtUpdateOp, UoInsert, UoUpdate, UoDelete,
+    UpdateOp, UoInsert, UoUpdate, UoDelete,
     AuthAction, AuthDecision, AdAllow, AdDeny, AdIgnore,
     AaSelect, AaInsert,
 };
@@ -44,7 +44,7 @@ mount core.database.sqlite.native.ext.hooks.{
 fn always_allow_commit() -> Bool { false }    // false = no veto
 fn always_veto_commit() -> Bool { true }
 fn no_op_rollback() {}
-fn no_op_update(_op: ExtUpdateOp, _db: &Text, _table: &Text, _rowid: Int64) {}
+fn no_op_update(_op: UpdateOp, _db: &Text, _table: &Text, _rowid: Int64) {}
 fn wal_returns_zero(_db: &Text, _n: Int) -> Int { 0 }
 fn wal_returns_seven(_db: &Text, _n: Int) -> Int { 7 }
 fn busy_always_retry(_n: Int) -> Bool { true }

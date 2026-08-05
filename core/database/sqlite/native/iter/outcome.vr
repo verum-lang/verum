@@ -1,10 +1,10 @@
 // =============================================================================
-// iter/outcome.vr — StepOutcome sum
+// iter/outcome.vr — RawStepOutcome sum
 // =============================================================================
 // Spec: SQLite C API
 //
 
-// `StepOutcome` is the typed counterpart to sqlite3_step's return
+// `RawStepOutcome` is the typed counterpart to sqlite3_step's return
 // integer. The five SQLite codes the catalogue exposes:
 //
 
@@ -15,7 +15,7 @@
 //  SQLITE_MISUSE = 21
 //
 
-// Anything else is wrapped in `SoOther(code)` so callers can route
+// Anything else is wrapped in `RawOther(code)` so callers can route
 // extended error codes themselves.
 // =============================================================================
 
@@ -29,13 +29,13 @@ module core.database.sqlite.native.iter.outcome;
 mount core.*;
 mount base.{Text, Bool};
 
-public type StepOutcome is
-      SoRow
-    | SoDone
-    | SoBusy
-    | SoError(Text)
-    | SoMisuse
-    | SoOther(Int);
+public type RawStepOutcome is
+      RawRow
+    | RawDone
+    | RawBusy
+    | RawError(Text)
+    | RawMisuse
+    | RawOther(Int);
 
 public const SQLITE_ROW: Int     = 100;
 public const SQLITE_DONE: Int    = 101;
@@ -43,60 +43,60 @@ public const SQLITE_BUSY: Int    = 5;
 public const SQLITE_ERROR: Int   = 1;
 public const SQLITE_MISUSE: Int  = 21;
 
-public fn outcome_code(o: &StepOutcome) -> Int {
+public fn outcome_code(o: &RawStepOutcome) -> Int {
     match o {
-        SoRow         => SQLITE_ROW,
-        SoDone        => SQLITE_DONE,
-        SoBusy        => SQLITE_BUSY,
-        SoError(_)    => SQLITE_ERROR,
-        SoMisuse      => SQLITE_MISUSE,
-        SoOther(c)    => *c,
+        RawRow         => SQLITE_ROW,
+        RawDone        => SQLITE_DONE,
+        RawBusy        => SQLITE_BUSY,
+        RawError(_)    => SQLITE_ERROR,
+        RawMisuse      => SQLITE_MISUSE,
+        RawOther(c)    => *c,
     }
 }
 
-public fn outcome_kind_name(o: &StepOutcome) -> Text {
+public fn outcome_kind_name(o: &RawStepOutcome) -> Text {
     match o {
-        SoRow         => "row".clone(),
-        SoDone        => "done".clone(),
-        SoBusy        => "busy".clone(),
-        SoError(_)    => "error".clone(),
-        SoMisuse      => "misuse".clone(),
-        SoOther(_)    => "other".clone(),
+        RawRow         => "row".clone(),
+        RawDone        => "done".clone(),
+        RawBusy        => "busy".clone(),
+        RawError(_)    => "error".clone(),
+        RawMisuse      => "misuse".clone(),
+        RawOther(_)    => "other".clone(),
     }
 }
 
 /// True iff this outcome means "another row is ready" — the caller
 /// should fetch the row and step again.
-public fn has_row(o: &StepOutcome) -> Bool {
+public fn has_row(o: &RawStepOutcome) -> Bool {
     match o {
-        SoRow => true,
+        RawRow => true,
         _     => false,
     }
 }
 
 /// True iff this outcome means "the loop should stop".
-public fn is_terminal(o: &StepOutcome) -> Bool {
+public fn is_terminal(o: &RawStepOutcome) -> Bool {
     match o {
-        SoDone | SoError(_) | SoMisuse | SoOther(_) => true,
+        RawDone | RawError(_) | RawMisuse | RawOther(_) => true,
         _ => false,
     }
 }
 
 /// True iff the caller may retry after a back-off.
-public fn is_retriable(o: &StepOutcome) -> Bool {
+public fn is_retriable(o: &RawStepOutcome) -> Bool {
     match o {
-        SoBusy => true,
+        RawBusy => true,
         _      => false,
     }
 }
 
-/// Translate a raw C-API integer into a StepOutcome. Caller passes
+/// Translate a raw C-API integer into a RawStepOutcome. Caller passes
 /// `error_message` only for the error-class codes.
-public fn from_code(code: Int, error_message: Text) -> StepOutcome {
-    if code == SQLITE_ROW    { return SoRow; }
-    if code == SQLITE_DONE   { return SoDone; }
-    if code == SQLITE_BUSY   { return SoBusy; }
-    if code == SQLITE_ERROR  { return SoError(error_message); }
-    if code == SQLITE_MISUSE { return SoMisuse; }
-    SoOther(code)
+public fn from_code(code: Int, error_message: Text) -> RawStepOutcome {
+    if code == SQLITE_ROW    { return RawRow; }
+    if code == SQLITE_DONE   { return RawDone; }
+    if code == SQLITE_BUSY   { return RawBusy; }
+    if code == SQLITE_ERROR  { return RawError(error_message); }
+    if code == SQLITE_MISUSE { return RawMisuse; }
+    RawOther(code)
 }

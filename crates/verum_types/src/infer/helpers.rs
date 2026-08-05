@@ -1779,6 +1779,34 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
         }
         return Type::Var(crate::ty::TypeVar::fresh());
     }
+    // Dyn-protocol objects. TWO writer spellings reach this decoder:
+    // the surface `dyn P` / `dyn P + Q` (source-scan renderers) and
+    // the `make_type_key` form `dyn:P` / `dyn:P+Q` (protocol-layer
+    // keys that leak into baked descriptors). Pre-fix BOTH decoded
+    // as a rigid `Named { "dyn CommitHook" }` — every call passing a
+    // concrete implementor at a `Heap<dyn Hook>` parameter failed
+    // unification with `expected 'dyn:CommitHook', found
+    // 'AlwaysAbort'`, because the coercion arm keys on
+    // `Type::DynProtocol`, which never materialized on the
+    // archive-loaded side (encode/decode symmetry, T0555).
+    {
+        let dyn_body = trimmed
+            .strip_prefix("dyn:")
+            .or_else(|| trimmed.strip_prefix("dyn "));
+        if let Some(body) = dyn_body {
+            let bounds: List<Text> = body
+                .split('+')
+                .map(|b| Text::from(b.trim()))
+                .filter(|b| !b.is_empty())
+                .collect();
+            if !bounds.is_empty() {
+                return Type::DynProtocol {
+                    bounds,
+                    bindings: verum_common::Map::new(),
+                };
+            }
+        }
+    }
     // References: "&[checked|unsafe] [mut] T" (grammar tier spellings) and
     // the plain "&mut T" / "&T".  ARCHIVE-REF-TIER-DROP-1: the metadata
     // writer (`archive_metadata::type_ref_to_text`) renders the CBGR tier

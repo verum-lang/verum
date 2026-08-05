@@ -4,7 +4,7 @@
 // @tags: sqlite, native, l7_api, capability, phantom-types
 // @timeout: 15000
 // @description: Phantom-type capability narrowing — verifies the
-//               TypedConnection<C> ↔ inner SqliteConnection accessor
+//               TypedConnection<C> ↔ inner SqliteNativeConnection accessor
 //               surface, plus that demote_to_read is not callable
 //               on a read-only connection.
 //
@@ -25,7 +25,10 @@ mount core.database.sqlite.native.l7_api.{
     ReadCap, WriteCap, AdminCap,
 };
 mount core.database.sqlite.native.l6_session.connection.{
-    SqliteConnection, mode_can_write, mode_can_ddl,
+    // SqliteNativeConnection: the bare `SqliteConnection` name is owned
+    // by the Spindle bridge (core.database.sqlite.connection); the L7
+    // typed wrapper narrows to the SESSION connection (T0555).
+    SqliteNativeConnection, mode_can_write, mode_can_ddl,
 };
 
 // -----------------------------------------------------------------------------
@@ -35,7 +38,7 @@ mount core.database.sqlite.native.l6_session.connection.{
 fn read_only_inner_mode() {
     match open_memory_readonly() {
         Ok(c) => {
-            let inner: &SqliteConnection = c.as_untyped();
+            let inner: &SqliteNativeConnection = c.as_untyped();
             // Inner mode is CmRead → mode_can_write is false.
             assert(!mode_can_write(inner.mode));
             assert(!mode_can_ddl(inner.mode));
@@ -47,7 +50,7 @@ fn read_only_inner_mode() {
 fn write_inner_mode() {
     match open_memory_readwrite() {
         Ok(c) => {
-            let inner: &SqliteConnection = c.as_untyped();
+            let inner: &SqliteNativeConnection = c.as_untyped();
             assert(mode_can_write(inner.mode));
             assert(!mode_can_ddl(inner.mode));
         }
@@ -58,7 +61,7 @@ fn write_inner_mode() {
 fn admin_inner_mode() {
     match open_memory_admin() {
         Ok(c) => {
-            let inner: &SqliteConnection = c.as_untyped();
+            let inner: &SqliteNativeConnection = c.as_untyped();
             assert(mode_can_write(inner.mode));
             assert(mode_can_ddl(inner.mode));
         }

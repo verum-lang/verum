@@ -5,6 +5,8 @@
 )
 module core.database.sqlite.native.hooks_api.dispatcher;
 
+mount core.database.sqlite.native.busy_timeout.handler.{BusyDecision, BdRetry, BdGiveUp};
+
 // =============================================================================
 // hooks_api/dispatcher.vr — Eight-hook dispatch surface
 // =============================================================================
@@ -114,13 +116,13 @@ implement ExtendedHooksEngine {
 // the local copies were verbatim twins feeding the bare-name
 // first-wins dispatch class.
 
-/// Named ...Hook...: busy_timeout.handler owns the bare `BusyHookDecision`
+// Busy decision REUSES the canonical `busy_timeout.handler.BusyDecision`
+// (BdRetry(ns)/BdGiveUp). The previous private `BusyHookDecision`
+// (BhRetry(ms)/BhGiveUp) was the same concept with a DIFFERENT unit —
+// the duplicate-with-drift class this codebase bans (T0555).
 /// with a NANOSECOND payload; this hook-surface variant carries
 /// MILLISECONDS — the names stay distinct so the units cannot be
 /// silently conflated through bare-name dispatch.
-public type BusyHookDecision is
-      BhRetry(after_ms: Int)   // sleep N ms then retry
-    | BhGiveUp;                 // surface SQLITE_BUSY to caller
 
 // ProgressDecision comes from progress.handler (identical variants —
 // the local copy was a verbatim twin).
@@ -237,15 +239,15 @@ public fn fire_authorizer(engine: &ExtendedHooksEngine, ctx: AuthorizerCtx) -> A
 /// SQLITE_BUSY.  `retry_count` is the number of times we've already
 /// retried this operation — passed so the handler can implement
 /// bounded back-off.
-public fn fire_busy_handler(engine: &ExtendedHooksEngine, retry_count: Int) -> BusyHookDecision {
+public fn fire_busy_handler(engine: &ExtendedHooksEngine, retry_count: Int) -> BusyDecision {
     if !is_installed(&engine.busy) {
-        return BhGiveUp;
+        return BdGiveUp;
     }
     let _ = retry_count;
     // Foundation: default policy (no handler installed) gives up
     // immediately — surfaces SQLITE_BUSY to the caller.  Real
     // dispatch pulls the registered handler's decision.
-    BhRetry(0)
+    BdRetry(0 as Int64)
 }
 
 /// Fire the progress handler.  Called every N opcodes during VDBE

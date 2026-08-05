@@ -78,7 +78,16 @@ pub const VERSION_MAJOR: u16 = 2;
 /// their structural fn-shape — so a return naming `F`
 /// (`-> MappedIter<Self, F>`) kept forever-free type variables and
 /// every un-annotated iterator-adapter binding failed E404.
-pub const VERSION_MINOR: u16 = 11;
+/// Version 2.12: additive `TypeDescriptor.origin_module` (trailing,
+/// version-gated `Option<StringId>`) — TYPE-ORIGIN-MODULE carry
+/// (T0555). Archive entries are DIRECTORY modules; a type declared in
+/// a file submodule (`...native.ext.hooks`) previously reached
+/// `archive_metadata` carrying only the entry path (`...native.ext`),
+/// so the file submodule reported no types of its own and mounts of
+/// its payload-variant constructors died E401. This field preserves
+/// the declaring file submodule's dotted path; `None` = declared at
+/// the entry's own top level (single-file modules, user code).
+pub const VERSION_MINOR: u16 = 12;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

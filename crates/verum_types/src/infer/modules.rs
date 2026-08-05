@@ -3424,7 +3424,15 @@ impl TypeChecker {
         let mut seen: std::collections::HashSet<Text> = std::collections::HashSet::new();
         let mut items: List<Text> = List::new();
         for td in metadata.types.values() {
-            if owns(&td.module_path) && seen.insert(td.name.clone()) {
+            // v2.12 TYPE-ORIGIN-MODULE (T0555): a type declared in a FILE
+            // submodule of a multi-file archive entry carries the precise
+            // declaring module in `origin_module_path` — the module-surface
+            // query must honour it, or the submodule reports none of its
+            // own types and mounts of its payload-variant constructors
+            // die E401.
+            let owned = owns(&td.module_path)
+                || matches!(&td.origin_module_path, verum_common::Maybe::Some(om) if owns(om));
+            if owned && seen.insert(td.name.clone()) {
                 items.push(td.name.clone());
             }
         }

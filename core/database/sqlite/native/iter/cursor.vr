@@ -24,7 +24,7 @@ mount core.*;
 mount base.{Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.iter.outcome.{
-    StepOutcome, SoRow, SoDone, SoBusy, SoError,
+    RawStepOutcome, RawRow, RawDone, RawBusy, RawError,
     has_row, is_terminal, is_retriable,
 };
 
@@ -75,9 +75,9 @@ implement StmtCursor {
 
     /// Drive one step. The supplied closure performs the real work
     /// (calling into the L4 interpreter) + returns the raw outcome.
-    public fn step(&mut self, step_fn: fn(Int64) -> StepOutcome) -> StepOutcome {
+    public fn step(&mut self, step_fn: fn(Int64) -> RawStepOutcome) -> RawStepOutcome {
         if self.is_done() {
-            return SoOther(self.stmt_id as Int);
+            return RawOther(self.stmt_id as Int);
         }
         let outcome = (step_fn)(self.stmt_id);
         self.steps_taken = self.steps_taken + 1_i64;
@@ -85,22 +85,22 @@ implement StmtCursor {
         outcome
     }
 
-    fn note_outcome(&mut self, o: &StepOutcome) {
+    fn note_outcome(&mut self, o: &RawStepOutcome) {
         match o {
-            SoRow => {
+            RawRow => {
                 self.state = CsRowAvailable;
                 self.rows_returned = self.rows_returned + 1_i64;
             }
-            SoDone => self.state = CsDone,
-            SoBusy => self.state = CsBusy,
-            SoError(msg) => self.state = CsFailed(msg.clone()),
+            RawDone => self.state = CsDone,
+            RawBusy => self.state = CsBusy,
+            RawError(msg) => self.state = CsFailed(msg.clone()),
             _ => self.state = CsDone,
         }
     }
 
     /// Poll until the cursor stops returning ROW. Returns the count
     /// of rows yielded.
-    public fn drain(&mut self, step_fn: fn(Int64) -> StepOutcome, on_row: fn(Int64)) -> Int64 {
+    public fn drain(&mut self, step_fn: fn(Int64) -> RawStepOutcome, on_row: fn(Int64)) -> Int64 {
         let mut yielded: Int64 = 0 as Int64;
         loop {
             let o = self.step(step_fn);
@@ -129,4 +129,4 @@ fn clone_state(s: &CursorState) -> CursorState {
     }
 }
 
-fn SoOther(c: Int) -> StepOutcome { core.database.sqlite.native.iter.outcome.SoOther(c) }
+fn RawOther(c: Int) -> RawStepOutcome { core.database.sqlite.native.iter.outcome.RawOther(c) }

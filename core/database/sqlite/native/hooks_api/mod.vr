@@ -51,7 +51,6 @@ public mount .dispatcher.{
     new_extended_engine, new_connection_hooks,
     CommitDecision, CdAllow, CdAbort,
     AuthDecision, AdAllow, AdDeny, AdIgnore,
-    BusyHookDecision, BhRetry, BhGiveUp,
     ProgressDecision, PdContinue, PdInterrupt,
     UpdateOp, UoInsert, UoUpdate, UoDelete,
     UpdateHookCtx, PreUpdateHookCtx, AuthorizerCtx, TraceHookCtx,
@@ -61,8 +60,9 @@ public mount .dispatcher.{
     fire_authorizer, fire_busy_handler, fire_progress_handler, fire_trace_hook,
 };
 
-// T0583: the busy-handler flow uses busy_timeout's BusyDecision (BdRetry/
-// BdGiveUp) — distinct from the dispatcher's BusyHookDecision above. Re-export
+// The busy-handler flow uses busy_timeout's canonical BusyDecision
+// (BdRetry(ns)/BdGiveUp); the dispatcher's former duplicate
+// BusyHookDecision (same concept, ms unit) was removed (T0555). Re-export
 // it so eight_hooks_dispatcher can mount it from the hooks_api facade.
 public mount core.database.sqlite.native.busy_timeout.handler.{
     BusyDecision, BdRetry, BdGiveUp,

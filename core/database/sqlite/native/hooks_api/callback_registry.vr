@@ -48,7 +48,7 @@ mount core.database.sqlite.native.ext.hooks.{
     AuthorizerHook, BusyHandler, ProgressHandler, TraceHook,
     CommitDecision, CdAllow, CdAbort,
     AuthDecision, AdAllow, AdDeny, AdIgnore,
-    AuthAction, ExtUpdateOp, UoInsert, UoUpdate, UoDelete,
+    AuthAction, UpdateOp, UoInsert, UoUpdate, UoDelete,
     TraceEvent, TeStmt, TeProfile, TeRow, TeClose,
 };
 mount core.database.sqlite.native.l4_vdbe.register.Register;
@@ -171,7 +171,7 @@ public fn invoke_rollback(r: &mut HookCallbacks) {
 
 public fn invoke_update(
     r: &mut HookCallbacks,
-    op: ExtUpdateOp,
+    op: UpdateOp,
     db: &Text,
     table: &Text,
     rowid: Int64,
@@ -184,7 +184,7 @@ public fn invoke_update(
 
 public fn invoke_pre_update(
     r: &mut HookCallbacks,
-    op: ExtUpdateOp,
+    op: UpdateOp,
     db: &Text,
     table: &Text,
     old_row: &List<Register>,

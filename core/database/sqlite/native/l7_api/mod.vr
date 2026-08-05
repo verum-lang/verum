@@ -37,7 +37,12 @@ public mount .database.{
 // -----------------------------------------------------------------------------
 public mount .database.{ SqliteApiDbError as DbError };
 
-public mount core.database.sqlite.connection.{ SqliteNativeConnection };
+// The untyped session connection, from its DECLARING module.
+// (A previous re-export pointed at core.database.sqlite.connection —
+// the Spindle bridge — which never declared this name; the bare
+// `SqliteConnection` stays with that bridge, per the no-duplicate-
+// simple-names discipline, T0555.)
+public mount core.database.sqlite.native.l6_session.connection.{ SqliteNativeConnection };
 
 public mount core.database.sqlite.native.l6_session.statement.{
     PreparedStatement, StmtError,

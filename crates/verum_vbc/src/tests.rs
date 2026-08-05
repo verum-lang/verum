@@ -128,6 +128,7 @@ fn test_roundtrip_type_descriptor() {
     let y_name = module.intern_string("y");
 
     let desc = TypeDescriptor {
+            origin_module: None,
         id: TypeId(16),
         name,
         kind: TypeKind::Record,
@@ -186,6 +187,7 @@ fn test_roundtrip_sum_type() {
     let t_name = module.intern_string("T");
 
     let desc = TypeDescriptor {
+            origin_module: None,
         id: TypeId(16),
         name,
         kind: TypeKind::Sum,
@@ -710,6 +712,7 @@ fn test_roundtrip_all_type_kinds() {
     for (i, kind) in kinds.iter().enumerate() {
         let name = module.intern_string(&format!("Type{}", i));
         module.types.push(TypeDescriptor {
+            origin_module: None,
             id: TypeId(16 + i as u32),
             name,
             kind: *kind,
@@ -747,6 +750,7 @@ fn test_roundtrip_all_visibility_levels() {
     for (i, vis) in visibilities.iter().enumerate() {
         let name = module.intern_string(&format!("Type{}", i));
         module.types.push(TypeDescriptor {
+            origin_module: None,
             id: TypeId(16 + i as u32),
             name,
             kind: TypeKind::Unit,
@@ -896,6 +900,7 @@ fn test_roundtrip_empty_and_full_variants() {
     let val_name = module.intern_string("value");
 
     module.types.push(TypeDescriptor {
+            origin_module: None,
         id: TypeId(16),
         name,
         kind: TypeKind::Sum,
