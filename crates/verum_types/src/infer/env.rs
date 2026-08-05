@@ -801,6 +801,7 @@ impl TypeChecker {
             stdlib_single_file_mode: false,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
+            current_module_declared_types: std::collections::HashSet::new(),
             builtin_ambient_names: std::collections::HashSet::new(),
             alias_scope: None,
             in_explicit_import_registration: false,
@@ -934,6 +935,7 @@ impl TypeChecker {
             stdlib_single_file_mode: false,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
+            current_module_declared_types: std::collections::HashSet::new(),
             builtin_ambient_names: std::collections::HashSet::new(),
             alias_scope: None,
             in_explicit_import_registration: false,
@@ -1068,6 +1070,7 @@ impl TypeChecker {
             stdlib_single_file_mode: false,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
+            current_module_declared_types: std::collections::HashSet::new(),
             builtin_ambient_names: std::collections::HashSet::new(),
             alias_scope: None,
             in_explicit_import_registration: false,
@@ -8466,6 +8469,9 @@ impl TypeChecker {
     /// user-code phase / unknown-module context: register only flat, so
     /// behaviour matches pre-change semantics there.
     pub(crate) fn define_type_in_current_module(&mut self, name: Text, ty: Type) {
+        // E430 horizon leg: this file DECLARED the type.
+        self.current_module_declared_types
+            .insert(name.as_str().to_string());
         let mod_path = self.current_module_path.clone();
         // Always write the unqualified flat entry (back-compat + fast path).
         self.ctx.define_type(name.clone(), ty.clone());
@@ -11219,6 +11225,56 @@ with .to_float() or .to_int() (at {:?})",
         Ok(Some(InferResult::new(left_ty.clone())))
     }
 
+    /// LANGUAGE-LAWS emitter (spec §4 Stage W): Warn prints the same
+    /// text a strict error carries; Strict returns the TypeError;
+    /// Legacy is silent. ONE voice for E430/E431/E432.
+    pub(super) fn language_law(
+        &self,
+        code: &'static str,
+        message: String,
+        help: String,
+        span: Span,
+    ) -> Result<()> {
+        match crate::language_laws_mode() {
+            crate::LanguageLawsMode::Legacy => Ok(()),
+            crate::LanguageLawsMode::Warn => {
+                eprintln!("warning<{}>: {}\n  help: {}", code, message, help);
+                Ok(())
+            }
+            crate::LanguageLawsMode::Strict => Err(crate::TypeError::LanguageLaw {
+                code,
+                message,
+                help,
+                span,
+            }),
+        }
+    }
+
+    /// Cheap Bool-atom probe for law E432: literal `true`/`false`, or an
+    /// identifier whose CURRENT env binding is Bool. Deliberately
+    /// shallow — the law targets the shapes where both precedence
+    /// readings type-check, which is exactly atoms.
+    pub(super) fn expr_types_as_bool(&self, e: &Expr) -> bool {
+        use verum_ast::expr::ExprKind;
+        match &e.kind {
+            ExprKind::Literal(l) => {
+                matches!(l.kind, verum_ast::LiteralKind::Bool(_))
+            }
+            ExprKind::Paren(inner) => self.expr_types_as_bool(inner),
+            ExprKind::Path(p) if p.segments.len() == 1 => {
+                if let verum_ast::ty::PathSegment::Name(id) = &p.segments[0] {
+                    matches!(
+                        self.ctx.env.lookup(&id.name).map(|s| s.ty.clone()),
+                        Some(Type::Bool)
+                    )
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn infer_binop(
         &mut self,
         op: BinOp,
@@ -11523,6 +11579,45 @@ with .to_float() or .to_int() (at {:?})",
             And | Or => {
                 self.check_expr(left, &Type::bool())?;
                 self.check_expr(right, &Type::bool())?;
+                // LANGUAGE LAW E432 — BOOLEAN-EQUALITY-CLARITY
+                // (docs/architecture/language-law-visibility-and-boolean-
+                // clarity.md §2, normative block beside logical_and_expr in
+                // grammar/verum.ebnf). Both operands just type-checked Bool,
+                // so if either side is an UNPARENTHESIZED `==`/`!=` whose
+                // own operands are Bool, both precedence readings
+                // type-check and the mis-parse is silent — in
+                // requires/ensures it vacuates proof obligations. A
+                // parenthesized equality arrives here as ExprKind::Paren
+                // and never trips this.
+                let op_str = if matches!(op, And) { "&&" } else { "||" };
+                for side in [left, right] {
+                    if let verum_ast::expr::ExprKind::Binary {
+                        op: eq_op,
+                        left: el,
+                        right: er,
+                        ..
+                    } = &side.kind
+                        && matches!(eq_op, BinOp::Eq | BinOp::Ne)
+                        && self.expr_types_as_bool(el)
+                        && self.expr_types_as_bool(er)
+                    {
+                        self.language_law(
+                            "E432",
+                            format!(
+                                "Bool {} Bool inside '{}' needs parentheses: this \
+                                 parses as `… {} (a {} b)`, and with Bool operands \
+                                 both readings type-check — the mis-parse is silent",
+                                if matches!(eq_op, BinOp::Eq) { "==" } else { "!=" },
+                                op_str,
+                                op_str,
+                                if matches!(eq_op, BinOp::Eq) { "==" } else { "!=" },
+                            ),
+                            "parenthesize the intended grouping explicitly"
+                                .to_string(),
+                            side.span,
+                        )?;
+                    }
+                }
                 Ok(InferResult::new(Type::bool()))
             }
 

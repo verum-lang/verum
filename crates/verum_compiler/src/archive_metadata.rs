@@ -983,6 +983,18 @@ fn register_module_metadata(
                     .map(|s| s.to_string());
                 let ty = match &carried {
                     Some(v) if rendered.contains("__opaque_type_") => v.clone(),
+                    // T0690 R1: reference-ness is CALL SEMANTICS the
+                    // TypeRef render structurally lacks (VBC TypeRefs have
+                    // no reference form — `&Shared<T>` renders as the bare
+                    // pointee). When the v2.10 carried spelling opens with
+                    // `&` and the render does not, the render is lossy in
+                    // exactly the T0701 sense — prefer the declared
+                    // spelling so the checker's scheme keeps the `&` and
+                    // `a.ptr_eq(&b)` unifies against a reference, not the
+                    // peeled value type.
+                    Some(v) if v.as_str().starts_with('&') && !rendered.starts_with('&') => {
+                        v.clone()
+                    }
                     _ => rendered,
                 };
                 ParamDescriptor {

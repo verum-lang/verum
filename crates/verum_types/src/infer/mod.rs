@@ -1266,6 +1266,12 @@ pub struct TypeChecker {
     /// conflict where `core.base.ordering.Ordering` (Less|Equal|Greater) gets overwritten
     /// by `core.sync.atomic.Ordering` (Relaxed|Acquire|Release|AcqRel|SeqCst).
     explicit_imports: std::collections::HashSet<String>,
+    /// LANGUAGE LAW horizon (E430): sum-type names DECLARED by the
+    /// current file — one leg of the constructor-visibility horizon
+    /// (with explicit_imports and the pinned prelude trio). Populated
+    /// by define_type_in_current_module; cleared per-file with
+    /// explicit_imports.
+    current_module_declared_types: std::collections::HashSet<String>,
     /// T0528 — names the CHECKER ITSELF seeded (primitive types, sized
     /// integers, builtin/intrinsic/meta functions) before any source or
     /// archive module was processed.  Union-snapshot taken at the end of

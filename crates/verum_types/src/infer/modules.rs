@@ -14824,6 +14824,65 @@ impl TypeChecker {
         } else {
             parents.first()?.clone()
         };
+        // ── LANGUAGE LAW E430/E431 — CONSTRUCTOR-VISIBILITY-HORIZON ──
+        // (docs/architecture/language-law-visibility-and-boolean-clarity
+        // .md §1; normative block beside variant_list in verum.ebnf).
+        // The heuristics above chose SOME parent; the law asks a
+        // stricter question: is the chosen owner inside this file's
+        // mount horizon (file-declared / explicitly mounted / the
+        // pinned prelude trio)? Outside it, the very fact resolution
+        // needed an ambient pick is the hazard — warn (Stage W) or
+        // reject (strict) with the qualify-it help. Skipped while
+        // imports are in flight (stranger modules' own bodies must not
+        // be judged by this file's horizon — the same in-flight guard
+        // mount-scoped selection uses).
+        if self.imports_in_progress.is_empty()
+            && self.glob_imports_in_progress.is_empty()
+            && !matches!(
+                parent_name.as_str(),
+                "Maybe" | "Result" | "Ordering"
+            )
+            && !self.explicit_imports.contains(parent_name.as_str())
+            && !self.explicit_imports.contains(name)
+        {
+            // Horizon membership: explicit mount of the TYPE or of the
+            // CONSTRUCTOR leaf, or the type declared in-file. In-file
+            // declarations register through define_type_in_current_module,
+            // which the current-module parents preference above already
+            // models — `local` picks only fire for in-file owners, so a
+            // NON-local winner outside explicit_imports is by
+            // construction outside the horizon.
+            let in_horizon = self
+                .current_module_declared_types
+                .contains(parent_name.as_str());
+            if !in_horizon {
+                let sibling_owners: Vec<&str> = parents
+                    .iter()
+                    .map(|p| p.as_str())
+                    .filter(|p| *p != parent_name.as_str())
+                    .take(3)
+                    .collect();
+                let also = if sibling_owners.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (other declarers: {})", sibling_owners.join(", "))
+                };
+                self.language_law(
+                    "E430",
+                    format!(
+                        "bare constructor '{}' resolves outside this file's \
+                         mount horizon to '{}'{}",
+                        name, parent_name, also
+                    ),
+                    format!(
+                        "write '{}.{}' or add 'mount …{{{}}};' to the file",
+                        parent_name, name, parent_name
+                    ),
+                    verum_ast::span::Span::dummy(),
+                )
+                .ok()?;
+            }
+        }
         let constructors = match self.ctx.get_constructors(&parent_name) {
             Maybe::Some(c) => c.clone(),
             Maybe::None => return None,
