@@ -4,14 +4,14 @@
 // @expected-exit: 0
 // @description: Int128/UInt128 stay full-width through literals, arithmetic,
 //   casts, comparisons and display on EVERY tier (T0272). Inputs are chosen
-//   where a 64-bit collapse MUST diverge: i128::MAX truncates to -1, so a
+//   where a 64-bit collapse MUST diverge: i128.MAX truncates to -1, so a
 //   narrowed pipeline flips the sign test, zeroes the division, and prints
 //   the wrong digits — none of these asserts can pass vacuously at 64 bits.
 
 mount core.prelude.*;
 
 fn main() {
-    // ---- literal channel: i128::MAX survives the constant pool ----
+    // ---- literal channel: i128.MAX survives the constant pool ----
     let big: Int128 = 170141183460469231731687303715884105727;
     assert(big > 0);
 

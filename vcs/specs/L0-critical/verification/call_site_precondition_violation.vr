@@ -16,7 +16,7 @@
 // not a missing feature).
 //
 // The fix wove call-site precondition obligations into the wp
-// formula (verum_verification::vcgen, discharged by
+// formula (verum_verification.vcgen, discharged by
 // verify_cmd Step 3), so this file MUST fail verification with a
 // counterexample naming the divide precondition.
 //

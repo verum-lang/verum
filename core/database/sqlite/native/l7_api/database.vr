@@ -538,7 +538,7 @@ implement Database {
         }
     }
 
-    /// SQL-classic COMMIT counterpart of [`Database::begin`].
+    /// SQL-classic COMMIT counterpart of [`Database.begin`].
     public fn commit(&mut self) -> Result<(), SqliteApiDbError> {
         match self.conn.commit_tx() {
             Result.Ok(_)  => Result.Ok(()),
@@ -546,7 +546,7 @@ implement Database {
         }
     }
 
-    /// SQL-classic ROLLBACK counterpart of [`Database::begin`].
+    /// SQL-classic ROLLBACK counterpart of [`Database.begin`].
     public fn rollback(&mut self) -> Result<(), SqliteApiDbError> {
         match self.conn.rollback_tx() {
             Result.Ok(_)  => Result.Ok(()),

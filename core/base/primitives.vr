@@ -6339,7 +6339,7 @@ implement Debug for Int64 {
 implement Display for Int128 {
     public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         // Full-width render (T0272): `.to_int()` narrows to i64 and would
-        // print `Int128::MAX` as `-1`. `to_text()` on a 128-bit receiver
+        // print `Int128.MAX` as `-1`. `to_text()` on a 128-bit receiver
         // compiles to the width-aware signed render op.
         f.write_str(&self.to_text())
     }

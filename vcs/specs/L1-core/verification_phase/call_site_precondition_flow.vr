@@ -8,7 +8,7 @@
 /// context-free.
 ///
 /// The obligations are WOVEN into the wp formula
-/// (`verum_verification::vcgen`), which is what lets each of the
+/// (`verum_verification.vcgen`), which is what lets each of the
 /// shapes below discharge:
 ///  - a branch guard scopes the obligation of the code it guards;
 ///  - a `let`-bound argument flows in by substitution (wp folds
