@@ -8739,7 +8739,28 @@ impl ProtocolChecker {
         let into_iter_path =
             Path::single(verum_ast::ty::Ident::new("IntoIterator", Span::default()));
 
-        if let Maybe::Some(impl_) = self.find_impl(ty, &into_iter_path) {
+        let found = self.find_impl(ty, &into_iter_path);
+        if crate::ctor_trace_enabled() {
+            match &found {
+                Maybe::Some(impl_) => {
+                    let mut keys = String::new();
+                    for k in impl_.associated_types.keys() {
+                        if !keys.is_empty() {
+                            keys.push(',');
+                        }
+                        keys.push_str(k.as_str());
+                    }
+                    eprintln!(
+                        "[ctor-trace] intoiter find_impl HIT ty={} for_type={} assoc_keys=[{}]",
+                        ty, impl_.for_type, keys
+                    );
+                }
+                Maybe::None => {
+                    eprintln!("[ctor-trace] intoiter find_impl MISS ty={}", ty)
+                }
+            }
+        }
+        if let Maybe::Some(impl_) = found {
             // Build type substitution from impl's generic type to concrete type
             let mut subst = Map::new();
             self.build_type_substitution_for_impl(&impl_.for_type, ty, &mut subst);

@@ -4711,9 +4711,7 @@ impl TypeChecker {
 
                                 // Protocol-based IntoIterator resolution
                                 let elem_ty = match self
-                                    .protocol_checker
-                                    .read()
-                                    .resolve_into_iterator_protocol(&iter_result.ty)
+                                    .resolve_into_iterator_with_loading(&iter_result.ty)
                                 {
                                     Some(resolution) => resolution.item,
                                     None => {
@@ -5555,6 +5553,9 @@ impl TypeChecker {
     fn infer_for_loop(&mut self, expr: &Expr) -> Result<InferResult> {
         let ExprKind::For { label: _, pattern, iter, body, invariants: _, decreases: _ } = &expr.kind
             else { unreachable!() };
+        if crate::ctor_trace_enabled() {
+            eprintln!("[ctor-trace] infer_for_loop ENTER span={:?}", expr.span);
+        }
                     // NLL: Before synthesizing the iterator expression, release any
                     // expired borrows on the collection being iterated. This handles
                     // patterns like:
@@ -5584,12 +5585,39 @@ impl TypeChecker {
                     // For-loop desugaring: "for x in iter" desugars to IntoIterator protocol calls (into_iter -> next loop)
                     // =========================================================================
                     let elem_ty = match self
-                        .protocol_checker
-                        .read()
-                        .resolve_into_iterator_protocol(&resolved_iter_ty)
+                        .resolve_into_iterator_with_loading(&resolved_iter_ty)
                     {
-                        Some(resolution) => resolution.item,
+                        // T0701 projection leg: the primary arm handed the
+                        // binder the RAW resolution item while the sibling
+                        // fallback arm normalizes — an unreduced
+                        // `Item<ListIter<T>>` projection then binds `ord`,
+                        // `*ord` types as a residual var, and every
+                        // let-bound method-chain result over iterator
+                        // elements surfaced as the E404 fleet
+                        // (factor-bisected: identical code green without
+                        // the loop, red under ANY .iter() form).
+                        Some(resolution) => {
+                            let normalized = self
+                                .protocol_checker
+                                .read()
+                                .normalize_projection_type(&resolution.item);
+                            if crate::ctor_trace_enabled() {
+                                eprintln!(
+                                    "[ctor-trace] for-binder iter_ty={} raw_item={} elem={}",
+                                    resolved_iter_ty,
+                                    resolution.item,
+                                    normalized
+                                );
+                            }
+                            normalized
+                        }
                         None => {
+                            if crate::ctor_trace_enabled() {
+                                eprintln!(
+                                    "[ctor-trace] for-binder NO-INTOITER iter_ty={}",
+                                    resolved_iter_ty
+                                );
+                            }
                             // =========================================================================
                             // Fallback 1: Try Iterator protocol's Item associated type
                             // If the type implements Iterator directly (not IntoIterator),
@@ -5603,10 +5631,17 @@ impl TypeChecker {
                             );
                             if let Some(item_ty) = iter_item {
                                 // Normalize projection types (e.g., ::Item[SomeType] -> ConcreteType)
-
-                                self.protocol_checker
+                                let n = self
+                                    .protocol_checker
                                     .read()
-                                    .normalize_projection_type(&item_ty)
+                                    .normalize_projection_type(&item_ty);
+                                if crate::ctor_trace_enabled() {
+                                    eprintln!(
+                                        "[ctor-trace] for-binder FALLBACK1 item={} norm={}",
+                                        item_ty, n
+                                    );
+                                }
+                                n
                             } else {
                                 // Duck-typing fallback: extract type name from any type representation
                                 // and check if it has has_next/next methods in inherent_methods.
@@ -5664,6 +5699,12 @@ impl TypeChecker {
                                     {
                                         // Known iterator-like types: return a fresh type variable
                                         // for the element type
+                                        if crate::ctor_trace_enabled() {
+                                            eprintln!(
+                                                "[ctor-trace] for-binder FRESH-VAR tname={} iter_ty={}",
+                                                tname, resolved_iter_ty
+                                            );
+                                        }
                                         Type::Var(TypeVar::fresh())
                                     } else if let Some(elem) = try_duck_type_iter(&resolved_iter_ty)
                                     {
@@ -8242,6 +8283,27 @@ impl TypeChecker {
             Type::Named { path, args } => {
                 // For named record types, look up the struct fields
                 let type_name = self.path_to_string(path);
+
+                // ITER-LAZY-LOAD sibling (T0701 FIELD-TYPE leg): a value
+                // can arrive typed `Named{X}` WITHOUT X's body ever
+                // loading — `X.new(...)` resolves through the eagerly
+                // registered static-method schemes, which name the
+                // nominal but load nothing (trace: 5223 ensure-load
+                // calls in the repro, zero for LogRecord). Field access
+                // is a consumer of X's body exactly like the for-loop
+                // desugar is a consumer of X's impls, so it pre-arms
+                // the same ensure-then-resolve authority. Idempotent,
+                // no-op for user-defined and already-loaded types.
+                {
+                    let leaf: verum_common::Text = type_name
+                        .as_str()
+                        .rsplit('.')
+                        .next()
+                        .unwrap_or(type_name.as_str())
+                        .into();
+                    self.ensure_stdlib_type_loaded_transitive(&leaf);
+                }
+
                 let struct_key = format!("__struct_fields_{}", type_name);
                 let field_name = verum_common::Text::from(field.name.as_str());
 
@@ -8301,6 +8363,62 @@ impl TypeChecker {
                         )?;
                     }
                     return Ok(InferResult::new(resolved_ty));
+                }
+
+                // QUALIFIED-NOMINAL leaf fallback: mount-scoped
+                // registrations put QUALIFIED nominal spellings into
+                // ctx (`core.base.log.LogRecord` — the
+                // `ensure_mounted_type_loaded_qualified` key space),
+                // while field maps are registered under the BARE leaf
+                // (`__struct_fields_LogRecord`) by the simple-name
+                // lazy loader. A value typed with the qualified
+                // spelling would miss both probes above and fall
+                // through to a fresh var. Qualified spellings stay
+                // FIRST (collision-immune); the leaf retry only fires
+                // when they found nothing, so colliding names keep
+                // resolving through their qualified keys.
+                if crate::ctor_trace_enabled() {
+                    eprintln!(
+                        "[ctor-trace] field-miss type_name={} field={}",
+                        type_name, field_name
+                    );
+                }
+                if type_name.contains(".") {
+                    let leaf = type_name
+                        .as_str()
+                        .rsplit('.')
+                        .next()
+                        .unwrap_or(type_name.as_str())
+                        .to_string();
+                    let leaf_params_key = format!("__type_params_{}", leaf);
+                    let leaf_params: List<verum_common::Text> =
+                        match self.ctx.lookup_type(leaf_params_key.as_str()) {
+                            Option::Some(Type::Record(params_map)) => {
+                                params_map.keys().cloned().collect()
+                            }
+                            _ => List::new(),
+                        };
+                    let mut leaf_subst = indexmap::IndexMap::new();
+                    for (param_name, arg_ty) in leaf_params.iter().zip(args.iter()) {
+                        leaf_subst.insert(param_name.clone(), arg_ty.clone());
+                    }
+                    let leaf_key = format!("__struct_fields_{}", leaf);
+                    if let Option::Some(Type::Record(fields)) =
+                        self.ctx.lookup_type(leaf_key.as_str())
+                        && let Some(field_ty) = fields.get(&field_name)
+                    {
+                        let resolved_ty =
+                            self.substitute_type_params(field_ty, &leaf_subst);
+                        if let Some(ref var_name) = var_name_for_affine {
+                            self.track_affine_field_access(
+                                var_name,
+                                &field_name_str,
+                                &resolved_ty,
+                                expr.span,
+                            )?;
+                        }
+                        return Ok(InferResult::new(resolved_ty));
+                    }
                 }
 
                 // Not a record field - try GAT instantiation
@@ -10374,9 +10492,7 @@ impl TypeChecker {
                     let resolved_comprehension_iter =
                         self.unifier.apply(&iter_result.ty);
                     let elem_ty = match self
-                        .protocol_checker
-                        .read()
-                        .resolve_into_iterator_protocol(&resolved_comprehension_iter)
+                        .resolve_into_iterator_with_loading(&resolved_comprehension_iter)
                     {
                         Some(resolution) => resolution.item,
                         None => {
@@ -10525,9 +10641,7 @@ impl TypeChecker {
 
                     // Protocol-based IntoIterator resolution for streams
                     let elem_ty = match self
-                        .protocol_checker
-                        .read()
-                        .resolve_into_iterator_protocol(&iter_result.ty)
+                        .resolve_into_iterator_with_loading(&iter_result.ty)
                     {
                         Some(resolution) => resolution.item,
                         None => {
@@ -10648,9 +10762,7 @@ impl TypeChecker {
 
                     // Protocol-based IntoIterator resolution
                     let elem_ty = match self
-                        .protocol_checker
-                        .read()
-                        .resolve_into_iterator_protocol(&iter_result.ty)
+                        .resolve_into_iterator_with_loading(&iter_result.ty)
                     {
                         Some(resolution) => resolution.item,
                         None => {
@@ -10730,9 +10842,7 @@ impl TypeChecker {
 
                     // Protocol-based IntoIterator resolution
                     let elem_ty = match self
-                        .protocol_checker
-                        .read()
-                        .resolve_into_iterator_protocol(&iter_result.ty)
+                        .resolve_into_iterator_with_loading(&iter_result.ty)
                     {
                         Some(resolution) => resolution.item,
                         None => {

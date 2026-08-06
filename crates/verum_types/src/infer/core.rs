@@ -842,8 +842,24 @@ impl TypeChecker {
         };
         let type_desc = match metadata.types.get(name) {
             Some(td) => td.clone(),
-            None => return,
+            None => {
+                if crate::ctor_trace_enabled() {
+                    eprintln!("[ctor-trace] ensure-load MISS name={}", name);
+                }
+                return;
+            }
         };
+        if crate::ctor_trace_enabled() {
+            eprintln!(
+                "[ctor-trace] ensure-load HIT name={} kind_record={} in_ctx={}",
+                name,
+                matches!(
+                    type_desc.kind,
+                    crate::core_metadata::TypeDescriptorKind::Record { .. }
+                ),
+                self.ctx.lookup_type(name.as_str()).is_some(),
+            );
+        }
         // For built-in primitive types (Text, Int, Float, Bool, …)
         // already registered by `register_builtins`, the type
         // definition does NOT need re-registration — but its
@@ -1111,6 +1127,79 @@ impl TypeChecker {
         for proto_name in proto_deps {
             pending.push(proto_name);
         }
+    }
+
+    /// Bounded-drain wrapper over [`Self::ensure_stdlib_type_loaded`]:
+    /// load `name` plus the stdlib dependencies its registration
+    /// transitively references (same 256-step bound every inline
+    /// drain site uses). Idempotent; no-op without metadata or for
+    /// non-stdlib names.
+    pub(crate) fn ensure_stdlib_type_loaded_transitive(&mut self, name: &Text) {
+        let mut pending: Vec<Text> = Vec::new();
+        self.ensure_stdlib_type_loaded(name, &mut pending);
+        let mut bound = 256usize;
+        while let Some(next) = pending.pop() {
+            bound = bound.saturating_sub(1);
+            if bound == 0 {
+                break;
+            }
+            self.ensure_stdlib_type_loaded(&next, &mut pending);
+        }
+    }
+
+    /// ITER-LAZY-LOAD (T0701 root): resolve `IntoIterator` for `ty`,
+    /// first making sure the iterated type is actually LOADED.
+    ///
+    /// The lazy stdlib loader is receiver-driven — a type's protocol
+    /// impls register when a METHOD is called on it
+    /// (`infer_method_call_inner_impl` → `ensure_stdlib_type_loaded`).
+    /// A for-loop's iterand is consumed by the desugar itself: nobody
+    /// calls a method on the `ListIter<T>` that `xs.iter()` returned,
+    /// so its `implement<T> IntoIterator for ListIter<T>` never
+    /// entered `protocol_checker.impls`, `find_impl` MISSed, and the
+    /// binder fell through to the fresh-var heuristic — every
+    /// element-method chain then surfaced as E404 «not fully
+    /// determined» (the fleet's factor-bisected signature: identical
+    /// code green without the loop, red under ANY `.iter()` form).
+    ///
+    /// ONE authority for every iterator-resolution consumer (for /
+    /// for-await / comprehensions): ensure-then-resolve. Reference
+    /// layers unwrap so `for x in &xs` loads the collection too;
+    /// type ARGUMENTS don't need loading here — the impl match is
+    /// head-driven, and argument types that user code can name are
+    /// loaded by the module pre-pass.
+    pub(crate) fn resolve_into_iterator_with_loading(
+        &mut self,
+        ty: &Type,
+    ) -> Option<crate::protocol::IntoIteratorResolution> {
+        let mut head = ty;
+        loop {
+            match head {
+                Type::Reference { inner, .. }
+                | Type::CheckedReference { inner, .. }
+                | Type::UnsafeReference { inner, .. }
+                | Type::Ownership { inner, .. } => head = inner,
+                _ => break,
+            }
+        }
+        let head_name: Option<Text> = match head {
+            Type::Named { path, .. } => path
+                .segments
+                .iter()
+                .rev()
+                .find_map(|s| match s {
+                    verum_ast::ty::PathSegment::Name(id) => {
+                        Some(Text::from(id.name.as_str()))
+                    }
+                    _ => None,
+                }),
+            Type::Generic { name, .. } => Some(name.clone()),
+            _ => None,
+        };
+        if let Some(name) = head_name {
+            self.ensure_stdlib_type_loaded_transitive(&name);
+        }
+        self.protocol_checker.read().resolve_into_iterator_protocol(ty)
     }
 
     /// MOUNT-TYPE-AUTHORITY-1 — mount-scoped lazy type load.
