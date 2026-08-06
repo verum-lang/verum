@@ -98,11 +98,24 @@ fn typecheck(code: &str) -> Vec<String> {
             let _ = checker.register_function_signature(f);
         }
     }
-    module
+    let mut errs: Vec<String> = module
         .items
         .iter()
         .filter_map(|item| checker.check_item(item).err().map(|e| format!("{:?}", e)))
-        .collect()
+        .collect();
+    // BOTH error channels: capture/borrow conflicts surface through Err on
+    // one closure path and through the collected DIAGNOSTICS on the other
+    // (the real `verum check` prints E310 for both samples — verified — via
+    // the diagnostics stream). A harness that drains only Err reads the
+    // diagnostics-side sample as clean and reports a symmetry break the
+    // language does not have.
+    errs.extend(
+        checker
+            .diagnostics()
+            .iter()
+            .map(|d| format!("{:?}", d)),
+    );
+    errs
 }
 
 /// A closure bound to an EXPLICITLY TYPED local takes `check_closure_expr`'s
