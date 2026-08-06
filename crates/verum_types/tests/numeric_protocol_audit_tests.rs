@@ -33,6 +33,7 @@ const PROTOCOLS_VR: &str = include_str!("../../../core/base/protocols.vr");
 const PRIMITIVES_VR: &str = include_str!("../../../core/base/primitives.vr");
 const ITERATOR_VR: &str   = include_str!("../../../core/base/iterator.vr");
 const TENSOR_VR: &str     = include_str!("../../../core/math/tensor.vr");
+const SIMD_MOD_VR: &str   = include_str!("../../../core/simd/mod.vr");
 
 fn count_occurrences(src: &str, pattern: &str) -> usize {
     let mut count = 0;
@@ -147,10 +148,16 @@ fn numeric_protocol_declared_in_protocols_vr() {
 }
 
 #[test]
-fn numeric_used_as_bound_in_tensor_vr() {
+fn tensor_stack_bounds_on_the_numeric_tower() {
+    // T0499 (00539476e) moved the tensor stack's element bound from
+    // `T: Numeric` to the RealField tower — the audit follows the
+    // design, not the old spelling. Numeric's own live bound sites are
+    // pinned in all_five_protocols_are_non_vestigial (simd/mod.vr).
     assert!(
-        TENSOR_VR.contains("T: Numeric"),
-        "Numeric must be used as a bound in math/tensor.vr (e.g. DynTensor<T: Numeric>)"
+        TENSOR_VR.contains("RealField"),
+        "the tensor stack must bound its elements on the RealField tower \
+         (T0499); if the design moved again, point this audit at the new \
+         truth rather than deleting it"
     );
 }
 
@@ -239,7 +246,9 @@ fn all_five_protocols_are_non_vestigial() {
     // At least one known use site per protocol:
     assert!(ITERATOR_VR.contains("+ Zero"),      "Zero: must have use site in iterator.vr");
     assert!(ITERATOR_VR.contains("+ One"),       "One: must have use site in iterator.vr");
-    assert!(TENSOR_VR.contains("T: Numeric"),    "Numeric: must have use site in tensor.vr");
+    // T0499: the tensor stack moved to RealField; Numeric's live bound
+    // sites are the SIMD vectors (`T: SimdElement + Numeric`).
+    assert!(SIMD_MOD_VR.contains("+ Numeric"),   "Numeric: must have use site in simd/mod.vr");
     assert!(PROTOCOLS_VR.contains("extends Atomic"), "Integer: must extend Atomic in protocols.vr");
     assert!(PROTOCOLS_VR.contains("extends Integer"), "SignedInteger: must extend Integer in protocols.vr");
 }
