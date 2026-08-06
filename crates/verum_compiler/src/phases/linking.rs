@@ -1225,6 +1225,84 @@ impl FinalLinker {
         }
     }
 
+    /// Locate an LLVM toolchain binary (`llvm-link`, `opt`, …) and
+    /// return a ready `Command`.
+    ///
+    /// Resolution order:
+    ///  1. `VERUM_LLVM_BIN_DIR` — explicit toolchain pin (CI's
+    ///     prebuilt `llvm/install/bin`, a user's custom build).
+    ///  2. Bare `name` on PATH.
+    ///  3. Distro-suffixed spelling on PATH (`llvm-link-19`): Debian/
+    ///     Ubuntu packages install ONLY suffixed names, so a bare
+    ///     `Command::new("llvm-link")` fails there even with a full
+    ///     LLVM installed. The suffix is discovered by scanning PATH
+    ///     entries for `name-<N>` and taking the highest N — no
+    ///     version list is hardcoded.
+    ///
+    /// The resolved spelling is cached per tool name for the process
+    /// lifetime.
+    fn llvm_tool(name: &str) -> Command {
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+        static RESOLVED: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
+        let cache = RESOLVED.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Some(hit) = cache.lock().unwrap().get(name) {
+            return Command::new(hit);
+        }
+
+        let runnable = |p: &std::path::Path| {
+            Command::new(p)
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        };
+
+        let mut found: Option<PathBuf> = None;
+        if let Ok(dir) = std::env::var("VERUM_LLVM_BIN_DIR") {
+            let cand = std::path::Path::new(&dir).join(name);
+            if cand.is_file() {
+                found = Some(cand);
+            }
+        }
+        if found.is_none() && runnable(std::path::Path::new(name)) {
+            found = Some(PathBuf::from(name));
+        }
+        if found.is_none() {
+            let prefix = format!("{name}-");
+            let mut best: Option<(u32, PathBuf)> = None;
+            for dir in std::env::var_os("PATH")
+                .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
+                .unwrap_or_default()
+            {
+                let Ok(entries) = std::fs::read_dir(&dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let fname = entry.file_name();
+                    let Some(fname) = fname.to_str() else { continue };
+                    let Some(suffix) = fname.strip_prefix(&prefix) else {
+                        continue;
+                    };
+                    let Ok(major) = suffix.parse::<u32>() else {
+                        continue;
+                    };
+                    if best.as_ref().is_none_or(|(b, _)| major > *b) {
+                        best = Some((major, entry.path()));
+                    }
+                }
+            }
+            found = best.map(|(_, p)| p);
+        }
+
+        let resolved = found.unwrap_or_else(|| PathBuf::from(name));
+        cache
+            .lock()
+            .unwrap()
+            .insert(name.to_string(), resolved.clone());
+        Command::new(resolved)
+    }
+
     /// Merge bitcode from all object files
     fn merge_bitcode(&mut self, object_files: &[ObjectFile]) -> Result<Bitcode> {
         let start = Instant::now();
@@ -1233,7 +1311,7 @@ impl FinalLinker {
 
         let output_path = self.get_temp_path("merged.bc");
 
-        let mut cmd = Command::new("llvm-link");
+        let mut cmd = Self::llvm_tool("llvm-link");
 
         // Add all bitcode files
         for obj in object_files {
@@ -1273,7 +1351,7 @@ impl FinalLinker {
 
         let output_path = self.get_temp_path("combined.bc");
 
-        let mut cmd = Command::new("llvm-link");
+        let mut cmd = Self::llvm_tool("llvm-link");
         cmd.arg(&user_bc.path)
             .arg(stdlib_bc)
             .arg("-o")
@@ -1297,7 +1375,7 @@ impl FinalLinker {
 
         let output_path = self.get_temp_path("optimized.bc");
 
-        let mut cmd = Command::new("opt");
+        let mut cmd = Self::llvm_tool("opt");
         cmd.arg(&bitcode.path);
 
         // Optimization level based on LTO mode

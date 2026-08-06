@@ -281,19 +281,27 @@ impl GpuBinaryEmitter {
     }
 
     /// Get the host target triple (for the CPU side of the executable).
+    ///
+    /// The GPU path always embeds kernels into an executable for the
+    /// machine running the compile (no cross-compilation support), so
+    /// host `cfg!` is the correct source here — unlike the AOT LLVM
+    /// path, where every platform decision must read the module's
+    /// TARGET triple. Arch must be respected on every OS: the linux
+    /// arm CI runner is `aarch64-unknown-linux-gnu`, not x86_64.
     fn host_triple(&self) -> String {
-        if cfg!(target_os = "macos") {
-            if cfg!(target_arch = "aarch64") {
-                "aarch64-apple-darwin".to_string()
-            } else {
-                "x86_64-apple-darwin".to_string()
-            }
-        } else if cfg!(target_os = "linux") {
-            "x86_64-unknown-linux-gnu".to_string()
-        } else if cfg!(target_os = "windows") {
-            "x86_64-pc-windows-msvc".to_string()
+        let arch = if cfg!(target_arch = "aarch64") {
+            "aarch64"
         } else {
-            "x86_64-unknown-unknown".to_string()
+            "x86_64"
+        };
+        if cfg!(target_os = "macos") {
+            format!("{arch}-apple-darwin")
+        } else if cfg!(target_os = "linux") {
+            format!("{arch}-unknown-linux-gnu")
+        } else if cfg!(target_os = "windows") {
+            format!("{arch}-pc-windows-msvc")
+        } else {
+            format!("{arch}-unknown-unknown")
         }
     }
 }
@@ -321,8 +329,35 @@ mod tests {
 
     #[test]
     fn test_gpu_binary_emitter_metal() {
+        // The CPU-side triple is HOST-derived by design (the GPU path
+        // has no cross support), so a fixed-string expectation is
+        // host-dependent — the old `== "aarch64-apple-darwin"` assert
+        // failed on every linux CI runner. Pin the os/arch MAPPING
+        // instead: the tokens must match the compiling host.
         let emitter = GpuBinaryEmitter::new(GpuTarget::Metal, false);
-        assert_eq!(emitter.host_triple(), "aarch64-apple-darwin");
+        let triple = emitter.host_triple();
+        let expected_arch = if cfg!(target_arch = "aarch64") {
+            "aarch64"
+        } else {
+            "x86_64"
+        };
+        assert!(
+            triple.starts_with(expected_arch),
+            "triple {triple:?} must carry the host arch {expected_arch:?}"
+        );
+        let expected_os = if cfg!(target_os = "macos") {
+            "apple-darwin"
+        } else if cfg!(target_os = "linux") {
+            "unknown-linux-gnu"
+        } else if cfg!(target_os = "windows") {
+            "pc-windows-msvc"
+        } else {
+            "unknown-unknown"
+        };
+        assert!(
+            triple.ends_with(expected_os),
+            "triple {triple:?} must carry the host os {expected_os:?}"
+        );
     }
 
     #[test]

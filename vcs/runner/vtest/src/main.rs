@@ -141,7 +141,12 @@ fn init_logging(verbosity: Verbosity, json_log: bool) {
 #[command(propagate_version = true)]
 struct Cli {
     /// Configuration file path
-    #[arg(short, long, value_name = "FILE")]
+    // global: the Makefile passes `--config` AFTER the subcommand
+    // (`vtest run … --config vcs.toml`); without propagation clap
+    // rejects it there — test-differential was the only target that
+    // both passed `--config` and gated CI, so the breakage surfaced
+    // as a Differential-job-only arg error.
+    #[arg(short, long, global = true, value_name = "FILE")]
     config: Option<PathBuf>,
 
     /// Verbose output (shorthand for --verbosity=debug)

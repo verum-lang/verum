@@ -342,14 +342,48 @@ impl WorkspaceManifest {
     /// Caller-supplied paths are canonicalised best-effort; non-
     /// existent paths are matched lexically.
     pub fn contains(&self, workspace_root: &Path, path: &Path) -> ManifestResult<bool> {
-        let canon = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let canon = Self::canonicalize_lenient(path);
         for member in self.member_dirs(workspace_root)? {
-            let canon_member = fs::canonicalize(&member).unwrap_or(member);
+            let canon_member = Self::canonicalize_lenient(&member);
             if canon.starts_with(&canon_member) {
                 return Ok(true);
             }
         }
         Ok(false)
+    }
+
+    /// Canonicalize a path that may not (fully) exist: resolve the
+    /// nearest existing ancestor and re-append the untouched tail.
+    ///
+    /// `contains` compares a probe path against member dirs with
+    /// `starts_with`, so BOTH sides must be canonicalized the same
+    /// way. A plain `canonicalize(path).unwrap_or(raw)` breaks the
+    /// moment the probe doesn't exist yet (a to-be-created source
+    /// file): the member resolves through the platform's tmp symlink
+    /// (`/var` → `/private/var` on macOS) while the probe keeps the
+    /// unresolved spelling, and membership reports false.
+    fn canonicalize_lenient(path: &Path) -> PathBuf {
+        if let Ok(c) = fs::canonicalize(path) {
+            return c;
+        }
+        let mut tail: Vec<std::ffi::OsString> = Vec::new();
+        let mut cur = path.to_path_buf();
+        while let Some(parent) = cur.parent() {
+            if let Some(name) = cur.file_name() {
+                tail.push(name.to_os_string());
+            } else {
+                break;
+            }
+            if let Ok(c) = fs::canonicalize(parent) {
+                let mut out = c;
+                for seg in tail.iter().rev() {
+                    out.push(seg);
+                }
+                return out;
+            }
+            cur = parent.to_path_buf();
+        }
+        path.to_path_buf()
     }
 
     /// Validate parse-time invariants. Caller passes `origin` so error
