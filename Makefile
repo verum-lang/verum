@@ -48,6 +48,9 @@ check-internal-refs: ## Gate: no references to the internal/ directory in tracke
 check-panic-surface: ## Gate (T0424): no net increase of unwrap/expect in verum_codegen/src/llvm production code
 	python3 scripts/ci/check_panic_surface_ratchet.py
 
+check-dup-emitters: ## Gate (T0438): every verum_* runtime symbol has ONE definer; dead-libc source census (Arm B)
+	python3 scripts/ci/check_dup_emitters.py
+
 check-dup-emitters: ## Gate (T0438): one definer per verum_* symbol + no libc-referencing emitter bodies without a syscall path
 	python3 scripts/ci/check_dup_emitters.py
 
