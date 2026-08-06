@@ -149,10 +149,25 @@ jobs:
   integration:
     name: Integration tests (tests/ gate, pure tier)
     runs-on: ubuntu-latest
+    env:
+      # Debuginfo is the bulk of test-binary volume; five crate tiers of
+      # integration binaries + the baked stdlib overflowed the runner's
+      # ~14GB free disk ("No space left on device", run 31112675382).
+      # Line tables stay (backtraces keep file:line); full debuginfo is
+      # only useful under a debugger, which never attaches on CI.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Free runner disk space
+        # The hosted image ships ~30GB of unrelated toolchains; reclaim
+        # them before the five-tier build (same disk-overflow class).
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost 2>/dev/null || true
+          df -h /
 
       - name: Install Rust toolchain (pinned via rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
