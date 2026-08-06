@@ -1889,6 +1889,56 @@ impl TypeChecker {
                 } else {
                     path.clone()
                 };
+                // VARIANT-RECORD literal under CHECK (T0701 retry leg):
+                // a two-segment `Type.Variant { … }` whose head expands
+                // to a variant carrying the second segment is the
+                // PARENT's value — constructing `Named{Type.Variant}`
+                // here unified the variant SPELLING against the
+                // expected parent and failed («expected 'RetryBackoff',
+                // found 'RetryBackoff.Linear'»). Same expansion
+                // authority as the synth arm.
+                let resolved_path = if resolved_path.segments.len() == 2 {
+                    let head_name = match &resolved_path.segments[0] {
+                        verum_ast::ty::PathSegment::Name(id) => {
+                            Some(id.name.as_str().to_string())
+                        }
+                        _ => None,
+                    };
+                    let case_name = match &resolved_path.segments[1] {
+                        verum_ast::ty::PathSegment::Name(id) => {
+                            Some(id.name.as_str().to_string())
+                        }
+                        _ => None,
+                    };
+                    match (head_name, case_name) {
+                        (Some(h), Some(c)) => {
+                            let head_ty = self
+                                .ctx
+                                .lookup_type(h.as_str())
+                                .cloned()
+                                .or_else(|| self.resolve_type_name(h.as_str(), expr.span).ok());
+                            let is_parent = head_ty
+                                .map(|t| {
+                                    matches!(
+                                        self.expand_generic_to_variant(&t),
+                                        Type::Variant(ref vs) if vs.contains_key(&verum_common::Text::from(c.as_str()))
+                                    )
+                                })
+                                .unwrap_or(false);
+                            if is_parent {
+                                verum_ast::ty::Path {
+                                    segments: vec![resolved_path.segments[0].clone()].into(),
+                                    span: resolved_path.span,
+                                }
+                            } else {
+                                resolved_path
+                            }
+                        }
+                        _ => resolved_path,
+                    }
+                } else {
+                    resolved_path
+                };
                 let actual_struct_ty = Type::Named {
                     path: resolved_path,
                     args: type_args,
@@ -9352,15 +9402,61 @@ impl TypeChecker {
                     }
                 }
             };
+            // CANONICAL-NOMINAL claim + nominal result: lazy metadata
+            // registrations store `Named{X}` — open the body through the
+            // ONE expansion authority so the variant branch CLAIMS the
+            // literal (otherwise `RetryBackoff.Linear { … }` fell to the
+            // generic record handler and typed as the variant spelling),
+            // and return the NOMINAL parent, not the structural body.
+            let nominal_result: Option<Type> = resolved_variant_ty.clone();
+            let resolved_variant_ty: Option<Type> = resolved_variant_ty.map(|t| {
+                if matches!(t, Type::Variant(_)) {
+                    t
+                } else {
+                    self.expand_generic_to_variant(&t)
+                }
+            });
             if let Option::Some(ty) = resolved_variant_ty
                 && let Type::Variant(variants) = &ty
             {
+                let ty = match &nominal_result {
+                    Option::Some(n) if !matches!(n, Type::Variant(_)) => n.clone(),
+                    _ => ty.clone(),
+                };
+                let ty_body_variants = variants.clone();
+                let variants = &ty_body_variants;
                 // It's a variant type! Look up the specific variant
                 if let Some(variant_payload_ty) = variants.get(variant_name) {
-                    // Verify the payload is a record type
-                    if let Type::Record(expected_field_types) = variant_payload_ty {
-                        // Clone to avoid borrowing issues
-                        let expected_field_types = expected_field_types.clone();
+                    // Verify the payload is a record type. Metadata ctor
+                    // registration FLATTENS record payloads positionally
+                    // (`Linear { delay_ms: Int }` → payload `Int`), so an
+                    // archive-loaded enum reached this check with a
+                    // non-Record payload, fell through to the generic
+                    // record handler, and the literal typed as the
+                    // variant spelling («RetryBackoff.Linear») instead of
+                    // the enum — same root and same remedy as the pattern
+                    // binder: consult the parent-qualified
+                    // `__struct_fields_<Type>.<Variant>` side-channel
+                    // (then the bare key) before giving up.
+                    let upgraded_fields: Option<
+                        indexmap::IndexMap<verum_common::Text, Type>,
+                    > = match variant_payload_ty {
+                        Type::Record(m) => Some(m.clone()),
+                        _ => {
+                            let qualified =
+                                format!("__struct_fields_{}.{}", type_name, variant_name);
+                            match self.ctx.lookup_type(qualified.as_str()) {
+                                Option::Some(Type::Record(m)) => Some(m.clone()),
+                                _ => match self.ctx.lookup_type(
+                                    format!("__struct_fields_{}", variant_name).as_str(),
+                                ) {
+                                    Option::Some(Type::Record(m)) => Some(m.clone()),
+                                    _ => None,
+                                },
+                            }
+                        }
+                    };
+                    if let Some(expected_field_types) = upgraded_fields {
                         // Type check the record fields
                         let mut provided_fields: indexmap::IndexMap<
                             verum_common::Text,
