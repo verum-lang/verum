@@ -307,13 +307,17 @@ mod tests {
     }
 
     fn write_temp(name: &str, content: &str) -> PathBuf {
+        // Uniqueness by ATOMIC COUNTER, not clock: SystemTime has
+        // microsecond-ish granularity on macOS, so two parallel tests
+        // calling this in the same tick built the SAME dir — the first
+        // to finish ran its `remove_dir_all` and the sibling's
+        // `fs::write` died with NotFound (flaked both CI Unit jobs and
+        // locally). pid + counter is collision-free by construction.
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
             "verum_script_test_{}_{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         fs::create_dir_all(&dir).unwrap();
         let p = dir.join(name);
