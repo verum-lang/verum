@@ -150,15 +150,18 @@ runs:
 
     - name: Expose toolchain to later steps
       # Runtime consumers (Phase 7.5 linking shells out to `llvm-link` /
-      # `opt`) resolve tools via `VERUM_LLVM_BIN_DIR` first, then PATH —
-      # without this export the ubuntu runners fail the no-libc smoke
-      # with "Failed to execute llvm-link" (GitHub's Linux images ship
-      # no bare `llvm-link`). Runs LAST so both install paths (prebuilt
-      # download and source-build fallback) are covered.
+      # `opt`) resolve tools via `VERUM_LLVM_BIN_DIR` first — without
+      # this export the ubuntu runners fail the no-libc smoke with
+      # "Failed to execute llvm-link" (GitHub's Linux images ship no
+      # bare `llvm-link`). Deliberately ENV-only, NOT a GITHUB_PATH
+      # prepend: putting the fetched clang ahead of the host toolchain
+      # broke every build-script bindgen run ("'inttypes.h' file not
+      # found" — the fetched clang has no host SDK sysroot). Runs LAST
+      # so both install paths (prebuilt download and source-build
+      # fallback) are covered.
       shell: bash
       run: |
         set -euo pipefail
         if [[ -d llvm/install/bin ]]; then
-          echo "${PWD}/llvm/install/bin" >> "$GITHUB_PATH"
           echo "VERUM_LLVM_BIN_DIR=${PWD}/llvm/install/bin" >> "$GITHUB_ENV"
         fi
