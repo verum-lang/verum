@@ -1498,6 +1498,91 @@ pub(in super::super) fn handle_call_method(
             };
 
             match base_method.as_str() {
+                // T0384 minors — every arm below is the SHARED-STRONGCOUNT-1
+                // repr-coupled class: the COMPILED stdlib bodies read
+                // `self.ptr`/`self.generation` of the SOURCE SharedInner
+                // layout, which the interp repr `[refcount][value]` does not
+                // carry, so the interp answers from ITS OWN repr.
+                "get_mut" => {
+                    if std::env::var_os("VERUM_TRACE_STATICMUT").is_some() {
+                        eprintln!("[shared-trace] get_mut arm HIT");
+                    }
+                    // Same `&mut T` contract as borrow_mut (memory.vr's
+                    // exclusive-access accessor) — pre-fix the auto-deref
+                    // arm forwarded it to the INNER value and SIGSEGV'd.
+                    let inner = unsafe { *data_ptr.add(1) };
+                    state.set_reg(dst, inner);
+                    return Ok(DispatchResult::Continue);
+                }
+                "make_unique" => {
+                    // refcount==1: already unique — hand back the receiver.
+                    // Shared: allocate a FRESH cell around a copy of the
+                    // inner value (the interp's value-copy semantics match
+                    // clone-on-write for NaN-boxed payloads).
+                    let refcount = unsafe { (*data_ptr).as_i64() };
+                    if refcount <= 1 {
+                        state.set_reg(dst, receiver);
+                        return Ok(DispatchResult::Continue);
+                    }
+                    let inner = unsafe { *data_ptr.add(1) };
+                    let obj = state
+                        .heap
+                        .alloc(TypeId::SHARED, 2 * std::mem::size_of::<Value>())?;
+                    state.record_allocation();
+                    let fresh = unsafe {
+                        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE)
+                            as *mut Value
+                    };
+                    // SAFETY: freshly allocated 2-Value cell.
+                    unsafe {
+                        *fresh = Value::from_i64(1);
+                        *fresh.add(1) = inner;
+                    }
+                    // The receiver's strong count drops by one (this handle
+                    // now owns the fresh cell).
+                    unsafe { *data_ptr = Value::from_i64(refcount - 1) };
+                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
+                    return Ok(DispatchResult::Continue);
+                }
+                "try_unwrap" => {
+                    // refcount==1 -> Ok(inner); else Err(receiver) — the
+                    // canonical Result builders stamp TypeId::RESULT so
+                    // downstream match/format read the honest variant.
+                    let refcount = unsafe { (*data_ptr).as_i64() };
+                    let result = if refcount <= 1 {
+                        let inner = unsafe { *data_ptr.add(1) };
+                        make_result_variant(
+                            state,
+                            verum_common::well_known_types::result_success_tag(),
+                            inner,
+                        )?
+                    } else {
+                        make_result_variant(
+                            state,
+                            verum_common::well_known_types::result_error_tag(),
+                            receiver,
+                        )?
+                    };
+                    state.set_reg(dst, result);
+                    return Ok(DispatchResult::Continue);
+                }
+                "downgrade" => {
+                    // Interp weak model (documented at weak_count: the repr
+                    // tracks NO weak references): the weak carrier IS the
+                    // cell pointer; upgrade answers from the strong count.
+                    state.set_reg(dst, receiver);
+                    return Ok(DispatchResult::Continue);
+                }
+                "upgrade" => {
+                    let refcount = unsafe { (*data_ptr).as_i64() };
+                    let result = if refcount > 0 {
+                        make_some_value(state, receiver)?
+                    } else {
+                        make_none_value(state)?
+                    };
+                    state.set_reg(dst, result);
+                    return Ok(DispatchResult::Continue);
+                }
                 "borrow" | "borrow_mut" | "get" => {
                     // Return the inner value (or a reference to it)
                     // In VBC, we simplify by returning the value itself since

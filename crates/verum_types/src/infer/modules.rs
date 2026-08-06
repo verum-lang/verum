@@ -17259,8 +17259,23 @@ impl TypeChecker {
                                 // assert_eq) fails against the opaque head
                                 // (`expected 'Item<Range<Int>>', found 'Int'`,
                                 // bisected to peekable/reduce/min producers).
-                                let final_return_type = self
-                                    .normalize_type(&self.unifier.apply(&subst_return_type));
+                                // GATED on contains_type_app (the same gate every
+                                // other normalize site uses): an ungated
+                                // normalize EXPANDED nominal sum returns to their
+                                // structural union — `reverse() -> Ordering`
+                                // handed consumers `Less(Unit) | Equal(Unit) |
+                                // Greater(Unit)`, identity died at the method
+                                // boundary, and the chained/let-bound results
+                                // surfaced as the E404 fleet (trace-proven:
+                                // scheme HIT carries Named{Ordering}, the ret=
+                                // print showed the union).
+                                let applied_return = self.unifier.apply(&subst_return_type);
+                                let final_return_type =
+                                    if Self::contains_type_app(&applied_return) {
+                                        self.normalize_type(&applied_return)
+                                    } else {
+                                        applied_return
+                                    };
 
                                 if crate::ctor_trace_enabled() {
                                     eprintln!(
@@ -17971,6 +17986,128 @@ impl TypeChecker {
         span: Span,
         skip_static_lookup: bool,
     ) -> Result<InferResult> {
+        // NOMINAL RECOVERY FOR VARIANT-UNION RECEIVERS (the E404 class,
+        // T0148): an ANNOTATED `List<Ordering>` element reached method
+        // resolution as the STRUCTURAL union `Less(Unit) | Equal(Unit)
+        // | Greater(Unit)` — inherent/impl buckets are keyed by the
+        // NOMINAL name, so the search found zero candidates and the
+        // fresh-var answer surfaced as E404 'not fully determined'.
+        // When every case name of the union maps (via the ambient
+        // parents table) to exactly ONE COMMON parent, the union IS
+        // that nominal — restore it before the search. Unions whose
+        // cases span several types (or unregistered cases) pass
+        // through untouched.
+        let recv_ty = match &recv_ty {
+            Type::Variant(cases) if !cases.is_empty() => {
+                let mut common: Option<indexmap::IndexSet<Text>> = None;
+                for (case_name, _) in cases.iter() {
+                    match self.variant_constructor_parents.get(case_name) {
+                        Some(parents) => {
+                            let set: indexmap::IndexSet<Text> =
+                                parents.iter().cloned().collect();
+                            common = Some(match common {
+                                None => set,
+                                Some(prev) => {
+                                    prev.intersection(&set).cloned().collect()
+                                }
+                            });
+                        }
+                        None => {
+                            common = None;
+                            break;
+                        }
+                    }
+                }
+                if crate::ctor_trace_enabled() {
+                    let n = common.as_ref().map(|s| s.len());
+                    eprintln!(
+                        "[ctor-trace] union-recovery probe cases={} common={:?} owners={:?}",
+                        cases.len(),
+                        n,
+                        common.as_ref().map(|s| s
+                            .iter()
+                            .map(|t| t.as_str().to_string())
+                            .collect::<Vec<_>>())
+                    );
+                }
+                // TWO-SPELLING COLLAPSE: the measured 'common=2' case is
+                // ONE type under two spellings (bare 'Ordering' + the
+                // qualified registrar's 'core.base.ordering.Ordering' —
+                // the documented mod.rs conflict). When every common
+                // owner shares one LAST SEGMENT, they are one identity;
+                // recover with the BARE leaf — the spelling the
+                // inherent/impl buckets key on.
+                let common = common.map(|owners| {
+                    if owners.len() > 1 {
+                        let leaves: indexmap::IndexSet<&str> = owners
+                            .iter()
+                            .map(|o| {
+                                o.as_str().rsplit('.').next().unwrap_or(o.as_str())
+                            })
+                            .collect();
+                        if leaves.len() == 1 {
+                            let leaf =
+                                Text::from(*leaves.iter().next().expect("len==1"));
+                            let mut one = indexmap::IndexSet::new();
+                            one.insert(leaf);
+                            return one;
+                        }
+                        // PINNED-CARRIER PREFERENCE (measured: owners =
+                        // ["Ordering", "SemVerOrdering"] — two GENUINE
+                        // types share all three case spellings). The
+                        // pinned prelude trio are LANGUAGE facts (the
+                        // same principle that keeps their ctors bare
+                        // under E430); when exactly one owner is a
+                        // pinned carrier, the expansion that produced
+                        // this union overwhelmingly came from it.
+                        // Honest residual: a receiver that GENUINELY was
+                        // the non-pinned twin and degraded to this union
+                        // recovers to the pinned owner — it was equally
+                        // unresolvable before (E404 either way), and the
+                        // true cure remains not losing the nominal
+                        // (DefId campaign).
+                        use verum_common::well_known_types::type_names as wkt;
+                        let pinned: Vec<&Text> = owners
+                            .iter()
+                            .filter(|o| {
+                                let leaf = o
+                                    .as_str()
+                                    .rsplit('.')
+                                    .next()
+                                    .unwrap_or(o.as_str());
+                                leaf == wkt::MAYBE
+                                    || leaf == wkt::RESULT
+                                    || leaf == wkt::ORDERING
+                            })
+                            .collect();
+                        if pinned.len() == 1 {
+                            let owner = (*pinned[0]).clone();
+                            let mut one = indexmap::IndexSet::new();
+                            one.insert(owner);
+                            return one;
+                        }
+                    }
+                    owners
+                });
+                match common {
+                    Some(owners) if owners.len() == 1 => {
+                        let owner = owners.into_iter().next().expect("len==1");
+                        if crate::ctor_trace_enabled() {
+                            eprintln!(
+                                "[ctor-trace] union-receiver nominal recovery -> '{}'",
+                                owner.as_str()
+                            );
+                        }
+                        Type::Named {
+                            path: Self::text_to_path(&owner),
+                            args: List::new(),
+                        }
+                    }
+                    _ => recv_ty,
+                }
+            }
+            _ => recv_ty,
+        };
         let method_name_str = method.name.as_str();
         let mut via_hkt_side_table = false;
         let dispatch_var: Option<TypeVar> = match &recv_ty {
