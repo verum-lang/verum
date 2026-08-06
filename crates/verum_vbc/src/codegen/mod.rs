@@ -2370,6 +2370,34 @@ impl VbcCodegen {
     /// arrays of scalars (elem_width * N; `[Byte; N]` packs at 1).
     /// `None` = record/generic/unsized — those stay on the TLS path
     /// unchanged (honest fallback, not a guess).
+    /// Is this static-mut initializer PROVABLY all-zero (the shape the
+    /// wide-cell zero-hydration honours)? Array literals of 0 / 0.0 /
+    /// false and `[0; N]` repeats qualify; anything else — including
+    /// expressions we cannot see through — is NOT, and the wide-static
+    /// registration refuses it loudly (T0133).
+    fn static_init_is_all_zero(e: &verum_ast::expr::Expr) -> bool {
+        use verum_ast::expr::{ArrayExpr, ExprKind};
+        fn lit_is_zero(e: &verum_ast::expr::Expr) -> bool {
+            match &e.kind {
+                ExprKind::Literal(l) => match &l.kind {
+                    verum_ast::LiteralKind::Int(il) => il.value == 0,
+                    verum_ast::LiteralKind::Float(fl) => fl.value == 0.0,
+                    verum_ast::LiteralKind::Bool(b) => !b,
+                    _ => false,
+                },
+                ExprKind::Paren(inner) => lit_is_zero(inner),
+                _ => false,
+            }
+        }
+        match &e.kind {
+            ExprKind::Array(ArrayExpr::List(elems)) => {
+                elems.iter().all(lit_is_zero)
+            }
+            ExprKind::Array(ArrayExpr::Repeat { value, .. }) => lit_is_zero(value),
+            _ => lit_is_zero(e),
+        }
+    }
+
     fn static_mut_byte_width(ty: &verum_ast::Type) -> Option<u32> {
         use verum_ast::ty::TypeKind;
         fn scalar_width(k: &TypeKind) -> Option<u32> {
@@ -8420,6 +8448,24 @@ impl VbcCodegen {
                     let name = static_decl.name.name.to_string();
                     let slot = self.ctx.register_thread_local(&name);
                     if let Some(w) = Self::static_mut_byte_width(&static_decl.ty) {
+                        // T0133: WIDE cells hydrate to zero — a non-zero
+                        // initializer would silently diverge between the
+                        // TLS value view and the native `&STATIC as *T`
+                        // address view. Refuse LOUDLY until element-wise
+                        // ctor hydration lands (scalar statics get their
+                        // ctor writeback in compile_pending_tls_inits).
+                        if w > 8 && !Self::static_init_is_all_zero(&static_decl.value) {
+                            return Err(CodegenError::internal(format!(
+                                "static mut '{}': non-zero initializers for \
+                                 statics wider than 8 bytes are not yet \
+                                 native — the address view would read \
+                                 zeros while the value view holds the \
+                                 initializer (T0133). Initialize with \
+                                 zeros and assign at startup, or use a \
+                                 scalar static.",
+                                name
+                            )));
+                        }
                         self.ctx.static_mut_byte_widths.insert(name.clone(), w);
                     }
 
@@ -14369,6 +14415,42 @@ impl VbcCodegen {
                     val: result_reg,
                 });
                 self.ctx.free_temp(slot_reg);
+                // T0133 non-zero scalar initializers: the native cell
+                // (the `&STATIC as *T` view) must observe the ctor's
+                // value, not its zero default. For SCALAR statics the
+                // writeback is three instructions: materialise the cell
+                // address, machine-write the computed value through it.
+                // Wide cells stay zero-hydrated (their live consumers
+                // init with zeros; a non-zero wide literal is refused
+                // loudly at declaration — no silent two-view divergence).
+                let scalar_width = self
+                    .ctx
+                    .static_mut_byte_widths
+                    .get(&name)
+                    .copied()
+                    .unwrap_or(8);
+                if scalar_width <= 8 {
+                    let addr_reg = self.ctx.alloc_temp();
+                    let mut a_ops = Vec::<u8>::with_capacity(4);
+                    Self::write_reg(&mut a_ops, addr_reg.0);
+                    a_ops.push((slot & 0xFF) as u8);
+                    a_ops.push(((slot >> 8) & 0xFF) as u8);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: crate::instruction::SystemSubOpcode::StaticMutAddr
+                            .to_byte(),
+                        operands: a_ops,
+                    });
+                    let mut w_ops = Vec::<u8>::new();
+                    Self::write_reg(&mut w_ops, addr_reg.0);
+                    Self::write_reg(&mut w_ops, result_reg.0);
+                    w_ops.push(8);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: crate::instruction::SystemSubOpcode::PtrWrite
+                            .to_byte(),
+                        operands: w_ops,
+                    });
+                    self.ctx.free_temp(addr_reg);
+                }
                 // Return unit
                 self.ctx.emit(Instruction::Ret { value: result_reg });
             } else {

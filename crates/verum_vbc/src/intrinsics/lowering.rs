@@ -838,6 +838,21 @@ impl IntrinsicLowering {
             // T0188: the GPU/MLIR face of the volatile pair — llvm.load /
             // llvm.store with the volatile attribute, matching the CPU
             // lowering's set_volatile(true).
+            // T0108 plain raw twins — same ops, no volatile attribute.
+            InlineSequenceId::PtrReadRaw => self.emit(MlirOp {
+                name: "llvm.load".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::PtrWriteRaw => self.emit(MlirOp {
+                name: "llvm.store".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             InlineSequenceId::PtrReadVolatile => self.emit(MlirOp {
                 name: "llvm.load".to_string(),
                 attrs: vec![MlirAttr {

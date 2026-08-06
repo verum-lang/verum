@@ -1036,6 +1036,9 @@ fn ffi_extended_body(
             // this interpreter allocates a zero-initialised cell.
             // Subsequent reads return the same stable address.
             let cell_addr = state.static_mut_cell_addr(slot);
+            if std::env::var_os("VERUM_TRACE_STATICMUT").is_some() {
+                eprintln!("[staticmut-trace] 0x52 slot={} -> addr={:p}", slot, cell_addr);
+            }
             state.set_reg(dst, Value::from_ptr::<u8>(cell_addr));
             Ok(DispatchResult::Continue)
         }
@@ -1189,6 +1192,93 @@ fn ffi_extended_body(
             Ok(DispatchResult::Continue)
         }
 
+        // T0108 machine-semantics plain pair — the non-volatile twins:
+        // same decode ladder and width policy as the volatile ops (raw
+        // machine bytes, payload not the NaN-box), plain host load/store.
+        Some(SystemSubOpcode::PtrRead) => {
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let size = read_u8(state)?;
+            let val = state.get_reg(ptr_reg);
+            let ptr: *mut u8 = if val.is_fat_ref() {
+                val.as_fat_ref().ptr()
+            } else if val.is_thin_ref() {
+                val.as_thin_ref().ptr
+            } else if val.is_regular_ptr() {
+                val.as_ptr()
+            } else {
+                val.as_i64() as *mut u8
+            };
+            if ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
+            // SAFETY: null-checked; caller supplies a pointer valid for
+            // `size`-byte reads (raw-pointer contract, mirrors DerefRaw).
+            let value = unsafe {
+                match size {
+                    1 => *ptr as i64,
+                    2 => std::ptr::read_unaligned(ptr as *const u16) as i64,
+                    4 => std::ptr::read_unaligned(ptr as *const u32) as i64,
+                    8 => std::ptr::read_unaligned(ptr as *const i64),
+                    _ => {
+                        return Err(InterpreterError::InvalidOperand {
+                            message: format!("invalid ptr_read size: {}", size),
+                        });
+                    }
+                }
+            };
+            state.set_reg(dst, Value::from_i64(value));
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::PtrWrite) => {
+            let ptr_reg = read_reg(state)?;
+            let value_reg = read_reg(state)?;
+            let size = read_u8(state)?;
+            let val = state.get_reg(ptr_reg);
+            let ptr: *mut u8 = if val.is_fat_ref() {
+                val.as_fat_ref().ptr()
+            } else if val.is_thin_ref() {
+                val.as_thin_ref().ptr
+            } else if val.is_regular_ptr() {
+                val.as_ptr()
+            } else {
+                val.as_i64() as *mut u8
+            };
+            if ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
+            let v = state.get_reg(value_reg);
+            // MACHINE representation: the payload (as_i64 for ints,
+            // bit-pattern for floats via to_f64 bits, raw ptr for heap
+            // values) — an `*mut Int` cell holds 11, never the NaN box.
+            let payload: i64 = if v.is_float() {
+                v.as_f64().to_bits() as i64
+            } else if v.is_regular_ptr() {
+                v.as_ptr::<u8>() as i64
+            } else {
+                v.as_i64()
+            };
+            // SAFETY: null-checked; caller supplies a pointer valid for
+            // `size`-byte writes (raw-pointer contract).
+                        if std::env::var_os("VERUM_TRACE_STATICMUT").is_some() {
+                eprintln!("[staticmut-trace] 0x6C write ptr={:p} payload={} size={}", ptr, payload, size);
+            }
+unsafe {
+                match size {
+                    1 => *ptr = payload as u8,
+                    2 => std::ptr::write_unaligned(ptr as *mut u16, payload as u16),
+                    4 => std::ptr::write_unaligned(ptr as *mut u32, payload as u32),
+                    8 => std::ptr::write_unaligned(ptr as *mut i64, payload),
+                    _ => {
+                        return Err(InterpreterError::InvalidOperand {
+                            message: format!("invalid ptr_write size: {}", size),
+                        });
+                    }
+                }
+            }
+            Ok(DispatchResult::Continue)
+        }
+
         // T0188 volatile qualified-access twins. EQUIVALENCE CONTRACT
         // (documented at the sub-op decl): the interpreter executes every
         // instruction — nothing is elided or reordered — so a plain
@@ -1339,18 +1429,22 @@ fn ffi_extended_body(
             let value_reg = read_reg(state)?;
             let size = read_u8(state)?;
 
-            // SECURITY: Only accept Pointer-tagged values for write operations.
-            // Casting arbitrary integers to pointers enables arbitrary memory writes.
+            // ONE raw-address decode ladder — the same forms DerefRaw and
+            // the volatile twins accept (fat/thin/regular-ptr AND the
+            // int-tagged address a ptr_offset chain produces). The former
+            // int-reject was asymmetric theater: the read side and both
+            // volatile ops already accepted ints, raw writes are gated by
+            // `unsafe` at the language level, and the reject broke every
+            // ptr_write through pointer arithmetic (T0108).
             let val = state.get_reg(ptr_reg);
-            let ptr: *mut u8 = if val.is_ptr() {
+            let ptr: *mut u8 = if val.is_fat_ref() {
+                val.as_fat_ref().ptr()
+            } else if val.is_thin_ref() {
+                val.as_thin_ref().ptr
+            } else if val.is_regular_ptr() {
                 val.as_ptr()
             } else {
-                return Err(InterpreterError::InvalidOperand {
-                    message: format!(
-                        "DerefMutRaw requires pointer-tagged value, got integer: {}",
-                        val.as_i64()
-                    ),
-                });
+                val.as_i64() as *mut u8
             };
             if ptr.is_null() {
                 return Err(InterpreterError::NullPointer);

@@ -280,8 +280,15 @@ pub enum InlineSequenceId {
     Memcmp,
     /// Volatile pointer read (T0188) — SystemSubOpcode::PtrReadVolatile.
     PtrReadVolatile,
+    /// Plain raw-pointer read — the NON-volatile twin (T0108): a
+    /// dedicated sub-op carries the raw-address semantic in the
+    /// INSTRUCTION, where generic Deref cannot (an int-tagged cell
+    /// address is indistinguishable from an int VALUE at runtime).
+    PtrReadRaw,
     /// Volatile pointer write (T0188) — SystemSubOpcode::PtrWriteVolatile.
     PtrWriteVolatile,
+    /// Plain raw-pointer write — non-volatile twin of the above.
+    PtrWriteRaw,
     /// fetch_add: CAS loop for atomic add
     AtomicFetchAdd,
     /// fetch_sub: CAS loop for atomic sub
@@ -1443,7 +1450,14 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         ],
         param_count: 1, // ptr
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::Deref),
+        // T0108: plain Deref cannot serve a RAW address — at Tier-0 an
+        // int-tagged cell address is indistinguishable from an int value,
+        // so handle_deref answered identity/bridge instead of reading
+        // memory (measured: ptr_read over a StaticMutAddrSized cell
+        // returned the TLS box object). The dedicated DerefRaw sub-op
+        // carries the semantic in the instruction — same shape as the
+        // volatile twins.
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PtrReadRaw),
         mlir_op: Some("llvm.load"),
         doc: "Read value from pointer",
     },
@@ -1509,7 +1523,8 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         ],
         param_count: 2, // ptr, value
         return_count: 0,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::DerefMut),
+        // T0108: non-volatile raw write — see ptr_read above.
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PtrWriteRaw),
         mlir_op: Some("llvm.store"),
         doc: "Write value to pointer",
     },

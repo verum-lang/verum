@@ -387,7 +387,10 @@ fn global_type_table_clean_for_fresh_codegen() {
 /// When a fix lands that resolves orphans (better mount transitive
 /// closure, MakeVariantTyped from #167 Phase 3, etc.), lower
 /// `RESULT_ORPHAN_BASELINE` to lock the gain.
-const RESULT_ORPHAN_BASELINE: usize = 280;
+// 2026-08-06: 280 -> 0 while this feature-gated target was invisible
+// (T0486) — the T0555/T0690 identity campaigns eliminated the orphan
+// class wholesale; pinned at zero so it can never silently return.
+const RESULT_ORPHAN_BASELINE: usize = 0;
 
 #[test]
 fn orphan_make_variants_baseline_for_result() {

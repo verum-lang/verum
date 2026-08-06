@@ -30256,6 +30256,39 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        // T0108 machine-semantics plain pair — non-volatile mirrors of
+        // the volatile arms above (same operand shape, plain load/store).
+        Some(SystemSubOpcode::PtrRead) => {
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "PtrRead: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let size_bytes = operands[2];
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "raw_read_ptr")?;
+            let mut ffi = FfiLowering::new(ctx.llvm_context());
+            let value = ffi.lower_deref_raw(ctx.builder(), ptr, size_bytes)?;
+            ctx.set_register(dst_reg, value.into());
+            Ok(())
+        }
+        Some(SystemSubOpcode::PtrWrite) => {
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "PtrWrite: insufficient operands",
+                ));
+            }
+            let ptr_reg = op_reg(operands, 0);
+            let value_reg = op_reg(operands, 1);
+            let size_bytes = operands[2];
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "raw_write_ptr")?;
+            let value = as_i64(ctx, ctx.get_register(value_reg)?, "raw_write_val")?;
+            let mut ffi = FfiLowering::new(ctx.llvm_context());
+            ffi.lower_deref_mut_raw(ctx.builder(), ptr, value, size_bytes)?;
+            Ok(())
+        }
+
         Some(SystemSubOpcode::PtrAdd) => {
             // Format: dst:reg, ptr:reg, offset:reg
             if operands.len() < 3 {

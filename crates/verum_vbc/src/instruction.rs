@@ -5013,6 +5013,16 @@ pub enum SystemSubOpcode {
     /// Additive beside 0x52 so pre-existing bytecode keeps its exact
     /// operand shape — the encoder/decoder-drift class stays closed.
     StaticMutAddrSized = 0x6A,
+    /// Plain raw-pointer READ with MACHINE semantics (T0108): reads the
+    /// raw bytes at the address — the non-volatile twin of
+    /// PtrReadVolatile. Distinct from DerefRaw only in family intent;
+    /// distinct from DerefMutRaw's 8-byte policy on the WRITE side,
+    /// which stores the full NaN-boxed Value bit-pattern for
+    /// deref-assign — the intrinsic pair speaks machine representation
+    /// (an `*mut Int` cell holds 11, not 0x7FF9…000B).
+    PtrRead = 0x6B,
+    /// Plain raw-pointer WRITE with MACHINE semantics — see PtrRead.
+    PtrWrite = 0x6C,
 
     // ========================================================================
     // Time Operations (0x70-0x7F)
@@ -5793,6 +5803,8 @@ impl SystemSubOpcode {
             0x68 => Some(Self::PtrReadVolatile),
             0x69 => Some(Self::PtrWriteVolatile),
             0x6A => Some(Self::StaticMutAddrSized),
+            0x6B => Some(Self::PtrRead),
+            0x6C => Some(Self::PtrWrite),
             0x63 => Some(Self::PtrAdd),
             0x64 => Some(Self::PtrSub),
             0x65 => Some(Self::PtrDiff),
@@ -5974,6 +5986,8 @@ impl SystemSubOpcode {
             Self::PtrReadVolatile        => m!("FFI_PTR_READ_VOLATILE",      RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrWriteVolatile       => m!("FFI_PTR_WRITE_VOLATILE",     RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::StaticMutAddrSized     => m!("FFI_STATIC_MUT_ADDR_SIZED",  RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::PtrRead                => m!("FFI_PTR_READ",              RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::PtrWrite               => m!("FFI_PTR_WRITE",             RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrAdd                 => m!("FFI_PTR_ADD",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrSub                 => m!("FFI_PTR_SUB",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrDiff                => m!("FFI_PTR_DIFF",               RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
@@ -16476,7 +16490,7 @@ mod tests {
         // corresponding meta() arm is in place.
         let mut count = 0;
         for_every_system_sub_opcode(|_| count += 1);
-        assert_eq!(count, 115,
+        assert_eq!(count, 117,
             "SystemSubOpcode variant count drift: expected 115, got {}",
             count);
     }
@@ -16630,8 +16644,9 @@ mod tests {
             seen.push(m);
         });
         // Mirrors the system_meta_count pin: 112 + the T0188/T0133
-        // trio (PtrReadVolatile / PtrWriteVolatile / StaticMutAddrSized).
-        assert_eq!(seen.len(), 115);
+        // trio (PtrReadVolatile / PtrWriteVolatile / StaticMutAddrSized)
+        // + the T0108 machine-semantics pair (PtrRead / PtrWrite).
+        assert_eq!(seen.len(), 117);
     }
 
     // ========================================================================

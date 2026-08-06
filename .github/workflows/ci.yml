@@ -106,6 +106,46 @@ jobs:
   # nightly lane. Linux-only: the tier is platform-agnostic Rust; the unit
   # matrix already covers OS spread.
   # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Job 1c (T0486, fold of T0394): the three feature-gated verum_vbc
+  # guardrail targets. `required-features = ["codegen"]` keeps them out
+  # of every default invocation, and their rot was invisible — measured
+  # on first arming: one target had stopped COMPILING (v2.12 field
+  # E0063) and a ratchet had drifted 280 -> 0 in the improved direction
+  # with nothing to pin the gain. They compile the real stdlib under
+  # the codegen feature (~85 min measured locally), so they get their
+  # own job and timeout rather than the 45-min pure tier.
+  # ---------------------------------------------------------------------------
+  vbc-guardrails:
+    name: verum_vbc feature-gated guardrails (codegen)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain (pinned via rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: vbc-guardrails
+          cache-on-failure: true
+
+      - name: Run the three gated targets
+        timeout-minutes: 120
+        run: >
+          cargo test --locked -p verum_vbc --features codegen
+          --test layout_invariant_verifier_tests
+          --test intrinsic_key_resolution_gate
+          --test global_type_table_consistency_tests
+
   integration:
     name: Integration tests (tests/ gate, pure tier)
     runs-on: ubuntu-latest

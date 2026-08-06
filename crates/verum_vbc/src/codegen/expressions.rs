@@ -426,7 +426,7 @@ struct FfiCallbackInfo {
 impl VbcCodegen {
     /// Writes a register to bytecode using variable-length encoding.
     /// Registers 0-127 use 1 byte, registers 128+ use 2 bytes.
-    fn write_reg(output: &mut Vec<u8>, reg: u16) {
+    pub(crate) fn write_reg(output: &mut Vec<u8>, reg: u16) {
         if reg < 128 {
             output.push(reg as u8);
         } else {
@@ -24133,6 +24133,15 @@ impl VbcCodegen {
             .get(&name)
             .copied()
             .unwrap_or(8);
+        if std::env::var_os("VERUM_TRACE_STATICMUT").is_some() {
+            eprintln!(
+                "[staticmut-trace] addr-intercept name={} slot={} width={} (map has {} entries)",
+                name,
+                slot,
+                width,
+                self.ctx.static_mut_byte_widths.len()
+            );
+        }
         let dst = self.ctx.alloc_temp();
         if width > 8 {
             let mut operands = Vec::<u8>::with_capacity(6);
@@ -31870,6 +31879,36 @@ impl VbcCodegen {
             // surface is generic over T but every current caller moves a
             // Value-width slot; narrower widths join with the unaligned
             // family when it lands.
+            // Plain raw twins (T0108): identical operand shape, sub-ops
+            // 0x60/0x61 — the interpreter's DerefRaw/DerefMutRaw and the
+            // AOT's non-volatile load/store arms.
+            InlineSequenceId::PtrReadRaw => {
+                if let Some(ptr) = args.first() {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, dest.0);
+                    Self::write_reg(&mut operands, ptr.0);
+                    operands.push(8);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x6B, // PtrRead (machine semantics)
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            InlineSequenceId::PtrWriteRaw => {
+                if args.len() >= 2 {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, args[0].0);
+                    Self::write_reg(&mut operands, args[1].0);
+                    operands.push(8);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x6C, // PtrWrite (machine semantics)
+                        operands,
+                    });
+                }
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            }
             InlineSequenceId::PtrReadVolatile => {
                 if let Some(ptr) = args.first() {
                     let mut operands = Vec::<u8>::new();
