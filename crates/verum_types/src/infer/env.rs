@@ -184,6 +184,16 @@ impl TypeChecker {
                                 field_map
                                     .insert(verum_common::Text::from(f.name.as_str()), field_ty);
                             }
+                            // PARENT-QUALIFIED twin: the bare key collides
+                            // across types (TWO stdlib `Linear` variants —
+                            // RetryBackoff's {delay_ms} lost its slot to a
+                            // sibling's {base_ms, …}, and record patterns
+                            // resolved the WRONG field set). The pattern
+                            // binder probes the qualified spelling first.
+                            self.ctx.define_type(
+                                format!("__struct_fields_{}.{}", type_name, case.name),
+                                Type::Record(field_map.clone()),
+                            );
                             self.ctx.define_type(struct_key, Type::Record(field_map));
                             InductiveConstructor::with_args(case.name.clone(), args, result_type)
                         }

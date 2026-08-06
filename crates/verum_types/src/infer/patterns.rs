@@ -3196,6 +3196,66 @@ impl TypeChecker {
             }
             _ => payload_ty.clone(),
         };
+        // SIDE-CHANNEL UPGRADE (T0148/T0701 retry leg): metadata ctor
+        // registration flattens record payloads POSITIONALLY into
+        // `with_args` (Linear{delay_ms: Int} → payload `Int`,
+        // Exponential{…} → a tuple) but ALSO registers the true field
+        // map as `__struct_fields_<Variant>` (env.rs Record arm) —
+        // consult it before rejecting, so record-style patterns on
+        // archive-loaded record-payload variants resolve their fields
+        // exactly like source-declared ones.
+        let resolved_payload = match &resolved_payload {
+            Type::Record(_) => resolved_payload,
+            _ => {
+                // Candidate keys: PARENT-QUALIFIED spellings first (the
+                // bare key collides across types — two stdlib `Linear`
+                // variants left RetryBackoff's pattern resolving a
+                // stranger's field set), then the bare key. Among
+                // candidates, prefer the record that actually carries
+                // the pattern's field names — the pattern itself is the
+                // collision-free disambiguator.
+                let mut candidates: Vec<Type> = Vec::new();
+                if let Some(parents) = self
+                    .variant_constructor_parents
+                    .get(&verum_common::Text::from(tag))
+                {
+                    for parent in parents.iter() {
+                        let leaf = parent
+                            .as_str()
+                            .rsplit('.')
+                            .next()
+                            .unwrap_or(parent.as_str());
+                        if let Some(Type::Record(m)) = self
+                            .ctx
+                            .lookup_type(format!("__struct_fields_{}.{}", leaf, tag).as_str())
+                        {
+                            candidates.push(Type::Record(m.clone()));
+                        }
+                    }
+                }
+                if let Some(Type::Record(m)) = self
+                    .ctx
+                    .lookup_type(format!("__struct_fields_{}", tag).as_str())
+                {
+                    candidates.push(Type::Record(m.clone()));
+                }
+                let wanted: Vec<&str> =
+                    field_patterns.iter().map(|f| f.name.name.as_str()).collect();
+                let best = candidates
+                    .iter()
+                    .find(|c| match c {
+                        Type::Record(m) => {
+                            wanted.iter().all(|w| m.contains_key(&verum_common::Text::from(*w)))
+                        }
+                        _ => false,
+                    })
+                    .or_else(|| candidates.first());
+                match best {
+                    Some(rec) => rec.clone(),
+                    None => resolved_payload,
+                }
+            }
+        };
         if let Type::Record(field_types) = &resolved_payload {
             // Track which fields have been matched
             let mut matched_fields = indexmap::IndexSet::new();
