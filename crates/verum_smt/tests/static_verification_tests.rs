@@ -23,7 +23,16 @@ use verum_smt::static_verification::*;
 
 #[test]
 fn test_bounds_check_verification_proved() {
-    let verifier = StaticVerifier::default_config();
+    // The production default's 100ms per-constraint budget exists for
+    // graceful degradation to runtime checks — inheriting it here made
+    // the PROOF assertion ride scheduler noise (CI observed z3
+    // exceeding 100ms under load → Timeout → "not proved"). The
+    // test's contract is provability, not latency: give the prover a
+    // budget only a hang would exceed.
+    let verifier = StaticVerifier::new(StaticVerificationConfig {
+        constraint_timeout_ms: 10_000,
+        ..StaticVerificationConfig::default()
+    });
 
     // Create a bounds check constraint that should be provable
     // with the right preconditions
