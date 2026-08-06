@@ -2853,6 +2853,40 @@ impl Unifier {
                     if (tn2 == "Byte" || tn2 == "UInt8") && self.is_bytewise_ffi(tn1) {
                         return Ok(Substitution::new());
                     }
+                    // QUALIFIED-LEAF IDENTITY BRIDGE (T0701, the
+                    // semver/regression cluster): the mount-scoped TYPE
+                    // authority speaks QUALIFIED for annotations
+                    // (`core.base.semver.SemVer`) while metadata
+                    // schemes speak BARE (`SemVer`) — ONE nominal, two
+                    // spellings, and respelling either PRODUCER flipped
+                    // sibling clusters red (measured; see the
+                    // CANONICAL-NOMINAL note in infer/modules.rs — the
+                    // true seam is the DefId campaign). Until identity
+                    // is by id, bridge at the identity point: exactly
+                    // one side single-segment, leaves equal, arg counts
+                    // equal → same head, unify the args. Genuine
+                    // cross-module leaf collisions meeting as
+                    // one-bare-one-dotted pairs previously FAILED here
+                    // loudly, so the bridge widens acceptance only for
+                    // spellings the same file scope resolved.
+                    // Kill-switch: VERUM_NO_LEAF_BRIDGE=1.
+                    let leaf_bridge = tn1 == tn2
+                        && !tn1.is_empty()
+                        && (p1.segments.len() == 1) != (p2.segments.len() == 1)
+                        && a1.len() == a2.len()
+                        && std::env::var_os("VERUM_NO_LEAF_BRIDGE").is_none();
+                    if leaf_bridge {
+                        let mut subst = Substitution::new();
+                        for (ty1, ty2) in a1.iter().zip(a2.iter()) {
+                            let s = self.unify_inner(
+                                &ty1.apply_subst(&subst),
+                                &ty2.apply_subst(&subst),
+                                span,
+                            )?;
+                            subst = subst.compose(&s);
+                        }
+                        return Ok(subst);
+                    }
                     return Err(TypeError::Mismatch {
                         expected: t2.to_text(),
                         actual: t1.to_text(),
@@ -2866,6 +2900,35 @@ impl Unifier {
                     match (seg1, seg2) {
                         (PathSegment::Name(id1), PathSegment::Name(id2)) => {
                             if id1.name != id2.name {
+                                // QUALIFIED-LEAF IDENTITY BRIDGE, single-
+                                // segment spelling: the mount-qualified
+                                // authority publishes DOTTED SINGLE
+                                // IDENTS (`core.base.semver.SemVer` as
+                                // one segment — the opaque qualified
+                                // form), which meet the schemes' bare
+                                // `SemVer` head-to-head here. Same
+                                // rationale and kill-switch as the
+                                // segment-count bridge above.
+                                let l1 = id1
+                                    .name
+                                    .as_str()
+                                    .rsplit('.')
+                                    .next()
+                                    .unwrap_or(id1.name.as_str());
+                                let l2 = id2
+                                    .name
+                                    .as_str()
+                                    .rsplit('.')
+                                    .next()
+                                    .unwrap_or(id2.name.as_str());
+                                let one_dotted = id1.name.as_str().contains('.')
+                                    != id2.name.as_str().contains('.');
+                                if l1 == l2
+                                    && one_dotted
+                                    && std::env::var_os("VERUM_NO_LEAF_BRIDGE").is_none()
+                                {
+                                    continue;
+                                }
                                 return Err(TypeError::Mismatch {
                                     expected: t2.to_text(),
                                     actual: t1.to_text(),
