@@ -18125,15 +18125,112 @@ impl TypeChecker {
                 match common {
                     Some(owners) if owners.len() == 1 => {
                         let owner = owners.into_iter().next().expect("len==1");
-                        if crate::ctor_trace_enabled() {
-                            eprintln!(
-                                "[ctor-trace] union-receiver nominal recovery -> '{}'",
-                                owner.as_str()
-                            );
-                        }
-                        Type::Named {
+                        // ARGS RECONSTRUCTION: a bare `Named{owner}`
+                        // restores identity but LOSES the instantiation —
+                        // `x.unwrap()` on a receiver that arrived as
+                        // `Some(Int) | None` then instantiates the
+                        // scheme's __generic_0 against NOTHING and the
+                        // result stays a free var (E404 unless some later
+                        // use pins it; VCS maybe_unwrap_none_panics is
+                        // the 4-line pin). Recover the args by walking
+                        // the owner's REGISTERED generic body case-by-
+                        // case against this union: wherever the body
+                        // holds a (persistent) type var and the receiver
+                        // holds a concrete type, that var IS one of the
+                        // owner's params bound at this receiver. Var
+                        // order of first appearance mirrors payload
+                        // declaration order — exactly how the scheme's
+                        // positional bind (ordered_fresh_vars ×
+                        // receiver_type_args) consumes them.
+                        let owner_nominal = Type::Named {
                             path: Self::text_to_path(&owner),
                             args: List::new(),
+                        };
+                        let body = self.expand_generic_to_variant(&owner_nominal);
+                        let mut var_order: Vec<crate::ty::TypeVar> = Vec::new();
+                        let mut bound: std::collections::HashMap<
+                            crate::ty::TypeVar,
+                            Type,
+                        > = std::collections::HashMap::new();
+                        fn walk(
+                            generic: &Type,
+                            concrete: &Type,
+                            order: &mut Vec<crate::ty::TypeVar>,
+                            bound: &mut std::collections::HashMap<
+                                crate::ty::TypeVar,
+                                Type,
+                            >,
+                        ) {
+                            match (generic, concrete) {
+                                (Type::Var(v), c) => {
+                                    if !order.contains(v) {
+                                        order.push(*v);
+                                    }
+                                    if !matches!(c, Type::Var(_)) {
+                                        bound.entry(*v).or_insert_with(|| c.clone());
+                                    }
+                                }
+                                (Type::Variant(gv), Type::Variant(cv)) => {
+                                    for (name, gp) in gv.iter() {
+                                        if let Some(cp) = cv.get(name) {
+                                            walk(gp, cp, order, bound);
+                                        }
+                                    }
+                                }
+                                (Type::Tuple(gs), Type::Tuple(cs)) => {
+                                    for (g, c) in gs.iter().zip(cs.iter()) {
+                                        walk(g, c, order, bound);
+                                    }
+                                }
+                                (
+                                    Type::Reference { inner: g, .. },
+                                    Type::Reference { inner: c, .. },
+                                )
+                                | (
+                                    Type::Ownership { inner: g, .. },
+                                    Type::Ownership { inner: c, .. },
+                                ) => walk(g, c, order, bound),
+                                (
+                                    Type::Generic { args: ga, .. },
+                                    Type::Generic { args: ca, .. },
+                                )
+                                | (
+                                    Type::Named { args: ga, .. },
+                                    Type::Named { args: ca, .. },
+                                ) => {
+                                    for (g, c) in ga.iter().zip(ca.iter()) {
+                                        walk(g, c, order, bound);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        if let Type::Variant(_) = &body {
+                            walk(&body, &recv_ty, &mut var_order, &mut bound);
+                        }
+                        let args: List<Type> = var_order
+                            .iter()
+                            .map(|v| {
+                                bound
+                                    .get(v)
+                                    .cloned()
+                                    .unwrap_or(Type::Var(TypeVar::fresh()))
+                            })
+                            .collect();
+                        if crate::ctor_trace_enabled() {
+                            eprintln!(
+                                "[ctor-trace] union-receiver nominal recovery -> '{}' args={}",
+                                owner.as_str(),
+                                args.len()
+                            );
+                        }
+                        if args.is_empty() {
+                            owner_nominal
+                        } else {
+                            Type::Generic {
+                                name: owner.clone(),
+                                args,
+                            }
                         }
                     }
                     _ => recv_ty,
