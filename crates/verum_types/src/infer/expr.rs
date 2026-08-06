@@ -7811,6 +7811,34 @@ impl TypeChecker {
                         return Ok(InferResult::new(self.unifier.apply(&ty)));
                     }
                 }
+                // TYPE-QUALIFIED VARIANT CTOR (T0701 ctor leg): `mount
+                // core.base.log.{LogLevel}` records `LogLevel` as a
+                // module ALIAS, so `LogLevel.Trace` lands in THIS arm —
+                // which probed env / module fns / Type.method forms but
+                // never variant constructors, and the binding degraded
+                // to a fresh var (`let trace = LogLevel.Trace` → E404).
+                // Path-expr resolution already handles Type.Variant
+                // (path_resolution.rs Strategy 2a); mirror it here via
+                // the ONE scoped resolver, with the alias leaf as the
+                // expected parent so ambient same-named ctors of other
+                // types cannot hijack the qualified spelling.
+                {
+                    let leaf: verum_common::Text = module_path
+                        .as_str()
+                        .rsplit('.')
+                        .next()
+                        .unwrap_or(module_path.as_str())
+                        .into();
+                    self.ensure_stdlib_type_loaded_transitive(&leaf);
+                    if let Some(ctor_ty) = self.try_resolve_variant_constructor_with_arity_for(
+                        field_name,
+                        None,
+                        Some(leaf.as_str()),
+                    ) {
+                        return Ok(InferResult::new(ctor_ty));
+                    }
+                }
+
                 // Field-access fallback: lookup the simple field
                 // name in env as a last-ditch effort.  Same shape
                 // as the inline-module bail-out below.
@@ -7925,6 +7953,13 @@ impl TypeChecker {
                     }
                     _ => mounted_ty.clone(),
                 };
+                // Canonical-nominal registrations (metadata lazy load)
+                // store `Named{X}` — open the variant body through the
+                // ONE expansion authority before probing, else every
+                // mounted stdlib sum type misses this arm and the
+                // binding degrades to a fresh var (`let trace =
+                // LogLevel.Trace` → E404, T0701 ctor leg).
+                let resolved = self.expand_generic_to_variant(&resolved);
                 if let Type::Variant(variants) = &resolved {
                     if let Some(payload_ty) = variants.get(field_name) {
                         if matches!(payload_ty, Type::Unit) {
@@ -7966,8 +8001,16 @@ impl TypeChecker {
             }
 
             // Strategy 2: Look up type name and check if it's a Variant
-            // This handles cross-file imported variant types like RegistryError
-            if let Maybe::Some(ty) = self.ctx.lookup_type(type_name)
+            // This handles cross-file imported variant types like RegistryError.
+            // Same canonical-nominal expansion as Strategy 1.5: lazy
+            // metadata registrations store `Named{X}`, so open the body
+            // through the ONE expansion authority before probing.
+            let flat_expanded = self
+                .ctx
+                .lookup_type(type_name)
+                .cloned()
+                .map(|t| self.expand_generic_to_variant(&t));
+            if let Some(ty) = flat_expanded
                 && let Type::Variant(variants) = &ty
             {
                 if let Some(payload_ty) = variants.get(field_name) {
