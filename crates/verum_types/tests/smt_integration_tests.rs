@@ -294,9 +294,11 @@ fn test_subsumption_performance() {
     let phi1 = make_binary(BinOp::Gt, x.clone(), hundred);
     let phi2 = make_binary(BinOp::Gt, x.clone(), zero);
 
-    let start = Instant::now();
-    let result = check_subsumption_smt(&phi1, &phi2, 100);
-    let elapsed = start.elapsed();
+    // Median-of-5 with warmup: one z3 call on a loaded runner can eat
+    // the whole budget in scheduler noise; the spec bound is about the
+    // check, not the runner.
+    let (elapsed, result) =
+        verum_test_support::median_elapsed(5, || check_subsumption_smt(&phi1, &phi2, 100));
 
     assert!(result.is_ok(), "Check should succeed");
     assert!(

@@ -960,9 +960,10 @@ fn test_large_tuple_performance() {
     // Create tuple with 100 elements
     let large_tuple = Type::Tuple(vec![Type::Int; 100].into());
 
-    let start = std::time::Instant::now();
-    let is_send = derivation.is_send(&large_tuple);
-    let duration = start.elapsed();
+    // Median-of-5 with warmup: pins the width scaling, not one cold
+    // sample on a loaded runner.
+    let (duration, is_send) =
+        verum_test_support::median_elapsed(5, || derivation.is_send(&large_tuple));
 
     assert!(is_send, "Large tuple should be Send");
     assert!(duration.as_millis() < 100, "Should check Send in < 100ms");
@@ -979,9 +980,10 @@ fn test_deeply_nested_performance() {
         nested = Type::Tuple(vec![nested].into());
     }
 
-    let start = std::time::Instant::now();
-    let is_send = derivation.is_send(&nested);
-    let duration = start.elapsed();
+    // Median-of-5 with warmup: pins the depth scaling, not one cold
+    // sample on a loaded runner.
+    let (duration, is_send) =
+        verum_test_support::median_elapsed(5, || derivation.is_send(&nested));
 
     assert!(is_send, "Deeply nested type should be Send");
     assert!(duration.as_millis() < 100, "Should check Send in < 100ms");

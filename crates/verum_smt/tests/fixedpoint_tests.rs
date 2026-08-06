@@ -603,7 +603,6 @@ fn test_large_fact_database() {
 
 #[test]
 fn test_query_performance() {
-    use std::time::Instant;
 
     let ctx = Context::thread_local();
     let mut engine = FixedPointEngine::new(ctx.clone()).unwrap();
@@ -621,13 +620,14 @@ fn test_query_performance() {
         .unwrap();
     engine.add_rule(&fact, Some("edge_1_2")).unwrap();
 
-    let start = Instant::now();
+    // Median-of-5 with warmup: judge the datalog query, not one cold
+    // sample on a loaded runner.
     let query = edge
         .apply(&[&Dynamic::from(x), &Dynamic::from(y)])
         .as_bool()
         .unwrap();
-    let _result = engine.query(&query).unwrap();
-    let elapsed = start.elapsed();
+    let (elapsed, _result) =
+        verum_test_support::median_elapsed(5, || engine.query(&query).unwrap());
 
     // Query should be fast (< 100ms)
     assert!(

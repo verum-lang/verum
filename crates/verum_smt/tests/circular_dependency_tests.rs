@@ -712,9 +712,11 @@ fn test_deeply_nested_type_performance() {
         nested_type = make_generic_type("List", nested_type);
     }
 
-    let start = std::time::Instant::now();
-    let cycles = backend.detect_circular_dependencies(&nested_type);
-    let elapsed = start.elapsed();
+    // Median-of-5 with warmup: pins the depth scaling, not one cold
+    // sample on a loaded runner.
+    let (elapsed, cycles) = verum_test_support::median_elapsed(5, || {
+        backend.detect_circular_dependencies(&nested_type)
+    });
 
     assert_eq!(
         cycles.len(),
@@ -739,9 +741,11 @@ fn test_wide_tuple_performance() {
     }
     let wide_tuple = Type::new(TypeKind::Tuple(elements.into()), Span::dummy());
 
-    let start = std::time::Instant::now();
-    let cycles = backend.detect_circular_dependencies(&wide_tuple);
-    let elapsed = start.elapsed();
+    // Median-of-5 with warmup: pins the width scaling, not one cold
+    // sample on a loaded runner.
+    let (elapsed, cycles) = verum_test_support::median_elapsed(5, || {
+        backend.detect_circular_dependencies(&wide_tuple)
+    });
 
     assert_eq!(cycles.len(), 0, "Wide tuple without cycles should verify");
     assert!(

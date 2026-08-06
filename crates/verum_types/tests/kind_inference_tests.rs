@@ -678,22 +678,19 @@ fn test_well_kindedness() {
 
 #[test]
 fn test_kind_inference_performance() {
-    use std::time::Instant;
-
-    let mut inferer = KindInferer::new();
-
     // Create a complex nested type
     let mut ty = Type::Int;
     for _ in 0..10 {
         ty = named_type("List", vec![ty]);
     }
 
-    let start = Instant::now();
-    let result = inferer.infer_kind(&ty);
-    let elapsed = start.elapsed();
+    // Median-of-9 with warmup: the contract is algorithmic (10-level
+    // nesting must not blow up), not absolute latency — a single cold
+    // sample measured 926µs on a loaded CI runner and failed the gate.
+    let (elapsed, result) =
+        verum_test_support::median_elapsed(9, || KindInferer::new().infer_kind(&ty));
 
     assert!(result.is_ok());
-    // Allow more time for debug builds - 500µs is reasonable for 10-level nested type
     assert!(
         elapsed.as_micros() < 500,
         "Kind inference too slow: {:?}",
@@ -703,27 +700,25 @@ fn test_kind_inference_performance() {
 
 #[test]
 fn test_constraint_solving_performance() {
-    use std::time::Instant;
-
-    let mut inferer = KindInferer::new();
-
-    // Add many constraints
-    for i in 0..100 {
-        inferer.add_constraint(KindConstraint::equal(
-            Kind::KindVar(i),
-            if i % 2 == 0 {
-                Kind::Type
-            } else {
-                Kind::unary_constructor()
-            },
-            Span::default(),
-            format!("constraint {}", i),
-        ));
-    }
-
-    let start = Instant::now();
-    let result = inferer.solve();
-    let elapsed = start.elapsed();
+    // Solving consumes the inferer's constraint set, so each sample
+    // rebuilds it: the median times construction + solve of 100
+    // constraints, which is what must stay flat.
+    let (elapsed, result) = verum_test_support::median_elapsed(9, || {
+        let mut inferer = KindInferer::new();
+        for i in 0..100 {
+            inferer.add_constraint(KindConstraint::equal(
+                Kind::KindVar(i),
+                if i % 2 == 0 {
+                    Kind::Type
+                } else {
+                    Kind::unary_constructor()
+                },
+                Span::default(),
+                format!("constraint {}", i),
+            ));
+        }
+        inferer.solve()
+    });
 
     assert!(result.is_ok());
     assert!(

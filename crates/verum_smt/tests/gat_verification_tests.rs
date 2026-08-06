@@ -233,10 +233,14 @@ fn test_suggest_fixes_empty() {
 #[test]
 fn test_verification_timing() {
     let gat = AssociatedTypeGAT::simple("Timed".into(), List::new());
-    let result = verify_gat(&gat);
+
+    // Median-of-5 of the solver-reported duration: one cold z3 call on
+    // a loaded runner measures the runner, not the GAT.
+    let duration =
+        verum_test_support::median_reported(5, || verify_gat(&gat).duration);
 
     // Verification should be fast for simple GATs
-    assert!(result.duration.as_millis() < 100);
+    assert!(duration.as_millis() < 100);
 }
 
 #[test]

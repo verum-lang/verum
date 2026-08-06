@@ -491,12 +491,11 @@ fn test_performance_simple_query() {
 
     let expr = make_binary(BinOp::Lt, make_int_literal(10), make_int_literal(20));
 
-    let start = std::time::Instant::now();
-    let _result = backend.check_sat(&expr, &context);
-    let elapsed = start.elapsed();
+    // Median-of-5 with warmup: z3 start-up and scheduler noise land in
+    // the discarded/outlier samples, the median judges the query.
+    let (elapsed, _result) =
+        verum_test_support::median_elapsed(5, || backend.check_sat(&expr, &context));
 
-    // Allow more slack for CI and different machine configurations
-    // Z3 initialization can have variable latency
     assert!(
         elapsed.as_millis() < 100,
         "Simple query took too long: {}ms (expected < 100ms)",
@@ -518,9 +517,10 @@ fn test_performance_complex_query() {
         expr = make_binary(BinOp::And, expr, constraint);
     }
 
-    let start = std::time::Instant::now();
-    let _result = backend.check_sat(&expr, &context);
-    let elapsed = start.elapsed();
+    // Median-of-5 with warmup — same measurement discipline as the
+    // simple-query pin above.
+    let (elapsed, _result) =
+        verum_test_support::median_elapsed(5, || backend.check_sat(&expr, &context));
 
     assert!(
         elapsed.as_millis() < 100,

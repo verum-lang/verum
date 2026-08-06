@@ -203,14 +203,17 @@ fn test_lattice_properties() {
 
 #[test]
 fn test_verification_timing() {
-    let mut verifier = SpecializationVerifier::new().unwrap();
-
-    verifier.register_implementation(create_impl(Type::int(Span::dummy()), "Clone"), 0);
-
-    let result = verifier.verify();
+    // Median-of-5 of the reported duration, fresh verifier per sample
+    // (verification is stateful): judge the verify pass, not one cold
+    // z3 start-up on a loaded runner.
+    let duration = verum_test_support::median_reported(5, || {
+        let mut verifier = SpecializationVerifier::new().unwrap();
+        verifier.register_implementation(create_impl(Type::int(Span::dummy()), "Clone"), 0);
+        verifier.verify().duration
+    });
 
     // Should be fast for simple cases
-    assert!(result.duration.as_millis() < 200);
+    assert!(duration.as_millis() < 200);
 }
 
 #[test]

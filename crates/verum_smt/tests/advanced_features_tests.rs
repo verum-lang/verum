@@ -409,16 +409,16 @@ fn test_proof_analysis_workflow() {
 
 #[test]
 fn test_strategy_selection_performance() {
-    use std::time::Instant;
 
     let selector = StrategySelector::new();
 
     // Create a moderately sized problem
     let constraints: Vec<Bool> = (0..10).map(|i| Bool::new_const(format!("c{i}"))).collect();
 
-    let start = Instant::now();
-    let _tactic = selector.select_tactic(&constraints);
-    let elapsed = start.elapsed();
+    // Median-of-5 with warmup: judge the selector, not one cold sample
+    // on a loaded runner.
+    let (elapsed, _tactic) =
+        verum_test_support::median_elapsed(5, || selector.select_tactic(&constraints));
 
     // Strategy selection should be fast (< 100ms)
     assert!(elapsed.as_millis() < 100);
@@ -426,7 +426,6 @@ fn test_strategy_selection_performance() {
 
 #[test]
 fn test_smtlib_export_performance() {
-    use std::time::Instant;
 
     let mut exporter = SmtLibExporter::new().with_logic("QF_LIA");
 
@@ -437,9 +436,9 @@ fn test_smtlib_export_performance() {
         let _ = i;
     }
 
-    let start = Instant::now();
-    let _output = exporter.export();
-    let elapsed = start.elapsed();
+    // Median-of-5 with warmup: judge the exporter, not one cold sample
+    // on a loaded runner.
+    let (elapsed, _output) = verum_test_support::median_elapsed(5, || exporter.export());
 
     // Export should be fast (< 10ms)
     assert!(elapsed.as_millis() < 10);

@@ -39,6 +39,7 @@ z3 = { workspace = true }
 # NEVER add stacker here — user explicitly prohibits stack-growing libraries
 
 [dev-dependencies]
+verum_test_support = { workspace = true }
 proptest = { workspace = true }
 criterion = { workspace = true }
 tempfile = { workspace = true }

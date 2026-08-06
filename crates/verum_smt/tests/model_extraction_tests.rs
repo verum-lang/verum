@@ -220,23 +220,24 @@ fn test_model_with_disjunction() {
 fn test_model_extraction_performance() {
     let ctx = create_context();
 
-    let start = std::time::Instant::now();
+    // Median-of-5 with warmup, each sample a full solve+extract on a
+    // fresh solver: judge the pipeline, not one cold z3 start-up.
+    let (elapsed, ()) = verum_test_support::median_elapsed(5, || {
+        let solver = Solver::new();
+        let x = Int::new_const("x");
 
-    let solver = Solver::new();
-    let x = Int::new_const("x");
+        // Add multiple constraints
+        for i in 0..10 {
+            solver.assert(&x.gt(&Int::from_i64(i)));
+        }
 
-    // Add multiple constraints
-    for i in 0..10 {
-        solver.assert(&x.gt(&Int::from_i64(i)));
-    }
+        let result = solver.check();
+        assert_eq!(result, SatResult::Sat);
 
-    let result = solver.check();
-    assert_eq!(result, SatResult::Sat);
+        let model = solver.get_model().unwrap();
+        let _x_value = model.eval(&x, true).unwrap();
+    });
 
-    let model = solver.get_model().unwrap();
-    let _x_value = model.eval(&x, true).unwrap();
-
-    let elapsed = start.elapsed();
     // Model extraction should be fast (<100ms)
     assert!(elapsed.as_millis() < 1000);
 }

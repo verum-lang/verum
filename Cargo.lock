@@ -5611,6 +5611,7 @@ dependencies = [
  "verum_error",
  "verum_kernel",
  "verum_protocol_types",
+ "verum_test_support",
  "verum_types",
  "z3",
  "z3-sys",
@@ -5647,6 +5648,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "verum_test_support"
+version = "0.1.0"
+
+[[package]]
 name = "verum_types"
 version = "0.1.0"
 dependencies = [
@@ -5671,6 +5676,7 @@ dependencies = [
  "verum_parser",
  "verum_protocol_types",
  "verum_smt",
+ "verum_test_support",
  "z3",
 ]
 
@@ -5738,6 +5744,7 @@ dependencies = [
  "verum_fast_parser",
  "verum_kernel",
  "verum_smt",
+ "verum_test_support",
  "verum_types",
  "z3",
 ]

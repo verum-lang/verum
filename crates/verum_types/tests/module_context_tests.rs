@@ -420,19 +420,20 @@ fn test_inference_order() {
 
 #[test]
 fn test_performance_small_module() {
-    use std::time::Instant;
 
     let module_id = ModuleId::new(0);
-    let mut inference = ModuleTypeInference::new(module_id);
 
     // Create 100 functions (small module)
     let functions: Vec<_> = (0..100)
         .map(|i| make_function_decl(&format!("func{}", i), true))
         .collect();
 
-    let start = Instant::now();
-    let result = inference.infer_module(&functions, 1000);
-    let elapsed = start.elapsed();
+    // Median-of-3 with warmup (inference is stateful — fresh engine per
+    // sample): the contract is throughput staying flat, not one cold
+    // sample on a loaded runner.
+    let (elapsed, result) = verum_test_support::median_elapsed(3, || {
+        ModuleTypeInference::new(module_id).infer_module(&functions, 1000)
+    });
 
     assert!(result.is_ok());
 
@@ -579,11 +580,8 @@ fn test_cross_function_type_variables() {
 /// In debug mode, it reports performance but does not fail on slow timing.
 #[test]
 fn benchmark_10k_loc_target() {
-    use std::time::Instant;
 
     let module_id = ModuleId::new(0);
-    let mut inference = ModuleTypeInference::new(module_id);
-
     // Create enough functions to simulate 10K LOC
     // Assume ~10 lines per function
     let num_functions = 1000;
@@ -591,9 +589,11 @@ fn benchmark_10k_loc_target() {
         .map(|i| make_function_decl(&format!("func{}", i), true))
         .collect();
 
-    let start = Instant::now();
-    let result = inference.infer_module(&functions, 10000);
-    let elapsed = start.elapsed();
+    // Median-of-3 with warmup (fresh engine per sample) — judge the
+    // sustained throughput, not one cold sample.
+    let (elapsed, result) = verum_test_support::median_elapsed(3, || {
+        ModuleTypeInference::new(module_id).infer_module(&functions, 10000)
+    });
 
     assert!(result.is_ok());
 

@@ -1279,13 +1279,15 @@ fn test_performance_1000_resolutions() {
 
     resolver.create_scope(mod_id);
 
-    // Measure resolution time
-    let start = std::time::Instant::now();
-    for i in 0..1000 {
-        let resolved = resolver.resolve_name(&format!("Type{}", i), mod_id);
-        assert!(resolved.is_ok());
-    }
-    let elapsed = start.elapsed();
+    // Median-of-5 with warmup: lookups are read-only, so the batch is
+    // re-runnable; the contract is that 1000 resolutions stay flat, not
+    // a single cold sample's latency on a loaded runner.
+    let (elapsed, ()) = verum_test_support::median_elapsed(5, || {
+        for i in 0..1000 {
+            let resolved = resolver.resolve_name(&format!("Type{}", i), mod_id);
+            assert!(resolved.is_ok());
+        }
+    });
 
     // Should be under 50ms
     assert!(

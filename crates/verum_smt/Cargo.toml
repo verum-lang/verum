@@ -77,6 +77,7 @@ base64 = { version = "0.22", optional = true }
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"], optional = true }
 
 [dev-dependencies]
+verum_test_support = { workspace = true }
 proptest = { workspace = true }
 criterion = { workspace = true }
 lazy_static = "1.5"

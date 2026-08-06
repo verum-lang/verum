@@ -161,9 +161,18 @@ fn test_verify_mode_runtime() {
 
     // Runtime mode may succeed or return error depending on implementation
     // The key is that it doesn't hang or crash
-    if let Ok(proof) = result {
-        // If successful, duration should be minimal (< 1ms)
-        assert!(proof.cost.duration.as_millis() < 10);
+    if result.is_ok() {
+        // Median-of-5 of the reported cost: the skipped-SMT path is
+        // deterministic, so repeat calls stay Ok; one preempted sample
+        // must not fail the mode contract.
+        let duration = verum_test_support::median_reported(5, || {
+            verifier
+                .verify_refinement(&ty, None, Some(VerifyMode::Runtime))
+                .expect("runtime mode was Ok above; deterministic path")
+                .cost
+                .duration
+        });
+        assert!(duration.as_millis() < 10);
     }
     // Error is also acceptable for runtime mode with no actual refinement
 }

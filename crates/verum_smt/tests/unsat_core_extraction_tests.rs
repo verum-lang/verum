@@ -237,23 +237,24 @@ fn test_multiple_cores() {
 fn test_core_extraction_performance() {
     let _ctx = create_context();
 
-    let start = std::time::Instant::now();
+    // Median-of-5 with warmup, each sample a full UNSAT solve on a
+    // fresh solver: judge the extraction, not one cold z3 start-up.
+    let (elapsed, ()) = verum_test_support::median_elapsed(5, || {
+        // Create a moderately complex UNSAT formula
+        let x = Int::new_const("x");
+        let solver = Solver::new();
 
-    // Create a moderately complex UNSAT formula
-    let x = Int::new_const("x");
-    let solver = Solver::new();
+        for i in 0..10 {
+            let constraint = x.gt(Int::from_i64(i * 10));
+            solver.assert(&constraint);
+        }
+        // Add contradictory constraint
+        solver.assert(x.lt(Int::from_i64(0)));
 
-    for i in 0..10 {
-        let constraint = x.gt(Int::from_i64(i * 10));
-        solver.assert(&constraint);
-    }
-    // Add contradictory constraint
-    solver.assert(x.lt(Int::from_i64(0)));
+        let result = solver.check();
+        assert_eq!(result, SatResult::Unsat);
+    });
 
-    let result = solver.check();
-    assert_eq!(result, SatResult::Unsat);
-
-    let elapsed = start.elapsed();
     // Core extraction should be reasonably fast (<100ms for small problems)
     assert!(elapsed.as_millis() < 1000);
 }

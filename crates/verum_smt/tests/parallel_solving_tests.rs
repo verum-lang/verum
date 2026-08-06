@@ -199,26 +199,31 @@ fn test_parallel_aggregation_conceptual() {
 
 #[test]
 fn test_parallel_config_overhead() {
-    use std::time::Instant;
-
-    let start = Instant::now();
-    let _config = ParallelConfig::default();
-    let elapsed = start.elapsed();
-
-    assert!(elapsed.as_millis() < 10);
+    // Formerly timed `ParallelConfig::default()` against 10ms — a struct
+    // literal cannot regress past a wall-clock bound, and 10ms is inside
+    // scheduler noise on a loaded runner (same verdict as
+    // fixedpoint_integration_tests::test_datalog_rule_construction).
+    // What the test can honestly pin: the default config is usable.
+    let config = ParallelConfig::default();
+    assert!(
+        !config.strategies.is_empty(),
+        "default parallel config must carry at least one strategy"
+    );
 }
 
 #[test]
 fn test_strategy_selection_performance() {
-    use std::time::Instant;
-
+    // Formerly timed `Vec::len()` against 100µs — nothing measurable
+    // happens (same verdict as fixedpoint_integration_tests::
+    // test_datalog_rule_construction). Pin the strategy set's shape
+    // instead: deduplicated and non-empty.
     let strategies = ParallelConfig::default().strategies;
-
-    let start = Instant::now();
-    let _iter_count = strategies.len();
-    let elapsed = start.elapsed();
-
-    assert!(elapsed.as_micros() < 100);
+    assert!(!strategies.is_empty());
+    let mut names: Vec<String> = strategies.iter().map(|s| format!("{s:?}")).collect();
+    names.sort();
+    let before = names.len();
+    names.dedup();
+    assert_eq!(before, names.len(), "duplicate strategies in default set");
 }
 
 // ==================== Edge Case Tests ====================

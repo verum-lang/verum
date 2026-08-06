@@ -378,32 +378,38 @@ fn test_optimizer_config_custom() {
 
 #[test]
 fn test_bigint_weight_performance() {
-    use std::time::Instant;
 
-    let start = Instant::now();
-    let _weight = Weight::BigInt(BigInt::from_str("999999999999999999999999").unwrap());
-    let elapsed = start.elapsed();
+    // Median-of-9 with warmup: judge the parse, not one cold sample.
+    let (elapsed, _weight) = verum_test_support::median_elapsed(9, || {
+        Weight::BigInt(BigInt::from_str("999999999999999999999999").unwrap())
+    });
     assert!(elapsed.as_micros() < 1000);
 }
 
 #[test]
 fn test_rational_weight_performance() {
-    use std::time::Instant;
 
-    let start = Instant::now();
-    let _weight = Weight::BigRational(BigRational::new(BigInt::from(355), BigInt::from(113)));
-    let elapsed = start.elapsed();
+    // Median-of-9 with warmup: judge the construction, not one cold
+    // sample.
+    let (elapsed, _weight) = verum_test_support::median_elapsed(9, || {
+        Weight::BigRational(BigRational::new(BigInt::from(355), BigInt::from(113)))
+    });
     assert!(elapsed.as_micros() < 1000);
 }
 
 #[test]
 fn test_optimizer_config_creation_performance() {
-    use std::time::Instant;
-
-    let start = Instant::now();
-    let _config = OptimizerConfig::default();
-    let elapsed = start.elapsed();
-    assert!(elapsed.as_micros() < 100);
+    // Formerly timed `OptimizerConfig::default()` against 100µs — a
+    // constructor cannot regress past a wall-clock bound, and 100µs is
+    // inside scheduler noise (same verdict as
+    // fixedpoint_integration_tests::test_datalog_rule_construction).
+    // Pin the default's semantic invariants instead: incremental with
+    // cores enabled, and both budgets actually bounded.
+    let config = OptimizerConfig::default();
+    assert!(config.incremental);
+    assert!(config.enable_cores);
+    assert!(config.max_solutions.is_some(), "solution count must be bounded");
+    assert!(config.timeout_ms.is_some(), "solver budget must be bounded");
 }
 
 // ==================== Integration Tests ====================

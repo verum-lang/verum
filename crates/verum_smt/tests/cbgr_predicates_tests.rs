@@ -259,10 +259,14 @@ fn test_verification_timing() {
         ref_expr: Box::new(Type::int(Span::dummy())),
     };
 
-    let result = verify_generation_property(&property);
+    // Median-of-5 of the solver-reported duration: one cold z3 call on
+    // a loaded runner measures the runner, not the property.
+    let duration = verum_test_support::median_reported(5, || {
+        verify_generation_property(&property).duration
+    });
 
     // Should be fast (<50ms target)
-    assert!(result.duration.as_millis() < 100);
+    assert!(duration.as_millis() < 100);
 }
 
 #[test]

@@ -43,6 +43,7 @@ blake3 = { workspace = true }    # For content hashing (unified with compiler)
 ed25519-dalek = { version = "2.2.0", features = ["serde"] }
 
 [dev-dependencies]
+verum_test_support = { workspace = true }
 proptest = { workspace = true }
 quickcheck = { workspace = true }
 criterion = { workspace = true }

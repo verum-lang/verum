@@ -24,6 +24,8 @@ members = [
     # Shared typed-IR sitting between AST and kernel; pipeline contract.
     "crates/verum_core",
     "crates/verum_integration_tests",
+    # Dev-only shared test utilities (median wall-clock measurement)
+    "crates/verum_test_support",
     "crates/verum_lsp",
     "crates/verum_interactive",
     # DAP (Debug Adapter Protocol) server
@@ -93,6 +95,7 @@ verum_modules = { path = "crates/verum_modules" }
 verum_verification = { path = "crates/verum_verification" }
 verum_kernel = { path = "crates/verum_kernel" }
 verum_core = { path = "crates/verum_core" }
+verum_test_support = { path = "crates/verum_test_support" }
 verum_dap = { path = "crates/verum_dap" }
 verum_vbc = { path = "crates/verum_vbc" }
 # LLVM/MLIR infrastructure
