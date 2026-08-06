@@ -18052,6 +18052,39 @@ impl TypeChecker {
                             one.insert(leaf);
                             return one;
                         }
+                        // MOUNT-SCOPED SELECTION (T0525 rule (1), lifted
+                        // to the union-recovery rung): when the call
+                        // site EXPLICITLY mounts exactly one of the
+                        // candidate owners, that mount is the author's
+                        // own disambiguation — `mount core.base.log.
+                        // {LogLevel}` + a receiver expanding to
+                        // Trace|Debug|Info|Warn|Error must recover to
+                        // LogLevel even though ContextLogLevel spells
+                        // the same five cases. Same in-flight guard as
+                        // the ctor resolver: a stranger module's
+                        // signatures resolved mid-import must not see
+                        // the requesting file's mounts.
+                        if self.imports_in_progress.is_empty()
+                            && self.glob_imports_in_progress.is_empty()
+                        {
+                            let mounted: Vec<Text> = owners
+                                .iter()
+                                .filter(|o| {
+                                    let leaf = o
+                                        .as_str()
+                                        .rsplit('.')
+                                        .next()
+                                        .unwrap_or(o.as_str());
+                                    self.explicit_imports.contains(leaf)
+                                })
+                                .cloned()
+                                .collect();
+                            if mounted.len() == 1 {
+                                let mut one = indexmap::IndexSet::new();
+                                one.insert(mounted.into_iter().next().expect("len==1"));
+                                return one;
+                            }
+                        }
                         // PINNED-CARRIER PREFERENCE (measured: owners =
                         // ["Ordering", "SemVerOrdering"] — two GENUINE
                         // types share all three case spellings). The
