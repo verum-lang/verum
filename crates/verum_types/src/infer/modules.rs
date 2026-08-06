@@ -16722,6 +16722,14 @@ impl TypeChecker {
             current
         };
 
+        // ONE-authority union recovery BEFORE any bucket lookup — the
+        // early-inherent path keys buckets by the receiver's nominal
+        // name, so a structural union receiver must recover here, not
+        // first inside the protocol search (T0701: `LogLevel.severity`
+        // is inherent; the protocol search found n=0 candidates while
+        // the bucket lookup had already missed on the structural key).
+        let recv_ty = self.recover_union_receiver_nominal(recv_ty);
+
         // Post-cascade DynProtocol resolution.
         //
 
@@ -17975,29 +17983,18 @@ impl TypeChecker {
         Ok(None)
     }
 
-    fn resolve_method_via_protocol_search(
-        &mut self,
-        recv_ty: Type,
-        recv_ty_raw: Type,
-        receiver: &Expr,
-        method: &Ident,
-        type_args: &List<verum_ast::ty::GenericArg>,
-        args: &[Expr],
-        span: Span,
-        skip_static_lookup: bool,
-    ) -> Result<InferResult> {
-        // NOMINAL RECOVERY FOR VARIANT-UNION RECEIVERS (the E404 class,
-        // T0148): an ANNOTATED `List<Ordering>` element reached method
-        // resolution as the STRUCTURAL union `Less(Unit) | Equal(Unit)
-        // | Greater(Unit)` — inherent/impl buckets are keyed by the
-        // NOMINAL name, so the search found zero candidates and the
-        // fresh-var answer surfaced as E404 'not fully determined'.
-        // When every case name of the union maps (via the ambient
-        // parents table) to exactly ONE COMMON parent, the union IS
-        // that nominal — restore it before the search. Unions whose
-        // cases span several types (or unregistered cases) pass
-        // through untouched.
-        let recv_ty = match &recv_ty {
+    /// ONE-authority nominal recovery for STRUCTURAL variant-union
+    /// receivers (the E404 class, T0148/T0701): intersect the case
+    /// names' registered parents, collapse spellings, prefer
+    /// explicitly MOUNTED owners, reconstruct the nominal's args from
+    /// the union's payloads. Called at the method-call entry (so the
+    /// EARLY-INHERENT bucket lookup already sees the nominal — an
+    /// inherent method like `LogLevel.severity` is invisible to the
+    /// protocol search, which was the pre-lift consumer) and kept in
+    /// `resolve_method_via_protocol_search` for its other callers.
+    /// Idempotent: non-union receivers pass through untouched.
+    fn recover_union_receiver_nominal(&mut self, recv_ty: Type) -> Type {
+        match &recv_ty {
             Type::Variant(cases) if !cases.is_empty() => {
                 let mut common: Option<indexmap::IndexSet<Text>> = None;
                 for (case_name, _) in cases.iter() {
@@ -18064,6 +18061,24 @@ impl TypeChecker {
                         // the ctor resolver: a stranger module's
                         // signatures resolved mid-import must not see
                         // the requesting file's mounts.
+                        if crate::ctor_trace_enabled() {
+                            eprintln!(
+                                "[ctor-trace] union-recovery mount-rung: in_flight={}/{} explicit={:?}",
+                                self.imports_in_progress.len(),
+                                self.glob_imports_in_progress.len(),
+                                owners
+                                    .iter()
+                                    .map(|o| {
+                                        let leaf = o
+                                            .as_str()
+                                            .rsplit('.')
+                                            .next()
+                                            .unwrap_or(o.as_str());
+                                        (leaf.to_string(), self.explicit_imports.contains(leaf))
+                                    })
+                                    .collect::<Vec<_>>()
+                            );
+                        }
                         if self.imports_in_progress.is_empty()
                             && self.glob_imports_in_progress.is_empty()
                         {
@@ -18237,7 +18252,32 @@ impl TypeChecker {
                 }
             }
             _ => recv_ty,
-        };
+        }
+    }
+
+    fn resolve_method_via_protocol_search(
+        &mut self,
+        recv_ty: Type,
+        recv_ty_raw: Type,
+        receiver: &Expr,
+        method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
+        args: &[Expr],
+        span: Span,
+        skip_static_lookup: bool,
+    ) -> Result<InferResult> {
+        // NOMINAL RECOVERY FOR VARIANT-UNION RECEIVERS (the E404 class,
+        // T0148): an ANNOTATED `List<Ordering>` element reached method
+        // resolution as the STRUCTURAL union `Less(Unit) | Equal(Unit)
+        // | Greater(Unit)` — inherent/impl buckets are keyed by the
+        // NOMINAL name, so the search found zero candidates and the
+        // fresh-var answer surfaced as E404 'not fully determined'.
+        // When every case name of the union maps (via the ambient
+        // parents table) to exactly ONE COMMON parent, the union IS
+        // that nominal — restore it before the search. Unions whose
+        // cases span several types (or unregistered cases) pass
+        // through untouched.
+        let recv_ty = self.recover_union_receiver_nominal(recv_ty);
         let method_name_str = method.name.as_str();
         let mut via_hkt_side_table = false;
         let dispatch_var: Option<TypeVar> = match &recv_ty {
