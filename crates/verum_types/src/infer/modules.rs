@@ -18140,6 +18140,23 @@ impl TypeChecker {
                 match common {
                     Some(owners) if owners.len() == 1 => {
                         let owner = owners.into_iter().next().expect("len==1");
+                        // ENSURE-THEN-RESOLVE, recovery leg (T0701
+                        // sev_min): the recovered owner's inherent
+                        // bucket may not exist yet — a mounted sum
+                        // type's value can reach method dispatch
+                        // without ANY path having loaded the owner
+                        // (trace: tried [("LogLevel", bucket=false)],
+                        // zero ensure-load lines). Same idempotent
+                        // bounded drain as every other consumer.
+                        {
+                            let owner_leaf: Text = owner
+                                .as_str()
+                                .rsplit('.')
+                                .next()
+                                .unwrap_or(owner.as_str())
+                                .into();
+                            self.ensure_stdlib_type_loaded_transitive(&owner_leaf);
+                        }
                         // ARGS RECONSTRUCTION: a bare `Named{owner}`
                         // restores identity but LOSES the instantiation —
                         // `x.unwrap()` on a receiver that arrived as
@@ -21103,6 +21120,36 @@ impl TypeChecker {
         let method_info_opt = {
             let methods_guard = self.inherent_methods.read();
             let method_name_text = verum_common::Text::from(method.name.as_str());
+            if crate::ctor_trace_enabled() {
+                let tried: Vec<(String, bool, bool)> = type_names_to_try
+                    .iter()
+                    .map(|tn| {
+                        let bucket = methods_guard.get(tn);
+                        (
+                            tn.as_str().to_string(),
+                            bucket.is_some(),
+                            bucket
+                                .map(|b| b.contains_key(&method_name_text))
+                                .unwrap_or(false),
+                        )
+                    })
+                    .collect();
+                let leaf_buckets: Vec<String> = methods_guard
+                    .keys()
+                    .filter(|k| {
+                        type_names_to_try.iter().any(|tn| {
+                            let leaf =
+                                tn.as_str().rsplit('.').next().unwrap_or(tn.as_str());
+                            !leaf.is_empty() && k.as_str().ends_with(leaf)
+                        })
+                    })
+                    .map(|k| k.as_str().to_string())
+                    .collect();
+                eprintln!(
+                    "[ctor-trace] inherent-dispatch method={} tried(name,bucket,has)={:?} sibling_buckets={:?}",
+                    method_name_text, tried, leaf_buckets
+                );
+            }
 
             // Extract receiver type args for specialization checking
             let recv_type_args_for_check: List<Type> = match &recv_ty {
