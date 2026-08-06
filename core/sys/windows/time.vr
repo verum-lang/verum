@@ -658,3 +658,13 @@ implement WindowsDeadlineTimer {
         }
     }
 }
+
+/// Platform-local bare aliases (T0442, the T0435 Stat=DarwinStat
+/// precedent): the concrete WindowsStopwatch / WindowsPerfCounter /
+/// WindowsDeadlineTimer are the declarations; the bare cross-platform
+/// names resolve HERE on this platform, so portable code can mount
+/// sys.<platform>.time.{{Stopwatch}} without naming the platform in
+/// the type.
+public type Stopwatch = WindowsStopwatch;
+public type PerfCounter = WindowsPerfCounter;
+public type DeadlineTimer = WindowsDeadlineTimer;

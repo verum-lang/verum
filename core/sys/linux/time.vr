@@ -496,3 +496,13 @@ implement LinuxStopwatch {
         LinuxDuration(current)
     }
 }
+
+/// Platform-local bare aliases (T0442, the T0435 Stat=DarwinStat
+/// precedent): the concrete LinuxStopwatch / LinuxPerfCounter /
+/// LinuxDeadlineTimer are the declarations; the bare cross-platform
+/// names resolve HERE on this platform, so portable code can mount
+/// sys.<platform>.time.{{Stopwatch}} without naming the platform in
+/// the type.
+public type Stopwatch = LinuxStopwatch;
+public type PerfCounter = LinuxPerfCounter;
+public type DeadlineTimer = LinuxDeadlineTimer;
