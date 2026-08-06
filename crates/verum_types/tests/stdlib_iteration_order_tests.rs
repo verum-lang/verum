@@ -22,18 +22,21 @@ fn variant_type_with_ok_err(name: &str) -> TypeDescriptor {
     TypeDescriptor {
         name: name.into(),
         module_path: "test.module".into(),
+        origin_module_path: Maybe::None,
         generic_params: List::from_iter([
             GenericParam {
                 name: "T".into(),
                 bounds: List::new(),
                 default: Maybe::None,
             type_bounds: List::new(),
+            pid: Maybe::None,
             },
             GenericParam {
                 name: "E".into(),
                 bounds: List::new(),
                 default: Maybe::None,
             type_bounds: List::new(),
+            pid: Maybe::None,
             },
         ]),
         kind: TypeDescriptorKind::Variant {

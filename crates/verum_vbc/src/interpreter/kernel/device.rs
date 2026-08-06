@@ -355,6 +355,11 @@ fn detect_cpu_vendor() -> String {
  {
  // Use CPUID to get vendor string
  use std::arch::x86_64::__cpuid;
+ // `__cpuid` became a SAFE fn on newer nightlies (x86_64 always has
+ // cpuid), so the block reads as unused there — while older pinned
+ // toolchains still require it (E0133 without). The allow straddles
+ // both until the workspace toolchain floor moves past the change.
+ #[allow(unused_unsafe)]
  unsafe {
  let result = __cpuid(0);
  let mut vendor = [0u8; 12];

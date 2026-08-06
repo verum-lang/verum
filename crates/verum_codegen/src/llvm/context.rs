@@ -2326,19 +2326,27 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                 let wide: verum_llvm::values::IntValue<'ctx> = match value {
                     BasicValueEnum::IntValue(v) => {
                         let bw = v.get_type().get_bit_width();
-                        if bw == 1 {
+                        if bw < 128 {
                             // i1 compare/bool results are 0/1 by
                             // language semantics — SEXT would store
                             // true as -1 (measured: `big > 0` printed
                             // -1, and assert() failed '-1 != 1' when
                             // the dst reused a wide-marked register).
-                            self.builder
-                                .build_int_z_extend(v, i128_ty, &format!("r{}_w_bzext", reg))
-                                .expect("zext to i128 should not fail")
-                        } else if bw < 128 {
-                            self.builder
-                                .build_int_s_extend(v, i128_ty, &format!("r{}_w_sext", reg))
-                                .expect("sext to i128 should not fail")
+                            // Wider ints keep the signed default.
+                            if bw == 1 {
+                                self.builder.build_int_z_extend(
+                                    v,
+                                    i128_ty,
+                                    &format!("r{}_w_bzext", reg),
+                                )
+                            } else {
+                                self.builder.build_int_s_extend(
+                                    v,
+                                    i128_ty,
+                                    &format!("r{}_w_sext", reg),
+                                )
+                            }
+                            .expect("extend to i128 should not fail")
                         } else {
                             v
                         }

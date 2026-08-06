@@ -176,13 +176,26 @@ jobs:
 
       - name: Install Isabelle 2025-2
         if: steps.cache-isabelle.outputs.cache-hit != 'true'
+        id: install-isabelle
+        # The TUM mirror flakes (measured: 133s connect timeout hard-failed
+        # the whole audit run). Retry hard, then fall back to the SourceForge
+        # mirror; if BOTH are down, mark the Isabelle leg skipped — Lean and
+        # Coq still replay and gate. A red caused by a mirror outage teaches
+        # nothing; the skip is LOUD (step outcome + replay summary).
+        continue-on-error: false
         run: |
-          curl -fsSL https://isabelle.in.tum.de/dist/Isabelle2025-2_linux.tar.gz \
-            | sudo tar xz -C /opt
-          # Pre-build HOL heap (the cache-miss expensive part).
-          /opt/Isabelle2025-2/bin/isabelle build -b HOL
+          fetch() { curl -fSL --retry 5 --retry-all-errors --connect-timeout 30 "$1"; }
+          if fetch https://isabelle.in.tum.de/dist/Isabelle2025-2_linux.tar.gz | sudo tar xz -C /opt \
+            || fetch https://downloads.sourceforge.net/project/isabelle/Isabelle2025-2_linux.tar.gz | sudo tar xz -C /opt; then
+            /opt/Isabelle2025-2/bin/isabelle build -b HOL
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Isabelle mirrors unreachable — Isabelle replay SKIPPED this run (Lean/Coq still gate)"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Add Isabelle to PATH
+        if: steps.cache-isabelle.outputs.cache-hit == 'true' || steps.install-isabelle.outputs.available == 'true'
         run: echo "/opt/Isabelle2025-2/bin" >> $GITHUB_PATH
 
       - name: Cache cargo + Lake
