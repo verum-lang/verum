@@ -15078,6 +15078,24 @@ impl VbcCodegen {
                 contexts: ctx_refs,
             };
         }
+        // Tuple: recurse elements with the SAME map. `type Item =
+        // (Int, I.Item)` (EnumerateIter) and `(A.Item, B.Item)`
+        // (ZipIter) previously fell through to the map-UNAWARE
+        // `ast_type_to_type_ref` fallback, whose tuple arm cannot
+        // resolve param-scoped projections — the bake carried
+        // `Item = "(Int, Unit)"` / `"(Unit, Unit)"` (archive-proven)
+        // and every `for (i, a) in xs.iter().enumerate()` binder
+        // typed `a: Unit` (base/env `expected Unit, found Text`).
+        if let TypeKind::Tuple(elements) = &ty.kind {
+            if elements.is_empty() {
+                return TypeRef::Concrete(TypeId::UNIT);
+            }
+            let elem_refs: Vec<TypeRef> = elements
+                .iter()
+                .map(|e| self.resolve_field_type_ref(e, generic_param_map))
+                .collect();
+            return TypeRef::Tuple(elem_refs);
+        }
         // #131 Layer E — associated-type projection.  In Verum the
         // parser produces `TypeKind::Qualified { self_ty, trait_ref,
         // assoc_name }` for both `Self.Item` and `<T as Trait>::Foo`

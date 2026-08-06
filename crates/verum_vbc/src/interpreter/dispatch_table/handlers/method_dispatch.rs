@@ -2389,22 +2389,6 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
-    // Check if receiver is a builtin collection (Map, Set, List). If so, skip user-defined
-    // method lookup to ensure builtin methods are used. This prevents issues where user-defined
-    // methods from core/collections/map.vr try to call private methods on builtin objects.
-    // dispatch_receiver already has CBGR refs dereffed.
-    let is_builtin_collection = if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
-        let ptr = dispatch_receiver.as_ptr::<u8>();
-        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-        header.type_id == TypeId::MAP
-            || header.type_id == TypeId::SET
-            || header.type_id == TypeId::LIST
-            || header.type_id == TypeId::DEQUE
-            || header.type_id == TypeId::CHANNEL
-    } else {
-        false
-    };
-
     // Fallback: try to find a user-defined impl method by searching for "Type.method_name"
     // in the module's function table. This handles methods defined in `implement Type { ... }` blocks.
     //
@@ -3841,10 +3825,7 @@ pub(in super::super) fn handle_call_method(
 
     #[cfg(debug_assertions)]
     if method_name.contains("ensure_capacity") {
-        eprintln!(
-            "DEBUG: Looking for method '{}', is_builtin_collection={}",
-            method_name, is_builtin_collection
-        );
+        eprintln!("DEBUG: Looking for method '{}'", method_name);
         eprintln!("DEBUG: All Map-related functions in module:");
         for func in &state.module.functions {
             let func_name = state.module.strings.get(func.name).unwrap_or("");
