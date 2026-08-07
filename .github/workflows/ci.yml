@@ -549,4 +549,15 @@ jobs:
       # only links the platform's permitted system boundary
       # (libSystem.B.dylib on macOS; ld-linux on Linux; nothing else).
       - name: Check AOT binary doesn't link libc
-        run: ./scripts/ci/check_no_libc_link.sh target/debug/verum
+        # tee + failure artifact: this step failed on ubuntu with its
+        # log blob vanished on every run since the tests-gate went
+        # live; the artifact is the surviving diagnostic channel.
+        run: ./scripts/ci/check_no_libc_link.sh target/debug/verum 2>&1 | tee no-libc-smoke.log; exit ${PIPESTATUS[0]}
+
+      - name: Upload no-libc smoke log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: no-libc-smoke-log-${{ matrix.os }}
+          path: no-libc-smoke.log
+          retention-days: 3
