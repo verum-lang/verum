@@ -419,7 +419,20 @@ fn compile_and_run(
     let func_id = vbc_module
         .functions
         .iter()
-        .find(|f| vbc_module.get_string(f.name) == Some(func_name))
+        .find(|f| {
+            // QUALIFIED-NAME MATCH (vbc/CLAUDE.md convention): function
+            // names in the module are MODULE-QUALIFIED
+            // (`repl_cell.__repl_script_1`), so an exact match on the
+            // bare wrapper name silently misses and every expression
+            // cell died with «REPL wrapper not found».
+            match vbc_module.get_string(f.name) {
+                Some(n) => {
+                    n == func_name
+                        || n.ends_with(&format!(".{}", func_name))
+                }
+                None => false,
+            }
+        })
         .map(|f| f.id)
         .ok_or_else(|| format!("internal: REPL wrapper {} not found", func_name))?;
 

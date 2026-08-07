@@ -51,6 +51,13 @@ jobs:
   unit:
     name: Unit tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      # Same rationale as the Integration job: full debuginfo is the
+      # bulk of build memory/disk, and no debugger attaches on CI.
+      # The arm runner (fewest resources in the matrix) died three
+      # runs straight inside «Build workspace» with no surviving logs
+      # — the OOM/disk profile this trims. Backtraces keep file:line.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     strategy:
       fail-fast: false
       matrix:

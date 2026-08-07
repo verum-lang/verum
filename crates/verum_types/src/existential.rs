@@ -488,9 +488,17 @@ impl<'a> ExistentialOps<'a> {
                     self.skolem_tracker
                         .create_skolem(skolem_name.into(), bounds.clone(), span);
 
-                // Create a type variable for the skolem
-                // We use a convention where the TypeVar id matches the SkolemId
-                let skolem_var = TypeVar::with_id(skolem.id.0);
+                // Create a type variable for the skolem — from THE ONE
+                // TypeVar counter. The old «convention where the TypeVar
+                // id matches the SkolemId» minted ids from SkolemId's
+                // INDEPENDENT counter (both start at 0): skolem #N
+                // aliased whatever the real counter's var #N meant, so a
+                // single unpack could poison an unrelated live var —
+                // volume-dependent, surfacing as retroactive E404 walls
+                // (maybe/unit prefix-117 bisect). No consumer ever
+                // reverse-mapped var.id → SkolemId (census: zero uses),
+                // so the convention was write-only decoration.
+                let skolem_var = TypeVar::fresh();
 
                 // Substitute the existential variable with the skolem
                 let mut subst = crate::ty::Substitution::new();

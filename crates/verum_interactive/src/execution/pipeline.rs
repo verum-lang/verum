@@ -769,14 +769,26 @@ impl ExecutionPipeline {
 
     /// Look up a function by name in a VBC module.
     fn find_function_by_name(&self, module: &VbcModule, name: &str) -> Option<FunctionId> {
+        // QUALIFIED-NAME MATCH (vbc/CLAUDE.md convention): compiled
+        // function names are MODULE-QUALIFIED (`cell.main`), so the
+        // exact match silently missed and every expression cell fell
+        // back to FunctionId(0) — a stdlib stub — executing to `()`
+        // (the 5 pipeline-test failures: «() vs 42», bindings never
+        // captured). Prefer the exact spelling, then the `.name`
+        // suffix.
+        let mut suffixed: Option<FunctionId> = None;
+        let dot_name = format!(".{}", name);
         for func in &module.functions {
-            if let Some(func_name) = module.get_string(func.name)
-                && func_name == name
-            {
-                return Some(func.id);
+            if let Some(func_name) = module.get_string(func.name) {
+                if func_name == name {
+                    return Some(func.id);
+                }
+                if suffixed.is_none() && func_name.ends_with(dot_name.as_str()) {
+                    suffixed = Some(func.id);
+                }
             }
         }
-        None
+        suffixed
     }
 
     /// Gets cached cell if available.
