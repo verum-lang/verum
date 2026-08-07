@@ -1568,9 +1568,29 @@ impl TypeChecker {
         // converts to fresh TypeVars.  No additional safety guard
         // needed at this site.
         let to_type = |s: &Text| -> Type { parse_descriptor_type_string(s.as_str()) };
+        // RECEIVER STRIP (T0701 result leg): descriptor params carry
+        // `self` as params[0]; every signature consumer counts USER
+        // arguments only (the inherent scheme builder at
+        // modules.rs::metadata_fn_scheme strips it the same way).
+        // Registering it verbatim made `a.cmp(&b)` fail «method `cmp`
+        // expects 2 argument(s), but 1 were provided» — proto-search's
+        // winner carried fn(self, other).
+        let to_params = |m: &crate::core_metadata::MethodSignature| -> List<Type> {
+            m.params
+                .iter()
+                .enumerate()
+                .filter_map(|(i, p)| {
+                    if i == 0 && p.name.as_str() == "self" {
+                        None
+                    } else {
+                        Some(to_type(&p.ty))
+                    }
+                })
+                .collect()
+        };
         let mut methods = verum_common::Map::new();
         for m in protocol_desc.required_methods.iter() {
-            let params: List<Type> = m.params.iter().map(|p| to_type(&p.ty)).collect();
+            let params: List<Type> = to_params(m);
             let return_type = to_type(&m.return_type);
             let method_type = Type::function(params, return_type);
             let protocol_method =
@@ -1578,7 +1598,7 @@ impl TypeChecker {
             methods.insert(m.name.clone(), protocol_method);
         }
         for m in protocol_desc.default_methods.iter() {
-            let params: List<Type> = m.params.iter().map(|p| to_type(&p.ty)).collect();
+            let params: List<Type> = to_params(m);
             let return_type = to_type(&m.return_type);
             let method_type = Type::function(params, return_type);
             let protocol_method =

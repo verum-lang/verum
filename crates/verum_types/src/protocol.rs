@@ -2083,11 +2083,18 @@ impl ProtocolChecker {
                     "cmp".into(),
                     ProtocolMethod {
                         name: "cmp".into(),
+                        // Params exclude the RECEIVER (T0701 result leg):
+                        // every arg-count consumer compares against USER
+                        // args, and both metadata intakes strip `self`
+                        // (metadata_fn_scheme; register_stdlib_protocol_
+                        // for_name). The old self-inclusive fn(T, T)
+                        // made `a.cmp(&b)` fail «expects 2 argument(s),
+                        // but 1 were provided» whenever proto-search's
+                        // winner was this builtin. eq/ne keep their
+                        // legacy spelling — equality is intercepted
+                        // upstream and never reaches this signature.
                         ty: Type::function(
-                            List::from(vec![
-                                Type::Var(crate::ty::TypeVar::with_id(0)),
-                                Type::Var(crate::ty::TypeVar::with_id(0)),
-                            ]),
+                            List::from(vec![Type::Var(crate::ty::TypeVar::with_id(0))]),
                             ordering_type.clone(),
                         ),
                         has_default: false,
