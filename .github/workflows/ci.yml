@@ -97,12 +97,18 @@ jobs:
       - name: Build workspace (rustc -D warnings, blocking)
         env:
           RUSTFLAGS: "-D warnings"
-          # The arm runner died four runs straight inside this step
-          # with no surviving logs — the memory profile of a full-
-          # parallel workspace build + the in-build stdlib bake on the
-          # smallest runner in the matrix. Halving build parallelism
-          # halves peak RSS; x86/macos keep full width.
-          CARGO_BUILD_JOBS: ${{ matrix.os == 'ubuntu-24.04-arm' && '2' || '4' }}
+          # The arm runner keeps dying inside this step. MEASURED, not
+          # guessed: with CARGO_BUILD_JOBS=2 the step ran 71 minutes and
+          # was still killed — so the constraint is not peak RSS from
+          # parallelism, and halving the width only made the job slower
+          # (my earlier reading of this failure was wrong and is
+          # corrected here rather than left in place). What actually
+          # bounds this runner is total work: it builds the whole
+          # workspace AND bakes the stdlib inside the build script.
+          # Keep full width; cut the WORK instead — codegen-units and no
+          # debug info are worth more here than fewer jobs.
+          CARGO_PROFILE_DEV_CODEGEN_UNITS: "256"
+          CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: "true"
         run: cargo build --workspace --locked
 
       - name: Run unit tests (library + binaries)

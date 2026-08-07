@@ -1311,13 +1311,34 @@ impl FinalLinker {
 
         let output_path = self.get_temp_path("merged.bc");
 
-        let mut cmd = Self::llvm_tool("llvm-link");
+        // NOTHING TO MERGE IS NOT AN ERROR — but invoking the linker with
+        // zero inputs IS. Every object on this path can legitimately be
+        // bitcode-free (the no-libc smoke builds a single module through
+        // the in-process LLVM path), and the old code still ran
+        // `llvm-link -o out.bc`, which exits non-zero with «Must specify
+        // at least 1 positional argument» and took the whole build down
+        // with a message about llvm-link that had nothing to do with the
+        // user's program. Named it on the linux arch-invariants job,
+        // whose runner logs were empty — the failure artifact added this
+        // session was what carried the message out.
+        let inputs: Vec<&std::path::Path> = object_files
+            .iter()
+            .filter(|obj| obj.has_bitcode)
+            .map(|obj| obj.path.as_path())
+            .collect();
+        if inputs.is_empty() {
+            debug!("No bitcode inputs — skipping llvm-link, LTO has nothing to merge");
+            // An empty merge yields an empty artefact, not a missing one:
+            // downstream steps read `Bitcode.path`, and a nonexistent file
+            // would trade one confusing error for another.
+            std::fs::write(&output_path, [])
+                .with_context(|| format!("creating empty merged bitcode at {}", output_path.display()))?;
+            return Bitcode::from_file(output_path);
+        }
 
-        // Add all bitcode files
-        for obj in object_files {
-            if obj.has_bitcode {
-                cmd.arg(&obj.path);
-            }
+        let mut cmd = Self::llvm_tool("llvm-link");
+        for path in inputs {
+            cmd.arg(path);
         }
 
         cmd.arg("-o").arg(&output_path);
