@@ -58,7 +58,7 @@
 module core.net.http_range;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 
 // =============================================================================
 // Types

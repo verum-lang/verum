@@ -63,7 +63,7 @@
 module core.collections.union_find;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.collections.map.{Map};
 
 // =============================================================================

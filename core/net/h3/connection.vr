@@ -43,7 +43,7 @@
 module core.net.h3.connection;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.h3.frame.{
     H3Frame, H3FrameError, UniStreamType,
     encode_frame, decode_frame,

@@ -64,7 +64,7 @@
 module core.security.hpke;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.security.ecc.x25519.{
     X25519, X25519SecretKey, X25519PublicKey, X25519Error,
 };

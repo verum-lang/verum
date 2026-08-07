@@ -47,7 +47,7 @@
 module core.net.quic.connection_sm.handshake_driver;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.quic.frame.{QuicFrame};
 mount core.net.quic.recovery.{PnSpaceKind};
 mount core.net.quic.connection_sm.dispatch.{CryptoChunk};

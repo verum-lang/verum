@@ -62,7 +62,7 @@
 module core.time.duration_parse;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.time.duration.{Duration, NANOS_PER_MICRO, NANOS_PER_MILLI, NANOS_PER_SEC, NANOS_PER_MIN, NANOS_PER_HOUR};
 
 /// Nanoseconds per day.

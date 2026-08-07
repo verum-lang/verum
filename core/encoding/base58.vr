@@ -65,7 +65,7 @@
 module core.encoding.base58;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.hash.crypto.sha256.{Sha256};
 
 // =============================================================================

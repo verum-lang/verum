@@ -50,7 +50,7 @@
 module core.security.token;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.encoding.base64.{encode_url};
 mount core.encoding.hex.{encode as hex_encode};
 mount core.random.secure.{fill_secure_array};

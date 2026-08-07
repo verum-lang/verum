@@ -72,7 +72,7 @@
 module core.encoding.value;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.collections.map.Map;
 
 mount core.encoding.json.{JsonValue,

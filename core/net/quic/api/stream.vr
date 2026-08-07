@@ -26,7 +26,7 @@
 module core.net.quic.api.stream;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.time.duration.{Duration};
 mount core.net.quic.stream_sm.{SendStream, RecvStream, SendError, RecvError};
 

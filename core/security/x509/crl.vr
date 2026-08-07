@@ -50,7 +50,7 @@
 module core.security.x509.crl;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.encoding.der.{DerReader, DerError, Time};
 
 // =============================================================================

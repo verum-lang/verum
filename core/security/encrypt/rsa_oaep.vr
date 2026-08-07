@@ -71,7 +71,7 @@
 module core.security.encrypt.rsa_oaep;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.math.big_uint.{BigUint, modexp};
 mount core.hash.legacy.sha1.{Sha1, SHA1_DIGEST_SIZE};
 mount core.security.sig.rsa.RsaPublicKey;

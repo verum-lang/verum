@@ -63,7 +63,7 @@
 module core.encoding.der;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 
 // =============================================================================
 // Tag classes + numbers — X.690 §8.1.2

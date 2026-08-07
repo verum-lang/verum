@@ -37,7 +37,7 @@
 module core.net.tls13.record.fragment;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.tls13.record.aead.{AeadState, Tls13RecordError};
 mount core.net.tls13.record.content_type.{ContentType};
 mount core.net.tls13.record.plaintext.{MAX_PLAINTEXT_SIZE};

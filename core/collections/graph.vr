@@ -1,0 +1,35 @@
+// =============================================================================
+// core/collections/graph.vr — graph VOCABULARY
+// =============================================================================
+// Layer: 2 (depends on core primitives only)
+// =============================================================================
+//
+
+// The data types a graph is made of. Nothing here reasons about graphs
+// — that is `core.math.graph`, which builds on these and adds category
+// theory, simplicial sets, topology and spectral methods.
+//
+
+// They live here because BOTH sides need them and neither should
+// depend on the other: `core.collections.adjacency_list` is a graph
+// REPRESENTATION and named `Edge` by mounting `core.math.graph`, which
+// pulled a data structure into a dependency on the mathematics —
+// the ring law measured it as `collections -> math -> collections`.
+// Definitions shared by both belong below both.
+//
+
+// =============================================================================
+
+module core.collections.graph;
+
+mount core.*;
+
+/// A directed edge from `src` to `tgt` with optional label `L`.
+public type Edge<V, L> is {
+    src:   V,
+    tgt:   V,
+    label: L,
+};
+
+/// An unlabelled directed edge — `()` is the trivial label.
+public type UEdge<V> is Edge<V, ()>;

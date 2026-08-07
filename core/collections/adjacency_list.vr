@@ -37,7 +37,7 @@ module core.collections.adjacency_list;
 
 mount core.collections.map.{Map};
 mount core.collections.list.{List};
-mount core.math.graph.{Edge};
+mount core.collections.graph.{Edge};
 
 // =============================================================================
 // §1. Type

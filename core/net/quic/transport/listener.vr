@@ -40,7 +40,7 @@
 module core.net.quic.transport.listener;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.async.nursery.{Nursery};

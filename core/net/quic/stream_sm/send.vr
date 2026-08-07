@@ -55,7 +55,7 @@
 module core.net.quic.stream_sm.send;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 
 public type SendState is Ready | Send | DataSent | DataRecvd | ResetSent | ResetRecvd;
 

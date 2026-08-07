@@ -63,7 +63,7 @@
 module core.net.h3.qpack.huffman;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 
 // =============================================================================
 // Error type

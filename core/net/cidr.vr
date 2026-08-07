@@ -54,7 +54,7 @@
 module core.net.cidr;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr, AddrParseError};
 mount core.net.ipv6_canonical.{format_ipv6};
 

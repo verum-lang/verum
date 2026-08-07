@@ -51,7 +51,7 @@
 module core.net.content_negotiation;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 
 // =============================================================================
 // Typed preferences

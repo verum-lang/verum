@@ -71,7 +71,7 @@
 module core.math.big_uint;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 
 // =============================================================================
 // BigUint

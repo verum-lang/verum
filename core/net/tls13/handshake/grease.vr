@@ -37,7 +37,7 @@
 module core.net.tls13.handshake.grease;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.tls13.handshake.extension.{Extension};
 mount core.net.tls13.cipher_suite.{CipherSuite};
 mount core.net.tls13.named_group.{NamedGroup};

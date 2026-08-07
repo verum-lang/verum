@@ -53,7 +53,7 @@
 module core.net.ipv6_canonical;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.addr.{Ipv6Addr, AddrParseError};
 
 public type Ipv6CanonicalError is

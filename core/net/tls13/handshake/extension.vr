@@ -50,7 +50,7 @@
 module core.net.tls13.handshake.extension;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.tls13.handshake.codec.{
     Tls13HandshakeReader, CodecError,
     put_u8, put_u16, put_u24, put_u32, put_bytes,

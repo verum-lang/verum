@@ -56,7 +56,7 @@
 module core.net.quic.stream_sm.recv;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 
 public type RecvState is Recv | SizeKnown | DataRecvd | DataRead | ResetRecvd | ResetRead;
 

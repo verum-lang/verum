@@ -45,7 +45,7 @@
 module core.net.tls13.keyschedule.schedule;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.security.kdf.hkdf.{
     hkdf_extract_sha256, hkdf_extract_sha384, HkdfError,
 };

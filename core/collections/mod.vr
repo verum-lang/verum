@@ -27,6 +27,9 @@ module core.collections;
 // Submodules
 // =============================================================================
 
+// Graph vocabulary (Edge, UEdge) — the theory is `core.math.graph`.
+public module graph;
+
 public module slice;
 public module list;
 public module map;

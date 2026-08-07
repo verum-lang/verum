@@ -47,7 +47,7 @@
 module core.security.x509.ext.name_constraints;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.encoding.der.{DerReader, DerError, DerErrorKind, Tag, TagClass};
 mount core.security.x509.ext.subject_alt_name.{GeneralName, parse_general_name};
 

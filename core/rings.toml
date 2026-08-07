@@ -68,6 +68,21 @@ modules = [
 
 [ring.1]
 name = "platform"
+# ONE cohesive layer, for the same reason ring 0 is: its members are
+# mutually dependent BY NATURE, and severing an edge would mean
+# duplicating one side rather than improving anything.
+#
+# Measured pairs: `sync.atomic` mounts `sys.{linux,darwin,windows}.thread`
+# for futex wait/wake — an atomic that blocks IS a syscall — while
+# `sys/windows/winsock2.vr` needs an `AtomicInt` to guard WSA
+# initialisation. Likewise `intrinsics.lowlevel` reads `sys.linux.auxv`
+# to detect CPU features, and `sys` is written in those intrinsics.
+#
+# Cohesion is declared, not assumed: the test is whether cutting the
+# edge would be an improvement. Here it would not — a futex-backed
+# atomic cannot avoid the syscall layer, and the syscall layer cannot
+# initialise itself without an atomic.
+cohesive = true
 # The syscall / hardware boundary. Ring 1 and not ring 2: the CBGR
 # allocator (`mem`) calls `mmap`/`mprotect`/`get_tid_fast` directly
 # (core/mem/segment.vr:68, core/mem/heap.vr:80) — memory management IS

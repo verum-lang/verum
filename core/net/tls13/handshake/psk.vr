@@ -41,7 +41,7 @@
 module core.net.tls13.handshake.psk;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.mac.hmac.{HmacSha256, HmacSha384};
 mount core.security.kdf.hkdf.{HkdfError};
 // `mount X as Y` rename-aliases don't surface to AOT codegen

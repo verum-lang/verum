@@ -56,7 +56,7 @@
 module core.security.jwt;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.encoding.base64.{encode_url, decode_url};
 mount core.encoding.json.{JsonValue, parse, stringify};
 mount core.mac.hmac.{hmac_sha256, hmac_sha384, hmac_sha512};

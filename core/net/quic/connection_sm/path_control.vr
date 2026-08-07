@@ -39,7 +39,7 @@
 module core.net.quic.connection_sm.path_control;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.net.quic.frame.{QuicFrame};
 mount core.net.quic.path.{QuicPath, PathManager, PathError, TimerOutcome};

@@ -57,7 +57,7 @@
 module core.security.otp;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.mac.hmac.{hmac_sha1, hmac_sha256, hmac_sha512};
 mount core.random.secure.{fill_secure_array};
 mount core.subtle.constant_time.{constant_time_eq};

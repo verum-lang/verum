@@ -41,7 +41,7 @@
 module core.net.quic.recovery.loss_detection;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.net.quic.frame.{Frame, AckRange};

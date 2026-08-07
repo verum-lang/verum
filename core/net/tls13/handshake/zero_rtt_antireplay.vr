@@ -73,7 +73,7 @@
 module core.net.tls13.handshake.zero_rtt_antireplay;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.mac.hmac.{hmac_sha256};

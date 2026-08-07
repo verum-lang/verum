@@ -61,7 +61,7 @@
 module core.collections.toposort;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.collections.map.{Map};
 
 public type TopoError is

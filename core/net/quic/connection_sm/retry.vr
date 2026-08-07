@@ -44,7 +44,7 @@
 module core.net.quic.connection_sm.retry;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.quic.connection_id.{ConnectionId};
 mount core.net.quic.crypto.retry.{
     compute_retry_integrity_tag, verify_retry_integrity_tag,

@@ -39,7 +39,7 @@
 module core.net.quic.transport.abstraction;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.addr.{SocketAddr};
 
 // =============================================================================

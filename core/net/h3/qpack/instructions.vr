@@ -38,7 +38,7 @@
 module core.net.h3.qpack.instructions;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.h3.qpack.huffman as huff;
 mount core.net.h3.qpack.huffman.HuffError;
 mount core.net.h3.qpack.integer.IntError;

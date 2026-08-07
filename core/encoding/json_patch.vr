@@ -61,7 +61,7 @@
 module core.encoding.json_patch;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.collections.map.{Map};
 mount core.encoding.json.{JsonValue, JsonError, parse_value};
 mount core.encoding.json_pointer.{JsonPointer, parse as pointer_parse};

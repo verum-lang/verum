@@ -47,7 +47,7 @@
 module core.net.h3.qpack.session;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.h3.qpack.dynamic_table.{DynamicTable, DynEntry, DynamicTableError};
 mount core.net.h3.qpack.instructions.{
     EncoderInstruction, DecoderInstruction, InstrError,

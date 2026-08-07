@@ -33,7 +33,7 @@
 module core.security.x509.ext.subject_alt_name;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.encoding.der.{DerReader, DerError, DerErrorKind, Tag, TagClass};
 
 public type GeneralName is

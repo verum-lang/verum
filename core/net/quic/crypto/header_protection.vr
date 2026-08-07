@@ -39,7 +39,7 @@
 module core.net.quic.crypto.header_protection;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.security.cipher.aes.{
     AesKey128, AesKey256, RoundKeys128, RoundKeys256,
     aes128_encrypt_block, aes256_encrypt_block,

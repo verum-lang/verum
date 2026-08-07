@@ -35,7 +35,7 @@
 module core.net.quic.connection_sm.aead;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.security.aead.aes_gcm.{
     aes128_gcm_seal, aes128_gcm_open,
     aes256_gcm_seal, aes256_gcm_open,

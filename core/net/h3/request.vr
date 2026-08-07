@@ -36,7 +36,7 @@
 module core.net.h3.request;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.h3.qpack.decoder.{QpackHeaderField};
 
 public type H3Method is Get | Post | Put | Delete | Head | Options | Patch | Connect | Other(Text);

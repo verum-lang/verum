@@ -31,7 +31,7 @@
 module core.net.tls13.handshake.codec;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 
 // =============================================================================
 // CodecError — structural errors raised by parsers

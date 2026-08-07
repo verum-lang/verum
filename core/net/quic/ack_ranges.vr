@@ -36,7 +36,7 @@
 module core.net.quic.ack_ranges;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.quic.frame.{AckRange};
 
 /// Refined nominal wrapper over the raw range list.

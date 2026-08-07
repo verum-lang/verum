@@ -41,7 +41,7 @@
 module core.net.h3.server;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.time.duration.{Duration};
 mount core.net.addr.{SocketAddr};
 mount core.net.h3.{

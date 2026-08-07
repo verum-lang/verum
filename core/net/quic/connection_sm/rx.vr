@@ -40,7 +40,7 @@
 module core.net.quic.connection_sm.rx;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.encoding.varint.{quic_decode};
 mount core.net.quic.connection_id.{ConnectionId, MAX_CID_LEN};
 mount core.net.quic.packet.{LongPacketType, decode_packet_number};

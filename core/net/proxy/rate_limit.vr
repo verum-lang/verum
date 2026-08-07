@@ -57,7 +57,7 @@
 module core.net.proxy.rate_limit;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.collections.map.{Map};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};

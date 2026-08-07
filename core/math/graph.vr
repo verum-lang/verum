@@ -55,15 +55,11 @@ mount core.base.protocols.{Eq, Ord};
 // §1. Directed edges and walks
 // =============================================================================
 
-/// A directed edge from `src` to `tgt` with optional label `L`.
-public type Edge<V, L> is {
-    src:   V,
-    tgt:   V,
-    label: L,
-};
-
-/// An unlabelled directed edge — `()` is the trivial label.
-public type UEdge<V> is Edge<V, ()>;
+// `Edge` / `UEdge` are DATA, not theory, and a graph representation in
+// `core.collections` needs them as much as this module does. They live
+// in `core.collections.graph` and are re-exported here so that
+// `core.math.graph.Edge` keeps naming the same type.
+public mount core.collections.graph.{Edge, UEdge};
 
 /// A walk from `start` to `end` is a sequence of edges where
 /// consecutive edges agree on the intermediate vertex. The empty

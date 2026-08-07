@@ -36,7 +36,7 @@
 module core.net.quic.crypto.retry;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.security.aead.aes_gcm.{Aes128Gcm, GcmError};
 
 /// RFC 9001 §5.8 — key for QUIC v1 retry integrity tag.

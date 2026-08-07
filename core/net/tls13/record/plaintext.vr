@@ -19,7 +19,7 @@
 module core.net.tls13.record.plaintext;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.tls13.record.content_type.{ContentType};
 
 /// RFC 8446 §5.1 — maximum plaintext fragment length (2^14 bytes).

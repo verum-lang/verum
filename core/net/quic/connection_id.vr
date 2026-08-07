@@ -34,7 +34,7 @@
 module core.net.quic.connection_id;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 
 public const MAX_CID_LEN: Int = 20;
 

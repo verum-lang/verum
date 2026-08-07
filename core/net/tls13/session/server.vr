@@ -30,7 +30,7 @@
 module core.net.tls13.session.server;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.tls13.error.{TlsError};
 mount core.net.tls13.cipher_suite.{AeadKind};
 mount core.net.tls13.record.{AeadState, ContentType,

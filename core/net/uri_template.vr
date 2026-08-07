@@ -55,7 +55,7 @@
 module core.net.uri_template;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.collections.map.{Map};
 
 // =============================================================================

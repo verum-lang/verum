@@ -84,7 +84,7 @@
 module core.encoding.bson;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 
 // =============================================================================
 // Type byte constants

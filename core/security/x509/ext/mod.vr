@@ -58,7 +58,7 @@
 module core.security.x509.ext;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.encoding.der.{DerReader, DerError, DerErrorKind};
 mount core.security.x509.oid.{Oid};
 mount core.security.x509.oid as pkix_oid;

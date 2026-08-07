@@ -45,7 +45,7 @@
 module core.net.quic.connection_sm.dispatch;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.net.quic.frame.{QuicFrame, AckRange, EcnCounts};
 mount core.net.quic.recovery.{LossDetection, PnSpaceKind, CongestionCtrl};

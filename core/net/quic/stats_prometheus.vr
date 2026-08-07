@@ -44,7 +44,7 @@
 module core.net.quic.stats_prometheus;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.quic.stats.{QuicStats, EndpointStats};
 
 // =============================================================================

@@ -32,7 +32,7 @@
 module core.net.tls13.handshake.dhe_pool;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.security.ecc.x25519.{X25519, X25519SecretKey, X25519PublicKey};
 mount core.security.ecc.p256.{P256, P256PrivateKey, P256PublicKey};
 mount core.net.tls13.named_group.{NamedGroup};
