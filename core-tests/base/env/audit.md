@@ -23,7 +23,7 @@
 | `var_opt` | `(&Text) -> Maybe<Text>` |
 | `set_var` | `(&Text, &Text)` |
 | `remove_var` | `(&Text)` |
-| `VarError` | sum `NotPresent \| NotUnicode(Text)` |
+| `VarError` | sum `NotPresent \| NotUnicode(List<Byte>)` |
 
 ### 1.3 Process control
 

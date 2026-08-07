@@ -105,7 +105,12 @@ fn regression_var_returns_err_not_present_for_missing_key() {
 @test
 fn regression_var_error_variants_disjoint() {
     let a = VarError.NotPresent;
-    let b = VarError.NotUnicode("invalid".to_text());
+    // Payload contract per core/base/env.vr: NotUnicode carries the RAW
+    // BYTES that failed decoding (List<Byte>), not a Text — the fixture
+    // previously passed Text and pinned the wrong contract (same idiom
+    // as unit_test's test_var_error_not_unicode).
+    let bad_bytes: List<Byte> = [0xFF, 0xFE, 0x00];
+    let b = VarError.NotUnicode(bad_bytes);
     // Both must be constructible — variant tag pin via match.
     match a {
         VarError.NotPresent => {},
