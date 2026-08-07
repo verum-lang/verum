@@ -34,7 +34,7 @@ use verum_llvm::values::{
 };
 
 use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
-use super::target_triple::{target_is_aarch64, target_is_darwin, target_is_linux};
+use super::target_triple::{target_is_aarch64, target_is_darwin, target_is_linux, target_is_windows};
 
 /// Default initial capacity for lists.
 ///
@@ -5654,6 +5654,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // (docs/architecture/no-libc-architecture.md, T0436).
         step!("emit_verum_time_now_ms", self.emit_verum_time_now_ms(module));
         step!("emit_verum_sleep_ms", self.emit_verum_sleep_ms(module));
+        step!(
+            "emit_verum_secure_random_u64",
+            self.emit_verum_secure_random_u64(module)
+        );
         step!("emit_verum_random_u64", self.emit_verum_random_u64(module));
         step!(
             "emit_verum_random_float",
@@ -6055,132 +6059,208 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// verum_random_u64() -> i64
     /// Xorshift64* PRNG with auto-seeding from monotonic time.
+    /// `verum_random_u64() -> i64` — the intrinsic behind
+    /// `@intrinsic("random_u64")`.
+    ///
+    /// Forwards to [`emit_verum_secure_random_u64`]. It is not a
+    /// generator: there is no state, no seed and no arithmetic here,
+    /// because every one of those was a way for this function to
+    /// return something predictable.
+    ///
+    /// It used to be a Xorshift64* seeded from
+    /// `verum_time_monotonic_nanos` (falling back to the constant
+    /// `0x12345678DEADBEEF`), which never touched an OS CSPRNG on any
+    /// platform — while the interpreter DID call `getentropy` /
+    /// `getrandom`. The same program was therefore differently random
+    /// depending on the tier it ran in, and the AOT tier — the one
+    /// that ships — was the insecure one. `core.random.secure`, which
+    /// draws through this intrinsic, documents itself as suitable for
+    /// keys, nonces and session tokens.
+    ///
+    /// Callers that want speed and reproducibility rather than
+    /// secrecy have `core.random.deterministic` (PCG / XorShift128+ /
+    /// SplitMix64, pure Verum, seeded once). Keeping a fast generator
+    /// here as well would only recreate the choice that this split
+    /// exists to make explicit — and it would be the default, which
+    /// is exactly backwards.
     fn emit_verum_random_u64(&self, module: &Module<'ctx>) -> Result<()> {
         if let Some(f) = module.get_function("verum_random_u64") {
             if f.count_basic_blocks() > 0 {
                 return Ok(());
             }
         }
+        self.emit_verum_secure_random_u64(module)?;
 
         let i64_type = self.context.i64_type();
-
-        // Global PRNG state
-        let global_name = "verum_rng_state";
-        let rng_state = if let Some(g) = module.get_global(global_name) {
-            g
-        } else {
-            let g = module.add_global(i64_type, None, global_name);
-            g.set_initializer(&i64_type.const_int(0, false));
-            g.set_linkage(verum_llvm::module::Linkage::Internal);
-            g
-        };
-
         let fn_type = i64_type.fn_type(&[], false);
         let func = super::error::get_or_declare_function(module, "verum_random_u64", fn_type);
         let entry = self.context.append_basic_block(func, "entry");
-        let seed_bb = self.context.append_basic_block(func, "seed");
-        let seed_check = self.context.append_basic_block(func, "seed_check");
-        let compute = self.context.append_basic_block(func, "compute");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
-
-        // Load current state
-        let state = builder
-            .build_load(i64_type, rng_state.as_pointer_value(), "state")
-            .or_llvm_err()?
-            .into_int_value();
-
-        // Check if needs seeding (state == 0)
-        let needs_seed = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                state,
-                i64_type.const_int(0, false),
-                "needs_seed",
-            )
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(needs_seed, seed_bb, compute)
-            .or_llvm_err()?;
-
-        // Seed from monotonic time
-        builder.position_at_end(seed_bb);
-        let ft = i64_type.fn_type(&[], false);
-        let time_fn = super::error::get_or_declare_function(module, "verum_time_monotonic_nanos", ft);
-        let seed_val = builder
-            .build_call(time_fn, &[], "seed")
+        let entropy_fn =
+            super::error::get_or_declare_function(module, "verum_secure_random_u64", fn_type);
+        let value = builder
+            .build_call(entropy_fn, &[], "draw")
             .or_llvm_err()?
             .basic_value_or("call returned void")?
             .into_int_value();
-        builder
-            .build_store(rng_state.as_pointer_value(), seed_val)
-            .or_llvm_err()?;
+        builder.build_return(Some(&value)).or_llvm_err()?;
+        Ok(())
+    }
 
-        // If seed is still 0, use fallback constant
-        let seed_is_zero = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                seed_val,
-                i64_type.const_int(0, false),
-                "seed_zero",
-            )
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(seed_is_zero, seed_check, compute)
-            .or_llvm_err()?;
+    /// `verum_secure_random_u64() -> i64` — eight bytes from the
+    /// platform CSPRNG, or the process dies.
+    ///
+    /// # The contract
+    ///
+    /// This function returns a value an adversary cannot predict, or
+    /// it does not return. There is deliberately no PRNG fallback and
+    /// no "best effort" path: a caller asks for secure randomness
+    /// because a key, nonce, salt or token depends on it, and a
+    /// guessable answer is worse than no answer — it fails silently,
+    /// looks correct in every test, and is discovered by an attacker
+    /// rather than by us.
+    ///
+    /// Per-platform entropy source (chosen from the module's TARGET
+    /// triple — a host `cfg!` here would miscompile every cross
+    /// build, which is how a Linux binary could end up with the
+    /// macOS path):
+    ///
+    ///  * Linux   — `getrandom(2)` by direct syscall, no libc, per
+    ///              the no-libc invariant. Retried on `EINTR`.
+    ///  * macOS   — `getentropy(3)` through libSystem, the boundary
+    ///              the architecture doc permits on Darwin.
+    ///  * Windows — `ProcessPrng`, the documented user-mode CSPRNG.
+    ///  * others  — no source is claimed, so the call aborts.
+    ///
+    /// Every source is checked. The previous interpreter code called
+    /// `getentropy` and discarded its result, which on failure left
+    /// the buffer as written — all zeros — and reported success.
+    fn emit_verum_secure_random_u64(&self, module: &Module<'ctx>) -> Result<()> {
+        if let Some(f) = module.get_function("verum_secure_random_u64") {
+            if f.count_basic_blocks() > 0 {
+                return Ok(());
+            }
+        }
 
-        builder.position_at_end(seed_check);
-        let fallback = i64_type.const_int(0x12345678DEADBEEF, false);
-        builder
-            .build_store(rng_state.as_pointer_value(), fallback)
-            .or_llvm_err()?;
-        builder.build_unconditional_branch(compute).or_llvm_err()?;
+        let i64_type = self.context.i64_type();
+        let i32_type = self.context.i32_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = i64_type.fn_type(&[], false);
+        let func =
+            super::error::get_or_declare_function(module, "verum_secure_random_u64", fn_type);
 
-        // Xorshift64*: x ^= x >> 12; x ^= x << 25; x ^= x >> 27; return x * C
-        builder.position_at_end(compute);
-        let x0 = builder
-            .build_load(i64_type, rng_state.as_pointer_value(), "x0")
+        let entry = self.context.append_basic_block(func, "entry");
+        let draw = self.context.append_basic_block(func, "draw");
+        let ok_bb = self.context.append_basic_block(func, "entropy_ok");
+        let fail_bb = self.context.append_basic_block(func, "entropy_unavailable");
+        let builder = self.context.create_builder();
+
+        builder.position_at_end(entry);
+        let buf = builder.build_alloca(i64_type, "entropy_buf").or_llvm_err()?;
+        builder
+            .build_store(buf, i64_type.const_int(0, false))
+            .or_llvm_err()?;
+        builder.build_unconditional_branch(draw).or_llvm_err()?;
+
+        builder.position_at_end(draw);
+        let buf_addr = builder
+            .build_ptr_to_int(buf, i64_type, "buf_addr")
+            .or_llvm_err()?;
+        let eight = i64_type.const_int(8, false);
+
+        if target_is_linux(module) {
+            let sys_num: u64 = if target_is_aarch64(module) {
+                verum_common::linux_syscalls::aarch64::SYS_GETRANDOM
+            } else {
+                verum_common::linux_syscalls::x86_64::SYS_GETRANDOM
+            };
+            // getrandom(buf, 8, 0): blocking, so it yields 8 or a
+            // negative errno. Only -EINTR is retryable.
+            let ret = self.emit_linux_syscall(
+                &builder,
+                module,
+                sys_num,
+                &[buf_addr, eight, i64_type.const_int(0, false)],
+            )?;
+            let got_all = builder
+                .build_int_compare(verum_llvm::IntPredicate::EQ, ret, eight, "got_8")
+                .or_llvm_err()?;
+            let retry_bb = self.context.append_basic_block(func, "eintr_retry");
+            builder
+                .build_conditional_branch(got_all, ok_bb, retry_bb)
+                .or_llvm_err()?;
+            builder.position_at_end(retry_bb);
+            let eintr = i64_type.const_int((-4i64) as u64, true);
+            let is_eintr = builder
+                .build_int_compare(verum_llvm::IntPredicate::EQ, ret, eintr, "is_eintr")
+                .or_llvm_err()?;
+            builder
+                .build_conditional_branch(is_eintr, draw, fail_bb)
+                .or_llvm_err()?;
+        } else if target_is_darwin(module) {
+            // int getentropy(void *buf, size_t len) — 0 on success.
+            let ge_type = i32_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+            let ge = super::error::get_or_declare_function(module, "getentropy", ge_type);
+            let ret = builder
+                .build_call(ge, &[buf.into(), eight.into()], "ge_ret")
+                .or_llvm_err()?
+                .basic_value_or("getentropy returned void")?
+                .into_int_value();
+            let is_ok = builder
+                .build_int_compare(
+                    verum_llvm::IntPredicate::EQ,
+                    ret,
+                    i32_type.const_int(0, false),
+                    "ge_ok",
+                )
+                .or_llvm_err()?;
+            builder
+                .build_conditional_branch(is_ok, ok_bb, fail_bb)
+                .or_llvm_err()?;
+        } else if target_is_windows(module) {
+            // BOOL ProcessPrng(BYTE *buf, SIZE_T len) — non-zero on
+            // success. Documented as never failing, but a documented
+            // invariant is not a checked one.
+            let pp_type = i32_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+            let pp = super::error::get_or_declare_function(module, "ProcessPrng", pp_type);
+            let ret = builder
+                .build_call(pp, &[buf.into(), eight.into()], "pp_ret")
+                .or_llvm_err()?
+                .basic_value_or("ProcessPrng returned void")?
+                .into_int_value();
+            let is_ok = builder
+                .build_int_compare(
+                    verum_llvm::IntPredicate::NE,
+                    ret,
+                    i32_type.const_int(0, false),
+                    "pp_ok",
+                )
+                .or_llvm_err()?;
+            builder
+                .build_conditional_branch(is_ok, ok_bb, fail_bb)
+                .or_llvm_err()?;
+        } else {
+            // No entropy source is claimed for this target. Failing
+            // here is the whole point: the alternative is to invent
+            // one, and an invented CSPRNG is the defect this function
+            // exists to remove.
+            builder.build_unconditional_branch(fail_bb).or_llvm_err()?;
+        }
+
+        builder.position_at_end(fail_bb);
+        let exit_fn = self.get_or_declare_exit(module);
+        builder
+            .build_call(exit_fn, &[i64_type.const_int(120, false).into()], "")
+            .or_llvm_err()?;
+        builder.build_unreachable().or_llvm_err()?;
+
+        builder.position_at_end(ok_bb);
+        let value = builder
+            .build_load(i64_type, buf, "entropy")
             .or_llvm_err()?
             .into_int_value();
-        let x1 = builder
-            .build_xor(
-                x0,
-                builder
-                    .build_right_shift(x0, i64_type.const_int(12, false), false, "shr12")
-                    .or_llvm_err()?,
-                "x1",
-            )
-            .or_llvm_err()?;
-        let x2 = builder
-            .build_xor(
-                x1,
-                builder
-                    .build_left_shift(x1, i64_type.const_int(25, false), "shl25")
-                    .or_llvm_err()?,
-                "x2",
-            )
-            .or_llvm_err()?;
-        let x3 = builder
-            .build_xor(
-                x2,
-                builder
-                    .build_right_shift(x2, i64_type.const_int(27, false), false, "shr27")
-                    .or_llvm_err()?,
-                "x3",
-            )
-            .or_llvm_err()?;
-
-        // Store new state
-        builder
-            .build_store(rng_state.as_pointer_value(), x3)
-            .or_llvm_err()?;
-
-        // Return x * 0x2545F4914F6CDD1D
-        let multiplier = i64_type.const_int(0x2545F4914F6CDD1D, false);
-        let result = builder
-            .build_int_mul(x3, multiplier, "result")
-            .or_llvm_err()?;
-        builder.build_return(Some(&result)).or_llvm_err()?;
+        builder.build_return(Some(&value)).or_llvm_err()?;
         Ok(())
     }
 

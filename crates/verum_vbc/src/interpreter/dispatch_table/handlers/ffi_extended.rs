@@ -1685,54 +1685,12 @@ unsafe {
         Some(SystemSubOpcode::RandomU64) => {
             // Format: dst:reg
             let dst = read_reg(state)?;
-
-            let random_value: u64 = {
-                #[cfg(target_os = "macos")]
-                {
-                    let mut buf = [0u8; 8];
-                    // SAFETY: `buf` is a stack-local 8-byte array; passing its
-                    // mutable pointer and length 8 to `getentropy` satisfies
-                    // the POSIX contract (max 256 bytes, pointer writable for
-                    // length bytes).
-                    unsafe {
-                        libc::getentropy(buf.as_mut_ptr() as *mut libc::c_void, 8);
-                    }
-                    u64::from_ne_bytes(buf)
-                }
-
-                #[cfg(target_os = "linux")]
-                {
-                    let mut buf = [0u8; 8];
-                    // SAFETY: `buf` is a stack-local 8-byte array. The getrandom
-                    // syscall writes at most `len` bytes to `buf`. Using the
-                    // raw syscall number for the current architecture is
-                    // intentional: some libc builds lack `SYS_getrandom`.
-                    unsafe {
-                        #[cfg(target_arch = "x86_64")]
-                        let syscall_num = 318i64;
-                        #[cfg(target_arch = "aarch64")]
-                        let syscall_num = 278i64;
-                        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-                        let syscall_num = libc::SYS_getrandom;
-                        libc::syscall(syscall_num, buf.as_mut_ptr(), 8usize, 0u32);
-                    }
-                    u64::from_ne_bytes(buf)
-                }
-
-                #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-                {
-                    let timestamp = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_nanos() as u64)
-                        .unwrap_or(0);
-                    let mut x = timestamp ^ 0x5DEECE66D;
-                    x ^= x >> 12;
-                    x ^= x << 25;
-                    x ^= x >> 27;
-                    x.wrapping_mul(0x2545F4914F6CDD1D)
-                }
-            };
-
+            // ONE entropy authority (crate::entropy): every return
+            // code is checked, and it aborts rather than yielding
+            // predictable bytes. The per-platform draw used to be
+            // inline here AND in RandomFloat, discarding the syscall
+            // result in both.
+            let random_value = crate::entropy::secure_random_u64();
             state.set_reg(dst, Value::from_i64(random_value as i64));
             Ok(DispatchResult::Continue)
         }
@@ -1740,52 +1698,10 @@ unsafe {
         Some(SystemSubOpcode::RandomFloat) => {
             // Format: dst:reg
             let dst = read_reg(state)?;
-
-            let random_u64: u64 = {
-                #[cfg(target_os = "macos")]
-                {
-                    let mut buf = [0u8; 8];
-                    // SAFETY: `buf` is a stack-local 8-byte array. See RandomU64
-                    // macos branch — same reasoning applies.
-                    unsafe {
-                        libc::getentropy(buf.as_mut_ptr() as *mut libc::c_void, 8);
-                    }
-                    u64::from_ne_bytes(buf)
-                }
-
-                #[cfg(target_os = "linux")]
-                {
-                    let mut buf = [0u8; 8];
-                    // SAFETY: Same as RandomU64 linux branch — `buf` is a
-                    // stack-local 8-byte array and the kernel writes at most
-                    // `len` bytes.
-                    unsafe {
-                        #[cfg(target_arch = "x86_64")]
-                        let syscall_num = 318i64;
-                        #[cfg(target_arch = "aarch64")]
-                        let syscall_num = 278i64;
-                        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-                        let syscall_num = libc::SYS_getrandom;
-                        libc::syscall(syscall_num, buf.as_mut_ptr(), 8usize, 0u32);
-                    }
-                    u64::from_ne_bytes(buf)
-                }
-
-                #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-                {
-                    let timestamp = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_nanos() as u64)
-                        .unwrap_or(0);
-                    let mut x = timestamp ^ 0x5DEECE66D;
-                    x ^= x >> 12;
-                    x ^= x << 25;
-                    x ^= x >> 27;
-                    x.wrapping_mul(0x2545F4914F6CDD1D)
-                }
-            };
-
-            // IEEE 754 conversion: (bits >> 11) * (1.0 / 2^53)
+            let random_u64 = crate::entropy::secure_random_u64();
+            // IEEE 754 conversion: (bits >> 11) * (1.0 / 2^53) — the
+            // 53 bits a double represents exactly, so every
+            // representable value in [0, 1) is equally likely.
             let float_value = (random_u64 >> 11) as f64 * (1.0 / ((1u64 << 53) as f64));
             state.set_reg(dst, Value::from_f64(float_value));
             Ok(DispatchResult::Continue)
@@ -2919,8 +2835,8 @@ unsafe {
             // an Int and cast — handle that too. `as_i64()` on a
             // Pointer-tagged value extracts the sign-extended payload
             // bits, which silently misreads high-address pointers as
-            // negative offsets, causing libc::getentropy to fault with
-            // EFAULT and the whole CSPRNG chain to return Err.
+            // negative offsets, making the draw fault with EFAULT and
+            // the whole CSPRNG chain return Err.
             let buf_val = state.get_reg(buf_reg);
             let buf = if buf_val.is_ptr() {
                 buf_val.as_ptr::<u8>() as usize as u64
@@ -2934,33 +2850,24 @@ unsafe {
                 let err_obj = make_oserror_variant_with_msg(state, 5, "getentropy: max 256 bytes")?;
                 state.set_reg(dst, err_obj);
             } else {
-                #[cfg(unix)]
-                let result = {
-                    // SAFETY: `len` was bounded to <= 256 above (getentropy's
-                    // hard limit). `buf` is an attacker-supplied pointer — the
-                    // kernel validates it and returns `-1/EFAULT` on invalid
-                    // memory; this is the same contract the AOT path uses.
-                    unsafe { libc::getentropy(buf as *mut libc::c_void, len as libc::size_t) }
+                // ONE entropy implementation (crate::entropy). This
+                // shim keeps the REPORTING contract — a syscall shim
+                // relays the kernel's answer — while
+                // `entropy::fill_secure` carries the abort contract
+                // the language needs.
+                //
+                // SAFETY: `len` was bounded to <= 256 above and `buf`
+                // is the caller's address; building a slice over it is
+                // the same trust boundary the direct call had, and the
+                // kernel still validates the pointer (EFAULT).
+                let result: i32 = {
+                    let slice =
+                        unsafe { std::slice::from_raw_parts_mut(buf as *mut u8, len as usize) };
+                    match crate::entropy::try_fill_secure(slice) {
+                        Ok(()) => 0,
+                        Err(_) => -1,
+                    }
                 };
-
-                #[cfg(windows)]
-                let result = {
-                    // SAFETY: BCryptGenRandom with BCRYPT_USE_SYSTEM_PREFERRED_RNG
-                    // (flag 0x00000002) fills the buffer with cryptographic random bytes.
-                    // `buf` is an address provided by the caller; `len` is bounded to <= 256.
-                    let status = unsafe {
-                        windows_sys::Win32::Security::Cryptography::BCryptGenRandom(
-                            std::ptr::null_mut(), // BCRYPT_USE_SYSTEM_PREFERRED_RNG requires null handle
-                            buf as *mut u8,
-                            len as u32,
-                            0x00000002u32, // BCRYPT_USE_SYSTEM_PREFERRED_RNG
-                        )
-                    };
-                    if status == 0 { 0i32 } else { -1i32 }
-                };
-
-                #[cfg(not(any(unix, windows)))]
-                let result: i32 = -1;
 
                 if result < 0 {
                     let errno = get_platform_errno();

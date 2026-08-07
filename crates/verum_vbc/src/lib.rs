@@ -60,6 +60,7 @@ pub mod bytecode_remap;
 pub mod cfg_key;
 pub mod linker;
 pub mod dtype;
+pub mod entropy;
 pub mod error;
 pub mod format;
 pub mod instruction;
