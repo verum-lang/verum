@@ -713,6 +713,7 @@ impl TypeChecker {
             metrics: TypeCheckMetrics::new(),
             generator_context: Maybe::None,
             diagnostics: List::new(),
+            diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
             pending_ambiguity: Vec::new(),
             pending_protocol_static_calls: Vec::new(),
@@ -847,6 +848,7 @@ impl TypeChecker {
             metrics: TypeCheckMetrics::new(),
             generator_context: Maybe::None,
             diagnostics: List::new(),
+            diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
             pending_ambiguity: Vec::new(),
             pending_protocol_static_calls: Vec::new(),
@@ -982,6 +984,7 @@ impl TypeChecker {
             metrics: TypeCheckMetrics::new(),
             generator_context: Maybe::None,
             diagnostics: List::new(),
+            diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
             pending_ambiguity: Vec::new(),
             pending_protocol_static_calls: Vec::new(),
@@ -8777,6 +8780,24 @@ impl TypeChecker {
     /// Clear all collected diagnostics
     pub fn clear_diagnostics(&mut self) {
         self.diagnostics.clear();
+        self.diagnostic_sources.clear();
+    }
+
+    /// The source-form errors behind [`Self::diagnostics`], in the same
+    /// order. A driver that can resolve AST spans (it owns the
+    /// source-file table) should render THESE — the pre-built
+    /// `Diagnostic`s necessarily carry no file/line, because the
+    /// checker cannot know them.
+    pub fn diagnostic_sources(&self) -> &List<crate::TypeError> {
+        &self.diagnostic_sources
+    }
+
+    /// Record a type error on the diagnostics channel, keeping its
+    /// source form for span-aware rendering. THE single entry point:
+    /// pushing to `diagnostics` directly loses the position forever.
+    pub(crate) fn push_diagnostic_for(&mut self, error: crate::TypeError) {
+        self.diagnostics.push(error.to_diagnostic());
+        self.diagnostic_sources.push(error);
     }
 
     /// Add a diagnostic (warning, note, etc.)

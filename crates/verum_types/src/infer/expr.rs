@@ -8923,7 +8923,7 @@ impl TypeChecker {
                         )),
                         span: index.span,
                     };
-                    self.diagnostics.push(e.to_diagnostic());
+                    self.push_diagnostic_for(e);
                 } else if !arr_is_mutable_variable && index_value as u64 >= array_size {
                     // Only check upper bound for non-variable paths (literals,
                     // etc.). Variable paths may have been resized via push/pop.
@@ -8934,7 +8934,7 @@ impl TypeChecker {
                         )),
                         span: index.span,
                     };
-                    self.diagnostics.push(e.to_diagnostic());
+                    self.push_diagnostic_for(e);
                 }
             }
         }
@@ -12803,7 +12803,7 @@ impl TypeChecker {
                     // drop anything recorded during it (the statement
                     // already carries its own loud error).
                     self.pending_ambiguity.truncate(amb_mark);
-                    self.diagnostics.push(e.to_diagnostic());
+                    self.push_diagnostic_for(e);
                     self.recover_stmt_bindings(stmt);
                 }
             }
@@ -12909,7 +12909,7 @@ impl TypeChecker {
                     // See the synth twin: drop candidates leaked by an
                     // aborted nested check inside this statement.
                     self.pending_ambiguity.truncate(amb_mark);
-                    self.diagnostics.push(e.to_diagnostic());
+                    self.push_diagnostic_for(e);
                     self.recover_stmt_bindings(stmt);
                 }
             }

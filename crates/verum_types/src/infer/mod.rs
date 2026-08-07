@@ -678,6 +678,23 @@ pub struct TypeChecker {
     generator_context: Maybe<GeneratorContext>,
     /// Collected diagnostics (warnings, notes, etc.)
     pub(crate) diagnostics: List<Diagnostic>,
+    /// The SAME errors as `diagnostics`, kept in their SOURCE form.
+    ///
+    /// A `Diagnostic` built inside the checker cannot carry a file or a
+    /// line: rendering an AST span into `verum_diagnostics::Span` needs
+    /// the session's source-file table, and the checker has no access
+    /// to it (by design — it must stay independent of the driver). The
+    /// consequence was that every diagnostic pushed through this
+    /// channel reached the user with NO position at all: even
+    /// `let x: Text = 42;` in a three-line file printed just
+    /// «Type mismatch: expected 'Text', found 'Int'».
+    ///
+    /// Keeping the `TypeError` (which DOES carry the AST span) lets the
+    /// driver do the conversion it is uniquely able to do — see
+    /// `phases::type_error_to_diagnostic`. The two lists are appended
+    /// in lockstep by `push_diagnostic_for`; consumers that can resolve
+    /// spans read this one, the rest keep reading `diagnostics`.
+    pub(crate) diagnostic_sources: List<crate::TypeError>,
     /// Errors of `is_soundness_critical()` kind that surfaced inside
     /// helpers whose Rust signature is `()` (e.g. cross-module type
     /// pre-passes). Drained by `phase_type_check` before declaring

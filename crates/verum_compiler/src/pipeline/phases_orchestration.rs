@@ -877,9 +877,33 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
-        // Forward type checker diagnostics (exhaustiveness errors, warnings, etc.)
-        for diag in checker.diagnostics() {
-            self.session.emit_diagnostic(diag.clone());
+        // Forward type-checker diagnostics (exhaustiveness errors,
+        // ambiguity, warnings, …).
+        //
+        // Render from the SOURCE errors, not from the pre-built
+        // `Diagnostic`s: the checker cannot resolve an AST span into a
+        // file/line (it has no source-file table, by design), so its
+        // pre-built diagnostics necessarily carry no position. Going
+        // through `type_error_to_diagnostic` with the session — which
+        // does own that table — is what puts `file:line:col` and the
+        // source snippet on these errors. Before this, every diagnostic
+        // arriving on this channel reached the user positionless: even
+        // `let x: Text = 42;` in a three-line file printed nothing but
+        // «Type mismatch: expected 'Text', found 'Int'».
+        //
+        // The two lists are appended in lockstep by
+        // `push_diagnostic_for`; the fallback keeps any diagnostic that
+        // has no source form (warnings emitted directly) visible.
+        let sources = checker.diagnostic_sources();
+        if sources.len() == checker.diagnostics().len() {
+            for error in sources.iter() {
+                let diag = type_error_to_diagnostic(error, Some(self.session));
+                self.session.emit_diagnostic(diag);
+            }
+        } else {
+            for diag in checker.diagnostics() {
+                self.session.emit_diagnostic(diag.clone());
+            }
         }
         checker.clear_diagnostics();
 

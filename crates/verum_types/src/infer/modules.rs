@@ -11016,7 +11016,7 @@ impl TypeChecker {
                 )),
                 span: bind_span,
             };
-            self.diagnostics.push(e.to_diagnostic());
+            self.push_diagnostic_for(e);
         }
 
         // PROTO-STATIC-EXISTENTIAL discharge (T0585): every protocol-
@@ -11086,7 +11086,7 @@ impl TypeChecker {
                     method: method_name,
                     span: call_span,
                 };
-                self.diagnostics.push(e.to_diagnostic());
+                self.push_diagnostic_for(e);
             }
         }
 
@@ -11158,7 +11158,7 @@ impl TypeChecker {
                         )),
                         span: call_span,
                     };
-                    self.diagnostics.push(e.to_diagnostic());
+                    self.push_diagnostic_for(e);
                 }
                 _ => {
                     let e = TypeError::OtherWithCodeSpanned {
@@ -11174,7 +11174,7 @@ impl TypeChecker {
                         )),
                         span: call_span,
                     };
-                    self.diagnostics.push(e.to_diagnostic());
+                    self.push_diagnostic_for(e);
                 }
             }
         }
