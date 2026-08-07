@@ -15,7 +15,7 @@
 // for any incremental hash trace.
 // =============================================================================
 
-mount core.security.hash.fnv.{
+mount core.hash.fast.fnv.{
     FNV_OFFSET_32, FNV_PRIME_32, FNV_OFFSET_64, FNV_PRIME_64,
     Fnv1a32, Fnv1a64,
 };

@@ -12,7 +12,7 @@
 // compile-time class.
 // =============================================================================
 
-mount core.security.hash.sha256.{BLOCK_SIZE, OUTPUT_SIZE};
+mount core.hash.crypto.sha256.{BLOCK_SIZE, OUTPUT_SIZE};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 

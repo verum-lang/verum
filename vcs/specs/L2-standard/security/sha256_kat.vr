@@ -11,7 +11,7 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.security.hash.sha256.{Sha256};
+mount core.hash.crypto.sha256.{Sha256};
 
 fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
     if a.len() != b.len() { return false; }

@@ -11,7 +11,7 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.security.hash.sha384.{Sha384};
+mount core.hash.crypto.sha384.{Sha384};
 
 fn sha384_empty_digest() {
     let empty: List<Byte> = [];

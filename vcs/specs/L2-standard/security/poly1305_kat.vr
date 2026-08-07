@@ -16,7 +16,7 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.security.mac.poly1305.{
+mount core.mac.poly1305.{
     Poly1305Key, Poly1305Tag, poly1305_mac,
     KEY_SIZE, TAG_SIZE,
 };

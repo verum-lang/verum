@@ -7,7 +7,7 @@
 //   * secure_zero_text(&mut Text)  — zero backing storage of a Text
 // =============================================================================
 
-mount core.security.util.zeroize.{secure_zero, secure_zero_text};
+mount core.subtle.zeroize.{secure_zero, secure_zero_text};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 

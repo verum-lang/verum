@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @expect: pass
 
-mount core.security.hash.fnv.{
+mount core.hash.fast.fnv.{
     fnv1_32, fnv1a_32, fnv1_64, fnv1a_64,
     Fnv1a32, Fnv1a64,
     FNV_OFFSET_32, FNV_PRIME_32, FNV_OFFSET_64, FNV_PRIME_64,

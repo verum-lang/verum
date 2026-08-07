@@ -14,7 +14,7 @@
 // tests deferred.
 // =============================================================================
 
-mount core.security.hash.xxhash.XxHash64;
+mount core.hash.fast.xxhash.XxHash64;
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 

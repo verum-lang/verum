@@ -12,7 +12,7 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.security.mac.hmac.{hmac_sha256, hmac_sha384};
+mount core.mac.hmac.{hmac_sha256, hmac_sha384};
 
 fn rfc_4231_test_case_1_sha256() {
     let key: List<Byte> = [

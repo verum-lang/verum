@@ -40,7 +40,7 @@ mount core.net.tls13.handshake.messages.{
     HandshakeMessage, ClientHello, ServerHello, decode_handshake,
 };
 mount core.net.tls13.handshake.codec.{Tls13HandshakeReader, CodecError};
-mount core.security.hash.sha256.{Sha256};
+mount core.hash.crypto.sha256.{Sha256};
 mount core.security.kdf.hkdf.{HkdfError};
 
 // =============================================================================

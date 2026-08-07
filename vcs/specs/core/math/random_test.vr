@@ -24,9 +24,9 @@
 // - Independence: split keys produce different sequences
 // =============================================================================
 
-module specs.core.math.random_test;
+module specs.core.random.deterministic_test;
 
-mount core.math.random.{
+mount core.random.deterministic.{
     RandomKey, XorShift128, PCG, Rng,
     uniform_01, uniform, uniform_vec, uniform_range_vec,
     uniform_int, uniform_int_range,

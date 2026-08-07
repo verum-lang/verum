@@ -10,7 +10,7 @@
 // and run/hkdf_rfc5869.vr (L1-core/security/run/).
 
 mount core.collections.list.{List};
-mount core.security.mac.hmac.{
+mount core.mac.hmac.{
     HmacSha256, HmacSha384, HmacSha512,
     hmac_sha256, hmac_sha384, hmac_sha512,
 };

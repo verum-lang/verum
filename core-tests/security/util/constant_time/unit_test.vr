@@ -10,7 +10,7 @@
 // these tests pin functional semantics only.
 // =============================================================================
 
-mount core.security.util.constant_time.{
+mount core.subtle.constant_time.{
     constant_time_eq, constant_time_compare,
 };
 mount core.base.maybe.{Maybe, Some, None};

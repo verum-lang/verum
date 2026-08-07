@@ -12,7 +12,7 @@
 // Pinned at the spec width contracts.
 // =============================================================================
 
-mount core.security.hash.sha1.{SHA1_DIGEST_SIZE, SHA1_BLOCK_SIZE};
+mount core.hash.legacy.sha1.{SHA1_DIGEST_SIZE, SHA1_BLOCK_SIZE};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 

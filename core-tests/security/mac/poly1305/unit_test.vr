@@ -5,7 +5,7 @@
 // `core/security/mac/poly1305.vr` — Poly1305 one-time MAC (RFC 8439).
 // =============================================================================
 
-mount core.security.mac.poly1305.{KEY_SIZE, TAG_SIZE};
+mount core.mac.poly1305.{KEY_SIZE, TAG_SIZE};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 

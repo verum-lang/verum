@@ -9,11 +9,11 @@
 //
 // Pre-#247 the OtpHash.Sha1 arm of hotp() returned
 // OtpError.UnsupportedHash because no hmac_sha1 was wired in
-// core.security.mac.hmac. This spec pins the new construction
+// core.mac.hmac. This spec pins the new construction
 // against RFC 2202's canonical KATs so the byte-for-byte
 // agreement is checkable as a typecheck assertion.
 
-mount core.security.mac.hmac.{hmac_sha1, HmacSha1};
+mount core.mac.hmac.{hmac_sha1, HmacSha1};
 
 fn hex_byte_eq(a: [Byte; 20], expected: List<Byte>) -> Bool {
     if expected.len() != 20 { return false; }

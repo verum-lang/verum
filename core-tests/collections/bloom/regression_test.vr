@@ -49,7 +49,7 @@ fn regression_bloom_with_defaults_constructible() {
 // `probe_offsets → hmac_sha256` chain.  The CSPRNG dispatch chain
 // closed via random_u64 (task #13), unblocking all constructors;
 // the insert path now exposes a SEPARATE defect class — somewhere
-// in `core.security.mac.hmac.HmacSha256.new` / `.finalize`'s
+// in `core.mac.hmac.HmacSha256.new` / `.finalize`'s
 // SHA-256 block processing, an index 64 access on a 64-element
 // buffer fires.  Class to investigate: `[Byte; 64]` array
 // indexing in hmac/sha256 internals.

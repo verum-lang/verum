@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @expect: pass
 
-mount core.security.hash.crc32c.{Crc32c, crc32c, CRC32C_POLYNOMIAL};
+mount core.hash.checksum.crc32c.{Crc32c, crc32c, CRC32C_POLYNOMIAL};
 
 fn exercise_crc32c() {
     // One-shot.

@@ -14,7 +14,7 @@
 // `vcs/specs/L2-standard/math/random/`.
 // =============================================================================
 
-mount core.math.random.{
+mount core.random.deterministic.{
     RandomKey, XorShift128, PCG,
 };
 

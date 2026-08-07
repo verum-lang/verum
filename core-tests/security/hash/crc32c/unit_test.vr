@@ -11,7 +11,7 @@
 //   * Fresh-state, empty-input, and re-seeding semantics
 // =============================================================================
 
-mount core.security.hash.crc32c.{CRC32C_POLYNOMIAL, Crc32c};
+mount core.hash.checksum.crc32c.{CRC32C_POLYNOMIAL, Crc32c};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 

@@ -9,11 +9,11 @@
 // Full NIST KAT discharge runs in `run` tests under L1-core/security/run/;
 // this file validates shape at typecheck level.
 
-mount core.security.hash.sha256.{Sha256,
+mount core.hash.crypto.sha256.{Sha256,
     BLOCK_SIZE as SHA256_BLOCK, OUTPUT_SIZE as SHA256_OUTPUT};
-mount core.security.hash.sha384.{Sha384,
+mount core.hash.crypto.sha384.{Sha384,
     BLOCK_SIZE as SHA384_BLOCK, OUTPUT_SIZE as SHA384_OUTPUT};
-mount core.security.hash.sha512.{Sha512,
+mount core.hash.crypto.sha512.{Sha512,
     BLOCK_SIZE as SHA512_BLOCK, OUTPUT_SIZE as SHA512_OUTPUT};
 
 fn typecheck_sha256() -> [Byte; 32] {

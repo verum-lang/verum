@@ -9,7 +9,7 @@
 //   * Direct construction preserves high/low halves
 // =============================================================================
 
-mount core.security.hash.murmur3.Murmur3Hash128;
+mount core.hash.fast.murmur3.Murmur3Hash128;
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 

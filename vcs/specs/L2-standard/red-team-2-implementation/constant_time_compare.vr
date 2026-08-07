@@ -26,7 +26,7 @@
 // `@verify(constant_time)` annotation is the static side of the
 // contract.
 
-mount core.security.util.constant_time.{constant_time_eq, constant_time_compare};
+mount core.subtle.constant_time.{constant_time_eq, constant_time_compare};
 
 fn ct_eq_identical_returns_true() {
     let a: List<Byte> = [0x12_u8, 0x34_u8, 0x56_u8, 0x78_u8];

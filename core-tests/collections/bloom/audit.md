@@ -41,9 +41,9 @@ The original audit (above) attributed the failure to a missing
 
 The **actual** root cause is cross-module function-id resolution:
 
-* `core/collections/bloom.vr:56` does `mount core.security.util.rng.{fill_secure};`
+* `core/collections/bloom.vr:56` does `mount core.random.secure.{fill_secure};`
   and calls bare `fill_secure(&mut key)` from `BloomFilter.try_new`.
-* `core.security.util.rng` lives under `core.security`, which already
+* `core.random.secure` lives under `core.security`, which already
   depends on `core.collections` because `security/{password_hash, token,
   merkle, otp, cose, kdf/pbkdf2, jwt, kdf/argon2, aead/chacha20_poly1305,
   aead/aes_gcm}.vr` all mount `core.collections.List`.

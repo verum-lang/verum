@@ -14,7 +14,7 @@
 // byte. Fast on AOT (< 50 μs total); this timeout accommodates the
 // interpreter's per-opcode dispatch overhead.
 
-mount core.security.hash.crc32.{crc32, crc32_continue, Crc32};
+mount core.hash.checksum.crc32.{crc32, crc32_continue, Crc32};
 mount collections.List;
 
 // -----------------------------------------------------------------------------

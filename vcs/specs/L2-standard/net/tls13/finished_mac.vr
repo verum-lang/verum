@@ -21,7 +21,7 @@ mount core.collections.List;
 mount core.net.tls13.cipher_suite.{HashKind};
 mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
 mount core.net.tls13.keyschedule.derive_secret.{LABEL_FINISHED};
-mount core.security.mac.hmac.{hmac_sha256, hmac_sha384};
+mount core.mac.hmac.{hmac_sha256, hmac_sha384};
 
 fn finished_key_sha256_has_32_bytes() {
     let base_key: List<Byte> = [

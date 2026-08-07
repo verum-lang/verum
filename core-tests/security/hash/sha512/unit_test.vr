@@ -8,7 +8,7 @@
 //   * BLOCK_SIZE / OUTPUT_SIZE canonical values
 // =============================================================================
 
-mount core.security.hash.sha512.{BLOCK_SIZE, OUTPUT_SIZE};
+mount core.hash.crypto.sha512.{BLOCK_SIZE, OUTPUT_SIZE};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 

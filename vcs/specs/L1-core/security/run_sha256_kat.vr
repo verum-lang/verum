@@ -15,7 +15,7 @@
 // "abc"   | ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
 // long 1M | cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0
 
-mount core.security.hash.sha256.{Sha256};
+mount core.hash.crypto.sha256.{Sha256};
 
 const EXPECTED_EMPTY: [Byte; 32] = [
     0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,

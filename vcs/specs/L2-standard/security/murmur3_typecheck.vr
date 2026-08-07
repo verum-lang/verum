@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @expect: pass
 
-mount core.security.hash.murmur3.{
+mount core.hash.fast.murmur3.{
     Murmur3Hash128, murmur3_32, murmur3_128,
 };
 

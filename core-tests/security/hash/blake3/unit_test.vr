@@ -13,7 +13,7 @@
 // behind byte-array compile-time class.
 // =============================================================================
 
-mount core.security.hash.blake3.{BLOCK_SIZE, CHUNK_SIZE, OUTPUT_SIZE, KEY_LEN};
+mount core.hash.crypto.blake3.{BLOCK_SIZE, CHUNK_SIZE, OUTPUT_SIZE, KEY_LEN};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 

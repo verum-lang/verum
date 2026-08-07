@@ -20,7 +20,7 @@ Ed25519 backend operations, tested at language level.
 ## 2. Crate-side hardcodes
 
 None today — pure Verum JWT implementation. HMAC + Ed25519
-intrinsics consumed via core.security.mac.hmac + ecc.ed25519.
+intrinsics consumed via core.mac.hmac + ecc.ed25519.
 
 ## 3. Language-implementation gaps
 

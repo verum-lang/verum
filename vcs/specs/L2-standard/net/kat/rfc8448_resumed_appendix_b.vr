@@ -40,7 +40,7 @@ mount core.net.tls13.keyschedule.derive_secret.{
     derive_secret,
 };
 mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
-mount core.security.hash.sha256.{Sha256};
+mount core.hash.crypto.sha256.{Sha256};
 
 fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
     if a.len() != b.len() { return false; }
