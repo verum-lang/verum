@@ -2596,7 +2596,58 @@ impl VbcCodegen {
     }
 
     /// Compiles a binary operation.
+    /// Compile a binary expression, then narrow the result to the
+    /// declared width of a sized integer type (T0611).
+    ///
+    /// The wrapper exists so that there is ONE place where the width is
+    /// applied. `compile_binary_inner` emits `BinaryI` from 56 distinct
+    /// sites; patching each is how a rule ends up holding on most paths
+    /// and silently not on the rest.
+    ///
+    /// Only the operations that can leave the declared range are
+    /// narrowed. `/`, `%`, `&`, `|`, `^` and `>>` cannot widen an
+    /// in-range operand, and comparisons yield `Bool`, so truncating
+    /// their results would be noise at best and wrong at worst.
+    ///
+    /// The width comes from the LEFT operand: Verum's arithmetic is
+    /// homogeneous, and for shifts the result type is the shifted
+    /// operand's, not the shift amount's.
     fn compile_binary(
+        &mut self,
+        op: BinOp,
+        left: &Expr,
+        right: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        let result = self.compile_binary_inner(op, left, right)?;
+        let widens = matches!(
+            op,
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Pow | BinOp::Shl
+        );
+        if !widens {
+            return Ok(result);
+        }
+        let Some(reg) = result else {
+            return Ok(result);
+        };
+        use verum_common::well_known_types::type_names;
+        let Some(name) = self.infer_expr_type_name(left) else {
+            return Ok(Some(reg));
+        };
+        let signed = type_names::is_signed_integer_type(&name);
+        if !(signed || type_names::is_unsigned_integer_type(&name)) {
+            return Ok(Some(reg));
+        }
+        match type_names::numeric_bit_width(&name) {
+            Some(w) if w < 64 => {
+                let dst = self.emit_truncate_to_width(reg, w, signed)?;
+                self.ctx.free_temp(reg);
+                Ok(Some(dst))
+            }
+            _ => Ok(Some(reg)),
+        }
+    }
+
+    fn compile_binary_inner(
         &mut self,
         op: BinOp,
         left: &Expr,
@@ -23608,6 +23659,79 @@ impl VbcCodegen {
     /// - Int → Char with validation (CvtIC)
     /// - Char → Int (CvtCI)
     /// - Bool → Int (CvtBI)
+    /// Truncate `src` to `width` bits, as a value — the operation that
+    /// makes a sized integer type actually sized (T0611).
+    ///
+    /// Verum declares `UInt8`, `UInt32`, `Int32` and friends, and the
+    /// checker tracks them, but nothing narrowed the VALUE: `255_u8 + 1`
+    /// produced 256 and `4294967296 as UInt32` produced 4294967296.
+    /// Every sized integer behaved as an unbounded i64.
+    ///
+    /// That is not a rounding-error class of defect. The stdlib's hash
+    /// functions are built on modular 32-bit arithmetic —
+    /// `rotr32(x, n) = (x >> n) | (x << (32 - n))` is only a rotation if
+    /// the left shift discards the bits it pushes past bit 31 — so
+    /// SHA-256 returned the wrong digest for every input, and with it
+    /// HMAC, the TLS 1.3 transcript, SCRAM, SigV4 and base58check.
+    ///
+    /// Semantics: WRAP. It is the only reading under which the existing
+    /// stdlib is correct as written, it matches Rust release and C
+    /// unsigned, and Verum already spells the other intents explicitly
+    /// (`wrapping_*`, `checked_*`, `saturating_*`). A checked default
+    /// would make every hash panic.
+    ///
+    ///  * unsigned — `src & ((1 << width) - 1)`
+    ///  * signed   — `(src << (64 - width)) >> (64 - width)`, an
+    ///    arithmetic right shift, so the sign bit of the narrow value
+    ///    is replicated exactly as two's complement requires.
+    fn emit_truncate_to_width(
+        &mut self,
+        src: Reg,
+        width: u32,
+        signed: bool,
+    ) -> CodegenResult<Reg> {
+        debug_assert!(width < 64 && width > 0, "only narrowing needs a mask");
+        let dst = self.ctx.alloc_temp();
+        // Holds the shift distance (signed path) or the mask (unsigned).
+        let aux = self.ctx.alloc_temp();
+        if signed {
+            let excess = (64 - width) as i64;
+            self.ctx.emit(Instruction::LoadSmallI {
+                dst: aux,
+                value: excess as i8,
+            });
+            let up = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::Bitwise {
+                op: crate::instruction::BitwiseOp::Shl,
+                dst: up,
+                a: src,
+                b: aux,
+            });
+            self.ctx.emit(Instruction::Bitwise {
+                op: crate::instruction::BitwiseOp::Shr,
+                dst,
+                a: up,
+                b: aux,
+            });
+            self.ctx.free_temp(up);
+        } else {
+            let mask = (1i64 << width) - 1;
+            let mask_id = self.ctx.add_const_int(mask);
+            self.ctx.emit(Instruction::LoadK {
+                dst: aux,
+                const_id: mask_id.0,
+            });
+            self.ctx.emit(Instruction::Bitwise {
+                op: crate::instruction::BitwiseOp::And,
+                dst,
+                a: src,
+                b: aux,
+            });
+        }
+        self.ctx.free_temp(aux);
+        Ok(dst)
+    }
+
     fn compile_cast(&mut self, inner: &Expr, ty: &verum_ast::Type) -> CodegenResult<Option<Reg>> {
         use verum_ast::ty::TypeKind;
 
@@ -23734,6 +23858,36 @@ impl VbcCodegen {
                 self.ctx.free_temp(const_reg);
                 self.ctx.free_temp(src_reg);
                 return Ok(Some(dst));
+            }
+        }
+
+        // NARROWING integer cast truncates the VALUE (T0611).
+        //
+        // `as UInt8` used to be a type annotation only: the target width
+        // was recorded for dispatch, the stored value stayed the full
+        // i64, and `300 as UInt8` compared unequal to `44 as UInt8`.
+        // Placed before the conversion match because that match keys on
+        // `TypeKind::Int` — one kind for every width — so int-to-int
+        // narrowing reaches an identity passthrough there.
+        //
+        // Float sources are excluded: they must convert first (CvtFI),
+        // and the truncation is applied to the converted value below.
+        {
+            use verum_common::well_known_types::type_names;
+            let target_name = match &ty.kind {
+                TypeKind::Path(path) => path.as_ident().map(|id| id.name.to_string()),
+                _ => None,
+            };
+            if let Some(name) = target_name.as_deref() {
+                let signed = type_names::is_signed_integer_type(name);
+                let is_int = signed || type_names::is_unsigned_integer_type(name);
+                let width = type_names::numeric_bit_width(name).unwrap_or(64);
+                let src_is_float = matches!(src_kind, Some(TypeKind::Float));
+                if is_int && width < 64 && !src_is_float {
+                    let dst = self.emit_truncate_to_width(src_reg, width, signed)?;
+                    self.ctx.free_temp(src_reg);
+                    return Ok(Some(dst));
+                }
             }
         }
 
