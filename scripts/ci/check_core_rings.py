@@ -77,9 +77,30 @@ def strip_comments(src: str) -> str:
 
 
 def module_of(path: Path) -> str | None:
-    """Top-level core module a file belongs to (`core/net/x/y.vr` -> `net`)."""
+    """The core module a file belongs to, at FULL path granularity.
+
+    `core/intrinsics/lowlevel/aarch64.vr` -> `intrinsics.lowlevel`
+    (the containing module, dropping the file name; `mod.vr` names the
+    directory itself).
+
+    Sources are resolved as finely as targets deliberately. When only
+    targets carried submodule paths, a ring declared for a submodule
+    worked when the submodule was DEPENDED ON and did nothing when it
+    was DEPENDING — `intrinsics.lowlevel` placed at ring 1 still
+    reported `intrinsics(r0) -> sys.linux.auxv(r1)`, because the source
+    collapsed back to `intrinsics`. A law that reads one side of an
+    edge at a different resolution than the other is not the same law
+    on both sides.
+
+    Ring lookup is by longest declared prefix (`ring_for`), so an
+    undeclared submodule still inherits its parent's ring and nothing
+    falls out of measurement.
+    """
     rel = path.relative_to(CORE)
-    return rel.parts[0] if len(rel.parts) > 1 else None
+    if len(rel.parts) < 2:
+        return None
+    parts = list(rel.parts[:-1]) if rel.name != "mod.vr" else list(rel.parts[:-1])
+    return ".".join(parts) if parts else None
 
 
 def targets(mount_body: str, from_file: Path) -> list[str]:

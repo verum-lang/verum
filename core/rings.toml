@@ -41,7 +41,24 @@ name = "platform"
 # (core/mem/segment.vr:68, core/mem/heap.vr:80) — memory management IS
 # a platform service, and placing `mem` above `sys` would invert the
 # real, correct direction of that dependency.
-modules = ["sys", "mem", "target"]
+modules = ["sys", "mem", "target", "sync.atomic", "intrinsics.lowlevel"]
+# Two submodules placed by measurement rather than by their parent's name:
+#
+#  * `sync.atomic` mounts only `core.intrinsics.atomic` (ring 0),
+#    `core.intrinsics.platform` and `sys.{linux,darwin}.thread` (ring 1).
+#    Atomics ARE the platform's memory-ordering surface, not a container
+#    algorithm, which is why `sys/windows/winsock2.vr` needs one.
+#  * `intrinsics.lowlevel` reads `sys.linux.auxv` to detect CPU features
+#    (`lowlevel/aarch64.vr:720`). Asking the kernel what hardware this is
+#    is the platform boundary by definition.
+#
+# Neither move creates a downward-looking parent edge: umbrellas declare
+# children with `public module X;`, which is a declaration, not a mount.
+# That is NOT universal — `math` re-mounts its own `frameworks` subtree
+# with ABSOLUTE paths from sibling files (math/meta_cls.vr:37,
+# math/syn_mod.vr:82), so raising those submodules turned the parent's
+# own references into 30+ upward edges. Check for absolute intra-module
+# mounts before refining a submodule's ring.
 
 [ring."1.5"]
 name = "byte-primitive"
@@ -60,13 +77,20 @@ name = "byte-primitive"
 # Half a ring, not ring 1: these are pure computation and do not touch
 # the syscall boundary — except `random.secure`, which is entropy, a
 # platform service by nature.
-modules = ["hash", "mac", "random", "subtle"]
+modules = ["hash", "mac", "random", "subtle", "security.ecc"]
+# `security.ecc` is here by MEASUREMENT, not by topic: ed25519, p256,
+# x25519 and mod have ZERO external mounts, bls12_381 and vrf only a
+# sibling plus the prelude. Curve arithmetic is byte computation exactly
+# like a digest. Its NAME does not lie — Ed25519 IS cryptography — so the
+# file stays in `security/` and only the ring is corrected, per the
+# doctrine in §4quinquies. This is what lets `cog` (ring 4) sign an
+# archive without depending upward.
 
 [ring.2]
 name = "data"
 # Container and value algorithms. May use the platform (allocation,
 # clocks) but nothing above it.
-modules = ["collections", "text", "encoding", "math", "simd", "logic", "io", "time", "sync", "storage"]
+modules = ["collections", "text", "encoding", "math", "simd", "logic", "io", "time", "sync"]
 
 [ring.3]
 name = "runtime"
@@ -88,6 +112,29 @@ name = "domain"
 # are the candidates for extraction into cog packages (§5.3, §5.4).
 modules = [
     "database", "net", "security", "term", "shell", "cli", "mesh",
+    # `storage` is mod.vr + types.vr + s3/ — an object-store network
+    # client, not a container algorithm. Ring 2 was a topical placement
+    # ("storage sounds like data"), and it turned two ordinary lateral
+    # edges — storage -> net.http, storage -> security.aws_credentials —
+    # into law violations.
+    "storage",
+    # The applied superstructure of `math`. frameworks/ and foundations/
+    # mount core.action.{articulation,enactments} (ring 3),
+    # core.theory_interop.coord (ring 5) and core.proof.kernel_bridge
+    # (ring 4); the algebraic core stays at ring 2.
+    #
+    # This does NOT reduce the violation count, and that is the point.
+    # It converts 12 diffuse "math is above its ring" sites into 2
+    # precise ones: `math/meta_cls.vr:37` and `math/syn_mod.vr:82` mount
+    # `core.math.frameworks.msfs.key_symbols` — the algebraic core
+    # reaching UP into its own superstructure. That edge is a real
+    # design defect; leaving frameworks at ring 2 merely hid it inside a
+    # larger number.
+    "math.frameworks", "math.foundations",
+    # An adapter sits above both things it adapts, by construction:
+    # cache/adapters/redis.vr binds the CacheBackend protocol to
+    # core.redis.
+    "cache.adapters",
     "redis", "protobuf", "search", "compress", "money", "configuration",
     "architecture", "theory_interop",
 ]
