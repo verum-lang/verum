@@ -61,17 +61,23 @@
 // # Backends
 //
 
-// The hot loops route through `@intrinsic("verum.crypto.blake3_*")`:
+// **There is one backend today: the pure-Verum reference path.**
 //
 
-//  * `verum.crypto.blake3_compress` — single-block compression
-//  function. Backend choice (BLAKE3-team upstream / NEON / AVX2 /
-//  AVX-512) selected by the runtime feature-flag set at link time.
-//  * `verum.crypto.blake3_compress_chunks` — process N consecutive
-//  chunks in parallel (uses SIMD lanes for chunk-level parallelism).
-//  * `verum.crypto.blake3_compress_parents` — same shape for the
-//  merge pass.
-//  * `verum.crypto.blake3_xof` — extract `n` bytes from XOF state.
+// This section used to describe an accelerated family —
+// `verum.crypto.blake3_{compress, compress_chunks, compress_parents,
+// xof}`, "backend choice selected by the runtime feature-flag set at
+// link time". None of those intrinsics is registered in the compiler
+// (measured 2026-08-07: zero occurrences in `crates/`), and an
+// unregistered `@intrinsic` does not fail — it lowers to `LoadNil`. So
+// the described acceleration did not merely not happen: `compress`
+// returned nil and the digest was garbage, while the doc explained how
+// to choose between AVX2 and NEON.
+//
+
+// If SIMD compression is added, the dispatch belongs in `compress`,
+// guarded on the intrinsic existing, and this section describes what is
+// wired — not what would be nice.
 //
 
 // When no backend feature flag is selected, a pure-Verum reference
@@ -337,10 +343,25 @@ implement Blake3 {
     /// pseudo-random and indistinguishable from a random oracle for any
     /// fixed `out.len()` (BLAKE3 spec §6.1).
     public fn finalize_xof(self, out: &mut [Byte]) {
-        // Re-run finalisation but emit a stream rather than a single
-        // 32-byte truncation. Implemented natively by the backend.
-        let mut state = self;
-        @intrinsic("verum.crypto.blake3_finalize_xof", &mut state, out);
+        // NOT IMPLEMENTED, and it says so.
+        //
+        // This called `@intrinsic("verum.crypto.blake3_finalize_xof")`,
+        // which is registered nowhere in the compiler — measured
+        // 2026-08-07. An unregistered `@intrinsic` lowers to `LoadNil`,
+        // so the call did nothing at all and `out` kept whatever it
+        // held: for a freshly allocated buffer, ZEROS. An XOF feeds
+        // `derive_key`, so that is key material silently replaced by a
+        // constant.
+        //
+        // A correct implementation needs the FULL 16-word output of the
+        // root compression with an incrementing counter per 64-byte
+        // block (spec §6.1); `compress_reference` currently returns only
+        // the first 8 words, so this needs a 16-word sibling before it
+        // can be written. Until then, refusing is the only honest
+        // answer — an XOF that returns zeros cannot be detected by its
+        // caller.
+        let _ = self;
+        panic(f"blake3: finalize_xof is not implemented (asked for {out.len()} bytes); use finalize() for the 32-byte digest");
     }
 
     // ─── Internal: tree-merge bookkeeping ────────────────────────────────
@@ -423,9 +444,20 @@ implement Blake3 {
 
 /// Single 64-byte block compression. Returns 8 output words.
 ///
-/// Routes through `verum.crypto.blake3_compress` when an accelerated
-/// backend is wired; otherwise falls back to the pure-Verum 7-round
-/// reference path.
+/// Calls the pure-Verum reference path below.
+///
+/// It used to call `@intrinsic("verum.crypto.blake3_compress")`
+/// UNCONDITIONALLY, with a doc comment promising a fallback to the
+/// reference path "otherwise". There was no otherwise, and the
+/// intrinsic is not registered anywhere in the compiler — measured
+/// 2026-08-07, zero occurrences in `crates/`. An unregistered
+/// `@intrinsic` does not fail: it lowers to `LoadNil`, so every
+/// compression returned a nil chaining value and BLAKE3 produced
+/// garbage while reporting success. The correct implementation was
+/// sitting twenty lines below the whole time.
+///
+/// When an accelerated backend is genuinely wired, the dispatch belongs
+/// HERE, guarded on the intrinsic actually existing — not in a comment.
 @inline
 fn compress(
     cv:            &[UInt32; 8],
@@ -434,7 +466,7 @@ fn compress(
     block_len:     UInt32,
     flags:         UInt32,
 ) -> [UInt32; 8] {
-    @intrinsic("verum.crypto.blake3_compress", cv, block_words, counter, block_len, flags)
+    compress_reference(cv, block_words, counter, block_len, flags)
 }
 
 /// Pure-Verum reference compression. Available for cross-checking the
@@ -615,12 +647,29 @@ fn words8_to_bytes32(words: &[UInt32; 8]) -> [Byte; 32] {
     out
 }
 
+// Written in Verum, not as intrinsics.
+//
+// `verum.arith.uint32_wrapping_add` and `verum.arith.uint32_rotr` are
+// not registered anywhere in the compiler — measured 2026-08-07, zero
+// occurrences in `crates/` — and an unregistered `@intrinsic` does not
+// fail: it lowers to `LoadNil`. Every BLAKE3 round therefore mixed in a
+// nil, silently.
+//
+// They also do not need to be intrinsics. `+` on a `UInt32` wraps at 32
+// bits (T0611), so the modular arithmetic BLAKE3 is defined over is
+// exactly what the operators now mean, and the shift-based rotation is
+// the same expression SHA-2 uses one directory over.
+
 @inline
 fn wrapping_add(a: UInt32, b: UInt32) -> UInt32 {
-    @intrinsic("verum.arith.uint32_wrapping_add", a, b)
+    a + b
 }
 
 @inline
 fn rotate_right(x: UInt32, n: UInt32) -> UInt32 {
-    @intrinsic("verum.arith.uint32_rotr", x, n)
+    if n == 0_u32 {
+        x
+    } else {
+        (x >> n) | (x << (32_u32 - n))
+    }
 }

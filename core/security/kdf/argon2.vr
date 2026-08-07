@@ -379,13 +379,21 @@ fn argon2id_derive(
         return Result.Err(PasswordHashError.WeakParameters(
             f"argon2id: tag {tag_len} outside [{ARGON2_MIN_TAG_BYTES}, {ARGON2_MAX_TAG_BYTES}]"));
     }
-    @intrinsic(
-        "verum.argon2id.derive",
-        password,
-        salt,
-        params.memory_kib,
-        params.iterations,
-        params.parallelism,
-        tag_len
-    )
+    // `verum.argon2id.derive` is NOT registered in the intrinsic
+    // table — measured 2026-08-07: zero occurrences of "argon2" in
+    // `crates/`, in either tier. An unregistered `@intrinsic` does not
+    // fail: it lowers to `LoadNil`, so this function used to return a
+    // nil tag and report success. A password store that silently
+    // derives nothing is worse than one that refuses, and this module
+    // is re-exported from `core.security.password_hash` as "the
+    // OWASP-recommended default", so callers had every reason to pick
+    // it.
+    //
+    // `UnsupportedBackend` is what the error type exists for. It stays
+    // until the memory-hard core is real — RFC 9106 with the §C KAT
+    // vectors pinned — and the check is that `tests/
+    // argon2id_rfc9106_kat.vr` passes, not that this line is deleted.
+    let _ = (password, salt, params);
+    Result.Err(PasswordHashError.UnsupportedBackend(
+        f"argon2id: no memory-hard backend in this build (requested tag {tag_len} bytes); use Pbkdf2Sha256Hasher"))
 }
