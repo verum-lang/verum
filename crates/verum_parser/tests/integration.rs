@@ -1310,11 +1310,36 @@ fn test_error_recovery_missing_brace() {
 fn test_error_recovery_invalid_expression() {
     let parser = VerumParser::new();
 
-    // Invalid operator sequence
+    // HONEST RED — an open LANGUAGE decision, not a regression (T0643).
+    //
+    // Four sources disagree about `++`:
+    //   * grammar/verum.ebnf — the declared ONLY source of truth for
+    //     syntax — does not contain `++` at all, and has no unary `+`
+    //     for `1 ++ 2` to decompose into (unary_op is ! - ~ & *);
+    //   * verum_fast_parser (the COMPILE path) maps it to
+    //     BinOp::Concat with binding power (11, 12);
+    //   * verum_parser (this crate, the IDE path) used to rewrite it
+    //     to PLUS — a lossless tree silently returning `1 + 2` for
+    //     `1 ++ 2`. That part IS fixed: the token now has its own
+    //     SyntaxKind::PLUS_PLUS, so the tree says what the source says;
+    //   * the specs contradict each other —
+    //     L0-critical/parser/expressions/arithmetic/invalid_arithmetic.vr
+    //     asserts `5 ++ 3` is invalid, while
+    //     L1-core/refinement/recursive_refinements.vr and
+    //     L2-standard/encoding/json_patch_typecheck.vr depend on it
+    //     working.
+    //
+    // Whichever way it is decided, one set of specs must change, so it
+    // is not a parser fix. This assertion stays as written — it is the
+    // "not an operator" position, and silencing it would erase the
+    // question. `verum_parser` therefore cannot join a CI --tests tier
+    // until the decision lands.
     let result = parser.parse_expr_str("1 ++ 2", FileId::new(0));
-    // Parser should detect this as an error
-    // Note: `++` is not a valid Verum operator
-    assert!(result.is_err());
+    assert!(
+        result.is_err(),
+        "`1 ++ 2` parses successfully. This is the open `++` decision \
+         (T0643), not a parser regression — see the comment above."
+    );
 }
 
 // ============================================================================

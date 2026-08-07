@@ -322,6 +322,28 @@ pub enum SyntaxKind {
     UNDERSCORE = 201,
 
     // === Operators (210-239) ===
+    /// `++` — lexed as its own token.
+    ///
+    /// It has a kind of its own because this tree is LOSSLESS: the IDE
+    /// parser used to map `TokenKind::PlusPlus` to `PLUS`, so `1 ++ 2`
+    /// round-tripped as `1 + 2` — one token silently rewritten into a
+    /// different one, which the module's own contract forbids.
+    ///
+    /// Its MEANING is an open language decision, and the three sources
+    /// disagree: `grammar/verum.ebnf` does not contain `++` at all
+    /// (and has no unary `+` for `1 ++ 2` to decompose into),
+    /// `verum_fast_parser` — the compile path — maps it to
+    /// `BinOp::Concat`, and the specs contradict each other (L0
+    /// `invalid_arithmetic.vr` asserts `5 ++ 3` is invalid while L1
+    /// `recursive_refinements.vr` and L2 `json_patch_typecheck.vr`
+    /// depend on it working). Representing the token faithfully is
+    /// correct under every outcome of that decision; rewriting it to
+    /// `PLUS` is correct under none.
+    ///
+    /// Placed at 286 rather than beside the operators because 210-285
+    /// are taken; the discriminants are explicit, so the value is
+    /// arbitrary but stable.
+    PLUS_PLUS = 286,
     /// `+`
     PLUS = 210,
     /// `-`
@@ -1109,6 +1131,7 @@ impl SyntaxKind {
             SyntaxKind::QUESTION_QUESTION => "??",
             SyntaxKind::QUESTION_QUESTION_BANG => "??!",
             SyntaxKind::UNDERSCORE => "_",
+            SyntaxKind::PLUS_PLUS => "++",
             SyntaxKind::PLUS => "+",
             SyntaxKind::MINUS => "-",
             SyntaxKind::STAR => "*",

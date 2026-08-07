@@ -2812,7 +2812,7 @@ fn token_kind_to_syntax_kind(kind: &TokenKind) -> SyntaxKind {
         TokenKind::Dollar => SyntaxKind::IDENT, // Treat as identifier context
 
         // Operators
-        TokenKind::PlusPlus => SyntaxKind::PLUS, // ++ maps to PLUS in legacy parser
+        TokenKind::PlusPlus => SyntaxKind::PLUS_PLUS,
         TokenKind::Plus => SyntaxKind::PLUS,
         TokenKind::Minus => SyntaxKind::MINUS,
         TokenKind::Star => SyntaxKind::STAR,
