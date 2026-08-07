@@ -10909,7 +10909,21 @@ impl TypeChecker {
             // `Maybe<_>`: the payload var WAS bound to Int two
             // statements later, the judge just never looked).
             let resolved = self.normalize_type(&self.unifier.apply(&bind_ty));
-            if resolved.free_vars().is_empty() {
+            let free = resolved.free_vars();
+            if free.is_empty() {
+                continue;
+            }
+            // GENERIC-PARAM EXEMPTION (T0148 protocols leg): the
+            // enclosing fn's OWN type params are determined BY THE
+            // CALLER — rank-1 polymorphism. `three_way_max<T: Ord>`'s
+            // `let ab = if a.ge(&b) { a } else { b }` types as T; the
+            // judge saw T's var as free and E404'd a perfectly
+            // determined binding. A candidate whose free vars all
+            // belong to the fn's declared params is not ambiguous.
+            if free
+                .iter()
+                .all(|v| func_type_param_vars.iter().any(|p| p == v))
+            {
                 continue;
             }
             // SHAPE criterion v2 (T0585/T0701 calibration against BOTH
