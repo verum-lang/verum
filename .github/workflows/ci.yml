@@ -337,11 +337,22 @@ jobs:
 
       - name: Run L0-critical (100% required)
         working-directory: vcs
-        run: make test-l0 PARALLEL=4
+        # tee + failure artifact — runner log blobs vanish on failures.
+        run: make test-l0 PARALLEL=4 2>&1 | tee l0.log; exit ${PIPESTATUS[0]}
 
       - name: Run L1-core (100% required)
         working-directory: vcs
-        run: make test-l1 PARALLEL=4
+        run: make test-l1 PARALLEL=4 2>&1 | tee l1.log; exit ${PIPESTATUS[0]}
+
+      - name: Upload VCS run logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-run-logs
+          path: |
+            vcs/l0.log
+            vcs/l1.log
+          retention-days: 3
 
       - name: Upload VCS reports
         if: always()
