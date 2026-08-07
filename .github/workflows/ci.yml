@@ -279,7 +279,18 @@ jobs:
       # stdlib and overflowed the shared runner twice.
       - name: Run tests/ for verum_vbc
         timeout-minutes: 45
-        run: cargo test --locked --tests -p verum_vbc
+        # tee into a file + artifact on failure: the runner's log blobs
+        # for this job have vanished on every failure (Azure-side), so
+        # the artifact is the only surviving diagnostic channel.
+        run: cargo test --locked --tests -p verum_vbc 2>&1 | tee vbc-tests.log; exit ${PIPESTATUS[0]}
+
+      - name: Upload vbc test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vbc-tests-log
+          path: vbc-tests.log
+          retention-days: 3
 
   # ---------------------------------------------------------------------------
   # Job 2: VCS L0 (2,963 specs, 100%) + L1 (499 specs, 100%). Blocks merge.
