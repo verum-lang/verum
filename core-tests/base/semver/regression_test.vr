@@ -8,7 +8,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.semver.{SemVer, SemVerError, parse, cmp, format};
+mount core.base.semver.{SemVer, SemVerError};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -16,7 +16,7 @@ mount core.collections.list.List;
 // `core.base.semver.parse` collides with another module's bare `parse`
 // (returning `ParsedType` somewhere in stdlib). The static-method
 // dispatcher's first-suffix-wins rule (task #17/#39) picks the wrong
-// sibling; `parse(&"1.2.3".to_text()).unwrap()` panics with:
+// sibling; `SemVer.parse(&"1.2.3".to_text()).unwrap()` panics with:
 //   method 'ParsedType.unwrap' not found on receiver of runtime kind
 //   `ParsedType` ... 5 candidate(s) end with `.unwrap`
 //   (Maybe / Result / CheckedResult / Poll / ReduceResult)
@@ -33,7 +33,7 @@ mount core.collections.list.List;
 // correctly under --interp again.
 @test
 fn regression_pin_parse_bare_dispatch_returns_wrong_type() {
-    let r = parse(&"1.2.3".to_text());
+    let r = SemVer.parse(&"1.2.3".to_text());
     assert(r.is_ok());
 }
 
@@ -54,13 +54,13 @@ fn regression_pin_format_panics_on_stub() {
         pre_release: List.new(),
         build_meta:  List.new(),
     };
-    let _ = format(&v);
+    let _ = f"{v}";
 }
 
 // =============================================================================
 // REGRESSION §C: SemVer is a 5-field record (major, minor, patch,
 // pre_release, build_meta). A defect that reordered or renamed any
-// field would break every consumer of cmp() / format() / parse().
+// field would break every consumer of cmp() / format() / SemVer.parse().
 // =============================================================================
 
 @test
@@ -95,7 +95,7 @@ fn regression_cmp_major_dominates_minor() {
         major: 2_u64, minor: 0_u64, patch: 0_u64,
         pre_release: List.new(), build_meta: List.new(),
     };
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Less => {},
         _ => panic("expected 1.99.99 < 2.0.0 — major dominates"),
     }
@@ -111,7 +111,7 @@ fn regression_cmp_minor_dominates_patch() {
         major: 1_u64, minor: 1_u64, patch: 0_u64,
         pre_release: List.new(), build_meta: List.new(),
     };
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Less => {},
         _ => panic("expected 1.0.99 < 1.1.0 — minor dominates patch"),
     }
@@ -135,7 +135,7 @@ fn regression_cmp_prerelease_strictly_less_than_release() {
         pre_release: List.new(),
         build_meta:  List.new(),
     };
-    match cmp(&pre, &rel) {
+    match pre.cmp(&rel) {
         Ordering.Less => {},
         _ => panic("expected 1.0.0-alpha < 1.0.0 (SemVer §11.3)"),
     }

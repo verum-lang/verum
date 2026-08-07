@@ -63,7 +63,7 @@ module core.base.semver_constraint;
 mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
-mount base.semver.{SemVer, SemVerError, parse as parse_version, cmp as cmp_versions, format_semver};
+mount base.semver.{SemVer, SemVerError};
 
 // =============================================================================
 // SemVerConstraint — algebraic constraint tree
@@ -266,22 +266,22 @@ fn matches_impl(c: &SemVerConstraint, v: &SemVer, opts: &MatchOptions) -> Bool {
             // Eq with a pre-release operand always allows pre-release input
             // for that exact tuple. Otherwise: the input version must
             // structurally equal the operand (build_meta ignored per §10).
-            cmp_versions(v, target) is Equal
+            v.cmp(target) is Equal
         }
         SemVerConstraint.Gt(target) => {
-            cmp_versions(v, target) is Greater
+            v.cmp(target) is Greater
                 && allow_prerelease_check(v, opts, &Maybe.Some(target.clone()))
         }
         SemVerConstraint.Gte(target) => {
-            !(cmp_versions(v, target) is Less)
+            !(v.cmp(target) is Less)
                 && allow_prerelease_check(v, opts, &Maybe.Some(target.clone()))
         }
         SemVerConstraint.Lt(target) => {
-            cmp_versions(v, target) is Less
+            v.cmp(target) is Less
                 && allow_prerelease_check(v, opts, &Maybe.Some(target.clone()))
         }
         SemVerConstraint.Lte(target) => {
-            !(cmp_versions(v, target) is Greater)
+            !(v.cmp(target) is Greater)
                 && allow_prerelease_check(v, opts, &Maybe.Some(target.clone()))
         }
         SemVerConstraint.And(a, b) => {
@@ -597,11 +597,11 @@ fn format_impl(c: &SemVerConstraint) -> Text {
     match c {
         SemVerConstraint.Any        => "*".to_text(),
         SemVerConstraint.Empty      => "<0.0.0".to_text(),
-        SemVerConstraint.Eq(v)      => "=".to_text().concat(&format_semver(v)),
-        SemVerConstraint.Gt(v)      => ">".to_text().concat(&format_semver(v)),
-        SemVerConstraint.Gte(v)     => ">=".to_text().concat(&format_semver(v)),
-        SemVerConstraint.Lt(v)      => "<".to_text().concat(&format_semver(v)),
-        SemVerConstraint.Lte(v)     => "<=".to_text().concat(&format_semver(v)),
+        SemVerConstraint.Eq(v)      => "=".to_text().concat(&f"{v}"),
+        SemVerConstraint.Gt(v)      => ">".to_text().concat(&f"{v}"),
+        SemVerConstraint.Gte(v)     => ">=".to_text().concat(&f"{v}"),
+        SemVerConstraint.Lt(v)      => "<".to_text().concat(&f"{v}"),
+        SemVerConstraint.Lte(v)     => "<=".to_text().concat(&f"{v}"),
         SemVerConstraint.And(a, b)  => format_impl(&**a).concat(&", ".to_text()).concat(&format_impl(&**b)),
         SemVerConstraint.Or(a, b)   => format_impl(&**a).concat(&" || ".to_text()).concat(&format_impl(&**b)),
     }

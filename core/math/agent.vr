@@ -47,6 +47,8 @@ mount core.math.tensor.{
 mount core.math.nn.{Module, Linear};
 mount core.*;
 mount core.io.path.{Path};
+// Prelude is curated (core/mod.vr): serde is mounted explicitly.
+mount core.base.serde.{Serialize, Deserialize};
 mount core.math.internal.{Value};
 
 // =============================================================================

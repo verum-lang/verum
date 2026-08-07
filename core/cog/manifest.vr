@@ -52,7 +52,7 @@ module core.cog.manifest;
 mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
-mount base.semver.{SemVer, parse as parse_semver, format_semver};
+mount base.semver.{SemVer};
 mount base.semver_constraint.{
     SemVerConstraint, parse as parse_constraint,
     format_constraint, matches_default,
@@ -326,7 +326,7 @@ fn parse_cog_identity(root: &Map<Text, ConfigValue>) -> Result<CogIdentity, Mani
     let name_text = require_string(cog_t, &"cog.name".to_text(), &"name".to_text())?;
     // CogName refinement is enforced at construction time.
     let version_text = require_string(cog_t, &"cog.version".to_text(), &"version".to_text())?;
-    let version = match parse_semver(&version_text) {
+    let version = match SemVer.parse(&version_text) {
         Result.Ok(v)  => v,
         Result.Err(e) => return Result.Err(ManifestError.InvalidVersion(f"{e}")),
     };
@@ -499,7 +499,7 @@ fn parse_features(root: &Map<Text, ConfigValue>) -> (Map<Text, List<Text>>, List
 fn format_cog_identity(c: &CogIdentity) -> ConfigValue {
     let mut t: Map<Text, ConfigValue> = Map.new();
     t.insert("name".to_text(), ConfigValue.ConfigString(c.name.clone()));
-    t.insert("version".to_text(), ConfigValue.ConfigString(format_semver(&c.version)));
+    t.insert("version".to_text(), ConfigValue.ConfigString(f"{c.version}"));
     t.insert("edition".to_text(), ConfigValue.ConfigString(c.edition.clone()));
     if !c.authors.is_empty()  { t.insert("authors".to_text(),  string_list_to_array(&c.authors)); }
     if let Maybe.Some(d) = &c.description { t.insert("description".to_text(), ConfigValue.ConfigString(d.clone())); }

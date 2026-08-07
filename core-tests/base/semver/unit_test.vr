@@ -22,10 +22,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.semver.{
-    SemVer, SemVerError,
-    cmp, format, format_semver,
-};
+mount core.base.semver.{SemVer, SemVerError};
 mount core.collections.list.List;
 
 fn mk_semver(major: UInt64, minor: UInt64, patch: UInt64) -> SemVer {
@@ -96,7 +93,7 @@ fn test_construct_with_prerelease_list() {
 fn test_cmp_equal_versions_returns_equal() {
     let a = mk_semver(1_u64, 2_u64, 3_u64);
     let b = mk_semver(1_u64, 2_u64, 3_u64);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Equal => {},
         _ => panic("expected Equal for 1.2.3 == 1.2.3"),
     }
@@ -106,11 +103,11 @@ fn test_cmp_equal_versions_returns_equal() {
 fn test_cmp_major_difference() {
     let a = mk_semver(1_u64, 0_u64, 0_u64);
     let b = mk_semver(2_u64, 0_u64, 0_u64);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Less => {},
         _ => panic("expected Less for 1.0.0 < 2.0.0"),
     }
-    match cmp(&b, &a) {
+    match b.cmp(&a) {
         Ordering.Greater => {},
         _ => panic("expected Greater for 2.0.0 > 1.0.0"),
     }
@@ -120,7 +117,7 @@ fn test_cmp_major_difference() {
 fn test_cmp_minor_difference() {
     let a = mk_semver(1_u64, 0_u64, 0_u64);
     let b = mk_semver(1_u64, 1_u64, 0_u64);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Less => {},
         _ => panic("expected Less for 1.0.0 < 1.1.0"),
     }
@@ -130,7 +127,7 @@ fn test_cmp_minor_difference() {
 fn test_cmp_patch_difference() {
     let a = mk_semver(1_u64, 0_u64, 0_u64);
     let b = mk_semver(1_u64, 0_u64, 1_u64);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Less => {},
         _ => panic("expected Less for 1.0.0 < 1.0.1"),
     }
@@ -141,7 +138,7 @@ fn test_cmp_prerelease_lower_than_release() {
     // SemVer §11.3: 1.0.0-alpha < 1.0.0 (prerelease < release).
     let a = mk_semver_pre(1_u64, 0_u64, 0_u64, ["alpha".to_text()]);
     let b = mk_semver(1_u64, 0_u64, 0_u64);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Less => {},
         _ => panic("expected 1.0.0-alpha < 1.0.0"),
     }
@@ -151,7 +148,7 @@ fn test_cmp_prerelease_lower_than_release() {
 fn test_cmp_two_prereleases_alphabetic() {
     let a = mk_semver_pre(1_u64, 0_u64, 0_u64, ["alpha".to_text()]);
     let b = mk_semver_pre(1_u64, 0_u64, 0_u64, ["beta".to_text()]);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Less => {},
         _ => panic("expected alpha < beta"),
     }
@@ -164,7 +161,7 @@ fn test_cmp_two_prereleases_longer_wins() {
     let b = mk_semver_pre(1_u64, 0_u64, 0_u64, [
         "alpha".to_text(), "1".to_text(),
     ]);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Less => {},
         _ => panic("expected [alpha] < [alpha.1]"),
     }
@@ -204,22 +201,14 @@ fn test_error_variants_eq_same_variant_different_payload_unequal() {
 }
 
 // =============================================================================
-// Section 4: format / format_semver aliases
+// Section 4: Display rendering (the ONE public rendering surface)
 // =============================================================================
-
-@ignore("`format` calls Text.from_utf8_unchecked which was private; visibility fix landed in this branch, activates on next precompiled-stdlib refresh.")
-@test
-fn test_format_aliases_match() {
-    let v = mk_semver(1_u64, 2_u64, 3_u64);
-    // `format_semver` is the backward-compat alias for `format`.
-    assert_eq(format(&v), format_semver(&v));
-}
 
 @ignore("Same Text.from_utf8_unchecked visibility defect — gated on stdlib refresh.")
 @test
 fn test_format_zero_version() {
     let v = mk_semver(0_u64, 0_u64, 0_u64);
-    let s = format(&v);
+    let s = f"{v}";
     // The canonical zero-version formats to "0.0.0".
     assert_eq(s.len(), 5);   // "0.0.0" has 5 chars
 }

@@ -142,7 +142,7 @@ const U64_MAX_DIV_10: UInt64 = 1_844_674_407_370_955_161_u64;
 // Parser
 // =============================================================================
 
-public fn parse(s: &Text) -> Result<SemVer, SemVerError> {
+fn parse_text(s: &Text) -> Result<SemVer, SemVerError> {
     let b = s.as_bytes();
     if b.len() == 0 {
         return Result.Err(SemVerError.Malformed(Text.from("empty")));
@@ -323,8 +323,9 @@ fn is_prerelease_ch(c: Byte) -> Bool {
 // Ordering (§11)
 // =============================================================================
 
-/// Total order: Less, Equal, or Greater per SemVer §11.
-public fn cmp(a: &SemVer, b: &SemVer) -> Ordering {
+/// Total order per SemVer §11 (build-meta is NOT significant).
+/// Private: the public surface is `implement Ord for SemVer`.
+fn compare(a: &SemVer, b: &SemVer) -> Ordering {
     let c = cmp_u64(a.major, b.major);
     if c != Equal { return c; }
     let c = cmp_u64(a.minor, b.minor);
@@ -426,13 +427,9 @@ fn cmp_int(a: Int, b: Int) -> Ordering {
 // Formatter
 // =============================================================================
 
-/// Format a SemVer as a canonical RFC 2.0.0 string.
-///
-/// Provided under the canonical name `format` for ergonomic
-/// `mount core.base.semver.{format as semver_format}`. The
-/// `format_semver` alias is kept for backward compatibility with
-/// the older naming convention.
-public fn format(v: &SemVer) -> Text {
+/// Render a SemVer as its canonical 2.0.0 string.
+/// Private: the public surface is `implement Display for SemVer`.
+fn render(v: &SemVer) -> Text {
     let mut out: List<Byte> = [];
     push_u64(&mut out, v.major);
     out.push('.' as Byte);
@@ -451,56 +448,58 @@ public fn format(v: &SemVer) -> Text {
     Text.from_utf8_unchecked(out.as_slice())
 }
 
-/// Backward-compatible alias for `format`.
-public fn format_semver(v: &SemVer) -> Text {
-    format(v)
-}
-
 // =============================================================================
-// `mount core.base.semver.{parse_semver, semver_compare, SemVerOrdering,
-// semver_zero}` import-site aliases used by downstream consumers
-// (`core/cog/resolve.vr`). Without these the dependency resolver
-// fails AOT compilation with `undefined function: semver_compare`,
-// blocking the entire stdlib-wide AOT pipeline (task #7).
+// Public surface — protocol-coherent, no ambient verbs
 // =============================================================================
+//
+// SemVer's entire API is reached through the TYPE (`SemVer.parse`,
+// `SemVer.zero`) or through the LANGUAGE's own protocols (`Display`
+// for rendering, `Ord`/`Eq` for comparison).  Nothing here is a free
+// function: a bare `parse` / `format` / `cmp` in the ambient namespace
+// binds silently across unrelated domains (five stdlib modules used to
+// export a free `parse`), which is exactly what design principle #2
+// («No Magic: all dependencies explicit») forbids.
 
-/// Free-function alias for `parse` — matches the
-/// `mount core.base.semver.{parse_semver}` import style.
-public fn parse_semver(s: &Text) -> Result<SemVer, SemVerError> {
-    parse(s)
-}
+implement SemVer {
+    /// Parse a canonical SemVer 2.0.0 string.
+    public fn parse(s: &Text) -> Result<SemVer, SemVerError> {
+        parse_text(s)
+    }
 
-/// Three-way comparison verdict for `semver_compare`. Equivalent to
-/// `Ordering` but exposed under a SemVer-specific name so call sites
-/// can pattern-match without confusion against other orderings in
-/// scope.
-public type SemVerOrdering is
-      Less
-    | Equal
-    | Greater;
-
-/// Three-way comparison of two SemVers. Equivalent to `cmp(a, b)`
-/// but returns the SemVer-flavoured `SemVerOrdering` rather than the
-/// general `Ordering` type. Used by `core/cog/resolve.vr` for
-/// dependency-resolution comparisons.
-public fn semver_compare(a: &SemVer, b: &SemVer) -> SemVerOrdering {
-    match cmp(a, b) {
-        Ordering.Less    => SemVerOrdering.Less,
-        Ordering.Equal   => SemVerOrdering.Equal,
-        Ordering.Greater => SemVerOrdering.Greater,
+    /// The all-zero version `0.0.0` — the identity lower bound for
+    /// resolution loops and the "nothing pinned yet" sentinel.
+    public fn zero() -> SemVer {
+        SemVer {
+            major: 0_u64,
+            minor: 0_u64,
+            patch: 0_u64,
+            pre_release: List.new(),
+            build_meta:  List.new(),
+        }
     }
 }
 
-/// The all-zero SemVer (`0.0.0` with no pre-release / build-meta).
-/// Convenience sentinel for "no version pinned yet" and lower-bound
-/// initialiser for cog version resolution loops.
-public fn semver_zero() -> SemVer {
-    SemVer {
-        major: 0_u64,
-        minor: 0_u64,
-        patch: 0_u64,
-        pre_release: List.new(),
-        build_meta:  List.new(),
+implement Display for SemVer {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(render(self).as_str())
+    }
+}
+
+implement Eq for SemVer {
+    /// Precedence equality per §11: build-meta is NOT significant, so
+    /// `1.0.0+a == 1.0.0+b`.  Defined through the same comparison the
+    /// Ord impl uses, so the two can never disagree.
+    fn eq(&self, other: &SemVer) -> Bool {
+        match compare(self, other) {
+            Ordering.Equal => true,
+            _              => false,
+        }
+    }
+}
+
+implement Ord for SemVer {
+    fn cmp(&self, other: &SemVer) -> Ordering {
+        compare(self, other)
     }
 }
 

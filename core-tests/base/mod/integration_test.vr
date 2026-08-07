@@ -9,7 +9,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.semver.{SemVer, parse as parse_semver};
+mount core.base.semver.{SemVer};
 mount core.base.{
     VERSION, MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION,
     Byte, Bytes, TextResult, StdResult,
@@ -93,13 +93,13 @@ fn test_std_result_alias() {
 
 @test
 fn test_version_parses_as_semver() {
-    let parsed = parse_semver(VERSION);
+    let parsed = SemVer.parse(VERSION);
     assert(parsed.is_ok(), f"VERSION '{VERSION}' must parse as semver");
 }
 
 @test
 fn test_version_components_consistent() {
-    let parsed = parse_semver(VERSION).unwrap();
+    let parsed = SemVer.parse(VERSION).unwrap();
     assert_eq(parsed.major, MAJOR_VERSION as UInt64);
     assert_eq(parsed.minor, MINOR_VERSION as UInt64);
     assert_eq(parsed.patch, PATCH_VERSION as UInt64);

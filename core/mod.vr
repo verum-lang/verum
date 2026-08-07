@@ -477,8 +477,41 @@ public module meta;
 // The prelude is automatically imported in every Verum module.
 // It contains the most fundamental types && functions.
 public module prelude {
-    // From base (fundamental types and protocols)
-    public mount super.base.*;
+    // =========================================================================
+    // From base — CURATED, never a directory glob
+    // =========================================================================
+    //
+    // INCLUSION LAW: a name belongs in the prelude only if the LANGUAGE
+    // ITSELF requires it to be in scope everywhere — the types the
+    // grammar and the checker name (`Maybe`, `Result`, `Ordering`), the
+    // protocols `@derive(...)` and generic bounds refer to, the
+    // iteration model, the panic/assert built-in family, the semantic
+    // memory types, and the coercion markers the unifier consults.
+    // EVERYTHING ELSE IS MOUNTED EXPLICITLY at its use site.
+    //
+    // Why this is not a glob: `public mount super.base.*;` published all
+    // 316 top-level names of base/ — including domain utilities — into
+    // every program, so five different modules each contributed a free
+    // `parse`, two a `matches`, two a `generate`, plus ambient `and`,
+    // `or`, `format`, `cmp`, `nil`, `v4`, `compile`, `retry`.  A bare
+    // `parse("1.2.3")` in a file with no mounts silently bound to the
+    // META-TERM parser and returned `Ok(MeTerm(1.2.3))`; `generate()`
+    // reported `Time.now` vs `Ulid.now` as competing candidates.  That
+    // is precisely what design principle #2 («No Magic: all dependencies
+    // explicit via mount») forbids, and it is the ambient-collision
+    // class that forces the checker into last-write-wins guesswork.
+    public mount super.base.maybe.*;
+    public mount super.base.result.*;
+    public mount super.base.ordering.*;
+    public mount super.base.protocols.*;
+    public mount super.base.ops.*;
+    public mount super.base.error.*;
+    public mount super.base.iterator.*;
+    public mount super.base.panic.*;
+    public mount super.base.memory.*;
+    public mount super.base.cell.*;
+    public mount super.base.primitives.*;
+    public mount super.base.coercion.*;
 
     // From collections (common types)
     public mount super.collections.List;

@@ -67,7 +67,7 @@ module core.cog.resolve;
 
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
-mount base.semver.{SemVer, parse_semver, semver_compare, SemVerOrdering, semver_zero};
+mount base.semver.{SemVer};
 mount base.semver_constraint.{
     SemVerConstraint, parse as parse_constraint,
     matches as constraint_matches,
@@ -222,23 +222,23 @@ public fn range_contains(r: &VersionRange, v: &SemVer) -> Bool {
 fn interval_contains(iv: &Interval, v: &SemVer) -> Bool {
     let lo_ok = match &iv.lo {
         Bound.Unbounded => true,
-        Bound.Included(b) => match semver_compare(v, b) {
-            SemVerOrdering.Less => false,
+        Bound.Included(b) => match v.cmp(b) {
+            Ordering.Less => false,
             _ => true,
         },
-        Bound.Excluded(b) => match semver_compare(v, b) {
-            SemVerOrdering.Greater => true,
+        Bound.Excluded(b) => match v.cmp(b) {
+            Ordering.Greater => true,
             _ => false,
         },
     };
     let hi_ok = match &iv.hi {
         Bound.Unbounded => true,
-        Bound.Included(b) => match semver_compare(v, b) {
-            SemVerOrdering.Greater => false,
+        Bound.Included(b) => match v.cmp(b) {
+            Ordering.Greater => false,
             _ => true,
         },
-        Bound.Excluded(b) => match semver_compare(v, b) {
-            SemVerOrdering.Less => true,
+        Bound.Excluded(b) => match v.cmp(b) {
+            Ordering.Less => true,
             _ => false,
         },
     };
@@ -320,10 +320,10 @@ fn bound_lo_max(a: &Bound, b: &Bound) -> Bound {
         _ => {
             let av = bound_value(a);
             let bv = bound_value(b);
-            match semver_compare(av, bv) {
-                SemVerOrdering.Greater => a.clone(),
-                SemVerOrdering.Less    => b.clone(),
-                SemVerOrdering.Equal   => {
+            match av.cmp(bv) {
+                Ordering.Greater => a.clone(),
+                Ordering.Less    => b.clone(),
+                Ordering.Equal   => {
                     // tie: exclusive wins (more restrictive)
                     match (a, b) {
                         (Bound.Excluded(_), _) => a.clone(),
@@ -343,10 +343,10 @@ fn bound_hi_min(a: &Bound, b: &Bound) -> Bound {
         _ => {
             let av = bound_value(a);
             let bv = bound_value(b);
-            match semver_compare(av, bv) {
-                SemVerOrdering.Less    => a.clone(),
-                SemVerOrdering.Greater => b.clone(),
-                SemVerOrdering.Equal   => {
+            match av.cmp(bv) {
+                Ordering.Less    => a.clone(),
+                Ordering.Greater => b.clone(),
+                Ordering.Equal   => {
                     match (a, b) {
                         (Bound.Excluded(_), _) => a.clone(),
                         (_, Bound.Excluded(_)) => b.clone(),
@@ -383,13 +383,13 @@ fn interval_is_degenerate(lo: &Bound, hi: &Bound) -> Bool {
         _ => {
             let lv = bound_value(lo);
             let hv = bound_value(hi);
-            match semver_compare(lv, hv) {
-                SemVerOrdering.Greater => true,
-                SemVerOrdering.Equal => match (lo, hi) {
+            match lv.cmp(hv) {
+                Ordering.Greater => true,
+                Ordering.Equal => match (lo, hi) {
                     (Bound.Included(_), Bound.Included(_)) => false,
                     _ => true, // exclusive on either side at same value = empty
                 },
-                SemVerOrdering.Less => false,
+                Ordering.Less => false,
             }
         }
     }
@@ -437,10 +437,10 @@ fn interval_lo_less(a: &Interval, b: &Interval) -> Bool {
         _ => {
             let av = bound_value(&a.lo);
             let bv = bound_value(&b.lo);
-            match semver_compare(av, bv) {
-                SemVerOrdering.Less    => true,
-                SemVerOrdering.Greater => false,
-                SemVerOrdering.Equal   => match (&a.lo, &b.lo) {
+            match av.cmp(bv) {
+                Ordering.Less    => true,
+                Ordering.Greater => false,
+                Ordering.Equal   => match (&a.lo, &b.lo) {
                     (Bound.Included(_), Bound.Excluded(_)) => true,
                     _ => false,
                 },
@@ -457,13 +457,13 @@ fn intervals_overlap_or_adjacent(a: &Interval, b: &Interval) -> Bool {
         _ => {
             let ahv = bound_value(&a.hi);
             let blv = bound_value(&b.lo);
-            match semver_compare(ahv, blv) {
-                SemVerOrdering.Greater => true,
-                SemVerOrdering.Equal   => match (&a.hi, &b.lo) {
+            match ahv.cmp(blv) {
+                Ordering.Greater => true,
+                Ordering.Equal   => match (&a.hi, &b.lo) {
                     (Bound.Included(_), Bound.Included(_)) => true,
                     _ => false,
                 },
-                SemVerOrdering.Less    => false,
+                Ordering.Less    => false,
             }
         }
     }
@@ -483,10 +483,10 @@ fn bound_hi_max(a: &Bound, b: &Bound) -> Bound {
         _ => {
             let av = bound_value(a);
             let bv = bound_value(b);
-            match semver_compare(av, bv) {
-                SemVerOrdering.Greater => a.clone(),
-                SemVerOrdering.Less    => b.clone(),
-                SemVerOrdering.Equal   => match (a, b) {
+            match av.cmp(bv) {
+                Ordering.Greater => a.clone(),
+                Ordering.Less    => b.clone(),
+                Ordering.Equal   => match (a, b) {
                     (Bound.Included(_), _) => a.clone(),
                     (_, Bound.Included(_)) => b.clone(),
                     _ => a.clone(),
@@ -1272,7 +1272,7 @@ fn sort_semvers_desc(vs: &mut List<SemVer>) {
     let mut i: Int = 1;
     while i < n {
         let mut j: Int = i;
-        while j > 0 && semver_compare(&vs[j], &vs[j - 1]) is SemVerOrdering.Greater {
+        while j > 0 && &vs[j].cmp(&vs[j - 1]) is Ordering.Greater {
             vs.swap(j, j - 1);
             j = j - 1;
         }

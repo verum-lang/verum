@@ -12,7 +12,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.semver.{SemVer, cmp};
+mount core.base.semver.{SemVer, SemVerError};
 mount core.collections.list.List;
 
 fn mk_semver(major: UInt64, minor: UInt64, patch: UInt64) -> SemVer {
@@ -49,7 +49,7 @@ fn law_cmp_reflexive_on_simple_versions() {
     let mut i: Int = 0;
     while i < cases.len() {
         let v = cases[i].clone();
-        match cmp(&v, &v) {
+        match v.cmp(&v) {
             Ordering.Equal => {},
             _ => panic("cmp must be reflexive"),
         }
@@ -60,25 +60,25 @@ fn law_cmp_reflexive_on_simple_versions() {
 @test
 fn law_cmp_reflexive_on_prerelease_versions() {
     let v = mk_semver_pre(1_u64, 0_u64, 0_u64, ["alpha".to_text()]);
-    match cmp(&v, &v) {
+    match v.cmp(&v) {
         Ordering.Equal => {},
         _ => panic("cmp must be reflexive on prerelease"),
     }
 }
 
 // =============================================================================
-// §B  cmp anti-symmetry — cmp(a,b) flips when args swapped.
+// §B  cmp anti-symmetry — a.cmp(&b) flips when args swapped.
 // =============================================================================
 
 @test
 fn law_cmp_anti_symmetric_major() {
     let a = mk_semver(1_u64, 0_u64, 0_u64);
     let b = mk_semver(2_u64, 0_u64, 0_u64);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Less => {},
         _ => panic("expected Less for 1.0.0 < 2.0.0"),
     }
-    match cmp(&b, &a) {
+    match b.cmp(&a) {
         Ordering.Greater => {},
         _ => panic("expected Greater for 2.0.0 > 1.0.0"),
     }
@@ -88,11 +88,11 @@ fn law_cmp_anti_symmetric_major() {
 fn law_cmp_anti_symmetric_patch() {
     let a = mk_semver(1_u64, 0_u64, 0_u64);
     let b = mk_semver(1_u64, 0_u64, 1_u64);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Less => {},
         _ => panic("expected Less for 1.0.0 < 1.0.1"),
     }
-    match cmp(&b, &a) {
+    match b.cmp(&a) {
         Ordering.Greater => {},
         _ => panic("expected Greater for 1.0.1 > 1.0.0"),
     }
@@ -106,7 +106,7 @@ fn law_cmp_anti_symmetric_patch() {
 fn law_major_dominates_minor() {
     let a = mk_semver(2_u64, 0_u64, 0_u64);
     let b = mk_semver(1_u64, 99_u64, 99_u64);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Greater => {},
         _ => panic("expected 2.0.0 > 1.99.99"),
     }
@@ -116,7 +116,7 @@ fn law_major_dominates_minor() {
 fn law_minor_dominates_patch() {
     let a = mk_semver(1_u64, 2_u64, 0_u64);
     let b = mk_semver(1_u64, 1_u64, 99_u64);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Greater => {},
         _ => panic("expected 1.2.0 > 1.1.99"),
     }
@@ -126,7 +126,7 @@ fn law_minor_dominates_patch() {
 fn law_patch_strictly_orders_within_minor() {
     let a = mk_semver(1_u64, 0_u64, 0_u64);
     let b = mk_semver(1_u64, 0_u64, 1_u64);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Less => {},
         _ => panic("expected 1.0.0 < 1.0.1"),
     }
@@ -140,7 +140,7 @@ fn law_patch_strictly_orders_within_minor() {
 fn law_prerelease_strictly_less_than_release() {
     let pre = mk_semver_pre(1_u64, 0_u64, 0_u64, ["alpha".to_text()]);
     let rel = mk_semver(1_u64, 0_u64, 0_u64);
-    match cmp(&pre, &rel) {
+    match pre.cmp(&rel) {
         Ordering.Less => {},
         _ => panic("expected 1.0.0-alpha < 1.0.0"),
     }
@@ -151,11 +151,11 @@ fn law_prerelease_versions_ordered_alphabetically() {
     let alpha = mk_semver_pre(1_u64, 0_u64, 0_u64, ["alpha".to_text()]);
     let beta  = mk_semver_pre(1_u64, 0_u64, 0_u64, ["beta".to_text()]);
     let rc    = mk_semver_pre(1_u64, 0_u64, 0_u64, ["rc".to_text()]);
-    match cmp(&alpha, &beta) {
+    match alpha.cmp(&beta) {
         Ordering.Less => {},
         _ => panic("expected alpha < beta"),
     }
-    match cmp(&beta, &rc) {
+    match beta.cmp(&rc) {
         Ordering.Less => {},
         _ => panic("expected beta < rc"),
     }
@@ -170,7 +170,7 @@ fn law_prerelease_longer_set_greater_than_shorter() {
         "alpha".to_text(),
         "1".to_text(),
     ]);
-    match cmp(&alpha, &alpha_one) {
+    match alpha.cmp(&alpha_one) {
         Ordering.Less => {},
         _ => panic("expected [alpha] < [alpha.1]"),
     }
@@ -184,7 +184,7 @@ fn law_prerelease_longer_set_greater_than_shorter() {
 fn law_cmp_equal_for_same_triple() {
     let a = mk_semver(1_u64, 2_u64, 3_u64);
     let b = mk_semver(1_u64, 2_u64, 3_u64);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Equal => {},
         _ => panic("expected Equal for same triple"),
     }
@@ -194,14 +194,14 @@ fn law_cmp_equal_for_same_triple() {
 fn law_cmp_equal_for_same_prerelease() {
     let a = mk_semver_pre(1_u64, 0_u64, 0_u64, ["rc".to_text()]);
     let b = mk_semver_pre(1_u64, 0_u64, 0_u64, ["rc".to_text()]);
-    match cmp(&a, &b) {
+    match a.cmp(&b) {
         Ordering.Equal => {},
         _ => panic("expected Equal for same prerelease tuple"),
     }
 }
 
 // =============================================================================
-// §F  Transitivity — cmp(a,b)==Less ∧ cmp(b,c)==Less ⇒ cmp(a,c)==Less.
+// §F  Transitivity — a.cmp(&b)==Less ∧ b.cmp(&c)==Less ⇒ a.cmp(&c)==Less.
 // =============================================================================
 
 @test
@@ -209,9 +209,9 @@ fn law_cmp_transitive_on_patches() {
     let a = mk_semver(1_u64, 0_u64, 0_u64);
     let b = mk_semver(1_u64, 0_u64, 1_u64);
     let c = mk_semver(1_u64, 0_u64, 2_u64);
-    let ab_less = match cmp(&a, &b) { Ordering.Less => true, _ => false };
-    let bc_less = match cmp(&b, &c) { Ordering.Less => true, _ => false };
-    let ac_less = match cmp(&a, &c) { Ordering.Less => true, _ => false };
+    let ab_less = match a.cmp(&b) { Ordering.Less => true, _ => false };
+    let bc_less = match b.cmp(&c) { Ordering.Less => true, _ => false };
+    let ac_less = match a.cmp(&c) { Ordering.Less => true, _ => false };
     if ab_less && bc_less { assert(ac_less); }
 }
 
