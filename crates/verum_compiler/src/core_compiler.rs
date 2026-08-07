@@ -1111,7 +1111,7 @@ impl StdlibModuleResolver {
                     // the consumer compiles.  Pre-fix, only consumers
                     // of `core.intrinsics` benefited from forced
                     // ordering; every other foundation utility
-                    // (`core.security.util.rng`, `core.sys.common`,
+                    // (`core.random.secure`, `core.sys.common`,
                     // `core.base.protocols`, etc.) compiled in the
                     // arbitrary order dictated by the hardcoded
                     // baseline, surfacing as

@@ -861,7 +861,7 @@ impl<'s> CompilationPipeline<'s> {
         // `core.collections.{Map}` → `core.collections.bloom` is
         // re-exported by `collections/mod.vr` and pulled into the
         // compile set → bloom.vr's body mounts
-        // `core.security.util.rng.{fill_secure}` → rng was NOT in
+        // `core.random.secure.{fill_secure}` → rng was NOT in
         // user_mount_prefixes (no user wrote `core.security`) so
         // `clear_non_compilable_stdlib_modules` dropped its AST →
         // BloomFilter.try_new lenient-SKIPs on every audit.

@@ -57,7 +57,7 @@ pub struct OntologyEntry {
 ///   * **System** (`core.sys.process.*`, `core.sys.exec.*`):
 ///     Spawn lifetime, Exec target.
 ///   * **Randomness** (`core.security.random.*`,
-///     `core.math.random.*`): Read from `Random` resource.
+///     `core.random.deterministic.*`): Read from `Random` resource.
 ///   * **Observability** (`core.tracing.*`, `core.metrics.*`,
 ///     `core.diagnostics.*`): `Custom("logger")` /
 ///     `Custom("metrics")` / `Custom("tracing")`.
@@ -244,7 +244,7 @@ pub fn canonical_ontology() -> Vec<OntologyEntry> {
             },
         },
         OntologyEntry {
-            path: "core.math.random.next",
+            path: "core.random.deterministic.next",
             capability_factory: || Capability::Read {
                 resource: ResourceTag::Random,
             },

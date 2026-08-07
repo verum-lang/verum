@@ -354,7 +354,7 @@ mod tests {
         //
         //  user mounts `core.collections.{Map, ...}`
         //  → prelude/transitive walk pulls in `core.collections.bloom`
-        //  → bloom mounts `core.security.util.rng.{fill_secure}`
+        //  → bloom mounts `core.random.secure.{fill_secure}`
         //  → rng MUST be reachable, otherwise BloomFilter.try_new
         //    bug-class lenient-skips on `undefined function: fill_secure`.
         //
@@ -380,7 +380,7 @@ mod tests {
             "should include bloom (re-exported by collections/mod.vr)"
         );
         assert!(
-            reachable.contains("core.security.util.rng"),
+            reachable.contains("core.random.secure"),
             "should include rng (mounted by bloom.vr) — \
              missing this is what #119 strict-codegen audit currently bumps into"
         );
