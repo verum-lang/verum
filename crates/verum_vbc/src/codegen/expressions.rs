@@ -30889,18 +30889,45 @@ impl VbcCodegen {
         let intrinsic_info = match lookup_intrinsic(intrinsic_name) {
             Some(info) => info,
             None => {
-                // Intrinsic not found. The nil fallback keeps deliberate
+                // Intrinsic not found: emit a TRAP, not a nil.
+                //
+                // The nil fallback existed so that deliberate
                 // not-yet-implemented host subsystems (verum.tls.*,
-                // verum.k8s.*, …) compiling, but an unregistered name in
-                // a LIVE code path silently returns nil — the class that
-                // left checked_add_u destructuring a nil tuple. Warn at
-                // bake so the miss is visible instead of silent
-                // (tech-debt register C3).
+                // verum.k8s.*, …) keep COMPILING. A trap preserves that
+                // exactly — an unreached call site costs nothing — while
+                // removing what the nil bought at the same time: a LIVE
+                // call that computes with a nil and reports success.
+                //
+                // Measured 2026-08-07: 134 of the 140 distinct
+                // `@intrinsic` names used by core/{security,hash,mac,
+                // subtle,random} are registered NOWHERE in `crates/`.
+                // Among them, `verum.crypto.blake3_compress` made every
+                // BLAKE3 digest garbage, `verum.crypto.blake3_finalize_xof`
+                // left an XOF's output buffer at its allocation zeros —
+                // key material replaced by a constant — and the whole
+                // Ed25519 / P-256 / RSA / ML-KEM surface is a thin
+                // wrapper over names that do not exist, so signing
+                // returned nil and looked like it worked.
+                //
+                // A warning at bake time was already emitted here and did
+                // not stop any of that: a warning in a 2550-file build
+                // log is not a gate. The failure has to reach whoever
+                // runs the code.
                 tracing::warn!(
-                    "[intrinsic] unregistered @intrinsic(\"{}\") in {} — lowering to LoadNil (silent nil at runtime); register it or reroute to a registered name",
+                    "[intrinsic] unregistered @intrinsic(\"{}\") in {} — lowering to a runtime trap; register it or reroute to a registered name",
                     intrinsic_name,
                     self.ctx.current_function.as_deref().unwrap_or("<top-level>"),
                 );
+                let message_id = self.intern_string(&format!(
+                    "@intrinsic(\"{}\") is not implemented in this build \
+                     (called from {}); it has no registry entry, so there is \
+                     no value to return",
+                    intrinsic_name,
+                    self.ctx.current_function.as_deref().unwrap_or("<top-level>"),
+                ));
+                self.ctx.emit(Instruction::Panic { message_id });
+                // The trap does not return; `dest` keeps the shape the
+                // caller expects for register bookkeeping.
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
                 return Ok(Some(dest));
             }
