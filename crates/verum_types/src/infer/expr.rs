@@ -7461,15 +7461,83 @@ impl TypeChecker {
                     // Only check bounds when the type var resolved to a concrete type
                     // (not still a type variable — those are checked at their own call sites)
                     if !matches!(resolved_ty, Type::Var(_)) {
-                        if let Err(_e) = self
+                        // LAZY-LOAD FIRST, THEN JUDGE. The verdict used to be
+                        // thrown away into `tracing::debug!` with the note
+                        // «some stdlib impls may not yet be loaded depending on
+                        // compilation order. The runtime will catch actual
+                        // violations». Both halves were wrong: for a statically
+                        // typed language the runtime must not be the arbiter of
+                        // a compile-time bound, and the load-order worry has a
+                        // real fix — ensure the receiver's impls are loaded and
+                        // re-ask. Silencing it made EVERY generic bound
+                        // decorative: `fn f<T: Ord>(…)` accepted a type with no
+                        // `Ord` and no `cmp` at all, and `T: Semiring` accepted
+                        // a plain record (measured on 2026-08-07).
+                        let first = self
                             .protocol_checker
                             .read()
-                            .check_bounds(&resolved_ty, bounds)
-                        {
-                            // Emit diagnostic but don't hard-error — some stdlib impls
-                            // may not yet be loaded depending on compilation order.
-                            // The runtime will catch actual violations.
-                            tracing::debug!("Protocol bound check warning: {}", _e);
+                            .check_bounds(&resolved_ty, bounds);
+                        // Retry AFTER ensuring the receiver's and the
+                        // protocols' impls are loaded: the lazy stdlib loader
+                        // is receiver-driven, so a bound can look unsatisfied
+                        // purely because nothing had asked for that type yet.
+                        // (This load-order worry is why the verdict used to be
+                        // discarded entirely — the fix is to remove the
+                        // uncertainty, not the check.)
+                        let satisfied = if first.is_err() {
+                            let leaf: Text =
+                                self.get_type_name(&resolved_ty).unwrap_or_default();
+                            if leaf.as_str().is_empty() {
+                                first
+                            } else {
+                                self.ensure_stdlib_type_loaded_transitive(&leaf);
+                                for b in bounds.iter() {
+                                    let rendered = format!("{}", b.protocol);
+                                    let proto_leaf: Text = rendered
+                                        .rsplit('.')
+                                        .next()
+                                        .unwrap_or(rendered.as_str())
+                                        .into();
+                                    self.ensure_stdlib_type_loaded_transitive(&proto_leaf);
+                                }
+                                self.protocol_checker
+                                    .read()
+                                    .check_bounds(&resolved_ty, bounds)
+                            }
+                        } else {
+                            first
+                        };
+                        if let Err(e) = satisfied {
+                            let (proto, is_negative) = match &e {
+                                crate::protocol::ProtocolError::BoundNotSatisfied {
+                                    protocol,
+                                    ..
+                                } => (Text::from(format!("{}", protocol)), false),
+                                crate::protocol::ProtocolError::NegativeBoundViolated {
+                                    protocol,
+                                    ..
+                                } => (Text::from(format!("{}", protocol)), true),
+                                _ => (Text::from(""), false),
+                            };
+                            if !proto.as_str().is_empty() {
+                                let msg = if is_negative {
+                                    format!(
+                                        "type `{}` must NOT implement `{}` here, but it does",
+                                        resolved_ty, proto
+                                    )
+                                } else {
+                                    format!(
+                                        "type `{}` does not implement `{}`, required by this \
+                                         call's bound",
+                                        resolved_ty, proto
+                                    )
+                                };
+                                self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
+                                    code: Text::from("E405"),
+                                    msg: Text::from(msg),
+                                    span: expr.span,
+                                });
+                            }
                         }
                     }
                 }

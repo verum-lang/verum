@@ -9643,6 +9643,10 @@ impl TypeChecker {
         // This is needed for phantom type parameters like `fn foo<T: Bound>()` where T
         // doesn't appear in parameters or return type but is still a valid type parameter.
         let mut func_type_param_vars: List<TypeVar> = List::new();
+        // Protocol bounds per type-param var, carried into the scheme the
+        // body-check publishes (see the note at the insertion site).
+        let mut func_param_protocol_bounds: Map<TypeVar, List<crate::protocol::ProtocolBound>> =
+            Map::new();
         let mut func_implicit_type_vars: Set<TypeVar> = Set::new();
 
         for generic_param in &func.generics {
@@ -9673,6 +9677,18 @@ impl TypeChecker {
                     // This enables infer_method_call to find protocol methods on bounded type params
                     if !protocol_bounds.is_empty() {
                         self.register_type_var_bounds(tvar, protocol_bounds.clone());
+                        // …and carry them into the SCHEME this pass will
+                        // publish. The body-check republishes the function's
+                        // scheme (built below via `TypeScheme::poly`), and
+                        // rebuilding it without the bounds silently REPLACED
+                        // the signature pass's bounded scheme — so every
+                        // call site instantiated an unbounded scheme and the
+                        // call-site bound check had nothing to verify.
+                        // Measured 2026-08-07: `env.insert needs_ord
+                        // proto_groups=1` followed by two inserts with
+                        // `proto_groups=0`; `fn f<T: Ord>` then accepted a
+                        // type with no `Ord` at all.
+                        func_param_protocol_bounds.insert(tvar, protocol_bounds.clone());
                     }
 
                     let type_param = crate::context::TypeParam::new(name_text.clone(), name.span)
@@ -9920,6 +9936,14 @@ impl TypeChecker {
                 initial_func_type.clone(),
                 func_implicit_type_vars.clone(),
             )
+        };
+        // Carry the declaration's protocol bounds onto the republished
+        // scheme — otherwise this pass downgrades the bounded scheme the
+        // signature pass registered.
+        let scheme = if func_param_protocol_bounds.is_empty() {
+            scheme
+        } else {
+            scheme.with_protocol_bounds(func_param_protocol_bounds.clone())
         };
         // Protect builtin polymorphic functions from being overwritten by stdlib functions.
         // During stdlib loading, protocol methods like `Drop.drop(&mut self)` would overwrite
@@ -11468,6 +11492,18 @@ impl TypeChecker {
                 final_func_type.clone(),
                 func_implicit_type_vars.clone(),
             )
+        };
+        // Same carry as the initial-scheme twin: rebuilding the scheme
+        // without the declaration's protocol bounds silently DOWNGRADES
+        // it, and this is the LAST writer — so the env ends up holding
+        // an unbounded scheme no matter what the earlier passes did.
+        // (Measured: `env.insert proto_groups=1, 1, 0` — this site was
+        // the trailing zero, and it is why `fn f<T: Ord>` accepted a
+        // type with no `Ord`.)
+        let final_scheme = if func_param_protocol_bounds.is_empty() {
+            final_scheme
+        } else {
+            final_scheme.with_protocol_bounds(func_param_protocol_bounds.clone())
         };
         if !self.in_impl_block {
             // T0231: guarded — see the initial-scheme twin above.
