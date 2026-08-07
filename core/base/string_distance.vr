@@ -55,7 +55,7 @@
 module core.base.string_distance;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 
 // =============================================================================
 // Levenshtein

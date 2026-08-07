@@ -14599,7 +14599,7 @@ impl TypeChecker {
     /// T0525's mount-scoped ctor selection; T0148's largest red
     /// cluster). A bare name the file EXPLICITLY mounts denotes the
     /// mounted module's item — never the flat bare slot's first-wins
-    /// winner. Measured: `mount core.base.ulid.{parse}` +
+    /// winner. Measured: `mount core.id.ulid.{parse}` +
     /// `parse("…")` resolved to semver's `parse` (`fn(&Text) ->
     /// Result<SemVer, SemVerError>` occupied the bare env slot), so
     /// ulid/snowflake/semver_constraint tests dispatched to stranger
@@ -14670,7 +14670,7 @@ impl TypeChecker {
         // Third leg: baked stdlib free fns keep their schemes ONLY in
         // `metadata.functions` under the qualified key — env and
         // module-context both carry bare names (trace-proven:
-        // 'core.base.ulid.parse' NOT FOUND in either). The metadata
+        // 'core.id.ulid.parse' NOT FOUND in either). The metadata
         // resolver is the existing ONE authority for exactly this
         // (direct key + bake-spelling drift + re-export chains).
         if let Some(s) = self.resolve_function_via_metadata_reexports(canonical, name) {

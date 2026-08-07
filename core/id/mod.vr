@@ -1,0 +1,34 @@
+// =============================================================================
+// core/id/mod.vr — unique identifiers
+// =============================================================================
+// Layer: 2 (needs a clock and entropy)
+// =============================================================================
+//
+
+// Generators for identifiers that must not collide. They were in
+// `core/base/` — where `core.id.snowflake` claimed that a Snowflake ID
+// is a primitive of the LANGUAGE, alongside Maybe and Result. It is not:
+// these read a wall clock and draw randomness, which is why the ring law
+// measured `base(r0) -> time.system_time(r2)` and pointed here.
+//
+
+//  * `uuid`      — RFC 9562 UUIDs.
+//  * `ulid`      — lexicographically sortable, timestamp-prefixed.
+//  * `nanoid`    — short, URL-safe, entropy-only.
+//  * `snowflake` — 64-bit, timestamp + machine + sequence.
+//
+
+// All four draw from `core.random.secure`; none is a hash, and none is
+// a secret. An identifier being unpredictable is a property of the
+// generator, not of the format — `ulid` and `snowflake` embed a
+// timestamp by design and reveal creation time to anyone holding one.
+//
+
+// =============================================================================
+
+module core.id;
+
+public module uuid;
+public module ulid;
+public module nanoid;
+public module snowflake;

@@ -99,7 +99,14 @@ def module_of(path: Path) -> str | None:
     rel = path.relative_to(CORE)
     if len(rel.parts) < 2:
         return None
-    parts = list(rel.parts[:-1]) if rel.name != "mod.vr" else list(rel.parts[:-1])
+    # A FILE is a module: `core/security/x509/verifier.vr` declares
+    # `module core.security.x509.verifier;`. Dropping the stem made the
+    # source coarser than the target one more time — a ring declared for
+    # `security.x509.verifier` matched when the file was depended on and
+    # never when it was depending.
+    parts = list(rel.parts[:-1])
+    if rel.name != "mod.vr":
+        parts.append(rel.stem)
     return ".".join(parts) if parts else None
 
 
@@ -180,7 +187,7 @@ def _entries(d: Path) -> frozenset[str]:
         return frozenset()
 
 
-def load_rings() -> tuple[dict[str, float], dict[float, str]]:
+def load_rings() -> tuple[dict[str, float], dict[float, str], set[float]]:
     """Read the ring declaration.
 
     Ring indices are ordered numbers, not consecutive ones: the law
@@ -195,17 +202,20 @@ def load_rings() -> tuple[dict[str, float], dict[float, str]]:
     data = tomllib.loads(RINGS_TOML.read_text())
     ring_of: dict[str, float] = {}
     names: dict[float, str] = {}
+    cohesive: set[float] = set()
     for key, spec in data.get("ring", {}).items():
         try:
             idx = float(key)
         except ValueError:
             sys.exit(f"[fail] ring key {key!r} is not a number — rings are ordered by index")
         names[idx] = spec.get("name", f"ring{idx}")
+        if spec.get("cohesive", False):
+            cohesive.add(idx)
         for m in spec.get("modules", []):
             if m in ring_of:
                 sys.exit(f"[fail] module '{m}' declared in two rings")
             ring_of[m] = idx
-    return ring_of, names
+    return ring_of, names, cohesive
 
 
 def ring_for(module: str, ring_of: dict[str, float]) -> float | None:
@@ -248,7 +258,7 @@ def placement_of(module: str, ring_of: dict[str, float]) -> str | None:
 
 def main() -> int:
     census = "--census" in sys.argv
-    ring_of, ring_names = load_rings()
+    ring_of, ring_names, cohesive_rings = load_rings()
 
     edges: dict[tuple[str, str], list[str]] = defaultdict(list)
     for path in sorted(CORE.rglob("*.vr")):
@@ -287,8 +297,24 @@ def main() -> int:
         us, ud = placement_of(src, ring_of), placement_of(dst, ring_of)
         if us is None or ud is None or us == ud:
             continue
-        if ring_for(src, ring_of) == ring_for(dst, ring_of):
-            intra[us].add(ud)
+        r = ring_for(src, ring_of)
+        if r != ring_for(dst, ring_of):
+            continue
+        # A ring may declare itself COHESIVE: one layer whose members
+        # are mutually dependent by design. Ring 0 is the case this
+        # exists for — `Maybe.ok_or -> Result` and `Result.ok -> Maybe`
+        # are paired conversions, `base` needs `List` and `list.vr`
+        # needs `base.ordering`, and severing either would be the
+        # defect. rings.toml said so in prose from the start; the gate
+        # reported those pairs as violations anyway, which is a law and
+        # its enforcement disagreeing about the same sentence.
+        #
+        # Clause (b) still applies everywhere else: a cycle between
+        # modules that were declared as SEPARATE layers means the split
+        # is fiction.
+        if r in cohesive_rings:
+            continue
+        intra[us].add(ud)
     cycles: list[list[str]] = []
     seen: set[str] = set()
     stack: list[str] = []

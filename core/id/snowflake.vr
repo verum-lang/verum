@@ -33,7 +33,7 @@
 // UUID v7 gives 128 bits of storage cost; Snowflake fits in 8 bytes
 // and leaves room in a typical 64-bit row-id column. For systems
 // that already have worker sharding, Snowflake is the tighter fit.
-// UUID v7 lives in `core.base.uuid` when 128-bit uniqueness is worth
+// UUID v7 lives in `core.id.uuid` when 128-bit uniqueness is worth
 // paying for.
 //
 
@@ -53,7 +53,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.base.snowflake;
+module core.id.snowflake;
 
 mount core.*;
 mount core.time.system_time.{SystemTime};
@@ -205,7 +205,7 @@ public type SnowflakeParts is {
 };
 
 /// Free-function alias for `Snowflake.using_default_epoch`.
-/// `mount core.base.snowflake.{using_default_epoch}` import-site
+/// `mount core.id.snowflake.{using_default_epoch}` import-site
 /// convention; equivalent to `Snowflake.using_default_epoch(worker_id)`.
 public fn using_default_epoch(worker_id: UInt64) -> Result<Snowflake, SnowflakeError> {
     Snowflake.using_default_epoch(worker_id)

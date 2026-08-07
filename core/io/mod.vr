@@ -31,7 +31,6 @@ public module path;
 public module fs;
 public module buffer;
 public module process;
-public module async_protocols;
 public module engine;
 
 // =============================================================================
@@ -206,15 +205,6 @@ public mount .process.run;
 // Re-exports from async_protocols
 // =============================================================================
 
-public mount .async_protocols.AsyncRead;
-public mount .async_protocols.AsyncWrite;
-public mount .async_protocols.AsyncBufRead;
-public mount .async_protocols.ReadFuture;
-public mount .async_protocols.WriteFuture;
-public mount .async_protocols.FlushFuture;
-public mount .async_protocols.read_async;
-public mount .async_protocols.write_async;
-public mount .async_protocols.flush_async;
 
 // =============================================================================
 // Prelude exports

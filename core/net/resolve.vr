@@ -1,0 +1,157 @@
+// =============================================================================
+// core/net/resolve.vr — hostname resolution to socket addresses
+// =============================================================================
+// Layer: 5 (network client)
+// Dependencies: core, core.net.addr, core.net.dns, core.io
+// =============================================================================
+//
+
+// `ToSocketAddrs` for the shapes that may need DNS. The protocol and
+// the literal-address implementations live in `core.net.addr`, which is
+// pure parsing and must stay that way: an IP address is a VALUE TYPE
+// that layers below the network stack legitimately construct — X.509
+// SAN matching parses one, and `core/sys` names one — while resolving a
+// hostname is a round-trip to a server.
+//
+// The two were one file until the ring law measured the edge
+// `net.addr -> net.dns` and named it: the type depended on the
+// resolver.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LApp,
+    lifecycle: Lifecycle.Theorem("v0.1")
+)
+module core.net.resolve;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.io.{IoError, IoErrorKind};
+mount core.net.addr.{SocketAddr, Ipv4Addr, Ipv6Addr};
+mount core.net.dns.{resolve as dns_resolve};
+
+implement ToSocketAddrs for (&Text, Int) {
+    type Iter = List<SocketAddr>;
+    fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
+        let (host, port) = *self;
+        // Try IPv4 first
+        if let Result.Ok(ip) = Ipv4Addr.parse(host) {
+            return Result.Ok(List.of(SocketAddr.new_v4(ip, port)));
+        }
+        // Try IPv6
+        if let Result.Ok(ip) = Ipv6Addr.parse(host) {
+            return Result.Ok(List.of(SocketAddr.new_v6(ip, port)));
+        }
+        // DNS resolution for hostnames. Failures map to
+        // `IoErrorKind.NotFound` (the host isn't in DNS) so
+        // downstream `match err.kind` handles the case
+        // identically to a missing-file path-not-found.
+        // The Err-arm preserves the typed DNS error in the
+        // message so callers that *do* want the detail can
+        // still inspect it.
+        match dns_resolve(host, port) {
+            Result.Ok(addrs) => {
+                if addrs.is_empty() {
+                    Result.Err(IoError {
+                        kind: IoErrorKind.NotFound,
+                        message: Maybe.Some(f"Cannot resolve: {host}"),
+                    })
+                } else {
+                    Result.Ok(addrs)
+                }
+            }
+            Result.Err(e) => Result.Err(IoError {
+                kind: IoErrorKind.NotFound,
+                message: Maybe.Some(f"Cannot resolve {host}: {e}"),
+            }),
+        }
+    }
+}
+
+/// Parse a "host:port" string directly. This is the ergonomic entry
+/// point used by `TcpListener.bind("127.0.0.1:8080")`, mirroring what
+/// every mainstream language exposes. Implementation: try literal
+/// IPv4/IPv6 first via `SocketAddr.parse`; on failure fall back to
+/// splitting `host:port` and DNS-resolving the host.
+implement ToSocketAddrs for Text {
+    type Iter = List<SocketAddr>;
+    fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
+        if let Result.Ok(addr) = SocketAddr.parse(self) {
+            return Result.Ok(List.of(addr));
+        }
+        match self.rsplit_once(':') {
+            Maybe.Some((host, port_str)) => {
+                let port = match port_str.parse_int() {
+                    Result.Ok(p) => p,
+                    Result.Err(_) => return Result.Err(IoError.with_message(IoErrorKind.InvalidInput, f"Invalid port: {port_str}")),
+                };
+                if port < 0 || port > 65535 {
+                    return Result.Err(IoError.with_message(IoErrorKind.InvalidInput, f"Port out of range: {port}"));
+                }
+                match dns_resolve(&host, port) {
+                    Result.Ok(addrs) => {
+                        if addrs.is_empty() {
+                            Result.Err(IoError {
+                                kind: IoErrorKind.NotFound,
+                                message: Maybe.Some(f"Cannot resolve: {host}"),
+                            })
+                        } else {
+                            Result.Ok(addrs)
+                        }
+                    }
+                    Result.Err(e) => Result.Err(IoError {
+                        kind: IoErrorKind.NotFound,
+                        message: Maybe.Some(f"Cannot resolve {host}: {e}"),
+                    }),
+                }
+            }
+            Maybe.None => Result.Err(IoError.with_message(IoErrorKind.InvalidInput, f"Invalid address (missing port): {self}")),
+        }
+    }
+}
+
+// =============================================================================
+// Error Types
+// =============================================================================
+
+/// `Iter` is the iterator the impl produces (typically `OnceIter` for
+/// a single address, `List` for hostname-DNS expansion). The bound
+/// `Iterator<Item = SocketAddr>` would be the proper way to express
+/// "yields SocketAddrs", but the typechecker doesn't yet enforce
+/// associated-type bindings on protocol-bounded generics (#75), and
+/// the prior form `Iterator<Item>` was a no-op (Item was unbound).
+/// Drop the bound entirely until #75 lands.
+public type ToSocketAddrs is protocol {
+    type Iter;
+    fn to_socket_addrs(&self) -> Result<Self.Iter, IoError>;
+};
+
+// Implementations for common types.
+//
+
+// `Iter = List<SocketAddr>` rather than `OnceIter<SocketAddr>`: the
+// other two impls in this module (`(&Text, Int)`, `Text`) already
+// return `List<SocketAddr>`, and using a single Iter type across
+// every impl avoids a class of impl-method-dispatch codegen failure
+// where the same call site emits "field index 2 (offset 16+8 = 24)
+// exceeds object data size 8" panics through the SocketAddr branch
+// only. Allocating a one-element list is a fixed cost per bind call,
+// dwarfed by the syscall.
+// Host RESOLUTION lives in `core.net.resolve`, not here. Turning a
+// hostname into an address is a network round-trip; turning a literal
+// into one is parsing. Keeping both in this file made the ADDRESS TYPE
+// depend on the DNS resolver, which inverted the direction — an
+// `Ipv4Addr` is a value, and `core.security.x509` needs to parse one to
+// match a SAN entry without acquiring a name-resolution stack.
+
+implement ToSocketAddrs for SocketAddr {
+    type Iter = List<SocketAddr>;
+    fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
+        let mut v: List<SocketAddr> = [];
+        v.push(*self);
+        Result.Ok(v)
+    }
+}

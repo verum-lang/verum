@@ -181,7 +181,7 @@ implement Debug for TempFile {
 fn generate_suffix() -> Text {
     // Reuse the snowflake/nanoid generator in base for unique short ids.
     // 12 base62 chars give >7e21 unique values — collision-free in practice.
-    core.base.nanoid.generate(12)
+    core.id.nanoid.generate(12)
 }
 
 // =============================================================================

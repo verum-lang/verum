@@ -18,8 +18,6 @@
 )
 module core.net.addr;
 mount core.*;
-mount net.dns.{resolve as dns_resolve};
-mount core.io.{IoError, IoErrorKind};
 
 // =============================================================================
 // IPv4 Address
@@ -873,127 +871,11 @@ implement Display for SocketAddr {
 }
 
 // =============================================================================
-// ToSocketAddrs Protocol
+// (ToSocketAddrs and its impls live in core/net/resolve.vr)
 // =============================================================================
 
 /// Protocol for types that can be converted to socket addresses.
 ///
-
-/// `Iter` is the iterator the impl produces (typically `OnceIter` for
-/// a single address, `List` for hostname-DNS expansion). The bound
-/// `Iterator<Item = SocketAddr>` would be the proper way to express
-/// "yields SocketAddrs", but the typechecker doesn't yet enforce
-/// associated-type bindings on protocol-bounded generics (#75), and
-/// the prior form `Iterator<Item>` was a no-op (Item was unbound).
-/// Drop the bound entirely until #75 lands.
-public type ToSocketAddrs is protocol {
-    type Iter;
-    fn to_socket_addrs(&self) -> Result<Self.Iter, IoError>;
-};
-
-// Implementations for common types.
-//
-
-// `Iter = List<SocketAddr>` rather than `OnceIter<SocketAddr>`: the
-// other two impls in this module (`(&Text, Int)`, `Text`) already
-// return `List<SocketAddr>`, and using a single Iter type across
-// every impl avoids a class of impl-method-dispatch codegen failure
-// where the same call site emits "field index 2 (offset 16+8 = 24)
-// exceeds object data size 8" panics through the SocketAddr branch
-// only. Allocating a one-element list is a fixed cost per bind call,
-// dwarfed by the syscall.
-implement ToSocketAddrs for SocketAddr {
-    type Iter = List<SocketAddr>;
-    fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
-        let mut v: List<SocketAddr> = [];
-        v.push(*self);
-        Result.Ok(v)
-    }
-}
-
-implement ToSocketAddrs for (&Text, Int) {
-    type Iter = List<SocketAddr>;
-    fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
-        let (host, port) = *self;
-        // Try IPv4 first
-        if let Result.Ok(ip) = Ipv4Addr.parse(host) {
-            return Result.Ok(List.of(SocketAddr.new_v4(ip, port)));
-        }
-        // Try IPv6
-        if let Result.Ok(ip) = Ipv6Addr.parse(host) {
-            return Result.Ok(List.of(SocketAddr.new_v6(ip, port)));
-        }
-        // DNS resolution for hostnames. Failures map to
-        // `IoErrorKind.NotFound` (the host isn't in DNS) so
-        // downstream `match err.kind` handles the case
-        // identically to a missing-file path-not-found.
-        // The Err-arm preserves the typed DNS error in the
-        // message so callers that *do* want the detail can
-        // still inspect it.
-        match dns_resolve(host, port) {
-            Result.Ok(addrs) => {
-                if addrs.is_empty() {
-                    Result.Err(IoError {
-                        kind: IoErrorKind.NotFound,
-                        message: Maybe.Some(f"Cannot resolve: {host}"),
-                    })
-                } else {
-                    Result.Ok(addrs)
-                }
-            }
-            Result.Err(e) => Result.Err(IoError {
-                kind: IoErrorKind.NotFound,
-                message: Maybe.Some(f"Cannot resolve {host}: {e}"),
-            }),
-        }
-    }
-}
-
-/// Parse a "host:port" string directly. This is the ergonomic entry
-/// point used by `TcpListener.bind("127.0.0.1:8080")`, mirroring what
-/// every mainstream language exposes. Implementation: try literal
-/// IPv4/IPv6 first via `SocketAddr.parse`; on failure fall back to
-/// splitting `host:port` and DNS-resolving the host.
-implement ToSocketAddrs for Text {
-    type Iter = List<SocketAddr>;
-    fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
-        if let Result.Ok(addr) = SocketAddr.parse(self) {
-            return Result.Ok(List.of(addr));
-        }
-        match self.rsplit_once(':') {
-            Maybe.Some((host, port_str)) => {
-                let port = match port_str.parse_int() {
-                    Result.Ok(p) => p,
-                    Result.Err(_) => return Result.Err(IoError.with_message(IoErrorKind.InvalidInput, f"Invalid port: {port_str}")),
-                };
-                if port < 0 || port > 65535 {
-                    return Result.Err(IoError.with_message(IoErrorKind.InvalidInput, f"Port out of range: {port}"));
-                }
-                match dns_resolve(&host, port) {
-                    Result.Ok(addrs) => {
-                        if addrs.is_empty() {
-                            Result.Err(IoError {
-                                kind: IoErrorKind.NotFound,
-                                message: Maybe.Some(f"Cannot resolve: {host}"),
-                            })
-                        } else {
-                            Result.Ok(addrs)
-                        }
-                    }
-                    Result.Err(e) => Result.Err(IoError {
-                        kind: IoErrorKind.NotFound,
-                        message: Maybe.Some(f"Cannot resolve {host}: {e}"),
-                    }),
-                }
-            }
-            Maybe.None => Result.Err(IoError.with_message(IoErrorKind.InvalidInput, f"Invalid address (missing port): {self}")),
-        }
-    }
-}
-
-// =============================================================================
-// Error Types
-// =============================================================================
 
 /// Error when parsing an address.
 public type AddrParseError is

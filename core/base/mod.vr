@@ -347,12 +347,12 @@ public mount .env.{
 // =============================================================================
 
 // From collections - semantic collection types (via module re-exports)
-public mount collections.List;
-public mount collections.Map;
-public mount collections.Set;
+public mount collections.list.{List};
+public mount collections.map.{Map};
+public mount collections.set.{Set};
 
 // From text - string type (via module re-export)
-public mount text.Text;
+public mount text.text.{Text};
 
 // TypeId for type identification (defined in protocols.vr)
 public mount .protocols.TypeId;

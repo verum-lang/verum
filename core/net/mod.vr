@@ -68,6 +68,11 @@ module core.net;
 // =============================================================================
 
 public module addr;
+
+// Hostname resolution — `ToSocketAddrs` for the shapes that may need
+// DNS. Separate from `addr` so the address TYPES stay free of the
+// resolver: layers below the network stack construct them.
+public module resolve;
 public module tcp;
 public module udp;
 public module unix;
@@ -117,7 +122,7 @@ public mount .addr.Ipv6Addr;
 public mount .addr.SocketAddr;
 public mount .addr.SocketAddrV4;
 public mount .addr.SocketAddrV6;
-public mount .addr.ToSocketAddrs;
+public mount .resolve.ToSocketAddrs;
 
 // From tcp
 public mount .tcp.TcpStream;

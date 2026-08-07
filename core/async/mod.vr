@@ -27,6 +27,14 @@
 )
 module core.async;
 
+// Async I/O protocols (AsyncRead / AsyncWrite), formerly
+// `core.io.async_protocols` — they mount async.poll and async.waker.
+public module io_protocols;
+
+// Interval / AsyncInterval timers, formerly `core.time.interval` — they
+// mount async.poll and async.stream.
+public module interval;
+
 // =============================================================================
 // Submodules
 // =============================================================================

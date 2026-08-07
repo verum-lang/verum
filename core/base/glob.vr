@@ -67,7 +67,7 @@
 module core.base.glob;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 
 public type GlobError is
       UnclosedClass

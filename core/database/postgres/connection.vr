@@ -44,7 +44,8 @@ mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount base.memory.Shared;
 mount collections.List;
 mount core.net.tcp.TcpStream;
-mount core.net.addr.{SocketAddr, ToSocketAddrs};
+mount core.net.addr.{SocketAddr};
+mount core.net.resolve.{ToSocketAddrs};
 mount core.io.IoError;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
 mount core.database.postgres.config.{

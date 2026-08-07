@@ -62,7 +62,7 @@
 module core.net.tcp;
 mount core.*;
 mount io.*;
-mount core.io.async_protocols.{AsyncRead, AsyncWrite, IoResult};
+mount core.async.io_protocols.{AsyncRead, AsyncWrite, IoResult};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context};
 mount core.async.future.{Future};

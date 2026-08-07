@@ -27,7 +27,7 @@
 
 // =============================================================================
 
-module core.io.async_protocols;
+module core.async.io_protocols;
 
 mount core.*;
 mount core.async.poll.{Poll};

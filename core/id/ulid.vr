@@ -62,10 +62,10 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.base.ulid;
+module core.id.ulid;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 // Inlined: use core.sys.common.random_bytes(...) directly (task #11).
 mount core.time.system_time.{SystemTime};
 
@@ -231,7 +231,7 @@ implement Ulid {
 }
 
 /// Free-function alias for `Ulid.from_parts_seeded` — the
-/// `mount core.base.ulid.{from_parts}` import style at call sites
+/// `mount core.id.ulid.{from_parts}` import style at call sites
 /// prefers free functions, and the `(Int, Int)` argument shape
 /// matches the convention in `core-tests/base/ulid/integration_test.vr`
 /// (`from_parts(0, 0)` for an all-zero ULID).

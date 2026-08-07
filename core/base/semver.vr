@@ -72,7 +72,7 @@
 module core.base.semver;
 
 mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 
 // =============================================================================
 // Typed value

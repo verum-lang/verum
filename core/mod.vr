@@ -128,6 +128,15 @@ public module random;
 public module subtle;
 
 // =============================================================================
+// Layer 2: Identifiers (Depends on: base, time, random)
+// =============================================================================
+
+// Unique identifiers: uuid, ulid, nanoid, snowflake. NOT byte
+// primitives — they read a wall clock and draw entropy, which is why
+// they are a layer above and not part of the group declared just here.
+public module id;
+
+// =============================================================================
 // Layer 0.5: Mathematics (Depends on: base, intrinsics, simd)
 // =============================================================================
 

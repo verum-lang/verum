@@ -34,7 +34,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.base.uuid;
+module core.id.uuid;
 
 mount core.*;
 mount base.{Result, Ok, Err, Text};
@@ -280,7 +280,7 @@ fn decode_hex(b: Byte, pos: Int) -> Result<Int, UuidError> {
 // Free-function aliases
 // =============================================================================
 //
-// `mount core.base.uuid.{Uuid, v4, v7, nil, parse}` is the canonical
+// `mount core.id.uuid.{Uuid, v4, v7, nil, parse}` is the canonical
 // import shape; these wrappers route to the corresponding
 // `Uuid.new_v4` / `Uuid.new_v7` / `Uuid.nil` / `Uuid.parse` methods.
 

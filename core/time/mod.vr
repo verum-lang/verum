@@ -57,7 +57,9 @@ mount core.*;
 public mount .duration.{Duration};
 public mount .instant.{Instant};
 public mount .system_time.{SystemTime, SystemTimeError};
-public mount .interval.{Interval, AsyncInterval, interval, interval_ms};
+// `Interval` moved to `core.async.interval`: an async timer mounts
+// async.poll and async.stream, so it belongs to the async layer, which
+// already knows about time.
 public mount .cron.{CronExpr, CronError};
 public mount .rfc3339.{Rfc3339Time, Rfc3339Error};
 public mount .duration_parse.{DurationParseError};

@@ -5323,7 +5323,7 @@ fn register_module_filtered(
         // the floor before they could be assigned an arity-qualified
         // alternate key — surfaced as the snowflake/uuid/ulid suite
         // failures where user code calls `parse(id, epoch_ms)` (2-arg
-        // form from `core.base.snowflake`) but the dispatcher routes
+        // form from `core.id.snowflake`) but the dispatcher routes
         // to a sibling stdlib's 1-arg `parse` because `parse#2` was
         // never registered.  `register_function`'s own arity branch
         // does the right thing here: same-arity → first-wins (matches

@@ -24,6 +24,12 @@
 
 [ring.0]
 name = "primitive"
+# ONE cohesive layer, not a set of separable modules — see the header.
+# Declared as data so the gate enforces the same sentence the prose
+# states; without it, clause (b) reported `base <-> intrinsics` and
+# `base <-> collections.list` as violations of a rule this file had
+# already exempted them from.
+cohesive = true
 # The language's own vocabulary: what the grammar, the checker and
 # `@derive` name. This is also exactly what the prelude publishes
 # (core/mod.vr) — the prelude IS ring 0's surface, never a directory glob.
@@ -32,7 +38,33 @@ name = "primitive"
 # base ↔ intrinsics cycle and concluded the two are ONE cohesive layer
 # (Maybe/Result are needed by intrinsics; intrinsics are needed by base).
 # `types` likewise names the checker's own vocabulary.
-modules = ["base", "types", "intrinsics"]
+modules = [
+    "base", "types", "intrinsics",
+    # The LANGUAGE's own vocabulary. CLAUDE.md mandates List/Text/Map/Set
+    # as the semantic types — they are named by the grammar and by every
+    # signature in the stdlib, exactly like Maybe and Result, and they
+    # belong in the primitive layer for the same reason.
+    #
+    # The measurement forces it too: `base` uses List/Map/Text in 384
+    # places across its own files, and `collections/list.vr` depends on
+    # `base` (coercion, memory, ordering). That is a genuine MUTUAL
+    # dependency — the same shape as the base <-> intrinsics pair this
+    # ring already declares as one cohesive layer. Their own mounts
+    # confirm the placement: list/map/set/text.text reach only `core.*`,
+    # `core.base.*` and `core.intrinsics.*`.
+    #
+    # `collections` and `text` as WHOLES stay at ring 2: btree, deque,
+    # lru, bloom, the regex engine and the formatter are not vocabulary.
+    #
+    # Consequence, and the reason base/ and types/ now mount the
+    # DEFINING module rather than the umbrella re-export: ring 0 cannot
+    # use the convenience of `mount collections.List`, because naming
+    # the umbrella makes the edge point at ring 2. Higher rings may keep
+    # using it — for them the edge is lateral. This also removes the
+    # one-hop indirection through a re-export, which hides which module
+    # a dependency actually comes from.
+    "collections.list", "collections.map", "collections.set", "text.text",
+]
 
 [ring.1]
 name = "platform"
@@ -41,7 +73,17 @@ name = "platform"
 # (core/mem/segment.vr:68, core/mem/heap.vr:80) — memory management IS
 # a platform service, and placing `mem` above `sys` would invert the
 # real, correct direction of that dependency.
-modules = ["sys", "mem", "target", "sync.atomic", "intrinsics.lowlevel"]
+modules = [
+    "sys", "mem", "target", "sync.atomic", "intrinsics.lowlevel",
+    # An IP address is a VALUE, not a networking capability. `net.addr`
+    # now mounts nothing but the prelude — hostname RESOLUTION moved to
+    # `net.resolve`, which is where the DNS round-trip belongs. Until
+    # that split, the address type depended on the resolver, which is
+    # why `core/sys/net_ops.vr` naming a `SocketAddr` and
+    # `core.security.x509` parsing an IP for SAN matching both had to
+    # reach into ring 5.
+    "net.addr",
+]
 # Two submodules placed by measurement rather than by their parent's name:
 #
 #  * `sync.atomic` mounts only `core.intrinsics.atomic` (ring 0),
@@ -77,7 +119,16 @@ name = "byte-primitive"
 # Half a ring, not ring 1: these are pure computation and do not touch
 # the syscall boundary — except `random.secure`, which is entropy, a
 # platform service by nature.
-modules = ["hash", "mac", "random", "subtle", "security.ecc"]
+modules = [
+    "hash", "mac", "random", "subtle", "security.ecc",
+    # HKDF and PBKDF2 are HMAC in a loop: hkdf mounts only `core.*` and
+    # `core.mac.hmac`, pbkdf2 adds `collections.list`. Their placement
+    # in ring 5 was what made TLS 1.3 — which cannot derive a key
+    # schedule without them — appear to depend upward on the security
+    # stack, and it is half of the net <-> security cycle.
+    # `kdf.argon2` stays in ring 5: it mounts `security.password_hash`.
+    "security.kdf.hkdf", "security.kdf.pbkdf2",
+]
 # `security.ecc` is here by MEASUREMENT, not by topic: ed25519, p256,
 # x25519 and mod have ZERO external mounts, bls12_381 and vrf only a
 # sibling plus the prelude. Curve arithmetic is byte computation exactly
@@ -90,7 +141,28 @@ modules = ["hash", "mac", "random", "subtle", "security.ecc"]
 name = "data"
 # Container and value algorithms. May use the platform (allocation,
 # clocks) but nothing above it.
-modules = ["collections", "text", "encoding", "math", "simd", "logic", "io", "time", "sync"]
+modules = [
+    "collections", "text", "encoding", "math", "simd", "logic", "io",
+    "time", "sync",
+    # `configuration` parses TOML into a value tree and converts it. Its
+    # mounts are `base`, `collections` and `time` — nothing above ring 2.
+    # Ring 5 was a topical placement ("configuration sounds like an
+    # application concern"), and it made `cog`, which reads a package
+    # manifest, depend upward.
+    "configuration",
+    # Shared symbol DEFINITIONS, mounting nothing at all (156 lines,
+    # zero mounts). Four files in math's algebraic core name them, and
+    # the answer to "the core reaches up into its own superstructure" is
+    # that definitions shared by both belong BELOW both — not that the
+    # core should move up.
+    "math.frameworks.msfs.key_symbols",
+    # Identifier generators, formerly `core/base/{uuid,ulid,nanoid,
+    # snowflake}.vr`. They read a wall clock and draw entropy, which is
+    # what the ring law measured as `base(r0) -> time.system_time(r2)`.
+    # `core.base.snowflake` claimed a Snowflake ID is a primitive of the
+    # LANGUAGE, next to Maybe and Result; it is not.
+    "id",
+]
 
 [ring.3]
 name = "runtime"
@@ -98,6 +170,11 @@ name = "runtime"
 modules = [
     "async", "concurrency", "runtime", "context", "control",
     "tracing", "metrics", "signal", "cache", "action", "eval",
+    # These two are applied, not algebraic: `distributed` mounts
+    # `async.channel`, `stack_model` mounts `action.articulation`. They
+    # sit in `math/` by topic and belong to the runtime layer by
+    # dependency.
+    "math.distributed", "math.stack_model",
 ]
 
 [ring.4]
@@ -135,6 +212,39 @@ modules = [
     # cache/adapters/redis.vr binds the CacheBackend protocol to
     # core.redis.
     "cache.adapters",
-    "redis", "protobuf", "search", "compress", "money", "configuration",
+    "redis", "protobuf", "search", "compress", "money",
     "architecture", "theory_interop",
+]
+
+[ring."5.5"]
+name = "integration-client"
+# Modules that TALK to a remote service. They sit above `net` because
+# they USE it — the other half of the net <-> security cycle, which was
+# never one cycle but two directions with different natures: `net`
+# needs cryptographic ALGORITHMS (now in rings 1.5), while these need
+# a network CLIENT.
+#
+# Each name is honest — fetching a CRL is security work — so the files
+# stay in `security/`, and only their layer is corrected. The file
+# names already said it: `crl_client.vr`, `ocsp_client.vr`.
+modules = [
+    # Only the CLIENT of each pair. `security.spiffe.id` and
+    # `.svid` are identity TYPES that `net.weft` legitimately names;
+    # `.workload_api` is the thing that opens a Unix socket. Splitting
+    # them here is the same distinction the ring law keeps finding:
+    # a data type and the client that fetches it are different layers
+    # even when they share a directory.
+    "security.spiffe.workload_api",
+    # Revocation checking is a network round-trip: crl_client and
+    # ocsp_client mount net.http, and `verifier` mounts both. Only
+    # `security.sigstore.verify` consumes them, and it is already here.
+    # Certificate PARSING stays in ring 5 — that is what `net.h3` needs,
+    # and it needs no network.
+    "security.x509.crl_client",
+    "security.x509.ocsp_client",
+    "security.x509.verifier",
+    "security.sigstore",
+    "security.tuf",
+    "security.oidc",
+    "security.transparency_log",
 ]

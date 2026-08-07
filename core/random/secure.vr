@@ -73,8 +73,8 @@ mount core.*;
 /// CountMinSketch, AliasSampler, Reservoir replacement-phase, TLS
 /// ticket issuers) hit `NullPointerAt` when indexing the nil result.
 /// Routing through `sys.common` reuses the audited platform-aware
-/// implementation that already powers `core.base.nanoid` and
-/// `core.base.ulid`.
+/// implementation that already powers `core.id.nanoid` and
+/// `core.id.ulid`.
 ///
 
 /// Spec: NIST SP 800-90A — DRBG draw, full-entropy reseed.
