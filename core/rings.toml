@@ -1,0 +1,74 @@
+# =============================================================================
+# core/rings.toml — the standard library's layering law, as data
+# =============================================================================
+#
+# THE LAW (docs/architecture/core-reference-architecture.md §4):
+#
+#     A module in ring N depends only on rings < N.
+#     Edges upward and sideways between rings do not exist.
+#
+# Ring 0 is declared as ONE cohesive unit — the language's primitive
+# layer. Mutual dependencies INSIDE ring 0 are expected and correct
+# (§6bis.2a: `Maybe.ok_or -> Result` and `Result.ok -> Maybe` are paired
+# conversions; severing them would be a defect, not an improvement).
+# Only edges BETWEEN rings are constrained.
+#
+# Enforced by `scripts/ci/check_core_rings.py` (gate: `make check-rings`).
+# A module absent from this file is itself a violation: an unplaced
+# module is one whose layer nobody decided.
+#
+# Placement follows the MEASURED dependency graph, not intent. When a
+# module cannot be placed without creating an upward edge, the correct
+# response is to move the dependency down — never to widen a ring.
+# =============================================================================
+
+[ring.0]
+name = "primitive"
+# The language's own vocabulary: what the grammar, the checker and
+# `@derive` name. This is also exactly what the prelude publishes
+# (core/mod.vr) — the prelude IS ring 0's surface, never a directory glob.
+#
+# `intrinsics` belongs here and not below: §6bis.2 measured the
+# base ↔ intrinsics cycle and concluded the two are ONE cohesive layer
+# (Maybe/Result are needed by intrinsics; intrinsics are needed by base).
+# `types` likewise names the checker's own vocabulary.
+modules = ["base", "types", "intrinsics"]
+
+[ring.1]
+name = "platform"
+# The syscall / hardware boundary. Ring 1 and not ring 2: the CBGR
+# allocator (`mem`) calls `mmap`/`mprotect`/`get_tid_fast` directly
+# (core/mem/segment.vr:68, core/mem/heap.vr:80) — memory management IS
+# a platform service, and placing `mem` above `sys` would invert the
+# real, correct direction of that dependency.
+modules = ["sys", "mem", "target"]
+
+[ring.2]
+name = "data"
+# Container and value algorithms. May use the platform (allocation,
+# clocks) but nothing above it.
+modules = ["collections", "text", "encoding", "math", "simd", "logic", "io", "time", "sync", "storage"]
+
+[ring.3]
+name = "runtime"
+# Execution services built on the system layer.
+modules = [
+    "async", "concurrency", "runtime", "context", "control",
+    "tracing", "metrics", "signal", "cache", "action", "eval",
+]
+
+[ring.4]
+name = "language-services"
+# Compile-time and toolchain-facing services.
+modules = ["meta", "cog", "proof", "verify", "archive", "script", "diagnostics"]
+
+[ring.5]
+name = "domain"
+# Complete application subsystems. §2 category 3: these are in core/ for
+# historical reasons — measured connectivity to rings 0–4 is ~zero — and
+# are the candidates for extraction into cog packages (§5.3, §5.4).
+modules = [
+    "database", "net", "security", "term", "shell", "cli", "mesh",
+    "redis", "protobuf", "search", "compress", "money", "configuration",
+    "architecture", "theory_interop",
+]
