@@ -151,12 +151,12 @@ implement QuicAccepted {
     pub async fn next_bidi_stream(&mut self) -> Result<QuicStream, QuicServerError> {
         // Integration layer wires this into the connection's RecvStream
         // creation hook (RFC 9000 §3 stream opening).
-        Result.Err(QuicServerError.Handshake(Text.from_str("pure-Verum server stream wire-up pending")))
+        Result.Err(QuicServerError.Handshake(Text.from("pure-Verum server stream wire-up pending")))
     }
 
     /// Await the next peer-initiated unidirectional stream (recv-only).
     pub async fn next_uni_stream(&mut self) -> Result<QuicRecvStream, QuicServerError> {
-        Result.Err(QuicServerError.Handshake(Text.from_str("pure-Verum server stream wire-up pending")))
+        Result.Err(QuicServerError.Handshake(Text.from("pure-Verum server stream wire-up pending")))
     }
 
     /// Await the next inbound datagram.
@@ -190,7 +190,7 @@ implement QuicServer {
     /// The server is idle until `accept()` / `accept_loop()` drive it.
     pub async fn bind(addr_text: &Text, opts: QuicServerOptions) -> Result<QuicServer, QuicServerError> {
         let addr = SocketAddr.from_text(addr_text.clone())
-            .map_err(|_| QuicServerError.Bind(Text.from_str(f"parse addr {addr_text}")))?;
+            .map_err(|_| QuicServerError.Bind(Text.from(f"parse addr {addr_text}")))?;
         Result.Ok(QuicServer {
             local_addr: addr,
             opts:       opts,
@@ -217,7 +217,7 @@ implement QuicServer {
 
         // The shape is carried here for the integration commit;
         // returning a Handshake stub keeps the SM well-typed.
-        Result.Err(QuicServerError.Handshake(Text.from_str("accept pending transport wire-up")))
+        Result.Err(QuicServerError.Handshake(Text.from("accept pending transport wire-up")))
     }
 
     /// Convenience: run accept() in a loop, spawning `handler` for

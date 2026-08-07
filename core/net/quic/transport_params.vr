@@ -335,13 +335,13 @@ fn apply_param(p: &mut TransportParams, id: UInt64, value: &[Byte]) -> Result<()
 
         PARAM_DISABLE_ACTIVE_MIGRATION            => {
             if value.len() != 0 {
-                return Result.Err(TpError.InvalidLength(Text.from_str("disable_active_migration expects zero length")));
+                return Result.Err(TpError.InvalidLength(Text.from("disable_active_migration expects zero length")));
             }
             p.disable_active_migration = true;
         },
         PARAM_GREASE_QUIC_BIT                     => {
             if value.len() != 0 {
-                return Result.Err(TpError.InvalidLength(Text.from_str("grease_quic_bit expects zero length")));
+                return Result.Err(TpError.InvalidLength(Text.from("grease_quic_bit expects zero length")));
             }
             p.grease_quic_bit = true;
         },
@@ -357,7 +357,7 @@ fn apply_param(p: &mut TransportParams, id: UInt64, value: &[Byte]) -> Result<()
         },
         PARAM_STATELESS_RESET_TOKEN => {
             if value.len() != 16 {
-                return Result.Err(TpError.InvalidLength(Text.from_str("stateless_reset_token must be 16 bytes")));
+                return Result.Err(TpError.InvalidLength(Text.from("stateless_reset_token must be 16 bytes")));
             }
             let mut tok: [Byte; 16] = [0_u8; 16];
             let mut i: Int = 0;
@@ -382,18 +382,18 @@ fn apply_param(p: &mut TransportParams, id: UInt64, value: &[Byte]) -> Result<()
 fn read_varint_all(buf: &[Byte]) -> Result<UInt64, TpError> {
     let (v, next) = quic_decode(buf, 0).or_else(vfail)?;
     if next != buf.len() {
-        return Result.Err(TpError.InvalidLength(Text.from_str("varint param has trailing bytes")));
+        return Result.Err(TpError.InvalidLength(Text.from("varint param has trailing bytes")));
     }
     Result.Ok(v)
 }
 
 fn cid_from(value: &[Byte]) -> Result<ConnectionId, TpError> {
     if value.len() > MAX_CID_LEN {
-        return Result.Err(TpError.InvalidLength(Text.from_str("CID param exceeds 20 bytes")));
+        return Result.Err(TpError.InvalidLength(Text.from("CID param exceeds 20 bytes")));
     }
     match ConnectionId.from_bytes(value) {
         Result.Ok(c)  => Result.Ok(c),
-        Result.Err(_) => Result.Err(TpError.InvalidValue(Text.from_str("CID construction failed"))),
+        Result.Err(_) => Result.Err(TpError.InvalidValue(Text.from("CID construction failed"))),
     }
 }
 
@@ -417,7 +417,7 @@ fn decode_preferred_address(buf: &[Byte]) -> Result<PreferredAddress, TpError> {
     let ipv6_port: UInt16 = ((buf[22] as UInt16) << 8) | (buf[23] as UInt16);
     let cid_len = buf[24] as Int;
     if cid_len > MAX_CID_LEN {
-        return Result.Err(TpError.InvalidLength(Text.from_str("PA cid length > 20")));
+        return Result.Err(TpError.InvalidLength(Text.from("PA cid length > 20")));
     }
     let cid_end = 25 + cid_len;
     let token_end = cid_end + 16;

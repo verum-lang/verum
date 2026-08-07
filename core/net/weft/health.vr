@@ -261,7 +261,7 @@ implement Handler for ReadinessHandler {
 
 /// ```verum
 /// let readiness = Readiness.new();
-/// readiness.add(ReadinessFlag.new(Text.from_str("db")));
+/// readiness.add(ReadinessFlag.new(Text.from("db")));
 /// readiness.bind_to_shutdown(&server.shutdown_token());
 ///
 

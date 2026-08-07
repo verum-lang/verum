@@ -193,11 +193,11 @@ implement TrustStore {
 
 fn try_load_linux_bundle() -> Result<TrustStore, TrustError> {
     let paths: [Text; 5] = [
-        Text.from_str("/etc/ssl/certs/ca-certificates.crt"),       // Debian / Ubuntu
-        Text.from_str("/etc/pki/tls/certs/ca-bundle.crt"),         // RHEL / Fedora
-        Text.from_str("/etc/ssl/cert.pem"),                         // OpenBSD
-        Text.from_str("/etc/ssl/ca-bundle.pem"),                    // SUSE
-        Text.from_str("/usr/local/etc/openssl/cert.pem"),           // macOS (Homebrew openssl)
+        Text.from("/etc/ssl/certs/ca-certificates.crt"),       // Debian / Ubuntu
+        Text.from("/etc/pki/tls/certs/ca-bundle.crt"),         // RHEL / Fedora
+        Text.from("/etc/ssl/cert.pem"),                         // OpenBSD
+        Text.from("/etc/ssl/ca-bundle.pem"),                    // SUSE
+        Text.from("/usr/local/etc/openssl/cert.pem"),           // macOS (Homebrew openssl)
     ];
     let mut i: Int = 0;
     while i < paths.len() {
@@ -213,7 +213,7 @@ fn try_load_linux_bundle() -> Result<TrustStore, TrustError> {
 fn read_file_to_text(path: &Text) -> Result<Text, TrustError> {
     match core.io.file.File.read_to_text(path) {
         Result.Ok(t) => Result.Ok(t),
-        Result.Err(e) => Result.Err(TrustError.IoFailure(Text.from_str(f"read {path} failed"))),
+        Result.Err(e) => Result.Err(TrustError.IoFailure(Text.from(f"read {path} failed"))),
     }
 }
 
@@ -258,7 +258,7 @@ fn load_bundled_mozilla() -> Result<TrustStore, TrustError> {
 fn parse_pem_bundle(pem: &Text) -> Result<List<List<Byte>>, TrustError> {
     let blocks: List<PemBlock> = match pem_decode_all(pem) {
         Result.Ok(b)  => b,
-        Result.Err(_) => return Result.Err(TrustError.IoFailure(Text.from_str("PEM decode failed"))),
+        Result.Err(_) => return Result.Err(TrustError.IoFailure(Text.from("PEM decode failed"))),
     };
     let mut out: List<List<Byte>> = [];
     let mut i: Int = 0;

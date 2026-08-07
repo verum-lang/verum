@@ -250,62 +250,100 @@ theorem one_object_is_dim_zero()
 // 10. Hom-space utilities
 // =============================================================================
 
-/// Given a source and target object in an ∞-category, return a
-/// handle for the mapping space between them. Concrete
-/// implementations produce the actual Kan complex; this stub
-/// validates the protocol shape.
-public fn mapping_space_handle(source: Int, target: Int) -> Int {
-    source + target
+// A HANDLE IS OPAQUE — this is the point of the type, not decoration.
+//
+// These functions used to take and return bare `Int`, and their bodies
+// were `source + target` / `x`. Two things followed, both wrong:
+//
+//   1. The signature promised «the mapping space between two objects»
+//      and delivered their SUM. A caller could not tell.
+//   2. Theorems were then stated ABOUT that arithmetic —
+//      `mapping_space_handle_symmetric`, `compose_self_is_double`,
+//      `compose_functor_handles_symmetric` — and discharged by SMT.
+//      They are true of `+` on `Int` and say NOTHING about ∞-categories;
+//      one of them even asserted symmetry that the doc comment itself
+//      admitted the underlying Kan complex does not have. Machine-
+//      checked proofs of the wrong proposition are worse than no
+//      proofs: they carry the authority of verification.
+//
+// The honest encoding makes the handle a distinct opaque type. Handles
+// can be formed, compared and passed around; they cannot be added,
+// so no arithmetic identity can masquerade as an ∞-categorical one.
+// When the Kan-complex implementation lands, `SpaceHandle` gains the
+// real payload and every call site keeps compiling.
+
+/// Opaque designator for a simplicial object produced by an
+/// ∞-categorical construction (a mapping space, an endomorphism
+/// monoid, a functor). Carries identity only — never an arithmetic
+/// value with a pretended meaning.
+public type SpaceHandle is (Int);
+
+implement Eq for SpaceHandle {
+    fn eq(&self, other: &SpaceHandle) -> Bool { self.0 == other.0 }
 }
 
-/// The endomorphism ∞-monoid of an object `x` is `Map(x, x)`. In a
-/// quasi-category it has a coherent composition making it a monoid
-/// object in ∞-groupoids. Here we just expose the handle.
-public fn endomorphism_space_handle(x: Int) -> Int {
-    x
+/// Given a source and target object in an ∞-category, designate the
+/// mapping space between them. The concrete Kan complex is produced
+/// by an implementation of `InfinityCategory`; this designates it.
+public fn mapping_space_handle(source: Int, target: Int) -> SpaceHandle {
+    SpaceHandle(hash_pair(source, target))
+}
+
+/// The endomorphism ∞-monoid of an object `x` is `Map(x, x)`.
+public fn endomorphism_space_handle(x: Int) -> SpaceHandle {
+    mapping_space_handle(x, x)
+}
+
+/// Order-sensitive pairing: `Map(a, b)` and `Map(b, a)` are different
+/// mapping spaces, so their designators must differ. (A sum would
+/// make them equal — the precise defect this type replaces.)
+fn hash_pair(a: Int, b: Int) -> Int {
+    a * 2654435761 + b
 }
 
 // =============================================================================
 // 11. Functor composition utilities
 // =============================================================================
 
-/// The identity ∞-functor on an ∞-category handle.
-public fn identity_functor_handle(c: Int) -> Int {
-    c
+/// Opaque designator for an ∞-functor.
+public type FunctorHandle is (Int);
+
+implement Eq for FunctorHandle {
+    fn eq(&self, other: &FunctorHandle) -> Bool { self.0 == other.0 }
 }
 
-/// Composition of two ∞-functors as a handle. Concrete
-/// implementations chain `map_simplex` calls; this witnesses the
-/// composition operation at the handle level.
-public fn compose_functor_handles(f: Int, g: Int) -> Int {
-    f + g
+/// The identity ∞-functor on an ∞-category.
+public fn identity_functor_handle(c: Int) -> FunctorHandle {
+    FunctorHandle(c)
 }
 
-/// Composing a functor with itself yields `2 * f` under the handle
-/// encoding — a concrete SMT-verifiable fact locked in as a theorem.
-theorem compose_self_is_double(f: Int)
-    proof by auto;
+/// Composition of two ∞-functors. Concrete implementations chain
+/// `map_simplex`; this designates the composite.
+///
+/// Composition is NOT commutative, and the designator must not
+/// pretend otherwise: `g ∘ f` and `f ∘ g` are different functors, so
+/// they get different handles.
+public fn compose_functor_handles(f: FunctorHandle, g: FunctorHandle) -> FunctorHandle {
+    FunctorHandle(hash_pair(f.0, g.0))
+}
 
-/// Composition of handles is commutative (reflects that addition is
-/// commutative — a handle-level stub for the more general fact that
-/// composition of ∞-functors up to homotopy is well-defined).
-theorem compose_functor_handles_symmetric(f: Int, g: Int)
-    proof by auto;
-
-/// Composing with the identity handle is the identity on the operand.
-theorem identity_functor_is_left_identity(f: Int)
-    proof by auto;
-
-/// The endomorphism space of any object `x` has the same handle as
-/// `x` — a direct encoding of the `Map(x, x)` definition.
-theorem endomorphism_space_reflects_object(x: Int)
-    proof by auto;
-
-/// The mapping space handle is symmetric in its arguments (at the
-/// handle encoding level — the underlying Kan complex is *not*
-/// symmetric in general).
-theorem mapping_space_handle_symmetric(a: Int, b: Int)
-    proof by auto;
+// The five theorems that stood here were removed, not weakened.
+//
+// `compose_self_is_double`, `compose_functor_handles_symmetric`,
+// `identity_functor_is_left_identity`,
+// `endomorphism_space_reflects_object`,
+// `mapping_space_handle_symmetric` were SMT-discharged statements
+// about `+` on `Int` — true of integer addition, silent about
+// ∞-categories, and presented under ∞-categorical names. One asserted
+// that mapping spaces are symmetric while its own doc comment noted
+// the underlying Kan complex is not.
+//
+// A machine-checked proof of the wrong proposition is worse than an
+// absent proof: it carries the authority of verification. The real
+// statements (composition is associative up to coherent homotopy;
+// `Map(x,x)` is a monoid object in ∞-groupoids) are provable only
+// against the Kan-complex implementation, and belong here when it
+// lands — stated about it, not about arithmetic.
 
 /// The walking arrow dimension strictly exceeds the one-object
 /// category dimension.

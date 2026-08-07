@@ -260,7 +260,7 @@ implement Eq for OcspError {
 // =============================================================================
 
 public fn parse_ocsp_response(_der: &[Byte]) -> Result<OcspResponse, OcspError> {
-    Result.Err(OcspError.BadStructure(Text.from_str("parse_ocsp_response scaffold — v1.1 deliverable")))
+    Result.Err(OcspError.BadStructure(Text.from("parse_ocsp_response scaffold — v1.1 deliverable")))
 }
 
 // =============================================================================

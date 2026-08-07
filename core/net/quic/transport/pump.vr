@@ -427,7 +427,7 @@ implement ConnectionPump {
 
         // Parse frames + dispatch.
         let frames = decode_all_frames(lp.payload.as_slice())
-            .map_err(|_| PumpError.Frame(Text.from_str("decode frames (long)")))?;
+            .map_err(|_| PumpError.Frame(Text.from("decode frames (long)")))?;
         // §10.1.1 — idle timer resets on *any* ack-eliciting packet
         // successfully processed.
         let rx_ack_eliciting = any_ack_eliciting(&frames);
@@ -448,7 +448,7 @@ implement ConnectionPump {
         self.connection.loss.spaces[PnSpaceKind.Application.as_index()]
             .on_packet_received(sp.packet_number);
         let frames = decode_all_frames(sp.payload.as_slice())
-            .map_err(|_| PumpError.Frame(Text.from_str("decode frames (short)")))?;
+            .map_err(|_| PumpError.Frame(Text.from("decode frames (short)")))?;
         let rx_ack_eliciting = any_ack_eliciting(&frames);
         let outcome = dispatch_frames(
             &frames, PnSpaceKind.Application, Instant.now(),
@@ -469,7 +469,7 @@ implement ConnectionPump {
         while i < outcome.crypto_chunks.len() {
             let chunk = &outcome.crypto_chunks[i];
             self.handshake.on_crypto_chunk(chunk)
-                .map_err(|_| PumpError.Handshake(Text.from_str("feed CRYPTO")))?;
+                .map_err(|_| PumpError.Handshake(Text.from("feed CRYPTO")))?;
             i = i + 1;
         }
         // Queue retransmits + PATH_RESPONSE echoes + other frames.
@@ -621,7 +621,7 @@ implement ConnectionPump {
                     frames:        &frames,
                     keys:          &keys_tx,
                 };
-                build_long_packet(input).map_err(|_| PumpError.Crypto(Text.from_str("build initial")))?
+                build_long_packet(input).map_err(|_| PumpError.Crypto(Text.from("build initial")))?
             },
             PnSpaceKind.Handshake => {
                 let empty_tok: [Byte; 0] = [];
@@ -636,7 +636,7 @@ implement ConnectionPump {
                     frames:        &frames,
                     keys:          &keys_tx,
                 };
-                build_long_packet(input).map_err(|_| PumpError.Crypto(Text.from_str("build handshake")))?
+                build_long_packet(input).map_err(|_| PumpError.Crypto(Text.from("build handshake")))?
             },
             PnSpaceKind.Application => {
                 let input = ShortPacketInput {
@@ -648,7 +648,7 @@ implement ConnectionPump {
                     frames:        &frames,
                     keys:          &keys_tx,
                 };
-                build_short_packet(input).map_err(|_| PumpError.Crypto(Text.from_str("build 1rtt")))?
+                build_short_packet(input).map_err(|_| PumpError.Crypto(Text.from("build 1rtt")))?
             },
         };
 

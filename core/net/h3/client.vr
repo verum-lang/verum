@@ -216,7 +216,7 @@ implement H3Client {
     public async fn connect(url_text: &Text, opts: ClientOptions) -> Result<H3Client, H3ClientError> {
         let url = Url.parse(url_text.as_slice())
             .map_err(|e| H3ClientError.UrlParse(e))?;
-        if url.scheme() != Text.from_str("https") {
+        if url.scheme() != Text.from("https") {
             return Result.Err(H3ClientError.UnsupportedScheme(url.scheme()));
         }
         let authority = url.authority();
@@ -268,7 +268,7 @@ implement H3Client {
 
         let url = Url.parse(url_text.as_slice())
             .map_err(|e| H3ClientError.UrlParse(e))?;
-        if url.scheme() != Text.from_str("https") {
+        if url.scheme() != Text.from("https") {
             return Result.Err(H3ClientError.UnsupportedScheme(url.scheme()));
         }
         let authority = url.authority();
@@ -307,7 +307,7 @@ implement H3Client {
         body: List<Byte>,
     ) -> Result<H3Response, H3ClientError> {
         let req = H3Request.post(self.authority.clone(), path.clone(), body)
-            .with_header(Text.from_str("content-type"), content_type.clone());
+            .with_header(Text.from("content-type"), content_type.clone());
         self.send(&req).await
     }
 

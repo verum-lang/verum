@@ -21,7 +21,7 @@
 //
 
 //  async fn hello() -> Result<Response, WeftError> {
-//  Result.Ok(Response.text(Text.from_str("Hello from Weft!")))
+//  Result.Ok(Response.text(Text.from("Hello from Weft!")))
 //  }
 //
 
@@ -114,7 +114,7 @@ implement<H: Handler + Send + Sync + 'static> WeftApp<H> {
     /// ```verum
     /// let app = WeftApp.new(router);
     /// let spec = app.child_spec("http-listener");
-    /// let addr = Text.from_str("0.0.0.0:8080");
+    /// let addr = Text.from("0.0.0.0:8080");
     /// supervisor.supervise(
     ///  fn() -> async {
     ///  WeftApp.new(router.clone())

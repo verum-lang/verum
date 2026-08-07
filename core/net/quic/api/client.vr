@@ -196,7 +196,7 @@ implement QuicClient {
         self.opened_bidi = self.opened_bidi + 1_u64;
         // Placeholder — integration layer creates real SendStream /
         // RecvStream halves against the underlying QuicConnectionSm<OneRtt>.
-        Result.Err(QuicClientError.Handshake(Text.from_str("pure-Verum stream opening awaits transport wire-up")))
+        Result.Err(QuicClientError.Handshake(Text.from("pure-Verum stream opening awaits transport wire-up")))
             .or_else(|_| {
                 // The shape the integration returns — SendStream +
                 // RecvStream halves with initial flow-control limits

@@ -151,9 +151,9 @@ implement RealUdpTransport {
     pub async fn bind(addr: &SocketAddr) -> Result<RealUdpTransport, TransportError> {
         let socket = core.net.udp.UdpSocket.bind(addr)
             .await
-            .map_err(|e| TransportError.IoFailed(Text.from_str(f"udp bind failed")))?;
+            .map_err(|e| TransportError.IoFailed(Text.from(f"udp bind failed")))?;
         let local = socket.local_addr()
-            .map_err(|_| TransportError.IoFailed(Text.from_str("local_addr")))?;
+            .map_err(|_| TransportError.IoFailed(Text.from("local_addr")))?;
         let is_v6 = local.is_ipv6();
         // Ask the kernel to surface inbound ECN via recvmsg cmsg.
         // Errors here are non-fatal — the socket still works, just
@@ -173,8 +173,8 @@ implement RealUdpTransport {
 
     /// Open a new client socket on an ephemeral local port.
     pub async fn connect_ephemeral() -> Result<RealUdpTransport, TransportError> {
-        let addr = SocketAddr.from_text(Text.from_str("[::]:0"))
-            .unwrap_or_else(|_| SocketAddr.from_text(Text.from_str("0.0.0.0:0")).unwrap());
+        let addr = SocketAddr.from_text(Text.from("[::]:0"))
+            .unwrap_or_else(|_| SocketAddr.from_text(Text.from("0.0.0.0:0")).unwrap());
         RealUdpTransport.bind(&addr).await
     }
 }
@@ -200,7 +200,7 @@ implement UdpTransport for RealUdpTransport {
                     ecn: EcnCodepoint.NotEct,
                 })
             },
-            Result.Err(_) => Result.Err(TransportError.IoFailed(Text.from_str("recv_from"))),
+            Result.Err(_) => Result.Err(TransportError.IoFailed(Text.from("recv_from"))),
         }
     }
 
@@ -223,7 +223,7 @@ implement UdpTransport for RealUdpTransport {
         };
         self.socket.send_to(data, to).await
             .map(|_| ())
-            .map_err(|_| TransportError.IoFailed(Text.from_str("send_to")))
+            .map_err(|_| TransportError.IoFailed(Text.from("send_to")))
     }
 
     fn local_addr(&self) -> SocketAddr { self.local_addr.clone() }

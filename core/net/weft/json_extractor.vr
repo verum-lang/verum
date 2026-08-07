@@ -351,7 +351,7 @@ public fn extract_json<T>(req: &WeftRequest, cfg: &JsonExtractorConfig)
         Result.Err(e) => return Result.Err(JsonExtractError.ParseError { json_err: e }),
     };
     // Gate 5: type-directed materialisation.
-    let root_path = Text.from_str("$");
+    let root_path = Text.from("$");
     T.from_json(&value, &root_path)
 }
 

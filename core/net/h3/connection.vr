@@ -450,7 +450,7 @@ implement H3Connection {
                 H3Frame.MaxPushIdFrame(_)  => Result.Ok(()),
                 H3Frame.ReservedFrame {..} => Result.Ok(()),
                 _ => Result.Err(H3Error.UnexpectedFrame {
-                    on_stream_kind: Text.from_str("control"),
+                    on_stream_kind: Text.from("control"),
                     frame_type: 0_u64,
                 }),
             },
@@ -486,7 +486,7 @@ implement H3Connection {
                                 Result.Ok(fs) => { decoded_headers = Maybe.Some(fs); },
                                 Result.Err(_) => return Result.Err(H3Error.ConnectionError {
                                     code: H3ErrorCode.new(H3ErrorCode.QPACK_DECOMPRESSION_FAILED),
-                                    reason: Text.from_str("QPACK decompression failed"),
+                                    reason: Text.from("QPACK decompression failed"),
                                 }),
                             }
                         },
@@ -516,7 +516,7 @@ implement H3Connection {
                                 },
                                 Maybe.None => return Result.Err(H3Error.ConnectionError {
                                     code: H3ErrorCode.new(H3ErrorCode.H3_MESSAGE_ERROR),
-                                    reason: Text.from_str("malformed request pseudo-headers"),
+                                    reason: Text.from("malformed request pseudo-headers"),
                                 }),
                             }
                         },
@@ -527,7 +527,7 @@ implement H3Connection {
                                 },
                                 Maybe.None => return Result.Err(H3Error.ConnectionError {
                                     code: H3ErrorCode.new(H3ErrorCode.H3_MESSAGE_ERROR),
-                                    reason: Text.from_str("malformed response :status"),
+                                    reason: Text.from("malformed response :status"),
                                 }),
                             }
                         },
@@ -537,7 +537,7 @@ implement H3Connection {
                     // Body-only and peer closed without headers = error.
                     return Result.Err(H3Error.ConnectionError {
                         code: H3ErrorCode.new(H3ErrorCode.H3_FRAME_UNEXPECTED),
-                        reason: Text.from_str("stream ended before headers"),
+                        reason: Text.from("stream ended before headers"),
                     });
                 },
             }

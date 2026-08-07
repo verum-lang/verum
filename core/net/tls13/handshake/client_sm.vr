@@ -211,7 +211,7 @@ implement ClientSm {
                 let msg = HandshakeMessage.ClientHelloMsg(ch);
                 let mut wire: List<Byte> = [];
                 encode_handshake(&msg, &mut wire)
-                    .map_err(|_| TlsError.InternalError(Text.from_str("encode CH failed")))?;
+                    .map_err(|_| TlsError.InternalError(Text.from("encode CH failed")))?;
                 // Transcript absorbs the wire-level message body.
                 let mut t = transcript;
                 t.append(wire.as_slice());
@@ -340,7 +340,7 @@ fn on_server_hello(
             let new_msg = HandshakeMessage.ClientHelloMsg(new_ch);
             let mut out_wire: List<Byte> = [];
             encode_handshake(&new_msg, &mut out_wire)
-                .map_err(|_| TlsError.InternalError(Text.from_str("encode CH2 failed")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("encode CH2 failed")))?;
             ws.transcript.append(out_wire.as_slice());
             let next = ClientSm.WaitServerHelloSm(WaitServerHello {
                 config: ws.config, transcript: ws.transcript,
@@ -383,15 +383,15 @@ fn on_server_hello(
 
             // Derive Early → Handshake secrets.
             let early = EarlySecret.derive_no_psk(hash)
-                .map_err(|_| TlsError.InternalError(Text.from_str("early secret")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("early secret")))?;
             let derived = early.to_handshake_input()
-                .map_err(|_| TlsError.InternalError(Text.from_str("derive handshake")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("derive handshake")))?;
             let handshake_secret = HandshakeSecret.derive(hash, derived.as_slice(), dhe_shared.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("handshake secret")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("handshake secret")))?;
             let client_hs = handshake_secret.client_traffic(transcript_after_sh.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("client hs traffic")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("client hs traffic")))?;
             let server_hs = handshake_secret.server_traffic(transcript_after_sh.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("server hs traffic")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("server hs traffic")))?;
 
             let next = ClientSm.WaitEncryptedExtensionsSm(WaitEncryptedExtensions {
                 config: ws.config,
@@ -542,7 +542,7 @@ fn on_finished(
             // Verify server Finished = HMAC(finished_key_server,
             //  Transcript-Hash(ClientHello..CertificateVerify))
             let srv_fin_key = inner.inner.server_hs_traffic.finished_key()
-                .map_err(|_| TlsError.InternalError(Text.from_str("server finished key")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("server finished key")))?;
             let th = inner.inner.transcript.snapshot();
             let expected = hmac_for_hash(inner.inner.hash, srv_fin_key.as_slice(), th.as_slice());
             if !constant_time_bytes_eq(expected.as_slice(), fin.verify_data.as_slice()) {
@@ -554,31 +554,31 @@ fn on_finished(
 
             // Derive application traffic secrets + exporter + resumption.
             let master_input = inner.inner.handshake_secret.to_master_input()
-                .map_err(|_| TlsError.InternalError(Text.from_str("master input")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("master input")))?;
             let master_secret = MasterSecret.derive(inner.inner.hash, master_input.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("master secret")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("master secret")))?;
 
             let transcript_after_sfin = transcript.snapshot();
             let client_ap = master_secret.client_traffic(transcript_after_sfin.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("client ap traffic")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("client ap traffic")))?;
             let server_ap = master_secret.server_traffic(transcript_after_sfin.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("server ap traffic")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("server ap traffic")))?;
             let exporter = master_secret.exporter_master(transcript_after_sfin.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("exporter master")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("exporter master")))?;
 
             // Build client Finished = HMAC(finished_key_client, transcript-hash-so-far)
             let cli_fin_key = inner.inner.client_hs_traffic.finished_key()
-                .map_err(|_| TlsError.InternalError(Text.from_str("client finished key")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("client finished key")))?;
             let cli_fin_verify = hmac_for_hash(inner.inner.hash, cli_fin_key.as_slice(), transcript_after_sfin.as_slice());
 
             let cli_fin = HandshakeMessage.FinishedMsg(Finished { verify_data: cli_fin_verify });
             let mut out_wire: List<Byte> = [];
             encode_handshake(&cli_fin, &mut out_wire)
-                .map_err(|_| TlsError.InternalError(Text.from_str("encode CFin")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("encode CFin")))?;
             transcript.append(out_wire.as_slice());
             let transcript_after_cfin = transcript.snapshot();
             let resumption_master = master_secret.resumption_master(transcript_after_cfin.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("resumption master")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("resumption master")))?;
 
             let connected = Connected {
                 config: inner.inner.config,

@@ -310,7 +310,7 @@ public fn decode_handshake(r: &mut Tls13HandshakeReader) -> Result<HandshakeMess
             HandshakeMessage.KeyUpdateMsg(KeyUpdate { request_update: KeyUpdateRequest.from_u8(v) })
         },
         5_u8  /* HST_END_OF_EARLY_DATA */   => HandshakeMessage.EndOfEarlyDataMsg,
-        _ => return Result.Err(CodecError.InvalidValue(Text.from_str("unknown HandshakeType"))),
+        _ => return Result.Err(CodecError.InvalidValue(Text.from("unknown HandshakeType"))),
     };
     Result.Ok(msg)
 }

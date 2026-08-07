@@ -287,11 +287,11 @@ implement ServerListener {
         // is *their* DCID which is the secret-derivation input per
         // RFC 9001 §5.2).
         let secrets = derive_initial_secrets(peer_dcid.as_slice())
-            .map_err(|_| ListenerError.MalformedInitial(Text.from_str("derive initial secrets")))?;
+            .map_err(|_| ListenerError.MalformedInitial(Text.from("derive initial secrets")))?;
         let server_keys_tx = derive_initial_keys(secrets.server.as_slice())
-            .map_err(|_| ListenerError.MalformedInitial(Text.from_str("derive server initial keys")))?;
+            .map_err(|_| ListenerError.MalformedInitial(Text.from("derive server initial keys")))?;
         let server_keys_rx = derive_initial_keys(secrets.client.as_slice())
-            .map_err(|_| ListenerError.MalformedInitial(Text.from_str("derive client initial keys")))?;
+            .map_err(|_| ListenerError.MalformedInitial(Text.from("derive client initial keys")))?;
 
         // Allocate a fresh local (SCID → server-issued CID).
         let local_cid = self.mint_cid();
@@ -424,17 +424,17 @@ fn extract_dcid(data: &List<Byte>, is_long: Bool) -> Result<ConnectionId, Listen
     if is_long {
         // Long header: version(4) | DCID-len(1) | DCID(0..=20)
         if data.len() < 6 {
-            return Result.Err(ListenerError.MalformedInitial(Text.from_str("short datagram")));
+            return Result.Err(ListenerError.MalformedInitial(Text.from("short datagram")));
         }
         let dcid_len = data[5] as Int;
         if dcid_len > MAX_CID_LEN || 6 + dcid_len > data.len() {
-            return Result.Err(ListenerError.MalformedInitial(Text.from_str("invalid DCID length")));
+            return Result.Err(ListenerError.MalformedInitial(Text.from("invalid DCID length")));
         }
         let mut cid: List<Byte> = [];
         let mut i: Int = 0;
         while i < dcid_len { cid.push(data[6 + i]); i = i + 1; }
         ConnectionId.from_bytes(cid.as_slice())
-            .map_err(|_| ListenerError.MalformedInitial(Text.from_str("CID construct")))
+            .map_err(|_| ListenerError.MalformedInitial(Text.from("CID construct")))
     } else {
         // Short header — DCID length known to the server from its
         // issued CIDs. Without knowing the expected length we peek
@@ -443,13 +443,13 @@ fn extract_dcid(data: &List<Byte>, is_long: Bool) -> Result<ConnectionId, Listen
         // here we use 8 as the convention.
         let dcid_len: Int = 8;
         if data.len() < 1 + dcid_len {
-            return Result.Err(ListenerError.MalformedInitial(Text.from_str("short dgram")));
+            return Result.Err(ListenerError.MalformedInitial(Text.from("short dgram")));
         }
         let mut cid: List<Byte> = [];
         let mut i: Int = 0;
         while i < dcid_len { cid.push(data[1 + i]); i = i + 1; }
         ConnectionId.from_bytes(cid.as_slice())
-            .map_err(|_| ListenerError.MalformedInitial(Text.from_str("CID construct")))
+            .map_err(|_| ListenerError.MalformedInitial(Text.from("CID construct")))
     }
 }
 

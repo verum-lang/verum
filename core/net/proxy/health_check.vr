@@ -242,7 +242,7 @@ implement ActiveHealthChecker {
         self.attempts.fetch_add(1, MemoryOrdering.AcqRel);
         let path = match self.cfg {
             HealthCheck.Active { path, .. } => path.clone(),
-            _ => Text.from_str("/healthz"),
+            _ => Text.from("/healthz"),
         };
         let timeout_ms = match self.cfg {
             HealthCheck.Active { timeout_ms, .. } => timeout_ms,

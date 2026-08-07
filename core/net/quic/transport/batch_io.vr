@@ -159,9 +159,9 @@ implement RealBatchUdp {
     /// can still use the socket in per-datagram mode.
     public async fn bind(addr: &SocketAddr) -> Result<RealBatchUdp, TransportError> {
         let socket = core.net.udp.UdpSocket.bind(addr)
-            .await.map_err(|_| TransportError.IoFailed(Text.from_str("udp bind")))?;
+            .await.map_err(|_| TransportError.IoFailed(Text.from("udp bind")))?;
         let local = socket.local_addr()
-            .map_err(|_| TransportError.IoFailed(Text.from_str("local_addr")))?;
+            .map_err(|_| TransportError.IoFailed(Text.from("local_addr")))?;
         let caps = probe_kernel_capabilities(&socket).await;
         Result.Ok(RealBatchUdp {
             socket:      socket,
@@ -188,7 +188,7 @@ implement UdpTransport for RealBatchUdp {
                     data: data, peer_addr: peer, ecn: EcnCodepoint.NotEct,
                 })
             },
-            Result.Err(_) => Result.Err(TransportError.IoFailed(Text.from_str("recv_from"))),
+            Result.Err(_) => Result.Err(TransportError.IoFailed(Text.from("recv_from"))),
         }
     }
 
@@ -198,7 +198,7 @@ implement UdpTransport for RealBatchUdp {
         let _ = ecn;
         self.socket.send_to(data, to).await
             .map(|_| ())
-            .map_err(|_| TransportError.IoFailed(Text.from_str("send_to")))
+            .map_err(|_| TransportError.IoFailed(Text.from("send_to")))
     }
 
     fn local_addr(&self) -> SocketAddr { self.local_addr.clone() }
@@ -226,7 +226,7 @@ implement BatchTransport for RealBatchUdp {
             match self.socket.send_to(dg.bytes.as_slice(), &dg.peer).await {
                 Result.Ok(_) => sent = sent + 1,
                 Result.Err(_) => return if sent > 0 { Result.Ok(sent) } else {
-                    Result.Err(TransportError.IoFailed(Text.from_str("send_to")))
+                    Result.Err(TransportError.IoFailed(Text.from("send_to")))
                 },
             }
             i = i + 1;
@@ -252,21 +252,21 @@ implement BatchTransport for RealBatchUdp {
         -> Result<(), TransportError>
     {
         if !self.caps.gso_supported {
-            return Result.Err(TransportError.IoFailed(Text.from_str("GSO unsupported")));
+            return Result.Err(TransportError.IoFailed(Text.from("GSO unsupported")));
         }
         set_udp_segment(&self.socket, segment_size).await
     }
 
     async fn enable_gro(&self) -> Result<(), TransportError> {
         if !self.caps.gro_supported {
-            return Result.Err(TransportError.IoFailed(Text.from_str("GRO unsupported")));
+            return Result.Err(TransportError.IoFailed(Text.from("GRO unsupported")));
         }
         set_udp_gro(&self.socket, true).await
     }
 
     async fn enable_ecn(&self) -> Result<(), TransportError> {
         if !self.caps.ecn_supported {
-            return Result.Err(TransportError.IoFailed(Text.from_str("ECN unsupported")));
+            return Result.Err(TransportError.IoFailed(Text.from("ECN unsupported")));
         }
         set_ip_tos(&self.socket).await
     }
@@ -312,30 +312,30 @@ async fn syscall_send_batch(
     // Production Linux binding: @intrinsic("verum.udp.sendmmsg", ...)
     // with iovec/cmsg marshalling. Pure-Verum path is the per-datagram
     // loop above.
-    Result.Err(TransportError.IoFailed(Text.from_str("sendmmsg not wired")))
+    Result.Err(TransportError.IoFailed(Text.from("sendmmsg not wired")))
 }
 
 async fn syscall_recv_batch(
     _sock: &core.net.udp.UdpSocket,
     _max_count: Int,
 ) -> Result<List<InboundDatagram>, TransportError> {
-    Result.Err(TransportError.IoFailed(Text.from_str("recvmmsg not wired")))
+    Result.Err(TransportError.IoFailed(Text.from("recvmmsg not wired")))
 }
 
 async fn set_udp_segment(_sock: &core.net.udp.UdpSocket, _segment_size: UInt16)
     -> Result<(), TransportError>
 {
-    Result.Err(TransportError.IoFailed(Text.from_str("UDP_SEGMENT not wired")))
+    Result.Err(TransportError.IoFailed(Text.from("UDP_SEGMENT not wired")))
 }
 
 async fn set_udp_gro(_sock: &core.net.udp.UdpSocket, _enable: Bool)
     -> Result<(), TransportError>
 {
-    Result.Err(TransportError.IoFailed(Text.from_str("UDP_GRO not wired")))
+    Result.Err(TransportError.IoFailed(Text.from("UDP_GRO not wired")))
 }
 
 async fn set_ip_tos(_sock: &core.net.udp.UdpSocket)
     -> Result<(), TransportError>
 {
-    Result.Err(TransportError.IoFailed(Text.from_str("IP_TOS not wired")))
+    Result.Err(TransportError.IoFailed(Text.from("IP_TOS not wired")))
 }

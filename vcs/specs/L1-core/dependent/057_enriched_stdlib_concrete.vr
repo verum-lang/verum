@@ -112,10 +112,16 @@ fn test_horn_ops() {
 fn test_inf_cat_utils() {
     let walking = walking_arrow_dim();
     let one_obj = one_object_category_dim();
+    // Handles are OPAQUE designators (SpaceHandle / FunctorHandle) —
+    // they can be formed, compared and passed, never added. That is
+    // what keeps an arithmetic identity from masquerading as an
+    // ∞-categorical one.
     let id_f = identity_functor_handle(42);
-    let composed = compose_functor_handles(1, 2);
+    let composed = compose_functor_handles(id_f, identity_functor_handle(7));
     let hom = mapping_space_handle(1, 2);
     let end_x = endomorphism_space_handle(5);
+    // Map(a,b) and Map(b,a) are different mapping spaces.
+    assert(!hom.eq(&mapping_space_handle(2, 1)));
 
     print(walking);
     print(one_obj);

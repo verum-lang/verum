@@ -307,7 +307,7 @@ implement QuicConnectionSm<OneRtt> {
                 self.inner.recv_streams.push((sid, recv));
                 Result.Ok(sid)
             },
-            Maybe.None => Result.Err(QuicError.InvalidTransportParameter(Text.from_str("stream limit reached"))),
+            Maybe.None => Result.Err(QuicError.InvalidTransportParameter(Text.from("stream limit reached"))),
         }
     }
 
@@ -325,7 +325,7 @@ implement QuicConnectionSm<OneRtt> {
                 self.inner.send_streams.push((sid, send));
                 Result.Ok(sid)
             },
-            Maybe.None => Result.Err(QuicError.InvalidTransportParameter(Text.from_str("stream limit reached"))),
+            Maybe.None => Result.Err(QuicError.InvalidTransportParameter(Text.from("stream limit reached"))),
         }
     }
 

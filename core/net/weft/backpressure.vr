@@ -150,23 +150,53 @@ implement RateLimitLayer {
         let elapsed = now - last;
         if elapsed > 0 {
             let add = elapsed * bucket.refill_per_ms_millis;
+            // Winning this CAS grants the RIGHT to refill for exactly
+            // the [last, now) window — at most one thread per window,
+            // so tokens can never be added twice for the same elapsed
+            // time.
             if bucket.last_refill_ms.compare_exchange(
                 last, now,
                 MemoryOrdering.AcqRel, MemoryOrdering.Relaxed,
             ).is_ok() {
+                // The ADD itself must also be a CAS loop. A
+                // load-modify-STORE here loses every concurrent
+                // withdrawal that lands between the load and the
+                // store: the bucket is written back to a value that
+                // never accounted for the spent token, and the limiter
+                // admits MORE traffic than configured — the one thing
+                // a rate limiter must never do. (Bug fixed 2026-08-07;
+                // pinned by `rate_limiter_refill_never_loses_a_take`.)
                 let cap = bucket.capacity_millis;
-                let current = bucket.tokens_millis.load(MemoryOrdering.Acquire);
-                let new_val = if current + add > cap { cap } else { current + add };
-                bucket.tokens_millis.store(new_val, MemoryOrdering.Release);
+                let mut current = bucket.tokens_millis.load(MemoryOrdering.Acquire);
+                loop {
+                    let raised = current + add;
+                    let new_val = if raised > cap { cap } else { raised };
+                    if new_val == current { break; }
+                    match bucket.tokens_millis.compare_exchange(
+                        current, new_val,
+                        MemoryOrdering.AcqRel, MemoryOrdering.Acquire,
+                    ) {
+                        Result.Ok(_)       => break,
+                        Result.Err(actual) => current = actual,
+                    }
+                }
             }
         }
-        // Attempt to take 1000 token-millis = 1 whole token.
-        let current = bucket.tokens_millis.load(MemoryOrdering.Acquire);
-        if current < 1000 { return false; }
-        bucket.tokens_millis.compare_exchange(
-            current, current - 1000,
-            MemoryOrdering.AcqRel, MemoryOrdering.Relaxed,
-        ).is_ok()
+        // Take 1000 token-millis = 1 whole token. Retry on contention:
+        // a failed CAS means another taker moved the reserve, not that
+        // this caller should be rejected — bailing out on the first
+        // conflict would reject traffic the bucket can actually serve.
+        loop {
+            let current = bucket.tokens_millis.load(MemoryOrdering.Acquire);
+            if current < 1000 { return false; }
+            match bucket.tokens_millis.compare_exchange(
+                current, current - 1000,
+                MemoryOrdering.AcqRel, MemoryOrdering.Acquire,
+            ) {
+                Result.Ok(_)  => return true,
+                Result.Err(_) => {},
+            }
+        }
     }
 }
 
@@ -468,9 +498,14 @@ implement WfqLayer {
     public fn admit(&self, tenant: &Text, cost_us: Int) -> Bool {
         let s = &*self.state;
         let tenants = s.tenants.lock();
-        let slot = match tenants.get(tenant) {
+        // The fallback key is a named binding, not an inline `&"…"`:
+        // the temporary a literal-reference creates does not outlive
+        // the match, so the two arms had incompatible reference
+        // lifetimes and the binding's type could not be inferred.
+        let default_key: Text = Text.from("_default");
+        let slot: &TenantSlot = match tenants.get(tenant) {
             Maybe.Some(t) => t,
-            Maybe.None => match tenants.get(&"_default") {
+            Maybe.None => match tenants.get(&default_key) {
                 Maybe.Some(d) => d,
                 Maybe.None    => return true,    // no policy → allow
             }
@@ -509,7 +544,7 @@ implement<H: Handler> Handler for WfqHandler<H> {
     async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
         let tenant = match req.headers.get(&"x-weft-tenant") {
             Maybe.Some(t) => t.clone(),
-            Maybe.None    => Text.from_str("_default"),
+            Maybe.None    => Text.from("_default"),
         };
         let cost_us = match req.headers.get(&"x-weft-cost-us") {
             Maybe.Some(t) => match t.parse_int() {

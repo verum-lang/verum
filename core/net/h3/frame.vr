@@ -182,7 +182,7 @@ public fn decode_frame(buf: &[Byte], pos: Int) -> Result<(H3Frame, Int), H3Frame
         1_u64 /* HEADERS */  => H3Frame.HeadersFrame(take_bytes(buf, p2, end)),
         3_u64 /* CANCEL_PUSH */ => {
             let (id, p3) = quic_decode(buf, p2).or_else(vfail)?;
-            if p3 != end { return Result.Err(H3FrameError.InvalidValue(Text.from_str("CANCEL_PUSH trailing bytes"))); }
+            if p3 != end { return Result.Err(H3FrameError.InvalidValue(Text.from("CANCEL_PUSH trailing bytes"))); }
             H3Frame.CancelPushFrame(id)
         },
         4_u64 /* SETTINGS */ => H3Frame.SettingsFrame(decode_settings(buf, p2, end)?),
@@ -195,12 +195,12 @@ public fn decode_frame(buf: &[Byte], pos: Int) -> Result<(H3Frame, Int), H3Frame
         },
         7_u64 /* GOAWAY */ => {
             let (id, p3) = quic_decode(buf, p2).or_else(vfail)?;
-            if p3 != end { return Result.Err(H3FrameError.InvalidValue(Text.from_str("GOAWAY trailing bytes"))); }
+            if p3 != end { return Result.Err(H3FrameError.InvalidValue(Text.from("GOAWAY trailing bytes"))); }
             H3Frame.GoawayFrame(id)
         },
         13_u64 /* MAX_PUSH_ID */ => {
             let (id, p3) = quic_decode(buf, p2).or_else(vfail)?;
-            if p3 != end { return Result.Err(H3FrameError.InvalidValue(Text.from_str("MAX_PUSH_ID trailing bytes"))); }
+            if p3 != end { return Result.Err(H3FrameError.InvalidValue(Text.from("MAX_PUSH_ID trailing bytes"))); }
             H3Frame.MaxPushIdFrame(id)
         },
         _ => H3Frame.ReservedFrame {
@@ -221,7 +221,7 @@ fn decode_settings(buf: &[Byte], start: Int, end: Int) -> Result<List<(UInt64, U
         cur = p2;
     }
     if cur != end {
-        return Result.Err(H3FrameError.InvalidValue(Text.from_str("SETTINGS trailing bytes")));
+        return Result.Err(H3FrameError.InvalidValue(Text.from("SETTINGS trailing bytes")));
     }
     Result.Ok(out)
 }

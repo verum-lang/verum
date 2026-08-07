@@ -292,7 +292,7 @@ fn decode_ack(buf: &[Byte], pos: Int, with_ecn: Bool) -> Result<(QuicFrame, Int)
 
     // First ack range: [largest - first_len, largest]
     if first_len > largest {
-        return Result.Err(FrameError.InvalidValue(Text.from_str("first ack range underflows")));
+        return Result.Err(FrameError.InvalidValue(Text.from("first ack range underflows")));
     }
     let mut ranges: List<AckRange> = [];
     ranges.push(AckRange { smallest: largest - first_len, largest: largest });
@@ -305,11 +305,11 @@ fn decode_ack(buf: &[Byte], pos: Int, with_ecn: Bool) -> Result<(QuicFrame, Int)
         let (len, q2) = quic_decode(buf, q1).or_else(vfail)?;
         // new_largest = smallest_last - gap - 2, per RFC 9000 §19.3.1
         if smallest_last < gap + 2_u64 {
-            return Result.Err(FrameError.InvalidValue(Text.from_str("ack gap underflows")));
+            return Result.Err(FrameError.InvalidValue(Text.from("ack gap underflows")));
         }
         let new_largest = smallest_last - gap - 2_u64;
         if len > new_largest {
-            return Result.Err(FrameError.InvalidValue(Text.from_str("ack range underflows")));
+            return Result.Err(FrameError.InvalidValue(Text.from("ack range underflows")));
         }
         let new_smallest = new_largest - len;
         ranges.push(AckRange { smallest: new_smallest, largest: new_largest });
@@ -447,7 +447,7 @@ fn decode_new_connection_id(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), 
     if p2 >= buf.len() { return Result.Err(FrameError.Truncated); }
     let cid_len = buf[p2] as Int;
     if cid_len < 1 || cid_len > 20 {
-        return Result.Err(FrameError.InvalidValue(Text.from_str("NEW_CONNECTION_ID invalid CID length")));
+        return Result.Err(FrameError.InvalidValue(Text.from("NEW_CONNECTION_ID invalid CID length")));
     }
     let cid_end = p2 + 1 + cid_len;
     let tok_end = cid_end + 16;

@@ -188,7 +188,7 @@ implement H3Server {
     /// server is idle until `run` / `run_with` drives it.
     pub async fn bind(addr_text: &Text, opts: ServerOptions) -> Result<H3Server, H3ServerError> {
         let addr = SocketAddr.from_text(addr_text.clone())
-            .map_err(|_| H3ServerError.Bind(Text.from_str(f"parse addr {addr_text}")))?;
+            .map_err(|_| H3ServerError.Bind(Text.from(f"parse addr {addr_text}")))?;
         // UDP socket creation + QUIC listener attach are in the
         // transport integration layer (wires through `core.net.quic.
         // connection.QuicListener` once the pure-Verum transport

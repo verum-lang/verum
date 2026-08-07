@@ -108,7 +108,7 @@ implement QuicApiStream {
             Result.Ok(n) => Result.Ok(n),
             Result.Err(SendError.AlreadyReset)        => Result.Err(QuicStreamError.Reset(0_u64)),
             Result.Err(SendError.AlreadyFinished)     => Result.Err(QuicStreamError.Closed),
-            Result.Err(SendError.FinalSizeViolation)  => Result.Err(QuicStreamError.Transport(Text.from_str("final size violation"))),
+            Result.Err(SendError.FinalSizeViolation)  => Result.Err(QuicStreamError.Transport(Text.from("final size violation"))),
             Result.Err(SendError.FlowControlExceeded) => Result.Err(QuicStreamError.FlowControl),
         }
     }
@@ -154,7 +154,7 @@ implement QuicApiStream {
             Result.Ok(())                             => Result.Ok(()),
             Result.Err(SendError.AlreadyReset)        => Result.Ok(()),
             Result.Err(SendError.AlreadyFinished)     => Result.Ok(()),
-            Result.Err(_)                             => Result.Err(QuicStreamError.Transport(Text.from_str("close failed"))),
+            Result.Err(_)                             => Result.Err(QuicStreamError.Transport(Text.from("close failed"))),
         }
     }
 

@@ -221,20 +221,20 @@ fn on_client_hello(
 
             let mut sh_wire: List<Byte> = [];
             encode_handshake(&HandshakeMessage.ServerHelloMsg(sh), &mut sh_wire)
-                .map_err(|_| TlsError.InternalError(Text.from_str("encode SH")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("encode SH")))?;
             transcript.append(sh_wire.as_slice());
 
             let t_after_sh = transcript.snapshot();
             let early = EarlySecret.derive_no_psk(hash.clone())
-                .map_err(|_| TlsError.InternalError(Text.from_str("early secret")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("early secret")))?;
             let derived = early.to_handshake_input()
-                .map_err(|_| TlsError.InternalError(Text.from_str("derive HS")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("derive HS")))?;
             let hs_secret = HandshakeSecret.derive(hash.clone(), derived.as_slice(), shared.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("HS secret")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("HS secret")))?;
             let client_hs = hs_secret.client_traffic(t_after_sh.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("c hs")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("c hs")))?;
             let server_hs = hs_secret.server_traffic(t_after_sh.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("s hs")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("s hs")))?;
 
             // Build + absorb EncryptedExtensions.
             let ee_msg = HandshakeMessage.EncryptedExtensionsMsg(EncryptedExtensions {
@@ -242,7 +242,7 @@ fn on_client_hello(
             });
             let mut ee_wire: List<Byte> = [];
             encode_handshake(&ee_msg, &mut ee_wire)
-                .map_err(|_| TlsError.InternalError(Text.from_str("encode EE")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("encode EE")))?;
             transcript.append(ee_wire.as_slice());
 
             // Build + absorb Certificate.
@@ -252,7 +252,7 @@ fn on_client_hello(
             });
             let mut cert_wire: List<Byte> = [];
             encode_handshake(&cert_msg, &mut cert_wire)
-                .map_err(|_| TlsError.InternalError(Text.from_str("encode Cert")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("encode Cert")))?;
             transcript.append(cert_wire.as_slice());
 
             // Build + absorb CertificateVerify.
@@ -265,24 +265,24 @@ fn on_client_hello(
             });
             let mut cv_wire: List<Byte> = [];
             encode_handshake(&cv_msg, &mut cv_wire)
-                .map_err(|_| TlsError.InternalError(Text.from_str("encode CV")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("encode CV")))?;
             transcript.append(cv_wire.as_slice());
 
             // Server Finished.
             let srv_fin_key = server_hs.finished_key()
-                .map_err(|_| TlsError.InternalError(Text.from_str("srv finished key")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("srv finished key")))?;
             let t_for_fin = transcript.snapshot();
             let fin_mac = hmac_for_hash(hash.clone(), srv_fin_key.as_slice(), t_for_fin.as_slice());
             let fin_msg = HandshakeMessage.FinishedMsg(Finished { verify_data: fin_mac });
             let mut fin_wire: List<Byte> = [];
             encode_handshake(&fin_msg, &mut fin_wire)
-                .map_err(|_| TlsError.InternalError(Text.from_str("encode Fin")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("encode Fin")))?;
             transcript.append(fin_wire.as_slice());
 
             // Derive Master secret input once — final application keys
             // are derived from the transcript at server Finished + client Finished.
             let master_input = hs_secret.to_master_input()
-                .map_err(|_| TlsError.InternalError(Text.from_str("master input")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("master input")))?;
 
             // Assemble outbound.
             let total = sh_wire.len() + ee_wire.len() + cert_wire.len()
@@ -323,7 +323,7 @@ fn on_client_finished(
             // Compute expected client Finished MAC = HMAC(client_hs_finished_key,
             // transcript-hash-at-server-Finished).
             let cli_fin_key = wf.client_hs_traffic.finished_key()
-                .map_err(|_| TlsError.InternalError(Text.from_str("cli finished key")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("cli finished key")))?;
             let expected = hmac_for_hash(wf.hash.clone(), cli_fin_key.as_slice(),
                                           wf.transcript.snapshot().as_slice());
             if !constant_time_bytes_eq(expected.as_slice(), fin.verify_data.as_slice()) {
@@ -351,16 +351,16 @@ fn on_client_finished(
 
             // Master secret derived from hs_secret (already have input seed).
             let master_secret = MasterSecret.derive(wf.hash.clone(), wf.master_secret_seed.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("master")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("master")))?;
 
             let client_ap = master_secret.client_traffic(t_at_server_fin.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("c ap")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("c ap")))?;
             let server_ap = master_secret.server_traffic(t_at_server_fin.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("s ap")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("s ap")))?;
             let exporter  = master_secret.exporter_master(t_at_server_fin.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("exporter")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("exporter")))?;
             let resumption = master_secret.resumption_master(t_after_client_fin.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from_str("resumption")))?;
+                .map_err(|_| TlsError.InternalError(Text.from("resumption")))?;
 
             let connected = ServerConnected {
                 suite: wf.suite,

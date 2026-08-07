@@ -97,7 +97,7 @@ implement DhePool for LocalDhePool {
             NamedGroup.Secp256r1 => {
                 let sk = P256.generate_private_key();
                 let pk = P256.public_key(&sk)
-                    .map_err(|_| TlsError.InternalError(Text.from_str("P256 pubkey gen")))?;
+                    .map_err(|_| TlsError.InternalError(Text.from("P256 pubkey gen")))?;
                 // P256PrivateKey is a type alias for [Byte; 32] — copy raw.
                 let mut priv_v: List<Byte> = [];
                 let mut i: Int = 0;

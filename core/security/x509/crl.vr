@@ -151,7 +151,7 @@ public fn parse_crl(_der: &[Byte]) -> Result<CertificateList, CrlError> {
     // The wiring to DerReader + Name/Time/Extension helpers lands
     // in v1.1. Until then: surface the scaffold so consumer code
     // can match on `CertificateList` / `RevokedEntry` already.
-    Result.Err(CrlError.BadStructure(Text.from_str("parse_crl scaffold — v1.1 deliverable")))
+    Result.Err(CrlError.BadStructure(Text.from("parse_crl scaffold — v1.1 deliverable")))
 }
 
 // =============================================================================

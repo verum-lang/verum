@@ -198,5 +198,5 @@ fn entry(i: Int) -> QpackStaticEntry {
 }
 
 fn e(n: &Text, v: &Text) -> QpackStaticEntry {
-    QpackStaticEntry { name: Text.from_str(n), value: Text.from_str(v) }
+    QpackStaticEntry { name: Text.from(n), value: Text.from(v) }
 }
