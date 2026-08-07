@@ -3825,7 +3825,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let func_id = decode_varint(data, offset)? as u32;
             // Type args are static TypeRefs (see `Instruction::CallG` doc).
             let type_arg_count = decode_varint(data, offset)? as usize;
-            let mut type_args = Vec::with_capacity(type_arg_count);
+            let mut type_args = decode_vec_with_capacity(type_arg_count, data, *offset);
             for _ in 0..type_arg_count {
                 type_args.push(decode_type_ref(data, offset)?);
             }
@@ -3921,7 +3921,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let value = decode_reg(data, offset)?;
             let default_offset = decode_signed_varint(data, offset)? as i32;
             let case_count = decode_varint(data, offset)? as usize;
-            let mut cases = Vec::with_capacity(case_count);
+            let mut cases = decode_vec_with_capacity(case_count, data, *offset);
             for _ in 0..case_count {
                 let case_val = decode_varint(data, offset)? as u32;
                 let case_offset = decode_signed_varint(data, offset)? as i32;
@@ -3988,7 +3988,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let dst = decode_reg(data, offset)?;
             let futures = decode_reg_vec(data, offset)?;
             let handler_count = decode_varint(data, offset)? as usize;
-            let mut handlers = Vec::with_capacity(handler_count);
+            let mut handlers = decode_vec_with_capacity(handler_count, data, *offset);
             for _ in 0..handler_count {
                 handlers.push(decode_signed_varint(data, offset)? as i32);
             }
@@ -4167,17 +4167,17 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let dst = decode_reg(data, offset)?;
                     let src = decode_reg(data, offset)?;
                     let kernel_size_len = decode_varint(data, offset)? as usize;
-                    let mut kernel_size = Vec::with_capacity(kernel_size_len);
+                    let mut kernel_size = decode_vec_with_capacity(kernel_size_len, data, *offset);
                     for _ in 0..kernel_size_len {
                         kernel_size.push(decode_u8(data, offset)?);
                     }
                     let stride_len = decode_varint(data, offset)? as usize;
-                    let mut stride = Vec::with_capacity(stride_len);
+                    let mut stride = decode_vec_with_capacity(stride_len, data, *offset);
                     for _ in 0..stride_len {
                         stride.push(decode_u8(data, offset)?);
                     }
                     let padding_len = decode_varint(data, offset)? as usize;
-                    let mut padding = Vec::with_capacity(padding_len);
+                    let mut padding = decode_vec_with_capacity(padding_len, data, *offset);
                     for _ in 0..padding_len {
                         padding.push(decode_u8(data, offset)?);
                     }
@@ -4363,7 +4363,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let dst = decode_reg(data, offset)?;
                     let src = decode_reg(data, offset)?;
                     let axes_len = decode_varint(data, offset)? as usize;
-                    let mut axes = Vec::with_capacity(axes_len);
+                    let mut axes = decode_vec_with_capacity(axes_len, data, *offset);
                     for _ in 0..axes_len {
                         axes.push(decode_u8(data, offset)?);
                     }
@@ -4549,7 +4549,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let dst = decode_reg(data, offset)?;
                     let src = decode_reg(data, offset)?;
                     let axes_len = decode_varint(data, offset)? as usize;
-                    let mut axes = Vec::with_capacity(axes_len);
+                    let mut axes = decode_vec_with_capacity(axes_len, data, *offset);
                     for _ in 0..axes_len {
                         axes.push(decode_u8(data, offset)?);
                     }
@@ -4610,12 +4610,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let a = decode_reg(data, offset)?;
                     let b = decode_reg(data, offset)?;
                     let axes_a_len = decode_varint(data, offset)? as usize;
-                    let mut axes_a = Vec::with_capacity(axes_a_len);
+                    let mut axes_a = decode_vec_with_capacity(axes_a_len, data, *offset);
                     for _ in 0..axes_a_len {
                         axes_a.push(decode_u8(data, offset)?);
                     }
                     let axes_b_len = decode_varint(data, offset)? as usize;
-                    let mut axes_b = Vec::with_capacity(axes_b_len);
+                    let mut axes_b = decode_vec_with_capacity(axes_b_len, data, *offset);
                     for _ in 0..axes_b_len {
                         axes_b.push(decode_u8(data, offset)?);
                     }
@@ -4633,17 +4633,17 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let kernel = decode_reg(data, offset)?;
                     let bias = decode_optional_reg(data, offset)?;
                     let stride_len = decode_varint(data, offset)? as usize;
-                    let mut stride = Vec::with_capacity(stride_len);
+                    let mut stride = decode_vec_with_capacity(stride_len, data, *offset);
                     for _ in 0..stride_len {
                         stride.push(decode_u8(data, offset)?);
                     }
                     let padding_len = decode_varint(data, offset)? as usize;
-                    let mut padding = Vec::with_capacity(padding_len);
+                    let mut padding = decode_vec_with_capacity(padding_len, data, *offset);
                     for _ in 0..padding_len {
                         padding.push(decode_u8(data, offset)?);
                     }
                     let dilation_len = decode_varint(data, offset)? as usize;
-                    let mut dilation = Vec::with_capacity(dilation_len);
+                    let mut dilation = decode_vec_with_capacity(dilation_len, data, *offset);
                     for _ in 0..dilation_len {
                         dilation.push(decode_u8(data, offset)?);
                     }
@@ -5734,7 +5734,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let sub_op = decode_u8(data, offset)?;
             let dst = decode_reg(data, offset)?;
             let args_len = decode_u8(data, offset)? as usize;
-            let mut args = Vec::with_capacity(args_len);
+            let mut args = decode_vec_with_capacity(args_len, data, *offset);
             for _ in 0..args_len {
                 args.push(decode_reg(data, offset)?);
             }
@@ -5756,11 +5756,33 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
 // Decoding Helpers
 // ============================================================================
 
+/// Allocate a decode buffer for a length that came OUT OF THE BYTE
+/// STREAM — i.e. one an attacker (or a corrupt archive) chooses.
+///
+/// Reserving directly on such a length lets a handful of bytes request
+/// a multi-terabyte allocation: the process dies in
+/// `handle_alloc_error` with SIGABRT instead of returning the decode
+/// error every caller here is written to handle. Since every element
+/// of these vectors occupies at least one byte on the wire, the
+/// remaining input is a hard upper bound on how many can actually
+/// follow — capping the reservation by it costs nothing for
+/// well-formed input (still a single allocation) and makes a lie about
+/// the length harmless.
+///
+/// THE one allocation authority for stream-derived lengths in this
+/// decoder; `Vec::with_capacity(<decoded length>)` must not appear
+/// again (pinned by `test_overflow_protection_in_vec_decode`).
+#[inline]
+fn decode_vec_with_capacity<T>(count: usize, data: &[u8], offset: usize) -> Vec<T> {
+    let max_possible = data.len().saturating_sub(offset);
+    Vec::with_capacity(count.min(max_possible))
+}
+
 /// Decodes a vector of registers.
 #[inline]
 fn decode_reg_vec(data: &[u8], offset: &mut usize) -> VbcResult<Vec<Reg>> {
     let count = decode_varint(data, offset)? as usize;
-    let mut regs = Vec::with_capacity(count);
+    let mut regs = decode_vec_with_capacity(count, data, *offset);
     for _ in 0..count {
         regs.push(decode_reg(data, offset)?);
     }
@@ -5863,7 +5885,7 @@ fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
             // Instantiated { base, args }
             let base_id = decode_varint(data, offset)? as u32;
             let arg_count = decode_varint(data, offset)? as usize;
-            let mut args = Vec::with_capacity(arg_count);
+            let mut args = decode_vec_with_capacity(arg_count, data, *offset);
             for _ in 0..arg_count {
                 args.push(decode_type_ref(data, offset)?);
             }
@@ -5875,7 +5897,7 @@ fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
         0x03 => {
             // Function { params, return_type, contexts }
             let param_count = decode_varint(data, offset)? as usize;
-            let mut params = Vec::with_capacity(param_count);
+            let mut params = decode_vec_with_capacity(param_count, data, *offset);
             for _ in 0..param_count {
                 params.push(decode_type_ref(data, offset)?);
             }
@@ -5914,7 +5936,7 @@ fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
         0x05 => {
             // Tuple(elems)
             let elem_count = decode_varint(data, offset)? as usize;
-            let mut elems = Vec::with_capacity(elem_count);
+            let mut elems = decode_vec_with_capacity(elem_count, data, *offset);
             for _ in 0..elem_count {
                 elems.push(decode_type_ref(data, offset)?);
             }
@@ -5947,7 +5969,7 @@ fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
             // failed on the first such function.
             let type_param_count = decode_varint(data, offset)? as u16;
             let param_count = decode_varint(data, offset)? as usize;
-            let mut params = Vec::with_capacity(param_count);
+            let mut params = decode_vec_with_capacity(param_count, data, *offset);
             for _ in 0..param_count {
                 params.push(decode_type_ref(data, offset)?);
             }
