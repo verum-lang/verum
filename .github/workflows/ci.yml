@@ -248,6 +248,20 @@ jobs:
         timeout-minutes: 20
         run: cargo test --locked --tests -p verum_codegen -p verum_integration_tests
 
+      # verum_lsp tier: measured green locally 2026-08-07 — 81 tests
+      # across 4 targets, 0.03s wall, zero carve-outs.
+      #
+      # `verum_parser` is NOT here and cannot be yet: 77 of its 78
+      # integration tests pass, and the one that does not
+      # (test_error_recovery_invalid_expression) asserts that `1 ++ 2`
+      # is a syntax error — an open LANGUAGE decision (T0643), since
+      # grammar/verum.ebnf has no `++` while L1/L2 specs depend on it
+      # working. Silencing it would erase the question; adding the
+      # crate red would get the whole tier silenced.
+      - name: Run tests/ for verum_lsp
+        timeout-minutes: 15
+        run: cargo test --locked --tests -p verum_lsp
+
       # verum_types tier: 1,124 tests green (measured 2026-08-03). The
       # affine pin sat red only because it asserted the pre-recovery
       # error CHANNEL (Err) while STMT-RECOVERY-1 reports through
