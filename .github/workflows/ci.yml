@@ -106,7 +106,17 @@ jobs:
         run: cargo build --workspace --locked
 
       - name: Run unit tests (library + binaries)
-        run: cargo test --workspace --lib --bins --locked
+        # tee + failure artifact: runner log blobs vanish on failures
+        # (Azure-side), leaving red steps with zero diagnostics.
+        run: cargo test --workspace --lib --bins --locked 2>&1 | tee unit-tests.log; exit ${PIPESTATUS[0]}
+
+      - name: Upload unit test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-tests-log-${{ matrix.os }}
+          path: unit-tests.log
+          retention-days: 3
 
   # ---------------------------------------------------------------------------
   # Job 1b (T0709): integration-test gate. `--lib --bins` above excludes the
