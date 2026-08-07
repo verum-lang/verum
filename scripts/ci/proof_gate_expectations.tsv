@@ -1,3 +1,16 @@
+# RATCHET EXCEPTION (2026-08-07, infinity_category 31 -> 27): five
+# theorems were REMOVED, not lost. They were SMT-discharged statements
+# about `+` on Int — `compose_self_is_double`,
+# `compose_functor_handles_symmetric`, `mapping_space_handle_symmetric`
+# (whose own doc admitted the underlying Kan complex is not symmetric),
+# `identity_functor_is_left_identity`,
+# `endomorphism_space_reflects_object` — presented under ∞-categorical
+# names because the "handles" they spoke about were bare Ints returned
+# by `source + target`. A machine-checked proof of the wrong
+# proposition is worse than an absent one: it carries the authority of
+# verification. The handles are now opaque types that cannot be added,
+# so those statements are no longer expressible.
+#
 # T0230 stdlib proof-gate ratchet manifest — regenerate with proof_gate.py --seed
 # file	status	proved	failed
 core/action/effects.vr	failures	4	9
@@ -43,7 +56,7 @@ core/math/guardrails.vr	unverifiable	0	0
 core/math/hott.vr	unverifiable	0	0
 core/math/hyperbolic.vr	failures	14	5
 core/math/ieee754.vr	clean	39	0
-core/math/infinity_category.vr	clean	31	0
+core/math/infinity_category.vr	clean	27	0
 core/math/infinity_topos.vr	clean	22	0
 core/math/integers.vr	failures	39	6
 core/math/internal.vr	clean	34	0
