@@ -1,71 +1,75 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @tier: 0
 // @level: L2
-// @tags: sqlite, varint_encode_api, encoding
+// @tags: sqlite, varint, encoding
 // @timeout: 5000
 // @expected-exit: 0
 
-mount core.database.sqlite.native.varint_encode_api.lengths.{
-    max_value_for, encoded_length, decode_length_from_lead,
-    max_length, min_length, length_of_zero,
+// Canonical SQLite varint codec — `core/encoding/varint.vr` is the ONE
+// implementation of this encoding (the former
+// `core.database.sqlite.native.varint_encode_api` was a second copy,
+// and a defective one: its `decode_length_from_lead` was a documented
+// "simplified heuristic" returning -1, because a SQLite varint's length
+// is genuinely NOT determinable from its lead byte alone).
+//
+// What this spec pins is the codec's DEFINING property — round-trip —
+// plus the length boundaries the record format depends on.
+
+mount core.encoding.varint.{
+    sqlite_encoded_len, sqlite_encode, sqlite_decode, sqlite_skip,
 };
-mount base.{Bool, Int64};
 
-fn test_bounds() {
-    assert_eq(max_length(), 9);
-    assert_eq(min_length(), 1);
-    assert_eq(length_of_zero(), 1);
+fn test_length_boundaries() {
+    // 7 bits per byte for the first eight bytes; the ninth carries 8.
+    assert_eq(sqlite_encoded_len(0_i64), 1);
+    assert_eq(sqlite_encoded_len(127_i64), 1);
+    assert_eq(sqlite_encoded_len(128_i64), 2);
+    assert_eq(sqlite_encoded_len(16383_i64), 2);
+    assert_eq(sqlite_encoded_len(16384_i64), 3);
+    assert_eq(sqlite_encoded_len(2097151_i64), 3);
+    assert_eq(sqlite_encoded_len(2097152_i64), 4);
 }
 
-fn test_max_value_for_1_byte() {
-    assert_eq(max_value_for(1), 127 as Int64);
+fn test_negative_fills_nine_bytes() {
+    // Negative values are the full 64-bit two's-complement pattern.
+    assert_eq(sqlite_encoded_len(-1_i64), 9);
 }
 
-fn test_max_value_for_2_bytes() {
-    assert_eq(max_value_for(2), 16383 as Int64);
+fn test_round_trip_is_the_contract() {
+    // The property that MATTERS: decode(encode(v)) == v, and the decoder
+    // reports exactly the byte count the length probe predicted.
+    let samples: List<Int64> = [
+        0_i64, 1_i64, 127_i64, 128_i64, 16383_i64, 16384_i64,
+        2097151_i64, 2097152_i64, 1234567890_i64, -1_i64,
+    ];
+    let mut i: Int = 0;
+    while i < samples.len() {
+        let v = samples[i];
+        let bytes = sqlite_encode(v);
+        assert_eq(bytes.len(), sqlite_encoded_len(v));
+        match sqlite_decode(bytes.as_slice(), 0) {
+            Result.Ok((decoded, used)) => {
+                assert_eq(decoded, v);
+                assert_eq(used, bytes.len());
+            }
+            Result.Err(_) => panic("round-trip decode failed"),
+        }
+        i = i + 1;
+    }
 }
 
-fn test_max_value_for_3_bytes() {
-    assert_eq(max_value_for(3), 2097151 as Int64);
-}
-
-fn test_max_value_for_sentinel_cap() {
-    // n>=9 returns Int64 max
-    assert_eq(max_value_for(9), 0x7FFFFFFFFFFFFFFF as Int64);
-    assert_eq(max_value_for(100), 0x7FFFFFFFFFFFFFFF as Int64);
-}
-
-fn test_encoded_length_boundaries() {
-    assert_eq(encoded_length(0_i64),   1);
-    assert_eq(encoded_length(127_i64), 1);
-    assert_eq(encoded_length(128_i64), 2);
-    assert_eq(encoded_length(16383_i64), 2);
-    assert_eq(encoded_length(16384_i64), 3);
-    assert_eq(encoded_length(2097151_i64), 3);
-    assert_eq(encoded_length(2097152_i64), 4);
-}
-
-fn test_encoded_length_negative_fills_nine_bytes() {
-    assert_eq(encoded_length(-1_i64), 9);
-    assert_eq(encoded_length(-0x7FFFFFFFFFFFFFFF_i64), 9);
-}
-
-fn test_decode_length_from_lead_ascii() {
-    // high bit clear → 1 byte
-    assert_eq(decode_length_from_lead(0x00 as u8), 1);
-    assert_eq(decode_length_from_lead(0x7F as u8), 1);
-    // high bit set → need more context
-    assert_eq(decode_length_from_lead(0x80 as u8), -1);
-    assert_eq(decode_length_from_lead(0xFF as u8), -1);
+fn test_skip_advances_by_encoded_length() {
+    let bytes = sqlite_encode(16384_i64);
+    match sqlite_skip(bytes.as_slice(), 0) {
+        Result.Ok(pos) => assert_eq(pos, 3),
+        Result.Err(_)  => panic("skip failed on a well-formed varint"),
+    }
 }
 
 fn main() {
-    test_bounds();
-    test_max_value_for_1_byte();
-    test_max_value_for_2_bytes();
-    test_max_value_for_3_bytes();
-    test_max_value_for_sentinel_cap();
-    test_encoded_length_boundaries();
-    test_encoded_length_negative_fills_nine_bytes();
-    test_decode_length_from_lead_ascii();
+    test_length_boundaries();
+    test_negative_fills_nine_bytes();
+    test_round_trip_is_the_contract();
+    test_skip_advances_by_encoded_length();
+    print("varint_smoke_ok");
 }
