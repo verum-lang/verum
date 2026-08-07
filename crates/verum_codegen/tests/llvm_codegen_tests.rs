@@ -298,14 +298,22 @@ fn test_llvm_ir_multiple_functions() {
         simple_function("bar", 2),
         simple_function("main", 0),
     ]);
-    let (ir, stats) = compile_to_llvm_ir(&ast);
-    let ir_str = ir.as_str();
-    assert!(ir_str.contains("foo"), "IR should contain foo");
-    assert!(ir_str.contains("bar"), "IR should contain bar");
-    assert!(ir_str.contains("main"), "IR should contain main");
-    assert!(
-        stats.functions_lowered >= 3,
-        "Should lower at least 3 functions, got {}",
+    let (_ir, stats) = compile_to_llvm_ir(&ast);
+    // Lowering is SCOPED TO REACHABLE functions (T0682). `foo` and
+    // `bar` are never called, so exactly one function — `main` — is
+    // lowered, and that is the property worth pinning.
+    //
+    // The assertion here used to demand "at least 3", which contradicts
+    // a deliberate, measured decision: before the scoping, Phase 2
+    // built IR for every function with a body, i.e. the whole baked
+    // stdlib (~48K functions) in ONE module for any program mounting
+    // `core` — a three-line program measured 1.9 -> 4.1 -> 14.4 GB RSS
+    // in five seconds and was still climbing when the watchdog killed
+    // it. A test that fails when dead code is dropped is a test that
+    // asks for the leak back.
+    assert_eq!(
+        stats.functions_lowered, 1,
+        "only the reachable function should be lowered, got {}",
         stats.functions_lowered
     );
 }
@@ -714,11 +722,18 @@ fn test_cbgr_fat_ref_type_layout() {
     let cbgr = CbgrLowering::new(&context);
 
     let fat_ref = cbgr.fat_ref_type();
-    // FatRef: { ptr, generation: u32, epoch_caps: u32, len: u64 }
+    // FatRef is 32 bytes: ThinRef (ptr + generation:4 + epoch_caps:4)
+    // plus metadata:8, offset:4 and reserved:4 — the layout the
+    // architecture pins (CLAUDE.md, "Memory Layout") and the one the
+    // FFI byte-buffer contract calls the "reserved-stride FatRef".
+    //
+    // This assertion said 4 and had never run: `verum_codegen` is not
+    // in any CI `--tests` tier, so a pin written against an older
+    // 4-field layout stayed red-in-waiting instead of red.
     let field_count = fat_ref.count_fields();
     assert_eq!(
-        field_count, 4,
-        "FatRef should have 4 fields (ptr, generation, epoch_caps, len)"
+        field_count, 6,
+        "FatRef should have 6 fields (ptr, generation, epoch_caps, metadata, offset, reserved)"
     );
 }
 

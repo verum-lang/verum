@@ -232,6 +232,22 @@ jobs:
           -p verum_diagnostics -p verum_error -p verum_protocol_types
           -p verum_fast_parser
 
+      # verum_codegen + verum_integration_tests tier: measured green
+      # locally 2026-08-07 (85 tests across 7 targets, 12.5s wall).
+      #
+      # Both crates were outside every `--tests` tier, and the two pins
+      # that had to be fixed to get here show what that costs: neither
+      # was red — both were UNRUN. `test_cbgr_fat_ref_type_layout`
+      # demanded 4 fields from a FatRef the architecture pins at 6
+      # (32 bytes: ThinRef + metadata:8 + offset:4 + reserved:4), and
+      # `test_llvm_ir_multiple_functions` demanded that 3 functions be
+      # lowered when lowering is deliberately SCOPED TO REACHABLE ones
+      # (T0682) — it failed exactly when dead code was correctly
+      # dropped, i.e. it asked for the 14.4 GB RSS leak back.
+      - name: Run tests/ for verum_codegen + integration
+        timeout-minutes: 20
+        run: cargo test --locked --tests -p verum_codegen -p verum_integration_tests
+
       # verum_types tier: 1,124 tests green (measured 2026-08-03). The
       # affine pin sat red only because it asserted the pre-recovery
       # error CHANNEL (Err) while STMT-RECOVERY-1 reports through
