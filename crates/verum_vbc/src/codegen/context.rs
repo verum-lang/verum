@@ -357,6 +357,15 @@ pub struct CodegenContext {
     /// Used to determine if `==` should dispatch to a custom `implement Eq` method.
     pub variable_type_names: HashMap<String, String>,
 
+    /// Element type of an array/slice-annotated local, by variable name.
+    ///
+    /// Separate from [`variable_type_names`] on purpose: that map holds
+    /// the variable's OWN type and every qualified-name builder reads
+    /// it, so an entry like `[UInt32; _]` would surface as a method
+    /// name. This one answers a narrower question — "what is in the
+    /// container?" — and only the indexed-receiver dispatch asks it.
+    pub array_element_type_names: HashMap<String, String>,
+
     /// Names of bindings (params) whose DECLARED type is a REFERENCE
     /// (`&T` / `&mut T` / `&checked T` / `&unsafe T`, plus `&self`-shape
     /// receivers). Consulted by the `*x` (Deref) lowering: `*reference` is a
@@ -1488,6 +1497,7 @@ impl CodegenContext {
             variable_types: HashMap::new(),
             constant_types: HashMap::new(),
             variable_type_names: HashMap::new(),
+            array_element_type_names: HashMap::new(),
             reference_bindings: std::collections::HashSet::new(),
             object_ref_param_regs: std::collections::HashSet::new(),
             last_function_variable_types: HashMap::new(),
@@ -2357,6 +2367,7 @@ impl CodegenContext {
             self.last_function_variable_types = self.variable_type_names.clone();
         }
         self.variable_type_names.clear();
+        self.array_element_type_names.clear();
         // Pillar 1: register-keyed — must not leak across functions (and
         // closures re-use low register indices for their own params).
         self.object_ref_param_regs.clear();

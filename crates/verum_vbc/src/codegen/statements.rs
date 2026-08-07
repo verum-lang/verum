@@ -582,6 +582,14 @@ impl VbcCodegen {
                     }
                     // Reference type: &Ipv6Addr, &mut SomeType
                     // Extract the pointee type name so method calls auto-deref correctly
+                    // Array / slice: record `[T; N]` and `[T]` so the
+                    // ELEMENT type survives to the method-call site.
+                    // Without this the annotation contributed nothing
+                    // and `a[0].to_be_bytes()` on a `[UInt32; 8]` could
+                    // not know its receiver was 32 bits — which is how
+                    // SHA-256's `finalize`, whose state is exactly
+                    // `[UInt32; 8]`, serialised its digest through the
+                    // 64-bit method.
                     TypeKind::Reference { inner, .. }
                     | TypeKind::CheckedReference { inner, .. }
                     | TypeKind::UnsafeReference { inner, .. } => {
@@ -617,6 +625,57 @@ impl VbcCodegen {
             // both paths consulted, `let s = sink();` now records
             // `variable_type_names["s"] = "Sink"` reliably and the
             // method-call site emits the qualified `Sink.write` CallM.
+            // The ELEMENT type of an array/slice annotation goes to its
+            // own map, NOT to `variable_type_names`. That map is keyed
+            // by variable and consumed by every qualified-name builder;
+            // writing `[UInt32; _]` into it would make `a.len()` emit
+            // `[UInt32; _].len`. What the method-call site needs is the
+            // element's WIDTH, and only for an INDEXED receiver.
+            //
+            // Without this, `let h: [UInt32; 8]` contributed nothing at
+            // all — the annotation walk handled Path, Generic and
+            // Reference but not Array — so `h[i].to_be_bytes()` could
+            // not know its receiver was 32 bits. SHA-256's `finalize`
+            // serialises exactly that shape.
+            {
+                use verum_ast::ty::TypeKind as TK;
+                // 1. From an explicit annotation: `let h: [UInt32; 8]`.
+                let mut elem_name: Option<String> = None;
+                if let Some(t) = ty {
+                    let elem = match &t.kind {
+                        TK::Array { element, .. } => Some(element),
+                        TK::Slice(element) => Some(element),
+                        _ => None,
+                    };
+                    if let Some(e) = elem
+                        && let TK::Path(path) = &e.kind
+                        && let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first()
+                    {
+                        elem_name = Some(id.name.to_string());
+                    }
+                }
+                // 2. From the FIELD's declaration when the initialiser is
+                //    a field read: `let mut h = self.h;` carries no
+                //    annotation, and that is the shape the stdlib
+                //    actually uses — SHA-256's `finalize` binds its
+                //    `[UInt32; 8]` state exactly this way, then
+                //    serialises it with `h[i].to_be_bytes()`. Reading
+                //    the DECLARED field type is the same authority the
+                //    packed-field-init path already uses.
+                if elem_name.is_none()
+                    && let Some(init) = value
+                    && let verum_ast::expr::ExprKind::Field { expr: base, field } = &init.kind
+                    && let Some(owner) = Self::self_or_inferred_type_name(&self.ctx, base)
+                        .or_else(|| self.infer_expr_type_name(base))
+                    && let Some(decl) = self.field_type_name(&owner, field.name.as_str())
+                    && let Some(e) = Self::element_type_name(decl)
+                {
+                    elem_name = Some(e);
+                }
+                if let Some(e) = elem_name {
+                    self.ctx.array_element_type_names.insert(var_name.clone(), e);
+                }
+            }
             if let Some(type_name) = type_name_from_annotation {
                 self.ctx
                     .variable_type_names

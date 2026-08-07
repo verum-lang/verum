@@ -12939,6 +12939,30 @@ impl VbcCodegen {
                     use crate::codegen::context::VarTypeKind;
                     let var_name = ident.name.to_string();
                     let vtype = self.ctx.get_variable_type(&ident.name);
+                    // The DECLARED type name is consulted first, because
+                    // `VarTypeKind` only distinguishes Byte / Int32 /
+                    // UInt64 among the sized integers. `UInt32`,
+                    // `UInt16`, `Int8` and `Int16` all collapse into
+                    // `Int` there, so a call on such a receiver fell to
+                    // the bare method name and landed on the 64-bit
+                    // implementation — measured:
+                    // `(0x6A09E667_u32).to_be_bytes()` returned EIGHT
+                    // bytes, while the type-qualified
+                    // `UInt32.to_be_bytes(x)` returned the correct four.
+                    // SHA-256 assembles its digest through exactly that
+                    // call, so every digest was wrong.
+                    //
+                    // Widening `VarTypeKind` would touch every match on
+                    // it; the declared name is already tracked and
+                    // `PrimWidth::from_type_name` is the ONE classifier,
+                    // so the width question is asked where it is
+                    // answered.
+                    if let Some(declared) = self.ctx.variable_type_names.get(&*ident.name)
+                        && let Some(width) =
+                            crate::prim_mangle::PrimWidth::from_type_name(declared.as_str())
+                    {
+                        crate::prim_mangle::dispatch_name(width, &method.name)
+                    } else {
                     match vtype {
                         // T0695: the ONE prim-mangle authority — width-
                         // semantic members mangle, everything else
@@ -13087,6 +13111,7 @@ impl VbcCodegen {
                             }
                         }
                     }
+                    }
                 }
                 verum_ast::ty::PathSegment::SelfValue => {
                     // Case 1b: Receiver is `self` keyword - look up type from impl context.
@@ -13130,6 +13155,31 @@ impl VbcCodegen {
                 }
                 _ => method.name.to_string(),
             }
+        } else if let ExprKind::Index { expr: object, .. } = &receiver.kind
+            && let ExprKind::Path(obj_path) = &object.kind
+            && obj_path.segments.len() == 1
+            && let verum_ast::ty::PathSegment::Name(obj_ident) = &obj_path.segments[0]
+            && let Some(elem) = self
+                .ctx
+                .array_element_type_names
+                .get(&*obj_ident.name)
+                .cloned()
+                .or_else(|| {
+                    self.ctx
+                        .variable_type_names
+                        .get(&*obj_ident.name)
+                        .and_then(|c| Self::element_type_name(c))
+                })
+            && let Some(width) = crate::prim_mangle::PrimWidth::from_type_name(&elem)
+        {
+            // An INDEXED receiver carries the ELEMENT's width, and the
+            // element is where sized integers usually live: SHA-256's
+            // `finalize` serialises its state with
+            // `h[i].to_be_bytes()` over `[UInt32; 8]`. Only a bare-path
+            // receiver was consulted for width, so `h[i]` fell through
+            // to the 64-bit method and the digest was assembled from
+            // the wrong four bytes of an eight-byte encoding.
+            crate::prim_mangle::dispatch_name(width, &method.name)
         } else if let ExprKind::Call { func, .. } = &receiver.kind {
             // Case 2: Receiver is a function call - check return type
             // Extract function name from the call expression
@@ -14365,15 +14415,11 @@ impl VbcCodegen {
 
                 // Prefix method name with type for typed primitives.
                 // T0695: authority-composed (see prim_mangle).
-                let prefixed_method = match type_name.as_str() {
-                    "Int32" | "i32" => crate::prim_mangle::dispatch_name(
-                        crate::prim_mangle::PrimWidth::Int32, &method_name),
-                    "UInt64" | "u64" => crate::prim_mangle::dispatch_name(
-                        crate::prim_mangle::PrimWidth::UInt64, &method_name),
-                    "Byte" | "UInt8" | "u8" => crate::prim_mangle::dispatch_name(
-                        crate::prim_mangle::PrimWidth::Byte, &method_name),
-                    _ => method_name.clone(),
-                };
+                let prefixed_method =
+                    match crate::prim_mangle::PrimWidth::from_type_name(type_name.as_str()) {
+                        Some(w) => crate::prim_mangle::dispatch_name(w, &method_name),
+                        None => method_name.clone(),
+                    };
 
                 let result = self.ctx.alloc_temp();
                 let method_id = self.intern_string(&prefixed_method);
@@ -23684,6 +23730,58 @@ impl VbcCodegen {
     ///  * signed   — `(src << (64 - width)) >> (64 - width)`, an
     ///    arithmetic right shift, so the sign bit of the narrow value
     ///    is replicated exactly as two's complement requires.
+    /// The declared type of `self`, when `expr` IS `self`.
+    ///
+    /// `infer_expr_type_name` resolves a named variable through
+    /// `variable_type_names`; the receiver keyword is stored under the
+    /// literal key `"self"` and reaches that map by a different route,
+    /// so a field read on `self` — the ordinary shape inside an
+    /// `implement` block — needs this one extra step to name its owner.
+    pub(crate) fn self_or_inferred_type_name(
+        ctx: &crate::codegen::context::CodegenContext,
+        expr: &Expr,
+    ) -> Option<String> {
+        if let ExprKind::Path(path) = &expr.kind
+            && path.segments.len() == 1
+            && matches!(path.segments[0], verum_ast::ty::PathSegment::SelfValue)
+        {
+            return ctx.variable_type_names.get("self").cloned();
+        }
+        None
+    }
+
+    /// The element type named by a container type string.
+    ///
+    /// `[UInt32; 8]` -> `UInt32`, `List<Byte>` -> `Byte`, through any
+    /// number of reference layers. Returns `None` for anything that is
+    /// not a container, so callers can fall through unchanged.
+    ///
+    /// It parses the recorded type STRING because that is what
+    /// `variable_type_names` holds — the declared spelling, which is
+    /// exactly the fact needed here and the only one available at this
+    /// point in codegen.
+    pub(crate) fn element_type_name(container: &str) -> Option<String> {
+        let t = container
+            .trim()
+            .trim_start_matches('&')
+            .trim_start_matches("mut ")
+            .trim_start_matches("checked ")
+            .trim_start_matches("unsafe ")
+            .trim();
+        if let Some(rest) = t.strip_prefix('[') {
+            // `[T; N]`, `[T; _]` (the size is not needed here) and `[T]`.
+            let inner = rest.split(';').next()?.trim_end_matches(']').trim();
+            return (!inner.is_empty()).then(|| inner.to_string());
+        }
+        for wrapper in ["List<", "Slice<", "Array<"] {
+            if let Some(rest) = t.strip_prefix(wrapper) {
+                let inner = rest.strip_suffix('>')?.trim();
+                return (!inner.is_empty()).then(|| inner.to_string());
+            }
+        }
+        None
+    }
+
     fn emit_truncate_to_width(
         &mut self,
         src: Reg,

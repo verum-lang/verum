@@ -2167,9 +2167,26 @@ implement UInt32 {
     public fn checked_add(self, rhs: UInt32) -> Maybe<UInt32> { checked_add(self, rhs) }
     public fn checked_sub(self, rhs: UInt32) -> Maybe<UInt32> { checked_sub(self, rhs) }
     public fn checked_mul(self, rhs: UInt32) -> Maybe<UInt32> { checked_mul(self, rhs) }
-    public fn wrapping_add(self, rhs: UInt32) -> UInt32 { wrapping_add(self, rhs) }
-    public fn wrapping_sub(self, rhs: UInt32) -> UInt32 { wrapping_sub(self, rhs) }
-    public fn wrapping_mul(self, rhs: UInt32) -> UInt32 { wrapping_mul(self, rhs) }
+    // Written with OPERATORS, not the free `wrapping_*` intrinsics.
+    //
+    // Those intrinsics are width-agnostic: they wrap at 64 bits, so
+    // `(0xFFFFFFFF_u32).wrapping_add(1)` returned 4294967296. SHA-256
+    // adds exclusively through `.wrapping_add` — its own comments say
+    // the chained form was broken up deliberately — so every digest was
+    // wrong. `Byte` was unaffected because it is one of the three widths
+    // with a width-correct interpreter intercept; UInt32 and UInt16 are
+    // not, and `implement UInt32` delegating to the 64-bit intrinsic is
+    // what "no width-correct implementation" looked like in source.
+    //
+    // `+`, `-`, `*` on a sized integer now wrap at the DECLARED width
+    // (T0611), which makes the operator form correct by construction and
+    // removes the need for a per-width intrinsic at all. Rotations are
+    // written the same way SHA-2 writes them one directory over; the
+    // `& 31` masks the distance and the `k == 0` arm avoids a shift by
+    // the full width.
+    public fn wrapping_add(self, rhs: UInt32) -> UInt32 { self + rhs }
+    public fn wrapping_sub(self, rhs: UInt32) -> UInt32 { self - rhs }
+    public fn wrapping_mul(self, rhs: UInt32) -> UInt32 { self * rhs }
     public fn saturating_add(self, rhs: UInt32) -> UInt32 { saturating_add(self, rhs) }
     public fn saturating_sub(self, rhs: UInt32) -> UInt32 { saturating_sub(self, rhs) }
     public fn saturating_mul(self, rhs: UInt32) -> UInt32 { saturating_mul(self, rhs) }
@@ -2177,8 +2194,14 @@ implement UInt32 {
     public fn trailing_zeros(self) -> Int { ctz(self) }
     public fn count_ones(self) -> Int { popcnt(self) }
     public fn count_zeros(self) -> Int { 32 - popcnt(self) }
-    public fn rotate_left(self, n: Int) -> UInt32 { rotl(self, n) }
-    public fn rotate_right(self, n: Int) -> UInt32 { rotr(self, n) }
+    public fn rotate_left(self, n: Int) -> UInt32 {
+        let k: UInt32 = (n as UInt32) & 31_u32;
+        if k == 0_u32 { self } else { (self << k) | (self >> (32_u32 - k)) }
+    }
+    public fn rotate_right(self, n: Int) -> UInt32 {
+        let k: UInt32 = (n as UInt32) & 31_u32;
+        if k == 0_u32 { self } else { (self >> k) | (self << (32_u32 - k)) }
+    }
     public fn swap_bytes(self) -> UInt32 { bswap(self) }
     public fn pow(self, exp: Int) -> UInt32 {
         assert(exp >= 0);
@@ -2324,9 +2347,9 @@ implement UInt16 {
     public fn checked_add(self, rhs: UInt16) -> Maybe<UInt16> { checked_add(self, rhs) }
     public fn checked_sub(self, rhs: UInt16) -> Maybe<UInt16> { checked_sub(self, rhs) }
     public fn checked_mul(self, rhs: UInt16) -> Maybe<UInt16> { checked_mul(self, rhs) }
-    public fn wrapping_add(self, rhs: UInt16) -> UInt16 { wrapping_add(self, rhs) }
-    public fn wrapping_sub(self, rhs: UInt16) -> UInt16 { wrapping_sub(self, rhs) }
-    public fn wrapping_mul(self, rhs: UInt16) -> UInt16 { wrapping_mul(self, rhs) }
+    public fn wrapping_add(self, rhs: UInt16) -> UInt16 { self + rhs }
+    public fn wrapping_sub(self, rhs: UInt16) -> UInt16 { self - rhs }
+    public fn wrapping_mul(self, rhs: UInt16) -> UInt16 { self * rhs }
     public fn saturating_add(self, rhs: UInt16) -> UInt16 { saturating_add(self, rhs) }
     public fn saturating_sub(self, rhs: UInt16) -> UInt16 { saturating_sub(self, rhs) }
     public fn saturating_mul(self, rhs: UInt16) -> UInt16 { saturating_mul(self, rhs) }

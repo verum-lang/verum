@@ -4969,15 +4969,7 @@ pub(super) fn dispatch_primitive_method(
     // `core-tests/base/primitives/regression_test.vr::regression_as_byte_cast_propagates_type_to_dispatch_pinned`.
     let normalised_method: String;
     let method = if let Some(pos) = method.find('.')
-        && let Some(width) = match &method[..pos] {
-            "Byte" | "UInt8" | "U8" | "u8" => Some(crate::prim_mangle::PrimWidth::Byte),
-            "Int32" | "I32" | "i32" => Some(crate::prim_mangle::PrimWidth::Int32),
-            "UInt" | "UInt64" | "U64" | "u64"
-            | "USize" | "UIntSize" | "Usize" | "usize" => {
-                Some(crate::prim_mangle::PrimWidth::UInt64)
-            }
-            _ => None,
-        }
+        && let Some(width) = crate::prim_mangle::PrimWidth::from_type_name(&method[..pos])
     {
         // T0695: normalize through the ONE prim-mangle authority.
         // Width-semantic members take the `<prefix>$` intercept;
