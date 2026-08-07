@@ -97,6 +97,12 @@ jobs:
       - name: Build workspace (rustc -D warnings, blocking)
         env:
           RUSTFLAGS: "-D warnings"
+          # The arm runner died four runs straight inside this step
+          # with no surviving logs — the memory profile of a full-
+          # parallel workspace build + the in-build stdlib bake on the
+          # smallest runner in the matrix. Halving build parallelism
+          # halves peak RSS; x86/macos keep full width.
+          CARGO_BUILD_JOBS: ${{ matrix.os == 'ubuntu-24.04-arm' && '2' || '4' }}
         run: cargo build --workspace --locked
 
       - name: Run unit tests (library + binaries)
