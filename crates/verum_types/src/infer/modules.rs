@@ -9962,6 +9962,13 @@ impl TypeChecker {
         // main's 14 recorded candidates with it — the spec reported
         // 1 E404 instead of 15).
         let ambiguity_mark = self.pending_ambiguity.len();
+        if std::env::var_os("VERUM_TRACE_VARCOUNTER").is_some() {
+            eprintln!(
+                "[varcounter] fn={} counter={}",
+                func.name.name.as_str(),
+                crate::ty::TypeVar::peek_counter()
+            );
+        }
         // PROTO-STATIC-EXISTENTIAL (T0585): same marker discipline as
         // the ambiguity window — this function's protocol-static calls
         // are discharged in its own epilogue, an aborted nested check

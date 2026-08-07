@@ -3442,6 +3442,13 @@ impl TypeVar {
         TypeVar(TYPEVAR_COUNTER.fetch_add(1, Ordering::Relaxed))
     }
 
+    /// Current value of the fresh counter WITHOUT allocating — diagnosis
+    /// instrument for id-collision investigations (a `with_id`-minted id
+    /// that the counter later crosses aliases an unrelated live var).
+    pub fn peek_counter() -> usize {
+        TYPEVAR_COUNTER.load(Ordering::Relaxed)
+    }
+
     /// Create a type variable with a specific ID (for testing)
     pub fn with_id(id: usize) -> Self {
         TypeVar(id)
