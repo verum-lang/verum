@@ -329,7 +329,7 @@ fn derive_resumption_psk(
     hkdf_expand_label(hash, resumption_master, &LABEL_RESUMPTION, ticket_nonce, out_len)
 }
 
-/// Delegates to the audited core.security.util.constant_time helper.
+/// Delegates to the audited core.subtle.constant_time helper.
 fn constant_time_eq(a: &[Byte], b: &[Byte]) -> Bool {
-    core.security.util.constant_time.constant_time_eq(a, b)
+    core.subtle.constant_time.constant_time_eq(a, b)
 }

@@ -92,7 +92,7 @@ mount core.database.mysql.connection.connect as mysql_connect;
 mount core.database.mysql.gtid.{
     GtidSet, parse_gtid_set, encode_wire as encode_gtid_wire,
 };
-mount core.security.hash.crc32.crc32 as crc32_compute;
+mount core.hash.checksum.crc32.crc32 as crc32_compute;
 
 // =============================================================================
 // COM_* opcodes
@@ -546,7 +546,7 @@ implement BinlogStream {
         // FORMAT_DESCRIPTION (and FORMAT_DESCRIPTION itself in 5.6.6+)
         // carries a 4-byte CRC32 trailer covering header + body. The
         // CRC is the standard IEEE 802.3 polynomial (0xedb88320 reversed),
-        // matching `core.security.hash.crc32`. We trim the trailer
+        // matching `core.hash.checksum.crc32`. We trim the trailer
         // before handing the body to the event decoder; mismatch
         // surfaces as `BINLOG_CRC32_MISMATCH` so DBA-side flips of
         // checksum mode + dropped wire bytes are loud.

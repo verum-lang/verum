@@ -104,6 +104,30 @@ public module base;
 public module simd;
 
 // =============================================================================
+// Layer 0: Byte primitives (Depends on: base)
+// =============================================================================
+
+// These four are computation over bytes, not security policy. They
+// depend on `base` and nothing else, so any layer may use them —
+// a Bloom filter needs a hash, not a dependency on the crypto stack.
+// Each is split by the GUARANTEE it carries, because within each of
+// them the variants are not interchangeable and a wrong pick fails
+// silently. See the module headers for the choice rules.
+
+// Hash functions: checksum / fast / crypto / legacy.
+public module hash;
+
+// Keyed authentication: HMAC, Poly1305.
+public module mac;
+
+// Randomness: secure (CSPRNG) vs deterministic (reproducible).
+public module random;
+
+// Operations defined by what must NOT happen: constant-time
+// comparison, zeroization that survives optimisation.
+public module subtle;
+
+// =============================================================================
 // Layer 0.5: Mathematics (Depends on: base, intrinsics, simd)
 // =============================================================================
 

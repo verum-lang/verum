@@ -43,30 +43,24 @@
 )
 module core.security;
 
-// Crypto primitive submodules.
-public module hash {
-    public module sha256;
-    public module sha1;
-    public module crc32c;
-    public module xxhash;
-    public module murmur3;
-    public module fnv;
-    /// BLAKE3 — modern fast cryptographic hash. Default for content
-    /// addressing, modern Merkle commitment, fast XOF.
-    public module blake3;
-}
-
-public module mac {
-    public module hmac;
-}
+// Digest, MAC, entropy and constant-time primitives are NOT security
+// policy — they are computation over bytes, and every one of them
+// depends on core alone. They live below this module, so that layers
+// that legitimately need a hash (collections, encoding, storage) do
+// not have to depend on the security stack to get one:
+//
+//   core.hash    — digests, grouped by guarantee
+//   core.mac     — keyed authentication
+//   core.random  — secure vs deterministic randomness
+//   core.subtle  — constant-time comparison, zeroization
+//
+// What remains here is what genuinely reasons about trust: key
+// agreement and signatures, credential and certificate formats,
+// policy, and identity.
 
 public module kdf {
     public module hkdf;
     public module pbkdf2;
-}
-
-public module util {
-    public module constant_time;
 }
 
 // SPIFFE workload identity (SVID + Workload API client).

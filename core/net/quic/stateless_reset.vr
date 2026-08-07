@@ -2,7 +2,7 @@
 // net/quic/stateless_reset.vr — Stateless Reset (RFC 9000 §10.3)
 // =============================================================================
 // Layer: 5 (Network — QUIC)
-// Dependencies: core, core.security.mac.hmac, core.security.util.rng
+// Dependencies: core, core.mac.hmac, core.random.secure
 // =============================================================================
 //
 
@@ -63,8 +63,8 @@ module core.net.quic.stateless_reset;
 
 mount core.*;
 mount core.collections.List;
-mount core.security.mac.hmac.{hmac_sha256};
-mount core.security.util.rng.{fill_secure};
+mount core.mac.hmac.{hmac_sha256};
+mount core.random.secure.{fill_secure};
 
 // =============================================================================
 // Key + token derivation

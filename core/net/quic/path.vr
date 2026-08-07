@@ -49,7 +49,7 @@ mount core.*;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.net.addr.{SocketAddr};
-mount core.security.util.rng.{fill_secure};
+mount core.random.secure.{fill_secure};
 
 // =============================================================================
 // State

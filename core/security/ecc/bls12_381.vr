@@ -2,7 +2,7 @@
 // security/ecc/bls12_381.vr — BLS12-381 pairing-friendly curve + signatures
 // =============================================================================
 // Layer: 2 (core primitive)
-// Dependencies: core, core.security.hash.{sha256, blake3}
+// Dependencies: core, core.hash.crypto.{sha256, blake3}
 // References:
 //  - draft-irtf-cfrg-bls-signature-05 (IETF, BLS Signatures)
 //  - draft-irtf-cfrg-pairing-friendly-curves-11 (IETF, BLS12-381 pinning)

@@ -1,5 +1,5 @@
 // =============================================================================
-// security/hash/sha1.vr — FIPS 180-4 SHA-1 reference implementation
+// core/hash/legacy/sha1.vr — FIPS 180-4 SHA-1 reference implementation
 // =============================================================================
 // NOTE: SHA-1 is cryptographically broken for digital-signature purposes.
 // This implementation exists specifically for RFC 6455 WebSocket
@@ -12,7 +12,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.hash.sha1;
+module core.hash.legacy.sha1;
 
 mount core.*;
 

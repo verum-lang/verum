@@ -1,8 +1,8 @@
 // =============================================================================
-// security/hash/sha384.vr — SHA-384 (FIPS 180-4)
+// core/hash/crypto/sha384.vr — SHA-384 (FIPS 180-4)
 // =============================================================================
 // Layer: 2 (depends on hash/sha512)
-// Dependencies: core, core.security.hash.sha512
+// Dependencies: core, core.hash.crypto.sha512
 // Reference: FIPS PUB 180-4 §5.3.4 + §6.5
 // =============================================================================
 //
@@ -58,9 +58,9 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.hash.sha384;
+module core.hash.crypto.sha384;
 mount core.*;
-mount core.security.hash.sha512.{compress_block, BLOCK_SIZE as SHA512_BLOCK};
+mount core.hash.crypto.sha512.{compress_block, BLOCK_SIZE as SHA512_BLOCK};
 
 // =============================================================================
 // Initial hash values — FIPS 180-4 §5.3.4

@@ -2,7 +2,7 @@
 // security/otp.vr — HOTP (RFC 4226) + TOTP (RFC 6238) one-time passwords
 // =============================================================================
 // Layer: 3 (Security)
-// Dependencies: core, core.security.mac.hmac, core.encoding.base32
+// Dependencies: core, core.mac.hmac, core.encoding.base32
 // =============================================================================
 //
 
@@ -58,9 +58,9 @@ module core.security.otp;
 
 mount core.*;
 mount core.collections.List;
-mount core.security.mac.hmac.{hmac_sha1, hmac_sha256, hmac_sha512};
-mount core.security.util.rng.{fill_secure_array};
-mount core.security.util.constant_time.{constant_time_eq};
+mount core.mac.hmac.{hmac_sha1, hmac_sha256, hmac_sha512};
+mount core.random.secure.{fill_secure_array};
+mount core.subtle.constant_time.{constant_time_eq};
 mount core.encoding.base32.{encode as base32_encode};
 
 // =============================================================================
@@ -165,7 +165,7 @@ public fn hotp(
             slice_owned(&mac[..])
         },
         OtpHash.Sha1 => {
-            // V8 (#247) — SHA-1 HMAC wired via core.security.mac.hmac.
+            // V8 (#247) — SHA-1 HMAC wired via core.mac.hmac.
             // RFC 6238 default; legacy authenticator (Google
             // Authenticator pre-2020, Authy, RFC 4226 HOTP-SHA-1)
             // compatibility. HMAC-SHA-1 itself is RFC 6151 sound for

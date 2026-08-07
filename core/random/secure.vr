@@ -1,5 +1,5 @@
 // =============================================================================
-// security/util/rng.vr — cryptographically secure random byte filling
+// core/random/secure.vr — cryptographically secure random byte filling
 // =============================================================================
 // Layer: 0 (no dependencies beyond core primitives + the runtime
 // intrinsic that wraps the platform CSPRNG)
@@ -52,7 +52,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.util.rng;
+module core.random.secure;
 mount core.*;
 // Inlined: use core.sys.common.random_bytes(...) directly (task #11).
 

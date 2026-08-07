@@ -2,7 +2,7 @@
 // security/merkle.vr — binary Merkle tree + inclusion proofs (RFC 6962)
 // =============================================================================
 // Layer: 3 (Security)
-// Dependencies: core, core.security.hash.sha256
+// Dependencies: core, core.hash.crypto.sha256
 // =============================================================================
 //
 
@@ -56,7 +56,7 @@ module core.security.merkle;
 
 mount core.*;
 mount core.collections.List;
-mount core.security.hash.sha256.{Sha256};
+mount core.hash.crypto.sha256.{Sha256};
 
 // =============================================================================
 // Error surface

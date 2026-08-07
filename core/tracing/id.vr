@@ -205,7 +205,7 @@ implement Debug for SpanId {
 // =============================================================================
 //
 
-// Identifiers draw from the same intrinsic `core.security.util.rng.
+// Identifiers draw from the same intrinsic `core.random.secure.
 // fill_secure` uses for NIST DRBG output: `random_u64` returns 64 bits
 // of platform randomness through the canonical value path — no buffer
 // marshalling, no cross-module call, no FFI gate. Random ids satisfy

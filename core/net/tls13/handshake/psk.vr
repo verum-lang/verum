@@ -42,7 +42,7 @@ module core.net.tls13.handshake.psk;
 
 mount core.*;
 mount core.collections.List;
-mount core.security.mac.hmac.{HmacSha256, HmacSha384};
+mount core.mac.hmac.{HmacSha256, HmacSha384};
 mount core.security.kdf.hkdf.{HkdfError};
 // `mount X as Y` rename-aliases don't surface to AOT codegen
 // function-table lookup (task #17/#39 mount-scope-aware defect class).
@@ -229,10 +229,10 @@ public fn verify_binder(
 }
 
 /// Delegates to the audited, @verify(constant_time)-annotated helper
-/// in core.security.util.constant_time — keeps the call-site readable
+/// in core.subtle.constant_time — keeps the call-site readable
 /// without duplicating the constant-time discipline.
 fn constant_time_eq(a: &[Byte], b: &[Byte]) -> Bool {
-    core.security.util.constant_time.constant_time_eq(a, b)
+    core.subtle.constant_time.constant_time_eq(a, b)
 }
 
 // =============================================================================

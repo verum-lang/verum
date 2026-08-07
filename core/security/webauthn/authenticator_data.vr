@@ -241,7 +241,7 @@ fn decode_cose_consume_length(bytes: &List<Byte>) -> Result<(CborValue, Int), We
 /// SHA-256 of the RP ID UTF-8 bytes — matches what authenticators
 /// embed into authData[0..32].
 pub fn hash_rp_id(rp_id: &Text) -> [Byte; 32] {
-    security.hash.sha256.Sha256.digest(rp_id.as_bytes())
+    hash.crypto.sha256.Sha256.digest(rp_id.as_bytes())
 }
 
 // =============================================================================

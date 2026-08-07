@@ -1,0 +1,33 @@
+// =============================================================================
+// core/hash/fast/mod.vr — fast NON-cryptographic hashes
+// =============================================================================
+// Layer: 1 (depends on core primitives only)
+// =============================================================================
+//
+
+// Fast, well-distributed, cheap to compute. The right default for
+// hash tables, cardinality sketches, sharding and cache keys, where
+// throughput matters and the inputs are not chosen by an adversary.
+//
+
+// # The one hazard
+//
+
+// These functions are unkeyed and their internals are public, so an
+// adversary who chooses inputs can compute collisions and degrade a
+// hash table to a list — an algorithmic-complexity denial of service.
+// When inputs cross a trust boundary, key the hash: `core.mac.hmac`,
+// or seed the sketch from `core.random.secure`.
+//
+
+// Never use these for content addressing, commitments, signatures, or
+// deduplication that must survive an attacker: see `core.hash.crypto`.
+//
+
+// =============================================================================
+
+module core.hash.fast;
+
+public module fnv;
+public module murmur3;
+public module xxhash;

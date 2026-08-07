@@ -1,0 +1,37 @@
+// =============================================================================
+// core/mac/mod.vr — message authentication codes (keyed)
+// =============================================================================
+// Layer: 2 (depends on core.hash)
+// =============================================================================
+//
+
+// A MAC answers a question no hash can answer: "did the holder of
+// this key produce these bytes?" It is not a hash of a key and a
+// message — the construction matters, which is why HMAC exists rather
+// than `hash(key || msg)`.
+//
+
+//  * `hmac`     — RFC 2104 over any `core.hash.crypto` digest. The
+//                 default when a long-lived key authenticates many
+//                 messages.
+//  * `poly1305` — RFC 8439 one-time authenticator. Its security
+//                 argument holds only if the key is used for exactly
+//                 ONE message; reusing it leaks the key. Almost
+//                 always used through an AEAD, not directly.
+//
+
+// # Comparing tags
+//
+
+// Compare MAC tags with `core.subtle.constant_time.constant_time_eq`,
+// never with `==`. A byte-wise early-exit comparison leaks the length
+// of the correct prefix, which is enough to forge a tag one byte at a
+// time.
+//
+
+// =============================================================================
+
+module core.mac;
+
+public module hmac;
+public module poly1305;

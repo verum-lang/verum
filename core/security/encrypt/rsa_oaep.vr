@@ -2,8 +2,8 @@
 // security/encrypt/rsa_oaep.vr — RSA-OAEP encryption (RFC 8017 §7.1)
 // =============================================================================
 // Layer: 2 (Security)
-// Dependencies: core.math.big_uint, core.security.hash.sha1,
-//               core.security.sig.rsa, core.security.util.rng
+// Dependencies: core.math.big_uint, core.hash.legacy.sha1,
+//               core.security.sig.rsa, core.random.secure
 // =============================================================================
 //
 // RSA-OAEP encryption per RFC 8017 §7.1.1 (RSAES-OAEP-ENCRYPT).
@@ -37,7 +37,7 @@
 // # Security notes
 //
 //   * Uses fresh `seed` per encryption (RFC 8017 mandates random
-//     seed for each call). Drawn from `core.security.util.rng` —
+//     seed for each call). Drawn from `core.random.secure` —
 //     OS-level CSPRNG, not a deterministic PRNG.
 //
 //   * The seed and intermediate values aren't currently zeroized
@@ -73,9 +73,9 @@ module core.security.encrypt.rsa_oaep;
 mount core.*;
 mount core.collections.List;
 mount core.math.big_uint.{BigUint, modexp};
-mount core.security.hash.sha1.{Sha1, SHA1_DIGEST_SIZE};
+mount core.hash.legacy.sha1.{Sha1, SHA1_DIGEST_SIZE};
 mount core.security.sig.rsa.RsaPublicKey;
-mount core.security.util.rng.{fill_secure};
+mount core.random.secure.{fill_secure};
 
 // =============================================================================
 // Constants

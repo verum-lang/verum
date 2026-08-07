@@ -2,7 +2,7 @@
 // security/ecc/p256.vr — NIST P-256 (secp256r1) — ECDSA + ECDHE
 // =============================================================================
 // Layer: 2 (core primitive)
-// Dependencies: core, core.security.hash.sha256 (internal)
+// Dependencies: core, core.hash.crypto.sha256 (internal)
 // Reference: NIST FIPS 186-5 §6 — Digital Signature Standard (ECDSA)
 //  NIST SP 800-186 §3.2.1 — P-256 parameters (aka secp256r1)
 //  SECG SEC 2 v2.0 — the curve was first standardised here

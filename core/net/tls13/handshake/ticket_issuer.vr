@@ -2,7 +2,7 @@
 // net/tls13/handshake/ticket_issuer.vr — Post-handshake NewSessionTicket (§4.6.1)
 // =============================================================================
 // Layer: 5 (Network — TLS 1.3 core)
-// Dependencies: core, core.time, core.security.util.rng,
+// Dependencies: core, core.time, core.random.secure,
 //  core.net.tls13.{handshake.{messages, extension, resumption},
 //  cipher_suite, keyschedule.schedule}
 // =============================================================================
@@ -35,7 +35,7 @@ mount core.*;
 mount core.collections.List;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
-mount core.security.util.rng.{fill_secure};
+mount core.random.secure.{fill_secure};
 mount core.net.tls13.cipher_suite.{CipherSuite};
 mount core.net.tls13.keyschedule.schedule.{SecretBytes};
 mount core.net.tls13.handshake.extension.{Extension, EarlyDataIndication};

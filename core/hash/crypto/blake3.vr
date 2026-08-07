@@ -1,5 +1,5 @@
 // =============================================================================
-// security/hash/blake3.vr — BLAKE3 (O'Connor / Aumasson / Neves / Wilcox-O'Hearn 2020)
+// core/hash/crypto/blake3.vr — BLAKE3 (O'Connor / Aumasson / Neves / Wilcox-O'Hearn 2020)
 // =============================================================================
 // Layer: 1 (crypto primitive)
 // Dependencies: core, core/base/primitives (UInt32, UInt64, rotate_right)
@@ -87,7 +87,7 @@
 // BLAKE3's compression is by construction free of secret-data-dependent
 // branches and memory accesses (all-arithmetic mixing on UInt32). The
 // implementation respects this property; pair the *output comparison*
-// site with `core.security.util.constant_time.constant_time_eq` when
+// site with `core.subtle.constant_time.constant_time_eq` when
 // using BLAKE3 as a MAC (`keyed_hash`).
 //
 
@@ -98,7 +98,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.hash.blake3;
+module core.hash.crypto.blake3;
 mount core.*;
 
 // =============================================================================

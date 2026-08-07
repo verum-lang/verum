@@ -1,5 +1,5 @@
 // =============================================================================
-// security/hash/murmur3.vr — MurmurHash3 (Austin Appleby 2011)
+// core/hash/fast/murmur3.vr — MurmurHash3 (Austin Appleby 2011)
 // =============================================================================
 // Layer: 1 (fast non-cryptographic hash)
 // Dependencies: core
@@ -46,7 +46,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.hash.murmur3;
+module core.hash.fast.murmur3;
 
 mount core.*;
 

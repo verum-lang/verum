@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // Dependencies: core, core.time, core.net.addr,
-//  core.security.aead.aes_gcm, core.security.util.rng
+//  core.security.aead.aes_gcm, core.random.secure
 // =============================================================================
 //
 
@@ -62,7 +62,7 @@ mount core.*;
 mount core.collections.List;
 mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr};
 mount core.security.aead.aes_gcm.{aes128_gcm_seal, aes128_gcm_open};
-mount core.security.util.rng.{fill_secure};
+mount core.random.secure.{fill_secure};
 
 // =============================================================================
 // Types

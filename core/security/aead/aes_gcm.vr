@@ -2,7 +2,7 @@
 // security/aead/aes_gcm.vr — AES-GCM AEAD (NIST SP 800-38D)
 // =============================================================================
 // Layer: 3 (depends on cipher/aes)
-// Dependencies: core.security.cipher.aes, core.security.util.constant_time
+// Dependencies: core.security.cipher.aes, core.subtle.constant_time
 // Reference: NIST SP 800-38D — Recommendation for Block Cipher Modes of
 //  Operation: Galois/Counter Mode (GCM) and GMAC
 //  RFC 5116 — AEAD interface
@@ -46,7 +46,7 @@
 //
 
 // Decryption compares the received tag with the computed tag using
-// `core.security.util.constant_time_eq`. Do NOT use `==` — a native
+// `core.subtle.constant_time.constant_time_eq`. Do NOT use `==` — a native
 // compare is timing-exploitable and would let the attacker brute-
 // force one tag byte at a time.
 //
@@ -77,7 +77,7 @@ mount core.security.cipher.aes.{
     aes128_encrypt_block, aes256_encrypt_block,
     BLOCK_SIZE,
 };
-mount core.security.util.constant_time.{constant_time_eq};
+mount core.subtle.constant_time.{constant_time_eq};
 
 // =============================================================================
 // Constants

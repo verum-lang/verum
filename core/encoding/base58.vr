@@ -2,7 +2,7 @@
 // encoding/base58.vr — Base58 + Base58Check (Bitcoin-style encoding)
 // =============================================================================
 // Layer: 1 (Encoding)
-// Dependencies: core, core.security.hash.sha256
+// Dependencies: core, core.hash.crypto.sha256
 // =============================================================================
 //
 
@@ -66,7 +66,7 @@ module core.encoding.base58;
 
 mount core.*;
 mount core.collections.List;
-mount core.security.hash.sha256.{Sha256};
+mount core.hash.crypto.sha256.{Sha256};
 
 // =============================================================================
 // Alphabet

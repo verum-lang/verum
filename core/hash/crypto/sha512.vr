@@ -1,5 +1,5 @@
 // =============================================================================
-// security/hash/sha512.vr — SHA-512 (FIPS 180-4)
+// core/hash/crypto/sha512.vr — SHA-512 (FIPS 180-4)
 // =============================================================================
 // Layer: 2 (depends on core primitives only)
 // Dependencies: core
@@ -63,7 +63,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.hash.sha512;
+module core.hash.crypto.sha512;
 mount core.*;
 
 // =============================================================================

@@ -1,0 +1,31 @@
+// =============================================================================
+// core/hash/legacy/mod.vr — cryptographic by design, BROKEN in practice
+// =============================================================================
+// Layer: 1 (depends on core primitives only)
+// =============================================================================
+//
+
+// Nothing here is a free choice. A module lands in `legacy` when a
+// wire protocol mandates the exact bytes and the protocol's security
+// does not rest on the broken property. Every call site must be able
+// to state which protocol requires it.
+//
+
+//  * `sha1` — collision resistance is DEAD (SHAttered, 2017;
+//    chosen-prefix collisions since 2020). Preimage resistance still
+//    stands, which is why RFC 6455 may keep using it: the WebSocket
+//    accept-key is a handshake echo that derives no security
+//    property from the digest. Never use SHA-1 for signatures,
+//    certificates, commitments or deduplication — use
+//    `core.hash.crypto`.
+//
+
+// This module exists so that the dependency is visible in a mount
+// line and in review. It must never become a convenience.
+//
+
+// =============================================================================
+
+module core.hash.legacy;
+
+public module sha1;

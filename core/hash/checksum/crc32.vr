@@ -1,5 +1,5 @@
 // =============================================================================
-// security/hash/crc32.vr — CRC-32 / IEEE 802.3
+// core/hash/checksum/crc32.vr — CRC-32 / IEEE 802.3
 // =============================================================================
 // Layer: 1 (checksum primitive — not a cryptographic hash)
 // Dependencies: core
@@ -73,10 +73,9 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.hash.crc32;
+module core.hash.checksum.crc32;
 
 mount core.*;
-mount collections.List;
 
 // =============================================================================
 // Constants

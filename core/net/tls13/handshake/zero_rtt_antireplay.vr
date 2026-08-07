@@ -2,7 +2,8 @@
 // net/tls13/handshake/zero_rtt_antireplay.vr — 0-RTT replay cache (RFC 8446 §8)
 // =============================================================================
 // Layer: 5 (Network — TLS 1.3 core)
-// Dependencies: core, core.collections, core.time, core.security.mac.siphash
+// Dependencies: core, core.collections, core.time, core.mac.hmac,
+//               core.random.secure
 // =============================================================================
 //
 
@@ -75,8 +76,8 @@ mount core.*;
 mount core.collections.List;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
-mount core.security.mac.hmac.{hmac_sha256};
-mount core.security.util.rng.{fill_secure};
+mount core.mac.hmac.{hmac_sha256};
+mount core.random.secure.{fill_secure};
 
 // =============================================================================
 // Config — capacity + freshness window + false-positive target

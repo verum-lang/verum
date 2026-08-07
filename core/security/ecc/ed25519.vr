@@ -2,7 +2,7 @@
 // security/ecc/ed25519.vr — Edwards-curve Digital Signature (RFC 8032)
 // =============================================================================
 // Layer: 2 (core primitive)
-// Dependencies: core, core.security.hash.sha512 (internally used by backend)
+// Dependencies: core, core.hash.crypto.sha512 (internally used by backend)
 // Reference: RFC 8032 — Edwards-Curve Digital Signature Algorithm (EdDSA)
 //  NIST FIPS 186-5 §7 — approves Ed25519 for U.S. federal use
 // =============================================================================
@@ -291,7 +291,7 @@ fn fill_random(buf: &mut [Byte; 32]) {
     let mut tmp: List<Byte> = List.with_capacity(32);
     let mut i = 0;
     while i < 32 { tmp.push(0); i = i + 1; }
-    core.security.util.rng.fill_secure(&mut tmp);
+    core.random.secure.fill_secure(&mut tmp);
     i = 0;
     while i < 32 { buf[i] = tmp[i]; i = i + 1; }
 }

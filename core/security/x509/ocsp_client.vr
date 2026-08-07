@@ -91,8 +91,8 @@ mount core.security.x509.ocsp.{
 };
 mount core.security.x509.oid.{Oid};
 mount core.security.x509.chain.{verify_signature, ChainError};
-mount core.security.hash.sha1.{Sha1};
-mount core.security.hash.sha256.{Sha256};
+mount core.hash.legacy.sha1.{Sha1};
+mount core.hash.crypto.sha256.{Sha256};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
 mount time.system_time.{epoch_seconds};
 

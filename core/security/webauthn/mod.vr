@@ -20,7 +20,7 @@
 //
 // **Composes against.**
 //   - core.encoding.{cbor, json, base64}    — wire formats
-//   - core.security.hash.sha256             — clientDataHash, rpIdHash
+//   - core.hash.crypto.sha256             — clientDataHash, rpIdHash
 //   - core.security.{ecc.{ed25519, p256}, sig.rsa} — sig verify
 //   - core.security.x509                    — attestation chain check
 //

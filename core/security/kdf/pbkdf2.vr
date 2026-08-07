@@ -2,7 +2,7 @@
 // security/kdf/pbkdf2.vr — PBKDF2 (RFC 2898 / RFC 8018)
 // =============================================================================
 // Layer: 3 (Security — key derivation)
-// Dependencies: core, core.collections, core.security.mac.hmac
+// Dependencies: core, core.collections, core.mac.hmac
 // =============================================================================
 //
 
@@ -42,7 +42,7 @@ module core.security.kdf.pbkdf2;
 
 mount core.*;
 mount core.collections.List;
-mount core.security.mac.hmac.{hmac_sha256, hmac_sha384, hmac_sha512};
+mount core.mac.hmac.{hmac_sha256, hmac_sha384, hmac_sha512};
 
 public type Pbkdf2Error is
       OutputTooLong

@@ -2,7 +2,7 @@
 // collections/count_min.vr — frequency sketch (Cormode & Muthukrishnan 2005)
 // =============================================================================
 // Layer: 2 (Collections)
-// Dependencies: core, core.security.mac.hmac, core.security.util.rng
+// Dependencies: core, core.mac.hmac, core.random.secure
 // =============================================================================
 //
 
@@ -69,8 +69,8 @@ module core.collections.count_min;
 
 mount core.*;
 mount core.collections.List;
-mount core.security.mac.hmac.{hmac_sha256};
-mount core.security.util.rng.{fill_secure};
+mount core.mac.hmac.{hmac_sha256};
+mount core.random.secure.{fill_secure};
 
 public type CountMinError is
       BadParameters(Text);

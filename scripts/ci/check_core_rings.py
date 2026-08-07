@@ -27,6 +27,7 @@ import re
 import sys
 import tomllib
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -107,24 +108,121 @@ def targets(mount_body: str, from_file: Path) -> list[str]:
         if (here / f"{parts[0]}.vr").exists() or (here / parts[0]).is_dir():
             return []
         # `mount base.x.Y;` — core-relative shorthand used across the tree.
-        return [parts[0]]
-    return [parts[1]] if len(parts) > 1 else []
+    else:
+        parts = parts[1:]
+    return [_longest_module_path(parts)] if parts else []
 
 
-def load_rings() -> tuple[dict[str, int], dict[int, str]]:
+def _longest_module_path(parts: list[str]) -> str:
+    """The longest prefix of `parts` that is an actual module.
+
+    A mount path is module segments followed by a symbol —
+    `core.collections.list.{List}` names module `collections.list`,
+    while `core.collections.List` names module `collections` and the
+    symbol `List` it re-exports. Nothing in the syntax distinguishes
+    them, but the filesystem does: the module tree IS the directory
+    tree, so a segment is a module exactly when `<dir>/<seg>.vr` or
+    `<dir>/<seg>/` exists.
+
+    Resolving to the deepest real module is what lets a ring be
+    declared for a SUBMODULE. That matters because the coarse form —
+    one ring per top-level directory — cannot express a directory
+    that legitimately spans layers, and forces the whole directory up
+    to its highest member, which is how `core/security/hash` (pure
+    byte computation, no dependencies beyond core) came to sit in the
+    same ring as X.509 policy.
+    """
+    here, depth = CORE, 0
+    for seg in parts:
+        # Case-SENSITIVE membership, read from an explicit listing.
+        # `Path.is_dir()` / `is_file()` ask the filesystem, and macOS
+        # answers case-insensitively: `collections/List.vr` "exists"
+        # there because `list.vr` does. That would make this gate
+        # resolve `collections.List` (a symbol) to a module on a
+        # developer's machine and to nothing on the Linux runner —
+        # the same tree, two verdicts.
+        entries = _entries(here)
+        if seg in entries:
+            here = here / seg; depth += 1
+        elif f"{seg}.vr" in entries:
+            depth += 1; break
+        else:
+            break
+    return ".".join(parts[:depth]) if depth else parts[0]
+
+
+@lru_cache(maxsize=None)
+def _entries(d: Path) -> frozenset[str]:
+    try:
+        return frozenset(e.name for e in d.iterdir())
+    except OSError:
+        return frozenset()
+
+
+def load_rings() -> tuple[dict[str, float], dict[float, str]]:
+    """Read the ring declaration.
+
+    Ring indices are ordered numbers, not consecutive ones: the law
+    only ever compares them (`ring(src) < ring(dst)`). Fractional
+    indices are therefore legitimate and are written as quoted TOML
+    keys — `[ring."1.5"]`. This exists so that discovering a layer
+    between two declared rings costs one entry, not a renumbering of
+    every ring below it plus every prose reference to them.
+    """
     if not RINGS_TOML.exists():
         sys.exit(f"[fail] {RINGS_TOML} missing — the ring law has no declaration to read")
     data = tomllib.loads(RINGS_TOML.read_text())
-    ring_of: dict[str, int] = {}
-    names: dict[int, str] = {}
+    ring_of: dict[str, float] = {}
+    names: dict[float, str] = {}
     for key, spec in data.get("ring", {}).items():
-        idx = int(key)
+        try:
+            idx = float(key)
+        except ValueError:
+            sys.exit(f"[fail] ring key {key!r} is not a number — rings are ordered by index")
         names[idx] = spec.get("name", f"ring{idx}")
         for m in spec.get("modules", []):
             if m in ring_of:
                 sys.exit(f"[fail] module '{m}' declared in two rings")
             ring_of[m] = idx
     return ring_of, names
+
+
+def ring_for(module: str, ring_of: dict[str, float]) -> float | None:
+    """The ring of `module`, by LONGEST DECLARED PREFIX.
+
+    `collections.map` inherits `collections`'s ring unless it is itself
+    declared. Prefix inheritance is what keeps the declaration small
+    AND keeps the gate honest: a target that resolves to a submodule
+    can never fall out of the table and stop being measured — it is
+    covered by its parent until someone deliberately places it
+    elsewhere.
+    """
+    parts = module.split(".")
+    for i in range(len(parts), 0, -1):
+        r = ring_of.get(".".join(parts[:i]))
+        if r is not None:
+            return r
+    return None
+
+
+def placement_of(module: str, ring_of: dict[str, float]) -> str | None:
+    """The declared unit that carries `module`'s ring.
+
+    `math.foundations` is placed by the entry for `math` unless it has
+    one of its own. Cycle detection runs on these units, not on raw
+    module paths: the law speaks about what a ring DECLARES, so
+    `collections -> math.foundations -> collections` is the same
+    cycle as `collections -> math -> collections` whenever `math` is
+    declared as one unit. Comparing raw paths instead would let a
+    cycle disappear the moment a mount named a submodule — the finer
+    the measurement, the quieter the gate, which is backwards.
+    """
+    parts = module.split(".")
+    for i in range(len(parts), 0, -1):
+        cand = ".".join(parts[:i])
+        if cand in ring_of:
+            return cand
+    return None
 
 
 def main() -> int:
@@ -145,7 +243,7 @@ def main() -> int:
                 edges[(src_mod, dst_mod)].append(f"{path.relative_to(REPO)}:{line}")
 
     present = {module_of(p) for p in CORE.rglob("*.vr")} - {None}
-    unplaced = sorted(m for m in present if m not in ring_of)
+    unplaced = sorted(m for m in present if ring_for(m, ring_of) is None)
 
     # The law has two independent clauses, and conflating them was a
     # measurement error worth recording: an edge WITHIN a ring
@@ -156,7 +254,7 @@ def main() -> int:
     # the two modules are really one and the split is fiction.
     violations: list[tuple[str, str, int, int, list[str]]] = []
     for (src, dst), sites in sorted(edges.items()):
-        rs, rd = ring_of.get(src), ring_of.get(dst)
+        rs, rd = ring_for(src, ring_of), ring_for(dst, ring_of)
         if rs is None or rd is None:
             continue
         if rd > rs:
@@ -165,8 +263,11 @@ def main() -> int:
     # Clause (b): cycles among the intra-ring edges.
     intra: dict[str, set[str]] = defaultdict(set)
     for (src, dst) in edges:
-        if ring_of.get(src) is not None and ring_of.get(src) == ring_of.get(dst):
-            intra[src].add(dst)
+        us, ud = placement_of(src, ring_of), placement_of(dst, ring_of)
+        if us is None or ud is None or us == ud:
+            continue
+        if ring_for(src, ring_of) == ring_for(dst, ring_of):
+            intra[us].add(ud)
     cycles: list[list[str]] = []
     seen: set[str] = set()
     stack: list[str] = []
@@ -188,7 +289,7 @@ def main() -> int:
     if census:
         print(f"modules: {len(present)}  edges: {len(edges)}")
         for (src, dst), sites in sorted(edges.items(), key=lambda kv: -len(kv[1])):
-            rs, rd = ring_of.get(src, "?"), ring_of.get(dst, "?")
+            rs, rd = ring_for(src, ring_of), ring_for(dst, ring_of)
             print(f"  {src}(r{rs}) -> {dst}(r{rd})  {len(sites)} site(s)")
         return 0
 

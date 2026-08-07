@@ -94,7 +94,7 @@ public fn memset(dst: &mut Byte, val: Byte, count: USize) { @intrinsic("memset",
 /// # Note on timing
 /// * `memcmp` may short-circuit on first difference and is therefore
 ///  NOT timing-safe. For comparing secret material (MAC tags, password
-///  hashes), use `core.security.util.constant_time.constant_time_eq`
+///  hashes), use `core.subtle.constant_time.constant_time_eq`
 ///  instead.
 public fn memcmp(a: &Byte, b: &Byte, count: USize) -> Int { @intrinsic("memcmp", a, b, count) }
 

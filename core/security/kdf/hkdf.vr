@@ -2,7 +2,7 @@
 // security/kdf/hkdf.vr — HKDF (RFC 5869) — SHA-256 / SHA-384 / SHA-512
 // =============================================================================
 // Layer: 2 (depends on HMAC primitive)
-// Dependencies: core.security.mac.hmac
+// Dependencies: core.mac.hmac
 // Reference: RFC 5869, NIST SP 800-56C Rev.2
 // =============================================================================
 //
@@ -61,13 +61,14 @@
 )
 module core.security.kdf.hkdf;
 mount core.*;
-mount core.security.mac.hmac.{
+mount core.mac.hmac.{
     HmacSha256, hmac_sha256,
     HmacSha384, hmac_sha384,
     HmacSha512, hmac_sha512,
 };
 // SHA{256,384,512}_LEN const-rename mounts dropped — task #11.
-// Call sites use fully-qualified `core.security.hash.sha{256,384,512}.OUTPUT_SIZE`.
+// Call sites use fully-qualified `core.hash.crypto.sha256.OUTPUT_SIZE`
+// (and the sha384 / sha512 siblings).
 
 // =============================================================================
 // Common errors
@@ -137,7 +138,7 @@ public fn hkdf_expand_sha256(
     length: Int,
     out: &mut List<Byte>,
 ) -> Result<(), HkdfError> {
-    if prk.len() < core.security.hash.sha256.OUTPUT_SIZE {
+    if prk.len() < core.hash.crypto.sha256.OUTPUT_SIZE {
         return Result.Err(HkdfError.InvalidPrk { len: prk.len() });
     }
     if length > MAX_EXPAND_OUTPUT_256 {
@@ -145,7 +146,7 @@ public fn hkdf_expand_sha256(
     }
     if length <= 0 { return Result.Ok(()); }
 
-    let n_blocks = (length + core.security.hash.sha256.OUTPUT_SIZE - 1) / core.security.hash.sha256.OUTPUT_SIZE;
+    let n_blocks = (length + core.hash.crypto.sha256.OUTPUT_SIZE - 1) / core.hash.crypto.sha256.OUTPUT_SIZE;
     let mut t_prev: [Byte; 32] = [0; 32];
     let mut produced = 0;
 
@@ -158,12 +159,12 @@ public fn hkdf_expand_sha256(
         mac.update(&ctr);
         let t_i = mac.finalize();
 
-        let take = if produced + core.security.hash.sha256.OUTPUT_SIZE > length { length - produced } else { core.security.hash.sha256.OUTPUT_SIZE };
+        let take = if produced + core.hash.crypto.sha256.OUTPUT_SIZE > length { length - produced } else { core.hash.crypto.sha256.OUTPUT_SIZE };
         out.extend_from_slice(&t_i[..take]);
         produced = produced + take;
 
         let mut k = 0;
-        while k < core.security.hash.sha256.OUTPUT_SIZE { t_prev[k] = t_i[k]; k = k + 1; }
+        while k < core.hash.crypto.sha256.OUTPUT_SIZE { t_prev[k] = t_i[k]; k = k + 1; }
         i = i + 1;
     }
     Result.Ok(())
@@ -202,7 +203,7 @@ public fn hkdf_expand_sha384(
     length: Int,
     out: &mut List<Byte>,
 ) -> Result<(), HkdfError> {
-    if prk.len() < core.security.hash.sha384.OUTPUT_SIZE {
+    if prk.len() < core.hash.crypto.sha384.OUTPUT_SIZE {
         return Result.Err(HkdfError.InvalidPrk { len: prk.len() });
     }
     if length > MAX_EXPAND_OUTPUT_384 {
@@ -210,7 +211,7 @@ public fn hkdf_expand_sha384(
     }
     if length <= 0 { return Result.Ok(()); }
 
-    let n_blocks = (length + core.security.hash.sha384.OUTPUT_SIZE - 1) / core.security.hash.sha384.OUTPUT_SIZE;
+    let n_blocks = (length + core.hash.crypto.sha384.OUTPUT_SIZE - 1) / core.hash.crypto.sha384.OUTPUT_SIZE;
     let mut t_prev: [Byte; 48] = [0; 48];
     let mut produced = 0;
 
@@ -223,12 +224,12 @@ public fn hkdf_expand_sha384(
         mac.update(&ctr);
         let t_i = mac.finalize();
 
-        let take = if produced + core.security.hash.sha384.OUTPUT_SIZE > length { length - produced } else { core.security.hash.sha384.OUTPUT_SIZE };
+        let take = if produced + core.hash.crypto.sha384.OUTPUT_SIZE > length { length - produced } else { core.hash.crypto.sha384.OUTPUT_SIZE };
         out.extend_from_slice(&t_i[..take]);
         produced = produced + take;
 
         let mut k = 0;
-        while k < core.security.hash.sha384.OUTPUT_SIZE { t_prev[k] = t_i[k]; k = k + 1; }
+        while k < core.hash.crypto.sha384.OUTPUT_SIZE { t_prev[k] = t_i[k]; k = k + 1; }
         i = i + 1;
     }
     Result.Ok(())
@@ -266,7 +267,7 @@ public fn hkdf_expand_sha512(
     length: Int,
     out: &mut List<Byte>,
 ) -> Result<(), HkdfError> {
-    if prk.len() < core.security.hash.sha512.OUTPUT_SIZE {
+    if prk.len() < core.hash.crypto.sha512.OUTPUT_SIZE {
         return Result.Err(HkdfError.InvalidPrk { len: prk.len() });
     }
     if length > MAX_EXPAND_OUTPUT_512 {
@@ -274,7 +275,7 @@ public fn hkdf_expand_sha512(
     }
     if length <= 0 { return Result.Ok(()); }
 
-    let n_blocks = (length + core.security.hash.sha512.OUTPUT_SIZE - 1) / core.security.hash.sha512.OUTPUT_SIZE;
+    let n_blocks = (length + core.hash.crypto.sha512.OUTPUT_SIZE - 1) / core.hash.crypto.sha512.OUTPUT_SIZE;
     let mut t_prev: [Byte; 64] = [0; 64];
     let mut produced = 0;
 
@@ -287,12 +288,12 @@ public fn hkdf_expand_sha512(
         mac.update(&ctr);
         let t_i = mac.finalize();
 
-        let take = if produced + core.security.hash.sha512.OUTPUT_SIZE > length { length - produced } else { core.security.hash.sha512.OUTPUT_SIZE };
+        let take = if produced + core.hash.crypto.sha512.OUTPUT_SIZE > length { length - produced } else { core.hash.crypto.sha512.OUTPUT_SIZE };
         out.extend_from_slice(&t_i[..take]);
         produced = produced + take;
 
         let mut k = 0;
-        while k < core.security.hash.sha512.OUTPUT_SIZE { t_prev[k] = t_i[k]; k = k + 1; }
+        while k < core.hash.crypto.sha512.OUTPUT_SIZE { t_prev[k] = t_i[k]; k = k + 1; }
         i = i + 1;
     }
     Result.Ok(())

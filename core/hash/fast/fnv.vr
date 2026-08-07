@@ -1,5 +1,5 @@
 // =============================================================================
-// security/hash/fnv.vr — FNV-1 and FNV-1a (Fowler–Noll–Vo)
+// core/hash/fast/fnv.vr — FNV-1 and FNV-1a (Fowler–Noll–Vo)
 // =============================================================================
 // Layer: 1 (fast non-cryptographic hash)
 // Dependencies: core
@@ -51,7 +51,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.hash.fnv;
+module core.hash.fast.fnv;
 
 mount core.*;
 

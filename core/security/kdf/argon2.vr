@@ -2,7 +2,10 @@
 // security/kdf/argon2.vr — Argon2id (RFC 9106)
 // =============================================================================
 // Layer: 3 (Security — key derivation, password hashing)
-// Dependencies: core, core.collections, core.security.hash.blake2b
+// Dependencies: core, core.collections, core.encoding.base64,
+//               core.security.password_hash. BLAKE2b is NOT a Verum
+//               module — Argon2id runs inside the `verum.argon2id.derive`
+//               intrinsic, which owns the permutation.
 //   (the internal hash; provided by the kernel as `@intrinsic`)
 // =============================================================================
 //

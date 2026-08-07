@@ -3,8 +3,8 @@
 // =============================================================================
 // Layer: 3 (depends on cipher/chacha20 + mac/poly1305)
 // Dependencies: core.security.cipher.chacha20
-//  core.security.mac.poly1305
-//  core.security.util.constant_time
+//  core.mac.poly1305
+//  core.subtle.constant_time
 // Reference: RFC 8439 §2.8 — AEAD construction
 //  RFC 7905 — TLS cipher-suite registration
 //  RFC 9001 — QUIC usage
@@ -65,10 +65,10 @@ mount core.security.cipher.chacha20.{
     ChaChaKey, ChaChaNonce,
     chacha20_block, chacha20_xor,
 };
-mount core.security.mac.poly1305.{
+mount core.mac.poly1305.{
     Poly1305, Poly1305Key, Poly1305Tag, poly1305_mac,
 };
-mount core.security.util.constant_time.{constant_time_eq};
+mount core.subtle.constant_time.{constant_time_eq};
 
 // =============================================================================
 // Constants

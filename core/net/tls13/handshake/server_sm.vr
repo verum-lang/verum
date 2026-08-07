@@ -45,9 +45,9 @@ module core.net.tls13.handshake.server_sm;
 
 mount core.*;
 mount core.collections.List;
-mount core.security.hash.sha256.{Sha256};
-mount core.security.hash.sha384.{Sha384};
-mount core.security.mac.hmac.{HmacSha256, HmacSha384};
+mount core.hash.crypto.sha256.{Sha256};
+mount core.hash.crypto.sha384.{Sha384};
+mount core.mac.hmac.{HmacSha256, HmacSha384};
 mount core.net.tls13.version.{ProtocolVersion, LEGACY_VERSION_TLS_1_2, TLS_1_3};
 mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
 mount core.net.tls13.named_group.{NamedGroup};

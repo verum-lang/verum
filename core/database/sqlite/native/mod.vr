@@ -38,7 +38,7 @@
 //
 
 //  * `core.encoding.varint` — SQLite varint encoding (Gap 4)
-//  * `core.security.hash.crc32` — WAL frame checksum (Gap 5)
+//  * `core.hash.checksum.crc32` — WAL frame checksum (Gap 5)
 //  * `core.collections.{btree,map}` — in-memory ordered maps for temp tables
 //  * `core.mem.arena` — CBGR arena for page cache
 //  * `core.async.{nursery,channel}` — background tasks + actor mailboxes

@@ -3,9 +3,9 @@
 // =============================================================================
 // Layer: 3 (Security — token-level auth)
 // Dependencies: core, core.collections, core.encoding.{base64, json},
-//  core.security.mac.hmac,
+//  core.mac.hmac,
 //  core.security.ecc.ed25519,
-//  core.security.util.constant_time
+//  core.subtle.constant_time
 // =============================================================================
 //
 
@@ -59,11 +59,11 @@ mount core.*;
 mount core.collections.List;
 mount core.encoding.base64.{encode_url, decode_url};
 mount core.encoding.json.{JsonValue, parse, stringify};
-mount core.security.mac.hmac.{hmac_sha256, hmac_sha384, hmac_sha512};
+mount core.mac.hmac.{hmac_sha256, hmac_sha384, hmac_sha512};
 mount core.security.ecc.ed25519.{
     Ed25519, Ed25519Seed, Ed25519PublicKey, Ed25519Signature,
 };
-mount core.security.util.constant_time.{constant_time_eq};
+mount core.subtle.constant_time.{constant_time_eq};
 
 // =============================================================================
 // Algorithms

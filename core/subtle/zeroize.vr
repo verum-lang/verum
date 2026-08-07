@@ -1,5 +1,5 @@
 // =============================================================================
-// security/util/zeroize.vr — cryptographic-zeroise primitives
+// core/subtle/zeroize.vr — cryptographic-zeroise primitives
 // =============================================================================
 // Layer: 0 (no dependencies beyond core primitives + intrinsics)
 // =============================================================================
@@ -81,7 +81,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.util.zeroize;
+module core.subtle.zeroize;
 
 mount core.*;
 

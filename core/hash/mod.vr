@@ -1,0 +1,50 @@
+// =============================================================================
+// core/hash/mod.vr — hash functions, grouped by the guarantee they give
+// =============================================================================
+// Layer: 1 (depends on core primitives only)
+// =============================================================================
+//
+
+// A hash function is chosen by the property the caller needs, and the
+// four properties below are NOT interchangeable. This module is split
+// by guarantee — not by algorithm family, not by era — so that the
+// mount line at a call site already states what the caller is relying
+// on, and a wrong choice is visible in review without opening the file.
+//
+
+//  * `checksum` — detects accidental corruption. NOT collision
+//                 resistant, NOT keyed. An adversary can construct
+//                 collisions trivially. Use for wire/storage integrity
+//                 against noise, never against an attacker.
+//
+//  * `fast`     — fast, well-distributed, NON-cryptographic. Use for
+//                 hash tables, sketches, sharding, cache keys. An
+//                 adversary who controls inputs can force collisions
+//                 (algorithmic-complexity attacks) — key such uses
+//                 with `core.mac.hmac` instead.
+//
+//  * `crypto`   — collision- and preimage-resistant. Use for content
+//                 addressing, commitments, signatures, key schedules.
+//
+//  * `legacy`   — cryptographic by design, BROKEN in practice, kept
+//                 only because a wire protocol mandates the exact
+//                 bytes. Never a free choice.
+//
+// Keyed authentication is not a hash: see `core.mac`.
+//
+
+// Placement rule: a module belongs here iff it maps bytes to a
+// fixed-size digest using core primitives alone. Anything that needs
+// a key, a policy, an identity, or a certificate belongs above —
+// `core.mac` or `core.security` respectively. This module MUST NOT
+// grow a dependency on either.
+//
+
+// =============================================================================
+
+module core.hash;
+
+public module checksum;
+public module fast;
+public module crypto;
+public module legacy;

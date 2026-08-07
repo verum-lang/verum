@@ -84,7 +84,7 @@ mount super.nn.{
 public mount super.nn.Module;
 mount super.autodiff.{grad, value_and_grad, with_no_grad};
 mount super.gpu.{default_device, has_gpu};
-mount super.random.RandomKey;
+mount core.random.deterministic.{RandomKey};
 
 // =============================================================================
 // Convenience Type Alias

@@ -1,0 +1,23 @@
+// =============================================================================
+// core/hash/checksum/mod.vr — corruption detection, NOT security
+// =============================================================================
+// Layer: 1 (depends on core primitives only)
+// =============================================================================
+//
+
+// Checksums detect ACCIDENTAL corruption — bit flips on a wire, a
+// truncated write, a bad sector. They give no security property at
+// all: producing a second input with the same CRC is a linear-algebra
+// exercise, not an attack.
+//
+
+// Use when the adversary is noise. When the adversary is a person,
+// use `core.hash.crypto` (unkeyed) or `core.mac` (keyed).
+//
+
+// =============================================================================
+
+module core.hash.checksum;
+
+public module crc32;
+public module crc32c;

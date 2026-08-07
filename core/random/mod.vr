@@ -1,0 +1,45 @@
+// =============================================================================
+// core/random/mod.vr — randomness, split by the guarantee it carries
+// =============================================================================
+// Layer: 1 (core primitives + the platform entropy intrinsic)
+// =============================================================================
+//
+
+// Two kinds of randomness live here, and choosing the wrong one is a
+// silent, total failure: the output looks equally random in a test and
+// in a debugger. They sit side by side, under one name, so the choice
+// is made once, deliberately, at the mount line.
+//
+
+//  * `secure`        — draws from the platform CSPRNG. Unpredictable
+//    to an adversary who has seen any amount of previous output. Use
+//    for EVERY secret-bearing draw: keys, nonces, IVs, salts, session
+//    tokens, key-share blinding, reset tokens.
+//
+//  * `deterministic` — reproducible pseudorandom generators (PCG,
+//    XorShift128+, SplitMix64) and probability distributions. A seed
+//    reproduces the whole stream exactly, which is the point: Monte
+//    Carlo, simulation, property tests, shuffles, tensor
+//    initialisation. Observing a few outputs reveals the internal
+//    state, so it is unusable for anything secret.
+//
+
+// # The choice rule
+//
+
+// If an adversary must not predict the value, use `secure`. If a run
+// must be repeatable from a seed, use `deterministic`. Nothing needs
+// both — a draw that must be unpredictable can never be reproducible.
+//
+
+// Speed is not a reason to reach for `deterministic`: the platform
+// CSPRNG costs one syscall amortised over a buffer, and every real
+// protocol draws far less randomness than it hashes.
+//
+
+// =============================================================================
+
+module core.random;
+
+public module secure;
+public module deterministic;

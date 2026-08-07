@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 3 (Security)
 // Dependencies: core, core.encoding.{base64, hex},
-//  core.security.util.{rng, constant_time}
+//  core.random.secure + core.subtle.constant_time
 // =============================================================================
 //
 
@@ -53,8 +53,8 @@ mount core.*;
 mount core.collections.List;
 mount core.encoding.base64.{encode_url};
 mount core.encoding.hex.{encode as hex_encode};
-mount core.security.util.rng.{fill_secure_array};
-mount core.security.util.constant_time.{constant_time_eq};
+mount core.random.secure.{fill_secure_array};
+mount core.subtle.constant_time.{constant_time_eq};
 
 // =============================================================================
 // Recommended lengths

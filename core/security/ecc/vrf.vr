@@ -2,7 +2,7 @@
 // security/ecc/vrf.vr — Verifiable Random Function — RFC 9381 ECVRF-EDWARDS25519
 // =============================================================================
 // Layer: 2 (core primitive)
-// Dependencies: core, core.security.ecc.ed25519, core.security.hash.sha512
+// Dependencies: core, core.security.ecc.ed25519, core.hash.crypto.sha512
 // Reference:
 //  - RFC 9381 — Verifiable Random Functions (VRFs), Goldberg / Reyzin /
 //    Papadopoulos / Vcelak. Errata-clean revision of the IRTF

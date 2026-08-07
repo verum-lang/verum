@@ -2,7 +2,7 @@
 // net/websocket.vr — RFC 6455 WebSocket protocol
 // =============================================================================
 // Layer: 5 (Network)
-// Dependencies: core.net.http, core.net.http_parser, core.security.hash.sha1,
+// Dependencies: core.net.http, core.net.http_parser, core.hash.legacy.sha1,
 //  core.encoding.base64, core.io
 // Spec: https://datatracker.ietf.org/doc/html/rfc6455
 //  permessage-deflate: RFC 7692 (not yet implemented)
@@ -80,7 +80,7 @@ module core.net.websocket;
 
 mount core.*;
 mount core.net.http.{Headers};
-mount core.security.hash.sha1.{Sha1};
+mount core.hash.legacy.sha1.{Sha1};
 mount core.encoding.base64;
 
 // =============================================================================

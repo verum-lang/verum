@@ -171,7 +171,7 @@ public fn record_vectors() -> List<RecordHeaderVector> {
 
 // The vectors below are the three checksums from the canonical
 // "all zero", "alternating bytes", "frame header" inputs. They are
-// what `core.security.hash.crc32` / WAL frame-write code must
+// what `core.hash.checksum.crc32` / WAL frame-write code must
 // reproduce bit-for-bit.
 // =============================================================================
 

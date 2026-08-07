@@ -43,6 +43,25 @@ name = "platform"
 # real, correct direction of that dependency.
 modules = ["sys", "mem", "target"]
 
+[ring."1.5"]
+name = "byte-primitive"
+# Computation over bytes, and nothing else: digests, keyed
+# authentication, entropy, constant-time operations. Their own headers
+# declare "Dependencies: core" and the measurement agrees.
+#
+# They were `core/security/{hash,mac,util}` until the ring law was
+# first enforced, which put `collections`, `encoding` and `storage`
+# (ring 2) in the position of depending on ring 5 to obtain a hash.
+# The layering was not the only casualty: `core.security.hash.murmur3`
+# and `core.security.hash.crc32` announce a security property that
+# MurmurHash and CRC-32 explicitly do not have. Grouping by topic
+# ("security") rather than by layer produced both defects at once.
+#
+# Half a ring, not ring 1: these are pure computation and do not touch
+# the syscall boundary — except `random.secure`, which is entropy, a
+# platform service by nature.
+modules = ["hash", "mac", "random", "subtle"]
+
 [ring.2]
 name = "data"
 # Container and value algorithms. May use the platform (allocation,

@@ -413,7 +413,7 @@ public fn stable_address_id(host: &Text, port: UInt16) -> UInt64 {
 }
 
 /// FNV-1a 64-bit. Inlined here to avoid pulling in
-/// `core.security.hash.fnv` from the gating hot path — that
+/// `core.hash.fast.fnv` from the gating hot path — that
 /// module is part of the layer-2 crypto stack and would
 /// circular-import.
 fn fnv1a_64(bytes: &[Byte]) -> UInt64 {

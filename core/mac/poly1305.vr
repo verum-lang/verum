@@ -1,5 +1,5 @@
 // =============================================================================
-// security/mac/poly1305.vr — Poly1305 one-time MAC (RFC 8439)
+// core/mac/poly1305.vr — Poly1305 one-time MAC (RFC 8439)
 // =============================================================================
 // Layer: 2 (core primitive)
 // Dependencies: core
@@ -65,7 +65,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.mac.poly1305;
+module core.mac.poly1305;
 mount core.*;
 
 public const KEY_SIZE: Int = 32;

@@ -51,8 +51,8 @@ module core.database.postgres.auth.scram;
 mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
-mount core.security.hash.sha256.Sha256;
-mount core.security.mac.hmac.hmac_sha256;
+mount core.hash.crypto.sha256.Sha256;
+mount core.mac.hmac.hmac_sha256;
 mount core.security.kdf.pbkdf2.pbkdf2_hmac_sha256;
 mount core.encoding.base64.{encode, decode};
 

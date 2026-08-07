@@ -2,7 +2,7 @@
 // collections/consistent_hash.vr — consistent-hash ring (Karger '97)
 // =============================================================================
 // Layer: 2 (Collections)
-// Dependencies: core, core.security.hash.sha256, core.collections.btree
+// Dependencies: core, core.hash.crypto.sha256, core.collections.btree
 // =============================================================================
 //
 
@@ -59,7 +59,7 @@ module core.collections.consistent_hash;
 mount core.*;
 mount core.collections.List;
 mount core.collections.btree.{BTreeMap};
-mount core.security.hash.sha256.{Sha256};
+mount core.hash.crypto.sha256.{Sha256};
 
 // =============================================================================
 // Defaults

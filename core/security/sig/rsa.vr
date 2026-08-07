@@ -2,7 +2,7 @@
 // security/sig/rsa.vr — RSA signature verification (verify-only, legacy)
 // =============================================================================
 // Layer: 2 (core primitive)
-// Dependencies: core, core.security.hash.{sha256, sha384, sha512}
+// Dependencies: core, core.hash.crypto.{sha256, sha384, sha512}
 // Reference: RFC 8017 — PKCS #1 v2.2 (RSA Cryptography Standard)
 //  FIPS 186-5 §5 — Digital Signature Standard (RSA section)
 // =============================================================================
@@ -83,9 +83,9 @@
 )
 module core.security.sig.rsa;
 mount core.*;
-mount core.security.hash.sha256.{Sha256};
-mount core.security.hash.sha384.{Sha384};
-mount core.security.hash.sha512.{Sha512};
+mount core.hash.crypto.sha256.{Sha256};
+mount core.hash.crypto.sha384.{Sha384};
+mount core.hash.crypto.sha512.{Sha512};
 
 // =============================================================================
 // Public key

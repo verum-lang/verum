@@ -1,5 +1,5 @@
 // =============================================================================
-// security/hash/xxhash.vr — XXH64 (Yann Collet 2012)
+// core/hash/fast/xxhash.vr — XXH64 (Yann Collet 2012)
 // =============================================================================
 // Layer: 1 (fast non-cryptographic hash)
 // Dependencies: core
@@ -40,7 +40,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.hash.xxhash;
+module core.hash.fast.xxhash;
 
 mount core.*;
 

@@ -1,0 +1,35 @@
+// =============================================================================
+// core/subtle/mod.vr — operations defined by what the machine must NOT do
+// =============================================================================
+// Layer: 0 (core primitives + intrinsics)
+// =============================================================================
+//
+
+// Ordinary code is specified by the value it computes. The operations
+// here are specified by what must NOT happen while computing it —
+// which is why an obvious-looking rewrite silently destroys them.
+//
+
+//  * `constant_time` — comparison and selection whose timing does not
+//    depend on secret data. `==` on two byte strings exits at the
+//    first difference, so its running time reveals the length of the
+//    correct prefix: enough to forge a MAC tag byte by byte. Used for
+//    every tag, password-hash and token comparison.
+//
+//  * `zeroize`       — wipes that survive optimisation. A compiler may
+//    delete a store to memory that is never read again, which is
+//    exactly the shape of erasing a key before free. These wipes are
+//    written so that they cannot be elided.
+//
+
+// The name follows the term of art (`crypto/subtle`) for this class:
+// primitives whose misuse is invisible in the result and only shows up
+// under measurement or attack.
+//
+
+// =============================================================================
+
+module core.subtle;
+
+public module constant_time;
+public module zeroize;

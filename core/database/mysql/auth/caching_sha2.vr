@@ -33,7 +33,7 @@ module core.database.mysql.auth.caching_sha2;
 mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
-mount core.security.hash.sha256.Sha256;
+mount core.hash.crypto.sha256.Sha256;
 mount core.encoding.pem.{PemBlock, PemError};
 // `mount X as Y` rename-aliases don't surface to AOT codegen
 // function-table lookup (task #17/#39 mount-scope-aware defect class).

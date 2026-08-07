@@ -396,7 +396,7 @@ implement ServerListener {
         bytes[0] = ((id >> 8) & 0xFF_u64) as Byte;
         bytes[1] = (id & 0xFF_u64) as Byte;
         let mut rnd: [Byte; 6] = [0_u8; 6];
-        core.security.util.rng.fill_secure(&mut rnd);
+        core.random.secure.fill_secure(&mut rnd);
         let mut i: Int = 0;
         while i < 6 { bytes[2 + i] = rnd[i]; i = i + 1; }
 

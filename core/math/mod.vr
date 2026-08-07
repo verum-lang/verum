@@ -173,7 +173,6 @@ public module linalg;       // Vectors, matrices, BLAS
 public module calculus;     // Integration, differentiation, ODEs
 
 // Layer 3 (continued): Random Numbers
-public module random;       // PRNG, distributions
 
 // Layer 4: Tensor System
 public module tensor;       // N-dimensional arrays, static/dynamic shape
@@ -678,40 +677,9 @@ public mount .calculus.{
 
 };
 
-// Random number generation
-public mount .random.{
-
-    // Key-based PRNG
-    RandomKey,
-    // Generators
-    XorShift128,
-    PCG,
-    Rng,
-    // Uniform distribution
-    uniform_01,
-    uniform,
-    uniform_vec,
-    uniform_int,
-    // Normal distribution
-    normal_01,
-    normal,
-    normal_vec,
-    truncated_normal,
-    // Other distributions
-    exponential,
-    bernoulli,
-    poisson,
-    chi_squared,
-    student_t,
-    cauchy,
-    categorical,
-    categorical_logits,
-    // Shuffling
-    permutation,
-    shuffle_vec,
-    choice,
-
-};
+// Random number generation moved to `core.random` — the choice
+// between a CSPRNG and a reproducible generator must be made
+// explicitly, and a re-export into `core.math.*` hides it.
 
 // Tensor system
 public mount .tensor.{

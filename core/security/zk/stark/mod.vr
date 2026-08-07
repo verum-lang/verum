@@ -2,7 +2,7 @@
 // security/zk/stark/mod.vr — STARK (FRI-based) zero-knowledge system
 // =============================================================================
 // Layer: 3 (cryptography)
-// Dependencies: core, core.security.hash.blake3
+// Dependencies: core, core.hash.crypto.blake3
 // References:
 //  - Ben-Sasson, Bentov, Horesh, Riabzev, "Scalable, transparent and
 //    post-quantum secure computational integrity" (2018).

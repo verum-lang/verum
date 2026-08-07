@@ -1,5 +1,5 @@
 // =============================================================================
-// security/util/constant_time.vr — timing-safe equality checks
+// core/subtle/constant_time.vr — timing-safe equality checks
 // =============================================================================
 // Layer: 0 (no dependencies beyond core primitives)
 // =============================================================================
@@ -53,7 +53,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.util.constant_time;
+module core.subtle.constant_time;
 mount core.*;
 
 /// Timing-safe byte-slice equality.

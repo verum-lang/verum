@@ -7,7 +7,7 @@
 //
 // **Purpose.** First-class Verum-side signing + verification for cog
 // archives + manifests, using Ed25519. Composes against the existing
-// `core.security.ecc.ed25519` and `core.security.hash.sha256`; this
+// `core.security.ecc.ed25519` and `core.hash.crypto.sha256`; this
 // module provides the cog-specific signature *envelope* (what gets
 // signed, encoding, key-management interface).
 //
@@ -60,7 +60,7 @@ mount security.ecc.ed25519.{
 //   ed25519_sign           → security.ecc.ed25519.sign
 //   ed25519_verify         → security.ecc.ed25519.verify
 //   ed25519_public_key     → security.ecc.ed25519.public_key
-//   sha256_digest          → security.hash.sha256.digest
+//   sha256_digest          → hash.crypto.sha256.digest
 //   hex_encode             → encoding.hex.encode
 //   hex_decode             → encoding.hex.decode
 mount time.rfc3339.{Rfc3339Time, now_utc};
@@ -134,8 +134,8 @@ public fn sign_cog(
     manifest_canonical_json: &List<Byte>,
     source_archive: &List<Byte>,
 ) -> Result<CogSignature, CogSignatureError> {
-    let manifest_hash = security.hash.sha256.digest(manifest_canonical_json);
-    let source_hash = security.hash.sha256.digest(source_archive);
+    let manifest_hash = hash.crypto.sha256.digest(manifest_canonical_json);
+    let source_hash = hash.crypto.sha256.digest(source_archive);
     let to_sign = concat_hashes(&manifest_hash, &source_hash);
     let signature_bytes = security.ecc.ed25519.sign(seed, &to_sign);
     let public_key_bytes = security.ecc.ed25519.public_key(seed);
@@ -161,8 +161,8 @@ public fn verify_cog(
     source_archive: &List<Byte>,
 ) -> Result<(), CogSignatureError> {
     // Step 1: compute the two hashes ourselves.
-    let manifest_hash = security.hash.sha256.digest(manifest_canonical_json);
-    let source_hash = security.hash.sha256.digest(source_archive);
+    let manifest_hash = hash.crypto.sha256.digest(manifest_canonical_json);
+    let source_hash = hash.crypto.sha256.digest(source_archive);
     let computed_manifest = encoding.hex.encode(&manifest_hash);
     let computed_source = encoding.hex.encode(&source_hash);
 
@@ -231,8 +231,8 @@ public fn signing_message(
     manifest_canonical_json: &List<Byte>,
     source_archive: &List<Byte>,
 ) -> List<Byte> {
-    let manifest_hash = security.hash.sha256.digest(manifest_canonical_json);
-    let source_hash = security.hash.sha256.digest(source_archive);
+    let manifest_hash = hash.crypto.sha256.digest(manifest_canonical_json);
+    let source_hash = hash.crypto.sha256.digest(source_archive);
     concat_hashes(&manifest_hash, &source_hash)
 }
 

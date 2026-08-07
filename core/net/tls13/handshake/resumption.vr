@@ -65,7 +65,7 @@ mount core.collections.List;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.security.aead.aes_gcm.{aes128_gcm_seal, aes128_gcm_open};
-mount core.security.util.rng.{fill_secure};
+mount core.random.secure.{fill_secure};
 mount core.security.kdf.hkdf.{HkdfError};
 mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
 mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};

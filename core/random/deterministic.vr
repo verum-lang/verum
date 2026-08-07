@@ -1,5 +1,5 @@
 // =============================================================================
-// random.vr - Random Number Generation Module
+// core/random/deterministic.vr - Random Number Generation Module
 // =============================================================================
 // Layer: 4 (Random Numbers)
 //
@@ -39,7 +39,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.math.random;
+module core.random.deterministic;
 
 mount super.constants.{PI, E};
 mount super.elementary.{sqrt, log, cos, sin, exp, abs, floor};

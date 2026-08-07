@@ -16,7 +16,7 @@
 // salts (cs0_init, cs1_init).
 //
 
-// (NOT to be confused with `core.security.hash.crc32` — distinct
+// (NOT to be confused with `core.hash.checksum.crc32` — distinct
 // algorithm; loom uses crc32 separately for the WAL header CRC.)
 // =============================================================================
 

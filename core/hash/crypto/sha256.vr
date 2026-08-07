@@ -1,5 +1,5 @@
 // =============================================================================
-// security/hash/sha256.vr — SHA-256 (FIPS 180-4)
+// core/hash/crypto/sha256.vr — SHA-256 (FIPS 180-4)
 // =============================================================================
 // Layer: 1 (crypto primitive)
 // Dependencies: core, core/base/primitives (UInt32, wrapping_add, rotate_right)
@@ -53,7 +53,7 @@
 // branches, no memory accesses indexed by secret data). The reference
 // impl is safe against timing side-channels at the primitive level.
 // Higher-level protocols (e.g., HMAC comparison) must pair with
-// `core.security.util.constant_time_eq` to preserve this property.
+// `core.subtle.constant_time.constant_time_eq` to preserve this property.
 //
 
 // =============================================================================
@@ -63,7 +63,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.hash.sha256;
+module core.hash.crypto.sha256;
 mount core.*;
 
 // =============================================================================
@@ -379,7 +379,7 @@ implement Sha256 {
 // established stdlib pattern of providing module-level wrappers next
 // to inherent-method APIs so consumers can write
 //
-//     mount core.security.hash.sha256.{digest as sha256_digest};
+//     mount core.hash.crypto.sha256.{digest as sha256_digest};
 //
 // without needing to bring the unit-marker `Sha256` into scope just
 // to call its static.

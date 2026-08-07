@@ -92,8 +92,8 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map, Set};
 mount encoding.json.{JsonValue, JsonMap, decode as json_decode};
 mount encoding.hex.{encode as hex_encode};
-mount security.hash.sha256.{digest};
-mount security.hash.sha512.{digest as sha512_digest};
+mount hash.crypto.sha256.{digest};
+mount hash.crypto.sha512.{digest as sha512_digest};
 mount time.system_time.{epoch_seconds};
 
 mount security.tuf.types.{
@@ -577,7 +577,7 @@ fn verify_hashes(bytes: &List<Byte>, expected: &Map<Text, Text>, what: &Text) ->
     }
     for (alg, expected_hex) in expected.iter() {
         let computed = match alg.as_str() {
-            "sha256" => hex_encode(&security.hash.sha256.digest(bytes)),
+            "sha256" => hex_encode(&hash.crypto.sha256.digest(bytes)),
             "sha512" => hex_encode(&sha512_digest(bytes)),
             _        => return Result.Err(UnsupportedHashAlgorithm(alg.clone())),
         };

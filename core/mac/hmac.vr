@@ -1,8 +1,8 @@
 // =============================================================================
-// security/mac/hmac.vr — HMAC (RFC 2104) — SHA-256 / SHA-384 / SHA-512
+// core/mac/hmac.vr — HMAC (RFC 2104) — SHA-256 / SHA-384 / SHA-512
 // =============================================================================
 // Layer: 2 (depends on hash primitives)
-// Dependencies: core.security.hash.{sha256, sha384, sha512}
+// Dependencies: core.hash.crypto.{sha256, sha384, sha512}
 // Reference: RFC 2104, RFC 4231 (test vectors)
 // =============================================================================
 //
@@ -46,7 +46,7 @@
 // # Verification — always constant-time
 //
 
-// Compare MAC tags with `core.security.util.constant_time_eq`, never
+// Compare MAC tags with `core.subtle.constant_time.constant_time_eq`, never
 // with `==`. A data-dependent compare opens a timing side channel.
 //
 
@@ -57,15 +57,15 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.mac.hmac;
+module core.mac.hmac;
 mount core.*;
-mount core.security.hash.sha1.{Sha1,
+mount core.hash.legacy.sha1.{Sha1,
     SHA1_BLOCK_SIZE, SHA1_DIGEST_SIZE};
-mount core.security.hash.sha256.{Sha256,
+mount core.hash.crypto.sha256.{Sha256,
     BLOCK_SIZE as SHA256_BLOCK, OUTPUT_SIZE as SHA256_OUTPUT};
-mount core.security.hash.sha384.{Sha384,
+mount core.hash.crypto.sha384.{Sha384,
     BLOCK_SIZE as SHA384_BLOCK, OUTPUT_SIZE as SHA384_OUTPUT};
-mount core.security.hash.sha512.{Sha512,
+mount core.hash.crypto.sha512.{Sha512,
     BLOCK_SIZE as SHA512_BLOCK, OUTPUT_SIZE as SHA512_OUTPUT};
 
 // =============================================================================

@@ -1,5 +1,5 @@
 // =============================================================================
-// security/hash/crc32c.vr — CRC-32C / Castagnoli
+// core/hash/checksum/crc32c.vr — CRC-32C / Castagnoli
 // =============================================================================
 // Layer: 1 (checksum primitive — not a cryptographic hash)
 // Dependencies: core
@@ -62,7 +62,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.security.hash.crc32c;
+module core.hash.checksum.crc32c;
 
 mount core.*;
 
