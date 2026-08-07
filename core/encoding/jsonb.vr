@@ -5,18 +5,33 @@
 // Dependencies: core, core.collections, core.encoding.json
 // =============================================================================
 //
-// Postgres / SQLite JSONB binary wire format:
+// POSTGRES JSONB binary wire format — and ONLY Postgres:
 //
 //   u8 version       — currently always 0x01; future versions will
 //                      change the layout (no version 2 has been
 //                      published as of Postgres 17).
 //   bytes payload[]  — UTF-8 JSON text of the document
 //
-// Both Postgres (since 9.4) and SQLite (since 3.45) use this exact
-// layout for their respective JSONB columns. This module is the
-// canonical implementation — `core.database.postgres.wire.codec` and
-// the SQLite native engine each delegate to `decode` / `encode`
-// here, eliminating two parallel implementations.
+// CORRECTION (measured against both implementations): an earlier
+// revision of this header claimed "Both Postgres (since 9.4) and
+// SQLite (since 3.45) use this exact layout". That is FALSE, and the
+// claim was load-bearing — it invited deleting the SQLite decoder as a
+// "duplicate" of this one, which would have replaced a correct
+// implementation with a wrong one.
+//
+// SQLite's JSONB (3.45+) is a completely different encoding: every
+// element carries a 1-byte header whose low nibble is one of 13
+// element types (Null/True/False/Int/Int5/Float/Float5/Text/TextJ/
+// Text5/TextRaw/Array/Object) and whose high nibble is a payload-length
+// class (0..11 inline, 12/13/14/15 selecting 1/2/4/8 extra length
+// bytes). There is no version byte and the payload is not JSON text.
+// Its implementation lives — correctly — in
+// `core.database.sqlite.native.jsonb_binary_format`.
+//
+// The two share a NAME, not a FORMAT. Merging them would be the
+// defect, not the fix. What this module is canonical for is the
+// Postgres layout: `core.database.postgres.wire.codec` delegates to
+// `decode` / `encode` here.
 //
 // `JsonbValue` is a thin wrapper around the version byte + the JSON
 // text payload; consumers either re-parse the payload through
@@ -35,10 +50,11 @@
 //   * The version byte is a Postgres-protocol artefact, not a
 //     general JSON concern; mixing it into `core.encoding.json`
 //     would pollute the JSON encoder's surface.
-//   * Two parallel implementations (one in `postgres/wire/codec`,
-//     one in `sqlite/native/jsonb_binary_format`) are a
-//     maintenance trap — bug-fixes in one don't propagate to the
-//     other. Single source of truth here.
+//   * The Postgres codec had a second copy of THIS layout inside
+//     `postgres/wire/codec`; that duplication is the one this
+//     module exists to remove. (`sqlite/native/jsonb_binary_format`
+//     is NOT a copy — see the correction above: different format,
+//     same name.)
 //   * Future versions of the wire format (if Postgres ships v2)
 //     land in this module without touching adapter code.
 //
@@ -74,10 +90,9 @@ mount core.encoding.value.{Value, ConvertError};
 // Constants
 // =============================================================================
 
-/// Current binary JSONB version. Postgres 9.4 → 17 has shipped only
-/// version 1; SQLite 3.45+ uses the same layout. A future version
-/// 2 is anticipated for shape-preserving binary encoding (à la
-/// CBOR) but no public spec exists.
+/// Current Postgres binary JSONB version. Postgres 9.4 → 17 has
+/// shipped only version 1. (SQLite's JSONB is a different encoding
+/// with no version byte at all — see the header correction.)
 public const JSONB_VERSION_1: Int = 1;
 
 // =============================================================================
@@ -85,8 +100,8 @@ public const JSONB_VERSION_1: Int = 1;
 // =============================================================================
 
 public type JsonbValue is {
-    /// Version byte from the wire. Always 1 for current Postgres /
-    /// SQLite. Carried so future-version JSONBs surface as a clean
+    /// Version byte from the wire. Always 1 for current Postgres.
+    /// Carried so future-version JSONBs surface as a clean
     /// `JbeUnsupportedVersion` rather than corrupting decoded text.
     version: Int,
     /// UTF-8 JSON text payload (after the version byte was
