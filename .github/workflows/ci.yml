@@ -233,11 +233,50 @@ jobs:
         timeout-minutes: 30
         run: cargo test --locked --tests -p verum_smt
 
+      # verum_vbc tier moved to its own job (integration-vbc): its test
+      # binaries are the heaviest of the five tiers (each embeds the
+      # baked stdlib), and by this point the runner's disk — even after
+      # the reclaim step — was drained by the four earlier tiers' build
+      # artifacts. Two runs died mid-step with no surviving logs before
+      # the split.
+
+  integration-vbc:
+    name: Integration tests (verum_vbc tier)
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost 2>/dev/null || true
+          df -h /
+
+      - name: Install Rust toolchain (pinned via rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: integration-vbc
+          cache-on-failure: true
+
       # verum_vbc tier: 1,717 tests measured green 2026-08-03 after the
       # T0714 landing (envelope-family arms made TOTAL to garbage
       # register values — the debug asserts aborted what release
       # semantics survive) and two ratchets tightened in the same pass
       # (INVENTORY duplicate rows, stdlib duplicate protocol names).
+      # Own job = own fresh disk: these binaries each embed the baked
+      # stdlib and overflowed the shared runner twice.
       - name: Run tests/ for verum_vbc
         timeout-minutes: 45
         run: cargo test --locked --tests -p verum_vbc
