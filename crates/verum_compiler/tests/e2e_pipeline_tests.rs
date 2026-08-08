@@ -1072,11 +1072,33 @@ fn test_compilation_performance() {
 
     println!("Compilation time for 20 functions: {:?}", elapsed);
 
-    // Should compile in reasonable time for 20 functions
+    // The bound is PER PROFILE, because this assertion was calibrated
+    // against one and `cargo test` builds the other.
+    //
+    // Measured 2026-08-08 on the same machine, same source:
+    //     release  18.4s   (the 30s bound held)
+    //     debug   143.4s   (it did not — a 4.8x profile gap)
+    //
+    // A single 30s bound therefore reported a compiler regression that
+    // did not exist, every time the suite ran the way CI runs it. The
+    // opposite fix — raising the bound to 240s for everyone — would
+    // have let a real 100s regression through in release, which is the
+    // profile that ships.
+    //
+    // What this measures is pipeline LATENCY end to end, stdlib
+    // bootstrap included, not throughput: 20 trivial functions do not
+    // account for 18 seconds on their own. It is a regression tripwire
+    // for the whole pipeline, not a check against the
+    // >50K LOC/sec target in CLAUDE.md — that one needs a benchmark
+    // that excludes bootstrap.
+    let bound_secs = if cfg!(debug_assertions) { 240 } else { 30 };
     assert!(
-        elapsed.as_secs() < 30,
-        "Compilation should be reasonably fast (took {:?})",
-        elapsed
+        elapsed.as_secs() < bound_secs,
+        "compilation took {:?}, over the {}s bound for this profile \
+         ({})",
+        elapsed,
+        bound_secs,
+        if cfg!(debug_assertions) { "debug" } else { "release" }
     );
 }
 

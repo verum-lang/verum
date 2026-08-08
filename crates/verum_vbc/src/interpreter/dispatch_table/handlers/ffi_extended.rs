@@ -1255,8 +1255,38 @@ fn ffi_extended_body(
                 v.as_f64().to_bits() as i64
             } else if v.is_regular_ptr() {
                 v.as_ptr::<u8>() as i64
-            } else {
+            } else if v.is_bool() {
+                // A `*mut Bool` cell holds 0 or 1, and `as_i64` refuses
+                // a boolean — `is_int()` does not include TAG_BOOLEAN.
+                // `let y: Bool = true;` in a `static mut` reached the
+                // catch-all below and tripped
+                // `debug_assert!(self.is_int(), "Expected int, got {:?}")`
+                // with tag 2 (TAG_BOOLEAN).
+                i64::from(v.as_bool())
+            } else if v.is_int() {
                 v.as_i64()
+            } else {
+                // Everything else — variants and any other value whose
+                // machine form IS its NaN box — is written verbatim.
+                //
+                // This arm used to be an unconditional `as_i64()`, on
+                // the assumption that "not float, not pointer" means
+                // integer. It is a CLOSED set treated as open with a
+                // default, and the default decodes a box's payload bits
+                // as if they were a number.
+                //
+                // In a debug build the assert fires — which is how this
+                // was found, through
+                // `verum_compiler/tests/core_stdlib_validation_test.rs`,
+                // a suite that had never run in CI. In a release build
+                // there is no assert: the write silently stores garbage
+                // and the next read hands it back with the original
+                // type's tag.
+                //
+                // A variant has no unboxed machine form, so the box IS
+                // the representation and storing it verbatim is the only
+                // value that round-trips.
+                v.to_bits() as i64
             };
             // SAFETY: null-checked; caller supplies a pointer valid for
             // `size`-byte writes (raw-pointer contract).
