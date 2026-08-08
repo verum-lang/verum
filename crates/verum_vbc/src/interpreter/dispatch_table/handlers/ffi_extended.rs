@@ -1149,8 +1149,24 @@ fn ffi_extended_body(
                 val.as_thin_ref().ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
-            } else {
+            } else if val.is_int() {
+                // A raw address fabricated as an Int and cast — the
+                // documented minority case.
                 val.as_i64() as *mut u8
+            } else {
+                // Anything else has no pointer reading. `as_i64()` on a
+                // Bool or a variant decodes the NaN box's payload bits as
+                // an address: `debug_assert!(self.is_int())` in a debug
+                // build, a wild pointer in release. Null is the honest
+                // answer, and every caller here already rejects null on
+                // the next line.
+                //
+                // The correct shape was already in the tree —
+                // `handlers/cbgr.rs:1718` guards with `is_int()` and
+                // falls to `null_mut()`. Paired implementations are an
+                // oracle: when one copy of a pattern is right, the
+                // question is why the others differ.
+                std::ptr::null_mut()
             };
             if ptr.is_null() {
                 return Err(InterpreterError::NullPointer);
@@ -1206,8 +1222,24 @@ fn ffi_extended_body(
                 val.as_thin_ref().ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
-            } else {
+            } else if val.is_int() {
+                // A raw address fabricated as an Int and cast — the
+                // documented minority case.
                 val.as_i64() as *mut u8
+            } else {
+                // Anything else has no pointer reading. `as_i64()` on a
+                // Bool or a variant decodes the NaN box's payload bits as
+                // an address: `debug_assert!(self.is_int())` in a debug
+                // build, a wild pointer in release. Null is the honest
+                // answer, and every caller here already rejects null on
+                // the next line.
+                //
+                // The correct shape was already in the tree —
+                // `handlers/cbgr.rs:1718` guards with `is_int()` and
+                // falls to `null_mut()`. Paired implementations are an
+                // oracle: when one copy of a pattern is right, the
+                // question is why the others differ.
+                std::ptr::null_mut()
             };
             if ptr.is_null() {
                 return Err(InterpreterError::NullPointer);
@@ -1241,8 +1273,24 @@ fn ffi_extended_body(
                 val.as_thin_ref().ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
-            } else {
+            } else if val.is_int() {
+                // A raw address fabricated as an Int and cast — the
+                // documented minority case.
                 val.as_i64() as *mut u8
+            } else {
+                // Anything else has no pointer reading. `as_i64()` on a
+                // Bool or a variant decodes the NaN box's payload bits as
+                // an address: `debug_assert!(self.is_int())` in a debug
+                // build, a wild pointer in release. Null is the honest
+                // answer, and every caller here already rejects null on
+                // the next line.
+                //
+                // The correct shape was already in the tree —
+                // `handlers/cbgr.rs:1718` guards with `is_int()` and
+                // falls to `null_mut()`. Paired implementations are an
+                // oracle: when one copy of a pattern is right, the
+                // question is why the others differ.
+                std::ptr::null_mut()
             };
             if ptr.is_null() {
                 return Err(InterpreterError::NullPointer);
@@ -1327,8 +1375,24 @@ unsafe {
                 val.as_thin_ref().ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
-            } else {
+            } else if val.is_int() {
+                // A raw address fabricated as an Int and cast — the
+                // documented minority case.
                 val.as_i64() as *mut u8
+            } else {
+                // Anything else has no pointer reading. `as_i64()` on a
+                // Bool or a variant decodes the NaN box's payload bits as
+                // an address: `debug_assert!(self.is_int())` in a debug
+                // build, a wild pointer in release. Null is the honest
+                // answer, and every caller here already rejects null on
+                // the next line.
+                //
+                // The correct shape was already in the tree —
+                // `handlers/cbgr.rs:1718` guards with `is_int()` and
+                // falls to `null_mut()`. Paired implementations are an
+                // oracle: when one copy of a pattern is right, the
+                // question is why the others differ.
+                std::ptr::null_mut()
             };
             if ptr.is_null() {
                 return Err(InterpreterError::NullPointer);
@@ -1363,8 +1427,24 @@ unsafe {
                 val.as_thin_ref().ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
-            } else {
+            } else if val.is_int() {
+                // A raw address fabricated as an Int and cast — the
+                // documented minority case.
                 val.as_i64() as *mut u8
+            } else {
+                // Anything else has no pointer reading. `as_i64()` on a
+                // Bool or a variant decodes the NaN box's payload bits as
+                // an address: `debug_assert!(self.is_int())` in a debug
+                // build, a wild pointer in release. Null is the honest
+                // answer, and every caller here already rejects null on
+                // the next line.
+                //
+                // The correct shape was already in the tree —
+                // `handlers/cbgr.rs:1718` guards with `is_int()` and
+                // falls to `null_mut()`. Paired implementations are an
+                // oracle: when one copy of a pattern is right, the
+                // question is why the others differ.
+                std::ptr::null_mut()
             };
             if ptr.is_null() {
                 return Err(InterpreterError::NullPointer);
@@ -1424,8 +1504,24 @@ unsafe {
                 val.as_thin_ref().ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
-            } else {
+            } else if val.is_int() {
+                // A raw address fabricated as an Int and cast — the
+                // documented minority case.
                 val.as_i64() as *mut u8
+            } else {
+                // Anything else has no pointer reading. `as_i64()` on a
+                // Bool or a variant decodes the NaN box's payload bits as
+                // an address: `debug_assert!(self.is_int())` in a debug
+                // build, a wild pointer in release. Null is the honest
+                // answer, and every caller here already rejects null on
+                // the next line.
+                //
+                // The correct shape was already in the tree —
+                // `handlers/cbgr.rs:1718` guards with `is_int()` and
+                // falls to `null_mut()`. Paired implementations are an
+                // oracle: when one copy of a pattern is right, the
+                // question is why the others differ.
+                std::ptr::null_mut()
             };
             if ptr.is_null() {
                 return Err(InterpreterError::NullPointer);
@@ -1473,8 +1569,24 @@ unsafe {
                 val.as_thin_ref().ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
-            } else {
+            } else if val.is_int() {
+                // A raw address fabricated as an Int and cast — the
+                // documented minority case.
                 val.as_i64() as *mut u8
+            } else {
+                // Anything else has no pointer reading. `as_i64()` on a
+                // Bool or a variant decodes the NaN box's payload bits as
+                // an address: `debug_assert!(self.is_int())` in a debug
+                // build, a wild pointer in release. Null is the honest
+                // answer, and every caller here already rejects null on
+                // the next line.
+                //
+                // The correct shape was already in the tree —
+                // `handlers/cbgr.rs:1718` guards with `is_int()` and
+                // falls to `null_mut()`. Paired implementations are an
+                // oracle: when one copy of a pattern is right, the
+                // question is why the others differ.
+                std::ptr::null_mut()
             };
             if ptr.is_null() {
                 return Err(InterpreterError::NullPointer);
