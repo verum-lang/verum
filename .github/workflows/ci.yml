@@ -59,6 +59,23 @@ jobs:
       - name: core/ ring law (no upward edges, no cycles)
         run: python3 scripts/ci/check_core_rings.py
 
+      # INVENTORY.md is the per-module conformance truth table, and its
+      # structural integrity is what makes the liveness layer possible:
+      # rows unique, row <-> test-directory bijection, valid status
+      # tokens. Without the bijection a module can run its tests while
+      # being ABSENT from the table — measured 2026-08-08, `sys/mod`
+      # was exactly that: four *_test.vr files, 39 compile-errors, no
+      # row at all.
+      #
+      # This is the cheap structural half. The liveness half
+      # (`--results`, which re-verifies every green claim against a real
+      # run) needs a full suite pass — 18,958 tests, ~35 minutes — so it
+      # is not a per-PR gate; it is run deliberately and its findings
+      # land in the table. Twenty rows claimed a green status they had
+      # never earned until that run happened.
+      - name: core-tests/INVENTORY.md structural integrity
+        run: python3 scripts/ci/check_inventory.py --structural-only
+
   # ---------------------------------------------------------------------------
   # Job 1: compile + unit tests on Linux (x86_64 + aarch64) and macOS.
   # Linux-arm64 matters because aarch64 uses a different kernel syscall
