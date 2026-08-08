@@ -899,6 +899,18 @@ fn scan_module_reexports(
         if glob_matches(source_prefix, module_path) {
             return true;
         }
+        // BISECTED 2026-08-09 — this one leg carries BOTH effects of the
+        // glob fix, measured by disabling it and re-baking:
+        //     with origin matching:  text/text 465/0,  base/panic 141
+        //     without it:            text/text 187/278, base/panic 135
+        // So it earns 278 tests and costs 6, and the 6 are a distinct
+        // defect it merely exposes: `core.base.panic.PanicInfo` loses
+        // `message` / `location` / `fmt_debug` once the prelude's
+        // re-export set includes the file-submodule names, and
+        // base/panic's failure changes from `E400 expected 'T', found
+        // 'Int'` to method-not-found. Kept: +272 net. The PanicInfo
+        // method loss is tracked separately — do not "fix" it by
+        // removing this match.
         match origin {
             verum_common::Maybe::Some(om) => glob_matches(source_prefix, om.as_str()),
             verum_common::Maybe::None => false,
