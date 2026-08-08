@@ -43,6 +43,22 @@ jobs:
       - name: No Rust `&str` in core/ .vr code
         run: python3 vcs/scripts/check_no_str_alias.py --gate
 
+      # The stdlib's layering law, as data: `core/rings.toml` declares the
+      # rings, the gate measures the actual mount graph against them. A
+      # module in ring N depends only on rings < N, and a ring not declared
+      # `cohesive` contains no dependency cycles.
+      #
+      # Added the day it first held — 2026-08-08, 2557 modules and 5275
+      # inter-module edges with 0 violations, down from 20 upward edges
+      # across 60 mount sites plus 9 cycles. It is worth gating precisely
+      # because it is green: an upward edge is trivial to introduce (one
+      # `mount`) and invisible without a measurement, and the last nine
+      # cycles each turned out to be a real inversion of dependency
+      # direction — a certificate type living in the network stack, thread
+      # primitives living above the async layer built on them.
+      - name: core/ ring law (no upward edges, no cycles)
+        run: python3 scripts/ci/check_core_rings.py
+
   # ---------------------------------------------------------------------------
   # Job 1: compile + unit tests on Linux (x86_64 + aarch64) and macOS.
   # Linux-arm64 matters because aarch64 uses a different kernel syscall
