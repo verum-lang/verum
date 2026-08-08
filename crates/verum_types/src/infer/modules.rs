@@ -8984,6 +8984,45 @@ impl TypeChecker {
             }
         }
 
+        // GLOB-MOUNT-HONEST-MISS (T0693 class — silent degradation dies):
+        // a glob whose module resolved through NONE of the sources above
+        // used to fall out of this function with `Ok(())`. Measured:
+        //   mount totally.nonexistent.module.*;   -> accepted silently
+        //   mount totally.nonexistent.module.thing; -> E402, correctly
+        // so a typo in a glob mount was swallowed while the same typo in
+        // a named mount was reported. The two spellings must agree about
+        // whether a module exists.
+        //
+        // The existence question is asked of the SAME authority the E401
+        // "module exports:" list uses — `metadata_known_module_items`
+        // returns `None` only when the module is unknown to the archive
+        // metadata, so a real-but-empty module (every name arriving via
+        // a lazy loader) still passes. Registry and inline-module hits
+        // are checked first, which covers user code and stdlib alike.
+        let known_to_registry = registry.get_by_path(module_path.as_str()).is_some();
+        let known_inline = self.inline_modules.contains_key(module_path);
+        let known_reexports = matches!(&self.core_metadata, Maybe::Some(m)
+            if m.module_reexports.contains_key(module_path));
+        if !known_to_registry
+            && !known_inline
+            && !known_reexports
+            && self.metadata_known_module_items(module_path.as_str()).is_none()
+        {
+            let all_modules: Vec<Text> = registry
+                .all_modules()
+                .map(|(_, info)| Text::from(info.path.to_string()))
+                .collect();
+            let similar = crate::find_similar_names(module_path.as_str(), &all_modules)
+                .into_iter()
+                .map(Text::from)
+                .collect::<List<Text>>();
+            return Err(TypeError::ImportModuleNotFound {
+                module_path: module_path.clone(),
+                similar_modules: similar,
+                span: verum_ast::span::Span::dummy(),
+            });
+        }
+
         Ok(())
     }
 
