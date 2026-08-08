@@ -32,6 +32,43 @@ artifact), T0448/T0215-class residuals. Until S2 lands, every
 same-name collision class (barename ctor capture, qualified-key
 squats, first-wins registries) stays reachable.
 
+**R1b. DUPLICATED WALKS — measured 2026-08-08.** The identity problem
+has a structural twin: the *traversals themselves* are duplicated, so a
+correct mechanism wired into one copy stays silent in the others. Four
+independent instances measured in one day:
+
+* **Declaration walk ×3** — `phases/semantic_analysis.rs` (not invoked
+  by `verum check` at all), `pipeline/cross_file.rs::analyze_module`
+  (traced: does not run for a single-file check),
+  `compile_orchestration.rs::check_project` (what `verum check` actually
+  runs). Blocks T0656: the 82-attribute declarative registry in
+  `verum_types::attr` has ZERO consumers, and wiring it into any ONE
+  driver buys a working `check` and a silent `verify`/build.
+* **Variant-body registration ×3** — `infer/helpers.rs` (lazy archive
+  load) plus two sites in `infer/decls.rs`, each minting its own
+  persistent vars for the SAME parameter. Measured: `type_var_order[Maybe]`
+  holds `TypeVar(19838)` while `ctor.args` holds `TypeVar(18417)`, so a
+  constructor comes out as `fn(Var a) -> Maybe<Var b>` with `a != b` —
+  the argument binds `a`, the head stays free, and it surfaces far away
+  as `E404 … Maybe<_> is not fully determined` (162 red in base/maybe,
+  181 in base/result, 74 in base/protocols). Seven substitution-side
+  fixes were tried and all were correct-but-irrelevant: they reconcile
+  vars WITHIN one registration while the divergence is BETWEEN them.
+* **Attribute registry ×2** — the declarative one above vs a 61-name
+  hardcoded copy in `verum_fast_parser::attr_validation`, wired for 2 of
+  7 targets with its warnings read only by a test.
+* **Module-name publication ×3** — the glob leg of T0691, landed
+  069f2ed88. The authoritative enumeration
+  (`metadata_known_module_items`) existed but drove only E401's
+  "module exports:" *text*, while mounts walked a synthesized mirror
+  that had drifted.
+
+Diagnostic signature of the class: a fix in the obviously-correct place
+changes nothing, because a *different* copy is the one executing. Verify
+that the site RUNS (env-gated trace) before concluding a fix is wrong —
+and keep a probe that MUST fail, since a dead check and a working one
+are indistinguishable from a one-sided green.
+
 **R2. Descriptor fidelity (bake ≡ source).** The archive's
 signature-string channel erased declared identity; v2.10
 PARAMNAME-CARRY (T0701, 11904454b) closed the inherent-method leg
