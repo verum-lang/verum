@@ -63,6 +63,21 @@ independent instances measured in one day:
   "module exports:" *text*, while mounts walked a synthesized mirror
   that had drifted.
 
+Adjacent measured class, same file-level census (2026-08-08): **20 type
+walkers in `verum_types` recurse through `Tuple`/`Reference` but drop
+`Variant` and/or `Record` into `_ => ty.clone()`** — 4 in
+`dependent_match.rs`, 6+ in `protocol.rs`, names like
+`substitute_type_in_type`, `apply_substitution_to_type`,
+`apply_type_substitution_impl`. Each claims to apply a substitution *to a
+type* and silently returns its input unchanged for the two composite
+shapes that carry a sum type's payloads. Two were completed under
+ae2a2cbd6 (`replace_named_with_var`, `substitute_type_vars_fresh`); the
+remaining ~18 are UNMEASURED — it is not yet established which of them
+ever receive a `Variant` at all, and a walker that never does is
+harmless. Do not batch-fix: measure which sites actually see sum bodies
+first, because adding recursion changes behaviour wherever a type is
+currently returned whole.
+
 Diagnostic signature of the class: a fix in the obviously-correct place
 changes nothing, because a *different* copy is the one executing. Verify
 that the site RUNS (env-gated trace) before concluding a fix is wrong —
