@@ -40,7 +40,7 @@ fn inline_template_instance() -> Int {
     1
 }
 
-/// Linkonce ODR (One Definition Rule) - for C++ style templates
+/// Linkonce ODR (One Definition Rule) - for C.concat(style) templates
 @linkage(linkonce_odr)
 fn odr_template<T>(x: T) -> T {
     x

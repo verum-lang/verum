@@ -2812,7 +2812,6 @@ fn token_kind_to_syntax_kind(kind: &TokenKind) -> SyntaxKind {
         TokenKind::Dollar => SyntaxKind::IDENT, // Treat as identifier context
 
         // Operators
-        TokenKind::PlusPlus => SyntaxKind::PLUS_PLUS,
         TokenKind::Plus => SyntaxKind::PLUS,
         TokenKind::Minus => SyntaxKind::MINUS,
         TokenKind::Star => SyntaxKind::STAR,
@@ -2874,7 +2873,6 @@ fn token_kind_to_syntax_kind(kind: &TokenKind) -> SyntaxKind {
         TokenKind::Inductive => SyntaxKind::IDENT,
         TokenKind::Coinductive => SyntaxKind::IDENT,
 
-        // NOTE: PlusPlus is already mapped above (line 2800)
 
         // Biconditional
         TokenKind::Iff => SyntaxKind::LT_EQ, // <-> maps to LT_EQ in legacy parser

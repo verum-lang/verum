@@ -74,14 +74,14 @@ module IntegerFails {
 module ListFails {
     /// ERROR: Append nil claim is wrong
     @verify
-    fn append_nil_wrong<T>(xs: List<T>) -> Eq<xs ++ [], []> {
-        Eq.smt_proof()  // ERROR: xs ++ [] = xs, not []
+    fn append_nil_wrong<T>(xs: List<T>) -> Eq<xs.concat([]), []> {
+        Eq.smt_proof()  // ERROR: xs.concat([]) = xs, not []
     }
 
     /// ERROR: Length append claim is wrong
     @verify
     fn length_append_wrong<T>(xs: List<T>, ys: List<T>)
-        -> Eq<len(xs ++ ys), len(xs) * len(ys)>
+        -> Eq<len(xs.concat(ys)), len(xs) * len(ys)>
     {
         Eq.smt_proof()  // ERROR: Should be len(xs) + len(ys)
     }

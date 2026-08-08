@@ -311,12 +311,12 @@ type GLibError is {
 // ============================================================
 
 // ------------------------------------------------------------
-// C++ Exception Handling at FFI Boundary
+// C.concat(Exception) Handling at FFI Boundary
 // ------------------------------------------------------------
 
-/// C++ function that may throw
+/// C.concat(function) that may throw
 ffi cpp_throws {
-    /// Catches C++ exceptions and converts to error code
+    /// Catches C.concat(exceptions) and converts to error code
     @extern("C")
     fn try_cpp_operation(
         input: c_int,

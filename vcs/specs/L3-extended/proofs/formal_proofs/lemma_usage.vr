@@ -70,19 +70,19 @@ lemma mult_comm(a: Nat, b: Nat): a * b == b * a {
 
 /// General list length append lemma
 lemma list_length_append<T>(xs: List<T>, ys: List<T>):
-    len(xs ++ ys) == len(xs) + len(ys)
+    len(xs.concat(ys)) == len(xs) + len(ys)
 {
     proof by induction on xs
 }
 
 /// Use specialized instance
 theorem triple_append_length<T>(xs: List<T>, ys: List<T>, zs: List<T>):
-    len(xs ++ ys ++ zs) == len(xs) + len(ys) + len(zs)
+    len(xs.concat(ys).concat(zs)) == len(xs) + len(ys) + len(zs)
 {
     proof {
         calc {
-            len(xs ++ ys ++ zs)
-            == { by list_length_append } len(xs ++ ys) + len(zs)
+            len(xs.concat(ys).concat(zs))
+            == { by list_length_append } len(xs.concat(ys)) + len(zs)
             == { by list_length_append } len(xs) + len(ys) + len(zs)
         }
     }

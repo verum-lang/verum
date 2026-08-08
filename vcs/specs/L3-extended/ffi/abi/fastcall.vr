@@ -165,13 +165,13 @@ ffi fastcall_compare {
 // thiscall (Related Convention)
 // ------------------------------------------------------------
 
-/// thiscall is used for C++ member functions
+/// thiscall is used for C.concat(member) functions
 /// - 'thisp pointer passed in ECX
 /// - Other args on stack
 
 @cfg(all(target_os = "windows", target_arch = "x86"))
 ffi thiscall_lib {
-    /// C++ member function
+    /// C.concat(member) function
     @extern("thiscall")
     fn CppMethod(this: *mut CppObject, arg: c_int) -> c_int;
 }

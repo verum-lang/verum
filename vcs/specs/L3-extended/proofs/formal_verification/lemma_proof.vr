@@ -11,8 +11,8 @@ lemma add_assoc(a: Nat, b: Nat, c: Nat): (a + b) + c == a + (b + c) { proof by r
 lemma mul_comm(a: Nat, b: Nat): a * b == b * a { proof by ring }
 
 lemma list_len_nonneg<T>(xs: List<T>): len(xs) >= 0 { proof by induction on xs }
-lemma append_assoc<T>(xs: List<T>, ys: List<T>, zs: List<T>): (xs ++ ys) ++ zs == xs ++ (ys ++ zs) { proof by induction on xs }
-lemma append_nil_right<T>(xs: List<T>): xs ++ [] == xs { proof by induction on xs }
+lemma append_assoc<T>(xs: List<T>, ys: List<T>, zs: List<T>): (xs.concat(ys)).concat(zs) == xs.concat((ys.concat(zs))) { proof by induction on xs }
+lemma append_nil_right<T>(xs: List<T>): xs.concat([]) == xs { proof by induction on xs }
 
 lemma le_refl(n: Int): n <= n { proof by omega }
 lemma le_trans(a: Int, b: Int, c: Int) requires a <= b requires b <= c ensures a <= c { proof by omega }

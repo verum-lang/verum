@@ -15,8 +15,8 @@ fn exercise_patch() -> Result<(), JsonPatchError> {
     // Parse a 3-op patch.
     let patch_text = Text.from(
         "[{\"op\":\"add\",\"path\":\"/name\",\"value\":\"alice\"},"
-      ++ "{\"op\":\"test\",\"path\":\"/name\",\"value\":\"alice\"},"
-      ++ "{\"op\":\"remove\",\"path\":\"/name\"}]"
+      + "{\"op\":\"test\",\"path\":\"/name\",\"value\":\"alice\"},"
+      + "{\"op\":\"remove\",\"path\":\"/name\"}]"
     );
     let patch: JsonPatch = parse(&patch_text)?;
     assert(patch.ops.len() == 3);
@@ -31,7 +31,7 @@ fn exercise_patch() -> Result<(), JsonPatchError> {
     // Atomic rollback on failing test op.
     let bad_patch = parse(&Text.from(
         "[{\"op\":\"add\",\"path\":\"/x\",\"value\":1},"
-      ++ "{\"op\":\"test\",\"path\":\"/x\",\"value\":999}]"
+      + "{\"op\":\"test\",\"path\":\"/x\",\"value\":999}]"
     ))?;
     let mut snapshot = match parse_value(&Text.from("{}")) {
         Ok(v)  => v,

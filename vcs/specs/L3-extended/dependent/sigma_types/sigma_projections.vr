@@ -57,7 +57,7 @@ fn sv_data<T>(sv: SizedVec<T>) -> List<T> {
 fn double_sized<T>(sv: SizedVec<T>) -> SizedVec<T> {
     SizedVec {
         len: sv.len * 2,
-        data: sv.data ++ sv.data,
+        data: sv.data.concat(sv).data,
     }
 }
 

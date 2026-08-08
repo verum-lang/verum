@@ -25,9 +25,9 @@ theorem simp_with_pre(x: Int, y: Int)
 }
 
 /// Simp lemma registration
-@simp lemma append_nil<T>(xs: List<T>): xs ++ [] == xs { proof by induction on xs }
+@simp lemma append_nil<T>(xs: List<T>): xs.concat([]) == xs { proof by induction on xs }
 
-theorem use_simp_lemma<T>(xs: List<T>): xs ++ [] == xs {
+theorem use_simp_lemma<T>(xs: List<T>): xs.concat([]) == xs {
     proof by simp
 }
 

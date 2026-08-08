@@ -49,18 +49,18 @@ fn divides(a: Nat, b: Nat) -> Bool;
 
 /// List append length
 theorem append_length<T>(xs: List<T>, ys: List<T>):
-    len(xs ++ ys) == len(xs) + len(ys)
+    len(xs.concat(ys)) == len(xs) + len(ys)
 {
     proof by induction on xs {
         case Nil => {
             calc {
-                len(Nil ++ ys)
+                len(Nil.concat(ys))
                 == { by definition } len(ys)
                 == { by arithmetic } 0 + len(ys)
             }
         }
         case Cons(h, t) => {
-            have ih: len(t ++ ys) == len(t) + len(ys);
+            have ih: len(t.concat(ys)) == len(t) + len(ys);
             conclude by auto
         }
     }

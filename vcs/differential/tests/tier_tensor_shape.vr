@@ -164,7 +164,7 @@ fn mat16_transpose(m: Mat16) -> Mat16 {
     out
 }
 
-/// Concatenate two flat arrays: result = a[0..len_a] ++ b[0..len_b]
+/// Concatenate two flat arrays: result = a[0..len_a].concat(b)[0..len_b]
 fn arr8_concat(a: Arr8, len_a: Int, b: Arr8, len_b: Int) -> Arr8 {
     let mut out = arr8_zeros();
     let mut i = 0;

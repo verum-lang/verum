@@ -94,7 +94,7 @@ fn benchmark_smt_loop_invariant() {
             // Invariant holds initially
             let inv_init = i.ge(0).and(i.le(n));
 
-            // If invariant holds and i < n, after i++ invariant still holds
+            // If invariant holds and i < n, after i.concat(invariant) still holds
             let i_next = i.add(1);
             let inv_preserved = i.ge(0).and(i.lt(n)).implies(
                 i_next.ge(0).and(i_next.le(n))

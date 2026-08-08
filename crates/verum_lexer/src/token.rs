@@ -1283,9 +1283,17 @@ pub enum TokenKind {
     ByteString(Vec<u8>),
 
     // ===== Operators =====
-    /// `++` list concatenation
-    #[token("++")]
-    PlusPlus,
+    // `++` REMOVED (language decision, 2026-08-08). It was never in
+    // `grammar/verum.ebnf` — the declared only source of truth for
+    // syntax — and it was not a distinct operation: the type system
+    // mapped `BinOp::Concat` to `BinOpKey::Add`
+    // (verum_types/operator_protocols.rs) and rendered it as `+`
+    // (refinement.rs), so it was a second spelling of `+`. `core/` used
+    // it zero times. Without the token, `1 ++ 2` lexes as `+` `+` and
+    // fails to parse — there is no unary `+` in the grammar — which is
+    // exactly what the L0 specs
+    // `parser/expressions/arithmetic/invalid_arithmetic.vr` and
+    // `parser/edge_cases/parser_recovery.vr` assert.
     /// `+` addition
     #[token("+")]
     Plus,
@@ -1625,7 +1633,6 @@ impl TokenKind {
             TokenKind::Lifetime(_) => "lifetime",
 
             // Operators
-            TokenKind::PlusPlus => "operator `++`",
             TokenKind::Plus => "operator `+`",
             TokenKind::Minus => "operator `-`",
             TokenKind::Star => "operator `*`",

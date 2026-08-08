@@ -1935,7 +1935,7 @@ impl<'a> RecursiveParser<'a> {
             TokenKind::LtLt | TokenKind::GtGt => (10, 11),
 
             // Level 11: Addition/Subtraction/Concatenation (left-assoc)
-            TokenKind::Plus | TokenKind::Minus | TokenKind::PlusPlus => (11, 12),
+            TokenKind::Plus | TokenKind::Minus => (11, 12),
 
             // Level 12: Multiplication/Division/Remainder (left-assoc)
             TokenKind::Star | TokenKind::Slash | TokenKind::Percent => (12, 13),
@@ -3272,7 +3272,6 @@ impl<'a> RecursiveParser<'a> {
             TokenKind::PipePipe => BinOp::Or,
             TokenKind::Implies | TokenKind::FatArrow | TokenKind::RArrow => BinOp::Imply,
             TokenKind::Iff => BinOp::Iff,
-            TokenKind::PlusPlus => BinOp::Concat,
             TokenKind::Ampersand => BinOp::BitAnd,
             TokenKind::Pipe => BinOp::BitOr,
             TokenKind::Caret => BinOp::BitXor,

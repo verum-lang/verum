@@ -76,7 +76,7 @@ where ensures len(result) == len(xs) {
     fn go<T>(acc: List<T>, rest: List<T>) -> List<T> {
         match rest {
             [] => acc,
-            [x, ..tail] => go([x] ++ acc, tail),
+            [x, ..tail] => go([x].concat(acc), tail),
         }
     }
     go([], xs)

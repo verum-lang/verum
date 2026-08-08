@@ -145,7 +145,7 @@ theorem contra<P: Prop, Q: Prop>: (P -> Q) -> (!Q -> !P) {
 // ============================================================
 
 /// Type-parameterized theorem
-theorem list_append_nil<T>(xs: List<T>): xs ++ [] == xs {
+theorem list_append_nil<T>(xs: List<T>): xs.concat([]) == xs {
     proof by induction on xs
 }
 

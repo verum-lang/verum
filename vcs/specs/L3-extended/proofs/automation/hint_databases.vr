@@ -60,7 +60,7 @@ lemma list_length_nonneg<T>(xs: List<T>): len(xs) >= 0 {
 @hint_db(list_hints)
 @immediate
 lemma list_append_length<T>(xs: List<T>, ys: List<T>):
-    len(xs ++ ys) == len(xs) + len(ys)
+    len(xs.concat(ys)) == len(xs) + len(ys)
 {
     proof by induction on xs
 }
@@ -100,7 +100,7 @@ theorem use_arith_hints(x: Int, y: Int, z: Int)
 theorem use_multi_hints<T>(xs: List<T>, ys: List<T>)
     requires len(xs) > 0
     requires len(ys) > 0
-    ensures len(xs ++ ys) > 1
+    ensures len(xs.concat(ys)) > 1
 {
     proof by auto using hints [list_hints, arithmetic_hints]
 }
@@ -146,9 +146,9 @@ lemma le_refl(a: Int): a <= a {
 
 /// Pattern hints (for rewriting)
 @hint_db(list_hints)
-@pattern(xs ++ [])
+@pattern(xs.concat([]))
 @rewrite_to(xs)
-/// Rewrite xs ++ [] to xs
+/// Rewrite xs.concat([]) to xs
 
 // ------------------------------------------------------------
 // Hint Priority
@@ -341,7 +341,7 @@ theorem debug_hints(a: Int, b: Int)
 
 /// Show which hints were used
 theorem show_used_hints(xs: List<Int>, ys: List<Int>):
-    len(xs ++ ys) >= len(xs)
+    len(xs.concat(ys)) >= len(xs)
 {
     proof by auto {
         hints: [list_hints, arithmetic_hints],

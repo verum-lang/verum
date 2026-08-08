@@ -726,7 +726,7 @@ fn stack_arr4_arr4(a: Arr4, b: Arr4) -> Arr8 {
 
 @test
 fn test_concat_stack() {
-    // Concat [1, 2, 3, 4] ++ [5, 6, 7, 8] -> [1, 2, 3, 4, 5, 6, 7, 8]
+    // Concat [1, 2, 3, 4].concat([5, 6, 7, 8]) -> [1, 2, 3, 4, 5, 6, 7, 8]
     let a = arr4_new(1, 2, 3, 4);
     let b = arr4_new(5, 6, 7, 8);
     let cat = concat_arr4_arr4(a, b);
@@ -739,7 +739,7 @@ fn test_concat_stack() {
     assert_eq(arr8_get(cat, 6), 7);
     assert_eq(arr8_get(cat, 7), 8);
 
-    // Concat with zeros: [10, 20, 30, 40] ++ [0, 0, 0, 0]
+    // Concat with zeros: [10, 20, 30, 40].concat([0, 0, 0, 0])
     let c = arr4_new(10, 20, 30, 40);
     let z = arr4_zeros();
     let cat2 = concat_arr4_arr4(c, z);

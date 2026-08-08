@@ -15,7 +15,7 @@ lemma reverse_nil<T>(): list_reverse(Nil) == Nil {
 
 /// Reverse distributes over append
 lemma reverse_append<T>(xs: List<T>, ys: List<T>):
-    list_reverse(xs ++ ys) == list_reverse(ys) ++ list_reverse(xs)
+    list_reverse(xs.concat(ys)) == list_reverse(ys).concat(list_reverse(xs))
 {
     proof by induction on xs
 }

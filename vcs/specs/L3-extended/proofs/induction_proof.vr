@@ -64,22 +64,22 @@ theorem prime_divisor(n: Nat)
 
 /// List length induction
 theorem list_append_length<T>(xs: List<T>, ys: List<T>):
-    len(xs ++ ys) == len(xs) + len(ys)
+    len(xs.concat(ys)) == len(xs) + len(ys)
 {
     proof by induction on xs {
         case [] => {
             calc {
-                len([] ++ ys)
+                len([].concat(ys))
                 == { by definition } len(ys)
                 == { by ring } 0 + len(ys)
                 == { by definition } len([]) + len(ys)
             }
         }
         case Cons(x, rest) => {
-            have ih: len(rest ++ ys) == len(rest) + len(ys);
+            have ih: len(rest.concat(ys)) == len(rest) + len(ys);
             calc {
-                len(Cons(x, rest) ++ ys)
-                == { by definition } 1 + len(rest ++ ys)
+                len(Cons(x, rest).concat(ys))
+                == { by definition } 1 + len(rest.concat(ys))
                 == { by ih } 1 + len(rest) + len(ys)
                 == { by definition } len(Cons(x, rest)) + len(ys)
             }

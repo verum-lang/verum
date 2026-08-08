@@ -48,11 +48,11 @@ theorem use_simp_lemma(n: Nat): n + 0 == n { proof by simp }
 
 /// Lemma with induction
 lemma append_assoc_lem<T>(xs: List<T>, ys: List<T>, zs: List<T>):
-    (xs ++ ys) ++ zs == xs ++ (ys ++ zs)
+    (xs.concat(ys)).concat(zs) == xs.concat((ys.concat(zs)))
 { proof by induction on xs }
 
 theorem use_assoc<T>(a: List<T>, b: List<T>, c: List<T>, d: List<T>):
-    ((a ++ b) ++ c) ++ d == a ++ (b ++ (c ++ d))
+    ((a.concat(b)).concat(c)).concat(d) == a.concat(b.concat(c.concat(d)))
 { proof by auto }
 
 /// Private helper

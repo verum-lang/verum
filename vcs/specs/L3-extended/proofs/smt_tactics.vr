@@ -114,7 +114,7 @@ theorem smt_with_proof_log(n: Nat)
 
 /// Theory-specific lemmas
 theorem smt_with_lemmas<T>(xs: List<T>, ys: List<T>)
-    ensures len(xs ++ ys) == len(xs) + len(ys)
+    ensures len(xs.concat(ys)) == len(xs) + len(ys)
 {
     proof by smt
 }

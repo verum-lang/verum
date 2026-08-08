@@ -266,12 +266,12 @@ ffi aarch64_example {
 }
 
 // ------------------------------------------------------------
-// Thiscall Convention (C++ methods)
+// Thiscall Convention (C.concat(methods))
 // ------------------------------------------------------------
 
 /// Thiscall convention
 /// - 'thisp pointer in ECX (x86) or first argument (x64)
-/// - Used for C++ member functions
+/// - Used for C.concat(member) functions
 @cfg(target_os = "windows")
 ffi thiscall_example {
     @extern("thiscall")

@@ -175,11 +175,11 @@ theorem pair_trivial(p: (Int, Int)): p.0 + p.1 == p.1 + p.0 {
 
 /// Induction with trivial base
 theorem list_len_append<T>(xs: List<T>, ys: List<T>):
-    (xs ++ ys).len() == xs.len() + ys.len()
+    (xs.concat(ys)).len() == xs.len() + ys.len()
 {
     proof by induction on xs {
         case Nil => {
-            // ([] ++ ys).len() == [].len() + ys.len()
+            // ([].concat(ys)).len() == [].len() + ys.len()
             // ys.len() == 0 + ys.len()
             trivial  // by definition
         }

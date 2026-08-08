@@ -194,9 +194,9 @@ extern "C" {
 }
 
 // ------------------------------------------------------------
-// C++ method calls via C ABI
+// C.concat(method) calls via C ABI
 // Note: thiscall is not a supported calling convention in Verum
-// Use extern "C" wrappers for C++ methods
+// Use extern "C" wrappers for C.concat(methods)
 // ------------------------------------------------------------
 
 @opaque

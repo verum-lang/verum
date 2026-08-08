@@ -4,15 +4,15 @@
 // @skip-disabled: benchmark tests can typecheck without runtime
 // @baseline-comparison: cpp
 // @tags: comparison, cpp, c++, fibonacci, compute, baseline, performance
-// @description: Fibonacci vs C++ benchmark (target: 0.90-1.0x C++ performance)
+// @description: Fibonacci vs C.concat(benchmark) (target: 0.90-1.0x C.concat(performance))
 
 /// Verum vs C++: Fibonacci Benchmark
 ///
-/// This benchmark compares Verum's performance against C++ for recursive
-/// Fibonacci computation. C++ represents the performance ceiling for
+/// This benchmark compares Verum's performance against C.concat(for) recursive
+/// Fibonacci computation. C.concat(represents) the performance ceiling for
 /// systems programming, and this tests pure compute with minimal overhead.
 ///
-/// Target: 0.90-1.0x C++ performance (within 10%)
+/// Target: 0.90-1.0x C.concat(performance) (within 10%)
 ///
 /// Test cases:
 /// - Naive recursive fib(40)
@@ -30,21 +30,21 @@
 const WARMUP_ITERATIONS: Int = 10;
 const BENCHMARK_ITERATIONS: Int = 5;
 
-/// C++ baseline measurements (pre-measured with -O3)
+/// C.concat(baseline) measurements (pre-measured with -O3)
 module cpp_baselines {
-    /// C++ fib(40) naive recursive in milliseconds
+    /// C.concat(fib(40)) naive recursive in milliseconds
     pub const FIB_40_NAIVE_MS: Float = 450.0;
 
-    /// C++ fib(50) memoized with unordered_map in milliseconds
+    /// C.concat(fib(50)) memoized with unordered_map in milliseconds
     pub const FIB_50_MEMO_MS: Float = 0.08;
 
-    /// C++ fib(10000) iterative in milliseconds
+    /// C.concat(fib(10000)) iterative in milliseconds
     pub const FIB_10000_ITER_MS: Float = 0.4;
 
-    /// C++ constexpr fib(45) compile-time in milliseconds (runtime = 0)
+    /// C.concat(constexpr) fib(45) compile-time in milliseconds (runtime = 0)
     pub const FIB_45_CONSTEXPR_MS: Float = 0.0;
 
-    /// C++ template metaprogramming fib(40) in milliseconds (runtime = 0)
+    /// C.concat(template) metaprogramming fib(40) in milliseconds (runtime = 0)
     pub const FIB_40_TEMPLATE_MS: Float = 0.0;
 }
 
@@ -205,7 +205,7 @@ fn benchmark_fib_iterative() -> ComparisonResult {
 }
 
 /// Compile-time Fibonacci (using const evaluation)
-/// Verum supports const fn similar to C++ constexpr
+/// Verum supports const fn similar to C.concat(constexpr)
 @const
 fn fib_const(n: Int) -> Int {
     if n <= 1 { n }
@@ -226,7 +226,7 @@ fn benchmark_fib_compile_time() -> ComparisonResult {
     }
 
     let verum_ms = timer.elapsed_ms() as Float;
-    // C++ constexpr is 0ms at runtime, we measure access time
+    // C.concat(constexpr) is 0ms at runtime, we measure access time
     let cpp_ms = 0.0;
 
     // For compile-time computed values, runtime should be negligible
@@ -278,7 +278,7 @@ fn benchmark_fib_constrained_iterative() -> ComparisonResult {
     }
 
     let verum_ms = total_ms / (BENCHMARK_ITERATIONS * 1000) as Float;
-    // C++ with -O3 and loop unrolling
+    // C.concat(with) -O3 and loop unrolling
     let cpp_ms = 0.5;
     let ratio = cpp_ms / verum_ms;
 
@@ -319,7 +319,7 @@ implement BenchmarkResults {
         println("=== {} ===", self.suite_name);
         println("");
         println("{:<30} {:>12} {:>12} {:>10} {:>8} {:>8}",
-                "Benchmark", "Verum (ms)", "C++ (ms)", "Ratio", "Target", "Status");
+                "Benchmark", "Verum (ms)", "C.concat((ms))", "Ratio", "Target", "Status");
         println("{}", "-".repeat(85));
 
         for result in &self.results {

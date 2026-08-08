@@ -95,7 +95,7 @@ meta fn generate_builder(
             fn build(self) -> Result<$type_name, Text> {
                 Ok($type_name {
                     $[for (name, _) in fields {
-                        $name: self.$name.ok_or("Missing field: " ++ stringify($name))?,
+                        $name: self.$name.ok_or("Missing field: " + stringify($name))?,
                     }]
                 })
             }

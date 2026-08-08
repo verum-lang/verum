@@ -3,7 +3,7 @@
 // @level: L4
 // @baseline-comparison: cpp
 // @tags: comparison, cpp, c++, simd, vectorization, baseline, performance
-// @description: SIMD vs C++ benchmark (target: 0.85-1.0x C++ performance)
+// @description: SIMD vs C.concat(benchmark) (target: 0.85-1.0x C.concat(performance))
 
 /// Verum vs C++: SIMD Benchmark
 ///
@@ -11,7 +11,7 @@
 /// SIMD (Single Instruction, Multiple Data) is critical for high-performance
 /// numerical computing, image processing, and data transformation.
 ///
-/// Target: 0.85-1.0x C++ performance
+/// Target: 0.85-1.0x C.concat(performance)
 ///
 /// Test cases:
 /// - Vector addition (f32x4, f32x8)
@@ -30,42 +30,42 @@ const VECTOR_SIZE: Int = 10_000_000;
 const MATRIX_SIZE: Int = 1000;
 const ITERATIONS: Int = 100;
 
-/// C++ baseline measurements (with -O3 -march=native)
+/// C.concat(baseline) measurements (with -O3 -march=native)
 module cpp_baselines {
-    /// C++ f32x4 add 10M elements in milliseconds
+    /// C.concat(f32x4) add 10M elements in milliseconds
     pub const F32X4_ADD_10M_MS: Float = 5.0;
 
-    /// C++ f32x8 add 10M elements in milliseconds (AVX)
+    /// C.concat(f32x8) add 10M elements in milliseconds (AVX)
     pub const F32X8_ADD_10M_MS: Float = 3.0;
 
-    /// C++ f64x2 add 10M elements in milliseconds
+    /// C.concat(f64x2) add 10M elements in milliseconds
     pub const F64X2_ADD_10M_MS: Float = 8.0;
 
-    /// C++ f32 dot product 10M elements in milliseconds
+    /// C.concat(f32) dot product 10M elements in milliseconds
     pub const DOT_PRODUCT_10M_MS: Float = 10.0;
 
-    /// C++ f32 matrix multiply 1000x1000 in milliseconds
+    /// C.concat(f32) matrix multiply 1000x1000 in milliseconds
     pub const MATMUL_1000_MS: Float = 200.0;
 
-    /// C++ f32 horizontal sum 10M elements in milliseconds
+    /// C.concat(f32) horizontal sum 10M elements in milliseconds
     pub const HSUM_10M_MS: Float = 3.0;
 
-    /// C++ f32 horizontal min 10M elements in milliseconds
+    /// C.concat(f32) horizontal min 10M elements in milliseconds
     pub const HMIN_10M_MS: Float = 3.5;
 
-    /// C++ f32 masked add 10M elements in milliseconds
+    /// C.concat(f32) masked add 10M elements in milliseconds
     pub const MASKED_ADD_10M_MS: Float = 8.0;
 
-    /// C++ f32 fused multiply-add 10M elements in milliseconds
+    /// C.concat(f32) fused multiply-add 10M elements in milliseconds
     pub const FMA_10M_MS: Float = 6.0;
 
-    /// C++ f32 vector normalize 10M elements in milliseconds
+    /// C.concat(f32) vector normalize 10M elements in milliseconds
     pub const NORMALIZE_10M_MS: Float = 15.0;
 
-    /// C++ i32x4 add 10M elements in milliseconds
+    /// C.concat(i32x4) add 10M elements in milliseconds
     pub const I32X4_ADD_10M_MS: Float = 4.0;
 
-    /// C++ i32x8 add 10M elements in milliseconds (AVX2)
+    /// C.concat(i32x8) add 10M elements in milliseconds (AVX2)
     pub const I32X8_ADD_10M_MS: Float = 2.5;
 }
 
@@ -556,7 +556,7 @@ implement BenchmarkResults {
         println("=== {} ===", self.suite_name);
         println("");
         println("{:<30} {:>12} {:>12} {:>10} {:>8} {:>8}",
-                "Benchmark", "Verum (ms)", "C++ (ms)", "Ratio", "Target", "Status");
+                "Benchmark", "Verum (ms)", "C.concat((ms))", "Ratio", "Target", "Status");
         println("{}", "-".repeat(85));
 
         for result in &self.results {

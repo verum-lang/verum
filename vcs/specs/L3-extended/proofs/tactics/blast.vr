@@ -283,9 +283,9 @@ theorem blast_needed(p: Bool, q: Bool, r: Bool, s: Bool):
 
 /// Provide hints to guide blast
 theorem blast_hints<T>(xs: List<T>, ys: List<T>)
-    requires xs ++ ys == ys ++ xs
+    requires xs.concat(ys) == ys.concat(xs)
     requires len(xs) == len(ys)
-    ensures xs == ys || xs ++ xs == ys ++ ys
+    ensures xs == ys || xs.concat(xs) == ys.concat(ys)
 {
     proof by blast {
         hints: [list_append_eq_implies, length_append]

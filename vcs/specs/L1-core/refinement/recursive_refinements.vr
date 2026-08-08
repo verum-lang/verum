@@ -389,7 +389,7 @@ fn reverse<T>(lst: List<T>) -> List<T>
     {
         match rest.split_first() {
             None => acc,
-            Some((head, tail)) => go(tail, [head] ++ acc),
+            Some((head, tail)) => go(tail, [head].concat(acc)),
         }
     }
 

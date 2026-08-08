@@ -56,7 +56,7 @@ fn test_crc32_ascii_string() {
 }
 
 // -----------------------------------------------------------------------------
-// Streaming equivalence: update(a++b) ≡ update(a); update(b)
+// Streaming equivalence: update(a.concat(b)) ≡ update(a); update(b)
 // -----------------------------------------------------------------------------
 
 fn test_streaming_equivalence() {

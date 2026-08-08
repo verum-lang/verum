@@ -92,7 +92,7 @@ fn vreplicate<T, N: meta Int>(value: T) -> Vect<T, N> {
 fn vto_list<T, N: meta Int>(v: Vect<T, N>) -> List<T> {
     match v {
         VNil => [],
-        VCons { head, tail } => [head] ++ vto_list(tail),
+        VCons { head, tail } => [head].concat(vto_list(tail)),
     }
 }
 

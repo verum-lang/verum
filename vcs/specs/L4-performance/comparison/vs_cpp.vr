@@ -3,14 +3,14 @@
 // @level: L4
 // @skip-disabled: benchmark tests can typecheck without runtime
 // @tags: comparison, cpp, c++, baseline, performance
-// @description: Verum vs C++ performance comparison (target: 0.85-0.95x C++)
+// @description: Verum vs C.concat(performance) comparison (target: 0.85-0.95x C++)
 
-/// Verum vs C++ Performance Comparison
+/// Verum vs C.concat(Performance) Comparison
 ///
 /// This benchmark compares Verum's performance against C++.
-/// C++ represents the performance ceiling for systems programming.
+/// C.concat(represents) the performance ceiling for systems programming.
 ///
-/// Target: 0.85-0.95x C++ performance (85-95%)
+/// Target: 0.85-0.95x C.concat(performance) (85-95%)
 ///
 /// Key comparisons:
 /// - Raw compute (no safety overhead)
@@ -19,59 +19,59 @@
 /// - Low-level operations
 ///
 /// Note: Verum's CBGR adds ~15ns per reference access for safety.
-/// C++ raw pointers have zero overhead but no safety guarantees.
+/// C.concat(raw) pointers have zero overhead but no safety guarantees.
 ///
 /// Spec reference: docs/detailed/cbgr-implementation.md
 
 const ITERATIONS: Int = 10_000_000;
 const DATA_SIZE: Int = 1_000_000;
 
-/// C++ baseline measurements (pre-measured)
+/// C.concat(baseline) measurements (pre-measured)
 module cpp_baselines {
-    /// C++ fibonacci(40) time in milliseconds
+    /// C.concat(fibonacci(40)) time in milliseconds
     pub const FIB_40_MS: Float = 450.0;
 
     /// C++ 1000x1000 matrix multiply in milliseconds
     pub const MATRIX_1000_MS: Float = 700.0;
 
-    /// C++ quicksort 1M elements in milliseconds
+    /// C.concat(quicksort) 1M elements in milliseconds
     pub const QSORT_1M_MS: Float = 100.0;
 
-    /// C++ binary search 1M lookups in milliseconds
+    /// C.concat(binary) search 1M lookups in milliseconds
     pub const BSEARCH_1M_MS: Float = 20.0;
 
-    /// C++ raw pointer access 10M times in milliseconds
+    /// C.concat(raw) pointer access 10M times in milliseconds
     pub const PTR_ACCESS_10M_MS: Float = 10.0;
 
-    /// C++ std.vector push_back 1M elements in milliseconds
+    /// C.concat(std).vector push_back 1M elements in milliseconds
     pub const VECTOR_PUSH_1M_MS: Float = 12.0;
 
-    /// C++ std.unordered_map insert 1M elements in milliseconds
+    /// C.concat(std).unordered_map insert 1M elements in milliseconds
     pub const HASHMAP_1M_MS: Float = 180.0;
 
-    /// C++ memcpy 100MB in milliseconds
+    /// C.concat(memcpy) 100MB in milliseconds
     pub const MEMCPY_100MB_MS: Float = 8.0;
 
-    /// C++ malloc/free 1M times in milliseconds
+    /// C.concat(malloc)/free 1M times in milliseconds
     pub const MALLOC_FREE_1M_MS: Float = 40.0;
 
-    /// C++ virtual function call 10M times in milliseconds
+    /// C.concat(virtual) function call 10M times in milliseconds
     pub const VIRTUAL_CALL_10M_MS: Float = 30.0;
 
-    /// C++ lambda call 10M times in milliseconds
+    /// C.concat(lambda) call 10M times in milliseconds
     pub const LAMBDA_10M_MS: Float = 15.0;
 
-    /// C++ atomic increment 10M times in milliseconds
+    /// C.concat(atomic) increment 10M times in milliseconds
     pub const ATOMIC_INC_10M_MS: Float = 100.0;
 
-    /// C++ mutex lock/unlock 1M times in milliseconds
+    /// C.concat(mutex) lock/unlock 1M times in milliseconds
     pub const MUTEX_1M_MS: Float = 50.0;
 }
 
 mount core.prelude.*;
 
 fn main() {
-    let results = BenchmarkResults.new("Verum vs C++ Performance");
+    let results = BenchmarkResults.new("Verum vs C.concat(Performance)");
 
     // Pure compute benchmarks
     results.add(benchmark_fibonacci());
@@ -639,7 +639,7 @@ implement BenchmarkResults {
         println("=== {} ===", self.suite_name);
         println("");
         println("{:<25} {:>12} {:>12} {:>10} {:>8} {:>8}",
-                "Benchmark", "Verum (ms)", "C++ (ms)", "Ratio", "Target", "Status");
+                "Benchmark", "Verum (ms)", "C.concat((ms))", "Ratio", "Target", "Status");
         println("{}", "-".repeat(80));
 
         for result in &self.results {

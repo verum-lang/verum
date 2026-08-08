@@ -72,7 +72,7 @@ theorem calc_rewrite(a: Int, b: Int): (a + b) * (a + b) == a*a + 2*a*b + b*b {
 }
 
 /// Bidirectional rewrite
-theorem bidi_rewrite(xs: List<Int>): xs ++ [] == xs {
+theorem bidi_rewrite(xs: List<Int>): xs.concat([]) == xs {
     proof by auto
 }
 

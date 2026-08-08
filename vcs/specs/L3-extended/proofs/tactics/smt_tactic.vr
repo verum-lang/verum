@@ -84,7 +84,7 @@ theorem smt_with_log(n: Nat) requires n > 0 ensures n * n > 0 { proof by smt }
 
 /// Theory-specific lemmas
 theorem smt_with_lemmas<T>(xs: List<T>, ys: List<T>)
-    ensures len(xs ++ ys) == len(xs) + len(ys)
+    ensures len(xs.concat(ys)) == len(xs) + len(ys)
 { proof by smt }
 
 mount core.prelude.*;

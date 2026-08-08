@@ -39,19 +39,19 @@ theorem corollary_le_chain(a: Int, b: Int, c: Int, d: Int)
 }
 
 /// Corollary from list theorems
-lemma base_append_length<T>(xs: List<T>, ys: List<T>): len(xs ++ ys) == len(xs) + len(ys) {
+lemma base_append_length<T>(xs: List<T>, ys: List<T>): len(xs.concat(ys)) == len(xs) + len(ys) {
     proof by induction on xs
 }
 
 theorem corollary_triple_length<T>(xs: List<T>, ys: List<T>, zs: List<T>):
-    len(xs ++ ys ++ zs) == len(xs) + len(ys) + len(zs)
+    len(xs.concat(ys).concat(zs)) == len(xs) + len(ys) + len(zs)
 {
     proof by auto
 }
 
 /// Corollary: empty append
-theorem corollary_nil_append<T>(xs: List<T>): [] ++ xs == xs { proof by definition }
-theorem corollary_append_nil<T>(xs: List<T>): xs ++ [] == xs { proof by induction on xs }
+theorem corollary_nil_append<T>(xs: List<T>): [].concat(xs) == xs { proof by definition }
+theorem corollary_append_nil<T>(xs: List<T>): xs.concat([]) == xs { proof by induction on xs }
 
 /// Corollary from prime theorem
 theorem base_prime_exists(): exists p: Nat. is_prime(p) { proof { witness 2; conclude by auto } }

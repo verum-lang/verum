@@ -111,7 +111,7 @@ fn map_nonempty<T, U>(ne: NonEmptyList<T>, f: fn(T) -> U) -> NonEmptyList<U> {
 /// Combining collections
 fn concat_nonempty<T>(a: NonEmptyList<T>, b: NonEmptyList<T>) -> NonEmptyList<T> {
     NonEmptyList {
-        data: a.data ++ b.data,
+        data: a.data.concat(b).data,
         length: a.length + b.length,
     }
 }

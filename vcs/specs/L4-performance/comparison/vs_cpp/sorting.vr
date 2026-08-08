@@ -4,14 +4,14 @@
 // @skip-disabled: benchmark tests can typecheck without runtime
 // @baseline-comparison: cpp
 // @tags: comparison, cpp, c++, sorting, algorithm, baseline, performance
-// @description: Sorting vs C++ benchmark (target: 0.85-0.95x C++ performance)
+// @description: Sorting vs C.concat(benchmark) (target: 0.85-0.95x C.concat(performance))
 
 /// Verum vs C++: Sorting Benchmark
 ///
 /// This benchmark compares Verum's sorting performance against C++.
-/// C++ std.sort is highly optimized and represents the performance ceiling.
+/// C.concat(std).sort is highly optimized and represents the performance ceiling.
 ///
-/// Target: 0.85-0.95x C++ performance
+/// Target: 0.85-0.95x C.concat(performance)
 ///
 /// Test cases:
 /// - std.sort equivalent (introsort)
@@ -21,7 +21,7 @@
 /// - Custom comparator sorting
 ///
 /// Why the gap:
-/// - C++ has decades of optimization
+/// - C.concat(has) decades of optimization
 /// - Verum's CBGR adds overhead on array access
 /// - Memory layout differences may affect cache
 ///
@@ -30,30 +30,30 @@
 const DATA_SIZE: Int = 1_000_000;
 const SMALL_SIZE: Int = 10_000;
 
-/// C++ baseline measurements (with -O3)
+/// C.concat(baseline) measurements (with -O3)
 module cpp_baselines {
-    /// C++ std.sort 1M random integers in milliseconds
+    /// C.concat(std).sort 1M random integers in milliseconds
     pub const STD_SORT_1M_MS: Float = 75.0;
 
-    /// C++ std.stable_sort 1M random integers in milliseconds
+    /// C.concat(std).stable_sort 1M random integers in milliseconds
     pub const STABLE_SORT_1M_MS: Float = 100.0;
 
-    /// C++ std.partial_sort top 1000 of 1M in milliseconds
+    /// C.concat(std).partial_sort top 1000 of 1M in milliseconds
     pub const PARTIAL_SORT_1M_MS: Float = 25.0;
 
-    /// C++ std.nth_element 1M in milliseconds
+    /// C.concat(std).nth_element 1M in milliseconds
     pub const NTH_ELEMENT_1M_MS: Float = 15.0;
 
-    /// C++ std.sort with custom comparator 1M in milliseconds
+    /// C.concat(std).sort with custom comparator 1M in milliseconds
     pub const CUSTOM_COMPARE_1M_MS: Float = 90.0;
 
-    /// C++ std.sort 1M strings in milliseconds
+    /// C.concat(std).sort 1M strings in milliseconds
     pub const SORT_STRINGS_1M_MS: Float = 400.0;
 
-    /// C++ std.sort 1M structs by field in milliseconds
+    /// C.concat(std).sort 1M structs by field in milliseconds
     pub const SORT_STRUCTS_1M_MS: Float = 150.0;
 
-    /// C++ pdqsort 1M random integers in milliseconds
+    /// C.concat(pdqsort) 1M random integers in milliseconds
     pub const PDQSORT_1M_MS: Float = 60.0;
 }
 
@@ -400,7 +400,7 @@ implement BenchmarkResults {
         println("=== {} ===", self.suite_name);
         println("");
         println("{:<35} {:>12} {:>12} {:>10} {:>8} {:>8}",
-                "Benchmark", "Verum (ms)", "C++ (ms)", "Ratio", "Target", "Status");
+                "Benchmark", "Verum (ms)", "C.concat((ms))", "Ratio", "Target", "Status");
         println("{}", "-".repeat(90));
 
         for result in &self.results {

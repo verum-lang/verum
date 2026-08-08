@@ -22,7 +22,7 @@ fn concat_wrong<T, M: meta Nat, N: meta Nat>(
     ys: List<T, N>
 ) -> List<T, M> {
     // Should be List<T, plus(M, N)> - concat adds lengths
-    xs ++ ys  // ERROR: Cannot unify 'plus(M, N)' with 'M'
+    xs.concat(ys)  // ERROR: Cannot unify 'plus(M, N)' with 'M'
 }
 
 /// ERROR: Map claims wrong return length

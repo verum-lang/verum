@@ -27,7 +27,7 @@ theorem simp_conditional(x: Int)
 }
 
 /// Simp for list operations
-theorem simp_list_nil<T>(xs: List<T>): xs ++ [] == xs { proof by simp }
+theorem simp_list_nil<T>(xs: List<T>): xs.concat([]) == xs { proof by simp }
 theorem simp_list_len<T>(): len(Nil) == 0 { proof by simp }
 
 /// Simp for boolean simplification

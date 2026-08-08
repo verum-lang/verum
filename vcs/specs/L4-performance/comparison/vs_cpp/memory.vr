@@ -4,7 +4,7 @@
 // @skip-disabled: benchmark tests can typecheck without runtime
 // @baseline-comparison: cpp
 // @tags: comparison, cpp, c++, memory, allocation, baseline, performance
-// @description: Memory allocation vs C++ benchmark (target: 0.70-0.90x C++ performance)
+// @description: Memory allocation vs C.concat(benchmark) (target: 0.70-0.90x C.concat(performance))
 
 /// Verum vs C++: Memory Benchmark
 ///
@@ -12,7 +12,7 @@
 /// Memory allocation and access are critical performance factors, and
 /// this is where Verum's CBGR safety system adds measurable overhead.
 ///
-/// Target: 0.70-0.90x C++ performance (CBGR overhead expected)
+/// Target: 0.70-0.90x C.concat(performance) (CBGR overhead expected)
 ///
 /// Test cases:
 /// - Raw allocation (malloc/free equivalent)
@@ -33,42 +33,42 @@ const ITERATIONS: Int = 1_000_000;
 const LARGE_SIZE: Int = 100 * 1024 * 1024; // 100MB
 const SMALL_ALLOC: Int = 64;
 
-/// C++ baseline measurements (with -O3)
+/// C.concat(baseline) measurements (with -O3)
 module cpp_baselines {
-    /// C++ malloc/free 1M times in milliseconds
+    /// C.concat(malloc)/free 1M times in milliseconds
     pub const MALLOC_FREE_1M_MS: Float = 40.0;
 
-    /// C++ new/delete 1M times in milliseconds
+    /// C.concat(new)/delete 1M times in milliseconds
     pub const NEW_DELETE_1M_MS: Float = 45.0;
 
-    /// C++ stack allocation 1M times in milliseconds
+    /// C.concat(stack) allocation 1M times in milliseconds
     pub const STACK_ALLOC_1M_MS: Float = 2.0;
 
-    /// C++ memcpy 100MB in milliseconds
+    /// C.concat(memcpy) 100MB in milliseconds
     pub const MEMCPY_100MB_MS: Float = 8.0;
 
-    /// C++ memset 100MB in milliseconds
+    /// C.concat(memset) 100MB in milliseconds
     pub const MEMSET_100MB_MS: Float = 6.0;
 
-    /// C++ pointer dereference 10M times in milliseconds
+    /// C.concat(pointer) dereference 10M times in milliseconds
     pub const PTR_DEREF_10M_MS: Float = 10.0;
 
-    /// C++ pointer arithmetic 10M times in milliseconds
+    /// C.concat(pointer) arithmetic 10M times in milliseconds
     pub const PTR_ARITH_10M_MS: Float = 5.0;
 
-    /// C++ arena allocator 1M allocs in milliseconds
+    /// C.concat(arena) allocator 1M allocs in milliseconds
     pub const ARENA_ALLOC_1M_MS: Float = 15.0;
 
-    /// C++ pool allocator 1M allocs in milliseconds
+    /// C.concat(pool) allocator 1M allocs in milliseconds
     pub const POOL_ALLOC_1M_MS: Float = 20.0;
 
-    /// C++ smart pointer 10M access in milliseconds
+    /// C.concat(smart) pointer 10M access in milliseconds
     pub const SMART_PTR_10M_MS: Float = 15.0;
 
-    /// C++ unique_ptr create/destroy 1M times in milliseconds
+    /// C.concat(unique_ptr) create/destroy 1M times in milliseconds
     pub const UNIQUE_PTR_1M_MS: Float = 50.0;
 
-    /// C++ shared_ptr create/destroy 1M times in milliseconds
+    /// C.concat(shared_ptr) create/destroy 1M times in milliseconds
     pub const SHARED_PTR_1M_MS: Float = 100.0;
 }
 
@@ -450,7 +450,7 @@ fn benchmark_bulk_alloc() -> ComparisonResult {
     }
 
     let verum_ms = timer.elapsed_ms() as Float;
-    // C++ vector reserve 1000 times
+    // C.concat(vector) reserve 1000 times
     let cpp_ms = 50.0;
 
     ComparisonResult {
@@ -483,7 +483,7 @@ fn benchmark_realloc() -> ComparisonResult {
     }
 
     let verum_ms = timer.elapsed_ms() as Float;
-    // C++ vector push with reallocs
+    // C.concat(vector) push with reallocs
     let cpp_ms = 15.0;
 
     black_box(data);
@@ -525,7 +525,7 @@ implement BenchmarkResults {
         println("=== {} ===", self.suite_name);
         println("");
         println("{:<30} {:>12} {:>12} {:>10} {:>8} {:>8}",
-                "Benchmark", "Verum (ms)", "C++ (ms)", "Ratio", "Target", "Status");
+                "Benchmark", "Verum (ms)", "C.concat((ms))", "Ratio", "Target", "Status");
         println("{}", "-".repeat(85));
 
         for result in &self.results {

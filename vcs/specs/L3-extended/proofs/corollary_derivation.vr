@@ -216,7 +216,7 @@ corollary identity<P: Prop>: P -> P {
 // ------------------------------------------------------------
 
 theorem list_append_assoc<T>(xs: List<T>, ys: List<T>, zs: List<T>):
-    (xs ++ ys) ++ zs == xs ++ (ys ++ zs)
+    (xs.concat(ys)).concat(zs) == xs.concat((ys.concat(zs)))
 {
     proof by induction on xs {
         case Nil => simp
@@ -227,7 +227,7 @@ theorem list_append_assoc<T>(xs: List<T>, ys: List<T>, zs: List<T>):
     }
 }
 
-corollary list_append_nil<T>(xs: List<T>): xs ++ [] == xs {
+corollary list_append_nil<T>(xs: List<T>): xs.concat([]) == xs {
     proof by induction on xs {
         case Nil => simp
         case Cons(h, t) => simp; apply IH
@@ -235,7 +235,7 @@ corollary list_append_nil<T>(xs: List<T>): xs ++ [] == xs {
 }
 
 corollary list_append_4<T>(a: List<T>, b: List<T>, c: List<T>, d: List<T>):
-    ((a ++ b) ++ c) ++ d == a ++ (b ++ (c ++ d))
+    ((a.concat(b)).concat(c)).concat(d) == a.concat(b.concat(c.concat(d)))
 {
     proof {
         rewrite list_append_assoc;
