@@ -3102,6 +3102,32 @@ impl TypeChecker {
                     .map(|e| self.substitute_type_vars_fresh(e, old_to_fresh))
                     .collect(),
             ),
+            // Composite shapes carry nested types and MUST be
+            // descended. Omitting them made this "substitute with fresh
+            // vars" walk skip exactly the shape a variant constructor
+            // returns (`fn(payload) -> Variant{…}`): the parameter's
+            // vars were freshened, the result's were not, and the two
+            // stopped being the same variable — which is what makes the
+            // argument bind the result at a call site.
+            Type::Variant(cases) => Type::Variant(
+                cases
+                    .iter()
+                    .map(|(k, v)| (k.clone(), self.substitute_type_vars_fresh(v, old_to_fresh)))
+                    .collect(),
+            ),
+            Type::Record(fields) => Type::Record(
+                fields
+                    .iter()
+                    .map(|(k, v)| (k.clone(), self.substitute_type_vars_fresh(v, old_to_fresh)))
+                    .collect(),
+            ),
+            Type::Array { element, size } => Type::Array {
+                element: Box::new(self.substitute_type_vars_fresh(element, old_to_fresh)),
+                size: size.clone(),
+            },
+            Type::Slice { element } => Type::Slice {
+                element: Box::new(self.substitute_type_vars_fresh(element, old_to_fresh)),
+            },
             _ => ty.clone(),
         }
     }
@@ -3258,6 +3284,29 @@ impl TypeChecker {
                     .map(|e| Self::replace_named_with_var(e, name, var))
                     .collect(),
             ),
+            // Composite shapes must be DESCENDED, not returned whole.
+            // `Variant` and `Record` used to fall into the catch-all
+            // below, so this function silently did nothing to the two
+            // shapes that carry a sum type's payloads — the exact place
+            // a declaration-time parameter name lives. A caller asking
+            // to replace `T` inside `None(Unit) | Some(Named{"T"})` got
+            // its input back unchanged and no indication of it.
+            Type::Variant(cases) => Type::Variant(
+                cases
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Self::replace_named_with_var(v, name, var)))
+                    .collect(),
+            ),
+            Type::Record(fields) => Type::Record(
+                fields
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Self::replace_named_with_var(v, name, var)))
+                    .collect(),
+            ),
+            // Leaves (Var, Unit, primitives, …) — nothing to descend
+            // into. This arm is a POLICY, not a guess: every composite
+            // shape above is enumerated, so what reaches here carries no
+            // nested type to rewrite.
             _ => ty.clone(),
         }
     }
