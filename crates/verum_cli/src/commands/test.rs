@@ -368,18 +368,20 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     };
     let total = active.len() + ignored_count;
 
+    // The EFFECTIVE worker count — `--test-threads 1` previously still
+    // printed `parallel=true`, which mis-attributed set-only crashes to
+    // parallelism during triage (task #40). Computed once: the human
+    // banner and the machine `suite` event must report the same number.
+    let effective_threads = if manifest.test.parallel {
+        opts
+            .test_threads
+            .unwrap_or_else(|| default_test_threads(opts.tier))
+            .max(1)
+    } else {
+        1
+    };
+
     if !quiet {
-        // Banner reports the EFFECTIVE worker count — `--test-threads 1`
-        // previously still printed `parallel=true`, which mis-attributed
-        // set-only crashes to parallelism during triage (task #40).
-        let effective_threads = if manifest.test.parallel {
-            opts
-                .test_threads
-                .unwrap_or_else(|| default_test_threads(opts.tier))
-                .max(1)
-        } else {
-            1
-        };
         ui::output(&format!(
             "running {} test{} (tier={}, threads={})",
             active.len(),
@@ -387,6 +389,35 @@ pub fn execute(opts: TestOptions) -> Result<()> {
             opts.tier.as_str(),
             effective_threads,
         ));
+    } else if matches!(opts.format, TestFormat::Json) {
+        // The machine-readable twin of the banner above.
+        //
+        // `quiet` is on for every machine format, so a JSON run printed
+        // NOTHING until the first test finished. Measured 2026-08-08:
+        // the full suite emitted 0 bytes in 110 seconds — and 0 bytes
+        // in fifty minutes, after which the run was killed and the
+        // whole result was lost. A filtered run streams correctly
+        // (24 KB after 45s), so the silence is the SETUP phase, not
+        // buffering; it is simply longer than any timeout anyone
+        // guessed at.
+        //
+        // Without this line, "still discovering tests", "hung" and
+        // "died before writing" are the same observation: an empty
+        // file. With it, a consumer knows the run started, how many
+        // tests were selected, and against which tier — which is also
+        // what makes a partial JSONL stream interpretable after an
+        // interrupt.
+        println!(
+            "{}",
+            serde_json::json!({
+                "event": "suite",
+                "total": active.len() + ignored_count,
+                "selected": active.len(),
+                "ignored": ignored_count,
+                "tier": opts.tier.as_str(),
+                "threads": effective_threads,
+            })
+        );
     }
 
     // After #298 + #273 + #299 every [test].* manifest field is

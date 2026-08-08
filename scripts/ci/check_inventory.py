@@ -113,8 +113,26 @@ def discover_module_dirs():
 
 
 def load_results(path: Path):
-    """-> module -> {"ok": n, "failed": n, "ignored": n, "compile-error": n}"""
+    """-> (per-module outcome counts, truncation note or None)
+
+    The stream opens with a `suite` event stating how many tests were
+    SELECTED. Comparing that against the number of `test` events that
+    actually arrived is the only way to tell a completed run from an
+    interrupted one — and an interrupted run looks exactly like a small
+    one: every module it never reached simply has no rows, so a
+    liveness check over it verifies the modules it did reach and says
+    nothing about the rest. That is a false green of the same shape
+    this gate exists to prevent.
+
+    Measured 2026-08-08: the full suite needs hours (individual tests
+    run 15-16s), so an interrupted run is the NORMAL case to guard
+    against, not a rare one — a 50-minute attempt produced an empty
+    file, and a 110-second one produced an empty file too, because the
+    setup phase alone outlasts a guessed timeout.
+    """
     per = defaultdict(lambda: defaultdict(int))
+    selected = None
+    seen = 0
     with path.open() as fh:
         for line in fh:
             line = line.strip()
@@ -124,14 +142,31 @@ def load_results(path: Path):
                 ev = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if ev.get("event") == "suite":
+                selected = ev.get("selected")
+                continue
             if ev.get("event") != "test":
                 continue
+            seen += 1
             name = ev.get("name", "")
             # name = "<module-path>/<file>::<test>"
             head = name.split("::", 1)[0]
             module = head.rsplit("/", 1)[0] if "/" in head else head
             per[module][ev.get("outcome", "unknown")] += 1
-    return per
+    truncated = None
+    if selected is None:
+        truncated = (
+            "results carry no `suite` event — cannot tell a complete run "
+            "from an interrupted one (produced by a verum older than the "
+            "2026-08-08 suite-event change, or hand-assembled)"
+        )
+    elif seen < selected:
+        truncated = (
+            f"results are TRUNCATED: the suite selected {selected} tests, "
+            f"{seen} arrived. Modules the run never reached have no rows "
+            f"and would be verified as if they had passed."
+        )
+    return per, truncated
 
 
 def main() -> int:
@@ -201,7 +236,9 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        per = load_results(args.results)
+        per, truncated = load_results(args.results)
+        if truncated:
+            findings.append(f"[liveness] {truncated}")
         subset = (
             {m.strip() for m in args.modules.split(",")} if args.modules else None
         )
