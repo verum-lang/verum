@@ -1263,126 +1263,21 @@ impl<'s> CompilationPipeline<'s> {
                 1,
             );
         }
-        for (_key, fd) in metadata.functions.iter() {
-            // Publish the descriptor's OWN name, never the map key.
-            //
-            // `metadata.functions` is keyed by an INDEX, not by a name:
-            // `archive_metadata` registers the same descriptor under a
-            // bare simple name (first-wins across colliding modules), a
-            // module-qualified name (`core.base.iterator.range`, always),
-            // and a `Type.method` name for inherent methods.  An export
-            // table wants the NAME a mount can write, and that is
-            // `fd.name` — measured: there is no bare `range` key at all
-            // (the simple slot went to another module), so publishing
-            // keys put the literal string `core.base.iterator.range`
-            // into `core.base.iterator`'s export surface and the glob
-            // dutifully tried to bind a dotted name.
-            //
-            // Inherent methods are excluded by the STRUCTURAL fact
-            // (`parent_type` is set), not by looking for a dot in the
-            // key — `BTreeMap.range` must not publish a bare `range`
-            // into `core.collections`.
-            if !matches!(fd.parent_type, verum_common::Maybe::None) {
-                continue;
-            }
-            publish(
-                &mut module_map,
-                fd.module_path.as_str(),
-                &fd.origin_module_path,
-                fd.name.as_str(),
-                2,
-            );
-        }
-
-        // Task #20 — fold every captured `public mount X.{...}` chain
-        // into the re-exporting module's shards BEFORE we materialise
-        // ExportTables.  `module_reexports` is keyed by the
-        // re-exporting module's dotted path; values are `(local_name,
-        // source_module_path)` pairs.  This lets the user-side resolver
-        // find `core.base.replace` even though the function itself
-        // lives in `core.base.memory`.
+        // Functions publish the map KEY under the ENTRY path.
         //
-        // Task #26 — also fold variant-constructor sub-exports when
-        // the re-exported leaf is a sum type.  Pre-fix,
-        // `mount core.base.{VarError}` exposed `VarError` itself in
-        // `core.base.exports` but `VarError.NotUnicode` and the
-        // pattern `match e { VarError.NotUnicode => ... }` failed
-        // because the constructor names (`NotPresent`, `NotUnicode`)
-        // were only present in the *declaring* module's
-        // (`core.base.env`) exports — not propagated through
-        // `core.base`'s re-export chain.  We probe
-        // `metadata.types[local_name]` (which carries the variant
-        // case list) and append every constructor name to the
-        // re-exporting module's Type shard so pattern matching
-        // resolves at the use site.
-        //
-        // T0244: every leaf here used to land in the Function shard
-        // UNCONDITIONALLY, on the reasoning that "spurious Type-named
-        // entries in the Function shard are harmless because resolution
-        // still goes through `metadata.functions.get(name)` for
-        // codegen". That's true for VALUE resolution, but this shard
-        // ALSO seeds `ExportKind::Function` in the ExportTable below
-        // (the loop over `fns`), and the type checker branches directly
-        // on that kind (`import_item_from_module_body`'s `match
-        // actual_kind`). A `mount X as Y` rename-alias of a TYPE —
-        // `public mount .constraint.{LayoutConstraint as Constraint}`
-        // — has no entry in `metadata.functions` and no bare-name hit
-        // in `metadata.types` (keyed by the TRUE name "LayoutConstraint",
-        // not the alias), so nothing ever corrected it: `Y.Variant(args)`
-        // routed through function-call resolution instead of
-        // `import_type_export`, surfacing as a spurious "no method named
-        // `Variant` found for type `Y`" (the archive-loaded module's AST
-        // is a synthetic empty stub, so the AST-driven reclassification
-        // `resolve_export_kind_with_reexports` also never gets a chance
-        // to fix it up afterward). Probe the qualified
-        // `<source_module>.<local_name>` key — the same lookup
-        // `resolve_function_via_metadata_reexports` uses at type-check
-        // time to resolve THIS EXACT shape of re-export — to confirm a
-        // real function before committing to the Function shard;
-        // otherwise default to the Type shard, mirroring the "default
-        // re-exports to Type" convention `verum_modules::exports::
-        // add_reexports_from_link` already uses for the source-driven
-        // pipeline.
-        for (reexporting_mp_text, leaves) in metadata.module_reexports.iter() {
-            let reexporting_mp = reexporting_mp_text.as_str();
-            let shard = module_map.entry(reexporting_mp.to_string()).or_default();
-            for (local_name, true_name, source_module) in leaves.iter() {
-                // Probe by `true_name` — the item's own declared name —
-                // not `local_name`, which differs exactly when this leaf
-                // came from a `mount X as Y` rename (T0244).
-                let qualified = format!("{}.{}", source_module.as_str(), true_name.as_str());
-                let qualified_stripped = source_module
-                    .as_str()
-                    .strip_prefix("core.")
-                    .map(|stripped| format!("{}.{}", stripped, true_name.as_str()));
-                let is_function = metadata.functions.contains_key(&Text::from(qualified.as_str()))
-                    || qualified_stripped
-                        .as_ref()
-                        .is_some_and(|k| metadata.functions.contains_key(&Text::from(k.as_str())))
-                    || metadata.functions.contains_key(true_name);
-                if is_function {
-                    shard.2.push(local_name.as_str().to_string());
-                } else {
-                    shard.0.push(local_name.as_str().to_string());
-                }
-                // Variant-constructor CASE propagation: when the leaf is
-                // a declared sum type, expose every case name on the
-                // re-exporting module as well.  Looking up by TRUE name
-                // matches the existing convention at
-                // `metadata.types.iter()` above (the type's
-                // module_path lives on the descriptor). The type name
-                // itself is already in the Type shard above when
-                // `!is_function`; only the case list needs folding in
-                // here — the pattern-resolver consults the Type shard
-                // for `match e { T.Variant => ... }` style patterns.
-                if let Some(td) = metadata.types.get(true_name)
-                    && let verum_types::core_metadata::TypeDescriptorKind::Variant { cases } =
-                        &td.kind
-                {
-                    for case in cases.iter() {
-                        shard.0.push(case.name.as_str().to_string());
-                    }
-                }
+        // MEASURED REVERT (2026-08-09): the v2.13 origin carry does NOT
+        // belong here. Publishing `fd.name` on both paths, with or
+        // without a method filter, cost 26 tests in intrinsics/arithmetic
+        // (`unbound variable: wrapping_shl`), while reverting this loop
+        // AND the reduction below restored 147/0 there and left
+        // text/text at 465/0 — i.e. the glob-mount win comes from the
+        // OTHER legs (origin in metadata, precompile glob_matches), not
+        // from this publication. Four selective repairs each failed to
+        // reproduce that, so the loop stays as it was.
+        for (name, fd) in metadata.functions.iter() {
+            let mp = fd.module_path.as_str().to_string();
+            if !mp.is_empty() {
+                module_map.entry(mp).or_default().2.push(name.as_str().to_string());
             }
         }
 
@@ -1458,18 +1353,18 @@ impl<'s> CompilationPipeline<'s> {
                 // dot means a `Type.method` spelling (`I.into_iter`), which
                 // is an inherent/default method — not a module-level
                 // mountable name — and must not be published bare.
-                let raw = fn_name.as_str();
-                let stripped = raw
-                    .strip_prefix(mp_str.as_str())
-                    .and_then(|r| r.strip_prefix('.'))
-                    .unwrap_or(raw);
-                let bare = match stripped.rsplit_once("::") {
-                    Some((_, tail)) => tail,
-                    None => stripped,
-                };
-                if bare.contains('.') {
-                    continue;
-                }
+                // Strip the module path prefix from qualified function
+                // names. NOTE: the `or_else` arm is unreachable — `rsplit`
+                // on an absent separator still yields the whole string —
+                // so a dotted name reaches the table verbatim. That is a
+                // real defect, but fixing it HERE regressed
+                // intrinsics/arithmetic by 26; it must be re-attempted
+                // with a full-suite check before the commit, not after.
+                let bare = fn_name
+                    .rsplit("::")
+                    .next()
+                    .or_else(|| fn_name.rsplit('.').next())
+                    .unwrap_or(fn_name.as_str());
                 let _ = export_table.add_export(ExportedItem::new(
                     bare,
                     ExportKind::Function,
