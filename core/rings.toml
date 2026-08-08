@@ -143,6 +143,17 @@ modules = [
     # stack, and it is half of the net <-> security cycle.
     # `kdf.argon2` stays in ring 5: it mounts `security.password_hash`.
     "security.kdf.hkdf", "security.kdf.pbkdf2",
+    # Block/stream ciphers and the AEADs built on them. Measured
+    # mounts: `cipher.{aes,chacha20}` take nothing but the prelude;
+    # `aead.aes_gcm` takes `collections.list`, its own cipher and
+    # `subtle.constant_time`; `aead.chacha20_poly1305` adds
+    # `mac.poly1305`. All of that is ring 1.5 or below — this is
+    # arithmetic over bytes, the same as a digest or a curve.
+    #
+    # Ring 5 put QUIC and TLS, which cannot encrypt a packet without
+    # them, in the position of depending sideways into the security
+    # stack, which is half of the net <-> security cycle.
+    "security.cipher", "security.aead",
 ]
 # `security.ecc` is here by MEASUREMENT, not by topic: ed25519, p256,
 # x25519 and mod have ZERO external mounts, bls12_381 and vrf only a
@@ -190,6 +201,25 @@ modules = [
     # sit in `math/` by topic and belong to the runtime layer by
     # dependency.
     "math.distributed", "math.stack_model",
+    # A COORDINATE VOCABULARY — `Ordinal`, `MsfsCoord` and their
+    # constructors (467 lines) — mounting only `action.articulation`.
+    # `math.frameworks.registry` names those coordinates and
+    # `theory_interop` is built on them, so the two appeared to depend
+    # on each other; the shared definitions simply sat on the wrong
+    # side. Same shape as `math.frameworks.msfs.key_symbols` and
+    # `collections.graph`: what both need belongs below both.
+    "theory_interop.coord",
+    # OS thread primitives and a thread pool. `thread.vr` mounts
+    # `intrinsics.type_info` and `time`; `pool.vr` mounts only the
+    # prelude — neither needs anything from ring 3.
+    #
+    # They sat in `runtime` alongside `spawn` and `supervisor`, which
+    # are built ON the async layer, so one directory spanned both sides
+    # of it: `async.executor -> runtime.thread` and
+    # `async.task -> runtime.pool` went down while
+    # `runtime.spawn -> async` went up, and the pair read as a cycle.
+    # Async is BUILT ON threads; the threads are not part of it.
+    "runtime.thread", "runtime.pool",
 ]
 
 [ring.4]

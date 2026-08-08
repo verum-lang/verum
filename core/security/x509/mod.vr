@@ -56,6 +56,10 @@
 )
 module core.security.x509;
 
+// Credential artefacts: Certificate, PrivateKey, KeyType. Defined
+// here rather than in `core.net.tls`, which merely transports them.
+public module credential;
+
 public module oid;
 public module time;
 public module algorithm;

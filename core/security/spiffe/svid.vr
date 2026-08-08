@@ -16,7 +16,7 @@ module core.security.spiffe.svid;
 
 mount core.*;
 mount core.time.instant.{Instant};
-mount core.net.tls.{Certificate, PrivateKey};
+mount core.security.x509.credential.{Certificate, PrivateKey};
 mount core.security.spiffe.id.{SpiffeId};
 
 // =============================================================================
