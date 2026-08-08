@@ -47,6 +47,21 @@ Mount-scope candidate discipline for multi-source names T0710
 T0649. Sized-int value semantics T0611 — **CLOSED 2026-08-08** (c185b51c6 + 9c73789f5): casts mask, `+`/`-`/`*`/`<<` wrap at the declared width, and sized-int METHOD dispatch honours the receiver's width. Seven roots in one chain, each hidden behind the one before it; SHA-256 and HMAC-SHA256 are byte-exact against FIPS 180-4 / RFC 4231 (0 mismatched bytes of 32).
 E404 recovery shapes T0585/T0702. NLL dataflow T0694.
 
+**MEASURED 2026-08-08 — what a full conformance pass costs.**
+`verum test --interp` selects **18,589 of 18,958** tests; individual
+tests run **15-16 s**, so one pass is **≈5 hours on 16 threads**, after
+a ~5-minute silent discovery phase. Every guessed timeout under an hour
+produces a ZERO-BYTE file, which reads identically to a hang or a crash
+— two attempts (50 min, 110 s) did exactly that before the run was
+given a start event to announce itself.
+
+This bounds what `make check-inventory-live` can be. At five hours it is
+not a per-PR gate in its current form; the honest options are chunking
+with accumulated results, or a declared subset that states what it does
+NOT cover. The gate now refuses a truncated stream outright — it
+compares the suite's `selected` count against the `test` events that
+arrived — so a partial run can no longer pass as a small green one.
+
 **R4. Execution truth (both tiers, loud-by-default).** CallM
 const-zero degrade class A1/T0103-residue (strict-mono default =
 T0693). AOT adapter lowering T0260. FFI placeholder arms A9/T0110,
