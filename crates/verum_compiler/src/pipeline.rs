@@ -1630,6 +1630,12 @@ impl<'s> CompilationPipeline<'s> {
                         .map(|(p, _)| p)
                         .unwrap_or(""),
                 ),
+                // Same as the type branch above: the incremental cache
+                // does not round-trip the file-submodule origin, and the
+                // path it DOES store is already split to a module here.
+                // `None` = "same as module_path", which is the honest
+                // reading of what the cache knows.
+                origin_module_path: verum_common::Maybe::None,
                 generic_params: List::new(),
                 params: List::new(),
                 return_type: Text::from("()"),

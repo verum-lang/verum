@@ -879,10 +879,39 @@ fn scan_module_reexports(
         let rest = &candidate_module[source_prefix.len()..];
         rest.starts_with('.')
     }
+    // FN-ORIGIN-MODULE (v2.13): a declaration must be matched by its
+    // DECLARING module as well as by the archive ENTRY module.
+    //
+    // `module_path` is the entry (directory) module — `core.base` for
+    // everything in `core/base/*.vr`.  The prelude re-exports
+    // `super.base.iterator.*`, i.e. source_prefix `core.base.iterator`,
+    // which `glob_matches` rejects against `core.base` (it is a PARENT,
+    // not a child).  So the nested-glob re-export captured nothing from
+    // any file submodule, and `mount core.prelude.*` delivered only the
+    // names the prelude mounts BY NAME.  Measured: 31 lowercase names
+    // reached a prelude glob — exactly the 21 math + 5 io + 3 format + 2
+    // tier functions the prelude names explicitly — and zero of the
+    // glob-re-exported ones.
+    let owns_decl = |source_prefix: &str,
+                     module_path: &str,
+                     origin: &verum_common::Maybe<verum_common::Text>|
+     -> bool {
+        if glob_matches(source_prefix, module_path) {
+            return true;
+        }
+        match origin {
+            verum_common::Maybe::Some(om) => glob_matches(source_prefix, om.as_str()),
+            verum_common::Maybe::None => false,
+        }
+    };
     for (reexporting_mp, source_prefix) in glob_pairs.iter() {
         let bucket = accum.entry(reexporting_mp.clone()).or_default();
         for (name, td) in metadata.types.iter() {
-            if !glob_matches(source_prefix, td.module_path.as_str()) {
+            if !owns_decl(
+                source_prefix,
+                td.module_path.as_str(),
+                &td.origin_module_path,
+            ) {
                 continue;
             }
             // Glob expansion never renames — true_name == local_name.
@@ -900,7 +929,11 @@ fn scan_module_reexports(
             }
         }
         for (name, fd) in metadata.functions.iter() {
-            if !glob_matches(source_prefix, fd.module_path.as_str()) {
+            if !owns_decl(
+                source_prefix,
+                fd.module_path.as_str(),
+                &fd.origin_module_path,
+            ) {
                 continue;
             }
             // Task #27 — extract the leaf-level simple name.
@@ -979,7 +1012,11 @@ fn scan_module_reexports(
                 .or_insert_with(|| (leaf_name, fd.module_path.as_str().to_string()));
         }
         for (name, pd) in metadata.protocols.iter() {
-            if !glob_matches(source_prefix, pd.module_path.as_str()) {
+            if !owns_decl(
+                source_prefix,
+                pd.module_path.as_str(),
+                &pd.origin_module_path,
+            ) {
                 continue;
             }
             bucket.entry(name.as_str().to_string()).or_insert_with(|| {
@@ -2635,6 +2672,13 @@ fn inject_declared_module_free_fn_keys(
                 let descriptor = FunctionDescriptor {
                     name: Text::from(simple),
                     module_path: Text::from(source_module.as_str()),
+                    // Source-scan injector: `source_module` is already the
+                    // FILE-precise declaring module — the entry-vs-file
+                    // collapse this field exists to undo happens only on
+                    // the ARCHIVE path.  `None` = "same as module_path",
+                    // which is exactly true here.  Same discipline as the
+                    // honestly-unknown `pid` above.
+                    origin_module_path: Maybe::None,
                     generic_params,
                     params,
                     return_type,

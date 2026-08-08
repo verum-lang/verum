@@ -695,6 +695,12 @@ impl Serializer {
             self.serialize_optional_u32(carried);
         }
 
+        // v2.13 — FN-ORIGIN-MODULE carry: the declaring FILE submodule's
+        // dotted path, the free-function twin of v2.12's
+        // `TypeDescriptor.origin_module`.  Same trailing optional-u32
+        // discipline; pre-2.13 readers stop before it and decode `None`.
+        self.serialize_optional_u32(desc.origin_module.map(|s| s.0));
+
         Ok(())
     }
 

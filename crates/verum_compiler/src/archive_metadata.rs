@@ -643,6 +643,16 @@ fn register_module_metadata(
                     ProtocolDescriptor {
                         name: type_name.clone(),
                         module_path: module_path.clone(),
+                        // Same carry as the type branch above — a
+                        // protocol IS a VBC type, so `ty.origin_module`
+                        // is already decoded into `ty_module_path`.
+                        origin_module_path: if ty_module_path.as_str()
+                            != module_path.as_str()
+                        {
+                            Maybe::Some(ty_module_path.clone())
+                        } else {
+                            Maybe::None
+                        },
                         generic_params: convert_generic_params(&ty.type_params, module),
                         super_protocols: super_protocols.clone(),
                         associated_types: List::new(),
@@ -1164,9 +1174,24 @@ fn register_module_metadata(
             })
             .unwrap_or_default();
 
+        // v2.13 FN-ORIGIN-MODULE: the declaring FILE submodule, the
+        // free-function twin of the type branch's `ty_module_path`.
+        // Pre-2.13 archives decode `origin_module = None` and this
+        // falls back to the entry path — the previous behaviour.
+        let fn_module_path: Text = fn_desc
+            .origin_module
+            .and_then(|sid| module.strings.get(sid))
+            .map(Text::from)
+            .unwrap_or_else(|| module_path.clone());
+
         let descriptor = FunctionDescriptor {
             name: simple_name.clone(),
             module_path: module_path.clone(),
+            origin_module_path: if fn_module_path.as_str() != module_path.as_str() {
+                Maybe::Some(fn_module_path.clone())
+            } else {
+                Maybe::None
+            },
             generic_params: convert_generic_params(&fn_desc.type_params, module),
             params,
             return_type,

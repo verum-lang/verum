@@ -2364,6 +2364,26 @@ impl VbcCodegen {
             .map(|m| crate::types::StringId(self.ctx.intern_string_raw(&m)))
     }
 
+    /// The ONE constructor for a function descriptor in codegen.
+    ///
+    /// FN-ORIGIN-MODULE (v2.13): `origin_module` must be stamped at
+    /// CREATION time, while `current_source_module` still names the file
+    /// being compiled — `build_module` runs after every function is
+    /// done and would read whichever module happened to be last.  There
+    /// are nine descriptor-creation sites; routing them all through here
+    /// is what keeps the carry from silently reverting to `None` at the
+    /// one site a future edit forgets.  Same discipline as the type
+    /// side's `current_origin_module_sid` call in the alias/decl paths.
+    fn new_fn_descriptor(
+        &mut self,
+        name_id: crate::types::StringId,
+    ) -> crate::module::FunctionDescriptor {
+        let origin_module = self.current_origin_module_sid();
+        let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
+        descriptor.origin_module = origin_module;
+        descriptor
+    }
+
     /// T0133: declared byte width of a `static mut`'s type, for the
     /// scalar-vs-wide cell decision. `Some(w)` only for shapes the
     /// native cell model covers exactly: scalars (8) and fixed-length
@@ -9251,7 +9271,7 @@ impl VbcCodegen {
             name.clone()
         };
         let name_id = StringId(self.intern_string(&descriptor_name));
-        let mut descriptor = FunctionDescriptor::new(name_id);
+        let mut descriptor = self.new_fn_descriptor(name_id);
         self.trace_id_adoption(func_info.id.0, &descriptor_name);
         descriptor.id = func_info.id;
         descriptor.register_count = register_count;
@@ -14166,7 +14186,7 @@ impl VbcCodegen {
                 name.to_string()
             };
             let name_id = StringId(self.intern_string(&const_qualified_name));
-            let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
+            let mut descriptor = self.new_fn_descriptor(name_id);
             descriptor.id = info.id;
             // RETNAME-CARRY-1 — carry the source-level return-type name.
             descriptor.return_type_name = info
@@ -14296,7 +14316,7 @@ impl VbcCodegen {
                 name.to_string()
             };
             let name_id = StringId(self.intern_string(&const_descriptor_name));
-            let mut descriptor = FunctionDescriptor::new(name_id);
+            let mut descriptor = self.new_fn_descriptor(name_id);
             self.trace_id_adoption(func_info.id.0, &const_descriptor_name);
             descriptor.id = func_info.id;
             // RETNAME-CARRY-1 — carry the source-level return-type name.
@@ -14462,7 +14482,7 @@ impl VbcCodegen {
             let (instructions, register_count) = self.ctx.end_function();
 
             let name_id = StringId(self.intern_string(&init_name));
-            let mut descriptor = FunctionDescriptor::new(name_id);
+            let mut descriptor = self.new_fn_descriptor(name_id);
             descriptor.id = func_id;
             descriptor.register_count = register_count;
             descriptor.locals_count = 0;
@@ -16846,7 +16866,7 @@ impl VbcCodegen {
 
         // Create VBC function
         let name_id = StringId(self.intern_string(&descriptor_name));
-        let mut descriptor = FunctionDescriptor::new(name_id);
+        let mut descriptor = self.new_fn_descriptor(name_id);
         self.trace_id_adoption(func_info.id.0, &descriptor_name);
         descriptor.id = func_info.id;
         // RETNAME-CARRY-1 — carry the source-level return-type name.
@@ -17560,7 +17580,7 @@ impl VbcCodegen {
             name.clone()
         };
         let name_id = StringId(self.intern_string(&descriptor_name));
-        let mut descriptor = FunctionDescriptor::new(name_id);
+        let mut descriptor = self.new_fn_descriptor(name_id);
         descriptor.id = id;
         descriptor.register_count = register_count;
         descriptor.locals_count = params_with_mutability.len() as u16;
@@ -17692,7 +17712,7 @@ impl VbcCodegen {
             lookup_name.clone()
         };
         let name_id = StringId(self.intern_string(&descriptor_name));
-        let mut descriptor = FunctionDescriptor::new(name_id);
+        let mut descriptor = self.new_fn_descriptor(name_id);
         self.trace_id_adoption(func_info.id.0, &descriptor_name);
         descriptor.id = func_info.id;
         // RETNAME-CARRY-1 — carry the source-level return-type name.
@@ -20340,7 +20360,7 @@ impl VbcCodegen {
             // "method 'as_path' not found".
             let name_id = StringId(self.ctx.intern_string_raw(&name));
             stub_synthesised.insert(id);
-            let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
+            let mut descriptor = self.new_fn_descriptor(name_id);
             descriptor.id = crate::module::FunctionId(id);
             descriptor.register_count = 1;
             descriptor.locals_count = info.param_count as u16;
@@ -20676,7 +20696,7 @@ impl VbcCodegen {
                         None => Vec::new(),
                     }
                 };
-                let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
+                let mut descriptor = self.new_fn_descriptor(name_id);
                 descriptor.id = info.id;
                 descriptor.register_count = 1;
                 descriptor.locals_count = info.param_count as u16;
@@ -21688,6 +21708,20 @@ impl VbcCodegen {
             if let Some(codegen_rname) = descriptor.return_type_name {
                 let codegen_idx = codegen_rname.0 as usize;
                 descriptor.return_type_name = string_id_map.get(codegen_idx).copied();
+            }
+
+            // FN-ORIGIN-MODULE (v2.13): the same codegen-index →
+            // module-StringId translation.  Every StringId a descriptor
+            // carries MUST join this remap — `new_fn_descriptor` interns
+            // the origin path via the codegen-local table, so without
+            // this the serialised id points past the module's string
+            // table and the loader reads `None`, which is exactly the
+            // entry-path fallback this field exists to replace (the
+            // failure would be silent and would look like the fix simply
+            // not working).
+            if let Some(codegen_oname) = descriptor.origin_module {
+                let codegen_idx = codegen_oname.0 as usize;
+                descriptor.origin_module = string_id_map.get(codegen_idx).copied();
             }
 
             // Register-type hints: same codegen-index → module-StringId

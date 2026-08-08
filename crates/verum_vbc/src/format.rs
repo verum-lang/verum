@@ -87,7 +87,20 @@ pub const VERSION_MAJOR: u16 = 2;
 /// its payload-variant constructors died E401. This field preserves
 /// the declaring file submodule's dotted path; `None` = declared at
 /// the entry's own top level (single-file modules, user code).
-pub const VERSION_MINOR: u16 = 12;
+/// Version 2.13: additive `FunctionDescriptor.origin_module` (trailing,
+/// version-gated `Option<StringId>`) — FN-ORIGIN-MODULE carry, the
+/// free-function twin of 2.12.  v2.12 fixed the type namespace only, so
+/// `pipeline/loading.rs` published a type on both the entry path and its
+/// declaring file submodule while a FUNCTION reached the synthesized
+/// export table under the entry path alone.  `core.base.iterator` was
+/// therefore published with its 21 types and NONE of its 13 functions —
+/// and since a glob mount ENUMERATES that table (a named mount looks up
+/// by name and has a metadata rescue the enumeration can never reach),
+/// `mount core.prelude.*; range(0, 3)` died E100 for every free function
+/// the prelude re-exports through a glob.  The type namespace hid the
+/// same hole behind `ensure_stdlib_type_loaded`; the value namespace has
+/// no lookup-on-miss, so there the hole was fatal.
+pub const VERSION_MINOR: u16 = 13;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

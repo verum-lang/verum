@@ -1433,6 +1433,16 @@ impl<'a> Deserializer<'a> {
  }
  }
 
+ // v2.13 — FN-ORIGIN-MODULE carry: version-gated trailing
+ // Option<StringId>, the free-function twin of v2.12's type-side
+ // field.  Pre-2.13 archives decode as `None` (entry-name fallback
+ // in archive_metadata).
+ let origin_module = if fmt_minor >= 13 {
+ self.parse_optional_u32()?.map(StringId)
+ } else {
+ None
+ };
+
  Ok(FunctionDescriptor {
  id,
  name,
@@ -1469,6 +1479,7 @@ impl<'a> Deserializer<'a> {
  is_const,
  register_type_hints,
  return_type_name,
+ origin_module,
  })
  }
 

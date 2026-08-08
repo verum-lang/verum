@@ -483,6 +483,21 @@ pub struct ProtocolDescriptor {
     /// Module path
     pub module_path: Text,
 
+    /// The declaring FILE submodule when it differs from `module_path`
+    /// — the protocol twin of `TypeDescriptor::origin_module_path`.
+    ///
+    /// A protocol IS a VBC type (`TypeDescriptorKind::Protocol`), so the
+    /// carry needs no format change: `archive_metadata` reads the same
+    /// `ty.origin_module` the type branch reads.  Fixed alongside the
+    /// v2.13 function carry because the third item kind had the SAME
+    /// entry-path-only publication in `pipeline/loading.rs` — masked, not
+    /// absent: `register_stdlib_protocol_for_name` resolves protocols by
+    /// bare name on miss, exactly as `ensure_stdlib_type_loaded` does for
+    /// types.  Leaving it would have kept one publication route lying
+    /// while its two siblings told the truth.
+    #[serde(default)]
+    pub origin_module_path: Maybe<Text>,
+
     /// Generic parameters
     pub generic_params: List<GenericParam>,
 
@@ -511,6 +526,24 @@ pub struct FunctionDescriptor {
 
     /// Module path
     pub module_path: Text,
+
+    /// The declaring FILE submodule when it differs from `module_path`
+    /// (v2.13 FN-ORIGIN-MODULE): the free-function twin of
+    /// `TypeDescriptor::origin_module_path`.  Archive entries are
+    /// DIRECTORY modules, so `module_path` stays the entry path every
+    /// existing resolver route keys on, while this field records the
+    /// precise `module core.x.y.z;` declaration for module-surface
+    /// queries (`pipeline/loading.rs`'s export-table synthesis and
+    /// `metadata_known_module_items`).  `Maybe::None` = same as
+    /// `module_path` (single-file modules, pre-v2.13 archives).
+    ///
+    /// v2.12 gave TYPES this field and left the value namespace behind,
+    /// so a file submodule published its types and none of its
+    /// functions — and a glob mount, which ENUMERATES the export table
+    /// rather than looking names up, therefore never named a free
+    /// function.  See the field's twin in `TypeDescriptor`.
+    #[serde(default)]
+    pub origin_module_path: Maybe<Text>,
 
     /// Generic parameters
     pub generic_params: List<GenericParam>,

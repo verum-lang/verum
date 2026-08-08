@@ -1210,31 +1210,88 @@ impl<'s> CompilationPipeline<'s> {
                 }
             }
         }
-        for (name, pd) in metadata.protocols.iter() {
-            let mp = pd.module_path.as_str().to_string();
-            if !mp.is_empty() {
-                module_map.entry(mp).or_default().1.push(name.as_str().to_string());
+        // v2.13 FN-ORIGIN-MODULE — the value-namespace twin of the type
+        // loop above, and the whole reason `mount core.prelude.*` could
+        // not deliver a free function.
+        //
+        // Publishing on the entry path ALONE meant a file submodule's
+        // export table held its types (rescued onto the origin path by
+        // the loop above) and NONE of its functions: `core.base.iterator`
+        // was published with 21 types and 0 of its 13 free functions.
+        // A glob mount ENUMERATES this table — `import_all_from_module`
+        // walks `public_exports()` — so it never named `range` and the
+        // bare call died E100, while `mount core.base.iterator.range;`
+        // worked because the NAMED path looks a name up and has a
+        // by-name metadata rescue an enumeration can never reach.
+        //
+        // The type namespace hid its half of the hole behind
+        // `ensure_stdlib_type_loaded` (lookup-on-miss by bare name);
+        // there is no such loader for functions, so here it was fatal.
+        // Both kinds now publish on BOTH paths, exactly as types do.
+        let publish = |module_map: &mut std::collections::BTreeMap<
+            String,
+            (Vec<String>, Vec<String>, Vec<String>),
+        >,
+                       entry_path: &str,
+                       origin: &verum_common::Maybe<verum_common::Text>,
+                       name: &str,
+                       shard: usize| {
+            let mut paths: Vec<String> = Vec::new();
+            if !entry_path.is_empty() {
+                paths.push(entry_path.to_string());
             }
+            if let verum_common::Maybe::Some(om) = origin {
+                let om = om.as_str().to_string();
+                if !om.is_empty() && !paths.contains(&om) {
+                    paths.push(om);
+                }
+            }
+            for path in paths {
+                let e = module_map.entry(path).or_default();
+                match shard {
+                    1 => e.1.push(name.to_string()),
+                    _ => e.2.push(name.to_string()),
+                }
+            }
+        };
+        for (_key, pd) in metadata.protocols.iter() {
+            publish(
+                &mut module_map,
+                pd.module_path.as_str(),
+                &pd.origin_module_path,
+                pd.name.as_str(),
+                1,
+            );
         }
-        for (name, fd) in metadata.functions.iter() {
-            let mp = fd.module_path.as_str().to_string();
-            if !mp.is_empty() {
-                module_map.entry(mp).or_default().2.push(name.as_str().to_string());
+        for (_key, fd) in metadata.functions.iter() {
+            // Publish the descriptor's OWN name, never the map key.
+            //
+            // `metadata.functions` is keyed by an INDEX, not by a name:
+            // `archive_metadata` registers the same descriptor under a
+            // bare simple name (first-wins across colliding modules), a
+            // module-qualified name (`core.base.iterator.range`, always),
+            // and a `Type.method` name for inherent methods.  An export
+            // table wants the NAME a mount can write, and that is
+            // `fd.name` — measured: there is no bare `range` key at all
+            // (the simple slot went to another module), so publishing
+            // keys put the literal string `core.base.iterator.range`
+            // into `core.base.iterator`'s export surface and the glob
+            // dutifully tried to bind a dotted name.
+            //
+            // Inherent methods are excluded by the STRUCTURAL fact
+            // (`parent_type` is set), not by looking for a dot in the
+            // key — `BTreeMap.range` must not publish a bare `range`
+            // into `core.collections`.
+            if !matches!(fd.parent_type, verum_common::Maybe::None) {
+                continue;
             }
-        }
-
-        // Also register every module path from the embedded VBC archive
-        // index, even if it has no types (mod.vr namespace files, empty
-        // modules, etc.).  #102 — switched away from
-        // `embedded_stdlib::file_paths()` (gzipped .vr sources) to
-        // `vbca.index` so the typechecker registers stdlib modules
-        // without consulting source.  The archive's module names are
-        // already the canonical dotted paths (`core.text`, `core.io.fs`),
-        // so no source-path → dotted-path conversion is needed.
-        if let Some(archive) = crate::embedded_stdlib_vbc::get_runtime_archive() {
-            for entry in &archive.index {
-                module_map.entry(entry.name.clone()).or_default();
-            }
+            publish(
+                &mut module_map,
+                fd.module_path.as_str(),
+                &fd.origin_module_path,
+                fd.name.as_str(),
+                2,
+            );
         }
 
         // Task #20 — fold every captured `public mount X.{...}` chain
@@ -1335,6 +1392,7 @@ impl<'s> CompilationPipeline<'s> {
         for (mp_str, (types, protocols, fns)) in &module_map {
             let module_path_text = Text::from(mp_str.as_str());
 
+
             // Skip if already in our modules map (populated by a previous call).
             if self.modules.contains_key(&module_path_text) {
                 continue;
@@ -1376,13 +1434,42 @@ impl<'s> CompilationPipeline<'s> {
                 ));
             }
             for fn_name in fns {
-                // Strip the module path prefix from qualified function names
-                // (e.g., "core.base.maybe.Maybe::new" → "new").
-                let bare = fn_name
-                    .rsplit("::")
-                    .next()
-                    .or_else(|| fn_name.rsplit('.').next())
-                    .unwrap_or(fn_name.as_str());
+                // Reduce a qualified function name to the bare name a mount
+                // can write.
+                //
+                // The previous chain was
+                //   `rsplit("::").next().or_else(|| rsplit('.').next())`
+                // and the `or_else` arm was UNREACHABLE: `rsplit` on a
+                // separator the string does not contain still yields one
+                // item — the whole string — so the first `.next()` is
+                // always `Some`. Every dotted name therefore reached the
+                // export table VERBATIM, and `core.base.iterator` published
+                // a function literally named `core.base.iterator.range`.
+                // A glob mount enumerates these names, so it asked for a
+                // dotted name, got nothing, and `range(0, 3)` died E100 —
+                // while a NAMED mount worked, because it looks the name up
+                // and has a by-name metadata rescue an enumeration cannot
+                // reach.
+                //
+                // The replacement strips the OWNING MODULE PATH structurally
+                // instead of guessing at the last separator: the bare name
+                // is exactly what remains after removing this module's own
+                // prefix, and only when a single segment remains. A leftover
+                // dot means a `Type.method` spelling (`I.into_iter`), which
+                // is an inherent/default method — not a module-level
+                // mountable name — and must not be published bare.
+                let raw = fn_name.as_str();
+                let stripped = raw
+                    .strip_prefix(mp_str.as_str())
+                    .and_then(|r| r.strip_prefix('.'))
+                    .unwrap_or(raw);
+                let bare = match stripped.rsplit_once("::") {
+                    Some((_, tail)) => tail,
+                    None => stripped,
+                };
+                if bare.contains('.') {
+                    continue;
+                }
                 let _ = export_table.add_export(ExportedItem::new(
                     bare,
                     ExportKind::Function,

@@ -1327,6 +1327,7 @@ impl VbcModule {
                     is_const: false,
                     register_type_hints: Vec::new(),
                     return_type_name: None,
+                    origin_module: None,
                 };
                 let fid = self.add_function(desc);
                 if trace {
@@ -2290,6 +2291,36 @@ pub struct FunctionDescriptor {
     /// decode as `None` via `serde(default)` and keep the old path).
     #[serde(default)]
     pub return_type_name: Option<StringId>,
+
+    /// The declaring FILE submodule when it differs from the archive
+    /// ENTRY module — the free-function twin of
+    /// `TypeDescriptor::origin_module`.
+    ///
+    /// Carried-fact contract (FN-ORIGIN-MODULE, v2.13): the archive
+    /// collapses every `core/base/<sub>.vr` into one entry named for
+    /// the directory (`core.base`), so a function declared in
+    /// `core/base/iterator.vr` reaches `archive_metadata` carrying
+    /// only `core.base`.  v2.12 gave TYPES this field and
+    /// `pipeline/loading.rs` publishes a type on BOTH paths; functions
+    /// had no such field, so the synthesized export table for
+    /// `core.base.iterator` held its 21 types and NONE of its 13
+    /// functions.
+    ///
+    /// A glob mount enumerates that export table, so it never named a
+    /// function and `mount core.base.iterator.*; range(0,3)` died
+    /// E100 while `mount core.base.iterator.range;` worked — the
+    /// named path has a by-name metadata rescue
+    /// (`resolve_function_via_metadata_reexports`) that an
+    /// enumeration-driven glob can never reach, because asking by name
+    /// requires already knowing the name.  Types hid the same hole
+    /// behind `ensure_stdlib_type_loaded`, the lookup-on-miss the
+    /// value namespace does not have.
+    ///
+    /// `None` = declared at the entry's own top level (single-file
+    /// modules, user code); pre-2.13 archives decode `None` and keep
+    /// the entry-name fallback.
+    #[serde(default)]
+    pub origin_module: Option<StringId>,
 }
 
 /// Debug information for a local variable or parameter.
@@ -2359,6 +2390,7 @@ impl Default for FunctionDescriptor {
             is_const: false,
             register_type_hints: Vec::new(),
             return_type_name: None,
+            origin_module: None,
         }
     }
 }
@@ -3563,6 +3595,7 @@ mod precompile_extension_tests {
             is_const: false,
             register_type_hints: Vec::new(),
             return_type_name: None,
+            origin_module: None,
         };
         // Backwards-compat field is filled with the existing layout.
         let _ = &mut desc;
@@ -3616,6 +3649,7 @@ mod precompile_extension_tests {
             is_const: false,
             register_type_hints: Vec::new(),
             return_type_name: None,
+            origin_module: None,
         };
         m.functions.push(desc);
 

@@ -3461,15 +3461,22 @@ impl TypeChecker {
             }
         }
         for fd in metadata.functions.values() {
-            if owns(&fd.module_path)
-                && matches!(fd.parent_type, Maybe::None)
-                && seen.insert(fd.name.clone())
-            {
+            // v2.13 FN-ORIGIN-MODULE: the same honouring for the value
+            // namespace. Without it this query reported a file
+            // submodule as exporting its types and none of its free
+            // functions — the surface E401 prints when a mount of one
+            // of them fails, so the diagnostic actively misled by
+            // listing a module's own function as not existing.
+            let owned = owns(&fd.module_path)
+                || matches!(&fd.origin_module_path, verum_common::Maybe::Some(om) if owns(om));
+            if owned && matches!(fd.parent_type, Maybe::None) && seen.insert(fd.name.clone()) {
                 items.push(fd.name.clone());
             }
         }
         for pd in metadata.protocols.values() {
-            if owns(&pd.module_path) && seen.insert(pd.name.clone()) {
+            let owned = owns(&pd.module_path)
+                || matches!(&pd.origin_module_path, verum_common::Maybe::Some(om) if owns(om));
+            if owned && seen.insert(pd.name.clone()) {
                 items.push(pd.name.clone());
             }
         }
