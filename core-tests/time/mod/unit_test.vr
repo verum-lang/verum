@@ -18,7 +18,7 @@ mount core.time.mod.{Time};
 mount core.time.duration.{Duration};
 mount core.time.instant.{Instant};
 mount core.time.system_time.{SystemTime, SystemTimeError};
-mount core.time.interval.{Interval, AsyncInterval, interval, interval_ms};
+mount core.async.interval.{Interval, AsyncInterval, interval, interval_ms};
 mount core.time.cron.{CronExpr, CronError};
 mount core.time.rfc3339.{Rfc3339Time, Rfc3339Error};
 mount core.time.duration_parse.{DurationParseError};

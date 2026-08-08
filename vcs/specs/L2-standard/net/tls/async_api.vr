@@ -14,7 +14,7 @@ mount core.net.tls.{
     TlsStream, TlsConfig, TlsConnector, TlsAcceptor, TlsVersion,
     Certificate, PrivateKey, TlsReadFut, TlsWriteFut,
 };
-mount core.io.async_protocols.{AsyncRead, AsyncWrite};
+mount core.async.io_protocols.{AsyncRead, AsyncWrite};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context};
 mount core.async.cancellation.{CancellationToken, CancellationTokenSource, CancellationError};

@@ -1,4 +1,4 @@
-# `core.time.interval` — audit findings
+# `core.async.interval` — audit findings
 
 > Module under test: `core/time/interval.vr` (226 LOC; `Interval`
 > (blocking) and `AsyncInterval` (Stream-implementing) record types
@@ -90,7 +90,7 @@ load). Gated on §A's live-blocking harness.
 
 | # | Defect | Layer | Fix |
 |---|---|---|---|
-| — | Per-submodule conformance suite for `core.time.interval` | `core-tests/time/interval/{unit,property,integration}_test.vr` | Pre-existing in this branch; this audit pins the coverage map. |
+| — | Per-submodule conformance suite for `core.async.interval` | `core-tests/time/interval/{unit,property,integration}_test.vr` | Pre-existing in this branch; this audit pins the coverage map. |
 | — | Missing `audit.md` for `core-tests/time/interval/` | This file. |
 
 ## 5. Action items deferred

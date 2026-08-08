@@ -20,7 +20,7 @@ Seek / BufRead are consumed by every other module in `core.io.*`:
 | `core.io.buffer.{BufReader, BufWriter, LineWriter}` | `Read` / `Write` impls wrap `<R: Read>` / `<W: Write>` |
 | `core.io.process.{Command, Child, Output}` | `IoResult<T>`, `StreamError` |
 | `core.io.path.{Path, PathBuf}` | only `IoResult` via `metadata()` route |
-| `core.io.async_protocols.{AsyncRead, AsyncWrite, AsyncBufRead}` | mirrors Read/Write/BufRead with async-marker bodies |
+| `core.async.io_protocols.{AsyncRead, AsyncWrite, AsyncBufRead}` | mirrors Read/Write/BufRead with async-marker bodies |
 | `core.net.*` socket types | `IoResult<T>`, `StreamError.from_os` |
 | `core.shell.stream` | `Read` for `FdReader` (defined in `buffer.vr` but consumed across shell pipes) |
 

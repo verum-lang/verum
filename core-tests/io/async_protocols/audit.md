@@ -1,4 +1,4 @@
-# `core.io.async_protocols` — audit
+# `core.async.io_protocols` — audit
 
 > Conformance suite for `core/io/async_protocols.vr`.
 > Snapshot: 2026-05-24.

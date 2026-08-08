@@ -2,7 +2,7 @@
 // core-tests/io/async_protocols/integration_test.vr
 // =============================================================================
 
-mount core.io.async_protocols.{read_async, write_async, flush_async};
+mount core.async.io_protocols.{read_async, write_async, flush_async};
 mount core.io.protocols.{empty_reader, sink};
 mount core.collections.list.List;
 

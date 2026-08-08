@@ -7,7 +7,7 @@
 // Plus the async executor itself needs a runtime — most tests gated.
 // =============================================================================
 
-mount core.io.async_protocols.{ReadFuture, WriteFuture, FlushFuture, read_async, write_async, flush_async};
+mount core.async.io_protocols.{ReadFuture, WriteFuture, FlushFuture, read_async, write_async, flush_async};
 mount core.io.protocols.{empty_reader, sink};
 mount core.collections.list.List;
 

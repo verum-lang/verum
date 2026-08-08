@@ -9,7 +9,7 @@
 mount core.prelude.*;
 mount core.time.duration_parse.{parse, DurationParseError};
 mount core.time.duration.{Duration};
-mount core.time.interval.{Interval};
+mount core.async.interval.{Interval};
 mount core.collections.list.List;
 
 // =============================================================================

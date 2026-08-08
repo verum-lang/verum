@@ -14,8 +14,8 @@
 
 | Consumer | Use |
 |---|---|
-| `core.time.interval.Interval` | `Time.monotonic()` for deadlines, `Time.sleep()` inside `tick()` |
-| `core.time.interval.AsyncInterval` | `Time.monotonic()` in `poll_next` |
+| `core.async.interval.Interval` | `Time.monotonic()` for deadlines, `Time.sleep()` inside `tick()` |
+| `core.async.interval.AsyncInterval` | `Time.monotonic()` in `poll_next` |
 | retry/backoff helpers (`core/base/retry.vr`) | blocking sleeps between attempts |
 | ad-hoc benchmarks in `vcs/` | `Time.monotonic()` deltas |
 

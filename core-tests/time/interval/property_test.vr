@@ -6,7 +6,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.time.interval.{Interval, AsyncInterval, interval, interval_ms};
+mount core.async.interval.{Interval, AsyncInterval, interval, interval_ms};
 mount core.time.duration.{Duration};
 mount core.collections.list.List;
 

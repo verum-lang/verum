@@ -21,7 +21,7 @@ time API takes / returns `Duration`:
 |---|---|
 | `core.time.instant.Instant` | `Instant.elapsed`, `Instant.duration_since`, `Instant.checked_add` |
 | `core.time.system_time.SystemTime` | `SystemTime.duration_since_epoch`, `SystemTime.checked_add`, `from_*` / `as_*` constructor & accessor surface |
-| `core.time.interval.{Interval,AsyncInterval}` | `Interval.new(period: Duration)`, `tick`, `reset` |
+| `core.async.interval.{Interval,AsyncInterval}` | `Interval.new(period: Duration)`, `tick`, `reset` |
 | `core.time.duration_parse.parse` | Returns `Result<Duration, DurationParseError>` |
 | `core.time.rfc3339` | `Duration` not surfaced directly; uses nanos internally for offset arithmetic |
 | `core.async.timer.{sleep,sleep_until,timeout,Deadline}` | Every executor-facing timer accepts `Duration` |

@@ -2,12 +2,12 @@
 // core-tests/time/interval/regression_test.vr
 // =============================================================================
 //
-// Regression pins for surfaced defects in `core.time.interval`.
+// Regression pins for surfaced defects in `core.async.interval`.
 // =============================================================================
 
 mount core.prelude.*;
 mount core.time.duration.{Duration};
-mount core.time.interval.{Interval, AsyncInterval};
+mount core.async.interval.{Interval, AsyncInterval};
 mount core.time.mod.{Time};
 
 // REGRESSION §A (2026-07-09): a NEGATIVE period (Duration is signed)

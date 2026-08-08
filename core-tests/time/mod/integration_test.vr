@@ -11,7 +11,7 @@ mount core.prelude.*;
 mount core.time.mod.{Time};
 mount core.time.duration.{Duration};
 mount core.time.instant.{Instant};
-mount core.time.interval.{Interval};
+mount core.async.interval.{Interval};
 
 // Time.monotonic and Instant.now read the same clock: an Instant taken
 // between two raw reads is bracketed by them.

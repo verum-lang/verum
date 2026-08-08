@@ -2,12 +2,12 @@
 // core-tests/io/async_protocols/unit_test.vr
 // =============================================================================
 //
-// Unit tests for `core.io.async_protocols`. The protocols themselves are
+// Unit tests for `core.async.io_protocols`. The protocols themselves are
 // type-shape declarations; structural construction tests for the Future
 // wrappers exercise the data path.
 // =============================================================================
 
-mount core.io.async_protocols.{ReadFuture, WriteFuture, FlushFuture};
+mount core.async.io_protocols.{ReadFuture, WriteFuture, FlushFuture};
 mount core.io.protocols.{EmptyReader, Sink, empty_reader, sink};
 mount core.collections.list.List;
 

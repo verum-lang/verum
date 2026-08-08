@@ -9,7 +9,7 @@
 // waker-based readiness waits.
 
 mount core.net.tcp.{TcpStream, TcpListener};
-mount core.io.async_protocols.{AsyncRead, AsyncWrite};
+mount core.async.io_protocols.{AsyncRead, AsyncWrite};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context};
 mount core.async.future.{Future};

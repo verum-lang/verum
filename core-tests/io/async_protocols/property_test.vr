@@ -2,7 +2,7 @@
 // core-tests/io/async_protocols/property_test.vr
 // =============================================================================
 
-mount core.io.async_protocols.{ReadFuture, WriteFuture, FlushFuture};
+mount core.async.io_protocols.{ReadFuture, WriteFuture, FlushFuture};
 mount core.io.protocols.{empty_reader, sink};
 mount core.collections.list.List;
 

@@ -2,11 +2,11 @@
 // core-tests/time/interval/unit_test.vr
 // =============================================================================
 //
-// Unit tests for `core.time.interval.{Interval, AsyncInterval}`.
+// Unit tests for `core.async.interval.{Interval, AsyncInterval}`.
 // =============================================================================
 
 mount core.prelude.*;
-mount core.time.interval.{Interval, AsyncInterval, interval, interval_ms};
+mount core.async.interval.{Interval, AsyncInterval, interval, interval_ms};
 mount core.time.duration.{Duration};
 mount core.time.instant.{Instant};
 

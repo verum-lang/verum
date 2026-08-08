@@ -12,7 +12,7 @@ mount core.net.unix.{
     PeerCred, ShutdownKind, UnixReadFut, UnixWriteFut,
     FdPassingError,
 };
-mount core.io.async_protocols.{AsyncRead, AsyncWrite};
+mount core.async.io_protocols.{AsyncRead, AsyncWrite};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context};
 mount core.async.stream.{Stream};

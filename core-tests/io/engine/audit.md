@@ -10,7 +10,7 @@
 
 * `core.net.tcp` / `core.net.udp` — async socket I/O registers fds
   with an IoEngine for readiness notifications.
-* `core.io.async_protocols` — Future polling defers to engine.poll
+* `core.async.io_protocols` — Future polling defers to engine.poll
   in the long-term plan.
 * `core.async.executor` — wakes tasks when their IoEngine readiness
   signal fires.
@@ -34,7 +34,7 @@ automatic destroy on test exit.
 
 ### §B — Real async I/O via engine.poll is still in the plan
 
-The current async I/O implementation in `core.io.async_protocols`
+The current async I/O implementation in `core.async.io_protocols`
 falls back to sync-on-worker-thread (per the in-source comments).
 Real engine.poll routing is task #io-15.
 

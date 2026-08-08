@@ -19,7 +19,7 @@ reference clock for every elapsed-time measurement.
 
 | Consumer | Use |
 |---|---|
-| `core.time.interval.{Interval,AsyncInterval}` | `Interval.new` captures `Time.monotonic()` (raw `Int` form of the same monotonic counter) and computes the next-tick deadline from it; `AsyncInterval.poll_next` reads `Time.monotonic()` to test deadline expiry. |
+| `core.async.interval.{Interval,AsyncInterval}` | `Interval.new` captures `Time.monotonic()` (raw `Int` form of the same monotonic counter) and computes the next-tick deadline from it; `AsyncInterval.poll_next` reads `Time.monotonic()` to test deadline expiry. |
 | `core.async.executor` / `core.async.timer` | `sleep_until(deadline: Instant)`, `Deadline { instant }` |
 | `core.cog.manifest` (build-time profiling) | Elapsed-time measurement around compilation phases |
 | `core-tests/base/memory/cbgr_test.vr` | Benchmark CBGR-validation latency vs. the 15ns production-target via `Instant.now()` deltas |
