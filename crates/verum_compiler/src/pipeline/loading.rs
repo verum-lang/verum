@@ -1281,6 +1281,63 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        // T0693 RE-EXPORT LEAVES — the synthesized surface must carry what
+        // `public mount .sub.{X as Y};` publishes.
+        //
+        // `module_reexports[M] = [(local_name, original_name, source_module)]`
+        // is the ONLY record of a renamed re-export. The three descriptor
+        // families above carry the TARGET (`X`, under `source_module`) and
+        // never the name the PARENT publishes (`Y`, under `M`) — so the
+        // registry surface and `metadata_known_module_items` answered
+        // "does M export Y" differently, and the probed-exports E401 gate
+        // in `verum_types::infer::modules` consults the registry one.
+        // `mount core.term.layout.{Constraint};` therefore failed against a
+        // 263-entry surface that legitimately lacked only the leaves.
+        //
+        // The kind is READ OFF THE TARGET, never assumed: `module_map`
+        // already records, per module, which names are types, protocols and
+        // functions, and this fold runs after all three publication loops.
+        // A leaf whose target names no descriptor is SKIPPED — publishing
+        // it under a guessed kind would seed a wrong entry into a surface
+        // that glob mounts ENUMERATE, and a glob has no by-name rescue to
+        // correct it.
+        let mut reexport_pubs: Vec<(String, String, usize)> = Vec::new();
+        for (module, leaves) in metadata.module_reexports.iter() {
+            let mp = module.as_str();
+            if mp.is_empty() {
+                continue;
+            }
+            for (local_name, original_name, source_module) in leaves.iter() {
+                let Some((src_types, src_protos, src_fns)) =
+                    module_map.get(source_module.as_str())
+                else {
+                    continue;
+                };
+                let target = original_name.as_str();
+                let shard = if src_types.iter().any(|n| n == target) {
+                    0
+                } else if src_protos.iter().any(|n| n == target) {
+                    1
+                } else if src_fns.iter().any(|n| n == target) {
+                    2
+                } else {
+                    continue;
+                };
+                reexport_pubs.push((mp.to_string(), local_name.as_str().to_string(), shard));
+            }
+        }
+        for (module, local_name, shard) in reexport_pubs {
+            let entry = module_map.entry(module).or_default();
+            let bucket = match shard {
+                0 => &mut entry.0,
+                1 => &mut entry.1,
+                _ => &mut entry.2,
+            };
+            if !bucket.iter().any(|n| n == &local_name) {
+                bucket.push(local_name);
+            }
+        }
+
         let mut registered = 0usize;
         let module_registry = self.session.module_registry();
 
