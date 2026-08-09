@@ -789,6 +789,13 @@ enum Commands {
  /// Emit a single-line key=value form for scripting.
         #[clap(long)]
         raw: bool,
+
+        /// Dump the bytecode of every function whose name contains this
+        /// substring, instead of printing the header. Answers "is the
+        /// instruction present in the BAKED body at all" — a question no
+        /// user-code reproduction can reach.
+        #[clap(long, value_name = "SUBSTRING")]
+        dump_fn: Option<String>,
     },
 
     /// Manage cog packages (build / publish / install)
@@ -3557,7 +3564,10 @@ fn run_command(cli: Cli) -> Result<()> {
             }
         },
         Commands::Version { verbose } => commands::version::execute(verbose),
-        Commands::VbcVersion { archive, raw } => commands::vbc_version::execute(&archive, raw),
+        Commands::VbcVersion { archive, raw, dump_fn } => match dump_fn {
+            Some(needle) => commands::vbc_version::dump_function(&archive, &needle),
+            None => commands::vbc_version::execute(&archive, raw),
+        },
         Commands::Package(pkg_cmd) => match pkg_cmd {
             PackageCommands::Publish {
                 dry_run,

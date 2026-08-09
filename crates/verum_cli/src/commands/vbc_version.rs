@@ -253,3 +253,89 @@ pub fn execute(archive: &Path, raw: bool) -> Result<()> {
     println!("{}", "OK".green().bold());
     Ok(())
 }
+
+/// Dump the bytecode of every function whose name contains `needle`.
+///
+/// Why this exists: three separate defects this campaign differ ONLY
+/// between the baked archive and the same source compiled locally —
+/// `Mutex.try_lock` never reaching the atomic-CAS opcode, a generic
+/// tuple impl misdispatching, and a re-export leaf missing from a
+/// module surface. No user-code reproduction can reach any of them,
+/// because the thing under suspicion is what the BAKE produced. Until
+/// now the only archive inspection available was `vbc-version`, which
+/// parses the header and stops, so the baked body was unreadable and
+/// every question about it cost a 46-minute rebuild to guess at.
+///
+/// The output is deliberately raw — module, function, byte length and
+/// the opcode stream — because the question it answers is "is the
+/// instruction there at all", not "what does this program mean".
+pub fn dump_function(archive: &Path, needle: &str) -> Result<()> {
+    let arch = verum_vbc::archive::read_archive_from_file(archive)
+        .map_err(|e| CliError::Custom(format!("cannot read archive: {e}")))?;
+
+    let mut found = 0usize;
+    for (entry, data) in arch.index.iter().zip(arch.module_data.iter()) {
+        let module = match verum_vbc::deserialize::deserialize_module(data) {
+            Ok(m) => m,
+            Err(e) => {
+                println!(
+                    "{} {}: {}",
+                    "skip".yellow(),
+                    entry.name,
+                    format!("undecodable: {e:?}").dimmed()
+                );
+                continue;
+            }
+        };
+        for f in &module.functions {
+            let name = module.strings.get(f.name).unwrap_or("<unnamed>");
+            if !name.contains(needle) {
+                continue;
+            }
+            found += 1;
+            let start = f.bytecode_offset as usize;
+            let end = start.saturating_add(f.bytecode_length as usize);
+            println!(
+                "\n{} {}  {} {}  {} {} bytes @ {}",
+                "module".dimmed(),
+                entry.name.cyan(),
+                "fn".dimmed(),
+                name.green().bold(),
+                "body".dimmed(),
+                f.bytecode_length,
+                start
+            );
+            if f.bytecode_length == 0 {
+                // An empty body is the signature of a forward
+                // declaration or of a body the codegen dropped — the
+                // exact thing `[lenient] SKIP` leaves behind, and the
+                // reason a call can "succeed" while doing nothing.
+                println!("  {}", "EMPTY BODY".red().bold());
+                continue;
+            }
+            match module.bytecode.get(start..end) {
+                Some(code) => {
+                    for (i, chunk) in code.chunks(16).enumerate() {
+                        let hex: Vec<String> =
+                            chunk.iter().map(|b| format!("{b:02x}")).collect();
+                        println!("  {:04x}  {}", i * 16, hex.join(" "));
+                    }
+                }
+                None => println!(
+                    "  {} offset {}..{} outside a {}-byte section",
+                    "OUT OF RANGE".red().bold(),
+                    start,
+                    end,
+                    module.bytecode.len()
+                ),
+            }
+        }
+    }
+
+    if found == 0 {
+        println!("{} no function name contains {:?}", "none".yellow(), needle);
+    } else {
+        println!("\n{} {} function(s)", "total".dimmed(), found);
+    }
+    Ok(())
+}
