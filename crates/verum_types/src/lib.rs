@@ -3568,22 +3568,33 @@ impl TypeError {
                                 .join(", ")
                         ));
                     }
-                    // Show available exports (limited to first 10)
-                    let items_preview: Vec<&str> = available_items
-                        .iter()
-                        .take(10)
-                        .map(|s| s.as_str())
-                        .collect();
-                    let suffix = if available_items.len() > 10 {
-                        format!(" and {} more", available_items.len() - 10)
-                    } else {
-                        String::new()
-                    };
+                    // Show a DETERMINISTIC and USEFUL sample of the surface.
+                    //
+                    // The previous form took the first 10 in iteration order.
+                    // `ExportTable` is HashMap-backed, so that ten differed
+                    // between runs — a diagnostic nobody can quote or compare.
+                    // The surface also mixes three shapes: bare names, fully
+                    // qualified ones (`core.term.layout.InfOperad`) and
+                    // inherent methods (`Rect.split_horizontal`). Someone who
+                    // mounted a bare name wants bare names, so those sort
+                    // first, alphabetically within each group.
+                    //
+                    // The TOTAL leads the note. Without it a truncated list
+                    // reads as the whole surface, and "my name is not in the
+                    // ten shown" gets mistaken for "the module does not export
+                    // it" — that misreading cost a full investigation once.
+                    let mut sorted: Vec<&str> =
+                        available_items.iter().map(|s| s.as_str()).collect();
+                    sorted.sort_unstable_by(|a, b| {
+                        (a.contains('.'), *a).cmp(&(b.contains('.'), *b))
+                    });
+                    let shown = sorted.len().min(10);
                     builder = builder.add_note(format!(
-                        "module `{}` exports: {}{}",
+                        "module `{}` exports {} item(s); showing {}: {}",
                         module_path,
-                        items_preview.join(", "),
-                        suffix
+                        sorted.len(),
+                        shown,
+                        sorted[..shown].join(", ")
                     ));
                 }
                 builder.build()

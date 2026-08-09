@@ -1301,7 +1301,17 @@ impl<'s> CompilationPipeline<'s> {
         // it under a guessed kind would seed a wrong entry into a surface
         // that glob mounts ENUMERATE, and a glob has no by-name rescue to
         // correct it.
-        let mut reexport_pubs: Vec<(String, String, usize)> = Vec::new();
+        // The three descriptor families the synthesized surface is built from.
+        // Named rather than numbered: `module_map`'s tuple is positional, and a
+        // fourth family added later must fail to compile here instead of
+        // silently landing in whichever arm a `_` pattern happened to cover.
+        #[derive(Clone, Copy)]
+        enum SurfaceKind {
+            Type,
+            Protocol,
+            Function,
+        }
+        let mut reexport_pubs: Vec<(String, String, SurfaceKind)> = Vec::new();
         for (module, leaves) in metadata.module_reexports.iter() {
             let mp = module.as_str();
             if mp.is_empty() {
@@ -1314,24 +1324,24 @@ impl<'s> CompilationPipeline<'s> {
                     continue;
                 };
                 let target = original_name.as_str();
-                let shard = if src_types.iter().any(|n| n == target) {
-                    0
+                let kind = if src_types.iter().any(|n| n == target) {
+                    SurfaceKind::Type
                 } else if src_protos.iter().any(|n| n == target) {
-                    1
+                    SurfaceKind::Protocol
                 } else if src_fns.iter().any(|n| n == target) {
-                    2
+                    SurfaceKind::Function
                 } else {
                     continue;
                 };
-                reexport_pubs.push((mp.to_string(), local_name.as_str().to_string(), shard));
+                reexport_pubs.push((mp.to_string(), local_name.as_str().to_string(), kind));
             }
         }
-        for (module, local_name, shard) in reexport_pubs {
+        for (module, local_name, kind) in reexport_pubs {
             let entry = module_map.entry(module).or_default();
-            let bucket = match shard {
-                0 => &mut entry.0,
-                1 => &mut entry.1,
-                _ => &mut entry.2,
+            let bucket = match kind {
+                SurfaceKind::Type => &mut entry.0,
+                SurfaceKind::Protocol => &mut entry.1,
+                SurfaceKind::Function => &mut entry.2,
             };
             if !bucket.iter().any(|n| n == &local_name) {
                 bucket.push(local_name);
