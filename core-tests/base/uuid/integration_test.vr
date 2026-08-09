@@ -21,7 +21,7 @@ fn test_v4_has_correct_variant_bits() {
     // RFC 4122: variant bits must be 10xx (bits 7-6 of octet 8 = 0b10)
     let id = v4();
     let bytes = id.to_bytes();
-    let octet8 = bytes.get(8).unwrap();
+    let octet8 = bytes[8];
     // High bits must be 1 and 0 (0b10xxxxxx)
     assert_eq((octet8 >> 6) & 0b11, 0b10,
         "v4 variant bits must be 10 (RFC 4122 variant 1)");
@@ -31,7 +31,7 @@ fn test_v4_has_correct_variant_bits() {
 fn test_v7_has_correct_variant_bits() {
     let id = v7();
     let bytes = id.to_bytes();
-    let octet8 = bytes.get(8).unwrap();
+    let octet8 = bytes[8];
     assert_eq((octet8 >> 6) & 0b11, 0b10);
 }
 
@@ -52,7 +52,7 @@ fn test_nil_uuid_has_all_zero_bytes() {
 fn test_v4_version_nibble_is_4() {
     let id = v4();
     let bytes = id.to_bytes();
-    let octet6 = bytes.get(6).unwrap();
+    let octet6 = bytes[6];
     assert_eq((octet6 >> 4) & 0xF, 4);
 }
 
@@ -60,7 +60,7 @@ fn test_v4_version_nibble_is_4() {
 fn test_v7_version_nibble_is_7() {
     let id = v7();
     let bytes = id.to_bytes();
-    let octet6 = bytes.get(6).unwrap();
+    let octet6 = bytes[6];
     assert_eq((octet6 >> 4) & 0xF, 7);
 }
 
