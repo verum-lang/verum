@@ -1439,6 +1439,26 @@ impl VbcCodegen {
             if let Some(target) = self.type_aliases.get(mount_path.as_str()) {
                 return target.clone();
             }
+            // T0691 MOUNT-WINS: an explicitly mounted name whose OWNER
+            // module declares no alias for it is a real type — never let
+            // the bare walk hand it to a same-named alias from an
+            // unrelated module. That walk is how `Mutex` (mounted from
+            // core.sync.mutex) was captured by the platform layer's
+            // `public type Mutex = DarwinMutex;` and every `m.lock()`
+            // compiled to `DarwinMutex.lock` (measured via --emit-vbc;
+            // the alias-key census showed the two lookups above had
+            // NEVER fired — the table held only bare keys, so this
+            // branch decided nothing until the registration site began
+            // writing qualified keys).
+            //
+            // RENAMING mounts (`mount X.{Duration as SysDuration}`) must
+            // still fall through: their alias entry is deliberately
+            // registered under the BARE local name at the mount site,
+            // and the mount path's last segment names the TARGET, not
+            // the local alias — that asymmetry is the discriminator.
+            if mount_path.rsplit('.').next() == Some(type_name) {
+                return type_name.to_string();
+            }
         }
         // Cycle-safe bare-key walk: visited-set instead of a fixed
         // iteration budget — on a cycle, return the LAST name reached
@@ -22845,20 +22865,35 @@ impl VbcCodegen {
                             .insert(alias_name.clone(), full);
                     }
                 }
-                // T0691 census: the module-aware fix for alias shadowing
-                // hinges on whether EVERY alias carries a module-qualified
-                // key. If some exist only under a bare name, an early
-                // return in the mount-provenance block would stop
-                // resolving them — the regression that fix is meant to
-                // prevent. Dump the keys and answer it with data.
+                // T0691 census verdict (VERUM_TRACE_ALIAS_KEYS, 2026-08-09):
+                // every one of the 194 insertions this site made carried a
+                // BARE key — zero qualified. That made the mount-provenance
+                // lookups in `resolve_type_alias` (which probe
+                // "io.IoError" / "core.io.IoError") dead code, and left
+                // every resolution to the bare walk, where a platform
+                // alias captured `Mutex` and broke core.sync's lock
+                // (`m.lock()` emitted `CALL_G DarwinMutex.lock`).
+                //
+                // Register the module-qualified spellings alongside the
+                // bare one — both forms the provenance block probes. The
+                // bare key stays: glob mounts and prelude names resolve
+                // through it, and removing it is a different (measured)
+                // decision.
                 if std::env::var("VERUM_TRACE_ALIAS_KEYS").is_ok() {
                     eprintln!(
-                        "[aliaskey] key='{}' -> '{}' qualified={}",
-                        alias_name,
-                        name,
-                        alias_name.contains('.')
+                        "[aliaskey] module='{}' key='{}' -> '{}'",
+                        module.name, alias_name, name
                     );
                 }
+                let full_key = format!("{}.{}", module.name, alias_name);
+                let stripped_key = module
+                    .name
+                    .strip_prefix("core.")
+                    .map(|m| format!("{}.{}", m, alias_name));
+                if let Some(k) = stripped_key {
+                    self.type_aliases.insert(k, name.clone());
+                }
+                self.type_aliases.insert(full_key, name.clone());
                 self.type_aliases.insert(alias_name, name);
             }
         }
