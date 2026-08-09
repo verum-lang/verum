@@ -71,6 +71,29 @@ Qualified path inline. No mount needed; the full path resolves
 the name. Useful for one-off uses where adding a top-of-file
 mount would be overkill.
 
+```verum
+public mount .constraint.{LayoutConstraint, LayoutConstraint as Constraint};
+```
+
+Re-export form — the producing side. Every mount above brings names
+*in*; a mount carrying a visibility also republishes them *out*, as
+part of the enclosing module's own public surface. The line above is
+`core/term/layout/mod.vr`, and it is what lets a caller write:
+
+```verum
+mount core.term.layout.{Constraint};
+```
+
+without knowing that the type is declared in the `constraint`
+submodule under the name `LayoutConstraint`.
+
+This is how a module keeps a stable public surface while its internal
+file layout changes: files split and move, the re-export line absorbs
+the churn, and callers never edit their mounts. The alias form
+(`X as Y`) publishes under a name of the module's choosing — the same
+type can be both `LayoutConstraint` and, for callers who already have
+a `Constraint` of their own, avoidable.
+
 ## Things to try
 
 1. Replace one of the `outln(...)` calls with `core.io.println(...)`

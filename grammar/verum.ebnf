@@ -529,7 +529,23 @@ verify_strategy =
 context_group_identifier = identifier ;
 
 (* 2.2 Cogs and Modules *)
-mount_stmt       = 'mount' , mount_tree , [ 'as' , identifier ] , ';' ;
+
+(* AUDIT 2026-08-09: `mount_stmt` carried no visibility, yet the parser
+   has always taken one — `parse_item` dispatches `TokenKind::Mount` to
+   `parse_mount(attrs, vis)` with the SAME `parse_visibility` result it
+   passes to every other item, so the full surface applies (`pub`,
+   `public(cog)`, `public(super)`, `public(in path)`). The standard
+   library relies on it: 1826 `public mount` lines in core/.
+
+   A mount with public visibility is a RE-EXPORT — the mounted names
+   join the enclosing module's public surface and are mountable from
+   it, including under an alias:
+
+     public mount .constraint.{LayoutConstraint as Constraint};
+
+   makes `mount core.term.layout.{Constraint};` resolve
+   (core/term/layout/mod.vr:26).                                       *)
+mount_stmt       = visibility , 'mount' , mount_tree , [ 'as' , identifier ] , ';' ;
 mount_tree       = mount_item , [ 'as' , identifier ]
                 | path , '.' , '{' , mount_list , '}'
                 | path , '.' , '*' ;

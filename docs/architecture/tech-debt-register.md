@@ -153,6 +153,23 @@ while closing T0272/T0555/T0165/T0463/T0523/T0424/T0438/T0485).**
   one path comes from THREE unreconciled sources (`ModuleInfo.exports`
   / `module_reexports` / `metadata_known_module_items`). ONE
   module-surface authority belongs in the T0691 stone.
+  **One leg of that drift closed 2026-08-09 (T0691):** the synthesized
+  archive surface was built from the three descriptor families and
+  never from `module_reexports`, so a RENAMED re-export
+  (`public mount .constraint.{LayoutConstraint as Constraint};`)
+  existed in the metadata and nowhere in `ModuleInfo.exports` — the
+  probed-exports E401 gate rejected the mount against a 263-entry
+  surface missing exactly the leaves. The leaves now fold in, with the
+  kind read off the TARGET and an unresolvable leaf skipped rather than
+  guessed (`pipeline/loading.rs`). Paired measurement, same invocation
+  both sides: term/layout 20 failed → 0; sync/mod, text/text,
+  intrinsics/arithmetic, base/mod, collections/list unchanged at 0.
+  The drift is NOT gone — three divergences remain and are named on
+  T0691: variant CASES present in one surface and absent from the
+  other; inherent METHODS published into the surface that three
+  consumers ENUMERATE (`core.term.layout` exports `Rect.top`); and the
+  AST-derived table for project modules, which drops `ItemKind::Mount`
+  entirely via `_ => Ok(())`.
 * **R2 new class, half-closed:** archive entry granularity is the
   DIRECTORY module, so every type in a multi-file stdlib module lost
   its declaring file submodule — v2.12 `origin_module` carry landed
