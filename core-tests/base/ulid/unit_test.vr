@@ -2,7 +2,7 @@
 // core-tests/base/ulid/unit_test.vr
 // =============================================================================
 //
-// Tests for `core.base.ulid` — 128-bit time-ordered IDs encoded in
+// Tests for `core.id.ulid` — 128-bit time-ordered IDs encoded in
 // 26-char Crockford Base32 (no I/L/O/U).
 //
 // Two distinct test groups:
@@ -23,7 +23,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.ulid.{
+mount core.id.ulid.{
     Ulid, UlidError, parse, from_parts,
     ULID_ALPHABET,
 };

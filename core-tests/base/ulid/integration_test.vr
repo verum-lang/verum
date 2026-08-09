@@ -2,7 +2,7 @@
 // core-tests/base/ulid/integration_test.vr
 // =============================================================================
 //
-// Integration tests for `core.base.ulid` — deterministic ULID corpora
+// Integration tests for `core.id.ulid` — deterministic ULID corpora
 // in List<Ulid> / Set<Text> / Map<Text, Text>, parse-validation paths,
 // and 48-bit timestamp-boundary exercises.
 //
@@ -17,7 +17,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.ulid.{Ulid, UlidError, parse, from_parts};
+mount core.id.ulid.{Ulid, UlidError, parse, from_parts};
 mount core.collections.list.List;
 mount core.collections.set.Set;
 

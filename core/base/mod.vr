@@ -58,12 +58,16 @@ public module panic;
 public module env;
 public module data;  // Structured dynamic data
 public module cell;  // Interior mutability (Cell, RefCell)
-public module uuid;  // RFC 4122/9562 UUIDs (v4 random, v7 time-ordered)
-public module snowflake;  // Twitter-style 64-bit time-ordered IDs
-public module nanoid;     // URL-safe short-ID generator (21 chars ≈ 126 bits)
 public module semver;     // Semantic Versioning 2.0.0 parser + comparator
 public module glob;       // Shell-style glob pattern matching (* ** ? [...])
-public module ulid;       // 128-bit time-ordered IDs (26-char Crockford Base32)
+
+// uuid / ulid / nanoid / snowflake are NOT declared here. 597ef22e2 moved
+// them to `core.id` under the ring law: they read a wall clock and draw
+// entropy, so they are not primitives of the language the way Maybe and
+// Result are. The forward declarations outlived the move and promised
+// four modules `core/base/` no longer owns — every compile of every
+// program emitted E_MODULE_HEADER_FORWARD_DECL_NO_SOURCE for them.
+// Mount them from their real home: `core.id.{uuid,ulid,nanoid,snowflake}`.
 public module string_distance;  // Levenshtein + Jaro-Winkler for fuzzy matching
 
 // =============================================================================

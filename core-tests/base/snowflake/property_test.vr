@@ -2,7 +2,7 @@
 // core-tests/base/snowflake/property_test.vr
 // =============================================================================
 //
-// Algebraic-law verification for `core.base.snowflake` — bit-packing
+// Algebraic-law verification for `core.id.snowflake` — bit-packing
 // invariants, parse round-trip across worker / sequence / timestamp
 // dimensions, and worker-id range validation.
 //
@@ -14,7 +14,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.snowflake.{
+mount core.id.snowflake.{
     Snowflake, SnowflakeParts, parse,
     MAX_WORKER, MAX_SEQUENCE, DEFAULT_EPOCH_MS,
     WORKER_SHIFT, TIMESTAMP_SHIFT,

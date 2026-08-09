@@ -7,7 +7,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.uuid.{Uuid};
+mount core.id.uuid.{Uuid};
 mount core.collections.list.List;
 mount core.collections.set.Set;
 

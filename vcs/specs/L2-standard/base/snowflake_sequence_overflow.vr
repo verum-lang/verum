@@ -18,7 +18,7 @@
 // (TIMESTAMP_SHIFT, WORKER_SHIFT, MAX_SEQUENCE, MAX_WORKER) — no wall-clock
 // dependency.
 
-mount core.base.snowflake.{
+mount core.id.snowflake.{
     SnowflakeParts,
     parse,
     WORKER_BITS, SEQUENCE_BITS,

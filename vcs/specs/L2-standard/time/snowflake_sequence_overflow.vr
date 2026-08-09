@@ -6,7 +6,7 @@
 //               sequence counter saturates at 4095, the generator must advance
 //               to the next millisecond before emitting the next ID (#72).
 
-mount core.base.snowflake.{
+mount core.id.snowflake.{
     Snowflake,
     SnowflakeError,
     SnowflakeParts,

@@ -2,12 +2,12 @@
 // core-tests/base/uuid/integration_test.vr
 // =============================================================================
 //
-// Integration tests for `core.base.uuid` — RFC 4122 variant-bits validation,
+// Integration tests for `core.id.uuid` — RFC 4122 variant-bits validation,
 // cross-collection usage, v4/v7 differentiation, and parse edge cases.
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.uuid.{Uuid, v4, v7, nil, parse};
+mount core.id.uuid.{Uuid, v4, v7, nil, parse};
 mount core.collections.list.List;
 mount core.collections.set.Set;
 mount core.collections.map.Map;

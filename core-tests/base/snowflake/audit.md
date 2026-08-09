@@ -61,7 +61,7 @@ type with a 1-field layout vs `SystemTime`'s 2-field layout). Symptom:
 field access out of bounds: field index 1 (offset 8+8 = 16)
 exceeds object data size 8 type_id=137 type='SysTimeOpsInstant'
 backtrace=[SystemTime.timestamp_millis@pc=16
-  <- core.base.snowflake.current_unix_ms@pc=20
+  <- core.id.snowflake.current_unix_ms@pc=20
   <- Snowflake.next_id@pc=6]
 ```
 
@@ -102,7 +102,7 @@ monotonicity property is pinned at `regression_test.vr §D` as
 
 ## §3 — Cross-stdlib usage audit (pending)
 
-Consumers of `core.base.snowflake`:
+Consumers of `core.id.snowflake`:
 
 * `core.action.*` and `core.signal.*` — task IDs / event IDs.
 * `core.database.*` — primary keys (cited in source as the canonical

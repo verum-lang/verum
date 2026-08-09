@@ -2,7 +2,7 @@
 // core-tests/base/nanoid/integration_test.vr
 // =============================================================================
 //
-// Integration tests for `core.base.nanoid` — alphabet-level invariants
+// Integration tests for `core.id.nanoid` — alphabet-level invariants
 // exercised against List<Byte> / Set<Byte> / cross-position layout.
 //
 // Live generation surface (`generate` / `generate_len` /
@@ -13,7 +13,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.nanoid.{
+mount core.id.nanoid.{
     NANOID_ALPHABET, NANOID_DEFAULT_LENGTH, DEFAULT_LEN,
 };
 mount core.collections.list.List;

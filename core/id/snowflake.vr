@@ -1,5 +1,5 @@
 // =============================================================================
-// base/snowflake.vr — Twitter-style 64-bit time-ordered ID generator
+// id/snowflake.vr — Twitter-style 64-bit time-ordered ID generator
 // =============================================================================
 // Layer: 0 (Base)
 // Dependencies: core, core.time

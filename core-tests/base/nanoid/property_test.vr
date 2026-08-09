@@ -2,7 +2,7 @@
 // core-tests/base/nanoid/property_test.vr
 // =============================================================================
 //
-// Algebraic-law verification for `core.base.nanoid` — alphabet-level
+// Algebraic-law verification for `core.id.nanoid` — alphabet-level
 // invariants and length-entropy properties.
 //
 // Live `generate()` properties are pinned `@ignore`'d at
@@ -12,7 +12,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.nanoid.{NANOID_ALPHABET, NANOID_DEFAULT_LENGTH, DEFAULT_LEN};
+mount core.id.nanoid.{NANOID_ALPHABET, NANOID_DEFAULT_LENGTH, DEFAULT_LEN};
 mount core.collections.list.List;
 
 // =============================================================================

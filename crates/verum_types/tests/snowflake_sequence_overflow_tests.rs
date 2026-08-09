@@ -9,7 +9,7 @@
 )]
 //! Snowflake sequence overflow drift guard (#72).
 //!
-//! `core/base/snowflake.vr` defines the Snowflake ID generator.  When the
+//! `core/id/snowflake.vr` defines the Snowflake ID generator.  When the
 //! 12-bit sequence counter saturates at 4095, the generator must advance to
 //! the next millisecond before emitting the next ID.
 //!
@@ -25,7 +25,7 @@
 //!   9. SnowflakeParts type exists with timestamp_ms, worker_id, sequence fields.
 //!  10. VCS spec uses SEQUENCE_BITS, MAX_SEQUENCE, TIMESTAMP_SHIFT, WORKER_BITS.
 
-const SNOWFLAKE_VR: &str = include_str!("../../../core/base/snowflake.vr");
+const SNOWFLAKE_VR: &str = include_str!("../../../core/id/snowflake.vr");
 const SNOWFLAKE_SPEC: &str = include_str!(
     "../../../vcs/specs/L2-standard/time/snowflake_sequence_overflow.vr"
 );

@@ -9,7 +9,7 @@
 )]
 //! ULID case-insensitive parse normalisation drift guard (#73).
 //!
-//! `core/base/ulid.vr` implements the ULID parser with Crockford Base32
+//! `core/id/ulid.vr` implements the ULID parser with Crockford Base32
 //! case normalisation: lowercase input is converted to uppercase before
 //! the alphabet lookup, and the aliases I/L → 1, O → 0 are accepted.
 //!
@@ -23,7 +23,7 @@
 //!   7. ulid.vr has `to_text` method on Ulid.
 //!   8. VCS spec uses `parse`, `UlidError`, `ULID_ALPHABET`.
 
-const ULID_VR: &str = include_str!("../../../core/base/ulid.vr");
+const ULID_VR: &str = include_str!("../../../core/id/ulid.vr");
 const ULID_SPEC: &str = include_str!(
     "../../../vcs/specs/L2-standard/time/ulid_case_insensitive_parse.vr"
 );

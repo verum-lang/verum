@@ -17,7 +17,7 @@
 //   5. from_bytes() with hand-crafted bytes exposes the correct version and
 //      variant via to_bytes()[6] / to_bytes()[8].
 
-mount core.base.uuid.{Uuid, UuidError};
+mount core.id.uuid.{Uuid, UuidError};
 
 fn version_byte(id: &Uuid) -> Int {
     id.version()

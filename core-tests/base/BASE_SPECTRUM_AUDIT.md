@@ -53,7 +53,7 @@ USER code:
   undefined function: Text.new`. But `Text.new()` in USER code with
   uuid.vr's EXACT mount pattern (`mount core.*` + `mount base.{Text}`)
   works perfectly. The stub was baked because at precompile time, when
-  `core.base.uuid` (Layer 0) was compiled, `core.text.Text.new` (higher
+  `core.id.uuid` (Layer 0) was compiled, `core.text.Text.new` (higher
   layer, baked later) was an unresolved forward reference → lenient
   codegen replaced the WHOLE `to_text` body with a Panic
   (`mod.rs:13338`). `new_v4`/`new_v7` similarly stub on

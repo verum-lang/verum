@@ -82,7 +82,7 @@ composition).
 
 ## §3 — Cross-stdlib usage audit (pending)
 
-Consumers of `core.base.nanoid`:
+Consumers of `core.id.nanoid`:
 
 * No other `core/` modules reference this layer today; primarily a
   surface for application code (request IDs, session tokens,

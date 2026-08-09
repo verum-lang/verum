@@ -6,7 +6,7 @@
 //               §4.1.3): byte 8 must have top two bits = 10xx xxxx (0x80 mask),
 //               and byte 6 encodes the version in the top 4 bits (#74).
 
-mount core.base.uuid.{Uuid, UuidError}
+mount core.id.uuid.{Uuid, UuidError}
 mount core.base.{UInt8, Int, Bool, Text, Result, Byte}
 mount core.io.{print}
 

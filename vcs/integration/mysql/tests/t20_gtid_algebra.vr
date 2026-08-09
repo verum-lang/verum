@@ -26,7 +26,7 @@ mount core.database.mysql.{
     parse_gtid_set, format_gtid_set,
     encode_gtid_wire, decode_gtid_wire,
 };
-mount core.base.uuid.Uuid;
+mount core.id.uuid.Uuid;
 
 const SID_A: Text = "00000000-0000-0000-0000-000000000001";
 const SID_B: Text = "00000000-0000-0000-0000-000000000002";

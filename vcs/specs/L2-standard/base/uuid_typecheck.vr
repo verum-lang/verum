@@ -3,10 +3,10 @@
 // @level: L2
 // @tags: base, uuid
 // @timeout: 15000
-// @description: core.base.uuid surface — Uuid constructors / accessors / parse
+// @description: core.id.uuid surface — Uuid constructors / accessors / parse
 
 mount core.*;
-mount core.base.uuid.{Uuid, UuidError};
+mount core.id.uuid.{Uuid, UuidError};
 
 fn nil_version_is_zero() {
     let n = Uuid.nil();

@@ -2,7 +2,7 @@
 // core-tests/base/snowflake/integration_test.vr
 // =============================================================================
 //
-// Integration tests for `core.base.snowflake` — multi-worker ID space
+// Integration tests for `core.id.snowflake` — multi-worker ID space
 // composition, parse + List<UInt64> + Set<UInt64> interaction, and
 // bit-layout extraction via synthetic IDs that bypass the live-clock
 // dispatch defect.
@@ -15,7 +15,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.snowflake.{
+mount core.id.snowflake.{
     Snowflake, SnowflakeError, SnowflakeParts, parse,
     using_default_epoch, with_epoch,
     MAX_WORKER, MAX_SEQUENCE, DEFAULT_EPOCH_MS,

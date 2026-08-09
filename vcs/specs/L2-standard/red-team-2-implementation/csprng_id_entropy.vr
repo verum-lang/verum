@@ -19,8 +19,8 @@
 // MUST differ — the strongest signal that entropy is actually
 // flowing through (not silently zero).
 
-mount core.base.uuid.{Uuid};
-mount core.base.ulid.{Ulid};
+mount core.id.uuid.{Uuid};
+mount core.id.ulid.{Ulid};
 
 // UUID v4: 122 bits of entropy. Two successive draws being
 // byte-identical has probability 2^-122 ≈ 0 — if it happens, the

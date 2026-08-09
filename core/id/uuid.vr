@@ -1,5 +1,5 @@
 // =============================================================================
-// base/uuid.vr - Universally Unique IDentifiers
+// id/uuid.vr - Universally Unique IDentifiers
 // =============================================================================
 // Layer: 0 (Base)
 // Dependencies: core

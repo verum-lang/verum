@@ -2,7 +2,7 @@
 // core-tests/base/ulid/property_test.vr
 // =============================================================================
 //
-// Algebraic-law verification for `core.base.ulid` — parse validation,
+// Algebraic-law verification for `core.id.ulid` — parse validation,
 // alphabet membership, timestamp round-trip via `from_parts`.
 //
 // Live `Ulid.new()` properties (uniqueness, lex order, length) are
@@ -18,7 +18,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.ulid.{Ulid, UlidError, parse, from_parts, ULID_ALPHABET};
+mount core.id.ulid.{Ulid, UlidError, parse, from_parts, ULID_ALPHABET};
 mount core.collections.list.List;
 mount core.collections.set.Set;
 

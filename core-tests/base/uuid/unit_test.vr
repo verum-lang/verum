@@ -2,11 +2,11 @@
 // core-tests/base/uuid/unit_test.vr
 // =============================================================================
 //
-// Tests for `core.base.uuid` — RFC 4122/9562 UUIDs (v4 random, v7 time-ordered).
+// Tests for `core.id.uuid` — RFC 4122/9562 UUIDs (v4 random, v7 time-ordered).
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.uuid.{Uuid, UuidError};
+mount core.id.uuid.{Uuid, UuidError};
 mount core.collections.list.List;
 
 // =============================================================================

@@ -1,5 +1,5 @@
 // =============================================================================
-// base/nanoid.vr — URL-safe short-ID generator (nanoid)
+// id/nanoid.vr — URL-safe short-ID generator (nanoid)
 // =============================================================================
 // Layer: 0 (Base)
 // Dependencies: core, core.base.random

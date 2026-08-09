@@ -2,7 +2,7 @@
 // core-tests/base/snowflake/unit_test.vr
 // =============================================================================
 //
-// Tests for `core.base.snowflake` — Twitter-style 64-bit time-ordered
+// Tests for `core.id.snowflake` — Twitter-style 64-bit time-ordered
 // IDs: 41-bit timestamp + 10-bit worker + 12-bit sequence.
 //
 // Two distinct test groups:
@@ -18,7 +18,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.snowflake.{
+mount core.id.snowflake.{
     Snowflake, SnowflakeError, SnowflakeParts, parse,
     MAX_WORKER, MAX_SEQUENCE, DEFAULT_EPOCH_MS,
     WORKER_BITS, SEQUENCE_BITS, WORKER_SHIFT, TIMESTAMP_SHIFT,

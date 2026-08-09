@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @expect: pass
 
-mount core.base.ulid.{Ulid, UlidError, parse, ULID_ALPHABET};
+mount core.id.ulid.{Ulid, UlidError, parse, ULID_ALPHABET};
 
 fn exercise_ulid() -> Result<(), UlidError> {
     // Generate.

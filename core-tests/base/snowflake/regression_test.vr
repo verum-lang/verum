@@ -2,13 +2,13 @@
 // core-tests/base/snowflake/regression_test.vr
 // =============================================================================
 //
-// Regression pins for `core.base.snowflake`. Every entry ties a
+// Regression pins for `core.id.snowflake`. Every entry ties a
 // previously-observed defect or canonical-shape contract to a single
 // executable @test so re-regressions surface as named test failures.
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.snowflake.{
+mount core.id.snowflake.{
     Snowflake, SnowflakeError, SnowflakeParts, parse,
     MAX_WORKER, MAX_SEQUENCE, DEFAULT_EPOCH_MS,
     WORKER_SHIFT, TIMESTAMP_SHIFT,

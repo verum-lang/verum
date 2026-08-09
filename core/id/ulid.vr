@@ -1,5 +1,5 @@
 // =============================================================================
-// base/ulid.vr — Universally Unique Lexicographically Sortable Identifier
+// id/ulid.vr — Universally Unique Lexicographically Sortable Identifier
 // =============================================================================
 // Layer: 0 (Base)
 // Dependencies: core, core.base.random, core.time.instant

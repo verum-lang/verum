@@ -2,13 +2,13 @@
 // core-tests/base/ulid/regression_test.vr
 // =============================================================================
 //
-// Regression pins for `core.base.ulid`. Each entry ties a previously-
+// Regression pins for `core.id.ulid`. Each entry ties a previously-
 // observed defect or canonical-shape contract to a single @test so
 // re-regressions surface as named test failures.
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.ulid.{
+mount core.id.ulid.{
     Ulid, UlidError, parse, from_parts,
     ULID_ALPHABET,
 };

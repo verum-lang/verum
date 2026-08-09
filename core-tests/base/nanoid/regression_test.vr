@@ -2,13 +2,13 @@
 // core-tests/base/nanoid/regression_test.vr
 // =============================================================================
 //
-// Regression pins for `core.base.nanoid`. Each entry ties a previously-
+// Regression pins for `core.id.nanoid`. Each entry ties a previously-
 // observed defect or canonical-shape contract to a single @test so
 // re-regressions surface as named test failures.
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.nanoid.{
+mount core.id.nanoid.{
     generate, generate_len, generate_with_alphabet,
     NANOID_ALPHABET, NANOID_DEFAULT_LENGTH, DEFAULT_LEN,
 };

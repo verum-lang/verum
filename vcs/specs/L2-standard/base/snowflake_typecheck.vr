@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @expect: pass
 
-mount core.base.snowflake.{
+mount core.id.snowflake.{
     Snowflake, SnowflakeError, SnowflakeParts,
     parse,
     WORKER_BITS, SEQUENCE_BITS, MAX_WORKER, MAX_SEQUENCE,

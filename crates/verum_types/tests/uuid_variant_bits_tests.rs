@@ -9,7 +9,7 @@
 )]
 //! UUID variant-bits RFC 4122 drift guard (#74).
 //!
-//! `core/base/uuid.vr` generates UUIDs with correct variant (byte 8 top two
+//! `core/id/uuid.vr` generates UUIDs with correct variant (byte 8 top two
 //! bits = 10xx) and version stamps (byte 6 top four bits = version nibble).
 //!
 //! This drift guard pins:
@@ -24,7 +24,7 @@
 //!   9. uuid.vr has `to_text` method (36-char hyphenated format).
 //!  10. VCS spec uses UuidError, Uuid.parse, Uuid.nil.
 
-const UUID_VR: &str = include_str!("../../../core/base/uuid.vr");
+const UUID_VR: &str = include_str!("../../../core/id/uuid.vr");
 const UUID_SPEC: &str = include_str!(
     "../../../vcs/specs/L2-standard/time/uuid_variant_bits_rfc4122.vr"
 );

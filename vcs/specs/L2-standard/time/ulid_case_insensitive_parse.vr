@@ -7,7 +7,7 @@
 //               must parse identically to uppercase, and the aliases
 //               I/L → 1 and O → 0 must be accepted.
 
-mount core.base.ulid.{Ulid, UlidError, ULID_ALPHABET, parse}
+mount core.id.ulid.{Ulid, UlidError, ULID_ALPHABET, parse}
 mount core.base.{UInt64, UInt8, Int, Bool, Text, Result, Byte}
 mount core.io.{print}
 

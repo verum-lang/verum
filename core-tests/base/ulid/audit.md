@@ -89,7 +89,7 @@ never `Ulid.new()`. Live-clock pin at `regression_test.vr §B` as
 
 ## §3 — Cross-stdlib usage audit (pending)
 
-Consumers of `core.base.ulid`:
+Consumers of `core.id.ulid`:
 
 * `core.action.*` / `core.signal.*` — event / task IDs.
 * `core.database.*` — primary key candidate when 128-bit uniqueness is

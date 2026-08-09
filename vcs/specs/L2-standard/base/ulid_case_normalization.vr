@@ -23,7 +23,7 @@
 //   5. Mixed-case input is accepted.
 //   6. Canonical to_text() output is always uppercase.
 
-mount core.base.ulid.{Ulid, UlidError, parse};
+mount core.id.ulid.{Ulid, UlidError, parse};
 
 fn eq_ulid(a: &Ulid, b: &Ulid) -> Bool {
     a.high == b.high && a.low == b.low
