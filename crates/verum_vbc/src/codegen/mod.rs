@@ -22845,6 +22845,20 @@ impl VbcCodegen {
                             .insert(alias_name.clone(), full);
                     }
                 }
+                // T0691 census: the module-aware fix for alias shadowing
+                // hinges on whether EVERY alias carries a module-qualified
+                // key. If some exist only under a bare name, an early
+                // return in the mount-provenance block would stop
+                // resolving them — the regression that fix is meant to
+                // prevent. Dump the keys and answer it with data.
+                if std::env::var("VERUM_TRACE_ALIAS_KEYS").is_ok() {
+                    eprintln!(
+                        "[aliaskey] key='{}' -> '{}' qualified={}",
+                        alias_name,
+                        name,
+                        alias_name.contains('.')
+                    );
+                }
                 self.type_aliases.insert(alias_name, name);
             }
         }
