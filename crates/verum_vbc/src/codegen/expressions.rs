@@ -4656,11 +4656,51 @@ impl VbcCodegen {
                     t.starts_with('*') || t.starts_with("&unsafe")
                 })
                 .unwrap_or(false);
-            if is_probe_shape || is_static_raw_method {
+            // `(… as *mut T)` / `(… as *const T)` operands — the guard
+            // idiom `&mut *(&self.field as *const T as *mut T)`. The
+            // cast's OWN target type names a raw pointer, so the single
+            // compile IS the fold result: same admission contract as the
+            // static-raw method arm. Without this the shape fell to the
+            // generic path, which DEREFERENCES the address into a
+            // register copy and returns a register-ref into the dying
+            // frame — every write through an RwLock/Mutex guard landed
+            // in that copy and vanished (`{ let mut w =
+            // l.write().unwrap(); *w = 42; }` then read → old value).
+            // Gated to side-effect-free operand chains (paths, fields,
+            // address-of, nested casts of those) so the fall-through
+            // recompile stays impossible by construction, not by luck.
+            fn idempotent_cast_chain(e: &verum_ast::Expr) -> bool {
+                match &e.kind {
+                    ExprKind::Path(_) | ExprKind::Field { .. } => true,
+                    ExprKind::Cast { expr, .. } => idempotent_cast_chain(expr),
+                    // The guard idiom writes the cast PARENTHESIZED —
+                    // `&mut *(&self.f as *const T as *mut T)` — and the
+                    // parser keeps the grouping as ExprKind::Paren. The
+                    // first landing of this fold matched Cast directly,
+                    // never fired, and the emission stayed byte-identical:
+                    // a wrapper node is part of the shape, not noise.
+                    ExprKind::Paren(inner) => idempotent_cast_chain(inner),
+                    ExprKind::Unary {
+                        op: UnOp::Ref | UnOp::RefMut,
+                        expr,
+                    } => idempotent_cast_chain(expr),
+                    _ => false,
+                }
+            }
+            let mut cast_probe: &verum_ast::Expr = ptr_expr;
+            while let ExprKind::Paren(inner) = &cast_probe.kind {
+                cast_probe = inner;
+            }
+            let is_raw_cast = matches!(
+                &cast_probe.kind,
+                ExprKind::Cast { ty, .. }
+                    if matches!(ty.kind, verum_ast::ty::TypeKind::Pointer { .. } | verum_ast::ty::TypeKind::VolatilePointer { .. })
+            ) && idempotent_cast_chain(cast_probe);
+            if is_probe_shape || is_static_raw_method || is_raw_cast {
                 let ptr_reg = self
                     .compile_expr(ptr_expr)?
                     .or_internal("&*p: pointer operand has no value")?;
-                if self.ctx.is_raw_pointer(ptr_reg) || is_static_raw_method {
+                if self.ctx.is_raw_pointer(ptr_reg) || is_static_raw_method || is_raw_cast {
                     // `&*p ≡ p` — `ptr_reg` already holds the heap-anchored
                     // pointer, which is the exact `&T` the surrounding code
                     // expects and which survives every frame boundary.
@@ -4676,7 +4716,7 @@ impl VbcCodegen {
                     // element-repr carried facts on the buffer (see
                     // task #48 notes / [[session_2026-07-11_glob_mount_
                     // ctor_pattern_rigidity_47]]).
-                    if is_static_raw_method {
+                    if is_static_raw_method || is_raw_cast {
                         self.ctx.mark_raw_pointer(ptr_reg);
                     }
                     return Ok(Some(ptr_reg));
