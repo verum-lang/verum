@@ -75,3 +75,43 @@ fn regression_rwlock_writers_waiting_initial_zero_via_unpoisoned_fresh_state() {
     let l = RwLock.new(0);
     assert(!l.is_poisoned());
 }
+
+// =============================================================================
+// READING AND WRITING — the operations the type exists for (added 2026-08-09)
+// =============================================================================
+//
+// The 28 tests in this family never called `read`, `write`, `try_read`
+// or `try_write` — not once. Construction, poisoning, `Default` and
+// `Debug` were covered; taking the lock was not. That is the same shape
+// that let `sync/mutex` stand at 39/39 green while `Mutex.lock()` never
+// succeeded, so it is closed here before it hides a real defect.
+//
+// These PASS today (measured, b174 Tier-0): `RwLock` holds a scalar
+// atomic and works, unlike `Mutex`, which composes a `FutexLock` record.
+// They exist so that stops being an accident nobody would notice.
+
+@test
+fn regression_rwlock_read_succeeds_on_a_fresh_lock() {
+    let l: RwLock<Int> = RwLock.new(5);
+    let g = l.read();
+    assert(g is Ok(_), "read() on a freshly created RwLock must succeed");
+}
+
+@test
+fn regression_rwlock_write_succeeds_when_uncontended() {
+    let l: RwLock<Int> = RwLock.new(5);
+    let g = l.write();
+    assert(g is Ok(_), "write() on an uncontended RwLock must succeed");
+}
+
+@test
+fn regression_rwlock_write_is_visible_to_a_later_read() {
+    let l: RwLock<Int> = RwLock.new(1);
+    {
+        let mut w = l.write().unwrap();
+        *w = 42;
+    }
+    let r = l.read().unwrap();
+    let seen: Int = *r;
+    assert_eq(seen, 42, "a write through the guard must be visible to a later read");
+}
