@@ -92,3 +92,49 @@ fn regression_mutex_drop_does_not_auto_poison() {
     // by inspection that it remains false.
     assert(!m.is_poisoned());
 }
+
+// =============================================================================
+// LOCKING ITSELF — the operation the type exists for (added 2026-08-09)
+// =============================================================================
+//
+// This family was 39/39 green and INVENTORY recorded it as "stable"
+// while `Mutex.lock()` never succeeded: NOT ONE of the 39 tests called
+// `.lock()` or `.try_lock()`. Everything around the lock was covered —
+// construction, poisoning flags, Default, Debug — and the lock was not.
+//
+// Measured on b174 (Tier-0 interpreter), freshly constructed mutex:
+//     Mutex.new(5).lock()      -> Err   (unwrap prints "Err: {22}")
+//     Mutex.new(5).try_lock()  -> Err
+// while every flat-atomic sibling works (`RwLock.read()` -> Ok), and the
+// same nested-record shape rebuilt in user code works. `Mutex` is the
+// only primitive in core/sync composing a record (`futex: FutexLock`)
+// rather than holding a scalar atomic.
+//
+// These pins therefore FAIL today, on purpose. A green suite that never
+// exercises the primary operation is worth less than a red one that
+// does; when the defect is fixed they flip without being touched.
+
+@test
+fn regression_mutex_lock_succeeds_on_a_fresh_mutex() {
+    let m: Mutex<Int> = Mutex.new(5);
+    let guard = m.lock();
+    assert(guard is Ok(_), "lock() on a freshly created mutex must succeed");
+}
+
+@test
+fn regression_mutex_try_lock_succeeds_when_uncontended() {
+    let m: Mutex<Int> = Mutex.new(5);
+    let guard = m.try_lock();
+    assert(guard is Ok(_), "try_lock() on an uncontended mutex must succeed");
+}
+
+@test
+fn regression_mutex_guard_writes_are_visible_after_release() {
+    let m: Mutex<Int> = Mutex.new(1);
+    {
+        let mut g = m.lock().unwrap();
+        *g = 42;
+    }
+    let g2 = m.lock().unwrap();
+    assert_eq(*g2, 42, "a write through the guard must survive release");
+}
