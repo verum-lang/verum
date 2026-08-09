@@ -40028,6 +40028,33 @@ impl VbcCodegen {
         {
             return (index as i64) * 8;
         }
+        // The layout table is keyed by SIMPLE type name, but callers hand
+        // over whatever inference produced — `&RwLock<T>`, `&mut GBox<Int>`,
+        // `&unsafe Cell`. The un-normalized miss then hit the silent
+        // 0 fallback below, and 0 is not a refusal: it is the BYTE OFFSET
+        // OF FIELD 0. Every address-of on a generic record's non-first
+        // field wrote into whatever lived in slot 0 — measured on
+        // `RwLock<T>`: `*guard = 42` corrupted `state` (the first field,
+        // an AtomicInt), and the guard's Drop then panicked with
+        // "method 'AtomicInt.store' not found on receiver of runtime
+        // kind Int". A concrete receiver with the same shape computed 16
+        // and worked, which is what kept this invisible: probes whose
+        // `data` field sat at index 0 succeeded FOR THE WRONG REASON.
+        let base = type_name
+            .trim_start_matches("&unsafe mut ")
+            .trim_start_matches("&unsafe ")
+            .trim_start_matches("&checked mut ")
+            .trim_start_matches("&checked ")
+            .trim_start_matches("&mut ")
+            .trim_start_matches('&')
+            .trim();
+        let base = Self::strip_generic_args(base);
+        if base != type_name
+            && let Some(fields) = self.type_field_layouts.get(base)
+            && let Some(index) = fields.iter().position(|f| f == field_name)
+        {
+            return (index as i64) * 8;
+        }
         // Field or type not found — return 0 as a conservative fallback.
         // This can happen for types not yet registered (e.g., generic
         // instantiations or externally-defined types).
