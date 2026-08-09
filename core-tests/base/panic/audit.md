@@ -100,6 +100,55 @@ primitives + Location/PanicInfo record surface. Most pass; only the
 2 `Formatter`-using tests (`test_location_debug_format` /
 `test_location_display_format`) hit §2.1.
 
+> **STALE as of 2026-07-19** — see §2.3. §2.2's "most pass" was
+> measured before three interpreter/typechecker defects landed in the
+> tree; the suite was 114F/27P when re-measured.
+
+### 2.3 Re-measurement 2026-07-19 (T0148): three roots, all fixed
+
+Measured `verum test --interp --filter base/panic`: **114 failed /
+27 passed / 4 ignored**. Not a panic-module defect — three
+infrastructure roots, none of them stdlib-side:
+
+| Class | Count | Root |
+|---|---|---|
+| file-wide typecheck failure | 93 | GENERIC-PARAM-LEAK |
+| escaped panic | 20 | CATCH-UNWIND-CLOSURE-1 + PANIC-CLASS-1 |
+| `ProcessExit(101)` | 1 | PANIC-IMPL-EXIT-1 |
+
+**GENERIC-PARAM-LEAK** (`verum_types`, `infer/decls.rs`) —
+`register_type_declaration_body` leaked a declaration's generic
+parameter NAMES into the GLOBAL type table whenever the body-shape
+match `?`-returned early, because the cleanup ran only on the success
+path. Import callers deliberately swallow registration errors, so the
+leak was silent. Mounting `CatchResult` (a generic alias) alone made
+bare `T` resolve as a nominal type — every test in the file then failed
+typecheck at `assert_some(maybe)` with "expected 'T', found 'Int'".
+Fixed: cleanup is unconditional (run-body-then-cleanup closure).
+
+**CATCH-UNWIND-CLOSURE-1** (`verum_vbc`, interpreter) — the Tier-0
+`catch_unwind` intercept accepted only a bare `FuncRef`, but codegen has
+emitted `NewClosure` heap objects for every lambda since #110, so the
+intercept never fired and every panic escaped. The compiled body's
+`TryBegin` cannot help: it handles explicit `Throw`, and the dispatch
+loop never consults `exception_handlers` when a handler returns an
+error. Fixed: both callable shapes accepted.
+
+**PANIC-CLASS-1** — the intercept caught only `InterpreterError::Panic`,
+while the panic surface also lowers to `AssertionFailed` (builtin
+`assert` — the dominant shape here: every `assert_panics(|| assert(...))`)
+and `Unreachable` (builtin `unreachable()`). All three are now catchable;
+runtime faults and `ProcessExit` stay uncatchable by design.
+
+**PANIC-IMPL-EXIT-1** — `panic_impl` bottoms out in `exit_process(101)`,
+so `panic_at` / `resume_unwind` produced `ProcessExit(101)`: uncatchable
+AND lethal to the whole per-file test batch (every queued sibling
+reported as TEST-RUNNER-ISOLATION-1 quarantine collateral, T0394).
+Fixed: intercepted to raise a real `Panic` carrying the same
+`msg at file:line:column` rendering.
+
+Pins: `crates/verum_vbc/tests/catch_unwind_closure_pin.rs`.
+
 ## §3 — Cross-stdlib usage audit (pending)
 
 Consumers of `core.base.panic`:

@@ -74,6 +74,54 @@ comment pointing to `regression_test.vr §A`. Defect is in either:
 runs, OR (b) `args_count` reading from a different source than
 `arg(i)`.
 
+> **Diagnosis SUPERSEDED 2026-07-19 (T0148).** Neither (a) nor (b): the
+> Tier-0 `arg` intercept
+> (`verum_vbc … handlers/env_runtime.rs::intercept_arg`) reads
+> `std::env::args()` directly and already wraps in `Maybe` — driven
+> standalone it returns `Some(argv0)` with `args_count() == 4`. The real
+> defect was MOUNT-FN-AUTHORITY-1 (§2.3): the call never reached the
+> intercept because `arg` failed to RESOLVE at codegen. Re-verify the two
+> `@ignore`'d pins (`test_arg_first`,
+> `test_args_first_matches_arg_zero`) against a binary carrying the §2.3
+> fix and un-ignore them if green.
+
+### 2.3 MOUNT-FN-AUTHORITY-1: `arg` unresolvable → whole file down (2026-07-19)
+
+Measured `verum test --interp --filter base/env`: **94 failed / 3
+passed**. 93 of the 94 were one compile error taking the whole file
+down:
+
+```
+VBC codegen: UndefinedFunction("arg") (in function test_arg_first)
+```
+
+Minimal repro — two mounts, no test harness:
+
+```verum
+mount core.base.{arg};
+mount core.{List};
+fn main() { arg(0); }   // undefined function: arg
+```
+
+The bare-name function slot is last-wins across passive archive/module
+loads. `mount core.base.{arg}` binds `arg` authoritatively, then
+`mount core.{List}` pulls the whole `core` re-export tree, flooding
+`core.cli.parser.arg` / `core.shell.arg` / `core.math.Complex.arg` /
+`core.io.Command.arg` over the slot. The call-site chain's
+ambiguity-guarded suffix scan then sees several free-fn candidates and
+refuses to guess — the diagnostic itself reports "exact key present:
+true" while failing.
+
+Fixed in `verum_vbc` codegen: `ctx.mounted_fns` carries the explicit
+mount intent as alias → resolved registry KEY (name-driven, because
+archive fn ids are renumbered per entry), consulted after the
+lexical/unit-decl layers and before the flood-prone global layers.
+Function-side mirror of `mounted_types` / MOUNT-TYPE-AUTHORITY-1.
+
+The 1 remaining non-collateral failure is
+`integration_temp_dir_returns_path` — `StackOverflow { depth: 16384 }`,
+a separate root, unmeasured post-fix.
+
 ### 2.2 Pre-existing tests largely green
 
 Most other env tests (var/var_opt/set_var/remove_var/temp_dir/
