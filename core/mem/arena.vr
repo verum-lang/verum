@@ -116,7 +116,7 @@
 module core.mem.arena;
 
 mount super.header.{AllocationHeader, HEADER_SIZE, FLAG_ARENA};
-mount core.intrinsics.runtime.mem_raw.{memcpy, memset, memzero, load_i64, store_i64};
+mount core.intrinsics.runtime.mem_raw.{memcpy_addr, memset_addr, memzero, load_i64, store_i64};
 
 // Platform-level raw allocation intrinsics
 mount core.intrinsics.runtime.os.{__alloc_raw, __alloc_zeroed_raw, __dealloc_raw};
