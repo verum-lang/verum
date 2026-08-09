@@ -720,10 +720,17 @@ implement FutexCondvar {
 // (different field sets). One alias per declaration, the
 // libsystem.vr `SockaddrIn = DarwinSockaddrIn` canon.
 // =============================================================================
+// Deliberately NOT aliased to the bare names `Mutex` / `Condvar` /
+// `SpinLock` / `Once`. Those names belong to core.sync, and
+// `resolve_type_alias` is keyed by BARE NAME across the whole stdlib:
+// with the alias present, `m.lock()` on a `core.sync.mutex.Mutex<Int>`
+// compiled to `CALL_G DarwinMutex.lock` — a different type — so every
+// Mutex/SpinLock/Once/Condvar operation silently did nothing at
+// Tier-0, taking the async task queue, the signal registry and the
+// global tracer down with it. Measured with `verum build --emit-vbc`.
+// The aliases had ZERO consumers (no direct mount, no glob on
+// `thread.*`), so the collision bought nothing. Reach for the
+// platform types by their own names: DarwinMutex, LinuxMutex, ...
 public type ThreadError = DarwinThreadError;
 public type Thread = DarwinThread;
 public type ThreadFn = DarwinThreadFn;
-public type Mutex = DarwinMutex;
-public type Condvar = DarwinCondvar;
-public type SpinLock = DarwinSpinLock;
-public type Once = DarwinOnce;
