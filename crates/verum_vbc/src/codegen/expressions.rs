@@ -13147,7 +13147,44 @@ impl VbcCodegen {
                                         .unwrap_or_else(|| format!("{}.{}", base_type, method.name))
                                 }
                             } else {
-                                method.name.to_string()
+                                // Case 1a-0 — ALIASED TYPE HEAD, not a
+                                // variable. `IoError.new(..)` where IoError
+                                // is core.io's alias of StreamError:
+                                // `variable_type_names` has no entry (the
+                                // receiver is a type name, not a value), so
+                                // this arm produced the BARE method name;
+                                // devirt then skipped it (no dot) and the
+                                // emitted `CallM "new"` was bound at run
+                                // time by REGISTRATION ORDER — in
+                                // core-tests/io/mod that picked the free fn
+                                // `new` of core.security.transparency_log,
+                                // and the alias test died on a
+                                // TransparencyLog receiver while minimal
+                                // probes passed by luck. If the head is not
+                                // a value and its alias resolves to a
+                                // DIFFERENT type, `Alias.method` means
+                                // `Target.method` — qualify and let devirt
+                                // resolve it (it sees lazily-loaded archive
+                                // methods: the neighbouring `.kind()` call
+                                // already emits a static
+                                // `CALL StreamError.kind` through exactly
+                                // that route). Two earlier attempts died
+                                // inert in branches this call never takes
+                                // (the is_type_ns static lookup; the
+                                // stage-5 stub) — the tpcall trace proves
+                                // THIS is the taken branch.
+                                let resolved = self.resolve_type_alias(&var_name);
+                                if self.ctx.get_var_reg(var_name.as_str()).is_err()
+                                    && resolved != var_name
+                                {
+                                    format!(
+                                        "{}.{}",
+                                        VbcCodegen::strip_generic_args(&resolved),
+                                        method.name
+                                    )
+                                } else {
+                                    method.name.to_string()
+                                }
                             }
                         }
                     }
@@ -14301,6 +14338,35 @@ impl VbcCodegen {
                         &method_name,
                         args,
                         Some(&type_name),
+                    )?));
+                }
+                return Ok(Some(self.compile_static_method_call(&func_info, args)?));
+            }
+        }
+        // ALIASED head retry. `IoError.new(..)` where IoError is core.io's
+        // alias of StreamError: the raw join above ("IoError.new") names no
+        // function, and the fall-through ended in a dynamic CallM whose
+        // method the runtime bound by REGISTRATION ORDER — in
+        // core-tests/io/mod that picked the free fn `new` of
+        // core.security.transparency_log and the alias test died on a
+        // TransparencyLog receiver. `resolve_type_alias` answers correctly
+        // for mounted aliases since 7fd7f34d8; retry the SAME lookup under
+        // the resolved head, with the SAME arity/variant/static handling —
+        // a variant alias (`type TextResult = Result` + `TextResult.Ok(x)`)
+        // must keep emitting MakeVariant, and the hint stays the RESOLVED
+        // parent, because variant metadata registers under the target's
+        // name, not the alias's.
+        let resolved_head = self.resolve_type_alias(&type_name);
+        if resolved_head != type_name {
+            let resolved_qualified = format!("{}.{}", resolved_head, method_name);
+            if let Some(func_info) = self.ctx.lookup_function(&resolved_qualified).cloned()
+                && func_info.param_count == args.len()
+            {
+                if func_info.variant_tag.is_some() {
+                    return Ok(Some(self.compile_variant_constructor_hinted(
+                        &method_name,
+                        args,
+                        Some(&resolved_head),
                     )?));
                 }
                 return Ok(Some(self.compile_static_method_call(&func_info, args)?));
