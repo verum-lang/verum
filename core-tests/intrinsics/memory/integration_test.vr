@@ -13,7 +13,7 @@
 mount core.prelude.*;
 mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
 mount core.intrinsics.runtime.mem_raw.{
-    load_byte, store_byte, memset as raw_memset, memcmp as raw_memcmp, strlen,
+    load_byte, store_byte, memset_addr as raw_memset, memcmp_addr as raw_memcmp, strlen,
 };
 mount core.intrinsics.memory.{
     memset, memcpy, memmove, memcmp, ptr_to_ref, ptr_to_mut_ref,
