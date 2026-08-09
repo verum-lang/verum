@@ -274,6 +274,22 @@ pub fn dump_function(archive: &Path, needle: &str) -> Result<()> {
         .map_err(|e| CliError::Custom(format!("cannot read archive: {e}")))?;
 
     let mut found = 0usize;
+    // Slice the module disassembly to one function. `disassemble_module`
+    // marks each body with `; fn <name>(`, so a section runs to the next
+    // such marker. Computed lazily and once per module — a stdlib module
+    // disassembles to megabytes and most modules match nothing.
+    fn section_for<'a>(disasm: &'a str, name: &str) -> Option<&'a str> {
+        let marker = format!("; fn {}(", name);
+        let start = disasm.find(&marker)?;
+        let rest = &disasm[start..];
+        let end = rest
+            .get(1..)
+            .and_then(|tail| tail.find("\n; fn "))
+            .map(|i| i + 1)
+            .unwrap_or(rest.len());
+        Some(&rest[..end])
+    }
+
     for (entry, data) in arch.index.iter().zip(arch.module_data.iter()) {
         let module = match verum_vbc::deserialize::deserialize_module(data) {
             Ok(m) => m,
@@ -287,12 +303,16 @@ pub fn dump_function(archive: &Path, needle: &str) -> Result<()> {
                 continue;
             }
         };
+        let mut disasm: Option<String> = None;
         for f in &module.functions {
             let name = module.strings.get(f.name).unwrap_or("<unnamed>");
             if !name.contains(needle) {
                 continue;
             }
             found += 1;
+            if disasm.is_none() {
+                disasm = Some(verum_vbc::disassemble::disassemble_module(&module));
+            }
             let start = f.bytecode_offset as usize;
             let end = start.saturating_add(f.bytecode_length as usize);
             println!(
@@ -328,6 +348,38 @@ pub fn dump_function(archive: &Path, needle: &str) -> Result<()> {
                     end,
                     module.bytecode.len()
                 ),
+            }
+            // Hex answers "is the byte there"; the decoded form answers
+            // "which instruction is it", and hand-decoding a stream whose
+            // operand widths vary per opcode is how one mistakes an
+            // operand byte for an opcode.
+            match disasm.as_deref().and_then(|d| section_for(d, name)) {
+                Some(sec) => {
+                    println!("  {}", "— decoded —".dimmed());
+                    for line in sec.lines() {
+                        println!("  {line}");
+                    }
+                }
+                None => println!("  {}", "(no decoded section)".dimmed()),
+            }
+            // Say plainly what an empty decode means here, because it
+            // means NOTHING about this function. `deserialize_module`
+            // restores raw `bytecode` and does not rebuild the decoded
+            // instruction list, so the disassembler prints "(no decoded
+            // instructions)" for EVERY archive-loaded function —
+            // verified against three, including one measured to work.
+            // Without this line the next reader takes it for evidence.
+            if disasm
+                .as_deref()
+                .and_then(|d| section_for(d, name))
+                .is_some_and(|s| s.contains("(no decoded instructions)"))
+            {
+                println!(
+                    "  {}",
+                    "note: archive modules carry raw bytecode only — an empty decode is \
+                     universal here and says nothing about this function; read the hex"
+                        .dimmed()
+                );
             }
         }
     }
