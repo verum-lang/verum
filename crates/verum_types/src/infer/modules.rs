@@ -3387,6 +3387,76 @@ impl TypeChecker {
                             module_path.as_str(), item_name, available_items.len()
                         );
                     }
+                    // …but only when the item is genuinely ABSENT, and
+                    // when it is present, BIND it rather than just staying
+                    // quiet.
+                    //
+                    // This arm is reached because the MODULE is not in the
+                    // registry — normal for archive modules — and it used
+                    // to report the ITEM missing without ever testing the
+                    // surface it fetches for the hint. The message
+                    // contradicted itself:
+                    //     error<E401>: cannot find `Mutex` in module
+                    //         `core.sync.prelude`
+                    //       note: … exports: AtomicBool, AtomicInt,
+                    //         Mutex, MutexGuard, RwLock, Send, Sync
+                    // `core/sync/mod.vr:154` re-exports it via `public
+                    // mount super.Mutex`, so the name is real and the
+                    // mount resolved fine before this session. Cost:
+                    // sync/mod 0 -> 8, term/layout 0 -> 20.
+                    //
+                    // Testing membership alone is NOT enough — returning
+                    // Ok() there accepts the mount and registers nothing,
+                    // turning E401 into `E101 type not found:
+                    // PreludeMutex` at the use site. That is the silent
+                    // no-op class, so the item is loaded from the same
+                    // metadata surface that just proved it exists.
+                    let present = available_items.iter().any(|n| n.as_str() == item_name);
+                    if !present {
+                        return Err(TypeError::ImportItemNotFound {
+                            item_name: Text::from(item_name),
+                            module_path: module_path.clone(),
+                            available_items,
+                            span,
+                        });
+                    }
+                    // Resolve an ALIASED re-export to its true name before
+                    // loading.
+                    //
+                    // `core/term/layout/mod.vr:25` publishes
+                    //     public mount .constraint.{LayoutConstraint,
+                    //                              LayoutConstraint as Constraint, …};
+                    // because bare `Constraint` collided across three
+                    // domains. Membership then succeeds — `Constraint` is
+                    // in the surface — while a load keyed on
+                    // `core.term.layout.Constraint` finds nothing, since
+                    // metadata files the type under `LayoutConstraint`.
+                    // That left term/layout at 20 failures after the
+                    // sync/mod half of this fix landed.
+                    //
+                    // `module_reexports` already carries the mapping as
+                    // (local_name, true_name, source_module) — the same
+                    // shape `import_item_from_module_with_alias` consumes.
+                    let mut load_name: String = item_name.to_string();
+                    let mut canonical = module_path.as_str().to_string();
+                    if let Maybe::Some(md) = &self.core_metadata.clone()
+                        && let Some(leaves) = md.module_reexports.get(module_path)
+                        && let Some((_, true_name, src)) = leaves
+                            .iter()
+                            .find(|(local, _, _)| local.as_str() == item_name)
+                    {
+                        load_name = true_name.as_str().to_string();
+                        if !src.as_str().is_empty() {
+                            canonical = src.as_str().to_string();
+                        }
+                    }
+                    if let Some(ty) =
+                        self.ensure_mounted_type_loaded_qualified(&load_name, &canonical)
+                    {
+                        let bind = local_name.unwrap_or(item_name);
+                        self.ctx.define_type(bind, ty);
+                        return Ok(());
+                    }
                     return Err(TypeError::ImportItemNotFound {
                         item_name: Text::from(item_name),
                         module_path: module_path.clone(),
