@@ -189,3 +189,46 @@ fn regression_ptr_is_aligned_to_returns_bool_not_nil() {
     assert(aligned == true);
     cbgr_deallocate(a);
 }
+
+// =============================================================================
+// Address-of a field through a REFERENCE receiver (added 2026-08-09, T0108)
+// =============================================================================
+//
+// `&expr.field` lowers to the StructFieldAddr sub-opcode, which used to
+// accept only a bare Pointer or Int receiver. A `&T` parameter arrives
+// as a CBGR REGISTER REFERENCE instead — measured, TAG_UNIT header with
+// a non-zero payload (`0x7ffb800022000002`) — so every address-of
+// through a reference was refused:
+//
+//     InvalidOperand: StructFieldAddr: receiver register r0 holds
+//                     Some(3), expected Pointer or Int
+//
+// while the field READ path decoded the very same bits correctly,
+// because it runs `cbgr_helpers::resolve_arg_value` first. Both sites
+// were instrumented and handed byte-identical values; the fix makes the
+// address path use that one resolver rather than a second private test.
+//
+// No existing test covered this shape, which is why it survived: the
+// suite exercised address-of only on OWNED receivers.
+
+type FieldAddrPair is { a: Int, b: Int };
+
+fn field_addr_write_through_ref(p: &FieldAddrPair, x: Int) {
+    unsafe { *(&p.b as *const Int as *mut Int) = x; }
+}
+
+@test
+fn regression_address_of_field_through_a_reference_writes() {
+    let p = FieldAddrPair { a: 7, b: 1 };
+    field_addr_write_through_ref(&p, 42);
+    assert_eq(p.b, 42, "a write through &p.field must land in the referent");
+    assert_eq(p.a, 7, "and must not disturb the neighbouring field");
+}
+
+@test
+fn regression_address_of_field_still_works_on_an_owned_receiver() {
+    let mut owned = FieldAddrPair { a: 1, b: 2 };
+    unsafe { *(&owned.a as *const Int as *mut Int) = 9; }
+    assert_eq(owned.a, 9, "the owned-receiver path must keep working");
+    assert_eq(owned.b, 2, "and must not disturb the neighbouring field");
+}

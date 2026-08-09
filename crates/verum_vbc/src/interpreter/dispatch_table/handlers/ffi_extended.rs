@@ -1081,6 +1081,32 @@ fn ffi_extended_body(
             let field_offset = (offset_hi << 8) | offset_lo;
 
             let obj_val = state.get_reg(obj_reg);
+
+            // Resolve the receiver the SAME WAY `handle_get_field` does.
+            //
+            // A `&T` parameter arrives as a CBGR register reference, not
+            // as a bare pointer: measured, both sites are handed the
+            // identical value (`0x7ffb800022000002` — TAG_UNIT header
+            // with a non-zero payload) and only the field-READ path
+            // decoded it, because it runs `resolve_arg_value` first
+            // while this one went straight to `is_ptr() / is_int()`.
+            // The consequence was silent and expensive: `&p.b` through a
+            // reference refused, which is exactly the shape of
+            // `core/sync/rwlock.vr`'s `deref_mut`, so every write made
+            // through an RwLock guard was lost.
+            //
+            // Reusing that resolver rather than re-testing here is the
+            // point: the receiver-decoding rule belongs in ONE place, and
+            // `handlers/cbgr.rs` already had to mirror it by hand
+            // ("Mirror the GetF auto-deref chain") — a third private copy
+            // would guarantee the next divergence.
+            let obj_val = super::cbgr_helpers::resolve_arg_value(state, obj_val);
+            let obj_val = if super::cbgr_helpers::is_cbgr_ref(&obj_val) {
+                let (abs_index, _generation) = super::cbgr_helpers::decode_cbgr_ref(obj_val);
+                state.registers.get_absolute(abs_index)
+            } else {
+                obj_val
+            };
             // The struct receiver lives in the register either as an
             // Object/Pointer Value (heap-allocated struct) or — for
             // some single-field receivers — as the inline payload
@@ -1100,6 +1126,36 @@ fn ffi_extended_body(
             } else if obj_val.is_int() {
                 obj_val.as_i64() as *mut u8
             } else {
+                // T0108 diagnosis aid: the refusal below says only which
+                // TAG arrived, which is not enough to tell "the register
+                // was never written" from "the reference lives in a
+                // representation this arm does not know". Dump the raw
+                // bits of the reported register and of its neighbours —
+                // if the object is sitting one slot over, the address
+                // lowering picked the wrong register; if every slot is
+                // empty, the receiver was never materialised at all.
+                if std::env::var("VERUM_TRACE_FIELDADDR").is_ok() {
+                    let lo = obj_reg.0.saturating_sub(2);
+                    let neighbours: Vec<String> = (lo..=obj_reg.0 + 2)
+                        .map(|r| {
+                            let v = state.get_reg(Reg(r));
+                            format!(
+                                "r{}={:#018x}{}",
+                                r,
+                                v.bits(),
+                                if r == obj_reg.0 { "*" } else { "" }
+                            )
+                        })
+                        .collect();
+                    eprintln!(
+                        "[fieldaddr] receiver r{} tag={:?} bits={:#018x} offset={} | {}",
+                        obj_reg.0,
+                        obj_val.tag(),
+                        obj_val.bits(),
+                        field_offset,
+                        neighbours.join(" ")
+                    );
+                }
                 return Err(InterpreterError::InvalidOperand {
                     message: format!(
                         "StructFieldAddr: receiver register r{} holds {:?}, expected Pointer or Int (struct receiver address)",
