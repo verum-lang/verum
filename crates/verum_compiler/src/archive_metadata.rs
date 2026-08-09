@@ -1070,6 +1070,22 @@ fn register_module_metadata(
                     // the module-named descriptor id).
                     || ((s.starts_with("*const ") || s.starts_with("*mut "))
                         && !rendered_return.starts_with('*'))
+                    // T0705: tiered-reference returns are the SAME lossy
+                    // class. `core.base.memory.alloc_zeroed` is declared
+                    // `-> &unsafe Byte`, but the TypeRef render collapses
+                    // the reference wrapper and the baked descriptor said
+                    // `-> Byte` — so the checker typed the call's result
+                    // as the POINTEE, and every
+                    // `ptr_offset(alloc_zeroed(..), i)` died with
+                    // "expected '*const _', found 'UInt8'", killing all
+                    // 61 base/memory/cbgr_test siblings at typecheck. The
+                    // verbatim source string carries the full spelling;
+                    // admit it exactly as the raw-pointer arm above does.
+                    || ((s.starts_with("&unsafe ")
+                        || s.starts_with("&checked ")
+                        || s.starts_with("&mut ")
+                        || (s.starts_with('&') && !s.starts_with("&<")))
+                        && !rendered_return.starts_with('&'))
             });
         let return_type = match carried_return {
             Some(verbatim) => Text::from(verbatim),
