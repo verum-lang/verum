@@ -391,3 +391,39 @@ pub fn dump_function(archive: &Path, needle: &str) -> Result<()> {
     }
     Ok(())
 }
+
+/// Resolve a string id against every module's string table.
+///
+/// `CallM`'s third operand is a method id — a StringId — and reading a
+/// baked body leaves you holding that number with no way to turn it
+/// into a name. Without this the question "which method does this call
+/// actually name" costs a rebuild to answer, which is the same tax
+/// `--dump-fn` was written to remove.
+pub fn resolve_string(archive: &Path, id: u32) -> Result<()> {
+    let arch = verum_vbc::archive::read_archive_from_file(archive)
+        .map_err(|e| CliError::Custom(format!("cannot read archive: {e}")))?;
+
+    let mut hits = 0usize;
+    for (entry, data) in arch.index.iter().zip(arch.module_data.iter()) {
+        let Ok(module) = verum_vbc::deserialize::deserialize_module(data) else {
+            continue;
+        };
+        if let Some(s) = module.strings.get(verum_vbc::types::StringId(id)) {
+            hits += 1;
+            println!("{:<28} {}", entry.name.cyan(), s.green().bold());
+        }
+    }
+    if hits == 0 {
+        println!("{} id {} is in no module's string table", "none".yellow(), id);
+    } else {
+        // String ids are PER MODULE, so the same number names different
+        // things in different modules. Say so rather than letting a
+        // single-line answer read as global truth.
+        println!(
+            "\n{} {} module(s) — ids are per-module, so pick the row whose module owns the body you read",
+            "total".dimmed(),
+            hits
+        );
+    }
+    Ok(())
+}

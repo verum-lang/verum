@@ -796,6 +796,11 @@ enum Commands {
         /// user-code reproduction can reach.
         #[clap(long, value_name = "SUBSTRING")]
         dump_fn: Option<String>,
+
+        /// Resolve a string id (e.g. CallM's method-id operand) to its
+        /// name in every module that has one.
+        #[clap(long, value_name = "ID")]
+        string: Option<u32>,
     },
 
     /// Manage cog packages (build / publish / install)
@@ -3564,9 +3569,10 @@ fn run_command(cli: Cli) -> Result<()> {
             }
         },
         Commands::Version { verbose } => commands::version::execute(verbose),
-        Commands::VbcVersion { archive, raw, dump_fn } => match dump_fn {
-            Some(needle) => commands::vbc_version::dump_function(&archive, &needle),
-            None => commands::vbc_version::execute(&archive, raw),
+        Commands::VbcVersion { archive, raw, dump_fn, string } => match (dump_fn, string) {
+            (_, Some(id)) => commands::vbc_version::resolve_string(&archive, id),
+            (Some(needle), None) => commands::vbc_version::dump_function(&archive, &needle),
+            (None, None) => commands::vbc_version::execute(&archive, raw),
         },
         Commands::Package(pkg_cmd) => match pkg_cmd {
             PackageCommands::Publish {
