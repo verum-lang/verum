@@ -91,10 +91,10 @@ public type SupervisorId is (UInt64);
 public type ChildId is (UInt64);
 
 /// Global supervisor ID counter
-static SUPERVISOR_ID_COUNTER: AtomicU64 = AtomicU64.new(1);
+static mut SUPERVISOR_ID_COUNTER: AtomicU64 = AtomicU64.new(1);
 
 /// Global child ID counter
-static CHILD_ID_COUNTER: AtomicU64 = AtomicU64.new(1);
+static mut CHILD_ID_COUNTER: AtomicU64 = AtomicU64.new(1);
 
 implement SupervisorId {
     /// Generate new unique supervisor ID

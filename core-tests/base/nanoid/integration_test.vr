@@ -123,7 +123,7 @@ fn integration_entropy_at_various_lengths() {
     let alpha_bits: Int = 6;
     let mut i: Int = 0;
     while i < cases.len() {
-        let p = cases[i].clone();
+        let p = cases[i];
         let len = p.0;
         let exp = p.1;
         assert_eq(len * alpha_bits, exp);

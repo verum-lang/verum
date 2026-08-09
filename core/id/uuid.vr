@@ -9,13 +9,16 @@
 // Generates and manipulates RFC 4122 / RFC 9562 UUIDs.
 // Supports the two most commonly useful versions:
 //  * v4 — random (122 bits of entropy; uses the system CSPRNG)
-//  * v7 — time-ordered (48-bit unix-ms timestamp + 74 random bits)
+//  * v7 — time-ordered (48-bit unix-ms timestamp + 12-bit monotonic
+//         counter + 62 random bits)
 //
 
 // UUID v7 is strongly preferred for database primary keys: the time-
 // ordered prefix gives you locality (B-tree inserts don't fragment),
-// while 74 bits of random data is still well beyond any realistic
-// collision probability.
+// while 62 bits of random data is still well beyond any realistic
+// collision probability. The 12 bits between them are a counter, not
+// entropy: they keep IDs minted inside a single millisecond in mint
+// order (RFC 9562 §6.2), which is the property a v7 key is chosen for.
 //
 
 // Canonical textual form: 8-4-4-4-12 lowercase hex with dashes,
@@ -38,6 +41,17 @@ module core.id.uuid;
 
 mount core.*;
 mount base.{Result, Ok, Err, Text};
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+
+// The v7 mint clock: 48 bits of unix-milliseconds shifted over a 12-bit
+// counter, advanced as ONE value so the pair can never tear. See
+// `next_v7_slot` for why it is a single cell and not two.
+//
+// `static mut`, not `static`: a non-mut `static` is compiled as a
+// CONSTANT and re-materialised at every use, so the atomic's interior
+// write lands in a throwaway copy. Measured — with plain `static`, three
+// v7 IDs minted inside one millisecond all came out with counter 0.
+static mut V7_STATE: AtomicInt = AtomicInt.new(0);
 
 // A 128-bit UUID stored as two 64-bit halves (big-endian byte view).
 public type Uuid is {
@@ -99,6 +113,58 @@ fn random_bytes(buf: &mut [Byte]) {
     }
 }
 
+// Claim the (millisecond, counter) pair this call will mint under —
+// RFC 9562 §6.2 Method 1, "Fixed Bit-Length Dedicated Counter".
+//
+// Without a counter, `rand_a` is random and v7 loses the ordering it
+// exists for: 50 IDs minted inside a single millisecond come out in
+// arbitrary order, which is exactly what a v7 database key must not
+// do. RFC 9562 gives the guarantee across milliseconds only unless
+// an implementation keeps this counter, and §6.2 recommends keeping
+// it.
+//
+// Timestamp and counter advance TOGETHER under ONE compare-exchange:
+// 48 bits of milliseconds shifted over a 12-bit counter, 60 bits in
+// one Int. Two separate cells would race — a thread could read the
+// millisecond, lose to a writer, and then increment a counter that
+// by then belongs to a later millisecond, minting a duplicate.
+//
+// The clock going BACKWARDS is handled by never lowering the stored
+// millisecond: an NTP step back would otherwise mint IDs that sort
+// before ones already issued. Such IDs keep the last millisecond and
+// ride the counter until the wall clock catches up.
+fn next_v7_slot(now_ms: Int) -> (Int, Int) {
+    let mut ms = now_ms;
+    loop {
+        let cur = V7_STATE.load(MemoryOrdering.SeqCst);
+        let cur_ms = (cur >> 12) & 0xFFFFFFFFFFFF;
+        let cur_ctr = cur & 0xFFF;
+
+        let mut next_ms = ms;
+        let mut next_ctr = 0;
+        if ms > cur_ms {
+            next_ctr = 0;
+        } else {
+            next_ms = cur_ms;
+            next_ctr = cur_ctr + 1;
+            if next_ctr > 0xFFF {
+                // 4096 IDs inside one millisecond — four million per
+                // second. Re-read the clock and retry rather than
+                // borrow bits from `rand_b`, which would eat
+                // uniqueness to buy ordering nobody asked for.
+                ms = unix_millis();
+                continue;
+            }
+        }
+
+        let next = (next_ms << 12) | next_ctr;
+        let swapped = V7_STATE.compare_exchange(cur, next, MemoryOrdering.SeqCst, MemoryOrdering.SeqCst);
+        if swapped is Ok(_) {
+            return (next_ms, next_ctr);
+        }
+    }
+}
+
 implement Uuid {
     // Generate a version-4 (random) UUID.
     //
@@ -127,16 +193,19 @@ implement Uuid {
     // Layout per RFC 9562 §5.7:
     //  * 48-bit unix-ms timestamp (big-endian)
     //  * 4 bits version = 0b0111
-    //  * 12 bits random ("rand_a")
+    //  * 12 bits monotonic counter ("rand_a", see `next_v7_slot`)
     //  * 2 bits variant = 0b10
     //  * 62 bits random ("rand_b")
     //
 
-    // Total entropy: 74 bits. Time-ordered so v7 UUIDs sort
-    // lexicographically and chronologically — ideal for DB keys.
+    // Total entropy: 62 bits, plus a 12-bit counter. Time-ordered so
+    // v7 UUIDs sort lexicographically and chronologically — including
+    // within one millisecond — which is what makes them good DB keys.
     public fn new_v7() -> Uuid {
         let mut buf: [Byte; 16] = [0_u8; 16];
-        let ts = unix_millis();
+        let slot = next_v7_slot(unix_millis());
+        let ts = slot.0;
+        let counter = slot.1;
         // Big-endian 48-bit timestamp in bytes 0..6.
         buf[0] = ((ts >> 40) & 0xFF) as Byte;
         buf[1] = ((ts >> 32) & 0xFF) as Byte;
@@ -155,8 +224,13 @@ implement Uuid {
             i = i + 1;
         }
 
-        buf[6] = (buf[6] & 0x0F_u8) | 0x70_u8;   // version 7
-        buf[8] = (buf[8] & 0x3F_u8) | 0x80_u8;   // variant 10xx
+        // `rand_a` is NOT random — it carries the 12-bit counter, which
+        // is what makes IDs minted inside one millisecond still sort in
+        // mint order. `rand_b` (bytes 8..16, 62 bits after the variant)
+        // stays random, so uniqueness across processes is unaffected.
+        buf[6] = 0x70_u8 | (((counter >> 8) & 0x0F) as Byte);   // version 7 + rand_a hi
+        buf[7] = (counter & 0xFF) as Byte;                      // rand_a lo
+        buf[8] = (buf[8] & 0x3F_u8) | 0x80_u8;                  // variant 10xx
 
         Uuid.from_bytes(&buf)
     }
