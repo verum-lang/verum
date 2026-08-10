@@ -4637,50 +4637,10 @@ impl VbcCodegen {
                 expr: field_base,
                 field,
             } = &inner.kind
-            && let ExprKind::Unary {
-                op: UnOp::Deref,
-                expr: raw_ptr_expr,
-            } = {
-                // The deref is usually parenthesized: `(*p).field`.
-                let mut b: &Expr = field_base;
-                while let ExprKind::Paren(pin) = &b.kind {
-                    b = pin;
-                }
-                &b.kind
-            }
         {
-            // Pointee type name drives the offset lookup — the layout
-            // table is keyed by simple name, and compute_field_offset
-            // normalizes reference/pointer spellings (landed today).
-            let pointee = self
-                .infer_expr_type_name(raw_ptr_expr)
-                .or_else(|| self.extract_expr_type_name(raw_ptr_expr))
-                .map(|t| {
-                    // The pointee arrives in whatever spelling inference
-                    // produced. `Shared.get_mut`'s field is
-                    // `ptr: &unsafe SharedInner<T>` — the first landing
-                    // stripped only `*const/*mut`, so the layout gate saw
-                    // "&unsafe SharedInner" , found no such key, and fell
-                    // through by design (the baked body kept DerefRaw and
-                    // the SIGSEGV stayed). Same normalization list as
-                    // compute_field_offset.
-                    let t = t
-                        .trim()
-                        .trim_start_matches("*const ")
-                        .trim_start_matches("*mut ")
-                        .trim_start_matches("&unsafe mut ")
-                        .trim_start_matches("&unsafe ")
-                        .trim_start_matches("&checked mut ")
-                        .trim_start_matches("&checked ")
-                        .trim_start_matches("&mut ")
-                        .trim_start_matches('&')
-                        .trim();
-                    VbcCodegen::strip_generic_args(t).to_string()
-                });
-            if let Some(type_name) = pointee
-                && !type_name.is_empty()
-                && self.type_field_layouts.contains_key(&type_name)
-            {
+            // Shape + pointee resolution through the ONE authority
+            // (`record_pointer_base`) — this used to be a private copy.
+            if let Some((raw_ptr_expr, type_name)) = self.record_pointer_base(field_base) {
                 let field_offset = self.compute_field_offset(&type_name, field.as_str());
                 if (0..=u16::MAX as i64).contains(&field_offset)
                     && let Some(ptr_reg) = self.compile_expr(raw_ptr_expr)?
@@ -21847,47 +21807,7 @@ impl VbcCodegen {
         // header-correctly. So for a known-layout pointee, compile the
         // POINTER and let the ordinary field machinery below do the
         // rest — never DerefRaw a record.
-        let deref_read = {
-            let mut probe: &Expr = base;
-            while let ExprKind::Paren(pin) = &probe.kind {
-                probe = pin;
-            }
-            if let ExprKind::Unary {
-                op: UnOp::Deref,
-                expr: rp,
-            } = &probe.kind
-            {
-                let pointee = self
-                    .infer_expr_type_name(rp)
-                    .or_else(|| self.extract_expr_type_name(rp))
-                    .map(|t| {
-                        let t = t
-                            .trim()
-                            .trim_start_matches("*const ")
-                            .trim_start_matches("*mut ")
-                            .trim_start_matches("&unsafe mut ")
-                            .trim_start_matches("&unsafe ")
-                            .trim_start_matches("&checked mut ")
-                            .trim_start_matches("&checked ")
-                            .trim_start_matches("&mut ")
-                            .trim_start_matches('&')
-                            .trim();
-                        VbcCodegen::strip_generic_args(t).to_string()
-                    });
-                match pointee {
-                    Some(tn)
-                        if !tn.is_empty()
-                            && self.type_field_layouts.contains_key(&tn) =>
-                    {
-                        Some((rp, tn))
-                    }
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        };
-        let (base_reg, base_type) = if let Some((rp, tn)) = deref_read {
+        let (base_reg, base_type) = if let Some((rp, tn)) = self.record_pointer_base(base) {
             let ptr_reg = self
                 .compile_expr(rp)?
                 .or_internal("deref-read pointer has no value")?;
@@ -24459,6 +24379,64 @@ impl VbcCodegen {
         Ok(Some(dst))
     }
 
+    /// SOLE authority for "this place-base is a RECORD behind a raw pointer".
+    ///
+    /// Returns the pointer expression and the normalized pointee type
+    /// name when `base` is `(*p)` (through any number of paren layers)
+    /// and `p`'s pointee has a registered field layout.
+    ///
+    /// Three lowerings must answer this question IDENTICALLY: the
+    /// address fold (`&mut (*p).field`), the value read (`(*p).field`)
+    /// and the cast idiom (`&(*p).field as *const T`). Each grew its
+    /// own copy of the shape match, and the copies did not agree — the
+    /// cast path was still compiling the receiver with `compile_expr`
+    /// (emitting DerefRaw, an 8-byte load of the OBJECT HEADER, and
+    /// computing the field address from that garbage word) a day after
+    /// the other two were fixed. That is what killed every atomic op
+    /// inside baked `Shared`: strong_count / weak_count lower through
+    /// `&(*self.ptr).strong_count as *const UInt32`, so is_unique,
+    /// get_mut and make_unique all died before reaching any of their
+    /// own logic (T0705).
+    ///
+    /// The pointee spelling is normalized here — inference hands back
+    /// whatever the declaration said (`&unsafe SharedInner<T>`,
+    /// `*mut Foo`, `&checked Bar`) while the layout table is keyed by
+    /// simple name.
+    fn record_pointer_base<'e>(&mut self, base: &'e Expr) -> Option<(&'e Expr, String)> {
+        let mut probe: &'e Expr = base;
+        while let ExprKind::Paren(pin) = &probe.kind {
+            probe = pin.as_ref();
+        }
+        let ExprKind::Unary {
+            op: UnOp::Deref,
+            expr: raw_ptr,
+        } = &probe.kind
+        else {
+            return None;
+        };
+        let type_name = self
+            .infer_expr_type_name(raw_ptr)
+            .or_else(|| self.extract_expr_type_name(raw_ptr))
+            .map(|t| {
+                let t = t
+                    .trim()
+                    .trim_start_matches("*const ")
+                    .trim_start_matches("*mut ")
+                    .trim_start_matches("&unsafe mut ")
+                    .trim_start_matches("&unsafe ")
+                    .trim_start_matches("&checked mut ")
+                    .trim_start_matches("&checked ")
+                    .trim_start_matches("&mut ")
+                    .trim_start_matches('&')
+                    .trim();
+                VbcCodegen::strip_generic_args(t).to_string()
+            })?;
+        if type_name.is_empty() || !self.type_field_layouts.contains_key(&type_name) {
+            return None;
+        }
+        Some((raw_ptr.as_ref(), type_name))
+    }
+
     /// Tries to compile a struct-field address pattern: `&receiver.field as *const T`
     /// (or `&mut receiver.field as *mut T`).
     ///
@@ -24505,15 +24483,29 @@ impl VbcCodegen {
             _ => return Ok(None),
         };
 
+        // T0705 — the receiver may be a RECORD BEHIND A RAW POINTER:
+        // `&(*self.ptr).strong_count as *const UInt32`, the shape every
+        // atomic accessor in the stdlib uses. Compiling that receiver
+        // with `compile_expr` emits DerefRaw — an 8-byte load of the
+        // object HEADER — and the field address computed from that word
+        // is garbage. The pointer itself IS the object address, so ask
+        // the ONE authority and, when it answers, compile the POINTER.
+        let ptr_base = self.record_pointer_base(receiver);
+
         // Receiver type must be a registered struct so we can look up
         // the field offset. Use the same type-resolution helper that
         // GetF + compile_field_access rely on.
-        let receiver_type_name = self
-            .infer_expr_type_name(receiver)
-            .or_else(|| self.extract_expr_type_name(receiver));
-        let type_name = match receiver_type_name {
-            Some(t) => t,
-            None => return Ok(None),
+        let type_name = match &ptr_base {
+            Some((_, pointee)) => pointee.clone(),
+            None => {
+                match self
+                    .infer_expr_type_name(receiver)
+                    .or_else(|| self.extract_expr_type_name(receiver))
+                {
+                    Some(t) => t,
+                    None => return Ok(None),
+                }
+            }
         };
 
         // Field offset in bytes within the data section. Verum stores
@@ -24532,10 +24524,16 @@ impl VbcCodegen {
         }
         let field_offset = field_offset as u16;
 
-        // Compile the receiver to get a heap pointer Value.
-        let recv_reg = self
-            .compile_expr(receiver)?
-            .or_internal("field-addr receiver has no value")?;
+        // Compile the receiver to get a heap pointer Value — or, for a
+        // record behind a raw pointer, the POINTER itself.
+        let recv_reg = match ptr_base {
+            Some((raw_ptr, _)) => self
+                .compile_expr(raw_ptr)?
+                .or_internal("field-addr pointer has no value")?,
+            None => self
+                .compile_expr(receiver)?
+                .or_internal("field-addr receiver has no value")?,
+        };
 
         let dst = self.ctx.alloc_temp();
 
