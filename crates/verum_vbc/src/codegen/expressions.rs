@@ -4621,6 +4621,91 @@ impl VbcCodegen {
         // fields (and by `compile_cast` for `… as &unsafe T`), and survives
         // `Self`-receiver resolution, making compile-then-check the reliable
         // detector that a static type-name probe cannot match.
+        // `&mut (*p).field` — FIELD PROJECTION through a raw-pointer
+        // deref. The identity fold below covers `&mut *p` (the WHOLE
+        // deref); this composition went to the generic place machinery,
+        // which dereferences the raw pointer and SIGSEGVs the
+        // interpreter: `Shared.get_mut`'s
+        // `Maybe.Some(unsafe { &mut (*self.ptr).value })` was a 6-line
+        // reproducible crash (exit 139), and 10 of
+        // base/memory/cbgr_test's 36 failures are this class. The
+        // principled lowering is the same as the cast idiom's:
+        // compute the interior ADDRESS with StructFieldAddr — never
+        // load through the pointer.
+        if matches!(op, UnOp::Ref | UnOp::RefMut | UnOp::RefUnsafe | UnOp::RefUnsafeMut)
+            && let ExprKind::Field {
+                expr: field_base,
+                field,
+            } = &inner.kind
+            && let ExprKind::Unary {
+                op: UnOp::Deref,
+                expr: raw_ptr_expr,
+            } = {
+                // The deref is usually parenthesized: `(*p).field`.
+                let mut b: &Expr = field_base;
+                while let ExprKind::Paren(pin) = &b.kind {
+                    b = pin;
+                }
+                &b.kind
+            }
+        {
+            // Pointee type name drives the offset lookup — the layout
+            // table is keyed by simple name, and compute_field_offset
+            // normalizes reference/pointer spellings (landed today).
+            let pointee = self
+                .infer_expr_type_name(raw_ptr_expr)
+                .or_else(|| self.extract_expr_type_name(raw_ptr_expr))
+                .map(|t| {
+                    // The pointee arrives in whatever spelling inference
+                    // produced. `Shared.get_mut`'s field is
+                    // `ptr: &unsafe SharedInner<T>` — the first landing
+                    // stripped only `*const/*mut`, so the layout gate saw
+                    // "&unsafe SharedInner" , found no such key, and fell
+                    // through by design (the baked body kept DerefRaw and
+                    // the SIGSEGV stayed). Same normalization list as
+                    // compute_field_offset.
+                    let t = t
+                        .trim()
+                        .trim_start_matches("*const ")
+                        .trim_start_matches("*mut ")
+                        .trim_start_matches("&unsafe mut ")
+                        .trim_start_matches("&unsafe ")
+                        .trim_start_matches("&checked mut ")
+                        .trim_start_matches("&checked ")
+                        .trim_start_matches("&mut ")
+                        .trim_start_matches('&')
+                        .trim();
+                    VbcCodegen::strip_generic_args(t).to_string()
+                });
+            if let Some(type_name) = pointee
+                && !type_name.is_empty()
+                && self.type_field_layouts.contains_key(&type_name)
+            {
+                let field_offset = self.compute_field_offset(&type_name, field.as_str());
+                if (0..=u16::MAX as i64).contains(&field_offset)
+                    && let Some(ptr_reg) = self.compile_expr(raw_ptr_expr)?
+                {
+                    let dst = self.ctx.alloc_temp();
+                    let off = field_offset as u16;
+                    let mut operands = Vec::<u8>::with_capacity(6);
+                    Self::write_reg(&mut operands, dst.0);
+                    Self::write_reg(&mut operands, ptr_reg.0);
+                    operands.push((off & 0xFF) as u8);
+                    operands.push(((off >> 8) & 0xFF) as u8);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: crate::instruction::SystemSubOpcode::StructFieldAddr.to_byte(),
+                        operands,
+                    });
+                    self.ctx.free_temp(ptr_reg);
+                    self.ctx.mark_raw_pointer(dst);
+                    return Ok(Some(dst));
+                }
+            }
+            // Unknown pointee layout: fall through to the existing
+            // machinery rather than guess an offset — a wrong write
+            // beats a refused compile only in the wrong direction.
+        }
+
         if matches!(
             op,
             UnOp::Ref
@@ -24325,7 +24410,7 @@ impl VbcCodegen {
     /// Returns `Some(reg)` if the pattern was detected and lowered,
     /// `None` otherwise (caller falls through to generic cast paths).
     fn try_compile_struct_field_addr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
-        use crate::instruction::SystemSubOpcode;
+        // (SystemSubOpcode is referenced fully-qualified below)
 
         // Unwrap parenthesized expressions.
         let expr = {
@@ -24400,7 +24485,7 @@ impl VbcCodegen {
         operands.push(((field_offset >> 8) & 0xFF) as u8);
 
         self.ctx.emit(Instruction::FfiExtended {
-            sub_op: SystemSubOpcode::StructFieldAddr.to_byte(),
+            sub_op: crate::instruction::SystemSubOpcode::StructFieldAddr.to_byte(),
             operands,
         });
 
