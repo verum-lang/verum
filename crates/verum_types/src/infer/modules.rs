@@ -11060,10 +11060,38 @@ impl TypeChecker {
             // judge saw T's var as free and E404'd a perfectly
             // determined binding. A candidate whose free vars all
             // belong to the fn's declared params is not ambiguous.
-            if free
+            // The comparison must run through the UNIFIER. `resolved` is
+            // already `apply`d, so its free vars are representatives,
+            // while `func_type_param_vars` holds the vars minted when the
+            // signature was read. Union-find is free to pick either side
+            // as the representative, so raw `p == v` equality answers
+            // "is this the declared param" only when the coin landed one
+            // way. Measured: `fn f<T>(x: T) -> Int { let y = x; 1 }` and
+            // even `let y: T = x;` — an EXPLICIT annotation — were
+            // reported "not fully determined by this function" (T0708
+            // acceptance; the same E404 read as a protocol-signature
+            // defect for days).
+            if std::env::var("VERUM_TRACE_AMBIG").is_ok() {
+                eprintln!(
+                    "[ambig] bind={} resolved={} free={:?} fn_params={:?}",
+                    bind_name,
+                    resolved,
+                    free.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>(),
+                    func_type_param_vars
+                        .iter()
+                        .map(|v| format!("{v:?}"))
+                        .collect::<Vec<_>>()
+                );
+            }
+            let param_reprs: List<Type> = func_type_param_vars
                 .iter()
-                .all(|v| func_type_param_vars.iter().any(|p| p == v))
-            {
+                .map(|p| self.unifier.apply(&Type::Var(*p)))
+                .collect();
+            if free.iter().all(|v| {
+                let v_repr = self.unifier.apply(&Type::Var(*v));
+                func_type_param_vars.iter().any(|p| p == v)
+                    || param_reprs.iter().any(|r| r == &v_repr)
+            }) {
                 continue;
             }
             // SHAPE criterion v2 (T0585/T0701 calibration against BOTH
@@ -18749,12 +18777,7 @@ impl TypeChecker {
                                         };
                                     let expected_params = &expected_params;
                                     if args.len() != expected_params.len() {
-                                        return Err(TypeError::WrongArgCount {
-                                            method: method.name.as_str().to_text(),
-                                            expected: expected_params.len(),
-                                            actual: args.len(),
-                                            span,
-                                        });
+                                        return Err(TypeError::wrong_arg_count(method.name.as_str().to_text(), expected_params.len(), args.len(), span));
                                     }
 
                                     if crate::ctor_trace_enabled() {
@@ -19492,10 +19515,59 @@ impl TypeChecker {
                 return_type,
                 ..
             } => {
-                // Protocol methods in ProtocolImpl.methods EXCLUDE self parameter.
-                // This is consistent with Protocol.methods and inherent_methods conventions.
-                // For method calls like `recv.method(arg)`, check args directly against params.
-                let method_params = params.as_slice();
+                // Protocol methods in ProtocolImpl.methods EXCLUDE the
+                // self parameter — that is the CONVENTION, and it is not
+                // universally honoured: a candidate arriving from the
+                // archive carries `self` as params[0] (archive_metadata
+                // renders it; every other consumer strips it — see the
+                // RECEIVER STRIP note in infer/core.rs). Believing the
+                // convention here rejected `k.eq(k)` with "method `eq`
+                // expects 2 argument(s), but 1 were provided" — six reds
+                // in core-tests/mem/cap_audit, invisible to `verum check`
+                // because the check phase never reaches this resolver.
+                //
+                // Establish the FACT instead of assuming it: strip a
+                // leading parameter only when the count is off by exactly
+                // one AND that parameter is receiver-shaped (Self, the
+                // receiver's own type, or a reference to either).
+                let method_params: &[Type] = {
+                    fn peel(t: &Type) -> &Type {
+                        match t {
+                            Type::Reference { inner, .. }
+                            | Type::CheckedReference { inner, .. }
+                            | Type::UnsafeReference { inner, .. }
+                            | Type::Ownership { inner, .. } => peel(inner),
+                            other => other,
+                        }
+                    }
+                    let all = params.as_slice();
+                    let leading_is_receiver = all.first().is_some_and(|p| {
+                        let p = peel(p);
+                        // `Self` inside an instantiated protocol scheme is
+                        // a fresh type VARIABLE, not a named type and not
+                        // structurally equal to the receiver — measured:
+                        // this arm is the site that rejected `k.eq(k)`
+                        // (VERUM_TRACE_ARITY named it), and comparing
+                        // shapes alone left it unstripped.
+                        matches!(p, Type::Var(_))
+                            || p == peel(&recv_ty)
+                            || p == peel(&recv_ty_raw)
+                            || matches!(p, Type::Named { path, .. }
+                                if matches!(
+                                    path.segments.last(),
+                                    Some(verum_ast::ty::PathSegment::SelfValue)
+                                ) || matches!(
+                                    path.segments.last(),
+                                    Some(verum_ast::ty::PathSegment::Name(n))
+                                        if n.name.as_str() == "Self"
+                                ))
+                    });
+                    if all.len() == args.len() + 1 && leading_is_receiver {
+                        &all[1..]
+                    } else {
+                        all
+                    }
+                };
 
                 // #[cfg(debug_assertions)]
                 // eprintln!(
@@ -19508,12 +19580,7 @@ impl TypeChecker {
 
                 // Check argument count
                 if args.len() != method_params.len() {
-                    return Err(TypeError::WrongArgCount {
-                        method: method.name.as_str().to_text(),
-                        expected: method_params.len(),
-                        actual: args.len(),
-                        span,
-                    });
+                    return Err(TypeError::wrong_arg_count(method.name.as_str().to_text(), method_params.len(), args.len(), span));
                 }
 
                 // Type check each argument with substitution
@@ -20112,12 +20179,7 @@ impl TypeChecker {
                                         // (self is handled implicitly as the receiver)
                                         // Check argument count directly
                                         if params.len().abs_diff(args.len()) > 1 {
-                                            return Err(TypeError::WrongArgCount {
-                                                method: method_name.clone(),
-                                                expected: params.len(),
-                                                actual: args.len(),
-                                                span,
-                                            });
+                                            return Err(TypeError::wrong_arg_count(method_name.clone(), params.len(), args.len(), span));
                                         }
 
                                         // Type check each argument with substitution
@@ -20266,12 +20328,7 @@ impl TypeChecker {
 
                                         // Check argument count
                                         if args.len() != method_params.len() {
-                                            return Err(TypeError::WrongArgCount {
-                                                method: method_name.clone(),
-                                                expected: method_params.len(),
-                                                actual: args.len(),
-                                                span,
-                                            });
+                                            return Err(TypeError::wrong_arg_count(method_name.clone(), method_params.len(), args.len(), span));
                                         }
 
                                         // CRITICAL: Unify receiver type with method's self parameter
@@ -20362,12 +20419,7 @@ impl TypeChecker {
                         // parameter (unlike inherent methods), so the
                         // arity check here must be strict.
                         if params.len() != args.len() {
-                            return Err(TypeError::WrongArgCount {
-                                method: method.name.as_str().to_text(),
-                                expected: params.len(),
-                                actual: args.len(),
-                                span,
-                            });
+                            return Err(TypeError::wrong_arg_count(method.name.as_str().to_text(), params.len(), args.len(), span));
                         }
 
                         // Check each argument with substitution
@@ -20586,12 +20638,7 @@ impl TypeChecker {
                 } = &method_ty
                 {
                     if params.len().abs_diff(args.len()) > 1 {
-                        return Err(TypeError::WrongArgCount {
-                            method: verum_common::Text::from(method.name.as_str()),
-                            expected: params.len(),
-                            actual: args.len(),
-                            span,
-                        });
+                        return Err(TypeError::wrong_arg_count(verum_common::Text::from(method.name.as_str()), params.len(), args.len(), span));
                     }
                     for (arg, param_ty) in args.iter().zip(params.iter()) {
                         let resolved_param = self.unifier.apply(param_ty);
@@ -20717,12 +20764,7 @@ impl TypeChecker {
                 } = &method_ty
                 {
                     if params.len().abs_diff(args.len()) > 1 {
-                        return Err(TypeError::WrongArgCount {
-                            method: method_name_text,
-                            expected: params.len(),
-                            actual: args.len(),
-                            span,
-                        });
+                        return Err(TypeError::wrong_arg_count(method_name_text, params.len(), args.len(), span));
                     }
 
                     // Bind type variables from receiver type args
@@ -20862,12 +20904,7 @@ impl TypeChecker {
             {
                 // Protocol methods don't include self in params (we already excluded it during registration)
                 if params.len().abs_diff(args.len()) > 1 {
-                    return Err(TypeError::WrongArgCount {
-                        method: method_name_text,
-                        expected: params.len(),
-                        actual: args.len(),
-                        span,
-                    });
+                    return Err(TypeError::wrong_arg_count(method_name_text, params.len(), args.len(), span));
                 }
 
                 // Type check each argument
@@ -20927,12 +20964,7 @@ impl TypeChecker {
                         {
                             // Check argument count
                             if params.len().abs_diff(args.len()) > 1 {
-                                return Err(TypeError::WrongArgCount {
-                                    method: method_name_text,
-                                    expected: params.len(),
-                                    actual: args.len(),
-                                    span,
-                                });
+                                return Err(TypeError::wrong_arg_count(method_name_text, params.len(), args.len(), span));
                             }
 
                             // Type check each argument
@@ -20980,12 +21012,7 @@ impl TypeChecker {
                             } = &method_ty
                             {
                                 if params.len().abs_diff(args.len()) > 1 {
-                                    return Err(TypeError::WrongArgCount {
-                                        method: method_name_text,
-                                        expected: params.len(),
-                                        actual: args.len(),
-                                        span,
-                                    });
+                                    return Err(TypeError::wrong_arg_count(method_name_text, params.len(), args.len(), span));
                                 }
                                 for (arg, param_ty) in args.iter().zip(params.iter()) {
                                     let resolved_param = self.unifier.apply(param_ty);
@@ -21043,12 +21070,7 @@ impl TypeChecker {
                                 params.clone()
                             };
                             if args.len() != method_params.len() {
-                                return Err(TypeError::WrongArgCount {
-                                    method: method_name_text.clone(),
-                                    expected: method_params.len(),
-                                    actual: args.len(),
-                                    span,
-                                });
+                                return Err(TypeError::wrong_arg_count(method_name_text.clone(), method_params.len(), args.len(), span));
                             }
                             for (arg, param_ty) in args.iter().zip(method_params.iter()) {
                                 let resolved_param = self.unifier.apply(param_ty);
@@ -21134,12 +21156,7 @@ impl TypeChecker {
                     let remaining_params: List<Type> = params.iter().skip(1).cloned().collect();
 
                     if args.len() != remaining_params.len() {
-                        return Err(TypeError::WrongArgCount {
-                            method: method_name_str.to_text(),
-                            expected: remaining_params.len(),
-                            actual: args.len(),
-                            span,
-                        });
+                        return Err(TypeError::wrong_arg_count(method_name_str.to_text(), remaining_params.len(), args.len(), span));
                     }
 
                     // Type check each argument against remaining params with substitution
@@ -21443,12 +21460,7 @@ impl TypeChecker {
                     let method_name_text = verum_common::Text::from(method.name.as_str());
                     // Check argument count (method params don't include self)
                     if params.len().abs_diff(args.len()) > 1 {
-                        return Err(TypeError::WrongArgCount {
-                            method: method_name_text,
-                            expected: params.len(),
-                            actual: args.len(),
-                            span,
-                        });
+                        return Err(TypeError::wrong_arg_count(method_name_text, params.len(), args.len(), span));
                     }
 
                     // CRITICAL FIX: Bind type variables in the method signature to receiver's type args
@@ -22047,12 +22059,7 @@ impl TypeChecker {
                     {
                         // Allow ±1 tolerance for self-param counting
                         if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::WrongArgCount {
-                                method: method_name.to_text(),
-                                expected: params.len(),
-                                actual: args.len(),
-                                span,
-                            });
+                            return Err(TypeError::wrong_arg_count(method_name.to_text(), params.len(), args.len(), span));
                         }
 
                         for (arg, param_ty) in args.iter().zip(params.iter()) {
@@ -22153,12 +22160,7 @@ impl TypeChecker {
                     if args_pre_compatible {
                         // Allow ±1 tolerance for self-param counting
                         if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::WrongArgCount {
-                                method: method_name.to_text(),
-                                expected: params.len(),
-                                actual: args.len(),
-                                span,
-                            });
+                            return Err(TypeError::wrong_arg_count(method_name.to_text(), params.len(), args.len(), span));
                         }
 
                         for (arg, param_ty) in args.iter().zip(params.iter()) {
@@ -22210,12 +22212,7 @@ impl TypeChecker {
                     // ±1 tolerance for self-param counting (matches
                     // the env-lookup arm above).
                     if ctor.args.len().abs_diff(args.len()) > 1 {
-                        return Err(TypeError::WrongArgCount {
-                            method: method_name.to_text(),
-                            expected: ctor.args.len(),
-                            actual: args.len(),
-                            span,
-                        });
+                        return Err(TypeError::wrong_arg_count(method_name.to_text(), ctor.args.len(), args.len(), span));
                     }
                     // Type-check each argument against the
                     // constructor's declared payload types.
@@ -22321,12 +22318,7 @@ impl TypeChecker {
                                     // Check argument count
                                     // Allow ±1 tolerance for self-param counting
                                     if params.len().abs_diff(args.len()) > 1 {
-                                        return Err(TypeError::WrongArgCount {
-                                            method: method.name.clone(),
-                                            expected: params.len(),
-                                            actual: args.len(),
-                                            span,
-                                        });
+                                        return Err(TypeError::wrong_arg_count(method.name.clone(), params.len(), args.len(), span));
                                     }
 
                                     // Type check each argument
@@ -22744,12 +22736,7 @@ impl TypeChecker {
                             if args.len() > params.len() + 1
                                 || (args.len() + 1 < params.len() && params.len() > 1)
                             {
-                                return Err(TypeError::WrongArgCount {
-                                    method: method.name.clone(),
-                                    expected: params.len(),
-                                    actual: args.len(),
-                                    span,
-                                });
+                                return Err(TypeError::wrong_arg_count(method.name.clone(), params.len(), args.len(), span));
                             }
 
                             // Type check each argument
@@ -22835,12 +22822,7 @@ impl TypeChecker {
                                 if args.len() > params.len() + 1
                                     || (args.len() + 1 < params.len() && params.len() > 1)
                                 {
-                                    return Err(TypeError::WrongArgCount {
-                                        method: method.name.clone(),
-                                        expected: params.len(),
-                                        actual: args.len(),
-                                        span,
-                                    });
+                                    return Err(TypeError::wrong_arg_count(method.name.clone(), params.len(), args.len(), span));
                                 }
 
                                 // Type check each argument
@@ -23098,12 +23080,7 @@ impl TypeChecker {
                                                         // For STATIC protocol methods (like From::from), there's no self param
                                                         // The params should already be correct
                                                         if params.len().abs_diff(args.len()) > 1 {
-                                                            return Err(TypeError::WrongArgCount {
-                                                                method: method_name.to_text(),
-                                                                expected: params.len(),
-                                                                actual: args.len(),
-                                                                span,
-                                                            });
+                                                            return Err(TypeError::wrong_arg_count(method_name.to_text(), params.len(), args.len(), span));
                                                         }
 
                                                         // Type check each argument
@@ -23174,12 +23151,7 @@ impl TypeChecker {
                         // canonicalization, and reference auto-borrow.
                         // Allow ±1 tolerance for self-param counting.
                         if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::WrongArgCount {
-                                method: method_name.to_text(),
-                                expected: params.len(),
-                                actual: args.len(),
-                                span,
-                            });
+                            return Err(TypeError::wrong_arg_count(method_name.to_text(), params.len(), args.len(), span));
                         }
 
                         for (arg, param_ty) in args.iter().zip(params.iter()) {
@@ -23261,12 +23233,7 @@ impl TypeChecker {
                             if args_pre_compatible {
                                 // Check argument count
                                 if params.len().abs_diff(args.len()) > 1 {
-                                    return Err(TypeError::WrongArgCount {
-                                        method: method_name.to_text(),
-                                        expected: params.len(),
-                                        actual: args.len(),
-                                        span,
-                                    });
+                                    return Err(TypeError::wrong_arg_count(method_name.to_text(), params.len(), args.len(), span));
                                 }
 
                                 // Type check each argument and accumulate substitution
@@ -23308,12 +23275,7 @@ impl TypeChecker {
                         {
                             // ±1 tolerance for self-param counting.
                             if ctor.args.len().abs_diff(args.len()) > 1 {
-                                return Err(TypeError::WrongArgCount {
-                                    method: method_name.to_text(),
-                                    expected: ctor.args.len(),
-                                    actual: args.len(),
-                                    span,
-                                });
+                                return Err(TypeError::wrong_arg_count(method_name.to_text(), ctor.args.len(), args.len(), span));
                             }
                             // GENERIC-CTOR-FRESHNESS-1 (§52, fix A2):
                             // registry InductiveConstructors store
@@ -23679,12 +23641,7 @@ impl TypeChecker {
                                 if let Some(Type::Function { params, .. }) = method_types.first() {
                                     // Allow ±1 tolerance for self-param counting
                                     if params.len().abs_diff(args.len()) > 1 {
-                                        return Err(TypeError::WrongArgCount {
-                                            method: method_name.to_text(),
-                                            expected: params.len(),
-                                            actual: args.len(),
-                                            span,
-                                        });
+                                        return Err(TypeError::wrong_arg_count(method_name.to_text(), params.len(), args.len(), span));
                                     }
                                     // Fall through to let regular type checking produce the error
                                 }

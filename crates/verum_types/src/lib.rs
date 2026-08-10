@@ -1943,6 +1943,35 @@ pub enum TypeError {
 }
 
 impl TypeError {
+    /// Build a `WrongArgCount` and remember WHERE it was built.
+    ///
+    /// 24 sites in `infer/modules.rs` used to construct this variant
+    /// inline, all with the same wording, so a fix at one of them could
+    /// not be told apart from a fix at none of them — and one was
+    /// measured inert exactly that way. `#[track_caller]` makes the
+    /// origin a fact: `VERUM_TRACE_ARITY=1` names the file and line that
+    /// rejected the call, which a release backtrace cannot (no symbols).
+    #[track_caller]
+    pub fn wrong_arg_count(
+        method: Text,
+        expected: usize,
+        actual: usize,
+        span: verum_ast::span::Span,
+    ) -> TypeError {
+        if std::env::var("VERUM_TRACE_ARITY").is_ok() {
+            eprintln!(
+                "[arity] method={method} expected={expected} actual={actual} built at {}",
+                std::panic::Location::caller()
+            );
+        }
+        TypeError::WrongArgCount {
+            method,
+            expected,
+            actual,
+            span,
+        }
+    }
+
     /// Get the span for this error
     pub fn span(&self) -> verum_ast::span::Span {
         use TypeError::*;
