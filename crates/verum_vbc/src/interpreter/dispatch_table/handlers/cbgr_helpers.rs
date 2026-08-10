@@ -257,17 +257,29 @@ pub(in crate::interpreter) fn resolve_receiver(
     state: &super::super::super::state::InterpreterState,
     val: Value,
 ) -> Value {
-    let mut v = resolve_arg_value(state, val);
+    // REGISTER-REF chains peel to a fixpoint; the value-cell / thin-ref
+    // peel then happens EXACTLY ONCE. The asymmetry is the contract, not
+    // an accident: a register-ref forwarded through nested frames can
+    // point at another register-ref, so that chain must be followed to
+    // its end, whereas a POINTER is peeled at most once — `cbgr_alloc` +
+    // `ptr_write` stores a record as one boxed Value, so one load
+    // reaches the object and a SECOND load reaches its first field.
+    // Looping the whole peel handed `Shared.strong_count`'s address
+    // computation `Int(1)` — the value of the very field it was trying
+    // to address (measured verbatim: `[fieldaddr-ok] tag=Some(1)
+    // is_int=true obj=0x1 field_addr=0x19 off=0`).
+    let mut v = val;
     let mut hops = 0u8;
-    while hops < 8 {
-        let next = resolve_arg_value(state, v);
+    while hops < 8 && is_cbgr_ref(&v) {
+        let (abs_index, _gen) = decode_cbgr_ref(v);
+        let next = state.registers.get_absolute(abs_index);
         if next.bits() == v.bits() {
             break;
         }
         v = next;
         hops += 1;
     }
-    v
+    resolve_arg_value(state, v)
 }
 
 /// Peel one `Heap<T>` CBGR cell, yielding the boxed value.
