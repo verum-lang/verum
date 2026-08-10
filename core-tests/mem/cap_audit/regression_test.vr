@@ -55,11 +55,12 @@ fn regression_bumped_generation_matrix() {
         (CapEventKind.GenBump, true),
         (CapEventKind.EpochAdvance, false),
     ];
-    // Index-based iteration (AOT-safe) instead of `for case in cases.iter()` —
-    // AOT-ITER-1 (catalogue §18). Interp-equivalent.
-    let mut i = 0;
-    while i < cases.len() {
-        let case = cases[i];
+    // RESTORED to iterator form (T0221): the AOT iterator defect this
+    // workaround dodged (AOT-ITER-1, catalogue §18) no longer
+    // reproduces — primitive/record/enum element probes all pass at
+    // Tier-1 — and this loop is the demonstration that stays red if it
+    // ever comes back.
+    for case in cases.iter() {
         let event = CapEvent.new(
             case.0,
             100 as UInt64,
@@ -68,7 +69,6 @@ fn regression_bumped_generation_matrix() {
             0 as UInt64,
         );
         assert_eq(event.bumped_generation(), case.1);
-        i = i + 1;
     }
 }
 
