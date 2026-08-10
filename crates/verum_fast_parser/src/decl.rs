@@ -1075,23 +1075,32 @@ impl<'a> RecursiveParser<'a> {
         // Function body: { ... } or = expr;
         // Extern functions may have a body (exported) or just a declaration (imported)
         let body = if extern_abi.is_some() {
-            // Extern functions WITH a body are "exported" functions
-            // (equivalent to Rust's `extern "C" fn name() { body }`)
-            // Extern functions WITHOUT a body (ending with ;) are "imported" FFI declarations
-            if self.stream.check(&TokenKind::LBrace) {
-                Maybe::Some(FunctionBody::Block(self.parse_block()?))
-            } else if self.stream.consume(&TokenKind::Eq).is_some() {
-                let expr = self.parse_expr()?;
-                if !self.is_block_form_expr_for_fn(&expr)
-                    || self.stream.check(&TokenKind::Semicolon)
-                {
-                    self.stream.expect(TokenKind::Semicolon)?;
-                }
-                Maybe::Some(FunctionBody::Expr(expr))
-            } else {
-                self.stream.expect(TokenKind::Semicolon)?;
-                Maybe::None
+            // T0643 — the grammar has ONE extern production:
+            //   extern_block   = 'extern' , [ string_lit ] , '{' , { extern_fn_decl } , '}' ;
+            //   extern_fn_decl = ... , ';' ;
+            // An extern function DECLARES a foreign symbol; it never
+            // carries a body. Accepting `extern fn f() { .. }` invented
+            // an "exported function" form the language does not have,
+            // and the only such site in the whole tree is
+            // `vcs/specs/parser/fail/declarations/invalid_fn_visibility.vr`
+            // — a spec that exists to be REJECTED and was passing.
+            // The `;`-terminated standalone form is left alone here (10
+            // sites in vcs/specs use it); tightening THAT is a separate
+            // decision with its own measurement.
+            if self.stream.check(&TokenKind::LBrace) || self.stream.check(&TokenKind::Eq) {
+                return Err(ParseError::new(
+                    ParseErrorKind::InvalidSyntax {
+                        message: Text::from(
+                            "an extern function declares a foreign symbol and has no \
+                             body: end the declaration with `;` (grammar/verum.ebnf: \
+                             extern_fn_decl)",
+                        ),
+                    },
+                    self.stream.current_span(),
+                ));
             }
+            self.stream.expect(TokenKind::Semicolon)?;
+            Maybe::None
         } else if self.stream.check(&TokenKind::LBrace) {
             // For cofix functions, check if the brace body is a copattern body
             // by looking ahead for the `.identifier =>` pattern.
