@@ -1100,13 +1100,7 @@ fn ffi_extended_body(
             // `handlers/cbgr.rs` already had to mirror it by hand
             // ("Mirror the GetF auto-deref chain") — a third private copy
             // would guarantee the next divergence.
-            let obj_val = super::cbgr_helpers::resolve_arg_value(state, obj_val);
-            let obj_val = if super::cbgr_helpers::is_cbgr_ref(&obj_val) {
-                let (abs_index, _generation) = super::cbgr_helpers::decode_cbgr_ref(obj_val);
-                state.registers.get_absolute(abs_index)
-            } else {
-                obj_val
-            };
+            let obj_val = super::cbgr_helpers::resolve_receiver(state, obj_val);
             // The struct receiver lives in the register either as an
             // Object/Pointer Value (heap-allocated struct) or — for
             // some single-field receivers — as the inline payload
@@ -1178,6 +1172,25 @@ fn ffi_extended_body(
             let field_addr = unsafe {
                 obj_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE + field_offset as usize)
             };
+            // T0705 diagnosis aid, SUCCESS path (the existing FIELDADDR
+            // trace fires only on refusal). The bridge-headerless
+            // hypothesis was implemented and measured inert — but if
+            // `resolve_arg_value` materializes cbgr_allocate's Int-tagged
+            // bridge address into a PTR-tagged value BEFORE the is_int
+            // test, that fix never executed and stands unmeasured rather
+            // than refuted. This prints the receiver's post-resolution
+            // tag and both addresses so the question closes on data.
+            if std::env::var("VERUM_TRACE_FIELDADDR").is_ok() {
+                eprintln!(
+                    "[fieldaddr-ok] tag={:?} is_int={} is_ptr={} obj={:p} field_addr={:p} off={}",
+                    obj_val.tag(),
+                    obj_val.is_int(),
+                    obj_val.is_ptr(),
+                    obj_ptr,
+                    field_addr,
+                    field_offset
+                );
+            }
             state.set_reg(dst, Value::from_ptr(field_addr));
             Ok(DispatchResult::Continue)
         }

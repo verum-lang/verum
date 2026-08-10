@@ -1469,21 +1469,16 @@ fn cbgr_extended_body(
 
             let base_val = state.get_reg(base_reg);
 
-            // Auto-deref CBGR register reference / thin-ref / fat-ref
-            // (same chain GetF runs before computing the field offset).
-            let base_val = if is_cbgr_ref(&base_val) {
-                let (abs_index, _gen) = decode_cbgr_ref(base_val);
-                state.registers.get_absolute(abs_index)
-            } else if base_val.is_thin_ref() {
-                let thin_ref = base_val.as_thin_ref();
-                if thin_ref.ptr.is_null() {
-                    return Err(InterpreterError::NullPointer);
-                }
-                unsafe { *(thin_ref.ptr as *const Value) }
-            } else if base_val.is_fat_ref() {
+            // Receiver resolution through the ONE layered authority
+            // (T0705): the private one-hop chain here returned NIL for
+            // a receiver forwarded through two method frames, and every
+            // baked `Shared` &mut-self chain died on the reference-typed
+            // field it then failed to read. Fat-refs keep their local
+            // arm — resolve_receiver does not flatten them.
+            let base_val = if base_val.is_fat_ref() {
                 Value::from_ptr(base_val.as_fat_ref().ptr())
             } else {
-                base_val
+                super::cbgr_helpers::resolve_receiver(state, base_val)
             };
 
             if !base_val.is_ptr() || base_val.is_nil() {

@@ -234,6 +234,42 @@ pub(super) fn resolve_arg_value(
     val
 }
 
+/// Resolve a RECEIVER to its object value, peeling LAYERED indirection.
+///
+/// `resolve_arg_value` peels exactly one hop of each encoding. A
+/// receiver forwarded through nested method frames can arrive as a
+/// register-ref whose target is ITSELF still an indirection —
+/// `handle_deref_mut` already carries a per-site second peel "for
+/// layered register-ref chains the single resolve above may still
+/// surface", which is the tell that one hop is not a contract. Measured
+/// casualty (T0705): `grab(&mut self) -> mid(&self) -> deep(&self)`
+/// reading a reference-typed field at depth 2 got NIL where the same
+/// read at depth 1 worked, and every baked `Shared` &mut-self chain
+/// (get_mut, make_unique) died on exactly that — 10 of
+/// base/memory/cbgr_test's failures are this class.
+///
+/// ONE authority, loop-until-stable with a bounded hop count (cycles
+/// are a codegen bug, not a semantics; refusing beats spinning). Every
+/// receiver-consuming handler (GetF, RefField, StructFieldAddr, the
+/// deref family) should resolve through THIS, not through private
+/// one-hop copies — the copies are how the gap keeps reopening.
+pub(in crate::interpreter) fn resolve_receiver(
+    state: &super::super::super::state::InterpreterState,
+    val: Value,
+) -> Value {
+    let mut v = resolve_arg_value(state, val);
+    let mut hops = 0u8;
+    while hops < 8 {
+        let next = resolve_arg_value(state, v);
+        if next.bits() == v.bits() {
+            break;
+        }
+        v = next;
+        hops += 1;
+    }
+    v
+}
+
 /// Peel one `Heap<T>` CBGR cell, yielding the boxed value.
 ///
 /// **SOLE authority** for the IMPLICIT cell peel — the one every object reader

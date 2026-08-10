@@ -97,17 +97,12 @@ pub(in super::super) fn handle_get_field(
     // helper first: it covers all three ref encodings and is IDENTITY
     // for plain values, so the for-loop's by-value binder path is
     // untouched (same precedent as the handle_iter_new fix).
-    let obj_val = super::cbgr_helpers::resolve_arg_value(state, obj_val);
-
-    // Handle CBGR register references: deref to get the actual pointer
-    // (kept for layered register-ref chains the single resolve above
-    // may still surface).
-    let obj_val = if is_cbgr_ref(&obj_val) {
-        let (abs_index, _generation) = decode_cbgr_ref(obj_val);
-        state.registers.get_absolute(abs_index)
-    } else {
-        obj_val
-    };
+    // ONE layered receiver authority (T0705): the previous pair —
+    // resolve_arg_value plus a single hand-rolled second hop "kept for
+    // layered register-ref chains" — is exactly the shape that kept
+    // reopening this gap one handler at a time. resolve_receiver loops
+    // the same peel to a fixpoint with a bounded hop count.
+    let obj_val = super::cbgr_helpers::resolve_receiver(state, obj_val);
 
     // TEMP ground-truth oracle (#48): VERUM_TRACE_LISTREPR=1 dumps the
     // List object's field words and peeks the buffer candidates, so the
