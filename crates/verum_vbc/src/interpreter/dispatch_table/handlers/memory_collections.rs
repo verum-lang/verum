@@ -220,6 +220,28 @@ pub(in super::super) fn handle_get_field(
     // primitive Value treated as a transparent-newtype self
     // (field_idx 0 only).  This mirrors the codegen-side
     // `is_transparent_wrapper` fast-path.
+    // **T0705 — an Int-tagged BRIDGE ADDRESS is a pointer, not a
+    // primitive.** `cbgr_allocate` hands its user pointer back
+    // Int-tagged (the T0108 arms in handlers/cbgr.rs say so in as many
+    // words), so `(*p).field` on such a value arrived here with
+    // `is_ptr() == false` and fell into the transparent-newtype arm
+    // below, which answers "field 0 IS the value" — and returned the
+    // ADDRESS as the field. That is the source of every "garbage"
+    // number in this task's probes: `a_count = 45958390176` was never
+    // corruption, it was `0xAB1B8C1E0` printed as an integer.
+    //
+    // The provenance index decides, exactly as on the write side: an
+    // Int whose payload lies inside a LIVE bridge extent is that
+    // block's address.
+    let obj_val = if !obj_val.is_ptr()
+        && obj_val.is_int()
+        && super::cbgr::bridge_extent_room(state, obj_val.as_i64() as usize).is_some()
+    {
+        Value::from_ptr(obj_val.as_i64() as *mut u8)
+    } else {
+        obj_val
+    };
+
     if !obj_val.is_ptr() {
         if field_idx == 0 {
             state.set_reg(dst, obj_val);
@@ -445,7 +467,26 @@ pub(in super::super) fn handle_get_field(
     // SAFETY: `field_offset` is bounds-checked against `header.size` above.
     // `ptr` is a live, aligned heap object. The data area at
     // `OBJECT_HEADER_SIZE + field_offset` contains an initialized Value.
-    let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + field_offset) as *const Value };
+    // T0705 — bridge blocks are HEADERLESS (see the StructFieldAddr twin
+    // in ffi_extended.rs): their field slots start at the user pointer.
+    // The discriminator is the live-extent index, the same fact
+    // `bridge_scalar_slot` uses to decide provenance.
+    if std::env::var("VERUM_TRACE_GETF").is_ok() {
+        eprintln!(
+            "[getf] ptr={:p} idx={} off={} room={:?} hdr_size={:?}",
+            ptr,
+            field_idx,
+            field_offset,
+            super::cbgr::bridge_extent_room(state, ptr as usize),
+            unsafe { heap::ObjectHeader::try_from_ptr(ptr) }.map(|h| h.size)
+        );
+    }
+    let header_skip = if super::cbgr::bridge_extent_room(state, ptr as usize).is_some() {
+        0
+    } else {
+        heap::OBJECT_HEADER_SIZE
+    };
+    let data_ptr = unsafe { ptr.add(header_skip + field_offset) as *const Value };
     let value = unsafe { *data_ptr };
     state.set_reg(dst, value);
     Ok(DispatchResult::Continue)

@@ -250,6 +250,29 @@ fn bridge_scalar_slot(
     Ok(Some(addr as *mut u64))
 }
 
+/// Remaining capacity of the live bridge allocation that contains `addr`.
+///
+/// Sibling of [`bridge_scalar_slot`] for WHOLE-RECORD access: the scalar
+/// form demands 8 readable bytes, a record needs as many as its object
+/// header says it occupies, so the caller must see the room rather than
+/// a fixed-width slot.
+///
+/// `None` when `addr` lies in no live bridge payload — the same
+/// "provenance from the allocation index" answer, and the ONE fact that
+/// distinguishes the two physical layouts a `&unsafe T` can front
+/// (T0108, T0705).
+pub(super) fn bridge_extent_room(
+    state: &InterpreterState,
+    addr: usize,
+) -> Option<usize> {
+    let (&user, &len) = state.cbgr_bridge_extents.range(..=addr).next_back()?;
+    let offset = addr.checked_sub(user)?;
+    if offset >= len {
+        return None;
+    }
+    Some(len - offset)
+}
+
 /// The raw 8-byte pattern a scalar `Value` occupies in packed memory.
 ///
 /// Bridge allocations are byte-addressable storage shared with `memcpy` /
@@ -449,6 +472,68 @@ pub(in super::super) fn handle_deref(
 /// Writes the value to the absolute register index stored in the reference.
 /// This enables mutation through &mut parameters. Validates CBGR generation
 /// before writing to detect use-after-free.
+/// Store `value` FLAT into a live bridge allocation at `addr`.
+///
+/// ONE authority for both arms of `handle_deref_mut` — the Int-tagged
+/// bridge address `cbgr_allocate` hands back, and the Ptr-tagged one the
+/// same address becomes after `ptr as &unsafe T`. Bridge storage is
+/// byte-addressable memory shared verbatim with `memcpy` / `load_byte`
+/// and with AOT code, so a scalar occupies its own bytes and a record
+/// occupies its field slots — never a NaN box, which is a tag into
+/// interpreter-private storage.
+///
+/// The copy is bounded on BOTH ends: by the object header's own
+/// data-section `size` and by the room left in the extent.
+pub(super) fn bridge_flat_store(
+    state: &mut InterpreterState,
+    addr: *mut u8,
+    room: usize,
+    value: Value,
+    op: &'static str,
+) -> InterpreterResult<DispatchResult> {
+    if let Some(bits) = packed_scalar_bits(value) {
+        if room < BRIDGE_SLOT_BYTES {
+            return Err(InterpreterError::InvalidOperand {
+                message: format!(
+                    "{op}: {BRIDGE_SLOT_BYTES}-byte store into a bridge allocation                      with only {room} byte(s) left writes past its end",
+                ),
+            });
+        }
+        // SAFETY: the extent proved 8 readable/writable bytes at `addr`.
+        unsafe {
+            std::ptr::write_unaligned(addr as *mut u64, bits);
+        }
+    } else if value.is_ptr() && !value.is_nil() {
+        let obj = value.as_ptr::<u8>();
+        let Some(header) = (unsafe { heap::ObjectHeader::try_from_ptr(obj) }) else {
+            return Err(InterpreterError::InvalidOperand {
+                message: format!(
+                    "{op}: cannot store a non-scalar value ({:?}) into a packed                      bridge allocation — its NaN box is a tag into                      interpreter-private storage and is not recoverable by the                      matching read",
+                    value.tag()
+                ),
+            });
+        };
+        let bytes = (header.size as usize).min(room);
+        if bytes > 0 {
+            // SAFETY: `room` bounds the destination inside a live bridge
+            // payload and `header.size` bounds the source inside the
+            // object's data section; the regions are distinct allocations.
+            unsafe {
+                std::ptr::copy_nonoverlapping(obj.add(heap::OBJECT_HEADER_SIZE), addr, bytes);
+            }
+        }
+    } else {
+        return Err(InterpreterError::InvalidOperand {
+            message: format!(
+                "{op}: cannot store a non-scalar value ({:?}) into a packed bridge                  allocation",
+                value.tag()
+            ),
+        });
+    }
+    state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
+    Ok(DispatchResult::Continue)
+}
+
 pub(in super::super) fn handle_deref_mut(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -456,6 +541,29 @@ pub(in super::super) fn handle_deref_mut(
     let value_reg = read_reg(state)?;
     let ref_val = state.get_reg(ref_reg);
     let value = state.get_reg(value_reg);
+    if std::env::var("VERUM_TRACE_PTRWRITE").is_ok() {
+        let addr = if ref_val.is_ptr() {
+            ref_val.as_ptr::<u8>() as usize
+        } else if ref_val.is_int() {
+            ref_val.as_i64() as usize
+        } else {
+            0
+        };
+        eprintln!(
+            "[ptrwrite] tag={:?} thin={} fat={} cbgrref={} ptr={} int={} addr={:#x} room={:?} \
+             val_tag={:?}",
+            ref_val.tag(),
+            ref_val.is_thin_ref(),
+            ref_val.is_fat_ref(),
+            is_cbgr_ref(&ref_val),
+            ref_val.is_ptr(),
+            ref_val.is_int(),
+            addr,
+            bridge_extent_room(state, addr),
+            value.tag()
+        );
+    }
+
     if state.config.count_instructions {
         state.stats.cbgr_stats.tier0_derefs += 1;
     }
@@ -499,6 +607,17 @@ pub(in super::super) fn handle_deref_mut(
     } else if ref_val.is_ptr() && !ref_val.is_nil() {
         // Heap pointer deref-mut: write value at pointer location.
         let base_ptr = ref_val.as_ptr::<u8>();
+        // **T0705 — the TAG does not name the LAYOUT.**
+        // A bridge address may arrive Int-tagged (as `cbgr_allocate`
+        // returns it) or Ptr-tagged (after `ptr as &unsafe T`, which is
+        // how every stdlib builder spells it). The destination's
+        // PROVENANCE decides how it must be written, not the tag on the
+        // register — so the same flat store the Int-tagged arm performs
+        // has to happen here too, or the identical program writes a
+        // boxed Value or raw bytes depending on a cast.
+        if let Some(room) = bridge_extent_room(state, base_ptr as usize) {
+            return bridge_flat_store(state, base_ptr, room, value, "ptr_write");
+        }
         // **T0374 — DerefMut twin of the Deref SHARED arm.**  `*shared = X`
         // must write THROUGH the carrier to the inner value cell (slot1); a
         // naive write at `base_ptr` lands on the Shared ObjectHeader and is
@@ -542,6 +661,11 @@ pub(in super::super) fn handle_deref_mut(
         // Packed storage: the scalar goes in FLAT, so `load_byte` /
         // `memcpy` observe the value's own bytes and the AOT store of the
         // same program produces the same memory.
+        // The Int-tagged bridge address `cbgr_allocate` returns —
+        // same store, ONE authority (see `bridge_flat_store`).
+        if let Some(room) = bridge_extent_room(state, ref_val.as_i64() as usize) {
+            return bridge_flat_store(state, slot as *mut u8, room, value, "ptr_write");
+        }
         let Some(bits) = packed_scalar_bits(value) else {
             return Err(InterpreterError::InvalidOperand {
                 message: format!(

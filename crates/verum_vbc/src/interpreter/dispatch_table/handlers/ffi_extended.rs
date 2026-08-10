@@ -1169,9 +1169,21 @@ fn ffi_extended_body(
             // is always within the object's data section.
             // OBJECT_HEADER_SIZE adds the standard 24-byte header
             // skip to reach the data section's first byte.
-            let field_addr = unsafe {
-                obj_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE + field_offset as usize)
+            // **T0705 — bridge blocks are HEADERLESS.**
+            // The +24 skip reaches the data section of a HEAP OBJECT. A
+            // `cbgr_alloc` bridge block has no object header: its field
+            // slots start at the user pointer, and adding the skip lands
+            // 24 bytes past the field (or outside the block entirely).
+            // The discriminator is the live-extent index — the same fact
+            // `bridge_scalar_slot` uses to decide provenance — not the
+            // value's tag, which says nothing about layout.
+            let header_skip = if super::cbgr::bridge_extent_room(state, obj_ptr as usize).is_some()
+            {
+                0
+            } else {
+                super::super::super::heap::OBJECT_HEADER_SIZE
             };
+            let field_addr = unsafe { obj_ptr.add(header_skip + field_offset as usize) };
             // T0705 diagnosis aid, SUCCESS path (the existing FIELDADDR
             // trace fires only on refusal). The bridge-headerless
             // hypothesis was implemented and measured inert — but if
@@ -1365,6 +1377,54 @@ fn ffi_extended_body(
                 return Err(InterpreterError::NullPointer);
             }
             let v = state.get_reg(value_reg);
+            // **T0705 — a RECORD into a BRIDGE block goes in FLAT.**
+            // The machine form of a heap value is its POINTER, and
+            // storing that is right for a cell that holds a reference.
+            // A bridge allocation is not such a cell: `cbgr_alloc(T.size)`
+            // + `ptr_write(p, record)` asks for the record's BYTES, and
+            // that is what `memcpy` / `load_byte` / AOT code and the
+            // read side (`(*p).field` -> StructFieldAddr) all expect.
+            // Storing the pointer left the block holding one word that
+            // the flat read walks straight past — `Shared.new` builds
+            // exactly this way, which is why every baked `Shared` read
+            // garbage.
+            //
+            // Gate: the destination must lie in a live bridge extent
+            // (provenance, not the tag) AND the block must have room for
+            // the WHOLE value — a block sized for a reference keeps the
+            // pointer write.
+            if std::env::var("VERUM_TRACE_PTRWRITE").is_ok() {
+                let room = super::cbgr::bridge_extent_room(state, ptr as usize);
+                let hsize = if v.is_regular_ptr() && !v.is_nil() {
+                    unsafe {
+                        super::super::super::heap::ObjectHeader::try_from_ptr(v.as_ptr::<u8>())
+                    }
+                    .map(|h| h.size)
+                } else {
+                    None
+                };
+                eprintln!(
+                    "[ptrwrite] raw={:#x} raw_tag={:?} dst={:p} size_op={} val_tag={:?} regular_ptr={} room={:?} \
+                     hdr_size={:?}",
+                    val.to_bits(),
+                    val.tag(),
+                    ptr,
+                    size,
+                    v.tag(),
+                    v.is_regular_ptr(),
+                    room,
+                    hsize
+                );
+            }
+            if v.is_regular_ptr()
+                && !v.is_nil()
+                && let Some(room) = super::cbgr::bridge_extent_room(state, ptr as usize)
+                && let Some(header) =
+                    (unsafe { super::super::super::heap::ObjectHeader::try_from_ptr(v.as_ptr::<u8>()) })
+                && room >= header.size as usize
+            {
+                return super::cbgr::bridge_flat_store(state, ptr, room, v, "ptr_write");
+            }
             // MACHINE representation: the payload (as_i64 for ints,
             // bit-pattern for floats via to_f64 bits, raw ptr for heap
             // values) — an `*mut Int` cell holds 11, never the NaN box.

@@ -221,7 +221,19 @@ pub(super) fn resolve_arg_value(
     }
     if val.is_ptr() && !val.is_nil() {
         let ptr_addr = val.as_ptr::<u8>() as usize;
-        if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
+        // BRIDGE MEMORY IS DATA, NOT A CELL (T0705).
+        // The `cbgr_mutable_ptrs` peel exists for pointers that hold a
+        // Value — `&arr[i]`, a deref source, a raw address cell. A live
+        // bridge allocation is the opposite: `ptr_write` stores the
+        // record's BYTES there, so loading 8 bytes from it yields the
+        // first FIELD and the reader then walks that number as if it
+        // were the object. Measured: `Shared.strong_count`'s address
+        // computation received `Int(1)` — the value of the very field it
+        // was addressing. The extent index decides, and it decides
+        // FIRST: provenance outranks the cell registry.
+        if super::cbgr::bridge_extent_room(state, ptr_addr).is_none()
+            && state.cbgr_mutable_ptrs.contains(&ptr_addr)
+        {
             return unsafe { *(ptr_addr as *const Value) };
         }
     }
