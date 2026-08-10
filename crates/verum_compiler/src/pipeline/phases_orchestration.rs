@@ -53,6 +53,64 @@ impl<'s> CompilationPipeline<'s> {
     /// interpreter and AOT paths before type-checking. Emits a
     /// diagnostic for each rejected construct and returns Err if any
     /// were rejected.
+    /// Attribute-target well-formedness (T0656).
+    ///
+    /// UNCONDITIONAL by design, and that is the whole point: this rule
+    /// went to two wrong homes before this one, each eliminated by
+    /// measurement rather than by argument.
+    ///
+    ///   * the FFI-boundary phase — `validate_module` has a single
+    ///     caller, on the INTERPRET path, so `verum run` rejected the
+    ///     program and `verum check` accepted it;
+    ///   * the safety gate — it opens with a fast path that returns
+    ///     immediately on the default permissive configuration
+    ///     ("zero cost on the default configuration"), so the walker
+    ///     never ran at all.
+    ///
+    /// A well-formedness rule is not a policy: it must hold on every
+    /// configuration and on every path. `@repr` controls the memory
+    /// layout of a TYPE; the attribute registry has always declared
+    /// exactly that (`AttributeMetadata::new("repr")
+    /// .targets(AttributeTarget::Type)`) while nothing in the compile
+    /// path called `AttributeRegistry::validate` — the declaration was
+    /// documentation, not enforcement.
+    ///
+    /// Census before enforcing: `@repr` appears 90 times in `core/` and
+    /// ZERO times on a function; `core-tests/` likewise ZERO.
+    pub(super) fn phase_attribute_targets(&self, module: &Module) -> Result<()> {
+        let mut rejected = 0usize;
+        for item in module.items.iter() {
+            // A FUNCTION's attributes live on its declaration, not on
+            // the Item: `parse_function` builds `Item::new(..)`, leaving
+            // `Item::attributes` empty. TYPE items carry theirs on the
+            // Item — which is why a sibling walk over `item.attributes`
+            // looks like a counterexample and is merely walking types.
+            if let verum_ast::decl::ItemKind::Function(func) = &item.kind {
+                for attr in func.attributes.iter() {
+                    if attr.name.as_str() == "repr" {
+                        rejected += 1;
+                        self.session.emit_diagnostic(
+                            verum_diagnostics::DiagnosticBuilder::error()
+                                .message(
+                                    "`@repr` controls the memory layout of a TYPE and \
+                                     cannot be applied to a function\n  help: move it to \
+                                     the type declaration, or drop it",
+                                )
+                                .build(),
+                        );
+                    }
+                }
+            }
+        }
+        if rejected > 0 {
+            return Err(anyhow::anyhow!(
+                "{} attribute(s) applied to a target they do not support",
+                rejected
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn phase_safety_gate(&self, module: &Module) -> Result<()> {
         let features = self.session.language_features();
         // Fast path: when every relevant [safety] flag is permissive,
@@ -130,6 +188,7 @@ impl<'s> CompilationPipeline<'s> {
         // pipeline entry point that jumps directly to type_check keeps
         // the gate active. Idempotent — running twice costs one extra
         // walk on the fast path (no violations).
+        self.phase_attribute_targets(module)?;
         self.phase_safety_gate(module)?;
 
         // Stdlib-hazard lint pass — AST-only, emits W05xx
