@@ -38,7 +38,7 @@ jobs:
           shared-key: nightly-vcs
 
       - name: Build runners
-        run: cargo build -p vtest -p vfuzz -p vbench -p verum_cli --release --locked
+        run: cargo build -p vtest -p verum_vfuzz -p vbench -p verum_cli --release --locked
 
       - name: Run VCS L0+L1+L2+L3 full
         working-directory: vcs
@@ -85,12 +85,12 @@ jobs:
           shared-key: nightly-fuzz
 
       - name: Build fuzzer
-        run: cargo build -p vfuzz --release --locked
+        run: cargo build -p verum_vfuzz --release --locked
 
       - name: Run fuzzer
         working-directory: vcs
         run: |
-          cargo run --release -p vfuzz -- run \
+          cargo run --release -p verum_vfuzz -- run \
             --targets all --duration 60m --parallel 4 \
             --corpus fuzz/seeds --crashes reports/fuzz-crashes || true
 
