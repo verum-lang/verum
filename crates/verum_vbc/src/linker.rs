@@ -1359,6 +1359,7 @@ mod tests {
             is_const: false,
             register_type_hints: Vec::new(),
             return_type_name: None,
+            origin_module: None,  // v2.13 wire field — test fixtures carry no origin
         };
         let n0 = a.intern_string("alpha");
         let n1 = a.intern_string("beta");

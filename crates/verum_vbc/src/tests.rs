@@ -294,6 +294,7 @@ fn test_roundtrip_function_descriptor() {
         is_const: false,
         register_type_hints: Vec::new(),
         return_type_name: None,
+        origin_module: None,  // v2.13 wire field — test fixtures carry no origin
     };
 
     // Add some dummy bytecode
@@ -355,6 +356,7 @@ fn intrinsic_name_marker_survives_round_trip() {
         is_const: true,
         register_type_hints: Vec::new(),
         return_type_name: None,
+        origin_module: None,  // v2.13 wire field — test fixtures carry no origin
     });
     module.header.function_table_count = 1;
 
