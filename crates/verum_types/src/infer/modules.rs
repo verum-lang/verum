@@ -11083,10 +11083,29 @@ impl TypeChecker {
                         .collect::<Vec<_>>()
                 );
             }
-            let param_reprs: List<Type> = func_type_param_vars
+            // The declared-param vars must be read from the ENVIRONMENT at
+            // judge time, not from the list minted while the signature was
+            // read. Measured: for `fn f<T>(x: T) -> Int { let y = x; 1 }`
+            // the trace printed
+            //     free=["TypeVar(24186)"]  fn_params=["TypeVar(24185)"]
+            // — adjacent ids, i.e. the body-check re-bound `T` to a FRESH
+            // var, so comparing against the captured list (or its unifier
+            // images) can never match and every generic-typed binding whose
+            // type is not pinned by the return type was reported ambiguous.
+            // `self.ctx.lookup_type(name)` is what the body actually used.
+            let mut param_reprs: List<Type> = func_type_param_vars
                 .iter()
                 .map(|p| self.unifier.apply(&Type::Var(*p)))
                 .collect();
+            for generic_param in &func.generics {
+                if let verum_ast::ty::GenericParamKind::Type { name, .. } = &generic_param.kind
+                {
+                    let bound = self.ctx.lookup_type(name.name.as_str()).cloned();
+                    if let Some(bound) = bound {
+                        param_reprs.push(self.unifier.apply(&bound));
+                    }
+                }
+            }
             if free.iter().all(|v| {
                 let v_repr = self.unifier.apply(&Type::Var(*v));
                 func_type_param_vars.iter().any(|p| p == v)
