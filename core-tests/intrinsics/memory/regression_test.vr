@@ -204,7 +204,7 @@ fn regression_ptr_is_aligned_to_returns_bool_not_nil() {
 //                     Some(3), expected Pointer or Int
 //
 // while the field READ path decoded the very same bits correctly,
-// because it runs `cbgr_helpers::resolve_arg_value` first. Both sites
+// because it runs the shared receiver resolver first. Both sites
 // were instrumented and handed byte-identical values; the fix makes the
 // address path use that one resolver rather than a second private test.
 //
