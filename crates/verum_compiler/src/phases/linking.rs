@@ -1258,9 +1258,19 @@ impl FinalLinker {
                 .unwrap_or(false)
         };
 
+        // When the workspace pins an LLVM, a MISS there must not fall
+        // through to whatever the host happens to ship: the PATH rule
+        // below picks the highest `name-<major>` it can find, which on a
+        // CI runner is Ubuntu's LLVM 18 beside this workspace's LLVM 21.
+        // A silent cross-version mix produces exactly the kind of
+        // failure that reads as a flag problem (`opt-18: Did you mean
+        // '--arm-ldst-opt'?`) and hides the real one. Announce the miss
+        // — the tool is still resolved as before, so nothing breaks that
+        // used to work, but the mix stops being invisible.
+        let pinned_dir = std::env::var("VERUM_LLVM_BIN_DIR").ok();
         let mut found: Option<PathBuf> = None;
-        if let Ok(dir) = std::env::var("VERUM_LLVM_BIN_DIR") {
-            let cand = std::path::Path::new(&dir).join(name);
+        if let Some(dir) = pinned_dir.as_deref() {
+            let cand = std::path::Path::new(dir).join(name);
             if cand.is_file() {
                 found = Some(cand);
             }
@@ -1295,6 +1305,21 @@ impl FinalLinker {
             found = best.map(|(_, p)| p);
         }
 
+        if let Some(dir) = pinned_dir.as_deref()
+            && found
+                .as_deref()
+                .is_none_or(|p| !p.starts_with(std::path::Path::new(dir)))
+        {
+            warn!(
+                "LLVM tool `{name}` not found in the pinned VERUM_LLVM_BIN_DIR ({dir}); \
+                 using {} instead — mixing LLVM versions across tools is how a valid \
+                 invocation starts looking like a bad flag",
+                found
+                    .as_deref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| name.to_string())
+            );
+        }
         let resolved = found.unwrap_or_else(|| PathBuf::from(name));
         cache
             .lock()
