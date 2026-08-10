@@ -1399,33 +1399,36 @@ impl FinalLinker {
         let mut cmd = Self::llvm_tool("opt");
         cmd.arg(&bitcode.path);
 
-        // Optimization level based on LTO mode
-        match self.config.lto {
-            LTOConfig::Thin => {
-                cmd.args(&["-O2", "-flto=thin"]);
-            }
-            LTOConfig::Full => {
-                cmd.args(&["-O3", "-flto=full"]);
-                cmd.args(&["-inline", "-inline-threshold=225"]);
-            }
-            LTOConfig::None => {
-                cmd.arg("-O1");
-            }
-        }
+        // NEW PASS MANAGER syntax. Everything this block used to pass
+        // was either a CLANG DRIVER flag (`-flto=thin`, `-flto=full`,
+        // `-cross-dso-cfi`, `-whole-program-vtables`) or a LEGACY pass
+        // manager flag (`-std-link-opts`, `-internalize`, `-globaldce`,
+        // `-constmerge`, `-mergefunc`, `-inline`) — `opt` has accepted
+        // neither since the legacy PM was removed in LLVM 17, so this
+        // step could not have succeeded against ANY LLVM this workspace
+        // builds with. CI showed it as
+        //     opt-18: Did you mean '--arm-ldst-opt'?
+        //     [fail] verum build failed
+        // in the architectural-invariants job (the no-libc smoke build),
+        // which is the only gate that exercises the path.
+        //
+        // The pipeline is expressed as ONE `--passes` string so the
+        // ordering is explicit rather than implied by flag order.
+        let passes = match self.config.lto {
+            // ThinLTO: per-module optimization; the cross-module work
+            // happens at link time from the summary written below.
+            LTOConfig::Thin => "default<O2>",
+            // Full LTO: whole-program pipeline plus the global cleanups
+            // the legacy flags used to name.
+            LTOConfig::Full => "default<O3>,globaldce,constmerge,mergefunc",
+            LTOConfig::None => "default<O1>",
+        };
+        cmd.arg(format!("--passes={passes}"));
 
-        // Standard link-time optimizations
-        cmd.args(&[
-            "-std-link-opts", // Standard link-time opts
-            "-internalize",   // Mark non-exported as internal
-            "-globaldce",     // Remove dead globals
-            "-constmerge",    // Merge duplicate constants
-            "-mergefunc",     // Merge identical functions
-            "-cross-dso-cfi", // Cross-DSO CFI
-        ]);
-
-        // Devirtualization for better performance
-        if self.config.lto == LTOConfig::Full {
-            cmd.arg("-whole-program-vtables");
+        // ThinLTO needs the module summary in the output bitcode; that
+        // is `opt`'s own flag, unlike the driver's `-flto=thin`.
+        if self.config.lto == LTOConfig::Thin {
+            cmd.arg("--module-summary");
         }
 
         cmd.arg("-o").arg(&output_path);
