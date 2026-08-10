@@ -45,6 +45,91 @@ impl<'a> RecursiveParser<'a> {
     ///
     /// The key: refinements can only appear if there's content inside the braces that looks
     /// like a predicate (starts with comparison operator, or is an expression).
+    /// Kind of the token that FOLLOWS the brace group starting at the
+    /// current position (the opening `{` must already be consumed).
+    ///
+    /// Bounded by `SCAN_CAP` tokens: a refinement predicate is a single
+    /// expression, so a group that does not close within the cap is a
+    /// function body, and `None` makes the caller decide that way.
+    fn kind_after_brace_group(&self) -> Option<TokenKind> {
+        const SCAN_CAP: usize = 4096;
+        let mut depth: usize = 1;
+        let mut i: usize = 0;
+        while i < SCAN_CAP {
+            match self.stream.peek_nth(i).map(|t| &t.kind) {
+                None => return None,
+                Some(TokenKind::LBrace) => depth += 1,
+                Some(TokenKind::RBrace) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return self.stream.peek_nth(i + 1).map(|t| t.kind.clone());
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Does a brace group after a DECLARATION return type carry a
+    /// refinement?
+    ///
+    /// The grammar makes a `function_def`'s body mandatory
+    /// (`grammar/verum.ebnf`: `function_def ... , function_body ;`) and
+    /// ends a protocol signature with `;`. So the group is a refinement
+    /// exactly when the signature CONTINUES after it — with the body,
+    /// with `;`, or with a signature clause. Otherwise the group IS the
+    /// body. Whitespace-independent and name-independent.
+    ///
+    /// This replaces a stack of name-based guesses in signature
+    /// position: `it` followed by `.` was a refinement, any other
+    /// identifier was a body, `self` was always a body, `result`
+    /// followed by `.` was a body "since method call chains are more
+    /// common". Those guesses REJECTED legal programs — a function
+    /// whose body began with a parameter named `it`
+    /// (`fn f(it: Int) -> Int { it.abs() }`) failed with "expected `{`
+    /// to start function body", which is how T0708's acceptance repro
+    /// read as a type-system failure.
+    ///
+    /// CAST contexts must NOT use this: after `x as Int{> 0}` the
+    /// stream continues with arbitrary expression syntax — in
+    /// `let y = match x as Int { .. };` the token after the group is
+    /// `;`, which here means "refinement" and there would mean
+    /// "the match lost its body".
+    fn brace_group_is_refinement(&self) -> bool {
+        match self.kind_after_brace_group() {
+            // `-> Int{it > 0} { body }` — the body follows.
+            Some(TokenKind::LBrace) => true,
+            // `fn f() -> Int{it > 0};` — protocol / declaration form.
+            Some(TokenKind::Semicolon) => true,
+            // Signature clauses may sit between refinement and body:
+            // `-> Int{it > 0} using [Log] { .. }`. The set is read off
+            // the grammar (`function_contract_clause`, `context_clause`,
+            // `generic_where_clause`, `throws_clause`), not guessed.
+            // `@ghost requires ...` is deliberately NOT in it: a body is
+            // very often followed by the next item's `@test`/`@derive`
+            // attribute, and no source in the tree writes a refinement
+            // ahead of a clause at all (measured: zero occurrences).
+            Some(TokenKind::Using)
+            | Some(TokenKind::Where)
+            | Some(TokenKind::Requires)
+            | Some(TokenKind::Ensures)
+            | Some(TokenKind::Throws)
+            | Some(TokenKind::Decreases) => true,
+            // Anything else (EOF, the next item, the `}` closing an
+            // impl/protocol block): the group was the body.
+            _ => false,
+        }
+    }
+
+    /// Return type of a DECLARATION: same as
+    /// [`Self::parse_type_with_lookahead`], but the refinement-vs-body
+    /// question is answered deterministically instead of by name.
+    pub fn parse_return_type(&mut self) -> ParseResult<Type> {
+        self.parse_type_impl_ctx(true, true, true, true)
+    }
+
     pub fn parse_type_with_lookahead(&mut self) -> ParseResult<Type> {
         self.parse_type_impl(true, true, true)
     }
@@ -207,8 +292,22 @@ impl<'a> RecursiveParser<'a> {
         use_lookahead: bool,
         allow_sigma: bool,
     ) -> ParseResult<Type> {
+        self.parse_type_impl_ctx(allow_refinement, use_lookahead, allow_sigma, false)
+    }
+
+    /// `signature_ctx` marks a DECLARATION return type, where the body
+    /// is mandatory and the refinement question is decidable — see
+    /// `brace_group_is_refinement`.
+    fn parse_type_impl_ctx(
+        &mut self,
+        allow_refinement: bool,
+        use_lookahead: bool,
+        allow_sigma: bool,
+        signature_ctx: bool,
+    ) -> ParseResult<Type> {
         self.enter_recursion()?;
-        let result = self.parse_type_impl_inner(allow_refinement, use_lookahead, allow_sigma);
+        let result =
+            self.parse_type_impl_inner(allow_refinement, use_lookahead, allow_sigma, signature_ctx);
         self.exit_recursion();
         result
     }
@@ -218,6 +317,7 @@ impl<'a> RecursiveParser<'a> {
         allow_refinement: bool,
         use_lookahead: bool,
         allow_sigma: bool,
+        signature_ctx: bool,
     ) -> ParseResult<Type> {
         let start_pos = self.stream.position();
 
@@ -359,7 +459,31 @@ impl<'a> RecursiveParser<'a> {
                 // Peek ahead: is the next token after { indicative of a refinement?
                 self.stream.advance(); // consume {
 
-                let looks_like_refinement = match self.stream.peek_kind() {
+                // DECLARATION return type: decidable — see
+                // `brace_group_is_refinement`. Cast contexts fall
+                // through to the token heuristic below, which is the
+                // best available answer where nothing follows the group
+                // to disambiguate it.
+                let looks_like_refinement = if signature_ctx {
+                    match self.stream.peek_kind() {
+                        // Empty braces: an empty body, never a predicate.
+                        Some(TokenKind::RBrace) => false,
+                        // Statement keywords can only open a body —
+                        // answer without scanning (the hot path).
+                        Some(TokenKind::Let)
+                        | Some(TokenKind::If)
+                        | Some(TokenKind::Return)
+                        | Some(TokenKind::Loop)
+                        | Some(TokenKind::While)
+                        | Some(TokenKind::For)
+                        | Some(TokenKind::Match)
+                        | Some(TokenKind::Break)
+                        | Some(TokenKind::Continue) => false,
+                        Some(_) => self.brace_group_is_refinement(),
+                        None => false,
+                    }
+                } else {
+                    match self.stream.peek_kind() {
                     // Empty braces: could be empty body {}, definitely not a refinement
                     Some(TokenKind::RBrace) => false,
                     // Comparison operators: definitely a refinement {>= 0}, {< 100}
@@ -483,6 +607,7 @@ impl<'a> RecursiveParser<'a> {
                     }
                     // Other tokens: conservatively assume function body
                     _ => false,
+                    }
                 };
 
                 // Reset to before the {

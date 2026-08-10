@@ -827,7 +827,7 @@ impl<'a> RecursiveParser<'a> {
                 }
                 _ => {}
             }
-            Maybe::Some(self.parse_type_with_lookahead()?)
+            Maybe::Some(self.parse_return_type()?)
         } else {
             Maybe::None
         };
@@ -4516,7 +4516,7 @@ impl<'a> RecursiveParser<'a> {
 
             // Use parse_type_with_lookahead to support refinements but avoid consuming body {
             let return_type = if self.stream.consume(&TokenKind::RArrow).is_some() {
-                Maybe::Some(self.parse_type_with_lookahead()?)
+                Maybe::Some(self.parse_return_type()?)
             } else {
                 Maybe::None
             };
@@ -5219,7 +5219,7 @@ impl<'a> RecursiveParser<'a> {
 
             // Use parse_type_with_lookahead to support refinements but avoid consuming body {
             let return_type = if self.stream.consume(&TokenKind::RArrow).is_some() {
-                Maybe::Some(self.parse_type_with_lookahead()?)
+                Maybe::Some(self.parse_return_type()?)
             } else {
                 Maybe::None
             };
@@ -6154,7 +6154,7 @@ impl<'a> RecursiveParser<'a> {
 
         self.stream.expect(TokenKind::RArrow)?;
         // Use parse_type_with_lookahead to avoid consuming the body { as a refinement
-        let return_type = self.parse_type_with_lookahead()?;
+        let return_type = self.parse_return_type()?;
 
         // Parse predicate body as a block expression (supports let bindings + final expression)
         let body = self.parse_block_expr()?;
@@ -6529,7 +6529,7 @@ impl<'a> RecursiveParser<'a> {
         // Context methods don't have bodies, so no lookahead needed
         // But we use parse_type_with_lookahead for consistency
         let return_type = if self.stream.consume(&TokenKind::RArrow).is_some() {
-            Maybe::Some(self.parse_type_with_lookahead()?)
+            Maybe::Some(self.parse_return_type()?)
         } else {
             Maybe::None
         };
