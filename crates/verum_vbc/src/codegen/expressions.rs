@@ -21833,14 +21833,76 @@ impl VbcCodegen {
             }
         }
 
-        let base_reg = self
-            .compile_expr(base)?
-            .or_internal("field base has no value")?;
+        // T0705 — READ twin of the address-side fold (bc70faab2).
+        // `(*p).field` in VALUE position compiled the base through the
+        // generic Deref path, which for a raw/`&unsafe` pointer emits
+        // DerefRaw: a raw 8-byte load that, for a RECORD pointee, reads
+        // the OBJECT HEADER — and the GetF that follows then indexes
+        // garbage. Emission of the 25-line repro's `Holder.deep` showed
+        // it verbatim (GET_F ptr; DerefRaw size=8; GET_F on the loaded
+        // word), and every baked `Shared` &mut-self chain
+        // (get_mut / make_unique — 10 of base/memory's failures) dies
+        // on exactly this. handle_get_field is POINTER-AWARE: given the
+        // pointer VALUE it resolves the object and reads the slot
+        // header-correctly. So for a known-layout pointee, compile the
+        // POINTER and let the ordinary field machinery below do the
+        // rest — never DerefRaw a record.
+        let deref_read = {
+            let mut probe: &Expr = base;
+            while let ExprKind::Paren(pin) = &probe.kind {
+                probe = pin;
+            }
+            if let ExprKind::Unary {
+                op: UnOp::Deref,
+                expr: rp,
+            } = &probe.kind
+            {
+                let pointee = self
+                    .infer_expr_type_name(rp)
+                    .or_else(|| self.extract_expr_type_name(rp))
+                    .map(|t| {
+                        let t = t
+                            .trim()
+                            .trim_start_matches("*const ")
+                            .trim_start_matches("*mut ")
+                            .trim_start_matches("&unsafe mut ")
+                            .trim_start_matches("&unsafe ")
+                            .trim_start_matches("&checked mut ")
+                            .trim_start_matches("&checked ")
+                            .trim_start_matches("&mut ")
+                            .trim_start_matches('&')
+                            .trim();
+                        VbcCodegen::strip_generic_args(t).to_string()
+                    });
+                match pointee {
+                    Some(tn)
+                        if !tn.is_empty()
+                            && self.type_field_layouts.contains_key(&tn) =>
+                    {
+                        Some((rp, tn))
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        };
+        let (base_reg, base_type) = if let Some((rp, tn)) = deref_read {
+            let ptr_reg = self
+                .compile_expr(rp)?
+                .or_internal("deref-read pointer has no value")?;
+            (ptr_reg, Some(tn))
+        } else {
+            let base_reg = self
+                .compile_expr(base)?
+                .or_internal("field base has no value")?;
+            (base_reg, base_type.clone())
+        };
 
         // FIELD-DEREF-CHASE-1: shared Deref-chase (extracted from the
         // task #15 read-side fix) — see `chase_deref_for_field`.
         let (base_reg, base_type) =
-            self.chase_deref_for_field(base_reg, base_type.clone(), field);
+            self.chase_deref_for_field(base_reg, base_type, field);
 
 
         let result = self.ctx.alloc_temp();
