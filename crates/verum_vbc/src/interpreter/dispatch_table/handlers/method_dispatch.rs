@@ -1880,9 +1880,16 @@ pub(in super::super) fn handle_call_method(
     // VBC-internal: interpreter runtime dispatch — Shared.new() allocates a
     // refcounted heap object. Must match the WKT::Shared name to trigger this
     // intrinsic path instead of falling through to compiled method lookup.
+    // `VERUM_SHARED_NATIVE=1` disables this interception so the COMPILED
+    // `core/base/memory.vr` body runs instead. It exists to MEASURE the
+    // native path — with the interception on, a static `Shared.new`
+    // exits here and no flow point past this line ever fires, so the
+    // question "where does an unresolved static call leave the chain"
+    // cannot be answered at all.
     if bare_method_name == "new"
         && let Some(ref name) = receiver_type_name
         && WKT::Shared.matches(name)
+        && std::env::var_os("VERUM_SHARED_NATIVE").is_none()
     {
         let caller_base = state.reg_base();
         let value = if args.count > 0 {
@@ -2421,6 +2428,9 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        eprintln!("[callm-flow] C3-pre-usersearch method={}", bare_method_name);
+    }
     // Fallback: try to find a user-defined impl method by searching for "Type.method_name"
     // in the module's function table. This handles methods defined in `implement Type { ... }` blocks.
     //
@@ -2442,6 +2452,48 @@ pub(in super::super) fn handle_call_method(
     // `format_debug(&"hi")` to the wrong `*.fmt_debug` body (was:
     // emitted `<hi>` instead of `<"hi">` because Display.fmt for Text
     // was picked over Debug.fmt_debug for Text).
+    // A1, STATIC-CALL LEG (T0384 campaign).
+    //
+    // `TypeName.method(..)` compiles to `LOAD_K String("TypeName")` +
+    // `CALL_M "method"`, so the type lives in the RECEIVER and the
+    // method name arrives bare. Every arm from here on keys off
+    // `method_name`, and the qualified form is never assembled, so the
+    // call walks the whole chain unresolved and leaves with the
+    // destination untouched — `Shared.new(42)` answers an empty value
+    // and `Shared.strong_count(1)` answers 0, both with NO diagnostic.
+    // Measured with the flow points: A → B → C → C2 → C3 and out, never
+    // reaching the not-found panic.
+    //
+    // The machinery to resolve it already exists — the same
+    // `format!("{type}.{method}")` + `find_function_by_name` pair that
+    // `resolve_unit_receiver_protocol_impl` uses — it simply never
+    // receives this shape. Give it the name: when the receiver IS a
+    // type name and the module has `TypeName.method`, qualify
+    // `method_name` so every downstream arm looks up what the caller
+    // actually wrote.
+    if !method_name.contains('.') && receiver.is_small_string() {
+        let tname = receiver.as_small_string().as_str().to_string();
+        if !tname.is_empty()
+            && tname.chars().next().is_some_and(char::is_uppercase)
+            && let Some(fid) = state
+                .module
+                .find_function_by_name(&format!("{tname}.{method_name}"))
+        {
+            // A STATIC call has no value receiver: the type name is not
+            // an argument. Qualifying the name alone is not enough —
+            // every downstream arm needs a pointer receiver and would
+            // reject a type-name string — so call the resolved body
+            // here, with the user's arguments only.
+            let caller_base = state.reg_base();
+            let argv: Vec<Value> = (0..args.count)
+                .map(|i| state.registers.get(caller_base, Reg(args.start.0 + i as u16)))
+                .collect();
+            let result = super::super::call_function_sync(state, fid, &argv)?;
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
+        }
+    }
+
     let mut was_dyn_dispatch = method_name.starts_with("dyn:");
     // CTX-UNIT-RECEIVER-DISPATCH-1 (T0245): remember the protocol
     // qualifier of a `dyn:`/`ctx:` token BEFORE the strip below discards
