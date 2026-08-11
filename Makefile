@@ -45,6 +45,7 @@ check-stdlib-proofs: ## Gate (T0230): stdlib theorem-proof ratchet — clean fil
 check-barename-collisions: ## Gate (T0538): free-fn (name,arity) collisions across core/ — ratchet
 	python3 scripts/ci/check_barename_collisions.py --check
 	python3 scripts/ci/check_barename_collisions.py --check --scope sqlite
+	python3 scripts/ci/check_barename_collisions.py --check --scope prelude
 
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
