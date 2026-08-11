@@ -227,10 +227,27 @@ otherwise strips); the fourth was fixed by commit 958e684e (switch
 the test harness to `compile_module_with_mounts` for files that bring
 cross-module symbols in via `mount`).
 
-The CI gate is: any unit-test failure in either default-feature or
-`--features codegen` surface blocks the PR.  There are no exceptions — the
-two that used to be carved out here were fixed under T0627.  No "known
-failure" may be documented here without an explicit tracking task.
+**What actually gates, read off `.github/workflows/ci.yml` (2026-08-11).**
+This paragraph used to claim that a failure in EITHER surface blocks the PR,
+"no exceptions".  Only the first one does:
+
+| Surface | CI line | Gates? |
+|---------|---------|--------|
+| `--lib` default features | `cargo test --workspace --lib --bins --locked` (ci.yml:150) | YES |
+| `--features codegen` **lib** (incl. `codegen::test_params::test_compile_stdlib_*`) | — | **NO** |
+| `--features codegen` three `tests/` targets | `-p verum_vbc --features codegen --test layout_invariant_verifier_tests --test intrinsic_key_resolution_gate --test global_type_table_consistency_tests` (ci.yml:206) | YES, those three only |
+
+`--test <name>` restricts the run to that integration binary and does NOT
+build the lib test target, so the whole AST-to-VBC codegen unit surface is
+unguarded on a PR.  A plausible reason it is not wired in: measured
+2026-08-11, that surface takes **over an hour** in a debug build on an
+otherwise-idle 10-core machine — the `test_compile_stdlib_*` fixtures each
+compile a stdlib module and individually pass the harness's 60-second
+"still running" threshold.
+
+Run it locally before landing anything in `codegen/`, and budget the hour.
+Do not read "CI is green" as covering it.  No "known failure" may be
+documented here without an explicit tracking task.
 
 ## Performance Targets
 
