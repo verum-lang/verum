@@ -71,6 +71,22 @@ use verum_common::{Heap, List, Map, Maybe, Set, Shared, Text, ToText};
 use verum_modules::{ModulePath, ModuleRegistry, NameResolver, resolve_import, resolver::NameKind};
 
 impl TypeChecker {
+    /// Is this body-check failure a verdict about the body ALONE?
+    ///
+    /// `stdlib_single_file_mode` tolerates failures caused by types a
+    /// sibling module has not loaded yet. It must not tolerate a verdict
+    /// that needed no sibling module at all — the canonical one being an
+    /// empty `{}` body, which is `Unit`, against a declared non-unit
+    /// return type. Those two are told apart by whether the ACTUAL type is
+    /// a concrete `Unit`: an unresolved cross-module type surfaces as
+    /// `Unknown` or a type variable, never as `Unit`.
+    fn is_local_body_verdict(err: &crate::TypeError) -> bool {
+        matches!(
+            err,
+            crate::TypeError::Mismatch { actual, .. } if actual.as_str() == "Unit"
+        )
+    }
+
     /// Type check a top-level item (function, type, protocol, etc.)
     /// Type check an item declaration.
     ///
@@ -10875,7 +10891,23 @@ impl TypeChecker {
                         // (Previously an `is_stub` guard skipped the check for empty
                         // blocks, which silently accepted any return type — T0118.)
                         if self.stdlib_single_file_mode {
-                            let _ = self.check_block(block, check_ty);
+                            // Single-file mode exists because a sibling
+                            // module's types may not be loaded yet, so a
+                            // CROSS-module resolution failure must not fail
+                            // the bake. Discarding the whole result was
+                            // broader than that reason: an empty body against
+                            // a non-Unit declared return is a purely LOCAL
+                            // fact that needs no sibling module, and the one
+                            // check that catches it was being thrown away for
+                            // every `core/*.vr` file.
+                            //
+                            // Keep the leniency where it was earned and
+                            // surface the local verdict.
+                            if let Err(e) = self.check_block(block, check_ty)
+                                && Self::is_local_body_verdict(&e)
+                            {
+                                return Err(e);
+                            }
                         } else {
                             self.check_block(block, check_ty)?;
                         }

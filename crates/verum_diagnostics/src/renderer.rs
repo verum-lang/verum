@@ -302,6 +302,16 @@ impl Renderer {
         let secondary_labels = diagnostic.secondary_labels();
 
         if primary_labels.is_empty() {
+            // Returning silently made "the compiler lost this diagnostic's
+            // position" indistinguishable from "this diagnostic needs no
+            // position", so the reader was left to search the file by hand.
+            // Measured: E400 "Type mismatch" prints `--> file:2:18` for a
+            // two-line program and printed NOTHING for a 461-line one.
+            //
+            // This invents no position — it reports that the producer
+            // attached none, which is a defect upstream and now leaves a
+            // greppable trace.
+            output.push_str("  --> <no source location attached to this diagnostic>\n");
             return;
         }
 
