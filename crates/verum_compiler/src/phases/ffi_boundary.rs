@@ -212,7 +212,15 @@ fn collect_repr_c_types(module: &Module) -> Set<Text> {
     let mut repr_c = Set::new();
     for item in &module.items {
         if let verum_ast::decl::ItemKind::Type(type_decl) = &item.kind {
-            for attr in item.attributes.iter() {
+            // Read the attribute from BOTH owners. `@repr(C)` on a type
+            // declaration is parsed onto `type_decl.attributes` — that is
+            // the list `verum_vbc`'s `has_repr_c` consults, and it is why
+            // `@repr(C)` types get a real C layout there. This collector
+            // read only `item.attributes`, which for those declarations is
+            // empty, so the set came out EMPTY and every user `@repr(C)`
+            // struct failed the FFI check with "add @repr(C)" — advice the
+            // type had already followed and which could not have helped.
+            for attr in item.attributes.iter().chain(type_decl.attributes.iter()) {
                 if attr.name.as_str() == "repr" {
                     // Check if the argument is "C"
                     if let verum_common::Maybe::Some(ref args) = attr.args {

@@ -302,7 +302,13 @@ impl ContextValidationPhase {
         let mut injectable_type_names: HashSet<String> = HashSet::new();
         for item in &module.items {
             if let ItemKind::Type(td) = &item.kind {
-                for attr in item.attributes.iter() {
+                // Same owner mismatch the FFI collector had: the parser puts
+                // a type declaration's attributes on `TypeDecl.attributes`
+                // (decl.rs:2619 `TypeDecl { … attributes: attrs … }`), not on
+                // the enclosing `Item`, so reading only `item.attributes`
+                // finds nothing for `@injectable` — 46 uses across core/ and
+                // vcs/. Read both owners.
+                for attr in item.attributes.iter().chain(td.attributes.iter()) {
                     if attr.name.as_str() == "injectable" {
                         found = true;
                         let scope = self.extract_di_scope(attr);
