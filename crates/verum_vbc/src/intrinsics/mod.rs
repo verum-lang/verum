@@ -467,4 +467,79 @@ mod tests {
     fn test_unknown_intrinsic() {
         assert!(lookup_intrinsic("nonexistent").is_none());
     }
+
+    /// **The naming contract the Float classifier rests on** (T0718).
+    ///
+    /// `infer_expr_type_kind` decides that an intrinsic call yields a Float
+    /// from the canonical name's `_f64` / `_f32` WIDTH SUFFIX.  That test used
+    /// to be padded with 26 `starts_with` prefixes for the scalar-math
+    /// families; a census over all 936 canonical names showed they captured
+    /// exactly ONE entry between them — `single_thread_block_on`, an Async
+    /// intrinsic caught by `starts_with("sin")` and typed Float for it — and
+    /// no true positive at all, because every float-result math intrinsic
+    /// already carries the suffix.  They were removed.
+    ///
+    /// Removing them is only safe while that stays true, and a suffix-less
+    /// float intrinsic added later would be mistyped SILENTLY at a site with
+    /// no test of its own.  So the contract is pinned HERE, beside the
+    /// registry that must satisfy it: a Math-category entry either carries a
+    /// width suffix or is one of the named constants.  Adding
+    /// `fn sqrt(...)` without `_f64` fails this test, not a user's f-string.
+    #[test]
+    fn intrinsic_math_names_carry_a_width_suffix() {
+        // The `f64_*` / `f32_*` constants are values, not width-parameterised
+        // operations, and `infer_expr_type_kind` names them exactly.
+        const NAMED_EXACTLY: &[&str] = &[
+            "f64_infinity",
+            "f64_neg_infinity",
+            "f64_nan",
+            "f64_epsilon",
+            "f32_infinity",
+            "f32_neg_infinity",
+            "f32_nan",
+            "f32_epsilon",
+        ];
+        let offenders: Vec<&str> = INTRINSIC_REGISTRY
+            .by_category(registry::IntrinsicCategory::Math)
+            .iter()
+            .copied()
+            .filter(|n| {
+                !n.ends_with("_f64") && !n.ends_with("_f32") && !NAMED_EXACTLY.contains(n)
+            })
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "Math intrinsics with neither a width suffix nor an exact classifier \
+             entry: {offenders:?}. Either name it `<op>_f64` / `<op>_f32`, or add \
+             it to BOTH this list and the Float arm of `infer_expr_type_kind` \
+             (verum_vbc/src/codegen/expressions.rs) — a suffix-less float \
+             intrinsic is typed as unknown and renders through the tag-driven \
+             path instead of the float one.",
+        );
+    }
+
+    /// The false positive that motivated the census: `starts_with("sin")`
+    /// captured `single_thread_block_on`, an Async intrinsic, and typed it
+    /// Float.
+    ///
+    /// This pins the two facts the prefix removal rests on, NOT the
+    /// classifier's verdict — `infer_expr_type_kind` is a method needing a
+    /// built `Expr` and a codegen context, so reaching it from here would
+    /// cost more setup than it proves.  What is checked: the name still
+    /// begins with `sin` (so a re-added prefix would capture it again, and
+    /// this test would then be guarding a live hazard rather than a
+    /// historical one), and it carries no width suffix (so the rule that
+    /// SURVIVED does not capture it).
+    #[test]
+    fn async_intrinsic_is_not_captured_by_a_math_prefix() {
+        let info = lookup_intrinsic("single_thread_block_on").expect("registered");
+        assert!(
+            info.intrinsic.name.starts_with("sin"),
+            "the capture this guards depends on the name still starting with `sin`",
+        );
+        assert!(
+            !info.intrinsic.name.ends_with("_f64") && !info.intrinsic.name.ends_with("_f32"),
+            "an Async intrinsic must not carry a float width suffix",
+        );
+    }
 }

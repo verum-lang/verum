@@ -27900,12 +27900,26 @@ impl VbcCodegen {
                             {
                                 return Some(TypeKind::Bool);
                             }
+                            // WIDTH SUFFIX IS THE CONTRACT (T0718 census, 936 canonical
+                            // registry names).  This test used to carry 26 `starts_with`
+                            // prefixes for the scalar-math families (sqrt/sin/cos/…).  A
+                            // census over EVERY canonical name showed they captured exactly
+                            // ONE entry between them — `single_thread_block_on`, an ASYNC
+                            // intrinsic caught by `starts_with("sin")`, which they typed
+                            // Float.  Every genuine float-result math intrinsic is named
+                            // with the `_f64`/`_f32` width suffix and is caught by the two
+                            // tests below (47 of the 50 Math-category entries; the other 3
+                            // are the `f64_*` constants named exactly).  So the prefixes
+                            // contributed no true positive and one false one — the THIRD
+                            // burn of this shape at this site, after `is_nan_f64` (suffix
+                            // described the ARGUMENT) and `exp` capturing `expect` below.
+                            //
+                            // Do not re-add prefixes.  `intrinsic_math_names_carry_a_width_suffix`
+                            // keeps the naming contract enforceable as the registry grows —
+                            // a new float intrinsic without the suffix fails there instead
+                            // of being silently mistyped here.
                             if name.ends_with("_f64")
                                 || name.ends_with("_f32")
-                                || name.starts_with("sqrt")
-                                || name.starts_with("sin")
-                                || name.starts_with("cos")
-                                || name.starts_with("tan")
                                 // CONTROL-EXPECT-GENERIC-ARITH (#30): the
                                 // `exp` PREFIX heuristic captured `expect`
                                 // (the branch hint!) — every let-bound
@@ -27918,28 +27932,6 @@ impl VbcCodegen {
                                 || name == "exp2"
                                 || name == "exp10"
                                 || name == "expm1"
-                                || name.starts_with("log")
-                                || name.starts_with("pow")
-                                || name.starts_with("fabs")
-                                || name.starts_with("floor")
-                                || name.starts_with("ceil")
-                                || name.starts_with("round")
-                                || name.starts_with("trunc")
-                                || name.starts_with("cbrt")
-                                || name.starts_with("hypot")
-                                || name.starts_with("fma")
-                                || name.starts_with("copysign")
-                                || name.starts_with("minnum")
-                                || name.starts_with("maxnum")
-                                || name.starts_with("sinh")
-                                || name.starts_with("cosh")
-                                || name.starts_with("tanh")
-                                || name.starts_with("asinh")
-                                || name.starts_with("acosh")
-                                || name.starts_with("atanh")
-                                || name.starts_with("asin")
-                                || name.starts_with("acos")
-                                || name.starts_with("atan")
                                 || name == "f64_infinity"
                                 || name == "f64_neg_infinity"
                                 || name == "f64_nan"
