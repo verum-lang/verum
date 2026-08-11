@@ -4641,8 +4641,11 @@ impl VbcCodegen {
             // Shape + pointee resolution through the ONE authority
             // (`record_pointer_base`) — this used to be a private copy.
             if let Some((raw_ptr_expr, type_name)) = self.record_pointer_base(field_base) {
-                let field_offset = self.compute_field_offset(&type_name, field.as_str());
-                if (0..=u16::MAX as i64).contains(&field_offset)
+                // An unknown type/field yields no offset at all; falling
+                // through leaves the general path to report it.
+                if let Some(field_offset) = self
+                    .compute_field_offset(&type_name, field.as_str())
+                    .filter(|o| (0..=u16::MAX as i64).contains(o))
                     && let Some(ptr_reg) = self.compile_expr(raw_ptr_expr)?
                 {
                     let dst = self.ctx.alloc_temp();
@@ -8562,9 +8565,19 @@ impl VbcCodegen {
                     }
                     _ => "unknown".to_string(),
                 };
-                // Look up the struct fields to compute offset
-                // For now, compute based on known type layouts
-                let offset = self.compute_field_offset(&type_name, &field_name);
+                // `offset_of` has no honest answer for a type we do not
+                // know or a field it does not declare. Returning 0 there
+                // was indistinguishable from the true offset of the FIRST
+                // field, so a misspelt field name compiled to a plausible
+                // address; say so instead.
+                let offset = self
+                    .compute_field_offset(&type_name, &field_name)
+                    .ok_or_else(|| {
+                        CodegenError::new(CodegenErrorKind::InvalidTypeForOperation {
+                            ty: type_name.clone(),
+                            operation: format!("offset_of(..., {field_name})"),
+                        })
+                    })?;
                 let dest = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::LoadI {
                     dst: dest,
@@ -24514,14 +24527,16 @@ impl VbcCodegen {
         // return points to the low byte of that Value's u64 storage,
         // which on little-endian targets is exactly the inline-int
         // payload byte that AtomicU8 / U16 / U32 read/write.
-        let field_offset = self.compute_field_offset(&type_name, field_name);
-        if !(0..=u16::MAX as i64).contains(&field_offset) {
-            // Out-of-range offset (likely an unregistered type for
-            // which compute_field_offset returned a fallback). Bail
-            // so the generic cast path fires and the user sees the
-            // existing diagnostic instead of a silent miscompile.
+        // A refusal (unknown type/field) and an out-of-range offset are the
+        // same verdict here: we cannot name this address, so bail and let
+        // the generic cast path fire with its existing diagnostic rather
+        // than emit a silent miscompile.
+        let Some(field_offset) = self
+            .compute_field_offset(&type_name, field_name)
+            .filter(|o| (0..=u16::MAX as i64).contains(o))
+        else {
             return Ok(None);
-        }
+        };
         let field_offset = field_offset as u16;
 
         // Compile the receiver to get a heap pointer Value — or, for a
@@ -40233,11 +40248,11 @@ impl VbcCodegen {
     /// collection) to find the field's position in the struct, then
     /// computes the offset based on Verum's uniform 64-bit value model
     /// where every field occupies 8 bytes.
-    fn compute_field_offset(&self, type_name: &str, field_name: &str) -> i64 {
+    fn compute_field_offset(&self, type_name: &str, field_name: &str) -> Option<i64> {
         if let Some(fields) = self.type_field_layouts.get(type_name)
             && let Some(index) = fields.iter().position(|f| f == field_name)
         {
-            return (index as i64) * 8;
+            return Some((index as i64) * 8);
         }
         // The layout table is keyed by SIMPLE type name, but callers hand
         // over whatever inference produced — `&RwLock<T>`, `&mut GBox<Int>`,
@@ -40264,12 +40279,21 @@ impl VbcCodegen {
             && let Some(fields) = self.type_field_layouts.get(base)
             && let Some(index) = fields.iter().position(|f| f == field_name)
         {
-            return (index as i64) * 8;
+            return Some((index as i64) * 8);
         }
-        // Field or type not found — return 0 as a conservative fallback.
-        // This can happen for types not yet registered (e.g., generic
-        // instantiations or externally-defined types).
-        0
+        // Type or field genuinely unknown. This USED to return 0 "as a
+        // conservative fallback", which it is not: 0 is the byte offset of
+        // field 0, so every caller received a plausible answer for a
+        // question that had none. The guards the callers wrote against it
+        // (`(0..=u16::MAX).contains(&offset)`) could never fire, because 0
+        // is in range — the unknown case took the same path as a correct
+        // field-0 answer and wrote there. That is the corruption the
+        // comment above records, and normalization only shrank the set of
+        // types that reach here; it did not make the answer honest.
+        //
+        // `None` is a refusal the type system forces every caller to
+        // handle. It must NEVER be mapped back onto 0.
+        None
     }
 
     /// Compiles type expression in expression position

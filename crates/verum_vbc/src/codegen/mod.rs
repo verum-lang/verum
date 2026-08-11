@@ -11313,7 +11313,10 @@ impl VbcCodegen {
             verum_ast::ffi::ErrorProtocol::None => (ErrorProtocol::None, 0),
             verum_ast::ffi::ErrorProtocol::Errno => (ErrorProtocol::NegOneErrno, -1),
             verum_ast::ffi::ErrorProtocol::ReturnCode(expr) => {
-                // Try to extract literal integer value from the pattern expression
+                // Try to extract a literal integer from the pattern. A
+                // pattern we cannot evaluate (a named constant) defaults to
+                // the success = 0 convention — a POLICY of this protocol,
+                // stated here rather than faked inside the evaluator.
                 let sentinel = Self::try_eval_const_i64(expr).unwrap_or(0);
                 (ErrorProtocol::ReturnCodePattern, sentinel)
             }
@@ -11347,12 +11350,14 @@ impl VbcCodegen {
                     None
                 }
             }
-            ExprKind::Path(path) => {
-                // Named constants like SQLITE_OK — can't resolve at compile time,
-                // fall back to 0 (success = 0 convention)
-                let _name = path.as_ident().map(|i| i.as_str()).unwrap_or("");
-                Some(0)
-            }
+            // A named constant (SQLITE_OK, …) cannot be resolved here. This
+            // used to answer `Some(0)` "by the success = 0 convention",
+            // which states a VALUE for an expression whose value is
+            // unknown — the same shape as an offset table answering 0 for
+            // a field it cannot find. The default belongs to the caller,
+            // where it is a documented protocol choice, not to the
+            // evaluator, where it is indistinguishable from having read a
+            // literal `0`.
             _ => None,
         }
     }
