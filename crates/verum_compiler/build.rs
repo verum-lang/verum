@@ -81,9 +81,37 @@ fn acquire_bake_lock(lock_path: &std::path::Path) -> bool {
                             .unwrap_or(false) // probe failed → don't claim dead
                     })
                     .unwrap_or(false);
-                let too_old = held_at
-                    .map(|t| now_secs().saturating_sub(t) > 8 * 60)
-                    .unwrap_or(true); // unreadable/empty lock counts as stale
+                // A CONFIRMED-LIVE holder is never stolen from, at any age.
+                //
+                // Measured 2026-08-11: with the age rule applied
+                // unconditionally, two `verum_stdlib_precompiler` processes
+                // ran CONCURRENTLY against the shared
+                // `target/precompiled-stdlib/` — one from each of two
+                // sessions, with different parents, both at ~100% CPU. The
+                // second had waited out the 8-minute window and removed a
+                // lock whose owner (a live pid, `kill -0` succeeding) was
+                // still baking.
+                //
+                // The window could never have been safe: this file's own
+                // notes record real bakes at 36 and 50 minutes, and a CLI
+                // precompile measured 42 minutes the same day. So an
+                // 8-minute staleness rule guaranteed lock theft on every
+                // overlapping build, not merely on an abandoned one — two
+                // 40-minute bakes burned in parallel, both writing the same
+                // artefacts.
+                //
+                // The age fallback keeps its original purpose and only that:
+                // reclaiming a lock we cannot ATTRIBUTE to a live process —
+                // an unreadable/empty file, or a pid that no longer answers.
+                // `holder_dead` stays false when the liveness probe itself
+                // fails (another user's process, EPERM), which is exactly
+                // the unattributable case the age rule is for.
+                let holder_known_alive =
+                    holder_pid.filter(|p| *p > 1).is_some() && !holder_dead;
+                let too_old = !holder_known_alive
+                    && held_at
+                        .map(|t| now_secs().saturating_sub(t) > 8 * 60)
+                        .unwrap_or(true); // unreadable/empty lock counts as stale
                 if holder_dead || too_old {
                     let _ = std::fs::remove_file(lock_path);
                     continue;
