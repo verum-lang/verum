@@ -11322,6 +11322,9 @@ impl TypeChecker {
                                     declared_names.join(", "),
                                     declared_names.join(" | "),
                                 ))
+                                // The throw expression's own span; without it the
+                                // diagnostic renders positionless.
+                                .span(span_to_line_col(expr.span))
                                 .build()
                         );
                     }
@@ -11335,6 +11338,9 @@ impl TypeChecker {
                                  help: add `throws(ErrorType)` to the function signature, or wrap in `try { ... } recover { ... }`"
                                     .to_string()
                             )
+                            // The throw expression's own span; without it the
+                            // diagnostic renders positionless.
+                            .span(span_to_line_col(expr.span))
                             .build()
                     );
                 }

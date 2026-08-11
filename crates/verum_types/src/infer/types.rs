@@ -6487,6 +6487,9 @@ impl TypeChecker {
                              note: integers larger than 2^53 cannot be represented exactly in IEEE 754 doubles",
                             from_ty, to_ty
                         ))
+                        // `check_cast` has the cast's span; a builder without it
+                        // renders positionless.
+                        .span(span_to_line_col(span))
                         .build()
                 );
                 Ok(())
@@ -6502,6 +6505,9 @@ impl TypeChecker {
                              help: use `.trunc()`, `.floor()`, `.ceil()`, or `.round()` for explicit rounding control",
                             from_ty, to_ty
                         ))
+                        // `check_cast` has the cast's span; a builder without it
+                        // renders positionless.
+                        .span(span_to_line_col(span))
                         .build()
                 );
                 Ok(())
@@ -6542,6 +6548,9 @@ impl TypeChecker {
                                  help: ensure the slice contains valid data for `{}`; consider @unsafe block",
                                 to_inner
                             ))
+                            // `check_cast` has the cast's span; a builder without it
+                            // renders positionless.
+                            .span(span_to_line_col(span))
                             .build()
                     );
                 }
@@ -6608,6 +6617,9 @@ impl TypeChecker {
                     self.emit_diagnostic(
                         DiagnosticBuilder::warning()
                             .message("casting integer to reference - ensure valid memory address and alignment")
+                            // `check_cast` has the cast's span; a builder without it
+                            // renders positionless.
+                            .span(span_to_line_col(span))
                             .build()
                     );
                 }
@@ -6636,6 +6648,9 @@ impl TypeChecker {
                             .message(
                                 "casting between integer and raw pointer - ensure a valid address",
                             )
+                            // `check_cast` has the cast's span; a builder without it
+                            // renders positionless.
+                            .span(span_to_line_col(span))
                             .build(),
                     );
                 }
@@ -6669,6 +6684,9 @@ impl TypeChecker {
                                     .message(
                                         "casting between integer and raw pointer - ensure a valid address",
                                     )
+                                    // `check_cast` has the cast's span; a builder without it
+                                    // renders positionless.
+                                    .span(span_to_line_col(span))
                                     .build(),
                             );
                         }
@@ -6704,6 +6722,9 @@ impl TypeChecker {
                                 "reinterpret cast between reference types: `{}` to `{}`",
                                 from_ty, to_ty
                             ))
+                            // `check_cast` has the cast's span; a builder without it
+                            // renders positionless.
+                            .span(span_to_line_col(span))
                             .build(),
                     );
                     return Ok(());
@@ -6864,6 +6885,9 @@ impl TypeChecker {
                                 "casting between unsafe reference and pointer with incompatible inner types: `{}` to `{}`",
                                 from_ty, to_ty
                             ))
+                            // `check_cast` has the cast's span; a builder without it
+                            // renders positionless.
+                            .span(span_to_line_col(span))
                             .build()
                     );
                     Ok(())
@@ -6894,6 +6918,11 @@ impl TypeChecker {
                                 "casting between incompatible pointer types: `{}` to `{}`",
                                 from_ty, to_ty
                             ))
+                            // `check_cast` receives the cast's span; without
+                            // this the diagnostic is built with no label at
+                            // all and renders positionless, leaving the
+                            // reader to find the cast by hand.
+                            .span(span_to_line_col(span))
                             .build(),
                     );
                     Ok(())
@@ -6923,6 +6952,9 @@ impl TypeChecker {
                                 "casting between pointer and unsafe reference with incompatible inner types: `{}` to `{}`",
                                 from_ty, to_ty
                             ))
+                            // `check_cast` has the cast's span; a builder without it
+                            // renders positionless.
+                            .span(span_to_line_col(span))
                             .build()
                     );
                     Ok(())
@@ -7382,6 +7414,9 @@ impl TypeChecker {
                     self.emit_diagnostic(
                         DiagnosticBuilder::warning()
                             .message("casting array to integer reinterprets memory layout")
+                            // `check_cast` has the cast's span; a builder without it
+                            // renders positionless.
+                            .span(span_to_line_col(span))
                             .build(),
                     );
                     Ok(())
@@ -7396,6 +7431,9 @@ impl TypeChecker {
                     self.emit_diagnostic(
                         DiagnosticBuilder::warning()
                             .message("casting integer type to unsafe reference - ensure valid memory address")
+                            // `check_cast` has the cast's span; a builder without it
+                            // renders positionless.
+                            .span(span_to_line_col(span))
                             .build()
                     );
                     Ok(())
@@ -7407,6 +7445,9 @@ impl TypeChecker {
                 self.emit_diagnostic(
                     DiagnosticBuilder::warning()
                         .message("casting named type to reference - ensure valid memory address")
+                        // `check_cast` has the cast's span; a builder without it
+                        // renders positionless.
+                        .span(span_to_line_col(span))
                         .build(),
                 );
                 Ok(())
@@ -7417,6 +7458,9 @@ impl TypeChecker {
                 self.emit_diagnostic(
                     DiagnosticBuilder::warning()
                         .message("casting between function pointer and integer - ensure valid function address")
+                        // `check_cast` has the cast's span; a builder without it
+                        // renders positionless.
+                        .span(span_to_line_col(span))
                         .build()
                 );
                 Ok(())
@@ -7429,6 +7473,9 @@ impl TypeChecker {
                         .message(
                             "casting Unit to unsafe reference - likely represents null pointer",
                         )
+                        // `check_cast` has the cast's span; a builder without it
+                        // renders positionless.
+                        .span(span_to_line_col(span))
                         .build(),
                 );
                 Ok(())
@@ -7439,6 +7486,9 @@ impl TypeChecker {
                 self.emit_diagnostic(
                     DiagnosticBuilder::warning()
                         .message("casting variant type to integer - ensure valid conversion")
+                        // `check_cast` has the cast's span; a builder without it
+                        // renders positionless.
+                        .span(span_to_line_col(span))
                         .build(),
                 );
                 Ok(())

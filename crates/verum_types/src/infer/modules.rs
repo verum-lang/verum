@@ -10207,6 +10207,9 @@ impl TypeChecker {
                                  example: `{}: meta <type>`",
                                 name.name, name.name
                             ))
+                            // The declaration's own span; without it the
+                            // diagnostic renders positionless.
+                            .span(span_to_line_col(func.span))
                             .build(),
                     );
                     let base_ty = self.ast_to_type(ty)?;
@@ -10227,6 +10230,9 @@ impl TypeChecker {
                                  help: remove this parameter for now",
                                 name.name
                             ))
+                            // The declaration's own span; without it the
+                            // diagnostic renders positionless.
+                            .span(span_to_line_col(func.span))
                             .build()
                     );
                 }
