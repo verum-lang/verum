@@ -25,6 +25,12 @@ fn carried_descriptor() -> FunctionDescriptor {
     FunctionDescriptor {
         name: Text::from("Slice.iter"),
         module_path: Text::from("core.collections.slice"),
+        // `Maybe::None` = the declaring file submodule is the same as
+        // `module_path`, which is what this fixture describes. Added when
+        // the field landed (069f2ed88, 2026-08-08) left this literal
+        // uncompilable; nothing noticed for three days because CI runs
+        // `--lib --bins` and never builds an integration test (T0709).
+        origin_module_path: Maybe::None,
         generic_params: List::new(),
         params: List::new(),
         return_type: Text::from("SliceIter<__generic_0>"),
