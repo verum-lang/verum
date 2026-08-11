@@ -220,6 +220,25 @@ impl RichRenderer {
                 "{}  {} {}:{}:{}\n",
                 indent_str, colored_arrow, colored_path, span.line, span.column
             ));
+        } else {
+            // A diagnostic with no primary label used to render with the
+            // location line simply ABSENT, which is indistinguishable from a
+            // diagnostic that needs no location — so a lost span was
+            // invisible, and the reader was left to search the file by hand.
+            // (Measured: E400 "Type mismatch" prints `-->` for a two-line
+            // program and prints nothing for a 461-line one; same code, same
+            // renderer, different producer.)
+            //
+            // Say so instead. This does not invent a position: it reports
+            // that the compiler failed to attach one, which is a defect in
+            // the producer and now leaves a greppable trace.
+            let indent_str = " ".repeat(indent);
+            let arrow = self.config.glyphs.arrow_right;
+            let colored_arrow = self.config.color_scheme.gutter.wrap(arrow);
+            output.push_str(&format!(
+                "{}  {} <no source location attached to this diagnostic>\n",
+                indent_str, colored_arrow
+            ));
         }
     }
 
