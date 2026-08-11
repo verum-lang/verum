@@ -6847,15 +6847,32 @@ impl TypeChecker {
                     // Check that we don't have too many explicit type args
                     let expected_explicit = fresh_vars.len() - implicit_vars.len();
                     if type_args.len() > expected_explicit {
-                        return Err(TypeError::Other(verum_common::Text::from(
-                            format!(
+                        // `TypeError::Other` has NO span field, so this
+                        // rendered with no file/line at all — surfaced by
+                        // the `<no source location …>` marker. `LanguageLaw`
+                        // is the variant that carries code + message + help
+                        // + span, and `expr.span` is right here.
+                        // E408 is the registry's "dependent value-argument
+                        // arity mismatch" — the same kind of arity fault,
+                        // one level up at the TYPE-argument list. E402 is
+                        // taken ("Send bound not satisfied").
+                        return Err(TypeError::LanguageLaw {
+                            code: "E408",
+                            message: format!(
                                 "Function `{}` expects {} explicit type argument{}, got {}",
                                 name,
                                 expected_explicit,
                                 if expected_explicit == 1 { "" } else { "s" },
                                 type_args.len()
                             ),
-                        )));
+                            help: format!(
+                                "remove the extra type argument{}, or check whether the \
+                                 remaining parameters are inferred from the call's \
+                                 arguments rather than given explicitly",
+                                if type_args.len() - expected_explicit == 1 { "" } else { "s" }
+                            ),
+                            span: expr.span,
+                        });
                     }
 
                     InferResult::new(ty)
