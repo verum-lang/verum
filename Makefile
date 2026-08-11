@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census check-panic-surface check-dup-emitters
+.PHONY: check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census check-panic-surface check-dup-emitters
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -41,6 +41,13 @@ check-op-bytes: ## Gate (T0198): .vr op-byte doc comments match the instruction.
 
 check-stdlib-proofs: ## Gate (T0230): stdlib theorem-proof ratchet — clean files stay clean, proved counts never fall
 	python3 scripts/ci/proof_gate.py
+
+check-barename-collisions: ## Gate (T0538): free-fn (name,arity) collisions across core/ — ratchet
+	python3 scripts/ci/check_barename_collisions.py --check
+	python3 scripts/ci/check_barename_collisions.py --check --scope sqlite
+
+check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
+	python3 scripts/ci/check_barename_collisions.py
 
 check-rings: ## Gate: core/ ring law — no upward edges, no cycles (core/rings.toml declares the rings)
 	python3 scripts/ci/check_core_rings.py
