@@ -30,11 +30,18 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CORE = ROOT / "core"
 SQLITE_NATIVE = "database/sqlite/native"
+PRELUDE_SOURCE = CORE / "mod.vr"
 
 # Frozen counts, measured 2026-08-11. Lower them in the commit that earns
 # it; never raise them without a recorded reason.
 BASELINE_ALL = 614
 BASELINE_SQLITE = 84
+# The PRELUDE scope — the subset a user meets without importing anything.
+# This is not a stylistic count: for these names the ambiguity DECIDES which
+# implementation runs, and 14 of the 20 prelude math functions currently
+# resolve to SQLite's SQL builtins and answer `Relaxed` instead of a number
+# (measured 2026-08-11 through `mount core.prelude.*`).
+BASELINE_PRELUDE = 26
 # Same populations under the (name, arity, first-param type) key — the
 # REUSE question. Duplicated WORK, not merely a shared verb.
 BASELINE_ALL_TYPED = 297
@@ -60,6 +67,33 @@ DECL = re.compile(r"^public fn (\w+)\s*\(([^)]*)\)")
 
 def arity(params: str) -> int:
     return len([p for p in params.split(",") if p.strip()])
+
+
+def prelude_named_exports() -> set[str]:
+    """Names the prelude re-exports EXPLICITLY, from `core/mod.vr`.
+
+    LIMITATION, stated rather than hidden: the prelude also carries ~13
+    `public mount super.<mod>.*;` globs, whose members are NOT counted here —
+    enumerating them means resolving each module's public surface, which this
+    script deliberately does not do. So the prelude count is a LOWER BOUND on
+    the ambiguous names a user can hit without importing anything.
+    """
+    try:
+        src = PRELUDE_SOURCE.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return set()
+    names: set[str] = set()
+    # `public mount super.math.{sin, cos, ...};` — braced lists, possibly
+    # spanning lines and carrying `//` comments between entries.
+    for block in re.finditer(r"public mount super\.[\w.]+\.\{([^}]*)\}", src, re.S):
+        body = re.sub(r"//[^\n]*", "", block.group(1))
+        for name in re.split(r"[,\s]+", body):
+            if re.fullmatch(r"[A-Za-z_]\w*", name):
+                names.add(name)
+    # `public mount super.io.print;` — single-name form.
+    for one in re.finditer(r"public mount super\.[\w.]+\.(\w+);", src):
+        names.add(one.group(1))
+    return names
 
 
 def collect(typed: bool = False) -> dict[tuple, set[str]]:
@@ -88,9 +122,16 @@ def collect(typed: bool = False) -> dict[tuple, set[str]]:
 
 def collisions(found, scope: str) -> dict[tuple[str, int], set[str]]:
     out = {}
+    prelude = prelude_named_exports() if scope == "prelude" else set()
     for key, modules in found.items():
         if len(modules) < 2:
             continue
+        if scope == "prelude":
+            # The name is reachable with no import at all, and more than one
+            # module answers to it at the same arity — so which body runs is
+            # decided by resolution order, invisibly, at every call site.
+            if key[0] not in prelude:
+                continue
         if scope == "sqlite":
             # Only the boundary this task is about: declared BOTH inside
             # sqlite/native and outside it.
@@ -105,7 +146,7 @@ def collisions(found, scope: str) -> dict[tuple[str, int], set[str]]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="ratchet mode")
-    ap.add_argument("--scope", choices=("all", "sqlite"), default="all")
+    ap.add_argument("--scope", choices=("all", "sqlite", "prelude"), default="all")
     ap.add_argument(
         "--typed",
         action="store_true",
@@ -116,7 +157,17 @@ def main() -> int:
     found = collect(typed=args.typed)
     coll = collisions(found, args.scope)
     if args.typed:
+        if args.scope == "prelude":
+            print(
+                "--typed is not defined for the prelude scope: the question there is "
+                "WHICH BODY RUNS for a bare name, and a differing first-parameter type "
+                "does not make that unambiguous.",
+                file=sys.stderr,
+            )
+            return 2
         baseline = BASELINE_SQLITE_TYPED if args.scope == "sqlite" else BASELINE_ALL_TYPED
+    elif args.scope == "prelude":
+        baseline = BASELINE_PRELUDE
     else:
         baseline = BASELINE_SQLITE if args.scope == "sqlite" else BASELINE_ALL
     count = len(coll)
