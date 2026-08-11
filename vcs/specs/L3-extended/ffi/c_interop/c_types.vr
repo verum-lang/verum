@@ -213,16 +213,16 @@ implement Flags {
         if enabled {
             self.raw = self.raw | 0x01;
         } else {
-            self.raw = self.raw & !0x01;
+            self.raw = self.raw & ~0x01;
         }
     }
 
     fn set_level(&mut self, level: u8) {
-        self.raw = (self.raw & !0x0E) | ((level & 0x07) << 1);
+        self.raw = (self.raw & ~0x0E) | ((level & 0x07) << 1);
     }
 
     fn set_mode(&mut self, mode: u8) {
-        self.raw = (self.raw & !0xF0) | ((mode & 0x0F) << 4);
+        self.raw = (self.raw & ~0xF0) | ((mode & 0x0F) << 4);
     }
 }
 

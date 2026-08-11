@@ -380,7 +380,7 @@ implement Bitfields {
     }
 
     fn set_value(&mut self, val: c_uint) {
-        self.packed = (self.packed & !0xFFC) | ((val & 0x3FF) << 2);
+        self.packed = (self.packed & ~0xFFC) | ((val & 0x3FF) << 2);
     }
 }
 

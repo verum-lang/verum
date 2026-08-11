@@ -207,7 +207,7 @@ implement WasmAllocator {
         let mem = unsafe { &*self.memory };
 
         // Align to 8 bytes
-        let aligned_ptr = (self.heap_ptr + 7) & !7;
+        let aligned_ptr = (self.heap_ptr + 7) & ~7;
         let new_ptr = aligned_ptr + size;
 
         if new_ptr > mem.size() {

@@ -351,7 +351,7 @@ implement BitFields {
     }
 
     fn set_value(&mut self, value: u8) {
-        self.packed = (self.packed & !Self.VALUE_MASK) |
+        self.packed = (self.packed & ~Self.VALUE_MASK) |
             ((value as c_uint) << Self.VALUE_SHIFT);
     }
 }
