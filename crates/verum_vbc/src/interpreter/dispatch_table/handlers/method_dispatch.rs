@@ -4424,7 +4424,8 @@ pub(in super::super) fn handle_call_method(
 
     Err(InterpreterError::Panic {
         message: format!(
-            "method '{}' not found on receiver of runtime kind {}. \
+            "method '{}' not found on receiver of runtime kind {} \
+             (raw bits {:#018x}). \
              This typically indicates one of three architectural gaps: \
              (1) the stdlib function defining `{}` was lenient-skipped \
              at compile time (look for `[lenient] SKIP ... bug-class` \
@@ -4434,7 +4435,11 @@ pub(in super::super) fn handle_call_method(
              to the wrong protocol implementation. Run with \
              `RUST_BACKTRACE=1 RUST_LOG=verum_vbc=debug` for the \
              dispatch trace.{}",
-            method_name, receiver_pretty, method_name, candidates_str
+            method_name,
+            receiver_pretty,
+            receiver.to_bits(),
+            method_name,
+            candidates_str
         ),
     })
 }
