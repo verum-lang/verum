@@ -137,7 +137,16 @@ pub(in super::super) fn try_intercept_wrapper_call(
     if let Some(method) = method_of(func_name, "Shared") {
         if arg_count == 1 {
             let v = arg_value(state, caller_base, args_start_reg, 0);
-            if let Some(rc_ptr) = shared_refcount_ptr(&v) {
+            // `VERUM_SHARED_NATIVE=1` disables the `Shared` interception so
+            // the COMPILED `core/base/memory.vr` bodies run. Without this
+            // half the switch is a HALF measurement: `Shared.new` runs the
+            // real constructor while `get` / `strong_count` are still
+            // answered from the interpreter's private
+            // `[refcount][value]` layout, and the mixture reads as a
+            // defect in the stdlib bodies.
+            if let Some(rc_ptr) = shared_refcount_ptr(&v)
+                && std::env::var_os("VERUM_SHARED_NATIVE").is_none()
+            {
                 match method {
                     "strong_count" => {
                         // SAFETY: rc_ptr derives from a validated SHARED
