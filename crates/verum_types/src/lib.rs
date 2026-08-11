@@ -2106,11 +2106,25 @@ impl TypeError {
 
     /// Convert to diagnostic for error reporting with span information
     ///
-    /// Note: This method creates diagnostics without file path/line information.
-    /// For proper diagnostics with source locations, use the compiler's helper
-    /// that converts AST spans to diagnostic spans via the session.
+    /// The converter-less form now still carries a position: it falls back
+    /// to the GLOBAL source registry (`source_files::span_to_line_col`),
+    /// which needs no session.
+    ///
+    /// It used to pass `None` and drop every position, and the callers who
+    /// cannot supply a converter are not being careless — the phase API
+    /// they run inside (`PhaseContext`) carries no session at all, so five
+    /// call sites in `phases/semantic_analysis.rs` had no way to give one.
+    /// Every type error raised from those paths therefore rendered with no
+    /// file, line or column, which for a 461-line file leaves the reader
+    /// searching by hand.
+    ///
+    /// A dummy or unregistered span still degrades — the registry answers
+    /// `<generated>:0:0` — but that is a stated, visible fallback rather
+    /// than a silently absent location.
     pub fn to_diagnostic(&self) -> Diagnostic {
-        self.to_diagnostic_with_span::<fn(verum_ast::span::Span) -> verum_diagnostics::Span>(None)
+        self.to_diagnostic_with_span(Some(|ast_span: verum_ast::span::Span| {
+            crate::source_files::span_to_line_col(ast_span)
+        }))
     }
 
     /// Convert to diagnostic with optional span converter

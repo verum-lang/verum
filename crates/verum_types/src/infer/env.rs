@@ -9641,6 +9641,9 @@ impl TypeChecker {
                             "if a call is missing its parentheses (e.g. `x.method` should be `x.method()`) \
                              or an assignment its `=`, add them; to discard a value on purpose, write `let _ = …;`",
                         )
+                        // The statement's own span; without it the warning
+                        // renders positionless and the reader must hunt for it.
+                        .span(crate::source_files::span_to_line_col(stmt.span))
                         .build();
                     self.diagnostics.push(diag);
                 }

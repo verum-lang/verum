@@ -8462,12 +8462,18 @@ impl VbcCodegen {
                 } else {
                     String::new()
                 };
+                // Name the condition in both failures. "cannot be
+                // evaluated" without saying WHICH assertion sends the
+                // reader hunting through a file that may hold dozens —
+                // exactly the cost this session spent removing from other
+                // diagnostics.
+                let rendered = self.render_static_assert_cond(&args[0]);
                 match self.const_eval_bool(&args[0]) {
                     // Discharged at compile time — emit nothing at all.
                     Some(true) => Ok(Some(None)),
                     Some(false) => Err(CodegenError::new(
                         CodegenErrorKind::StaticAssertionFailed {
-                            detail: format!("condition is false{note}"),
+                            detail: format!("`{rendered}` is false{note}"),
                         },
                     )),
                     // Refusing loudly is the whole point: an assertion that
@@ -8476,7 +8482,11 @@ impl VbcCodegen {
                     None => Err(CodegenError::new(
                         CodegenErrorKind::StaticAssertionFailed {
                             detail: format!(
-                                "condition cannot be evaluated at compile time{note}"
+                                "`{rendered}` cannot be evaluated at compile time{note} \
+                                 — compile-time folding covers literals, arithmetic, \
+                                 comparisons, `offset_of(T, f)` and a type's \
+                                 `.size`/`.alignment`/`.stride`; a GENERIC type \
+                                 parameter has no layout until it is instantiated"
                             ),
                         },
                     )),
@@ -40382,6 +40392,63 @@ impl VbcCodegen {
     /// `None` means "this type is not `@repr(C)`" (or the field is not one
     /// of its declared fields) — a question about a different layout, not a
     /// failure, so the caller falls through to the slot model.
+    /// Render a `static_assert` condition compactly enough to name it in
+    /// the failure. Not a pretty-printer — just the shapes const-eval
+    /// understands, so the message says WHICH assertion failed.
+    fn render_static_assert_cond(&self, expr: &verum_ast::expr::Expr) -> String {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::literal::LiteralKind;
+
+        match &expr.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                LiteralKind::Int(n) => n.value.to_string(),
+                LiteralKind::Bool(b) => b.to_string(),
+                _ => "…".to_string(),
+            },
+            ExprKind::Path(_) => {
+                Self::expr_ident_name(expr).unwrap_or_else(|| "…".to_string())
+            }
+            ExprKind::Unary { op, expr: inner } => {
+                format!("{op:?} {}", self.render_static_assert_cond(inner))
+            }
+            ExprKind::Binary { op, left, right } => format!(
+                "{} {} {}",
+                self.render_static_assert_cond(left),
+                match op {
+                    verum_ast::expr::BinOp::Eq => "==",
+                    verum_ast::expr::BinOp::Ne => "!=",
+                    verum_ast::expr::BinOp::Lt => "<",
+                    verum_ast::expr::BinOp::Le => "<=",
+                    verum_ast::expr::BinOp::Gt => ">",
+                    verum_ast::expr::BinOp::Ge => ">=",
+                    verum_ast::expr::BinOp::Add => "+",
+                    verum_ast::expr::BinOp::Sub => "-",
+                    verum_ast::expr::BinOp::Mul => "*",
+                    verum_ast::expr::BinOp::Div => "/",
+                    verum_ast::expr::BinOp::And => "&&",
+                    verum_ast::expr::BinOp::Or => "||",
+                    other => return format!("{other:?}"),
+                },
+                self.render_static_assert_cond(right)
+            ),
+            ExprKind::TypeProperty { ty, property } => {
+                format!("{}.{property:?}", self.extract_display_type_name(ty))
+            }
+            ExprKind::Call { func, args, .. } => {
+                let name = Self::expr_ident_name(func).unwrap_or_else(|| "…".to_string());
+                let rendered: Vec<String> = args
+                    .iter()
+                    .map(|a| {
+                        Self::expr_ident_name(a)
+                            .unwrap_or_else(|| self.render_static_assert_cond(a))
+                    })
+                    .collect();
+                format!("{name}({})", rendered.join(", "))
+            }
+            _ => "…".to_string(),
+        }
+    }
+
     /// The bare identifier an expression names, if it is exactly one.
     fn expr_ident_name(expr: &verum_ast::expr::Expr) -> Option<String> {
         match &expr.kind {
