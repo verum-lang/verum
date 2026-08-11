@@ -1,0 +1,68 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: codegen, interpreter, f-string, print, nan-box, render
+// @timeout: 60000
+// @expected-stdout: NaN\nNaN\ninf\ninf\n3\n7
+// @expected-exit: 0
+// @description: The value renderer answers by the value's TAG, never by
+// reinterpreting its bits under a static type that may name a different
+// callee than the one that ran (T0718).
+//
+// Two renderers serve one role: `format_value_for_print` (what `print`
+// reaches, tag-driven) and the `FloatToText` opcode (what an f-string
+// placeholder reaches when `emit_value_to_text` infers the static type
+// `Float`).  Before this fix EACH WAS WRONG WHERE THE OTHER WAS RIGHT:
+//
+//   value                        f"{x}"     print(x)
+//   0.0 / 0.0  (genuine NaN)     "NaN"      "<value 0x7fff000000000000>"
+//   min(3, 7)  (Int value,       "NaN"      "3"
+//      static type Float)
+//
+// Row 1: `is_float()` is deliberately FALSE for a NaN — `from_f64(NAN)`
+// boxes under `TAG_NAN`, which collides with the tag prefix that predicate
+// tests — so a NaN fell past every arm of the tag-driven renderer and came
+// out as its raw bit pattern.  `is_nan_float()` is the bridging predicate
+// that already existed for exactly this.
+//
+// Row 2 is the load-bearing one.  `f"{min(3, 7)}"` selects the float opcode
+// from a static type borrowed from `core.math.elementary.min(Float, Float)
+// -> Float`, while verum_types types the same expression `Int`
+// (`let m: Int = min(3, 7)` compiles).  The emitted callee returns the Int
+// it was handed, so the operand reaches the opcode as an integer NaN-box —
+// and `as_f64` of `0x7FF9_0000_0000_0003` IS a quiet NaN.  A resolution
+// disagreement surfaced as a WRONG ANSWER THAT LOOKS LIKE A VALUE, which is
+// worse than a refusal.
+//
+// What this pins is the AGREEMENT of the two paths on the same value, not
+// one path's spelling.  The `3.0` vs `3` divergence for a whole-valued
+// genuine Float is a SEPARATE defect that spans both tiers and the whole
+// corpus; it is deliberately NOT asserted here, and both spellings are
+// unchanged by the fix this file guards.
+//
+// Tier is pinned to 0: the Tier-1 arm (llvm/instruction.rs 0x21) carries the
+// same unconditional bitcast and has no runtime tag-driven renderer to
+// branch to — that leg is T0330.
+
+mount core.prelude.*;
+
+fn main() {
+    let zero: Float = 0.0;
+
+    // Row 1 — a genuine NaN through BOTH paths; they must agree.
+    let nan_value: Float = zero / zero;
+    print(nan_value);
+    print(f"{nan_value}");
+
+    // The neighbour on the other side of the `is_float()` predicate: a
+    // genuine (untagged) float keeps its spelling through both paths.
+    let inf_value: Float = 1.0 / zero;
+    print(inf_value);
+    print(f"{inf_value}");
+
+    // Row 2 — an Int-valued expression whose static type is Float.  Stable
+    // under either resolution: once the name collision behind that wrong
+    // static type is settled, the operand is still the integer 3.
+    print(f"{min(3, 7)}");
+    print(f"{max(3, 7)}");
+}

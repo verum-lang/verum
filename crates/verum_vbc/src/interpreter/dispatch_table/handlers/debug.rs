@@ -191,8 +191,19 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
         return "()".to_string();
     }
 
-    // Check for float - always include decimal point for whole numbers
-    if value.is_float() {
+    // Check for float - always include decimal point for whole numbers.
+    //
+    // `is_float()` is FALSE for a genuine NaN: `from_f64(f64::NAN)` boxes it
+    // under `TAG_NAN`, which collides with the tag prefix that predicate
+    // tests.  Without the `is_nan_float()` leg a NaN fell past every arm here
+    // and rendered as its raw bits — `print(0.0 / 0.0)` answered
+    // `<value 0x7fff000000000000>` while `f"{0.0 / 0.0}"` answered `NaN`.
+    // The bridging predicate exists precisely for callers that must classify
+    // a NaN as a float (its own doc records the marshaling site that was
+    // burned by the same gap); this is the rendering caller.  `as_f64()`
+    // decodes the box back to NaN and the `.0` guard below already excludes
+    // the "NaN" spelling.
+    if value.is_float() || value.is_nan_float() {
         let f = value.as_f64();
         let s = format!("{}", f);
         // Ensure whole-number floats display with ".0" (e.g., 5.0 not 5)
@@ -780,4 +791,60 @@ pub(in super::super) fn handle_invariant(
         return Err(InterpreterError::Panic { message });
     }
     Ok(DispatchResult::Continue)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::module::VbcModule;
+    use std::sync::Arc;
+
+    fn state() -> InterpreterState {
+        InterpreterState::new(Arc::new(VbcModule::new("t0718_render".to_string())))
+    }
+
+    /// **The wrong answer this closes.**  `from_f64(f64::NAN)` boxes under
+    /// `TAG_NAN`, and `is_float()` is deliberately FALSE for that box — it
+    /// collides with the tag prefix.  Before the `is_nan_float()` leg, a NaN
+    /// fell past every arm of the renderer and came out as its raw bit
+    /// pattern, so `print(0.0 / 0.0)` answered
+    /// `<value 0x7fff000000000000>` — while the f-string path, which reads
+    /// the same value through `as_f64`, answered `NaN`.  Two renderers for
+    /// one role, disagreeing on the same value.
+    ///
+    /// Asserting on the SPELLING rather than on "not the raw bits": the
+    /// observable this fix must produce is the word a reader sees.
+    #[test]
+    fn nan_renders_as_nan_not_raw_bits() {
+        let st = state();
+        assert_eq!(format_value_for_print(&st, Value::from_f64(f64::NAN)), "NaN");
+    }
+
+    /// The two neighbours of the NaN box on either side of the `is_float()`
+    /// predicate keep their spellings — the fix must not widen into them.
+    /// `inf` is a genuine (untagged) float; `3.0` is the whole-float case the
+    /// `.0` guard exists for, and `3` is what it must NOT print.
+    #[test]
+    fn float_spellings_unchanged_around_the_nan_leg() {
+        let st = state();
+        assert_eq!(
+            format_value_for_print(&st, Value::from_f64(f64::INFINITY)),
+            "inf"
+        );
+        assert_eq!(format_value_for_print(&st, Value::from_f64(3.0)), "3.0");
+        assert_eq!(format_value_for_print(&st, Value::from_f64(3.5)), "3.5");
+    }
+
+    /// An integer NaN-box is what reaches `FloatToText` when the static type
+    /// that selected the float opcode names a different callee than the one
+    /// that ran (`f"{min(3, 7)}"`).  The renderer this delegates to must read
+    /// the TAG, not the bits — `as_f64` of `0x7FF9_0000_0000_0003` is a quiet
+    /// NaN, which is how a resolution disagreement used to surface as a
+    /// plausible-looking value.
+    #[test]
+    fn integer_box_renders_as_its_integer() {
+        let st = state();
+        assert_eq!(format_value_for_print(&st, Value::from_i64(3)), "3");
+        assert_eq!(format_value_for_print(&st, Value::from_i64(-4)), "-4");
+    }
 }

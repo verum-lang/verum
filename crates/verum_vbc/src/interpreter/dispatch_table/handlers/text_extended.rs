@@ -136,10 +136,26 @@ fn text_extended_body(
         }
         Some(TextSubOpcode::FloatToText) => {
             let value_reg = read_reg(state)?;
-            let f = state.get_reg(value_reg).as_f64();
-            // Rust's shortest-round-trip rendering ("1.5", "-0.25") — the
-            // canonical form text_parse_float accepts back verbatim.
-            let s = format!("{}", f);
+            let value = state.get_reg(value_reg);
+            // Float-ness is a fact the VALUE carries.  What selects this
+            // opcode is `emit_value_to_text`'s static type — a HINT that can
+            // name a different callee than the one that ran: `f"{min(3, 7)}"`
+            // types the call from the stdlib `min(Float, Float) -> Float`
+            // while the emitted callee returns the Int it was handed, so the
+            // operand arrives as an integer NaN-box.  Reading those bits as
+            // an f64 yields a quiet NaN — a WRONG ANSWER THAT LOOKS LIKE A
+            // VALUE, which is worse than a refusal.  Ask the tag: only a
+            // genuine float takes the float path (spelling unchanged, so no
+            // call site that is correct today shifts), and everything else —
+            // integers, refs, the NaN box — renders through the canonical
+            // value formatter, the same authority `print` uses.
+            let s = if value.is_float() {
+                // Rust's shortest-round-trip rendering ("1.5", "-0.25") — the
+                // canonical form text_parse_float accepts back verbatim.
+                format!("{}", value.as_f64())
+            } else {
+                super::debug::format_value_for_print(state, value)
+            };
             let text_val = super::string_helpers::alloc_string_value(state, &s)?;
             state.set_reg(dst, text_val);
         }
