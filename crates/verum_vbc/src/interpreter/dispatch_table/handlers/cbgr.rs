@@ -398,6 +398,18 @@ pub(in super::super) fn handle_deref(
                 let value = unsafe { *(base_ptr as *const Value) };
                 state.cbgr_deref_source = Some((dst.0, ptr_addr));
                 state.set_reg(dst, value);
+            } else if bridge_extent_room(state, ptr_addr).is_some() {
+                // BRIDGE MEMORY IS DATA (T0705/T0384). An address inside
+                // a live bridge block names a `Value` slot, so `*p` READS
+                // it. The identity arm below is for a CBGR base pointer —
+                // an allocation header, where `*p` means "the struct
+                // itself" — and answering that here handed `*s.get()` the
+                // raw address, which the display then rendered by reading
+                // it as an object header: `<object type_id=42>`, where 42
+                // is the stored value itself.
+                // SAFETY: the extent proves a readable `Value` at `ptr`.
+                let value = unsafe { *(ptr_addr as *const Value) };
+                state.set_reg(dst, value);
             } else if state.cbgr_allocations.contains(&ptr_addr) {
                 // CBGR base pointer (AllocationHeader): identity deref for struct access
                 state.set_reg(dst, ref_val);
