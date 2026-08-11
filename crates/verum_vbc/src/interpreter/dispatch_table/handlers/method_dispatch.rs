@@ -1436,6 +1436,34 @@ pub(in super::super) fn handle_call_method(
     let prefer_user_compiled = method_name != bare_method_name
         && state.module.find_function_by_name(&method_name).is_some()
         && !force_intrinsic_variant_dispatch;
+    // A1, static-call leg: for `TypeName.method(..)` the codegen emits
+    // `LOAD_K String("TypeName")` + `CALL_M "method"`, so `method_name`
+    // here is the BARE name and the type lives only in the receiver
+    // string. The lookup above therefore never fires for a static call
+    // (`method_name != bare_method_name` is false), the receiver is
+    // neither a primitive nor a pointer, every later arm gates on
+    // `is_ptr()`, and the call leaves the chain with the destination
+    // untouched — `Shared.new(42)` answers an empty value and
+    // `Shared.strong_count(1)` answers 0, both silently.
+    //
+    // Reassemble the qualified name the emission threw away, so the
+    // archive's own body can be found. Only announces itself for now;
+    // the arm that CALLS it belongs after the existing fast paths, and
+    // placing it needs the exit point they fall through (see the flow
+    // trace below).
+    if std::env::var("VERUM_TRACE_STATIC_CALL").is_ok()
+        && receiver.is_small_string()
+    {
+        let tname = receiver.as_small_string().as_str().to_string();
+        let qualified = format!("{tname}.{bare_method_name}");
+        eprintln!(
+            "[static-call] recv_type={} bare={} qualified={} found={}",
+            tname,
+            bare_method_name,
+            qualified,
+            state.module.find_function_by_name(&qualified).is_some()
+        );
+    }
     if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
         eprintln!("[callm-flow] C-pre-variant-1 method={}", method_name);
     }
@@ -2164,6 +2192,10 @@ pub(in super::super) fn handle_call_method(
             state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
             return Ok(DispatchResult::Continue);
         }
+    }
+
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        eprintln!("[callm-flow] D-post-new-block method={}", bare_method_name);
     }
 
     // Handle List.with_capacity(n) static method
@@ -4422,6 +4454,9 @@ pub(in super::super) fn handle_call_method(
         );
     }
 
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        eprintln!("[callm-flow] Z-pre-panic method={}", method_name);
+    }
     Err(InterpreterError::Panic {
         message: format!(
             "method '{}' not found on receiver of runtime kind {} \
