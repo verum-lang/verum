@@ -193,7 +193,37 @@ impl ScriptContext {
     /// `Ok(Some(entry))` on hit, `Ok(None)` on miss, `Err(e)` on I/O
     /// failure or schema-incompatibility.
     pub fn cache_lookup(&self, cache: &ScriptCache) -> Result<Option<CacheEntry>, CacheError> {
-        cache.lookup(self.cache_key)
+        let hit = cache.lookup(self.cache_key)?;
+        // A content-addressed cache must VERIFY that it got what it asked
+        // for. `CacheMeta::source_len` is documented as "quick
+        // stale-detection signal independent of the digest" and was
+        // written on store and never read on load — so a hit was accepted
+        // on the key alone.
+        //
+        // The cost of not checking is not a stale answer, it is the WRONG
+        // PROGRAM: a `verum run` on one file was measured executing
+        // another file's `main` (a two-day-old probe that is not mounted,
+        // not referenced, and lives elsewhere), stably, decided by the
+        // source bytes. Moving the cache aside fixed it; moving it back
+        // restored the fault.
+        //
+        // Treat a mismatch as a MISS, not an error: recompiling is always
+        // correct, and refusing to run would turn a corrupt cache entry
+        // into an unusable toolchain.
+        if let Some(entry) = &hit {
+            let actual = self.source.len() as u64;
+            if entry.meta.source_len != actual {
+                tracing::warn!(
+                    "script cache: entry for {} claims source_len={} but the source is \
+                     {} bytes — treating as a MISS and recompiling",
+                    self.source_path.display(),
+                    entry.meta.source_len,
+                    actual
+                );
+                return Ok(None);
+            }
+        }
+        Ok(hit)
     }
 
     /// Cache store for the compiled VBC produced from this context's
