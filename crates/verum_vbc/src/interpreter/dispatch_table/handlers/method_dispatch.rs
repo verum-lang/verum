@@ -1533,7 +1533,27 @@ pub(in super::super) fn handle_call_method(
             // the stamping site writes through.
             unsafe { *(stamp_addr as *const u32) == crate::types::TypeId::HEAP.0 }
         };
-        if !is_heap_cbgr_cell && header.type_id == TypeId::SHARED {
+        if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+            eprintln!(
+                "[callm-flow] C0-carrier-block method={} heapcell={} tid={}",
+                method_name,
+                is_heap_cbgr_cell,
+                header.type_id.0
+            );
+        }
+        // THIRD interception site for `Shared` (after wrapper_runtime's
+        // arms and the `Shared.new` allocation). The kill-switch has to
+        // cover it too: with only the other two gated, a "native" run
+        // still answered `get` / `strong_count` from THIS arm against
+        // the private `[refcount][value]` layout, which is why the
+        // compiled bodies looked broken — `get` returned 1, i.e.
+        // `SharedInner.strong_count`, the first word behind `self.ptr`.
+        // The flow point above is what exposed it: `heapcell=false
+        // tid=520` — and 520 IS `TypeId::SHARED`, so the arm fires.
+        if !is_heap_cbgr_cell
+            && header.type_id == TypeId::SHARED
+            && std::env::var_os("VERUM_SHARED_NATIVE").is_none()
+        {
             // Shared layout: [ObjectHeader][refcount: i64][value: Value]
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
@@ -1777,6 +1797,9 @@ pub(in super::super) fn handle_call_method(
                 }
             }
         } else if is_heap_cbgr_cell {
+            if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+                eprintln!("[callm-flow] C1a-heap-carrier method={}", method_name);
+            }
             // HEAP-CARRIER-PEEL-1 (T0106 leg-2c), continued: any method
             // reaching here was NOT one of the CBGR-specific accessors
             // (into_inner / into_raw / generation / stored_generation /
