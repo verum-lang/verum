@@ -1500,9 +1500,39 @@ pub(in super::super) fn handle_call_method(
         // `into_raw`/`generation` intercepts use below (in
         // `dispatch_primitive_method`), instead of the garbage header
         // comparison.
-        let is_heap_cbgr_cell = state.cbgr_allocations.contains(
+        // A cbgr allocation is NOT the same thing as a `Heap<T>` carrier.
+        // `cbgr_alloc` is the GENERAL allocator: `Shared.new`'s compiled
+        // body allocates its `SharedInner` through it, and so does any
+        // other stdlib type. Testing only "is this a cbgr allocation"
+        // therefore captured those cells too, and the carrier-peel arm
+        // below then read their FIRST WORD as the carried value —
+        // `s.get()` answered 1, which is `SharedInner.strong_count`,
+        // and `s.strong_count()` answered an address (T0384).
+        //
+        // The distinguishing fact already exists and is written at
+        // creation: `Heap.new` STAMPS `TypeId::HEAP` into the cbgr
+        // header (offset 16 of the 32-byte header, see the
+        // `CBGR_HEADER_SIZE` site below). Ask for that stamp instead of
+        // inferring carrier-ness from the allocator's identity.
+        let is_cbgr_alloc = state.cbgr_allocations.contains(
             &(ptr as usize).wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize),
         );
+        let is_heap_cbgr_cell = is_cbgr_alloc && {
+            // Both the header size and the stamp's offset are named in
+            // `verum_common::layout` — the ONE authority. An earlier
+            // draft of this check re-declared `CBGR_HEADER_SIZE = 32`
+            // and `TYPE_ID_OFFSET = 16` locally, which is the same
+            // open-coded-layout defect this campaign has been removing
+            // elsewhere: a second copy of a constant reads the wrong
+            // word the day the first one moves.
+            let stamp_addr = (ptr as usize)
+                .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize)
+                .wrapping_add(verum_common::layout::ALLOCATION_HEADER_TYPE_ID_OFFSET as usize);
+            // SAFETY: membership above proves a live allocation header
+            // immediately below `ptr`; the offset is the canonical one
+            // the stamping site writes through.
+            unsafe { *(stamp_addr as *const u32) == crate::types::TypeId::HEAP.0 }
+        };
         if !is_heap_cbgr_cell && header.type_id == TypeId::SHARED {
             // Shared layout: [ObjectHeader][refcount: i64][value: Value]
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
@@ -1876,6 +1906,10 @@ pub(in super::super) fn handle_call_method(
         None
     };
 
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        eprintln!("[callm-flow] C1b-pre-shared-new method={}", method_name);
+    }
+
     // Handle Shared.new(value) - reference-counted shared ownership
     // VBC-internal: interpreter runtime dispatch — Shared.new() allocates a
     // refcounted heap object. Must match the WKT::Shared name to trigger this
@@ -1942,7 +1976,8 @@ pub(in super::super) fn handle_call_method(
 
                 // Allocate CBGR object: 32-byte AllocationHeader + 8-byte Value
                 // Layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]
-                const CBGR_HEADER_SIZE: usize = 32;
+                const CBGR_HEADER_SIZE: usize =
+                    verum_common::layout::ALLOCATION_HEADER_SIZE as usize;
                 let data_size = std::mem::size_of::<Value>() as u32;
                 let alloc_size = CBGR_HEADER_SIZE + data_size as usize;
                 let layout = std::alloc::Layout::from_size_align(alloc_size, 32).map_err(|_| {
@@ -1983,7 +2018,12 @@ pub(in super::super) fn handle_call_method(
                     // dispatch_table/handlers/method_dispatch.rs
                     // when reading `header.type_id` to classify
                     // the receiver's runtime kind.
-                    *(raw_ptr.add(16) as *mut u32) = crate::types::TypeId::HEAP.0;
+                    // The reader of this stamp (`is_heap_cbgr_cell`) goes
+                    // through `verum_common::layout`; the writer must use
+                    // the same names or the two drift apart silently.
+                    *(raw_ptr
+                        .add(verum_common::layout::ALLOCATION_HEADER_TYPE_ID_OFFSET as usize)
+                        as *mut u32) = crate::types::TypeId::HEAP.0;
                     *(raw_ptr.add(20) as *mut u32) = 0; // offset 20: flags (0 = allocated)
                     // offsets 24-31: reserved (already zeroed)
                     // Write user data value after the header
