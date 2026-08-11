@@ -515,7 +515,28 @@ pub(super) fn bridge_flat_store(
         unsafe {
             std::ptr::write_unaligned(addr as *mut u64, bits);
         }
-    } else if value.is_ptr() && !value.is_nil() {
+    } else if value.is_ptr()
+        && !value.is_nil()
+        && state
+            .heap
+            .contains(value.as_ptr::<u8>() as *const heap::ObjectHeader)
+    {
+        // OWNERSHIP BEFORE INSPECTION.  `try_from_ptr` validates the SHAPE of
+        // an address (marker bit clear, 8-aligned) and then DEREFERENCES it to
+        // answer — so for a well-formed address that names nothing it does not
+        // return `None`, it reads unmapped memory.  `Heap::contains` is the
+        // ownership authority, and its own doc states the rule this arm was
+        // breaking: "code that needs to inspect headers safely … must consult
+        // this method first".  The sibling inspection site (`handle_clone`,
+        // memory_collections.rs) already does.
+        //
+        // Without it the `non_scalar_bridge_store_reports_instead_of_corrupting`
+        // regression SIGSEGV'd reading `header.size` at 0x100c — the guard that
+        // exists to REPORT this exact input could not survive evaluating it, so
+        // a reportable store crashed the interpreter instead.  A pointer the
+        // heap does not own (a system buffer from `MemExtended::Alloc`, which
+        // carries no header at all, or a corrupted register) now falls to the
+        // reporting arm below rather than being read through.
         let obj = value.as_ptr::<u8>();
         let Some(header) = (unsafe { heap::ObjectHeader::try_from_ptr(obj) }) else {
             return Err(InterpreterError::InvalidOperand {
