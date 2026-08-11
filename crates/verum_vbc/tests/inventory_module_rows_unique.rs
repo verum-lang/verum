@@ -29,28 +29,22 @@ fn inventory_path() -> PathBuf {
     ))
 }
 
-/// Module names appearing more than once today, with their occurrence count.
-/// Deduplicating one means deleting its line here; the staleness test fails if
-/// a listed name stops being duplicated, so the list only shrinks on purpose.
-const KNOWN_DUPLICATE_ROWS: &[(&str, usize)] = &[
-    ("encoding/varint", 1),  // lines 31, 97
-    ("logic/linear", 1),  // lines 35, 96
-    ("proof/pcc", 1),  // lines 32, 98
-    ("sync/atomic", 1),  // lines 92, 413
-    ("sync/once", 1),  // lines 33, 412
-    ("text/builder", 1),  // lines 193, 309
-    ("text/case_fold", 1),  // lines 192, 308
-    ("text/char", 1),  // lines 191, 307
-    ("text/format", 1),  // lines 196, 310
-    ("text/numeric/bigdecimal", 1),  // lines 201, 315
-    ("text/numeric/bigint", 1),  // lines 200, 314
-    ("text/numeric/decimal", 1),  // lines 199, 313
-    ("text/numeric/modular", 1),  // lines 203, 317
-    ("text/numeric/rational", 1),  // lines 202, 316
-    ("text/regex", 1),  // lines 197, 311
-    ("text/tagged_literals", 1),  // lines 198, 312
-    ("text/text", 1),  // lines 190, 306
-];
+/// Modules allowed to appear more than once, with their TOTAL row count —
+/// the same quantity both tests below compare against, so an entry only ever
+/// means "this module legitimately has exactly N rows".
+///
+/// EMPTIED 2026-08-11 after measuring every entry. The list held 17 names, all
+/// frozen at `1`, and a count of 1 is the NON-duplicate case: the duplicate
+/// test only inspects modules with `n > 1`, so those entries excused nothing,
+/// and the staleness test compares `now != frozen`, so `1 == 1` never tripped
+/// either. The list neither permitted anything nor could go stale — it read as
+/// an allowance list while being inert, and its `// lines 190, 306` comments
+/// had drifted onto unrelated modules. All 17 were verified to have exactly one
+/// row today, so nothing is being waived away by removing them; the gate is now
+/// simply "one module, one row", which is the actual invariant.
+///
+/// Add an entry only with a reason two rows are genuinely needed.
+const KNOWN_DUPLICATE_ROWS: &[(&str, usize)] = &[];
 
 /// Module names in table order.  A row is a line starting `| ` followed by a
 /// backticked name — the same shape every module row in the file uses.
