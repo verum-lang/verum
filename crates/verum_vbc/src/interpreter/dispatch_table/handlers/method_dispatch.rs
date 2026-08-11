@@ -2195,7 +2195,7 @@ pub(in super::super) fn handle_call_method(
     }
 
     if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
-        eprintln!("[callm-flow] D-post-new-block method={}", bare_method_name);
+        eprintln!("[callm-flow] C2-post-new-block method={}", bare_method_name);
     }
 
     // Handle List.with_capacity(n) static method
