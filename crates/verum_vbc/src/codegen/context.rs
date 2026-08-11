@@ -1984,8 +1984,17 @@ impl CodegenContext {
     }
 
     /// Calculates backward offset from current position to a label.
-    pub fn calculate_backward_offset(&self, label: &str) -> i32 {
-        self.label_offset(label).unwrap_or(0)
+    ///
+    /// `None` means the label is not defined. That is NOT an offset: every
+    /// caller feeds the result straight into `Instruction::Jmp`, and the
+    /// interpreter reads the operand before sampling `pc`, so an offset of
+    /// `0` means FALL THROUGH — the old `unwrap_or(0)` turned an unresolved
+    /// label into a loop-back that silently does not loop, i.e. a straight
+    /// -line miscompile rather than a refusal. A backward jump targets an
+    /// already-defined label, so `None` is a codegen bug and callers must
+    /// raise it, never substitute a number for it.
+    pub fn calculate_backward_offset(&self, label: &str) -> Option<i32> {
+        self.label_offset(label)
     }
 
     // ==================== Defer Management ====================

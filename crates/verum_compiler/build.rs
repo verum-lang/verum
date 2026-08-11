@@ -274,7 +274,13 @@ fn main() {
     // typecheck and codegen phases consume them directly, no source-
     // driven fallback.  This build step ensures both files are FRESH:
     //
-    //   1. Compute blake3(core/**/*.vr) as a content-addressed key.
+    //   1. Compute a content-addressed key. It is NOT blake3(core/**/*.vr)
+    //      alone: the key also mixes in PRECOMPILE_SCHEMA_VERSION and a
+    //      curated list of compiler source files (VBC codegen, intrinsic
+    //      dispatch, well-known types) — see `compute_core_blake3`, which
+    //      documents why. A Rust-side codegen change therefore invalidates
+    //      the cache on purpose; describing the key as core/-only made a
+    //      reader predict a cache HIT for exactly that edit.
     //   2. Compare against `target/precompiled-stdlib/runtime.vbca.checksum`.
     //   3. Match → reuse existing artefacts (skip 7-min precompile).
     //   4. Mismatch (or artefacts missing) → invoke

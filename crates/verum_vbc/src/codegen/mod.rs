@@ -529,6 +529,17 @@ pub struct VbcCodegen {
     /// Map from type name to FFI layout index (for @repr(C) struct types).
     /// This allows FFI function signatures to reference struct types by layout index.
     repr_c_types: std::collections::HashMap<String, u16>,
+    /// Types whose C layout was generated because the DECLARATION carries
+    /// `@repr(C)`, as opposed to those that merely appear in an extern
+    /// signature.
+    ///
+    /// `repr_c_types` conflates the two, and the difference decides the
+    /// in-memory representation: a `@repr(C)` record IS laid out the C way,
+    /// while a plain record referenced by an extern function keeps Verum's
+    /// slot representation and is marshalled only AT the boundary. Reading
+    /// C offsets for the latter would relocate every field access on a type
+    /// that never asked for it.
+    declared_repr_c: std::collections::HashSet<String>,
 
     /// Pending import aliases to resolve after all declarations are collected.
     /// Maps (qualified_path, alias_name) pairs for deferred resolution.
@@ -1827,6 +1838,7 @@ impl VbcCodegen {
             // FFI struct layouts for @repr(C) types
             ffi_layouts: Vec::new(),
             repr_c_types: std::collections::HashMap::new(),
+            declared_repr_c: std::collections::HashSet::new(),
             // Deferred imports for multi-file modules
             pending_imports: Vec::new(),
             mount_aliases_buffer: Vec::new(),
@@ -2865,6 +2877,12 @@ impl VbcCodegen {
                 // runtime panic with no diagnostic trail.  Mirror the
                 // `compile_item_lenient` warn convention.
                 let class = e.skip_class();
+                // A `Fatal` error is never skipped, here as everywhere else:
+                // a class that means "never skipped" but IS skipped at one
+                // site is worse than no class at all.
+                if class == SkipClass::Fatal {
+                    return Err(e);
+                }
                 tracing::warn!(
                     "[lenient] SKIP default-body {}.{} ({}): {} — runtime calls \
                      will panic with 'method not found' via auto-stub",
@@ -4612,8 +4630,8 @@ impl VbcCodegen {
                         }
                     }
                     tracing::debug!("[lenient] SKIP top-level fn {}: {}", fname, e);
-                    if self.config.strict_codegen
-                        && class == SkipClass::BugClass
+                    if (class == SkipClass::Fatal
+                            || (self.config.strict_codegen && class == SkipClass::BugClass))
                         && first_strict_err.is_none()
                     {
                         first_strict_err = Some(e);
@@ -4783,8 +4801,8 @@ impl VbcCodegen {
                                 }
                             }
                             tracing::debug!("[lenient] SKIP {}.{}: {}", ty, fname, e);
-                            if self.config.strict_codegen
-                                && class == SkipClass::BugClass
+                            if (class == SkipClass::Fatal
+                                    || (self.config.strict_codegen && class == SkipClass::BugClass))
                                 && first_strict_err.is_none()
                             {
                                 first_strict_err = Some(e);
@@ -4816,8 +4834,8 @@ impl VbcCodegen {
             ItemKind::Mount(import_decl) => {
                 if let Err(e) = self.register_import_aliases(import_decl) {
                     let class = e.skip_class();
-                    if self.config.strict_codegen
-                        && class == SkipClass::BugClass
+                    if (class == SkipClass::Fatal
+                            || (self.config.strict_codegen && class == SkipClass::BugClass))
                         && first_strict_err.is_none()
                     {
                         first_strict_err = Some(e);
@@ -4844,8 +4862,10 @@ impl VbcCodegen {
                     self.ctx.current_source_module = Some(module_name);
                     for sub_item in items.iter() {
                         if let Err(e) = self.compile_item_lenient(sub_item) {
-                            if self.config.strict_codegen
-                                && e.skip_class() == SkipClass::BugClass
+                            let class = e.skip_class();
+                            if (class == SkipClass::Fatal
+                                || (self.config.strict_codegen
+                                    && class == SkipClass::BugClass))
                                 && first_strict_err.is_none()
                             {
                                 first_strict_err = Some(e);
@@ -13101,10 +13121,15 @@ impl VbcCodegen {
                 // `pregenerate_ffi_struct_layouts` (#32), which may already have
                 // generated a layout for this record if an extern signature
                 // references it.
-                if self.has_repr_c(&type_decl.attributes)
-                    && !self.repr_c_types.contains_key(&type_name)
-                {
-                    self.generate_ffi_struct_layout(&type_name, fields);
+                if self.has_repr_c(&type_decl.attributes) {
+                    // Record the DECLARATION fact separately from the layout
+                    // table: `repr_c_types` also collects records that only
+                    // appear in an extern signature, and those keep Verum's
+                    // slot representation.
+                    self.declared_repr_c.insert(type_name.clone());
+                    if !self.repr_c_types.contains_key(&type_name) {
+                        self.generate_ffi_struct_layout(&type_name, fields);
+                    }
                 }
 
                 // Check for @bitfield attribute - generate accessor methods

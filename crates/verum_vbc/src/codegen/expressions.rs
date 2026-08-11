@@ -8428,6 +8428,61 @@ impl VbcCodegen {
                 Ok(Some(None))
             }
 
+            // static_assert(cond) / static_assert_msg(cond, "why") — a
+            // COMPILE-TIME assertion. It was declared in the type
+            // environment and implemented nowhere, so 154 calls across the
+            // conformance corpus type-checked and asserted nothing, while
+            // codegen rejected the name outright for anything that reached
+            // it. Now the condition is folded here.
+            "static_assert" | "static_assert_msg" => {
+                // One or two arguments: the optional second is the message.
+                // The corpus writes `static_assert(cond, "why")` — the form
+                // every language with this construct uses — while the type
+                // environment declares the two-argument version under the
+                // separate name `static_assert_msg`, which nothing writes.
+                // Accepting both here means the written form is the working
+                // form.
+                if args.is_empty() || args.len() > 2 {
+                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                        expected: 1,
+                        found: args.len(),
+                        function: name.to_string(),
+                    }));
+                }
+                let note = if args.len() == 2 {
+                    match &args[1].kind {
+                        ExprKind::Literal(lit) => match &lit.kind {
+                            verum_ast::literal::LiteralKind::Text(s) => {
+                                format!(": {}", s.as_str())
+                            }
+                            _ => String::new(),
+                        },
+                        _ => String::new(),
+                    }
+                } else {
+                    String::new()
+                };
+                match self.const_eval_bool(&args[0]) {
+                    // Discharged at compile time — emit nothing at all.
+                    Some(true) => Ok(Some(None)),
+                    Some(false) => Err(CodegenError::new(
+                        CodegenErrorKind::StaticAssertionFailed {
+                            detail: format!("condition is false{note}"),
+                        },
+                    )),
+                    // Refusing loudly is the whole point: an assertion that
+                    // cannot be evaluated must not pass silently, or it is
+                    // decoration again.
+                    None => Err(CodegenError::new(
+                        CodegenErrorKind::StaticAssertionFailed {
+                            detail: format!(
+                                "condition cannot be evaluated at compile time{note}"
+                            ),
+                        },
+                    )),
+                }
+            }
+
             // transmute(x) — reinterpret bits as a different type.
             //
             // T0178 (TRANSMUTE-NANBOX-FLOAT-1): VBC values are 64-bit
@@ -8571,7 +8626,7 @@ impl VbcCodegen {
                 // field, so a misspelt field name compiled to a plausible
                 // address; say so instead.
                 let offset = self
-                    .compute_field_offset(&type_name, &field_name)
+                    .abi_field_offset(&type_name, &field_name)
                     .ok_or_else(|| {
                         CodegenError::new(CodegenErrorKind::InvalidTypeForOperation {
                             ty: type_name.clone(),
@@ -30380,7 +30435,10 @@ impl VbcCodegen {
 
         // Loop back
         self.ctx.emit(Instruction::Jmp {
-            offset: self.ctx.calculate_backward_offset(&continue_label),
+            offset: self
+                .ctx
+                .calculate_backward_offset(&continue_label)
+                .or_internal_else(|| format!("backward jump to undefined label {}", &continue_label))?,
         });
 
         // Loop end
@@ -37857,7 +37915,10 @@ impl VbcCodegen {
 
                 // Loop back
                 self.ctx.emit(Instruction::Jmp {
-                    offset: self.ctx.calculate_backward_offset(&loop_label),
+                    offset: self
+                .ctx
+                .calculate_backward_offset(&loop_label)
+                .or_internal_else(|| format!("backward jump to undefined label {}", &loop_label))?,
                 });
 
                 self.ctx.define_label(&end_label);
@@ -38569,7 +38630,10 @@ impl VbcCodegen {
 
                 // Loop back
                 self.ctx.emit(Instruction::Jmp {
-                    offset: self.ctx.calculate_backward_offset(&loop_label),
+                    offset: self
+                .ctx
+                .calculate_backward_offset(&loop_label)
+                .or_internal_else(|| format!("backward jump to undefined label {}", &loop_label))?,
                 });
 
                 self.ctx.define_label(&end_label);
@@ -38711,7 +38775,10 @@ impl VbcCodegen {
 
                 // Loop back
                 self.ctx.emit(Instruction::Jmp {
-                    offset: self.ctx.calculate_backward_offset(&loop_label),
+                    offset: self
+                .ctx
+                .calculate_backward_offset(&loop_label)
+                .or_internal_else(|| format!("backward jump to undefined label {}", &loop_label))?,
                 });
 
                 self.ctx.define_label(&end_label);
@@ -39938,39 +40005,12 @@ impl VbcCodegen {
             property,
             TypeProperty::Size | TypeProperty::Stride | TypeProperty::Alignment
         ) {
-            let base_name = Self::strip_generic_args(&type_name).to_string();
-            if self.ctx.user_defined_types.contains(&base_name)
-                && let Some(field_count) = self.type_field_count(&base_name)
-            {
-                let value = match property {
-                    TypeProperty::Alignment => 8,
-                    _ => (field_count as i64) * 8,
-                };
+            // Layout properties go through ONE authority so that emitting
+            // them and folding them at compile time can never disagree.
+            if let Some(value) = self.layout_property_value(&type_name, property) {
                 self.ctx.emit(Instruction::LoadI { dst: dest, value });
                 return Ok(Some(dest));
             }
-        }
-
-        // T0216: the size family reads the canonical layout authority first
-        // (Unit -> 0, Int -> 8, Text -> 24). The inline bits table below only
-        // serves .bits/.min/.max and the non-primitive fallback; its `_ => 64`
-        // default made Unit.size == 8 (layout says 0), and with the parser now
-        // routing `().size` here it would otherwise answer 8 for the unit.
-        if matches!(
-            property,
-            TypeProperty::Size | TypeProperty::Stride | TypeProperty::Alignment
-        ) && let Some(size) = verum_common::layout::primitive_size_by_name(&type_name)
-        {
-            let value = match property {
-                TypeProperty::Alignment => {
-                    verum_common::layout::primitive_alignment_by_name(&type_name)
-                        .unwrap_or_else(|| size.min(16)) as i64
-                }
-                // Size and Stride: primitives carry no tail padding (stride == size).
-                _ => size as i64,
-            };
-            self.ctx.emit(Instruction::LoadI { dst: dest, value });
-            return Ok(Some(dest));
         }
 
         // Get bits for the type
@@ -40244,10 +40284,21 @@ impl VbcCodegen {
 
     /// Compute the byte offset of a field within a struct type.
     ///
-    /// Uses the type_field_layouts map (populated during type declaration
-    /// collection) to find the field's position in the struct, then
-    /// computes the offset based on Verum's uniform 64-bit value model
-    /// where every field occupies 8 bytes.
+    /// TWO layouts exist and the type's own declaration says which one
+    /// applies, so this does not choose:
+    ///
+    /// * `@repr(C)` — the C ABI, with real widths and padding. That layout
+    ///   is ALREADY computed by `generate_ffi_struct_layout` and stored in
+    ///   `ffi_layouts`, so this reads it rather than recomputing it; a
+    ///   second implementation of C padding is a second chance to disagree.
+    /// * everything else — Verum's uniform 64-bit value model, where each
+    ///   field is one NaN-boxed slot and the offset is `index * 8`.
+    ///
+    /// Answering `index * 8` for a `@repr(C)` type contradicted the layout
+    /// the compiler had already built for the very same type: for
+    /// `{ a: Int8, b: Int32 }` the FFI layout puts `b` at 4 (1 byte + 3
+    /// padding) while this returned 8, so `offset_of` and the address-of
+    /// paths disagreed with the struct actually handed to C.
     fn compute_field_offset(&self, type_name: &str, field_name: &str) -> Option<i64> {
         if let Some(fields) = self.type_field_layouts.get(type_name)
             && let Some(index) = fields.iter().position(|f| f == field_name)
@@ -40294,6 +40345,235 @@ impl VbcCodegen {
         // `None` is a refusal the type system forces every caller to
         // handle. It must NEVER be mapped back onto 0.
         None
+    }
+
+    /// The offset `offset_of(T, f)` reports: an ABI question, not a storage
+    /// question.
+    ///
+    /// These are genuinely different and the distinction is load-bearing —
+    /// conflating them corrupts memory. `offset_of` asks where the field
+    /// sits in the type's DECLARED layout, which for `@repr(C)` is the C
+    /// ABI, and that is what a raw C buffer, an FFI call, and
+    /// `struct_layout.vr` all mean. [`Self::compute_field_offset`] answers
+    /// a different question — where the field sits in a value living in
+    /// Verum's own representation — and there every field is one NaN-boxed
+    /// slot regardless of annotation.
+    ///
+    /// Measured: routing the address-of paths through the C layout made
+    /// `*(&p.b as *mut Int32) = 42` on `@repr(C) { a: Int32, b: Int32 }`
+    /// write at byte 4, i.e. INSIDE field `a`'s 8-byte slot; `a` read back
+    /// as a denormal float. Bridge/FFI memory is the case where the C
+    /// layout is also the storage layout, and that is A31's territory.
+    fn abi_field_offset(&self, type_name: &str, field_name: &str) -> Option<i64> {
+        if let Some(off) = self.repr_c_field_offset(type_name, field_name) {
+            return Some(off);
+        }
+        if let Some(off) =
+            self.repr_c_field_offset(Self::strip_generic_args(type_name), field_name)
+        {
+            return Some(off);
+        }
+        self.compute_field_offset(type_name, field_name)
+    }
+
+    /// The C-ABI byte offset of `field` in a `@repr(C)` type, read from the
+    /// layout the compiler already built for it.
+    ///
+    /// `None` means "this type is not `@repr(C)`" (or the field is not one
+    /// of its declared fields) — a question about a different layout, not a
+    /// failure, so the caller falls through to the slot model.
+    /// The bare identifier an expression names, if it is exactly one.
+    fn expr_ident_name(expr: &verum_ast::expr::Expr) -> Option<String> {
+        match &expr.kind {
+            verum_ast::expr::ExprKind::Path(path) => {
+                path.as_ident().map(|i| i.name.to_string())
+            }
+            _ => None,
+        }
+    }
+
+    /// Fold an expression to an integer at compile time, or refuse.
+    ///
+    /// Deliberately narrow: literals, negation, the four arithmetic
+    /// operators, `offset_of(T, f)` and the layout properties. Anything
+    /// else returns `None`, which callers must report — a compile-time
+    /// assertion that cannot be evaluated must SAY so, because silently
+    /// passing is exactly how `static_assert` became decoration.
+    fn const_eval_i64(&self, expr: &verum_ast::expr::Expr) -> Option<i64> {
+        use verum_ast::expr::{BinOp, ExprKind, UnOp};
+        use verum_ast::literal::LiteralKind;
+
+        match &expr.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                LiteralKind::Int(n) => Some(n.value as i64),
+                _ => None,
+            },
+            ExprKind::Unary { op, expr: operand } => match op {
+                UnOp::Neg => self.const_eval_i64(operand)?.checked_neg(),
+                _ => None,
+            },
+            ExprKind::Binary { op, left, right } => {
+                let (l, r) = (self.const_eval_i64(left)?, self.const_eval_i64(right)?);
+                match op {
+                    BinOp::Add => l.checked_add(r),
+                    BinOp::Sub => l.checked_sub(r),
+                    BinOp::Mul => l.checked_mul(r),
+                    // `checked_div` refuses division by zero, so a bad
+                    // assertion reports "cannot evaluate" rather than
+                    // panicking the compiler.
+                    BinOp::Div => l.checked_div(r),
+                    BinOp::Rem => l.checked_rem(r),
+                    _ => None,
+                }
+            }
+            ExprKind::TypeProperty { ty, property } => {
+                let type_name = self.extract_display_type_name(ty);
+                self.layout_property_value(&type_name, property)
+            }
+            ExprKind::Call { func, args, .. } => {
+                // offset_of(Type, field) — both arguments are NAMES, never
+                // compiled as expressions.
+                if Self::expr_ident_name(func)? != "offset_of" || args.len() != 2 {
+                    return None;
+                }
+                let ty = Self::expr_ident_name(&args[0])?;
+                let field = Self::expr_ident_name(&args[1])?;
+                // `offset_of` is an ABI query — see `abi_field_offset`.
+                self.abi_field_offset(&ty, &field)
+            }
+            _ => None,
+        }
+    }
+
+    /// Fold an expression to a boolean at compile time, or refuse.
+    fn const_eval_bool(&self, expr: &verum_ast::expr::Expr) -> Option<bool> {
+        use verum_ast::expr::{BinOp, ExprKind, UnOp};
+        use verum_ast::literal::LiteralKind;
+
+        match &expr.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                LiteralKind::Bool(b) => Some(*b),
+                _ => None,
+            },
+            ExprKind::Unary { op, expr: operand } => match op {
+                UnOp::Not => Some(!self.const_eval_bool(operand)?),
+                _ => None,
+            },
+            ExprKind::Binary { op, left, right } => match op {
+                BinOp::And => Some(self.const_eval_bool(left)? && self.const_eval_bool(right)?),
+                BinOp::Or => Some(self.const_eval_bool(left)? || self.const_eval_bool(right)?),
+                BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                    let (l, r) = (self.const_eval_i64(left)?, self.const_eval_i64(right)?);
+                    Some(match op {
+                        BinOp::Eq => l == r,
+                        BinOp::Ne => l != r,
+                        BinOp::Lt => l < r,
+                        BinOp::Le => l <= r,
+                        BinOp::Gt => l > r,
+                        _ => l >= r,
+                    })
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The integer value of a LAYOUT property (`size` / `stride` /
+    /// `alignment`) for a named type — the ONE authority both the emitter
+    /// and compile-time folding read, so they cannot drift apart.
+    ///
+    /// Order matters and mirrors how the type was declared:
+    /// 1. `@repr(C)` — the C layout the compiler already built for it.
+    /// 2. a user record — Verum's slot model (`field_count * 8`, align 8).
+    /// 3. a primitive — `verum_common::layout`, the canonical table
+    ///    (`Unit` 0, `Int` 8, `Text` 24).
+    ///
+    /// `None` means "not a layout property, or a type none of the three
+    /// know" — a refusal, never a substituted number.
+    fn layout_property_value(
+        &self,
+        type_name: &str,
+        property: &verum_ast::TypeProperty,
+    ) -> Option<i64> {
+        use verum_ast::TypeProperty;
+        if !matches!(
+            property,
+            TypeProperty::Size | TypeProperty::Stride | TypeProperty::Alignment
+        ) {
+            return None;
+        }
+        let base_name = Self::strip_generic_args(type_name).to_string();
+        if let Some(value) = self.repr_c_type_property(&base_name, property) {
+            return Some(value);
+        }
+        if self.ctx.user_defined_types.contains(&base_name)
+            && let Some(field_count) = self.type_field_count(&base_name)
+        {
+            return Some(match property {
+                TypeProperty::Alignment => 8,
+                _ => (field_count as i64) * 8,
+            });
+        }
+        // T0216: `Unit.size` is 0, not 8 — the inline bits table further
+        // down defaults to 64 bits and would answer 8 for the unit.
+        let size = verum_common::layout::primitive_size_by_name(type_name)?;
+        Some(match property {
+            TypeProperty::Alignment => {
+                verum_common::layout::primitive_alignment_by_name(type_name)
+                    .unwrap_or_else(|| size.min(16)) as i64
+            }
+            // Primitives carry no tail padding, so stride == size.
+            _ => size as i64,
+        })
+    }
+
+    /// `size` / `stride` / `alignment` of a `@repr(C)` type, read from the
+    /// same already-built layout as [`Self::repr_c_field_offset`].
+    ///
+    /// `None` for any other type or property — the caller then uses the
+    /// slot model.
+    fn repr_c_type_property(
+        &self,
+        type_name: &str,
+        property: &verum_ast::TypeProperty,
+    ) -> Option<i64> {
+        use verum_ast::TypeProperty;
+        if !self.declared_repr_c.contains(type_name) {
+            return None;
+        }
+        let layout = self.ffi_layouts.get(*self.repr_c_types.get(type_name)? as usize)?;
+        match property {
+            // A C struct's size already includes its tail padding, so size
+            // and stride coincide.
+            TypeProperty::Size | TypeProperty::Stride => Some(i64::from(layout.size)),
+            TypeProperty::Alignment => Some(i64::from(layout.align)),
+            _ => None,
+        }
+    }
+
+    fn repr_c_field_offset(&self, type_name: &str, field_name: &str) -> Option<i64> {
+        // The DECLARATION decides, not the layout table: `repr_c_types` also
+        // holds records that merely cross an extern boundary, and those keep
+        // Verum's slot representation (they are marshalled AT the boundary).
+        if !self.declared_repr_c.contains(type_name) {
+            return None;
+        }
+        let layout_idx = *self.repr_c_types.get(type_name)?;
+        let layout = self.ffi_layouts.get(layout_idx as usize)?;
+        // `FfiStructField::name` is NOT an index into `ctx.strings`: FFI
+        // field names are interned by `intern_field_name`, which runs its
+        // own counter (`field_name_indices` / `next_field_id`). Reading the
+        // codegen string pool at that index returns an unrelated string, so
+        // the match never fired and every `@repr(C)` type silently fell back
+        // to the slot model — measured, not reasoned: the probe read 0/8/16
+        // for a type whose C layout says 0/4/8.
+        let want = *self.field_name_indices.get(field_name)?;
+        layout
+            .fields
+            .iter()
+            .find(|f| f.name.0 == want)
+            .map(|f| i64::from(f.offset))
     }
 
     /// Compiles type expression in expression position

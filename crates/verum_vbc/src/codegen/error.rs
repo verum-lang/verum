@@ -89,6 +89,16 @@ pub enum CodegenErrorKind {
         operation: String,
     },
 
+    /// A `static_assert` did not hold, or could not be evaluated.
+    ///
+    /// Both cases are failures: an assertion the compiler cannot evaluate
+    /// has not been checked, and passing it silently is what let 154 calls
+    /// in the conformance corpus assert nothing for so long.
+    StaticAssertionFailed {
+        /// What went wrong, plus the assertion's message when it has one.
+        detail: String,
+    },
+
     // === Pattern Errors ===
     /// Unsupported pattern.
     UnsupportedPattern(String),
@@ -347,6 +357,10 @@ impl CodegenError {
             //  * ImmutableAssignment / VariableAlreadyDefined / InvalidJumpTarget
             //  — borrowck / lowering bug
             //  * Internal — by definition a bug
+            // A compile-time assertion that failed — or that could not
+            // be evaluated — must halt the build in EVERY mode; see
+            // `SkipClass::Fatal`.
+            CodegenErrorKind::StaticAssertionFailed { .. } => SkipClass::Fatal,
             _ => SkipClass::BugClass,
         }
     }
@@ -363,6 +377,15 @@ pub enum SkipClass {
     /// hard errors.
     BugClass,
 
+    /// The error must never be skipped, in any mode. Reserved for
+    /// constructs whose whole purpose is to REFUSE compilation: a
+    /// `static_assert` that failed, or that could not be evaluated, has
+    /// not been honoured, and dropping the enclosing function with a
+    /// warning would leave the assertion looking satisfied. Lenient mode
+    /// exists to tolerate constructs Tier-0 cannot express — not to
+    /// tolerate a checked claim coming out false.
+    Fatal,
+
     /// The error indicates the Tier-0 interpreter cannot compile the
     /// construct (FFI prototype, unimplemented language feature, GPU
     /// kernel). Skipping is the documented contract: callers get a
@@ -377,6 +400,9 @@ impl SkipClass {
         match self {
             SkipClass::BugClass => "bug-class",
             SkipClass::Irreducible => "irreducible",
+            // Present for completeness: a `Fatal` error halts the build,
+            // so it never reaches a `[lenient] SKIP` trace line.
+            SkipClass::Fatal => "fatal",
         }
     }
 }
@@ -434,6 +460,9 @@ impl fmt::Display for CodegenErrorKind {
             Self::TypeInference(msg) => write!(f, "cannot infer type: {}", msg),
             Self::InvalidTypeForOperation { ty, operation } => {
                 write!(f, "invalid type {} for operation {}", ty, operation)
+            }
+            Self::StaticAssertionFailed { detail } => {
+                write!(f, "static assertion failed: {detail}")
             }
             Self::UnsupportedPattern(p) => write!(f, "unsupported pattern: {}", p),
             Self::NonExhaustivePattern(p) => write!(f, "non-exhaustive pattern: {}", p),
