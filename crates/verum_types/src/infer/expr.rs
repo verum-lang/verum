@@ -4992,9 +4992,11 @@ impl TypeChecker {
                     };
 
                     if arms.is_empty() {
-                        return Err(TypeError::Other(
-                            "Match expression must have at least one arm".into(),
-                        ));
+                        return Err(TypeError::OtherWithCodeSpanned {
+                            code: verum_common::Text::from("E406"),
+                            msg: "Match expression must have at least one arm".into(),
+                            span: expr.span,
+                        });
                     }
 
                     // Check if this is a dependent match (on an inductive type with indices).
@@ -6004,16 +6006,24 @@ impl TypeChecker {
                     // Validate that select is used in an async context
                     // Select expressions require async context: "select { ... }" only valid in async functions — Select expressions can only be used in async context
                     if !self.in_async_context {
-                        return Err(TypeError::Other(verum_common::Text::from(
-                            "select expression can only be used in async context \
-                             (async fn, async block, or async closure)",
-                        )));
+                        return Err(TypeError::OtherWithCodeSpanned {
+                            code: verum_common::Text::from("E406"),
+                            msg: verum_common::Text::from(
+                                "select expression can only be used in async context \
+                                 (async fn, async block, or async closure)",
+                            ),
+                            span: expr.span,
+                        });
                     }
 
                     if arms.is_empty() {
-                        return Err(TypeError::Other(verum_common::Text::from(
-                            "select expression must have at least one arm",
-                        )));
+                        return Err(TypeError::OtherWithCodeSpanned {
+                            code: verum_common::Text::from("E406"),
+                            msg: verum_common::Text::from(
+                                "select expression must have at least one arm",
+                            ),
+                            span: expr.span,
+                        });
                     }
 
                     // Type check each arm and collect body types
