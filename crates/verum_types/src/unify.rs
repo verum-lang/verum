@@ -2209,14 +2209,28 @@ impl Unifier {
                     };
                     for (name, ty_s) in smaller.iter() {
                         if let Some(ty_l) = larger.get(name) {
-                            if let Ok(s) = self.unify_inner(
-                                &ty_s.apply_subst(&subst),
-                                &ty_l.apply_subst(&subst),
-                                span,
-                            ) {
-                                subst = subst.compose(&s);
+                            let (a, b) =
+                                (ty_s.apply_subst(&subst), ty_l.apply_subst(&subst));
+                            match self.unify_inner(&a, &b, span) {
+                                Ok(s) => {
+                                    subst = subst.compose(&s);
+                                }
+                                Err(e) => {
+                                    if !Self::has_type_vars(&a) && !Self::has_type_vars(&b) {
+                                        if std::env::var("VERUM_TRACE_VARUNI").is_ok() {
+                                            eprintln!(
+                                                "[varuni] SUBSET reject: {:?} vs {:?}",
+                                                a, b
+                                            );
+                                        }
+                                        return Err(e);
+                                    }
+                                }
                             }
                         }
+                    }
+                    if std::env::var("VERUM_TRACE_VARUNI").is_ok() {
+                        eprintln!("[varuni] SUBSET ok (payload errors discarded)");
                     }
                     return Ok(subst);
                 }
@@ -2252,6 +2266,9 @@ impl Unifier {
                                     subst = subst.compose(&s);
                                 }
                             }
+                        }
+                        if std::env::var("VERUM_TRACE_VARUNI").is_ok() {
+                            eprintln!("[varuni] OVERLAP ok (payload errors discarded)");
                         }
                         return Ok(subst);
                     }

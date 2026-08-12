@@ -2438,11 +2438,28 @@ impl TypeChecker {
                 }
 
                 // Variant subtype coercion: accept subset/superset of variants.
+                //
+                // T0722 — the coercion is about differing variant SETS
+                // (widening/narrowing). When the two sets are IDENTICAL there
+                // is nothing to widen, and reaching here means unification
+                // ALREADY FAILED — on the payloads. Accepting on name sets
+                // alone then let `Maybe<Text>` satisfy `Maybe<Int>`, and a
+                // user-defined `Own<T>` behave the same, with three measured
+                // consequences: a panic for record payloads, a silently wrong
+                // number for scalars, and a silently DIFFERENT OPERATION for
+                // foreign payloads (`v + 1` string-concatenated).
+                //
+                // So the equal-set case falls through to the error. Genuine
+                // subset/superset pairs are untouched, which is what the
+                // widening this branch exists for actually looks like.
                 if let (Type::Variant(av), Type::Variant(ev)) =
                     (&normalized_actual, &normalized_expected)
                 {
-                    if ev.keys().all(|k| av.contains_key(k))
-                        || av.keys().all(|k| ev.contains_key(k))
+                    let same_set = av.len() == ev.len()
+                        && ev.keys().all(|k| av.contains_key(k));
+                    if !same_set
+                        && (ev.keys().all(|k| av.contains_key(k))
+                            || av.keys().all(|k| ev.contains_key(k)))
                     {
                         return Ok(InferResult::new(expected.clone()));
                     }
