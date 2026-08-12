@@ -1529,6 +1529,22 @@ impl Unifier {
     fn unify_inner_impl(&mut self, t1: &Type, t2: &Type, span: Span) -> Result<Substitution> {
         use Type::*;
 
+        // T0722 residual hunt. `VERUM_TRACE_UNIFY=<substring>` prints every
+        // pair whose rendering contains the substring. Kept filtered so it
+        // costs nothing unset; it is what localised the two sites already
+        // fixed, and the generic-vs-scalar case (`List<Int>` accepted where
+        // `Int` is declared) reaches NEITHER of them.
+        if let Ok(want) = std::env::var("VERUM_TRACE_UNIFY") {
+            let (a, b) = (format!("{:?}", t1), format!("{:?}", t2));
+            if want.is_empty() || a.contains(&want) || b.contains(&want) {
+                eprintln!(
+                    "[unify] t1={} | t2={}",
+                    &a[..a.len().min(120)],
+                    &b[..b.len().min(120)]
+                );
+            }
+        }
+
         // CRITICAL FIX: Resolve symbolic "Self" types before unification.
         // In implement blocks, Self may leak into types that reach the unifier.
         // Replace Self with the concrete implementing type to prevent
