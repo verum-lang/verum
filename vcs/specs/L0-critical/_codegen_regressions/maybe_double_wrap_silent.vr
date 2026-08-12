@@ -1,0 +1,55 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: types, coercion, maybe, deref, silent-wrong-value
+// @timeout: 60000
+// @expected-stdout: 43
+// @expected-exit: 0
+// @description: Wrapping an already-`Maybe` expression in `Maybe.Some(...)`
+// must not silently produce a wrong VALUE (T0722).
+//
+// `List.first()` returns `Maybe<Int>`, so `Maybe.Some(xs.first())` builds a
+// `Maybe<Maybe<Int>>` where the signature promises `Maybe<Int>`. The type
+// checker accepts it through `implement<T> Deref for Maybe<T>`
+// (core/base/maybe.vr, deliberate and documented) — and codegen does NOT
+// emit the coercion, so the payload stored is the inner Maybe.
+//
+// Measured at the time this file was written: the program printed
+// 49753132273 instead of 43, with NO panic, NO warning and exit 0 — the
+// Maybe's raw representation read as an Int and added to. When the payload
+// is a RECORD the wrong slots usually run past the object and the bounds
+// check fires (that is T0401, fixed in the stdlib by 28481ed91); when it is
+// a SCALAR there is nothing to run past, so the program just answers wrong.
+//
+// THE WRONG VALUE IS NOT STABLE: two runs minutes apart printed
+// 49753132273 and 42272801681. It is a raw representation, so there is
+// nothing to pin except the CORRECT answer — which is also why a test
+// that merely runs this code, rather than checking its output, passes.
+//
+// THIS FILE IS RED ON PURPOSE until T0722 is fixed. Do not make it pass
+// by changing the expectation.
+//
+// This file pins the OBSERVABLE, not the mechanism: whichever way the hole
+// is closed — emit the coercion, or reject the shape at check time like the
+// `.clone()` spelling already is (E400) — `43` is the only acceptable
+// stdout. If the fix is rejection, this file must be updated to a
+// typecheck-fail test IN THE SAME COMMIT rather than left printing a
+// number nobody reads.
+
+mount core.prelude.*;
+
+fn head_plus_one(xs: &List<Int>) -> Maybe<Int> {
+    if xs.is_empty() {
+        return Maybe.None;
+    }
+    Maybe.Some(xs.first())
+}
+
+fn main() {
+    let mut xs: List<Int> = List.new();
+    xs.push(42);
+    match head_plus_one(&xs) {
+        Maybe.Some(v) => { print(v + 1); }
+        Maybe.None => { print("empty"); }
+    }
+}
