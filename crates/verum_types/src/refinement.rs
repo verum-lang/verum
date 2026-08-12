@@ -227,12 +227,70 @@ impl RefinementPredicate {
     }
 }
 
+/// Render a refinement predicate for a DIAGNOSTIC.
+///
+/// Every refinement message used to read `refinement constraint failed:
+/// {<predicate>}` — a refusal that does not say what it refused. The
+/// predicate is right there in the struct; only the `Display` impl never
+/// looked at it.
+///
+/// Deliberately partial and deliberately HONEST about it: refinement
+/// predicates are comparisons and boolean combinations of a binding, a
+/// literal, a field or a call, so those shapes are rendered and anything
+/// else prints `…`. An ellipsis says "there is more here"; the old
+/// `<predicate>` said "there is nothing to see", which was false.
+fn predicate_text(e: &verum_ast::expr::Expr) -> String {
+    use verum_ast::expr::ExprKind;
+    use verum_ast::literal::{Literal, LiteralKind, StringLit};
+    match &e.kind {
+        ExprKind::Binary { op, left, right } => {
+            format!("{} {} {}", predicate_text(left), op, predicate_text(right))
+        }
+        ExprKind::Unary { op, expr } => format!("{}{}", op.as_str(), predicate_text(expr)),
+        ExprKind::Paren(inner) => format!("({})", predicate_text(inner)),
+        ExprKind::Literal(Literal { kind, .. }) => match kind {
+            LiteralKind::Int(v) => v.value.to_string(),
+            LiteralKind::Float(v) => v.value.to_string(),
+            LiteralKind::Bool(b) => b.to_string(),
+            LiteralKind::Char(c) => format!("'{}'", c),
+            LiteralKind::Text(StringLit::Regular(s) | StringLit::MultiLine(s)) => {
+                format!("\"{}\"", s.as_str())
+            }
+            _ => "…".to_string(),
+        },
+        ExprKind::Path(path) => match path.as_ident() {
+            Some(i) => i.as_str().to_string(),
+            None => path
+                .segments
+                .iter()
+                .map(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
+                    _ => "…",
+                })
+                .collect::<Vec<_>>()
+                .join("."),
+        },
+        ExprKind::Field { expr, field } => {
+            format!("{}.{}", predicate_text(expr), field.name.as_str())
+        }
+        ExprKind::MethodCall { receiver, method, .. } => {
+            format!("{}.{}(…)", predicate_text(receiver), method.name.as_str())
+        }
+        ExprKind::Call { func, .. } => format!("{}(…)", predicate_text(func)),
+        _ => "…".to_string(),
+    }
+}
+
 impl Display for RefinementPredicate {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match &self.binding {
-            RefinementBinding::Inline => write!(f, "{{<predicate>}}"),
-            RefinementBinding::Lambda(var) => write!(f, "where |{}| <predicate>", var),
-            RefinementBinding::Sigma(var) => write!(f, "{}: T where <predicate>", var),
+            RefinementBinding::Inline => write!(f, "{{{}}}", predicate_text(&self.predicate)),
+            RefinementBinding::Lambda(var) => {
+                write!(f, "where |{}| {}", var, predicate_text(&self.predicate))
+            }
+            RefinementBinding::Sigma(var) => {
+                write!(f, "{}: T where {}", var, predicate_text(&self.predicate))
+            }
             RefinementBinding::Named(path) => {
                 // Display path segments
                 let path_str = path
@@ -246,7 +304,7 @@ impl Display for RefinementPredicate {
                     .join(".");
                 write!(f, "where {}", path_str)
             }
-            RefinementBinding::Bare => write!(f, "where <predicate>"),
+            RefinementBinding::Bare => write!(f, "where {}", predicate_text(&self.predicate)),
         }
     }
 }
