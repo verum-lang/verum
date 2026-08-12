@@ -36,7 +36,7 @@
 )
 module core.math.examples;
 
-mount core.math.hott.{Equiv, IsContr, PathInt, refl_int};
+mount core.math.hott.{Equiv, IsContr, PathInt, refl_int, path_trans};
 mount core.math.simplicial.{
     Simplex, SimplicialSet, KanComplex, InfinityGroupoid, Nerve,
     SimplicialHomotopy,
@@ -368,11 +368,13 @@ public fn integer_path_id(a: Int) -> PathInt {
 /// Composition of two integer paths. If `p : a = b` and `q : b = c`,
 /// the composite is `a = c` (using `path_trans` from hott.vr).
 public fn integer_path_compose(p: PathInt, q: PathInt) -> PathInt {
-    PathInt {
-        lhs: p.lhs,
-        rhs: q.rhs,
-        witness: p.witness && q.witness,
-    }
+    // Was a hand-rolled literal with a `witness: p.witness && q.witness`
+    // field. `PathInt` has no `witness` — it is { lhs, rhs, proof_tag } —
+    // and the compiler resolved the name against SIX position-disagreeing
+    // candidates from other types, picking `Refactoring.witness` at index 4.
+    // A three-field record was therefore written at slot 4: out of bounds,
+    // silently. The doc above already named the right implementation.
+    path_trans(p, q)
 }
 
 /// Source of an integer path.
@@ -393,16 +395,20 @@ public fn integer_path_target(p: &PathInt) -> Int {
 // discharged at the theorem level below.
 
 implement Category<Int, PathInt> for IntegerPathCategory {
+    // Both bodies used to spell a `witness` field that `PathInt` does not
+    // have — it is { lhs, rhs, proof_tag } — and the guessed index landed at
+    // slot 4 of a three-slot record. `refl_int` and `path_trans` are the
+    // operations hott.vr already exports for exactly these two laws.
     fn id(a: &Int) -> PathInt {
-        PathInt { lhs: *a, rhs: *a, witness: true }
+        refl_int(*a)
     }
 
     fn compose(f: &PathInt, g: &PathInt) -> PathInt {
-        PathInt {
-            lhs: f.lhs,
-            rhs: g.rhs,
-            witness: f.witness && g.witness,
-        }
+        // Restates `path_trans` rather than calling it: the protocol hands
+        // us references, `path_trans` takes `PathInt` by value, and `PathInt`
+        // carries no Clone/Copy impl to bridge that. Two lines of law, kept
+        // next to a pointer at the authority, beats inventing a conversion.
+        PathInt { lhs: f.lhs, rhs: g.rhs, proof_tag: f.proof_tag + g.proof_tag }
     }
 
     fn source(f: &PathInt) -> Int {

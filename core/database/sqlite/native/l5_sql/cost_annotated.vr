@@ -150,7 +150,7 @@ fn clone_table_stats(src: &TableStats) -> TableStats {
         table_name: src.table_name.clone(),
         n_rows: src.n_rows,
         n_pages: src.n_pages,
-        avg_row_bytes: src.avg_row_bytes,
+        avg_row_size_bytes: src.avg_row_size_bytes,
         columns: clone_column_stats_list(&src.columns),
     }
 }

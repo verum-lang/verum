@@ -95,6 +95,8 @@ mount super.recovery.{
     RuntimeRetryConfig,
     RecoveryBackoffStrategy,
     RecoveryCircuitBreakerConfig,
+    JitterConfig,
+    RetryPredicate,
 };
 mount super.supervisor.{
     SupervisorHandle,
@@ -420,13 +422,18 @@ implement SupervisorSpawnConfig {
     /// - 0ns (inline)
     @inline
     public fn with_simple_retry(mut self, max_attempts: UInt16, delay_ms: UInt32) -> Self {
+        // `RuntimeRetryConfig` has four fields: max_attempts, backoff,
+        // jitter, retry_on. The literal here used to name six, four of which
+        // (`backoff_base_ms`, `backoff_max_ms`, `jitter_factor`,
+        // `retryable_errors`) do not exist on it, and it passed
+        // `RecoveryBackoffStrategy.Fixed` bare even though `Fixed` is a
+        // RECORD variant carrying the delay. The delay was therefore never
+        // reaching the strategy at all.
         self.retry = Maybe.Some(RuntimeRetryConfig {
-            max_attempts: max_attempts,
-            backoff: RecoveryBackoffStrategy.Fixed,
-            backoff_base_ms: delay_ms,
-            backoff_max_ms: delay_ms,
-            jitter_factor: 0.0,
-            retryable_errors: Maybe.None,
+            max_attempts: max_attempts as Int,
+            backoff: RecoveryBackoffStrategy.Fixed { delay_ms: delay_ms as UInt64 },
+            jitter: JitterConfig.None,
+            retry_on: RetryPredicate.AllErrors,
         });
         self.recovery = Maybe.Some(RuntimeRecoveryStrategy.Retry);
         self
@@ -445,13 +452,18 @@ implement SupervisorSpawnConfig {
         max_ms: UInt32,
         jitter: Float32,
     ) -> Self {
+        // Same four-field shape as `with_simple_retry` above. `jitter` is a
+        // 0.0–1.0 fraction at this API; `JitterConfig.Proportional` takes a
+        // 0–100 percentage, so it is scaled rather than handed over raw.
         self.retry = Maybe.Some(RuntimeRetryConfig {
-            max_attempts: max_attempts,
-            backoff: RecoveryBackoffStrategy.Exponential,
-            backoff_base_ms: base_ms,
-            backoff_max_ms: max_ms,
-            jitter_factor: jitter,
-            retryable_errors: Maybe.None,
+            max_attempts: max_attempts as Int,
+            backoff: RecoveryBackoffStrategy.Exponential {
+                base_ms: base_ms as UInt64,
+                max_ms: max_ms as UInt64,
+                multiplier: 2,
+            },
+            jitter: JitterConfig.Proportional((jitter * 100.0) as UInt8),
+            retry_on: RetryPredicate.AllErrors,
         });
         self.recovery = Maybe.Some(RuntimeRecoveryStrategy.Retry);
         self

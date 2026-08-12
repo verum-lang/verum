@@ -523,11 +523,11 @@ fn caret_range(v: SemVer) -> VersionRange {
     // ^0.2.3 = >=0.2.3 <0.3.0
     // ^0.0.3 = >=0.0.3 <0.0.4
     let upper = if v.major > 0 {
-        SemVer { major: v.major + 1, minor: 0, patch: 0, prerelease: List.new(), build: List.new() }
+        SemVer { major: v.major + 1, minor: 0, patch: 0, pre_release: List.new(), build_meta: List.new() }
     } else if v.minor > 0 {
-        SemVer { major: 0, minor: v.minor + 1, patch: 0, prerelease: List.new(), build: List.new() }
+        SemVer { major: 0, minor: v.minor + 1, patch: 0, pre_release: List.new(), build_meta: List.new() }
     } else {
-        SemVer { major: 0, minor: 0, patch: v.patch + 1, prerelease: List.new(), build: List.new() }
+        SemVer { major: 0, minor: 0, patch: v.patch + 1, pre_release: List.new(), build_meta: List.new() }
     };
     range_between(v, upper)
 }
@@ -538,8 +538,8 @@ fn tilde_range(v: SemVer) -> VersionRange {
         major: v.major,
         minor: v.minor + 1,
         patch: 0,
-        prerelease: List.new(),
-        build: List.new(),
+        pre_release: List.new(),
+        build_meta: List.new(),
     };
     range_between(v, upper)
 }

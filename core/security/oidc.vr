@@ -584,16 +584,54 @@ public async fn verify_oidc_token<C: HttpClient>(
         .map_err(|e| OidcVerifyError.KeyLookupFailed(e))?;
 
     // Step 3: signature verification + claim canonicalisation.
+    //
+    // Every field below is one `VerifyOptions` actually declares. The
+    // previous literal named `leeway_seconds`, `require_iat`, `require_exp`
+    // and `require_nbf` — NONE of which exist on the type — so the
+    // positional slots were filled from unrelated values: the algorithm
+    // allow-list received an integer and the issuer expectation a boolean,
+    // while `now_unix` and `clock_skew_sec` were never set at all. It
+    // compiled because the layout of this cross-module type was not
+    // available and the field indices were GUESSED (FIELD-GUESS-HARD-1).
+    let now = epoch_seconds();
     let verify_opts = VerifyOptions {
-        leeway_seconds: opts.leeway_seconds,
-        require_iat:    true,
-        require_exp:    true,
-        require_nbf:    false,
+        // Fails CLOSED: `algo_allowed` scans the list and returns false when
+        // it is empty, so this must be spelled out. It restates the policy
+        // `is_jwt_alg_supported` applied to the header above, deliberately —
+        // the allow-list is the defence that survives if that gate is ever
+        // loosened, which is exactly the algorithm-confusion case the field
+        // was declared for.
+        allowed_algorithms: oidc_allowed_algorithms(),
+        // `iss` and `aud` are enforced by `enforce_constraints` below, which
+        // reports the OIDC-specific IssuerMismatch / AudienceMismatch. One
+        // authority, so the two layers cannot disagree.
+        expected_iss:       Maybe.None,
+        expected_aud:       Maybe.None,
+        // Same clock and same tolerance as `enforce_constraints`, so the JWT
+        // layer can only reject what this function would reject anyway.
+        now_unix:           now,
+        clock_skew_sec:     opts.leeway_seconds,
     };
     let payload = jwt_verify_compact(token, &key, &verify_opts)
-        .map_err(|e| OidcVerifyError.SignatureFailed(e))?;
+        .map_err(|e| match e {
+            // An algorithm refusal is not a bad signature, and here the
+            // right answer needs no invention — the header's alg IS the
+            // rejected one.
+            JwtError.AlgorithmMismatch | JwtError.AlgNone =>
+                OidcVerifyError.UnsupportedAlgorithm(jwt_alg_to_text(&header.alg)),
+            // `Expired` / `NotYetValid` stay `SignatureFailed`, which reads
+            // worse than it is, and the reason is worth stating rather than
+            // hiding: both layers now share one clock and one tolerance, so
+            // `now - skew > exp` fires HERE first and the precise
+            // `TokenExpired { exp, now }` in `enforce_constraints` below can
+            // no longer be reached for a token that carries `exp`. Mapping
+            // it here would mean inventing the `exp` value the variant
+            // promises, because `JwtError.Expired` carries none. Giving that
+            // variant a payload is the honest fix and a public API change,
+            // not a side effect of this one.
+            other => OidcVerifyError.SignatureFailed(other),
+        })?;
 
-    let now = epoch_seconds();
     enforce_constraints(&payload, opts, now)?;
     Result.Ok(payload)
 }
@@ -690,6 +728,21 @@ fn audience_matches(token_aud: &List<Text>, opts: &OidcAudience) -> Bool {
             false
         }
     }
+}
+
+/// The algorithms an OIDC ID token may be signed with — the asymmetric
+/// families only, mirroring `is_jwt_alg_supported`.
+///
+/// Exists as a value because `VerifyOptions.allowed_algorithms` fails
+/// closed: an empty list rejects every algorithm, so "leave it out" is not
+/// a way to say "no restriction".
+fn oidc_allowed_algorithms() -> List<JwtAlgorithm> {
+    [
+        JwtAlgorithm.RS256, JwtAlgorithm.RS384, JwtAlgorithm.RS512,
+        JwtAlgorithm.PS256, JwtAlgorithm.PS384, JwtAlgorithm.PS512,
+        JwtAlgorithm.ES256, JwtAlgorithm.ES384, JwtAlgorithm.ES512,
+        JwtAlgorithm.EdDSA,
+    ]
 }
 
 fn is_jwt_alg_supported(alg: &JwtAlgorithm) -> Bool {

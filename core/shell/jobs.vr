@@ -224,7 +224,7 @@ public async fn fanout(
 ) -> Result<List<Result<ShellResult, ShellError>>, ShellError>
 
 {
-    let opts = NurseryOptions { error_behavior: policy, ..NurseryOptions.default() };
+    let opts = NurseryOptions { on_error: policy, ..NurseryOptions.default() };
     let outcome = with_nursery(opts, |nursery| {
         let mut handles: List<TaskHandle<Result<ShellResult, ShellError>>> = [];
         for cmd in cmds.iter() {

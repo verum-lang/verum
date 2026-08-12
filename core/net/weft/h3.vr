@@ -276,13 +276,28 @@ fn h3_to_weft_request(req: H3Request) -> WeftRequest {
         i = i + 1;
     }
 
+    // `WeftRequest` declares seven fields (see core/net/weft/handler.vr).
+    // This literal used to name `query` and `peer`, which do not exist on it
+    // — the type has `raw_query` and `peer_addr` — and omitted `path_params`
+    // entirely. The positional slots were guessed (FIELD-GUESS-HARD-1), so
+    // the query string and the peer address landed in the wrong fields on
+    // every HTTP/3 request.
+    //
+    // KNOWN, WIDER, NOT FIXED HERE: `H3Request` has no accessor methods at
+    // all — `implement H3Request` (core/net/h3/request.vr:92) provides only
+    // `get`, `post`, `with_header` and `to_field_list`. The `req.path()`,
+    // `req.query()`, `req.body_bytes()` and `req.peer_addr()` calls below
+    // therefore name a surface that does not exist, and `H3Request` has no
+    // peer address to give in the first place. Correcting the field names is
+    // necessary but not sufficient; the accessor surface is its own defect.
     WeftRequest {
-        method:  method,
-        path:    req.path(),
-        query:   req.query(),
-        headers: headers,
-        body:    req.body_bytes(),
-        peer:    req.peer_addr(),
+        method:      method,
+        path:        req.path(),
+        raw_query:   req.query(),
+        headers:     headers,
+        body:        req.body_bytes(),
+        path_params: Map.new(),
+        peer_addr:   req.peer_addr(),
     }
 }
 
