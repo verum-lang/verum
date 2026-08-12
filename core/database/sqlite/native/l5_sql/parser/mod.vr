@@ -17,7 +17,7 @@ module core.database.sqlite.native.l5_sql.parser;
 // each grammar production lives in its own file:
 //
 
-//  * token_stream — shared SqlTokenStream + ParseError
+//  * token_stream — shared SqlTokenStream + SqlParseError
 //  * expr — operator-precedence expression parser
 //  * select — SELECT with compound, ORDER BY, LIMIT, FROM+JOIN
 //  * insert/update/delete (upcoming)
@@ -35,7 +35,7 @@ public module stmt;
 
 public mount .token_stream.{
     SqlTokenStream,
-    SqlParseError as ParseError,
+    SqlParseError as SqlParseError,
     stream_new, parse_error,
 };
 

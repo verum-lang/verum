@@ -40,7 +40,7 @@ mount core.database.sqlite.native.l5_sql.ast.{
     SqlStatement, Expr, TableRef,
 };
 mount core.database.sqlite.native.l5_sql.parser.token_stream.{
-    SqlTokenStream, ParseError, parse_error,
+    SqlTokenStream, SqlParseError, parse_error,
 };
 mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 
@@ -48,7 +48,7 @@ mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 // PRAGMA
 // -----------------------------------------------------------------------------
 
-public fn parse_pragma(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
+public fn parse_pragma(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlParseError> {
     match ts.expect_keyword(KwPragma) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let name = match ts.expect_ident() {
         Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
@@ -89,8 +89,8 @@ public fn parse_pragma(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseErr
 
 public fn parse_explain(
     ts: &mut SqlTokenStream,
-    inner: fn(&mut SqlTokenStream) -> Result<SqlStatement, ParseError>,
-) -> Result<SqlStatement, ParseError> {
+    inner: fn(&mut SqlTokenStream) -> Result<SqlStatement, SqlParseError>,
+) -> Result<SqlStatement, SqlParseError> {
     match ts.expect_keyword(KwExplain) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let query_plan = if ts.accept_keyword(KwQuery) {
         match ts.expect_keyword(KwPlan) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
@@ -108,7 +108,7 @@ public fn parse_explain(
 // Transactions
 // -----------------------------------------------------------------------------
 
-public fn parse_begin(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
+public fn parse_begin(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlParseError> {
     match ts.expect_keyword(KwBegin) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     // Optional transaction mode: DEFERRED / IMMEDIATE / EXCLUSIVE.
     let _ = ts.accept_keyword(KwDeferred);
@@ -127,7 +127,7 @@ public fn parse_begin(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseErro
     Result.Ok(SBeginTransaction)
 }
 
-public fn parse_commit(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
+public fn parse_commit(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlParseError> {
     // `COMMIT [TRANSACTION]` or `END [TRANSACTION]`.
     if ts.accept_keyword(KwCommit) {
         let _ = ts.accept_keyword(KwTransaction);
@@ -140,7 +140,7 @@ public fn parse_commit(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseErr
     Result.Err(parse_error("expected COMMIT / END".clone(), ts.position()))
 }
 
-public fn parse_rollback(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
+public fn parse_rollback(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlParseError> {
     match ts.expect_keyword(KwRollback) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let _ = ts.accept_keyword(KwTransaction);
     if ts.accept_keyword(KwTo) {
@@ -153,7 +153,7 @@ public fn parse_rollback(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseE
     Result.Ok(SRollback(Maybe.None))
 }
 
-public fn parse_savepoint(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
+public fn parse_savepoint(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlParseError> {
     match ts.expect_keyword(KwSavepoint) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let name = match ts.expect_ident() {
         Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
@@ -161,7 +161,7 @@ public fn parse_savepoint(ts: &mut SqlTokenStream) -> Result<SqlStatement, Parse
     Result.Ok(SSavepoint(name))
 }
 
-public fn parse_release(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
+public fn parse_release(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlParseError> {
     match ts.expect_keyword(KwRelease) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let _ = ts.accept_keyword(KwSavepoint);
     let name = match ts.expect_ident() {
@@ -174,7 +174,7 @@ public fn parse_release(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseEr
 // VACUUM / REINDEX / ATTACH / DETACH / ANALYZE
 // -----------------------------------------------------------------------------
 
-public fn parse_vacuum(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
+public fn parse_vacuum(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlParseError> {
     match ts.expect_keyword(KwVacuum) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     // Optional schema name.
     let _schema: Maybe<Text> = match ts.peek() {
@@ -198,7 +198,7 @@ public fn parse_vacuum(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseErr
     Result.Ok(SVacuum(into))
 }
 
-public fn parse_reindex(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
+public fn parse_reindex(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlParseError> {
     match ts.expect_keyword(KwReindex) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let target: Maybe<TableRef> = match ts.peek() {
         TIdent(_) => {
@@ -219,7 +219,7 @@ public fn parse_reindex(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseEr
     Result.Ok(SReindex(target))
 }
 
-public fn parse_attach(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
+public fn parse_attach(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlParseError> {
     match ts.expect_keyword(KwAttach) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let _ = ts.accept_keyword(KwDatabase);
     let path = match parse_expr(ts) {
@@ -232,7 +232,7 @@ public fn parse_attach(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseErr
     Result.Ok(SAttach(path, name))
 }
 
-public fn parse_detach(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
+public fn parse_detach(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlParseError> {
     match ts.expect_keyword(KwDetach) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let _ = ts.accept_keyword(KwDatabase);
     let name = match ts.expect_ident() {
@@ -241,7 +241,7 @@ public fn parse_detach(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseErr
     Result.Ok(SDetach(name))
 }
 
-public fn parse_analyze(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
+public fn parse_analyze(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlParseError> {
     match ts.expect_keyword(KwAnalyze) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let target: Maybe<TableRef> = match ts.peek() {
         TIdent(_) => {

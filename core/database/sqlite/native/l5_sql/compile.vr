@@ -36,7 +36,7 @@ mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l5_sql.lexer.{lex, SqlLexError as LexError};
 mount core.database.sqlite.native.l5_sql.ast.Statement;
 mount core.database.sqlite.native.l5_sql.parser.{
-    stream_new, parse_one, ParseError,
+    stream_new, parse_one, SqlParseError,
 };
 mount core.database.sqlite.native.l5_sql.planner.{
     plan_statement, plan_statement_with_schema, PlanError,
@@ -71,7 +71,7 @@ mount core.database.sqlite.native.l5_sql.plan_passes.{
 
 public type CompileError is
       CeLex(LexError)
-    | CeParse(ParseError)
+    | CeParse(SqlParseError)
     | CePlan(PlanError)
     | CeCodegen(CodegenError);
 

@@ -62,7 +62,7 @@ mount core.database.sqlite.native.l5_sql.ast.{
 mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 mount core.database.sqlite.native.l5_sql.parser.select.parse_select;
 mount core.database.sqlite.native.l5_sql.parser.token_stream.{
-    SqlTokenStream, ParseError, parse_error,
+    SqlTokenStream, SqlParseError, parse_error,
 };
 mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 
@@ -70,7 +70,7 @@ mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 // CREATE
 // -----------------------------------------------------------------------------
 
-public fn parse_create(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
+public fn parse_create(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlParseError> {
     match ts.expect_keyword(KwCreate) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
 
     let temporary = ts.accept_keyword(KwTemp) || ts.accept_keyword(KwTemporary);
@@ -111,7 +111,7 @@ public fn parse_create(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseErr
 fn parse_create_table_rest(
     ts: &mut SqlTokenStream,
     temporary: Bool,
-) -> Result<CreateTableStmt, ParseError> {
+) -> Result<CreateTableStmt, SqlParseError> {
     let if_not_exists = if ts.accept_keyword(KwIf) {
         match ts.expect_keyword(KwNot) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         match ts.expect_keyword(KwExists) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
@@ -195,7 +195,7 @@ fn parse_create_table_rest(
 // Column definition
 // -----------------------------------------------------------------------------
 
-fn parse_column_def(ts: &mut SqlTokenStream) -> Result<ColumnDef, ParseError> {
+fn parse_column_def(ts: &mut SqlTokenStream) -> Result<ColumnDef, SqlParseError> {
     let name = match ts.expect_ident() {
         Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };
@@ -271,7 +271,7 @@ fn consume_through_rparen(ts: &mut SqlTokenStream) -> Bool {
 // Column constraints
 // -----------------------------------------------------------------------------
 
-fn try_parse_column_constraint(ts: &mut SqlTokenStream) -> Result<Maybe<ColumnConstraint>, ParseError> {
+fn try_parse_column_constraint(ts: &mut SqlTokenStream) -> Result<Maybe<ColumnConstraint>, SqlParseError> {
     if ts.accept_keyword(KwPrimary) {
         match ts.expect_keyword(KwKey) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         // Optional ASC / DESC — ignored for v1.
@@ -367,7 +367,7 @@ fn is_table_constraint_start(ts: &SqlTokenStream) -> Bool {
     }
 }
 
-fn parse_table_constraint(ts: &mut SqlTokenStream) -> Result<TableConstraint, ParseError> {
+fn parse_table_constraint(ts: &mut SqlTokenStream) -> Result<TableConstraint, SqlParseError> {
     if ts.accept_keyword(KwPrimary) {
         match ts.expect_keyword(KwKey) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         match ts.expect_punct(PLParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
@@ -446,7 +446,7 @@ fn parse_table_constraint(ts: &mut SqlTokenStream) -> Result<TableConstraint, Pa
     Result.Err(parse_error("expected table constraint".clone(), ts.position()))
 }
 
-fn parse_optional_on_conflict(ts: &mut SqlTokenStream) -> Result<Maybe<SqlOnConflict>, ParseError> {
+fn parse_optional_on_conflict(ts: &mut SqlTokenStream) -> Result<Maybe<SqlOnConflict>, SqlParseError> {
     if !ts.accept_keyword(KwOn) { return Result.Ok(Maybe.None); }
     match ts.expect_keyword(KwConflict) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     if ts.accept_keyword(KwAbort)    { return Result.Ok(Maybe.Some(OcAbort)); }
@@ -461,7 +461,7 @@ fn parse_optional_on_conflict(ts: &mut SqlTokenStream) -> Result<Maybe<SqlOnConf
 // DROP
 // -----------------------------------------------------------------------------
 
-public fn parse_drop(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
+public fn parse_drop(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlParseError> {
     match ts.expect_keyword(KwDrop) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
 
     let kind_tag = if ts.accept_keyword(KwTable)   { 0 }
@@ -499,7 +499,7 @@ public fn parse_drop(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError
 fn parse_create_index_rest(
     ts: &mut SqlTokenStream,
     unique: Bool,
-) -> Result<CreateIndexStmt, ParseError> {
+) -> Result<CreateIndexStmt, SqlParseError> {
     let if_not_exists = if ts.accept_keyword(KwIf) {
         match ts.expect_keyword(KwNot) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         match ts.expect_keyword(KwExists) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
@@ -553,7 +553,7 @@ fn parse_create_index_rest(
 fn parse_create_view_rest(
     ts: &mut SqlTokenStream,
     temporary: Bool,
-) -> Result<CreateViewStmt, ParseError> {
+) -> Result<CreateViewStmt, SqlParseError> {
     let if_not_exists = if ts.accept_keyword(KwIf) {
         match ts.expect_keyword(KwNot) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         match ts.expect_keyword(KwExists) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
@@ -586,7 +586,7 @@ fn parse_create_view_rest(
     })
 }
 
-fn parse_qualified_name(ts: &mut SqlTokenStream) -> Result<TableRef, ParseError> {
+fn parse_qualified_name(ts: &mut SqlTokenStream) -> Result<TableRef, SqlParseError> {
     let first = match ts.expect_ident() {
         Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };

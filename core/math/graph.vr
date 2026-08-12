@@ -44,6 +44,11 @@
 )
 module core.math.graph;
 
+// `Edge<V, L>` is declared in `core.collections.graph`, not here, and the
+// `Graph` protocol below names it in seven signatures. Without this mount the
+// name resolved to nothing and every `Edge` field access fell through to the
+// positional GUESS path (T0723).
+mount core.collections.graph.{Edge, UEdge};
 mount core.math.category.{Category, Functor};
 mount core.math.simplicial.{SimplicialSet, Simplex};
 mount core.math.algebra.{Semiring};
