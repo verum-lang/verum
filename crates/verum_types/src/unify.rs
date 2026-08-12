@@ -1528,6 +1528,26 @@ impl Unifier {
         }
         let result = self.unify_inner_impl(t1, t2, span);
         self.unify_depth = self.unify_depth.saturating_sub(1);
+        // T0722 hunt, verdict edition. `VERUM_TRACE_UNIFY=<substring>` prints
+        // the pair AND what the unifier decided about it.
+        //
+        // The pair alone is not enough, and reading it as if it were cost this
+        // investigation two false mechanism stories. A rejected pair whose
+        // caller discards the error looks identical, in a pair-only trace, to
+        // an accepted one — both appear as "compared, program compiled". Two
+        // T0722 sites were exactly that shape: the unifier said Err and
+        // something downstream shrugged. `-> Err` next to a program that
+        // compiles anyway is the signature to look for.
+        if let Ok(want) = std::env::var("VERUM_TRACE_UNIFY") {
+            let (a, b) = (Self::shape_of(t1), Self::shape_of(t2));
+            if want.is_empty() || a.contains(&want) || b.contains(&want) {
+                let verdict = match &result {
+                    Ok(_) => "Ok",
+                    Err(_) => "Err",
+                };
+                eprintln!("[unify] t1={a} | t2={b} -> {verdict}");
+            }
+        }
         result
     }
 
@@ -1553,12 +1573,13 @@ impl Unifier {
     fn unify_inner_impl(&mut self, t1: &Type, t2: &Type, span: Span) -> Result<Substitution> {
         use Type::*;
 
-        // T0722 residual hunt. `VERUM_TRACE_UNIFY=<substring>` prints every
-        // pair whose rendering contains the substring. Kept filtered so it
-        // costs nothing unset; it is what localised the two sites already
-        // fixed, and the generic-vs-scalar case (`List<Int>` accepted where
-        // `Int` is declared) reaches NEITHER of them.
-        if let Ok(want) = std::env::var("VERUM_TRACE_UNIFY") {
+        // The pair-only leg of the trace lives in `unify_inner`, which sees the
+        // VERDICT too. This one stays for the case that wrapper cannot report:
+        // a pair that ENTERS and never returns — a panic, a recursion-limit
+        // bail, or a `return` from deep inside the 3000-line match. Enable it
+        // with `VERUM_TRACE_UNIFY_ENTRY`; a pair printed here with no matching
+        // `[unify] ... ->` line below it did not come back.
+        if let Ok(want) = std::env::var("VERUM_TRACE_UNIFY_ENTRY") {
             // Render the SHAPE, not `{:?}`. Every Named/Generic carries a
             // `Span` per segment, and the debug dump spends its first two
             // hundred characters on source offsets — the earlier version of
@@ -1570,7 +1591,7 @@ impl Unifier {
             // one distinction T0722 turns on.
             let (a, b) = (Self::shape_of(t1), Self::shape_of(t2));
             if want.is_empty() || a.contains(&want) || b.contains(&want) {
-                eprintln!("[unify] t1={a} | t2={b}");
+                eprintln!("[unify-enter] t1={a} | t2={b}");
             }
         }
 
@@ -4652,26 +4673,29 @@ impl Unifier {
                 }
             }
 
-            // Int ↔ Variant coercion for FFI wrappers.
+            // There is deliberately NO `Int ↔ Variant` coercion here.
             //
-            // FFI functions return Int (error codes) while Verum wrappers return
-            // a Result-shaped or Maybe-shaped sum type. This uses structural
-            // recognition (variant_tags::classify_variants) — order-insensitive,
-            // arity-checked, and driven by the canonical RESULT/MAYBE_VARIANT_LAYOUT
-            // constants in verum_common. Stdlib-agnostic: any user-defined sum
-            // type with the canonical Result/Maybe shape participates in the
-            // same coercion.
-            (Int, Variant(variants)) | (Variant(variants), Int) => {
-                use verum_common::well_known_types::variant_tags::{classify_variants, VariantShape};
-                match classify_variants(variants.keys().map(|k| k.as_str())) {
-                    VariantShape::Result | VariantShape::Maybe => Ok(Substitution::new()),
-                    VariantShape::Other => Err(TypeError::Mismatch {
-                        expected: t2.to_text(),
-                        actual: t1.to_text(),
-                        span,
-                    }),
-                }
-            }
+            // One existed until T0722, justified as serving "FFI wrappers":
+            // C functions return `Int` error codes while Verum wrappers return
+            // a `Result`- or `Maybe`-shaped sum. The unifier has no notion of
+            // an FFI boundary, so the arm fired wherever those two shapes met.
+            // `let z: Int = maybe_value;` type-checked and `z + 1` read a raw
+            // pointer — 39765685617, then 54182278177, no panic, exit 0.
+            //
+            // Recognition was structural (`classify_variants`), so it was never
+            // limited to the stdlib's own types: a user's
+            // `type Own<T> is Nothing | Just(T)` satisfied a declared `Int` too.
+            // That was measured, not assumed.
+            //
+            // Whether any FFI wrapper actually needed it was also measured: a
+            // full 2558-file stdlib bake — the corpus that IS the FFI wrappers,
+            // core/sys, core/net, core/database — reached this arm ZERO times
+            // and produced its 21.9 MB archive without it.
+            //
+            // An extern whose declared Verum return type is `Result`/`Maybe`
+            // while the C signature returns `int` is a mis-declared extern, and
+            // the honest fix is at that declaration, not a global coercion that
+            // makes every sum type in the language interchangeable with `Int`.
 
             // Named type ↔ record structural coercion
             // When a Named type (like SocketAddrV4) is expected but a structural record
