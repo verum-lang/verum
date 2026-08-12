@@ -6554,7 +6554,16 @@ impl VbcCodegen {
         let mount_scoped_lookup: Option<(String, FunctionInfo)> = if !func_name.contains('.')
             && !func_name.contains("::")
         {
-            self.ctx.mounted_fns.get(&func_name).and_then(|resolved_key| {
+            // MOUNT-BINDING-CARRY-1 (T0148): the CARRIED answer is consulted
+            // FIRST. `mounted_fns` holds what this crate's mount ladder
+            // guessed by manipulating the mount path; `carried_mount_bindings`
+            // holds what the type checker actually RESOLVED. When both name a
+            // target, the resolution wins — a guess must not shadow an answer.
+            self.ctx
+                .carried_mount_bindings
+                .get(&func_name)
+                .or_else(|| self.ctx.mounted_fns.get(&func_name))
+                .and_then(|resolved_key| {
                 let exact = self
                     .ctx
                     .functions

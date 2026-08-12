@@ -906,6 +906,16 @@ pub struct CompilationPipeline<'s> {
         verum_ast::expr::ResolvedCallTarget,
     >,
 
+    /// MOUNT-BINDING-CARRY-1 (T0148): bare name -> the qualified key a
+    /// `mount` resolved to, taken from the type checker after type
+    /// checking and handed to codegen's mount authority.
+    ///
+    /// Sibling of `resolved_call_targets` above, one step coarser: that
+    /// one carries a resolution per CALL SITE, this one per MOUNTED NAME,
+    /// because a mount is file-scoped. Both exist for the same reason —
+    /// codegen cannot re-derive what the type checker already resolved.
+    pub(crate) resolved_mount_bindings: verum_common::Map<verum_common::Text, verum_common::Text>,
+
     /// Stdlib metadata for NormalBuild mode.
     ///
     /// When set, the type checker uses pre-compiled stdlib types from embedded
@@ -1204,6 +1214,7 @@ impl<'s> CompilationPipeline<'s> {
             collected_contexts: List::new(),
             type_registry: None,
             resolved_call_targets: std::collections::HashMap::new(),
+            resolved_mount_bindings: verum_common::Map::new(),
             // T2-extended single-path: when the compiler binary
             // embeds a precompiled stdlib `runtime.core_metadata`
             // sidecar, the typecheck phase prefers the
@@ -1326,6 +1337,7 @@ impl<'s> CompilationPipeline<'s> {
             collected_contexts: List::new(),
             type_registry: None,
             resolved_call_targets: std::collections::HashMap::new(),
+            resolved_mount_bindings: verum_common::Map::new(),
             stdlib_metadata: StdlibMetadataState::Eager(None),
             deferred_verification_goals: verum_common::List::new(), // Not used in bootstrap mode
             // Stdlib bootstrap mode fields - initialized

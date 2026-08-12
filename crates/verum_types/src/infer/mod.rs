@@ -875,6 +875,33 @@ pub struct TypeChecker {
     /// stdlib function and `.get(0)` attempted method dispatch on a
     /// function value.
     pub(crate) module_aliases: Map<Text, Text>,
+    /// MOUNT-BINDING-CARRY-1 (T0148): bare name -> the QUALIFIED KEY the
+    /// mount actually resolved to.
+    ///
+    /// `resolve_function_via_metadata_reexports` already computes this key
+    /// — it probes `<declaring module>.<true name>` in the metadata and
+    /// only succeeds when a descriptor is there — and then keeps only the
+    /// TYPE SCHEME, discarding WHICH function it found. VBC codegen has no
+    /// CoreMetadata handle and the VBC archive carries no re-export table,
+    /// so it re-derives the callee by manipulating the mount PATH
+    /// (`core.prelude.sqrt`, `core.prelude::sqrt`, `core.sqrt`,
+    /// `prelude.sqrt`), none of which can reach a name that arrives
+    /// through a re-export. Its mount authority then installs NOTHING and
+    /// the call falls to bare-name resolution.
+    ///
+    /// Measured cost of that gap: `mount core.prelude.*` served 14 of its
+    /// 20 math functions from SQLite's SQL builtins — `sqrt(16.0)`
+    /// answered `Relaxed`, a variant of an unrelated type. Traced end to
+    /// end: VERUM_TRACE_TASK20 shows this resolver finding
+    /// `core.math.elementary.sqrt` with `functions_has=true`, and
+    /// VERUM_TRACE_CALLS shows the interpreter calling
+    /// `core.database.sqlite.native.builtins.math_fns.sqrt`.
+    ///
+    /// So this map carries the ANSWER to the consumer rather than making
+    /// the consumer guess it again — the same direction as T0691. It is
+    /// written where the resolution succeeds and read once, by the
+    /// pipeline, into `codegen.import_mount_bindings`.
+    pub(crate) resolved_mount_bindings: Map<Text, Text>,
     /// Names registered by [`TypeChecker::register_meta_builtins`] —
     /// the AMBIENT compiler-provided surface (`env`, `is_debug`,
     /// `load_text`, …), recorded by the registration itself so no

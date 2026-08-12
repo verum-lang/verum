@@ -622,6 +622,19 @@ pub struct CodegenContext {
     /// `mounted_types` / the typechecker's MOUNT-TYPE-AUTHORITY step.
     /// Populated by `bind_mounted_function` (+ deferred twin).
     pub mounted_fns: HashMap<String, String>,
+    /// MOUNT-BINDING-CARRY-1 (T0148): bare name -> qualified key, as
+    /// resolved by the TYPE CHECKER and carried in through
+    /// `import_mount_bindings`.
+    ///
+    /// Deliberately SEPARATE from `mounted_fns`, which the mount ladder in
+    /// this crate writes as it guesses. Seeding both into one map lost the
+    /// race: the import runs at codegen construction, the ladder runs later
+    /// while compiling the `mount` statement, and it overwrote the carried
+    /// answer — measured, `bind_mounted_function alias='sqrt' name='sqrt'
+    /// key='prelude.sqrt'`, a placeholder key found by the strip-the-`core.`
+    /// probe. An answer must not be clobberable by a guess that arrives
+    /// afterwards.
+    pub carried_mount_bindings: HashMap<String, String>,
 
     /// Module aliases populated from bare-path `mount X.Y.Z;` declarations.
     ///
@@ -1521,6 +1534,7 @@ impl CodegenContext {
             user_defined_types: HashSet::new(),
             mounted_types: HashMap::new(),
             mounted_fns: HashMap::new(),
+            carried_mount_bindings: HashMap::new(),
             module_aliases: HashMap::new(),
             byte_array_vars: HashSet::new(),
             current_fn_escaping_vars: HashSet::new(),

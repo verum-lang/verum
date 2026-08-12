@@ -231,6 +231,17 @@ impl<'s> CompilationPipeline<'s> {
             codegen.import_protocols(&self.global_protocol_registry);
         }
 
+        // MOUNT-BINDING-CARRY-1 (T0148) — AFTER `import_functions`, which
+        // is what makes the seeded keys resolvable: a binding is installed
+        // only when its qualified key names a function this codegen can
+        // see. Without it the mount authority is empty for every
+        // re-exported name and the call site falls back to bare-name
+        // resolution, where (name, arity) first-wins handed `sqrt/1` to
+        // core.database.sqlite.native.builtins.math_fns.
+        if !self.resolved_mount_bindings.is_empty() {
+            codegen.import_mount_bindings(&self.resolved_mount_bindings);
+        }
+
         // T0363 — CODEGEN-MOUNT-ALIAS-DISPATCH-1: seed cross-module TYPE
         // re-export renames into this module's `type_aliases`. Shared with
         // the `verum test` path (`single_module::compile_module_with_stdlib`)

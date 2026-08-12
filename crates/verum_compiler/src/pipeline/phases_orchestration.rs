@@ -1049,6 +1049,15 @@ impl<'s> CompilationPipeline<'s> {
         // happy-path behaviour.
         self.resolved_call_targets = checker.take_resolved_call_targets();
 
+        // MOUNT-BINDING-CARRY-1 (T0148): the identity half of the same
+        // transfer. `resolve_function_via_metadata_reexports` establishes
+        // WHICH function a mounted name denotes and used to keep only its
+        // TYPE; codegen, which has no CoreMetadata handle and no re-export
+        // table in the archive, then guessed the callee from the mount PATH
+        // and could not reach a re-exported name — `mount core.prelude.*`
+        // served 14 of its 20 math functions from SQLite's SQL builtins.
+        self.resolved_mount_bindings = checker.take_resolved_mount_bindings();
+
         // Store the type registry for later use by codegen
         // This enables closure parameter type inference without explicit annotations
         self.type_registry = Some(checker.take_type_registry());

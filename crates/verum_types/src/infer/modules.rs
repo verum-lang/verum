@@ -2363,10 +2363,11 @@ impl TypeChecker {
                     // real occupant (see the archive-only gate below).
                     if (self.ctx.env.lookup(&Text::from(bind_name)).is_none()
                         || self.meta_builtin_names.contains(&Text::from(bind_name)))
-                        && let Some(scheme) = self
+                        && let Some((scheme, resolved_key)) = self
                             .resolve_function_via_metadata_reexports(module_path.as_str(), item_name)
                     {
                         self.insert_fn_scheme_guarded(bind_name, scheme);
+                        self.record_mount_binding(bind_name, &resolved_key);
                     }
 
                     // T0575 — the TYPE twin of the free-fn fallback
@@ -2713,7 +2714,7 @@ impl TypeChecker {
                             // T0231: guarded — a prelude/mount import
                             // must not downgrade a builtin's poly scheme.
                             self.insert_fn_scheme_guarded(register_name, scheme);
-                        } else if let Some(scheme) = {
+                        } else if let Some((scheme, resolved_key)) = {
                             let s = self.resolve_function_via_metadata_reexports(
                                 resolved_module_path.as_str(),
                                 item_name,
@@ -2741,6 +2742,7 @@ impl TypeChecker {
                             // descriptor without any source-walk.
                             // T0231: guarded (see insert_fn_scheme_guarded).
                             self.insert_fn_scheme_guarded(register_name, scheme);
+                            self.record_mount_binding(register_name, &resolved_key);
                         } else if let Some((true_name, source_module)) = self
                             .reexport_source_module_for(resolved_module_path.as_str(), item_name)
                             // T0244: recursing is worthwhile when EITHER the
@@ -3357,10 +3359,11 @@ impl TypeChecker {
             if self.ctx.env.lookup(&Text::from(bind_name)).is_none()
                 || occupant_is_ambient_builtin
             {
-                if let Some(scheme) = self
+                if let Some((scheme, resolved_key)) = self
                     .resolve_function_via_metadata_reexports(module_path.as_str(), item_name)
                 {
                     self.insert_fn_scheme_guarded(bind_name, scheme);
+                    self.record_mount_binding(bind_name, &resolved_key);
                     return Ok(());
                 }
                 if let Some((true_name, src)) = self
@@ -3372,10 +3375,11 @@ impl TypeChecker {
                     .filter(|(t, s)| {
                         s.as_str() != module_path.as_str() || t.as_str() != item_name
                     })
-                    && let Some(scheme) =
+                    && let Some((scheme, resolved_key)) =
                         self.resolve_function_via_metadata_reexports(src.as_str(), true_name.as_str())
                 {
                     self.insert_fn_scheme_guarded(bind_name, scheme);
+                    self.record_mount_binding(bind_name, &resolved_key);
                     return Ok(());
                 }
             }
@@ -6560,11 +6564,35 @@ impl TypeChecker {
     ///      [`Self::register_stdlib_static_methods_from_metadata`].
     ///   4. Wrap in a [`TypeScheme`] — `poly` when generic vars are
     ///      present, `mono` otherwise.
+    /// Record which function a mounted bare name denotes, for consumers
+    /// that cannot resolve it themselves (MOUNT-BINDING-CARRY-1, T0148).
+    ///
+    /// LAST-WINS, matching mount shadowing: a later `mount` of the same
+    /// bare name is the one the call site means. The map is written only
+    /// where a metadata resolution SUCCEEDED, so an entry is always a key
+    /// that named a real descriptor at the moment it was recorded.
+    fn record_mount_binding(&mut self, bare_name: &str, resolved_key: &Text) {
+        self.resolved_mount_bindings
+            .insert(Text::from(bare_name), resolved_key.clone());
+    }
+
+    /// Returns the scheme AND the qualified key the descriptor was found
+    /// under (`<module_path>.<name>`), because the caller needs BOTH.
+    ///
+    /// MOUNT-BINDING-CARRY-1 (T0148): this function already establishes
+    /// WHICH function a mounted name denotes — it probes the metadata and
+    /// only succeeds when a descriptor is there. Returning only the scheme
+    /// threw that identity away, and VBC codegen, which has no CoreMetadata
+    /// handle and no re-export table in the archive, then re-derived the
+    /// callee by manipulating the mount PATH. That can never reach a name
+    /// arriving through a re-export, so `mount core.prelude.{sqrt}` bound
+    /// nothing and the call fell to bare-name resolution — 14 of the 20
+    /// prelude math functions ran SQLite's SQL builtins.
     fn resolve_function_via_metadata_reexports(
         &mut self,
         module_path: &str,
         item_name: &str,
-    ) -> Option<TypeScheme> {
+    ) -> Option<(TypeScheme, Text)> {
         // Stage C (T0566): resolve the TRANSITIVE re-export redirect via the
         // single authority BEFORE borrowing `metadata`, so Step 2 uses the
         // definer-level `(true_name, source)` without a second overlapping
@@ -6910,7 +6938,26 @@ impl TypeChecker {
             self.function_required_params
                 .insert(Text::from(item_name), required);
         }
-        Some(scheme)
+        // The qualified key VBC codegen's own function table uses:
+        // `<descriptor module path>.<descriptor name>`. Taken from the
+        // DESCRIPTOR, never rebuilt from the mount path — the mount path
+        // is what could not find it in the first place.
+        // MEASURED, not assumed: for a baked free function `fd.name` is
+        // ALREADY the fully-qualified name (`core.math.elementary.sqrt`)
+        // while `fd.module_path` is the ENTRY path (`core.math`), so a
+        // blind join produced `core.math.core.math.elementary.sqrt` — a key
+        // naming nothing, which the consumer's own trace reported as
+        // `MISS carried='core.math.core.math.elementary.sqrt'`. Join only
+        // when the name is not already anchored at the module path; a
+        // method-shaped name like `Slice.iter` contains a dot but is NOT
+        // anchored, so testing for a dot alone would break it.
+        let (mp, n) = (fd.module_path.as_str(), fd.name.as_str());
+        let resolved_key = if n == mp || n.starts_with(&format!("{mp}.")) {
+            Text::from(n)
+        } else {
+            Text::from(format!("{mp}.{n}").as_str())
+        };
+        Some((scheme, resolved_key))
     }
 
     /// Resolve the canonical SOURCE module for `item_name` re-exported by
@@ -14874,7 +14921,12 @@ impl TypeChecker {
         // 'core.id.ulid.parse' NOT FOUND in either). The metadata
         // resolver is the existing ONE authority for exactly this
         // (direct key + bake-spelling drift + re-export chains).
-        if let Some(s) = self.resolve_function_via_metadata_reexports(canonical, name) {
+        // This leg answers "what TYPE does this name have"; the identity
+        // half is recorded too, keyed by the name the caller will write.
+        if let Some((s, resolved_key)) =
+            self.resolve_function_via_metadata_reexports(canonical, name)
+        {
+            self.record_mount_binding(name, &resolved_key);
             if crate::ctor_trace_enabled() {
                 eprintln!("[ctor-trace] mount-auth '{}' -> metadata '{}'", name, qualified);
             }

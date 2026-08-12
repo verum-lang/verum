@@ -2128,6 +2128,93 @@ impl VbcCodegen {
         }
     }
 
+    /// Seed the mount authority with bindings the TYPE CHECKER already
+    /// resolved (MOUNT-BINDING-CARRY-1, T0148).
+    ///
+    /// `mounted_fns` maps a bare name to the qualified key a `mount`
+    /// denotes, and the mount ladder in this crate fills it by
+    /// manipulating the mount PATH — `core.prelude.sqrt`,
+    /// `core.prelude::sqrt`, `core.sqrt`, `prelude.sqrt`. None of those
+    /// can reach a name that arrives through a RE-EXPORT, because getting
+    /// there means following the re-export, and this crate has neither a
+    /// CoreMetadata handle nor a re-export table in the archive.
+    ///
+    /// So the answer is carried instead of re-derived:
+    /// `verum_types::infer` records the qualified key at the exact point
+    /// its metadata resolution succeeds, and the pipeline hands the map
+    /// here. Call AFTER `import_functions` — a binding is only seeded
+    /// when the key names a function this codegen can actually see, so
+    /// the table never points at nothing.
+    ///
+    /// Returns `(seeded, skipped)`. `skipped` is not a failure signal by
+    /// itself: the map is built for the whole compilation and a given
+    /// codegen instance need not hold every module's functions.
+    pub fn import_mount_bindings(
+        &mut self,
+        bindings: &verum_common::Map<verum_common::Text, verum_common::Text>,
+    ) -> (usize, usize) {
+        let (mut seeded, mut skipped) = (0usize, 0usize);
+        for (bare_name, resolved_key) in bindings.iter() {
+            // SEED UNCONDITIONALLY. An earlier version installed a binding
+            // only when the key was already present in `ctx.functions`, and
+            // measured `seeded=0 skipped=1  table_has=[]`: the stdlib
+            // function table is populated LAZILY, so at import time it does
+            // not yet hold the target. Gating on presence here therefore
+            // rejected every correct binding for a reason that has nothing
+            // to do with correctness. The consumer (`mount_scoped_lookup`)
+            // does its own `ctx.functions.get` at the CALL site, by which
+            // point the lazy load has run — and returns None harmlessly if
+            // it has not, which is exactly today's behaviour.
+            let present = self.ctx.functions.contains_key(resolved_key.as_str());
+            self.ctx.carried_mount_bindings.insert(
+                bare_name.as_str().to_string(),
+                resolved_key.as_str().to_string(),
+            );
+            if present {
+                seeded += 1;
+            } else {
+                skipped += 1;
+            }
+        }
+        if std::env::var("VERUM_TRACE_QKEY").is_ok() {
+            eprintln!(
+                "[qkey] import_mount_bindings: installed={} (present_now={} lazy={})",
+                bindings.len(),
+                seeded,
+                skipped
+            );
+            // Name the MISMATCH, do not leave it to be inferred: print the
+            // key that was carried and what this table actually holds for
+            // that bare name. A carried key that names nothing here is the
+            // one failure mode this whole channel can have, and reading it
+            // off a silent symptom cost an evening once already.
+            for (bare_name, resolved_key) in bindings.iter().take(3) {
+                if self.ctx.functions.contains_key(resolved_key.as_str()) {
+                    continue;
+                }
+                let mut have: Vec<&str> = self
+                    .ctx
+                    .functions
+                    .keys()
+                    .filter(|k| {
+                        k.as_str() == bare_name.as_str()
+                            || k.ends_with(&format!(".{}", bare_name.as_str()))
+                    })
+                    .map(|k| k.as_str())
+                    .take(6)
+                    .collect();
+                have.sort_unstable();
+                eprintln!(
+                    "[qkey]   MISS name='{}' carried='{}' table_has={:?}",
+                    bare_name.as_str(),
+                    resolved_key.as_str(),
+                    have
+                );
+            }
+        }
+        (seeded, skipped)
+    }
+
     /// Imports protocols from previously compiled modules.
     ///
     /// This is used during stdlib compilation to make protocol default
@@ -9669,6 +9756,39 @@ impl VbcCodegen {
         resolved_key: &str,
         func_info: FunctionInfo,
     ) {
+        // MOUNT-BINDING-CARRY-1 (T0148): a ladder guess must not overwrite a
+        // carried ANSWER, nor poison the bare-name slot the call site checks
+        // one step earlier.
+        //
+        // Measured: for `mount core.prelude.{sqrt}` the strip-the-`core.`
+        // probe found the placeholder key `prelude.sqrt`, bound it here, and
+        // registered it authoritatively under `sqrt` — so the call site's
+        // unit-decl leg answered before `mount_scoped_lookup` was ever
+        // consulted, and the whole carry channel was inert for the NAMED
+        // mount form while the glob form (which never reaches this ladder)
+        // went from 6/20 to 18/20 correct.
+        if let Some(carried) = self.ctx.carried_mount_bindings.get(alias_name)
+            && carried.as_str() != resolved_key
+        {
+            if std::env::var("VERUM_TRACE_QKEY").is_ok() {
+                eprintln!(
+                    "[qkey] ladder guess '{}' DECLINED for alias '{}' — carried '{}'",
+                    resolved_key, alias_name, carried
+                );
+            }
+            return;
+        }
+        // MOUNT-BINDING-CARRY-1 diagnosis (T0148): name WHICH probe of the
+        // mount ladder won, and what it bound to. The named form of a
+        // prelude mount still reaches SQLite while the glob form does not,
+        // and the ladder has ~8 probes — guessing which one fired cost a
+        // rebuild already.
+        if std::env::var("VERUM_TRACE_QKEY").is_ok() {
+            eprintln!(
+                "[qkey] bind_mounted_function alias='{}' name='{}' key='{}'",
+                alias_name, func_name, resolved_key
+            );
+        }
         let fid = func_info.id;
         if let Some(scope) = self.ctx.current_source_module.clone()
             && !scope.is_empty()
@@ -10192,6 +10312,7 @@ impl VbcCodegen {
                 }
 
                 // Try just the function name (it might be already registered without qualification)
+                //
                 if let Some(func_info) = self.ctx.lookup_function(&func_name).cloned() {
                     let bare_key = func_name.clone();
                     self.bind_mounted_function(&alias_name, &func_name, &bare_key, func_info);

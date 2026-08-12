@@ -198,6 +198,26 @@ impl TypeChecker {
     > {
         std::mem::take(&mut self.resolved_call_targets)
     }
+
+    /// Take the mount-binding side-table: bare name -> the qualified key a
+    /// `mount` actually resolved to (MOUNT-BINDING-CARRY-1, T0148).
+    ///
+    /// Sibling of `take_resolved_call_targets` and the same idea one step
+    /// coarser: that one stamps a resolution per CALL SITE (method calls,
+    /// keyed by span), this one carries a resolution per MOUNTED NAME,
+    /// because a mount is file-scoped rather than expression-scoped and
+    /// the consumer — `verum_vbc::codegen`'s mount authority — is already
+    /// a name map.
+    ///
+    /// Why it must be carried at all: VBC codegen has no CoreMetadata
+    /// handle and the VBC archive holds no re-export table, so its mount
+    /// ladder guesses the callee by manipulating the mount PATH. That
+    /// cannot reach a name arriving through a re-export, which is why
+    /// `mount core.prelude.{sqrt}` bound nothing and 14 of the 20 prelude
+    /// math functions ran SQLite's SQL builtins instead.
+    pub fn take_resolved_mount_bindings(&mut self) -> Map<Text, Text> {
+        std::mem::take(&mut self.resolved_mount_bindings)
+    }
 }
 
 /// Walk `module` mutably and stamp every `MethodCall` expression's
@@ -533,6 +553,7 @@ impl TypeChecker {
             current_module_path: verum_common::Text::from("cog"),
             inline_modules: Map::new(),
             module_aliases: Map::new(),
+            resolved_mount_bindings: Map::new(),
             meta_builtin_names: std::collections::HashSet::new(),
             preregistered_modules: std::collections::HashSet::new(),
             blanket_impls_registered_modules: std::collections::HashSet::new(),
@@ -2898,6 +2919,7 @@ impl TypeChecker {
             current_module_path: verum_common::Text::from("cog"),
             inline_modules: Map::new(),
             module_aliases: Map::new(),
+            resolved_mount_bindings: Map::new(),
             meta_builtin_names: std::collections::HashSet::new(),
             preregistered_modules: std::collections::HashSet::new(),
             blanket_impls_registered_modules: std::collections::HashSet::new(),
