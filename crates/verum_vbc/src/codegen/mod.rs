@@ -2188,6 +2188,18 @@ impl VbcCodegen {
             // that bare name. A carried key that names nothing here is the
             // one failure mode this whole channel can have, and reading it
             // off a silent symptom cost an evening once already.
+            // Name WHICH names are carried, filtered by an env var, so a
+            // "why is this one name still wrong" question is one run away
+            // instead of one rebuild away.
+            if let Ok(want) = std::env::var("VERUM_TRACE_QKEY_NAME") {
+                for w in want.split(',') {
+                    eprintln!(
+                        "[qkey]   carried '{}' -> {:?}",
+                        w,
+                        bindings.get(&verum_common::Text::from(w)).map(|k| k.as_str())
+                    );
+                }
+            }
             for (bare_name, resolved_key) in bindings.iter().take(3) {
                 if self.ctx.functions.contains_key(resolved_key.as_str()) {
                     continue;

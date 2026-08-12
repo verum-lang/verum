@@ -3356,6 +3356,23 @@ impl TypeChecker {
             let occupant_is_ambient_builtin = self
                 .meta_builtin_names
                 .contains(&Text::from(bind_name));
+            // MOUNT-BINDING-CARRY-1 diagnosis (T0148): under `mount
+            // core.prelude.*` the carry channel picks up `sqrt` but NOT
+            // `pow` / `abs`, and this gate is the only thing between them.
+            // Filtered by name so the answer is one run away.
+            if std::env::var("VERUM_TRACE_MOUNTGATE")
+                .map(|w| w.split(',').any(|n| n == bind_name))
+                .unwrap_or(false)
+            {
+                eprintln!(
+                    "[mountgate] name='{}' mod='{}' item='{}' env_occupied={} ambient={}",
+                    bind_name,
+                    module_path.as_str(),
+                    item_name,
+                    self.ctx.env.lookup(&Text::from(bind_name)).is_some(),
+                    occupant_is_ambient_builtin
+                );
+            }
             if self.ctx.env.lookup(&Text::from(bind_name)).is_none()
                 || occupant_is_ambient_builtin
             {
