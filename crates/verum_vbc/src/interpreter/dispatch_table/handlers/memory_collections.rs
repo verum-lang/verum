@@ -460,6 +460,22 @@ pub(in super::super) fn handle_get_field(
                     .collect();
                 format!(" — declared fields ({}): [{}]", names.len(), names.join(", "))
             }
+            // A Sum type reaching a RECORD field access is not a bounds
+            // problem at all — its payload lives in `variants`, so index 2
+            // could never exist however large the object were. Say that,
+            // because the arithmetic in the first half of this message
+            // ("offset 24 exceeds size 16") invites a reader to go looking
+            // for a layout bug. Measured on the live case: the T0401
+            // `page_roundtrip` panic prints `kind Sum` here, which is the
+            // compiler stating that a `match Maybe.Some(x)` binding was
+            // never unwrapped.
+            Some(ty) if matches!(ty.kind, crate::types::TypeKind::Sum) => format!(
+                " — descriptor declares NO fields (kind Sum, {} variant(s)): a RECORD \
+                 field access reached a SUM value, so its payload lives in a variant, \
+                 not at a field index. Usual cause: a pattern binding that was never \
+                 unwrapped, or a receiver that lost its type",
+                ty.variants.len()
+            ),
             Some(ty) => format!(" — descriptor declares NO fields (kind {:?})", ty.kind),
             None => " — no type descriptor found for that id".to_string(),
         };
