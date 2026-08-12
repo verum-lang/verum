@@ -27,10 +27,19 @@ mount core.base.iterator.Iterator;
 /// The fundamental way to represent the possible absence of a value.
 public type Maybe<T> is None | Some(T);
 
-// IntCoercible: `Maybe<USize>` from indexing operations participates
-// in Int ↔ Generic coercion. Treating Maybe<T> uniformly here mirrors
-// the hardcoded list entry so the coercion works regardless of T.
-implement<T> IntCoercible for Maybe<T> {}
+// NO `IntCoercible` here, deliberately (T0722).
+//
+// There was one. Its stated reason was that "`Maybe<USize>` from indexing
+// operations participates in Int ↔ Generic coercion" — the same premise as
+// the unifier's indexable-collection arm, and it was measured false: an
+// index expression yields the ELEMENT, and legitimate `xs[0]` / `xs.len()`
+// into `Int` never reach an Int-vs-container comparison at all.
+//
+// What the declaration actually bought was `let z: Int = maybe_value;`
+// type-checking, after which `z + 1` added one to a raw pointer and printed
+// a different large number on every run. `IntCoercible` means "this type may
+// stand in for an `Int`"; `Maybe<T>` is not an integer wrapper, and saying
+// so here disabled type checking for every `Maybe` in the language.
 
 // `Deref` allows `*Maybe<T>` to evaluate to the inner `T` (panicking
 // on `None`).  This is the missing leg of a tri-layer story that

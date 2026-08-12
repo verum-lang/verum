@@ -111,12 +111,14 @@ public type List<T> is {
 };
 
 // IntCoercible: `list.len() == 0` and similar contexts unify Int ↔
-// List<USize> via the index-coercion path. Indexable: `list[i: Int]`.
+// NO `IntCoercible` here, deliberately (T0722) — see core/base/maybe.vr for
+// the measurement. It rested on "List<USize> via the index-coercion path",
+// which is false: indexing yields the ELEMENT. What it bought was
+// `let y: Int = xs;` type-checking. Indexable: `list[i: Int]`.
 // ArrayCoercible: array literals `[1, 2, 3]` unify with `List<T>`
 // at use sites — replaces the previously hardcoded
 // `array_coercible_types = {"List"}` default in the unifier and
 // subtyping checker (single source of truth: this implement block).
-implement<T> IntCoercible for List<T> {}
 implement<T> Indexable for List<T> {}
 implement<T> ArrayCoercible for List<T> {}
 

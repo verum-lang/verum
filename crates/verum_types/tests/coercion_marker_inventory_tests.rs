@@ -27,14 +27,24 @@
 //! `implement IntCoercible for Foo {}` without updating this inventory would
 //! widen the unifier's coercion surface without anyone noticing.
 //!
+//! That claim was overstated until T0722, and the gap was the whole defect:
+//! `Maybe<T>`, `List<T>`, `Range<T>` and `RangeInclusive<T>` all carried
+//! `implement IntCoercible` while appearing NOWHERE in this inventory, so
+//! `let z: Int = maybe_value;` type-checked and `z + 1` read a raw pointer.
+//! Every impl this file pins is a genuine integer wrapper (`FileDesc`,
+//! `Port`, `Duration`, …); the four that were not are pinned below by their
+//! ABSENCE, because re-adding one is how the hole returns.
+//!
 //! Note the asymmetry these tests CANNOT see: a marker's presence in
 //! `core/base/coercion.vr` does not by itself give it unifier meaning. That
 //! comes from `stdlib_coercion_registry.rs` mapping the name to a registrar,
 //! and from a live arm reading the resulting set. `Indexable` has neither
-//! since T0722; `RangeLike` has the mapping but every implementor in
-//! `core/base/coercion.vr` is commented out, so its set is empty and its arm
-//! is unreachable. Read all three places before concluding a marker does
-//! anything.
+//! since T0722. Read all three places before concluding a marker does
+//! anything — and read ALL of core/, not just `coercion.vr`. An earlier
+//! version of this note asserted that `RangeLike` had no live implementors,
+//! because the examples in `coercion.vr` are commented out. It has two, in
+//! `core/base/iterator.vr`. The commented-out block is documentation, not
+//! the inventory.
 //!
 //! Each test bakes the relevant source file in with `include_str!` so that:
 //!   1. A rename of the source file causes an immediate compile error.
@@ -52,6 +62,7 @@ const MATH_TENSOR_VR: &str        = include_str!("../../../core/math/tensor.vr")
 const MATH_LINALG_VR: &str        = include_str!("../../../core/math/linalg.vr");
 const BASE_ITERATOR_VR: &str      = include_str!("../../../core/base/iterator.vr");
 const COLLECTIONS_LIST_VR: &str   = include_str!("../../../core/collections/list.vr");
+const BASE_MAYBE_VR: &str         = include_str!("../../../core/base/maybe.vr");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -169,6 +180,42 @@ fn tensor_like_total_count_is_2() {
     assert_eq!(
         total, 2,
         "Expected 2 TensorLike impls across math/ (DynTensor + Vector), got {total}"
+    );
+}
+
+// ── IntCoercible ABSENCE pins (T0722) ────────────────────────────────────────
+//
+// `IntCoercible` means "this type may stand in for an `Int`". Container and
+// sum types are not integer wrappers, and declaring them so disabled type
+// checking for every value of that type. Each of the four below justified
+// itself with the same premise — that indexing or slicing leaves a CONTAINER
+// where an element is meant — and that premise was measured false: `xs[0]`,
+// `xs.len()`, `for i in 0..3` and `for j in 1..=3` all work without them.
+
+#[test]
+fn maybe_is_not_int_coercible() {
+    assert!(
+        !BASE_MAYBE_VR.contains("implement<T> IntCoercible for Maybe"),
+        "core/base/maybe.vr must NOT declare Maybe<T> IntCoercible (T0722): it \
+         made `let z: Int = maybe_value;` type-check, after which `z + 1` added \
+         one to a raw pointer — a different large number on every run, exit 0"
+    );
+}
+
+#[test]
+fn list_is_not_int_coercible() {
+    assert!(
+        !COLLECTIONS_LIST_VR.contains("implement<T> IntCoercible for List"),
+        "core/collections/list.vr must NOT declare List<T> IntCoercible (T0722)"
+    );
+}
+
+#[test]
+fn ranges_are_not_int_coercible() {
+    assert!(
+        !BASE_ITERATOR_VR.contains("implement<T> IntCoercible for Range"),
+        "core/base/iterator.vr must NOT declare Range<T> / RangeInclusive<T> \
+         IntCoercible (T0722) — a range is not an integer"
     );
 }
 

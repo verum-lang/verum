@@ -2579,11 +2579,14 @@ implement<A: Iterator, B: Iterator> IntoIterator for ZipLongestIter<A, B> {
 /// boundary.
 public type Range<T> is { current: T, end: T, inclusive: Bool };
 
-// Range/RangeInclusive — IntCoercible (slice notation `a[i..j]` produces
-// Int-bearing handles), Indexable (`range[i]` enumeration), RangeLike
+// Range/RangeInclusive — Indexable (`range[i]` enumeration), RangeLike
 // (start/end interval shape unifies with `(Maybe<USize>, Maybe<USize>)`
 // from slicing).
-implement<T> IntCoercible for Range<T> {}
+//
+// NO `IntCoercible`, deliberately (T0722). It claimed "slice notation
+// `a[i..j]` produces Int-bearing handles"; see core/base/maybe.vr for why
+// that premise was measured false. A range is not an integer, and declaring
+// it interchangeable with one let `let n: Int = some_range;` through.
 implement<T> Indexable for Range<T> {}
 implement<T> RangeLike for Range<T> {}
 
@@ -2596,7 +2599,6 @@ implement<T> RangeLike for Range<T> {}
 /// imports that name it explicitly.
 public type RangeInclusive<T> is { current: T, end: T, done: Bool };
 
-implement<T> IntCoercible for RangeInclusive<T> {}
 implement<T> RangeLike for RangeInclusive<T> {}
 
 /// Create a range iterator `[start, end)`.
