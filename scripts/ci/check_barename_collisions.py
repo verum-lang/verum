@@ -63,6 +63,22 @@ DECL = re.compile(r"^public fn (\w+)\s*\(([^)]*)\)")
 #                           `mode_name(&SecureMode)`), not duplicated work.
 #
 # Measured 2026-08-11: 614 by the first key, 297 by the second.
+#
+# THE TYPED KEY IS NOT PROOF OF DUPLICATION EITHER — checked on its own
+# largest cluster, 2026-08-12. `is_known_only/1/Int64` appears in five
+# sqlite modules and reads like five copies of one function. The bodies
+# differ: each ANDs against a different flag mask
+# (`f_nosavepoint()|f_invert()|f_ignorenoop()|f_fknoaction()` in
+# changeset_apply_policy, `well_known_mask()` in open_v2_flags_api, and so
+# on). Same verb, same carrier type, different DOMAIN — and the domain is
+# distinguished by the MODULE, which no key over (name, arity, type) can
+# see.
+#
+# So treat 297 as an upper bound on duplicated work, and READ THE BODIES
+# before merging anything this script pairs up. Kin: register entry C9,
+# where three math modules share 18 names and turned out to be three
+# deliberate CONTRACTS (high-precision / zero-libc / correctly-rounded),
+# not three copies.
 
 
 def arity(params: str) -> int:
