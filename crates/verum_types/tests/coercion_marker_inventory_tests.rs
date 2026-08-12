@@ -13,12 +13,28 @@
 //!
 //!   * `IntCoercible`  — Type ↔ Int bidirectional coercion
 //!   * `TensorLike`    — tensor-family marker
-//!   * `Indexable`     — types supporting `t[i: Int]` indexing
+//!   * `Indexable`     — types supporting `t[i: Int]` indexing.
+//!                       NO LONGER A COERCION AXIS: its unifier arm was
+//!                       removed as unsound in T0722 (it accepted a
+//!                       collection where an `Int` was declared). The
+//!                       inventory below still guards the impl list,
+//!                       because a marker nobody reads must not quietly
+//!                       grow implementors either — but adding one now
+//!                       widens NOTHING in the unifier.
 //!   * `RangeLike`     — types presenting (start, end) interval shape
 //!
 //! …must only be implemented by the types listed here.  Silently adding a new
 //! `implement IntCoercible for Foo {}` without updating this inventory would
 //! widen the unifier's coercion surface without anyone noticing.
+//!
+//! Note the asymmetry these tests CANNOT see: a marker's presence in
+//! `core/base/coercion.vr` does not by itself give it unifier meaning. That
+//! comes from `stdlib_coercion_registry.rs` mapping the name to a registrar,
+//! and from a live arm reading the resulting set. `Indexable` has neither
+//! since T0722; `RangeLike` has the mapping but every implementor in
+//! `core/base/coercion.vr` is commented out, so its set is empty and its arm
+//! is unreachable. Read all three places before concluding a marker does
+//! anything.
 //!
 //! Each test bakes the relevant source file in with `include_str!` so that:
 //!   1. A rename of the source file causes an immediate compile error.

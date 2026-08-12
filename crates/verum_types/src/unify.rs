@@ -98,10 +98,6 @@ pub struct Unifier {
     /// Will be superseded by structural checks (e.g., `IntCoercible` protocol or
     /// querying type declarations for integer newtype wrappers).
     int_coercible_named_types: std::collections::HashSet<Text>,
-    /// Data-driven set of collection type names whose Generic form coerces with `Int`
-    /// (e.g., `List<USize>` vs `Int` from indexing operations).
-    /// Will be superseded by an `Indexable` protocol check.
-    indexable_collection_types: std::collections::HashSet<Text>,
     /// Data-driven set of range-like type names whose Generic form coerces with `Tuple`
     /// (e.g., `Range<Int>` vs `(Maybe<USize>, Maybe<USize>)` from slicing).
     /// Will be superseded by a `RangeLike` protocol check.
@@ -176,17 +172,6 @@ impl Unifier {
         let int_coercible_named_types: std::collections::HashSet<Text> =
             std::collections::HashSet::new();
 
-        // Collection types that support integer indexing —
-        // populated dynamically via `register_indexable_type` from
-        // stdlib `implement<T> Indexable for X<T> {}` blocks
-        // (e.g. `core/collections/list.vr` for List, plus Range /
-        // Vector / DynTensor / GPUBuffer in their respective
-        // modules).  Default empty: a stdlib that declares no
-        // Indexable impls produces a type-mismatch at indexing
-        // sites rather than a silent hardcoded-List fallback.
-        let indexable_collection_types: std::collections::HashSet<Text> =
-            std::collections::HashSet::new();
-
         // Range-like types — populated via register_range_like_type() from stdlib.
         let range_like_types: std::collections::HashSet<Text> = std::collections::HashSet::new();
 
@@ -226,7 +211,6 @@ impl Unifier {
             array_coercible_types,
             tensor_family_types,
             int_coercible_named_types,
-            indexable_collection_types,
             range_like_types,
             sized_numeric_types,
             bytewise_ffi_types,
@@ -426,16 +410,56 @@ impl Unifier {
             || self.family_contains(&self.int_coercible_named_types, name)
     }
 
-    /// Register a type as indexable (supports integer indexing).
-    /// Called from stdlib type registration for types implementing Indexable.
-    pub fn register_indexable_type(&mut self, type_name: Text) {
-        self.indexable_collection_types.insert(type_name);
-    }
-
-    /// Check whether a Generic collection type coerces with `Int`
-    /// (indexing — alias-aware).
-    fn is_indexable_collection(&self, name: &str) -> bool {
-        self.family_contains(&self.indexable_collection_types, name)
+    /// Compact one-line rendering of a type's SHAPE, for `VERUM_TRACE_UNIFY`.
+    ///
+    /// Deliberately lossy: head name plus type arguments, recursively, and a
+    /// bare variant tag for everything else. Spans, paths and payload
+    /// details are dropped — what a unification trace has to answer is
+    /// "which two shapes were compared", and the `{:?}` form buries that
+    /// under source offsets.
+    fn shape_of(t: &Type) -> String {
+        use Type::*;
+        let args = |a: &List<Type>| -> String {
+            if a.is_empty() {
+                String::new()
+            } else {
+                let inner: Vec<String> = a.iter().map(Self::shape_of).collect();
+                format!("<{}>", inner.join(", "))
+            }
+        };
+        match t {
+            Unit => "Unit".into(),
+            Never => "Never".into(),
+            Unknown => "Unknown".into(),
+            Bool => "Bool".into(),
+            Int => "Int".into(),
+            Float => "Float".into(),
+            Char => "Char".into(),
+            Text => "Text".into(),
+            Var(v) => format!("?{v:?}"),
+            Named { path, args: a } => {
+                let head = path
+                    .segments
+                    .last()
+                    .and_then(|seg| match seg {
+                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| "?path".to_string());
+                format!("{head}{}", args(a))
+            }
+            Generic { name, args: a } => format!("{name}{}", args(a)),
+            Tuple(items) => {
+                let inner: Vec<String> = items.iter().map(Self::shape_of).collect();
+                format!("({})", inner.join(", "))
+            }
+            other => {
+                // Variant tag only. Keeps the probe total without enumerating
+                // a 40-arm enum that grows independently of this instrument.
+                let d = format!("{other:?}");
+                d.split(['(', ' ', '{']).next().unwrap_or("?").to_string()
+            }
+        }
     }
 
     /// Register a type as range-like (supports tuple/slice coercion).
@@ -1535,13 +1559,18 @@ impl Unifier {
         // fixed, and the generic-vs-scalar case (`List<Int>` accepted where
         // `Int` is declared) reaches NEITHER of them.
         if let Ok(want) = std::env::var("VERUM_TRACE_UNIFY") {
-            let (a, b) = (format!("{:?}", t1), format!("{:?}", t2));
+            // Render the SHAPE, not `{:?}`. Every Named/Generic carries a
+            // `Span` per segment, and the debug dump spends its first two
+            // hundred characters on source offsets — the earlier version of
+            // this probe truncated at 120 and printed `Named { path: Path {
+            // segments: [Name(Ident { name: Text { inner: "Maybe" }, span:
+            // Span { start: 0, end`, cutting off exactly the type ARGUMENTS
+            // the probe exists to show. Reading that output, `Maybe<Int>`
+            // and `Maybe<Maybe<Int>>` are indistinguishable, which is the
+            // one distinction T0722 turns on.
+            let (a, b) = (Self::shape_of(t1), Self::shape_of(t2));
             if want.is_empty() || a.contains(&want) || b.contains(&want) {
-                eprintln!(
-                    "[unify] t1={} | t2={}",
-                    &a[..a.len().min(120)],
-                    &b[..b.len().min(120)]
-                );
+                eprintln!("[unify] t1={a} | t2={b}");
             }
         }
 
@@ -4682,11 +4711,29 @@ impl Unifier {
             // `scan_protocol_implementations` (see #101 step 2). The HashSets
             // here are fast O(1) caches of the protocol-implementation
             // discovery result.
-            (Generic { name, .. }, Int) | (Int, Generic { name, .. })
-                if self.is_indexable_collection(name.as_str()) =>
-            {
-                Ok(Substitution::new())
-            }
+            // There is deliberately NO `(Generic { indexable }, Int)` arm here.
+            //
+            // One existed until T0722. It accepted a COLLECTION where an `Int`
+            // was declared, so `let y: Int = xs;` type-checked and `y + 1`
+            // added one to a raw pointer — printing a different large number
+            // on every run, with no panic, no warning and exit 0.
+            //
+            // Its comment justified it as smoothing "type inference through
+            // indexing": the container allegedly reached the unifier where the
+            // element was meant. That was measured before removal, with a
+            // positive control inside each run:
+            //
+            //   * `xs[0]` / `xs.len()` into `Int`: 16 unifications, 2 of them
+            //     naming `List`, the arm fired ZERO times, correct output.
+            //   * a full 2558-file stdlib bake: the arm fired ZERO times and
+            //     produced a 21.9 MB archive.
+            //   * `let y: Int = xs;`: the arm fired, and only there.
+            //
+            // Element-vs-`Int` widening — the coercion the comment actually
+            // described (`slice[i] + 1` where the element is `USize`) — is
+            // handled by `is_int_coercible_named` / `sized_numeric_types`,
+            // which compare the ELEMENT. This arm compared the CONTAINER, so
+            // it never served the case it was written for.
             (Generic { name, .. }, Tuple(_)) | (Tuple(_), Generic { name, .. })
                 if self.is_range_like(name.as_str()) =>
             {
@@ -5768,10 +5815,10 @@ mod alias_aware_family_pins {
 
     /// Cross-marker cross-cutting pin: every family-check
     /// method (`is_tensor_family` / `is_bytewise_ffi` /
-    /// `is_int_coercible_named` / `is_indexable_collection` /
-    /// `is_range_like` / `is_sized_numeric`) is alias-aware via
-    /// the shared `family_contains` helper, so the alias rule
-    /// applies uniformly across all six markers — adding a new
+    /// `is_int_coercible_named` / `is_range_like` /
+    /// `is_sized_numeric`) is alias-aware via the shared
+    /// `family_contains` helper, so the alias rule applies
+    /// uniformly across all five markers — adding a new
     /// family-check method must route through `family_contains`
     /// or this pin's pattern of cross-checks fails.
     #[test]
@@ -5786,8 +5833,6 @@ mod alias_aware_family_pins {
         assert!(u.is_bytewise_ffi("AliasName"));
         u.register_int_coercible_type(Text::from("HeadName"));
         assert!(u.is_int_coercible_named("AliasName"));
-        u.register_indexable_type(Text::from("HeadName"));
-        assert!(u.is_indexable_collection("AliasName"));
         u.register_range_like_type(Text::from("HeadName"));
         assert!(u.is_range_like("AliasName"));
         u.register_sized_numeric_type(Text::from("HeadName"));

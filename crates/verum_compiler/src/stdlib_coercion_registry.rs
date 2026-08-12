@@ -16,7 +16,6 @@
 //! ```verum
 //! public type IntCoercible is protocol {};
 //! public type TensorLike   is protocol {};
-//! public type Indexable    is protocol {};
 //! public type RangeLike    is protocol {};
 //! public type BytewiseFfi  is protocol {};
 //! public type SizedNumeric is protocol {};
@@ -66,7 +65,6 @@ fn match_coercion_protocol(path: &verum_ast::ty::Path) -> Option<&'static str> {
     match last {
         "IntCoercible" => Some("IntCoercible"),
         "TensorLike" => Some("TensorLike"),
-        "Indexable" => Some("Indexable"),
         "RangeLike" => Some("RangeLike"),
         "BytewiseFfi" => Some("BytewiseFfi"),
         "SizedNumeric" => Some("SizedNumeric"),
@@ -99,10 +97,16 @@ fn impl_target_head_name(ty: &verum_ast::ty::Type) -> Option<String> {
 }
 
 /// Scan a list of AST modules for `implement <Marker> for X`
-/// blocks against any of the six coercion markers in
+/// blocks against any of the five coercion markers in
 /// `core/base/coercion.vr` (IntCoercible / TensorLike /
-/// Indexable / RangeLike / BytewiseFfi / SizedNumeric) and
-/// register the target types with the unifier.
+/// RangeLike / BytewiseFfi / SizedNumeric) and register the
+/// target types with the unifier.
+///
+/// `Indexable` is deliberately NOT among them. It was, until its
+/// unifier arm was removed as unsound in T0722 — it accepted a
+/// COLLECTION where an `Int` was declared. The protocol still
+/// exists in `core/base/coercion.vr` as a declarative marker;
+/// registering it here again would resurrect the hole.
 ///
 /// **Idempotent** — calling it more than once is harmless because
 /// the unifier's `register_*` methods de-duplicate via HashSet.
@@ -145,7 +149,6 @@ where
             match coercion_name {
                 "IntCoercible" => unifier.register_int_coercible_type(target_text),
                 "TensorLike" => unifier.register_tensor_family_type(target_text),
-                "Indexable" => unifier.register_indexable_type(target_text),
                 "RangeLike" => unifier.register_range_like_type(target_text),
                 "BytewiseFfi" => unifier.register_bytewise_ffi_type(target_text),
                 "SizedNumeric" => unifier.register_sized_numeric_type(target_text),
@@ -181,7 +184,6 @@ mod migration_pins {
         for marker in [
             "IntCoercible",
             "TensorLike",
-            "Indexable",
             "RangeLike",
             "BytewiseFfi",
             "SizedNumeric",

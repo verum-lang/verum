@@ -1,0 +1,46 @@
+// @test: typecheck-fail
+// @expected-error: Type mismatch: expected 'Int', found 'List<Int>'
+// @level: L0
+// @tier: 0
+// @tags: types, coercion, indexable, soundness, silent-wrong-value
+// @timeout: 60000
+// @description: A COLLECTION must not satisfy a declared `Int` (T0722).
+//
+// Until T0722 the unifier carried an arm accepting `Generic { indexable } ↔ Int`
+// unconditionally, so the `let` below type-checked. Nothing then converted
+// anything: the binding held the collection's raw representation, and `y + 1`
+// added one to a pointer. Measured output was 33916954129, then 37812241249,
+// then 50423181313 — a different large number on every run, with no panic, no
+// warning and exit 0. A test that merely RAN this code would have passed.
+//
+// The arm's comment justified it as smoothing "type inference through
+// indexing". That was measured before removal, with a positive control inside
+// each run so that silence could not be mistaken for absence:
+//
+//   * `xs[0]` and `xs.len()` into `Int`: 16 unifications, 2 of them naming
+//     `List`, the arm fired ZERO times, correct output.
+//   * a full 2558-file stdlib bake: ZERO firings, 21.9 MB archive produced.
+//   * this file's `let`: the arm fired, and only there.
+//
+// The widening the comment described — `slice[i] + 1` where the element is a
+// sized integer — compares the ELEMENT and is handled by `IntCoercible` /
+// `SizedNumeric`. The removed arm compared the CONTAINER, so it never served
+// the case it was written for.
+//
+// This file pins the REFUSAL. Its sibling
+// `L2-standard/base/coercion_marker_refusal.vr` pins the other direction — a
+// type WITHOUT a marker being refused — and never covered this one: `List`
+// does carry `implement<T> Indexable for List<T> {}` to this day.
+
+mount core.prelude.*;
+
+fn main() {
+    let mut xs: List<Int> = List.new();
+    xs.push(7);
+
+    // A whole collection where an `Int` is declared. There is no reading of
+    // this that makes sense, so there is no value to expect — only refusal.
+    let y: Int = xs;
+
+    print(y + 1);
+}

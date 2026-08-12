@@ -684,7 +684,7 @@ impl TypeChecker {
     /// — but for the USER-SIDE typecheck path that doesn't re-walk
     /// stdlib AST.  Without this, the unifier's coercion-marker
     /// registries (ArrayCoercible / IntCoercible / TensorLike /
-    /// Indexable / RangeLike / BytewiseFfi / SizedNumeric) stay
+    /// RangeLike / BytewiseFfi / SizedNumeric) stay
     /// empty in `verum run` / `verum build`, and every
     /// `let bs: List<Byte> = [1, 2, 3]` style coercion fails with
     /// `expected 'List<Byte>', found '[Byte; 3]'` because
@@ -709,7 +709,6 @@ impl TypeChecker {
             match proto {
                 "IntCoercible" => self.unifier.register_int_coercible_type(target),
                 "TensorLike" => self.unifier.register_tensor_family_type(target),
-                "Indexable" => self.unifier.register_indexable_type(target),
                 "RangeLike" => self.unifier.register_range_like_type(target),
                 "BytewiseFfi" => self.unifier.register_bytewise_ffi_type(target),
                 "SizedNumeric" => self.unifier.register_sized_numeric_type(target),

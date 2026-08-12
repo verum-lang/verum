@@ -128,18 +128,34 @@ public type TensorLike is protocol {};
 // =============================================================================
 //
 
-// Types that implement Indexable opt into `Generic<...> ↔ Int` shape
-// coercion in the unifier — necessary because the index operation
-// produces an `Int` even when the container itself is `List<USize>`,
-// `Slice<UInt8>`, etc., and the surrounding context expects a plain
-// `Int`.
+// DECLARATIVE MARKER ONLY — the unifier does NOT read this protocol.
+//
+
+// It used to. Implementing it opted a type into `Generic<...> ↔ Int`
+// coercion, and that arm was removed as unsound in T0722: it compared
+// the CONTAINER with `Int`, so `let y: Int = xs;` type-checked and
+// `y + 1` added one to a raw pointer — a different large number on
+// every run, with no panic, no warning and exit 0.
+//
+
+// The arm was justified by "the index operation produces an Int even
+// when the container is `List<USize>`". That describes ELEMENT-vs-Int
+// widening, which `IntCoercible` / `SizedNumeric` already handle by
+// comparing the ELEMENT. Measured before removal, with a positive
+// control inside each run: legitimate `xs[0]` and `xs.len()` into
+// `Int` never reached the arm, and neither did a full 2558-file
+// stdlib bake. Only the wrong annotation did.
+//
+
+// Do NOT re-register this marker in
+// `crates/verum_compiler/src/stdlib_coercion_registry.rs` — that is
+// exactly how the hole comes back.
 //
 
 // Implement when:
-//  * The type supports `[i: Int]` indexing at runtime.
-//  * Index coercions naturally arise (e.g. `slice[i] + 1` where
-//  `slice[i]` produces some sized integer that the unifier
-//  should accept where `Int` is expected).
+//  * The type supports `[i: Int]` indexing at runtime and you want
+//  that stated in its declaration for readers. It buys no compiler
+//  behaviour today.
 //
 
 // # Examples

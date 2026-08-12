@@ -9,10 +9,17 @@
 //               rejected by the type-checker at use sites where coercion would
 //               otherwise be required (#79).
 //
-// The four coercion-marker protocols (IntCoercible, TensorLike, Indexable,
-// RangeLike) are opt-in: a type must carry an `implement X for T {}` block for
-// the unifier to allow the coercion.  A plain struct with no such block must
-// produce E400 (type mismatch) at each coercion site.
+// The coercion-marker protocols (IntCoercible, TensorLike, RangeLike) are
+// opt-in: a type must carry an `implement X for T {}` block for the unifier to
+// allow the coercion.  A plain struct with no such block must produce E400
+// (type mismatch) at each coercion site.
+//
+// `Indexable` is no longer among them — its unifier arm was removed as unsound
+// in T0722.  Note what this spec does and does NOT pin: it pins that a type
+// WITHOUT a marker is refused.  It never pinned what a type WITH a marker is
+// allowed to stand in for, and that is where T0722 lived — `Indexable` let a
+// whole COLLECTION pass as `Int`.  The complementary direction is pinned by
+// `L0-critical/_codegen_regressions/indexable_collection_not_int.vr`.
 //
 // This spec pins three refusal sites:
 //
