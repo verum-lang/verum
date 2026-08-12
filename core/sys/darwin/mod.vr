@@ -99,14 +99,22 @@ public mount .libsystem.{
 // the platform-local bare names via `as`, so `sys.darwin.…{Stat}`
 // consumers get the Darwin bytes.
 public mount .libsystem.{
-    Timespec,
-    Timeval,
+    // The five names below are re-exported THROUGH `as` because
+    // `libsystem.vr` declares them under their Darwin-prefixed spelling.
+    // Written bare, they published names that module declares nowhere —
+    // measured 2026-08-12: `public type Timespec is` / `Timeval` / `Stat` /
+    // `SockaddrIn` / `SockaddrIn6` all count ZERO there, while
+    // `DarwinTimespec` / `DarwinTimeval` / `DarwinStat` / `DarwinSockaddrIn`
+    // / `DarwinSockaddrIn6` each count one. The comment above this block
+    // already claimed the `as` form; the block did not implement it.
+    DarwinTimespec as Timespec,
+    DarwinTimeval as Timeval,
     KEvent,
     KEvent64,
-    Stat,
+    DarwinStat as Stat,
     Sockaddr,
-    SockaddrIn,
-    SockaddrIn6,
+    DarwinSockaddrIn as SockaddrIn,
+    DarwinSockaddrIn6 as SockaddrIn6,
     PthreadT,
     PthreadKey,
     PthreadMutex,
