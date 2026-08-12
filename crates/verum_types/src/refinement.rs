@@ -248,6 +248,17 @@ fn predicate_text(e: &verum_ast::expr::Expr) -> String {
         }
         ExprKind::Unary { op, expr } => format!("{}{}", op.as_str(), predicate_text(expr)),
         ExprKind::Paren(inner) => format!("({})", predicate_text(inner)),
+        // `type PageNo is Int where |n| { n >= 1 };` wraps the predicate in
+        // a BLOCK, so without this arm every `where`-form refinement printed
+        // the `…` fallback — which is how I found it: the ellipsis reported
+        // an unhandled shape instead of claiming there was nothing there.
+        // A statement-carrying block is not a predicate worth inlining into
+        // a one-line diagnostic, so only the bare tail expression is
+        // rendered and anything richer keeps the ellipsis.
+        ExprKind::Block(b) if b.stmts.is_empty() => match &b.expr {
+            verum_common::Maybe::Some(tail) => predicate_text(tail),
+            verum_common::Maybe::None => "…".to_string(),
+        },
         ExprKind::Literal(Literal { kind, .. }) => match kind {
             LiteralKind::Int(v) => v.value.to_string(),
             LiteralKind::Float(v) => v.value.to_string(),

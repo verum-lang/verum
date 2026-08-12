@@ -443,16 +443,29 @@ pub(in super::super) fn handle_get_field(
                     .unwrap_or_else(|| format!("?@pc={}", frame.pc))
             })
             .collect();
-        let type_name = state
-            .module
-            .types
-            .iter()
-            .find(|t| t.id == header.type_id)
+        let td = state.module.types.iter().find(|t| t.id == header.type_id);
+        let type_name = td
             .and_then(|t| state.module.strings.get(t.name))
             .unwrap_or("?");
+        // Say WHAT the object actually has. The message already carried the
+        // index, the offsets and a backtrace, but a reader still had to go
+        // look the type up to learn that the index is impossible — and the
+        // whole point of this panic is that the index does not exist.
+        let declared_fields: String = match td {
+            Some(ty) if !ty.fields.is_empty() => {
+                let names: Vec<&str> = ty
+                    .fields
+                    .iter()
+                    .map(|f| state.module.strings.get(f.name).unwrap_or("?"))
+                    .collect();
+                format!(" — declared fields ({}): [{}]", names.len(), names.join(", "))
+            }
+            Some(ty) => format!(" — descriptor declares NO fields (kind {:?})", ty.kind),
+            None => " — no type descriptor found for that id".to_string(),
+        };
         return Err(InterpreterError::Panic {
             message: format!(
-                "field access out of bounds: field index {} (offset {}+{} = {}) exceeds object data size {} type_id={} type='{}' backtrace=[{}]",
+                "field access out of bounds: field index {} (offset {}+{} = {}) exceeds object data size {} type_id={} type='{}' backtrace=[{}]{}",
                 field_idx,
                 field_offset,
                 std::mem::size_of::<Value>(),
@@ -460,7 +473,8 @@ pub(in super::super) fn handle_get_field(
                 header.size,
                 header.type_id.0,
                 type_name,
-                backtrace.join(" <- ")
+                backtrace.join(" <- "),
+                declared_fields
             ),
         });
     }
