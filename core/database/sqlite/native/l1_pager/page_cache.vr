@@ -175,7 +175,18 @@ implement PageCache {
         };
         let _ = self.frames.insert(page_no, updated);
         self.hits = self.hits + 1;
-        Maybe.Some(self.frames.get(page_no))
+        // `Map.get` ALREADY returns `Maybe<CachedFrame>` — wrapping it in
+        // `Maybe.Some(...)` produced `Maybe<Maybe<CachedFrame>>`, and the
+        // caller's `match … { Maybe.Some(cached) => … cached.dirty … }`
+        // then bound `cached` to the INNER Maybe and did a record field
+        // access on it. That is T0401's panic, verbatim:
+        //   field access out of bounds: field index 2 … type='Maybe'
+        //   — descriptor declares NO fields (kind Sum, 2 variant(s))
+        // The double wrap type-checks because `implement<T> Deref for
+        // Maybe<T>` (core/base/maybe.vr) lets a `Maybe<CachedFrame>` coerce
+        // where a `CachedFrame` is expected — the same deliberate impl that
+        // makes `existing.generation` above legal.
+        self.frames.get(page_no)
     }
 
     /// Insert / replace a frame at `page_no`. Tags with current

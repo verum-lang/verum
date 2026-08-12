@@ -239,7 +239,14 @@ implement VfsRegistry {
         if !self.entries.contains_key(name.clone()) {
             return Maybe.None;
         }
-        Maybe.Some(self.entries.get(name.clone()))
+        // `Map.get` ALREADY returns `Maybe<VfsKind>`. Wrapping it in
+        // `Maybe.Some(...)` builds `Maybe<Maybe<VfsKind>>`, which the
+        // checker accepts through `implement<T> Deref for Maybe<T>` and
+        // codegen then stores WITHOUT the coercion — so a caller's
+        // `Maybe.Some(v) => v.<field>` reads the inner Maybe as a record
+        // (T0722). The sibling of this line in l1_pager/page_cache.vr is
+        // exactly what kept `page_roundtrip.vr` red (T0401).
+        self.entries.get(name.clone())
     }
 
     /// Current default.
