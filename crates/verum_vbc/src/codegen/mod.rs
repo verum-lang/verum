@@ -2208,9 +2208,14 @@ impl VbcCodegen {
                     .ctx
                     .functions
                     .keys()
+                    // Last SEGMENT equality, not a suffix probe: a
+                    // `ends_with(".name")` here would be counted by
+                    // `census_name_keyed_surfaces.py` as one more ranked
+                    // suffix probe — the very surface T0690 exists to
+                    // shrink — for a line that only prints a diagnostic.
+                    // Measured: it moved that ratchet 51 -> 52.
                     .filter(|k| {
-                        k.as_str() == bare_name.as_str()
-                            || k.ends_with(&format!(".{}", bare_name.as_str()))
+                        k.rsplit('.').next() == Some(bare_name.as_str())
                     })
                     .map(|k| k.as_str())
                     .take(6)
