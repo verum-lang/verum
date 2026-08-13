@@ -328,11 +328,18 @@ implement HNSWIndex {
                         self.prune_connections(neighbor_idx, level, m);
                     }
                 }
-            }
 
-            // Update current for next level
-            if !neighbors.is_empty() {
-                current = neighbors[0].0;
+                // Update current for next level.
+                //
+                // Was placed AFTER the enclosing `if level <= ...` block, where
+                // `neighbors` — bound inside it — is out of scope. The compiler
+                // said so ("undefined variable: neighbors") and the whole method
+                // shipped as a panic stub. Moved inside, which is also the only
+                // reading that means anything: when the level was skipped there
+                // was no search, so there is no best neighbour to advance to.
+                if !neighbors.is_empty() {
+                    current = neighbors[0].0;
+                }
             }
         }
     }
