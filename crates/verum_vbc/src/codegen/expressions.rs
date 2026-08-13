@@ -6612,6 +6612,41 @@ impl VbcCodegen {
             // inside the declaring function, so no import/module/global
             // registration may capture it (NESTED-LEXICAL-FIRST-1).
             .or(unit_decl_lookup)
+            // ARITY-CORRECT LOCAL BEATS ARITY-WRONG IMPORT (T0723).
+            //
+            // `mount_scoped_lookup` otherwise outranks the module's OWN
+            // function, so an import captured a name the module itself
+            // declares. Measured: `core.database.mysql.json_binary` declares
+            // `read_u8(buf, off, what)` and calls it with three arguments;
+            // a mounted 2-arity `read_u8` from another module won, and the
+            // arity mismatch made `decode_value`, `decode_array`,
+            // `decode_value_entry`, `read_lenenc`, `read_size`,
+            // `decode_object` — and `FSDP.shard_params` via `flatten` —
+            // panic stubs in the shipped archive.
+            //
+            // The probe that settled it printed, at the raise site:
+            //   fn='read_u8' resolved_arity=2 called=3
+            //   src_mod='core.database.mysql.json_binary'
+            //   qualified_key_with_called_arity=Some((35183, 3))
+            // — the correct answer was registered and available, and the
+            // chain did not reach it.
+            //
+            // Deliberately NOT a reordering. Swapping the two layers would
+            // change cases that work today, and mount-scoped precedence
+            // carries its own history. This preempts ONLY when the mounted
+            // candidate CANNOT accept the call and the module's own one can
+            // — i.e. only where the alternative is a hard arity error.
+            .or_else(|| {
+                let mount_arity_ok = mount_scoped_lookup
+                    .as_ref()
+                    .is_some_and(|(_, info)| info.param_count == args.len());
+                if mount_arity_ok {
+                    return None;
+                }
+                module_qualified_lookup
+                    .clone()
+                    .filter(|(_, info)| is_free_fn(info) && info.param_count == args.len())
+            })
             .or(mount_scoped_lookup)
             .or_else(|| module_qualified_lookup.filter(|(_, info)| is_free_fn(info)))
             // The pinned rule above applies to EVERY layer: the
@@ -7008,6 +7043,37 @@ impl VbcCodegen {
 
         // Check argument count — allow fewer args if function has default params
         if args.len() > func_info.param_count {
+            // T0723 probe. This error is the visible end of the
+            // bare-simple-name clobber: a later-compiled module overwrites
+            // the bare slot, and a call inside the module that OWNS a
+            // different-arity function of that name resolves to the
+            // stranger. The module-qualified-first lookup exists and the
+            // qualified key IS registered (measured via VERUM_TRACE_FNREG),
+            // so the open question is only whether `current_source_module`
+            // is set when the BODY compiles. Print both, plus whether the
+            // qualified key with the CALLED arity exists — if it does, the
+            // resolution had a correct answer available and did not take it.
+            if std::env::var("VERUM_TRACE_ARITY").is_ok() {
+                let src_mod = self
+                    .ctx
+                    .current_source_module
+                    .clone()
+                    .unwrap_or_else(|| "<unset>".to_string());
+                let qualified = format!("{src_mod}.{func_name}");
+                let qualified_hit = self
+                    .ctx
+                    .lookup_function_with_arity(&qualified, args.len())
+                    .map(|i| (i.id.0, i.param_count));
+                eprintln!(
+                    "[arity] fn='{}' resolved_arity={} called={} src_mod='{}' \
+                     qualified_key_with_called_arity={:?}",
+                    func_name,
+                    func_info.param_count,
+                    args.len(),
+                    src_mod,
+                    qualified_hit
+                );
+            }
             return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
                 expected: func_info.param_count,
                 found: args.len(),
