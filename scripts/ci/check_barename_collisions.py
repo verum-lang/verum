@@ -45,12 +45,23 @@ BASELINE_PRELUDE = 26
 # Same populations under the (name, arity, first-param type) key — the
 # REUSE question. Duplicated WORK, not merely a shared verb.
 BASELINE_ALL_TYPED = 297
+# `--kind types`: two `public type` declarations sharing a SIMPLE NAME in
+# different modules. Frozen at the count measured when the scope was added.
+#
+# Not a tidiness metric. One of these pairs cost a whole public function:
+# `core/term/render/diff.vr` mounts `core.term.style.Modifier` EXPLICITLY, and
+# `Modifier.BOLD` still resolved against the SQLite date grammar's unrelated
+# `Modifier` sum — so `write_modifiers` shipped as a panic stub until the
+# SQLite type was renamed `DateModifier`. Every remaining pair is the same
+# shape, waiting for a resolution order to shift under it.
+BASELINE_TYPES = 104
 BASELINE_SQLITE_TYPED = 15
 
 # `public fn name(args)` at column 0 — the free-function surface. Methods
 # live inside `implement` blocks and are indented, so column-0 anchoring
 # is what separates the two without parsing.
 DECL = re.compile(r"^public fn (\w+)\s*\(([^)]*)\)")
+TYPE_DECL = re.compile(r"^public\s+type\s+(\w+)")
 
 # The two questions this script answers are NOT the same, and conflating
 # them overstates the reuse problem threefold:
@@ -112,6 +123,22 @@ def prelude_named_exports() -> set[str]:
     return names
 
 
+def collect_types() -> dict[tuple, set[str]]:
+    """(type name,) -> modules declaring it as a `public type`."""
+    found: dict[tuple, set[str]] = collections.defaultdict(set)
+    for path in CORE.rglob("*.vr"):
+        rel = path.relative_to(CORE).as_posix()
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            m = TYPE_DECL.match(line)
+            if m:
+                found[(m.group(1),)].add(rel)
+    return found
+
+
 def collect(typed: bool = False) -> dict[tuple, set[str]]:
     """(name, arity[, first-param type]) -> modules declaring it."""
     found: dict[tuple, set[str]] = collections.defaultdict(set)
@@ -164,11 +191,35 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="ratchet mode")
     ap.add_argument("--scope", choices=("all", "sqlite", "prelude"), default="all")
     ap.add_argument(
+        "--kind",
+        choices=("functions", "types"),
+        default="functions",
+        help="types: `public type` simple-name collisions across modules",
+    )
+    ap.add_argument(
         "--typed",
         action="store_true",
         help="key on (name, arity, first-param type): duplicated WORK, not a shared verb",
     )
     args = ap.parse_args()
+
+    if args.kind == "types":
+        found = collect_types()
+        coll = {k: v for k, v in found.items() if len(v) > 1}
+        for (name,), mods in sorted(coll.items()):
+            print(f"{name:28s} {', '.join(sorted(mods))}")
+        print(f"\n{len(coll)} colliding public type names [types]")
+        if args.check and len(coll) != BASELINE_TYPES:
+            direction = "rose above" if len(coll) > BASELINE_TYPES else "dropped below"
+            print(
+                f"RATCHET: public-type collisions {direction} the baseline "
+                f"({len(coll)} vs {BASELINE_TYPES}). A rise adds a name whose "
+                f"resolution is invisible at the use site; a drop must lower the "
+                f"baseline in the same commit that earns it.",
+                file=sys.stderr,
+            )
+            return 1
+        return 0
 
     found = collect(typed=args.typed)
     coll = collisions(found, args.scope)

@@ -46,6 +46,7 @@ check-barename-collisions: ## Gate (T0538): free-fn (name,arity) collisions acro
 	python3 scripts/ci/check_barename_collisions.py --check
 	python3 scripts/ci/check_barename_collisions.py --check --scope sqlite
 	python3 scripts/ci/check_barename_collisions.py --check --scope prelude
+	python3 scripts/ci/check_barename_collisions.py --check --kind types
 
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
