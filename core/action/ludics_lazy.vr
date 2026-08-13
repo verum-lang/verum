@@ -140,10 +140,19 @@ public fn bounded_cut_elim(
     let prefix2: ObservationTrace = trace_prefix(trace2.clone(), depth_bound);
     // Bisimulation up to depth_bound.
     let verdict: BisimulationResult = bisimilar_up_to(prefix1, prefix2, depth_bound);
+    // `BisimulationResult` (core/base/coinductive.vr) has exactly two
+    // variants: `Bisimilar { observed_depth }` and `Distinct { divergence_at }`.
+    // This match was written against a shape that does not exist — a `steps`
+    // field, a `NotBisimilar` variant and an `Unknown` variant — so the field
+    // read resolved through a positional GUESS (T0723) and the two extra arms
+    // matched nothing the callee can return.
+    //
+    // `DepthExceeded` is still produced above, where the depth bound is
+    // actually observed; it was never reachable from this verdict, because
+    // `bisimilar_up_to` has no way to say "unknown".
     match verdict {
-        Bisimilar { steps } => Normalised { steps_taken: steps },
-        NotBisimilar { .. } => NotBisimilar,
-        Unknown { .. }      => DepthExceeded,
+        Bisimilar { observed_depth } => Normalised { steps_taken: observed_depth },
+        Distinct { .. }              => NotBisimilar,
     }
 }
 

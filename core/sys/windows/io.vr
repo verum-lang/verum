@@ -788,7 +788,14 @@ implement IOEngine for IocpDriver {
                 }
 
                 // Cancel operation - cancel by user_data
-                Cancel { target_user_data } => {
+                // The field is `user_data` (see CompletionOp in
+                // core/sys/io_engine.vr); binding it as `target_user_data`
+                // named a field the variant does not have, so the pattern
+                // resolved through a positional GUESS (T0723). Renamed at
+                // bind time rather than in place: the body's `user_data` is
+                // the LOOP binding — the submitting op's tag — and shadowing
+                // it would post the completion under the wrong one.
+                Cancel { user_data: target_user_data } => {
                     // IOCP cancellation is handle-based, not user_data-based.
                     // Post completion with cancelled status.
                     let overlapped = Overlapped.new();
