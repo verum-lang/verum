@@ -818,12 +818,47 @@ fn register_module_metadata(
                 _ => 1,
             }
         };
+        // T0724: how much TYPE information a record descriptor carries.
+        //
+        // The archive holds SEVERAL descriptors per type name: the declaring
+        // module's, with real field types, and one per CONSUMING module,
+        // whose fields all carry `Concrete(TypeId::UNIT)` — the
+        // `FieldDescriptor::default()` type_ref. Both are `Record`, so
+        // `rank` above scores them equal and the sorted-walk order decides.
+        // When a consumer sorted first, `meta.types` ended up holding the
+        // degraded copy, and user code constructing that stdlib record got
+        // `E400: field 'n' ... expected 'Unit'` — measured on RsaPublicKey,
+        // TableStats and Cost, against the SHIPPED archive only (the library
+        // bakes itself from source and never sees it).
+        let field_fidelity = |kind: &TypeDescriptorKind| -> usize {
+            match kind {
+                TypeDescriptorKind::Record { fields } => fields
+                    .iter()
+                    .filter(|f| !f.ty.is_empty() && f.ty.as_str() != "Unit")
+                    .count(),
+                _ => 0,
+            }
+        };
+        // Strictly repairing: replaces ONLY an entry that carries no type
+        // information at all, and only with one that carries some. It cannot
+        // change which type owns a contested simple name — both candidates
+        // here are the same name — so the first-wins occupancy the suites
+        // pin is preserved.
+        let repairs_degraded = |existing: &TypeDescriptor, incoming: &TypeDescriptor| -> bool {
+            matches!(existing.kind, TypeDescriptorKind::Record { .. })
+                && matches!(incoming.kind, TypeDescriptorKind::Record { .. })
+                && field_fidelity(&existing.kind) == 0
+                && field_fidelity(&incoming.kind) > 0
+        };
         let incoming_rank = rank(&descriptor.kind, &type_name);
         let qualified_key: Text =
             format!("{}.{}", module_name, type_name).into();
         let insert_qualified = match meta.types.get(&qualified_key) {
             None => true,
-            Some(existing) => incoming_rank > rank(&existing.kind, &type_name),
+            Some(existing) => {
+                incoming_rank > rank(&existing.kind, &type_name)
+                    || repairs_degraded(existing, &descriptor)
+            }
         };
         if insert_qualified {
             meta.types.insert(qualified_key, descriptor.clone());
@@ -838,13 +873,20 @@ fn register_module_metadata(
                 format!("{}.{}", ty_module_path, type_name).into();
             let insert_file_q = match meta.types.get(&file_qualified) {
                 None => true,
-                Some(existing) => incoming_rank > rank(&existing.kind, &type_name),
+                Some(existing) => {
+                    incoming_rank > rank(&existing.kind, &type_name)
+                        || repairs_degraded(existing, &descriptor)
+                }
             };
             if insert_file_q {
                 meta.types.insert(file_qualified, descriptor.clone());
             }
         }
-        if !simple_slot_was_occupied {
+        let simple_needs_repair = meta
+            .types
+            .get(&type_name)
+            .is_some_and(|existing| repairs_degraded(existing, &descriptor));
+        if !simple_slot_was_occupied || simple_needs_repair {
             meta.types.insert(type_name.clone(), descriptor);
         }
         // Declaration-order list records each SIMPLE name once —
@@ -1825,6 +1867,55 @@ fn builtin_type_name(tid: &verum_vbc::types::TypeId) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// T0724 gate: a stdlib record's field TYPES must survive into the
+    /// metadata the typechecker reads.
+    ///
+    /// The archive holds several descriptors per type name — the declaring
+    /// module's, carrying real field types, and one per CONSUMING module,
+    /// whose fields all hold the `FieldDescriptor::default()` type_ref
+    /// (`Concrete(TypeId::UNIT)`). Both are `Record`, so the kind-only rank
+    /// scored them equal and sorted-walk order decided the winner. When a
+    /// consumer won, `RsaPublicKey.n` reached the checker as `Unit` and user
+    /// code constructing that record got `E400: expected 'Unit'` — against
+    /// the SHIPPED archive only, which is why the whole bake-from-source
+    /// corpus was blind to it.
+    ///
+    /// Pins the observable, not the mechanism: these fields have types, and
+    /// `Unit` is not one of them.
+    #[test]
+    fn stdlib_record_field_types_survive_the_archive() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return,
+        };
+        let meta = archive_to_core_metadata(archive);
+        // Three records whose declared field types are all non-Unit, spread
+        // across unrelated subsystems so a single module's regression cannot
+        // hide behind another's.
+        for (ty_name, field) in [
+            ("RsaPublicKey", "n"),
+            ("TableStats", "table_name"),
+            ("Cost", "rows"),
+        ] {
+            let Some(desc) = meta.types.get(&Text::from(ty_name)) else {
+                continue; // type absent from this build — not this gate's business
+            };
+            let TypeDescriptorKind::Record { fields } = &desc.kind else {
+                panic!("{ty_name} is not a Record in archive metadata");
+            };
+            let Some(f) = fields.iter().find(|f| f.name.as_str() == field) else {
+                panic!("{ty_name} has no field '{field}' in archive metadata");
+            };
+            assert!(
+                !f.ty.is_empty() && f.ty.as_str() != "Unit",
+                "{ty_name}.{field} lost its type crossing the archive: got {:?}. \
+                 A consumer module's degraded descriptor won the name slot; see \
+                 `repairs_degraded` in this file.",
+                f.ty.as_str()
+            );
+        }
+    }
 
     /// Smoke test: archive → CoreMetadata produces non-trivial
     /// type and function tables.

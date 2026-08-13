@@ -780,3 +780,17 @@ decrement in `DropRef` and `*shared` deref-to-inner in
 | Stable trigger | `.map(...).collect()` / `.chain(...).collect()` — any collect whose receiver is an adapter RECORD rather than an eagerly-intercepted List. |
 | Manifestation | Panic `method 'FFIAbi.from_iter' not found …` listing the 8 real implementors. Root: generic `collect` body `C.from_iter(self)` compiles with target C ERASED into an instance-form call; runtime owner recovery reads a colliding type-id. |
 | Fix (runtime leg) | `handle_call_method` intercept on the from_iter shape: locates the iterator among {receiver, arg0} (BOTH miscompile layouts observed), gated on candidate's own type having `.next`, drains via `call_function_sync(<Type>.next)` until `Maybe.None`. Erased target defaults to List (the entire pinned surface); Set/Map targets = codegen leg (open). Commit 928f6cd75; guard `collx.vr` + meta 835/0/41. |
+
+## §58 — ARCHIVE-CONSUMER-STUB-WINS-1 (a consuming module's degraded type descriptor shadows the declaring module's) — FIXED
+
+| Field | Value |
+|---|---|
+| Defect class id | **ARCHIVE-CONSUMER-STUB-WINS-1** |
+| Status | **FIXED 2026-08-13.** Gate: `verum_compiler` lib test `stdlib_record_field_types_survive_the_archive`. |
+| Manifestation | User code cannot construct a stdlib RECORD against the SHIPPED archive: `RsaPublicKey { n, e }` → `error<E400>: Type mismatch in field 'n' of 'RsaPublicKey': expected 'Unit', found 'List<Byte>'`. The same file compiles and runs with `VERUM_STDLIB_PATH` pointing at `core/`. |
+| Why the corpus was blind | The library bakes itself FROM SOURCE, so every stdlib test, every spec run and every bake exercises the path that works. Only a consumer of the shipped archive meets the defect — i.e. exactly the external developer, on their first record literal. |
+| Root cause (measured) | The archive holds SEVERAL `TypeDescriptor`s per type name: the declaring module's, with real field `type_ref`s, and one per CONSUMING module, whose fields all carry `FieldDescriptor::default()` — whose `type_ref` is `Concrete(TypeId::UNIT)`. `archive_to_core_metadata`'s collision policy ranked by KIND only, so two `Record`s scored equal and the sorted-walk order picked the winner. When a consumer module sorted first, the degraded copy owned the name. |
+| How it was localised | A test-time dump of the raw archive, printing `type_ref` and the carried name per field. It showed the split directly: `RsaPublicKey.n type_ref=Instantiated { base: 512, args: [Concrete(6)] }` from the declaring module, and `RsaPublicKey.n type_ref=Concrete(TypeId(0)) carried="core.security.x509"` from consumers. Three earlier mechanism hypotheses — all read off the code — were wrong; the dump settled it in one run. |
+| Fix | `repairs_degraded` in `archive_metadata.rs`: a Record descriptor whose fields carry NO type information may be replaced by one that does. Deliberately one-directional — it cannot change which type owns a contested simple name (both candidates are the same name), so the first-wins occupancy that many suites pin is preserved. |
+| Diagnostic tell | Generic records fail DIFFERENTLY (`expected 'L'`, the parameter unsubstituted) because `TypeRef::Generic` passes through the consumer stub untouched. A concrete field degrading to `Unit` while a generic field keeps its parameter name is the signature of this class. |
+| Residual | Generic stdlib records still fail from the archive with the type parameter unsubstituted (`Edge { src, tgt, label }` → `expected 'L'`). Same family, different mechanism, not covered by this fix. |
