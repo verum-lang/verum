@@ -2368,7 +2368,31 @@ impl VbcCodegen {
             }
 
             PathSegment::Super | PathSegment::Cog | PathSegment::Relative => {
-                // These require multi-segment paths
+                // A single-segment `cog` / `super` is a NAME before it is a
+                // path root. Verum reserves exactly three words — `let`, `fn`
+                // and `is` — so a binding may legitimately be called `cog`,
+                // and one is: `core/cog/manifest.vr` writes
+                // `let cog = parse_cog_identity(root)?;` and then `cog: cog`.
+                // The lexer hands that back as `PathSegment::Cog`, the arm
+                // below refused it as a bare path root, and `parse_value`
+                // shipped as a panic stub (T0723).
+                //
+                // Ordered so nothing else changes: a variable of that name has
+                // to EXIST for this to fire. Where none does, the original
+                // "requires multi-segment paths" refusal stands — a bare `cog`
+                // with no such binding really is an incomplete path.
+                let spelling = match segment {
+                    PathSegment::Cog => Some("cog"),
+                    PathSegment::Super => Some("super"),
+                    // `Relative` has no source spelling to look up, and the
+                    // two arms above already handled Name/SelfValue.
+                    _ => None,
+                };
+                if let Some(word) = spelling
+                    && let Ok(reg) = self.ctx.get_var_reg(word)
+                {
+                    return Ok(Some(reg));
+                }
                 Err(CodegenError::unsupported_expr(
                     "standalone super/crate/relative",
                 ))
