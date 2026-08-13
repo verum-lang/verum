@@ -27,11 +27,20 @@ from __future__ import annotations
 import pathlib
 import sys
 
-# Frozen at the measured counts. BOTH remaining classes are the same defect —
-# an API sketched against a PROTOCOL and never written (`InfinityFunctor`,
-# `SheafInfinityTopos`, `QuicStream`) — so the floor is not zero until those
-# types exist. Lower these in the same commit that earns it.
-BASELINE_FIELD_GUESS = 2
+# Frozen at the measured counts. What remains is ONE defect class: an API
+# sketched against a PROTOCOL and never written — `SheafInfinityTopos` built
+# with a record literal (the field guess), and `compose_geometric` /
+# `id_geometric` over `InfinityFunctor` (the two stubs). The floor is not zero
+# until those types exist, and writing them from a call site would be
+# inventing the design nobody wrote.
+#
+# `QuicStream` used to be counted here and was NOT that class: api/stream.vr
+# declares `QuicApiStream` with exactly the three fields the call sites build,
+# and the bare name resolved to the unrelated transport-level record. Renaming
+# the uses took FIELD-GUESS from 2 to 1 — hence this baseline moving in the
+# same commit that earned it.
+# Lower these in the same commit that earns it.
+BASELINE_FIELD_GUESS = 1
 BASELINE_PANIC_STUBS = 2
 
 

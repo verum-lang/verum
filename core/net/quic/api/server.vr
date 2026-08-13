@@ -37,7 +37,14 @@ mount core.collections.list.{List};
 mount core.time.duration.{Duration};
 mount core.net.addr.{SocketAddr};
 mount core.net.quic.transport_params.{TransportParams};
-mount core.net.quic.api.stream.{QuicStream, QuicRecvStream, QuicStreamError};
+// `QuicApiStream` is not a declared name: api/stream.vr declares
+// `QuicApiStream` (same three fields — stream_id, send, recv). The
+// bare spelling resolved to the TRANSPORT-level `QuicApiStream` in
+// net/quic/stream.vr, whose shape is handle/connection_id/stream_id/
+// direction, so every field of the constructed value went through a
+// positional GUESS (T0723). Aliased at the mount, as the sibling
+// Send/Recv halves already are.
+mount core.net.quic.api.stream.{QuicApiStream, QuicRecvStream, QuicStreamError};
 mount core.net.tls13.cipher_suite.{CipherSuite};
 mount core.net.tls13.named_group.{NamedGroup};
 mount core.net.tls13.handshake.server_sm.{CertSigner};
@@ -148,7 +155,7 @@ public type QuicAccepted is {
 
 implement QuicAccepted {
     /// Await the next peer-initiated bidirectional stream.
-    pub async fn next_bidi_stream(&mut self) -> Result<QuicStream, QuicServerError> {
+    pub async fn next_bidi_stream(&mut self) -> Result<QuicApiStream, QuicServerError> {
         // Integration layer wires this into the connection's RecvStream
         // creation hook (RFC 9000 §3 stream opening).
         Result.Err(QuicServerError.Handshake(Text.from("pure-Verum server stream wire-up pending")))
