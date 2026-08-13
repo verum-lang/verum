@@ -18728,6 +18728,21 @@ impl VbcCodegen {
             .is_some_and(|f| !f.is_empty())
     }
 
+    /// Last segment of a qualified type name, understanding BOTH separators
+    /// Verum type names arrive in: `.` (module paths as the bake spells
+    /// them, `core.database.common.error.AdapterSpecific`) and `::` (as the
+    /// type-name printer and several inference paths spell them,
+    /// `core::database::common::error::AdapterSpecific`,
+    /// `AllocError::AllocationTooLarge`).
+    ///
+    /// Splitting on one separator silently treats a name written with the
+    /// other as unqualified — which is how a registry entry that WAS present
+    /// stayed unreachable (T0723).
+    fn last_path_segment(name: &str) -> &str {
+        let after_colons = name.rsplit("::").next().unwrap_or(name);
+        after_colons.rsplit('.').next().unwrap_or(after_colons)
+    }
+
     /// META-GROUP-XMODULE-1: re-key a SIMPLE record-type name to its
     /// module-qualified registration when the simple name lost the
     /// cross-module first-wins race (e.g. `Group` bound to the
@@ -19069,10 +19084,22 @@ impl VbcCodegen {
             // dice (same class as the sorted scan below) — pick the
             // lexicographically-smallest qualified name instead.
             {
-                let simple_name = tn.rsplit('.').next().unwrap_or(tn);
+                // SEPARATOR-AGNOSTIC (T0723). This used to split on '.'
+                // only, so a type reaching the resolver in `::` form —
+                // `core::database::common::error::AdapterSpecific`,
+                // `AllocError::AllocationTooLarge`,
+                // `super::darwin::libsystem::DarwinStat` — yielded the WHOLE
+                // string as its "simple name" and matched nothing, even
+                // though the registry held both `AdapterSpecific` and
+                // `core.database.common.error.AdapterSpecific`. Both name
+                // forms reach this resolver, so both have to be understood
+                // here; the alternative is a registry that stores every
+                // spelling of every type, which is the same fact in more
+                // places.
+                let simple_name = Self::last_path_segment(tn);
                 let mut best: Option<(&String, usize)> = None;
                 for (type_n, fields) in &self.type_field_layouts {
-                    let registered_simple = type_n.rsplit('.').next().unwrap_or(type_n);
+                    let registered_simple = Self::last_path_segment(type_n);
                     if registered_simple == simple_name
                         && type_n != tn
                         && let Some(pos) = fields.iter().position(|f| f == field_name)
