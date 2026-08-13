@@ -173,7 +173,11 @@ implement PagerSavepointStack {
     /// Peek at the top savepoint without popping.
     public fn top(&self) -> Result<Savepoint, SavepointError> {
         if self.entries.len() == 0 {
-            return Result.Err(Empty);
+            // Qualified deliberately: SIX types in core/ declare a variant
+            // named `Empty` (channel, broadcast, task_queue, spiffe id,
+            // kernel judgment, and this one), so the bare form resolves to
+            // nothing and made `top` a panic stub in the archive.
+            return Result.Err(SavepointError.Empty);
         }
         Result.Ok(self.entries[self.entries.len() - 1].clone())
     }
