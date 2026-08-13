@@ -669,26 +669,69 @@ impl<'s> CompilationPipeline<'s> {
                         let verum_ast::ItemKind::Type(td) = &item.kind else {
                             continue;
                         };
-                        let verum_ast::decl::TypeDeclBody::Record(fields) = &td.body else {
-                            continue;
-                        };
-                        if fields.is_empty() {
-                            continue;
-                        }
-                        let names: Vec<String> =
-                            fields.iter().map(|f| f.name.name.to_string()).collect();
-                        let simple = td.name.name.to_string();
-                        let qualified = format!("{module_name}.{simple}");
-                        self.global_type_layout_registry
-                            .entry(qualified)
-                            .or_insert_with(|| names.clone());
-                        match self.global_type_layout_registry.entry(simple) {
-                            std::collections::hash_map::Entry::Occupied(_) => {
-                                simple_name_collisions += 1;
+                        // A record-style VARIANT payload has the same
+                        // positional-layout question as a record type, and
+                        // starves the same way. The resolver looks such a
+                        // payload up under both the qualified `Type.Variant`
+                        // spelling and the bare variant name (the
+                        // BARE-VARIANT-FIELD-1 arm), so both are registered.
+                        let mut entries: Vec<(String, String, Vec<String>)> = Vec::new();
+                        let owner = td.name.name.to_string();
+                        match &td.body {
+                            verum_ast::decl::TypeDeclBody::Record(fields)
+                                if !fields.is_empty() =>
+                            {
+                                entries.push((
+                                    owner.clone(),
+                                    format!("{module_name}.{owner}"),
+                                    fields.iter().map(|f| f.name.name.to_string()).collect(),
+                                ));
                             }
-                            std::collections::hash_map::Entry::Vacant(v) => {
-                                v.insert(names);
-                                layouts_registered += 1;
+                            verum_ast::decl::TypeDeclBody::Variant(variants) => {
+                                for v in variants.iter() {
+                                    let verum_common::Maybe::Some(
+                                        verum_ast::decl::VariantData::Record(fields),
+                                    ) = &v.data
+                                    else {
+                                        continue;
+                                    };
+                                    if fields.is_empty() {
+                                        continue;
+                                    }
+                                    let names: Vec<String> =
+                                        fields.iter().map(|f| f.name.name.to_string()).collect();
+                                    let vname = v.name.name.to_string();
+                                    entries.push((
+                                        format!("{owner}.{vname}"),
+                                        format!("{module_name}.{owner}.{vname}"),
+                                        names.clone(),
+                                    ));
+                                    // Bare variant name, first-wins. Genuinely
+                                    // ambiguous across types (the
+                                    // `AllocationFailed { code }` vs
+                                    // `{ code, size }` sibling class), which is
+                                    // why the loser is counted rather than
+                                    // overwritten — and why the qualified keys
+                                    // above carry the authority.
+                                    entries.push((vname, String::new(), names));
+                                }
+                            }
+                            _ => continue,
+                        }
+                        for (simple, qualified, names) in entries {
+                            if !qualified.is_empty() {
+                                self.global_type_layout_registry
+                                    .entry(qualified)
+                                    .or_insert_with(|| names.clone());
+                            }
+                            match self.global_type_layout_registry.entry(simple) {
+                                std::collections::hash_map::Entry::Occupied(_) => {
+                                    simple_name_collisions += 1;
+                                }
+                                std::collections::hash_map::Entry::Vacant(v) => {
+                                    v.insert(names);
+                                    layouts_registered += 1;
+                                }
                             }
                         }
                     }
