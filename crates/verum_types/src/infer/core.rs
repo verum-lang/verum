@@ -892,6 +892,49 @@ impl TypeChecker {
         // isn't yet in ctx, but ALWAYS run inherent-method
         // registration (which is idempotent — skips already-
         // populated method names).
+        // T0724 residual: registered OUTSIDE the "type not yet loaded"
+        // guard below, deliberately.
+        //
+        // The whole registration block used to sit inside that guard, so a
+        // type already present in ctx — put there by any earlier path —
+        // short-circuited the helper and `__type_params_<name>` was never
+        // written. The record-literal checker reads exactly that key to
+        // build its parameter substitution, so every archive-imported
+        // GENERIC record kept its declared field types as parameter NAMES:
+        // `Edge { src: 1, tgt: 2, label: 7 }` failed `expected 'L', found
+        // 'Int'`, and an explicit `Edge<Int, Int>` annotation did not help,
+        // because an empty parameter list gives the type ARGS nothing to
+        // bind to.
+        //
+        // The presence of the TYPE and the presence of its PARAMS are two
+        // facts; one guard cannot stand for both.
+        if !type_desc.generic_params.is_empty() {
+            self.type_generics_count
+                .insert(name.clone(), type_desc.generic_params.len());
+            // Mirror the eager `__type_params_<name>` record too —
+            // ordered param names drive by-name substitution in
+            // `expand_generic_to_variant` / ctor resolution /
+            // `try_build_variant_from_constructors` (#47 class B;
+            // twin write in env.rs `register_stdlib_constructors_
+            // from_metadata`).
+            let type_params_key: verum_common::Text =
+                format!("__type_params_{}", name).into();
+            if self.ctx.lookup_type(type_params_key.as_str()).is_none() {
+                let mut param_record: indexmap::IndexMap<
+                    verum_common::Text,
+                    crate::ty::Type,
+                > = indexmap::IndexMap::new();
+                for gp in type_desc.generic_params.iter() {
+                    param_record
+                        .insert(gp.name.clone(), crate::ty::Type::Int);
+                }
+                self.ctx.define_type(
+                    type_params_key,
+                    crate::ty::Type::Record(param_record),
+                );
+            }
+        }
+
         if self.ctx.lookup_type(name.as_str()).is_none() {
             // Convert + register this single type.  Mirror of the body
             // of `load_stdlib_from_metadata` reduced to one entry.
@@ -910,32 +953,6 @@ impl TypeChecker {
             // type arguments.  The eager loader ran this at
             // `load_stdlib_from_metadata` (line 1981-1984); the
             // lazy `ensure_stdlib_type_loaded` path missed it.
-            if !type_desc.generic_params.is_empty() {
-                self.type_generics_count
-                    .insert(name.clone(), type_desc.generic_params.len());
-                // Mirror the eager `__type_params_<name>` record too —
-                // ordered param names drive by-name substitution in
-                // `expand_generic_to_variant` / ctor resolution /
-                // `try_build_variant_from_constructors` (#47 class B;
-                // twin write in env.rs `register_stdlib_constructors_
-                // from_metadata`).
-                let type_params_key: verum_common::Text =
-                    format!("__type_params_{}", name).into();
-                if self.ctx.lookup_type(type_params_key.as_str()).is_none() {
-                    let mut param_record: indexmap::IndexMap<
-                        verum_common::Text,
-                        crate::ty::Type,
-                    > = indexmap::IndexMap::new();
-                    for gp in type_desc.generic_params.iter() {
-                        param_record
-                            .insert(gp.name.clone(), crate::ty::Type::Int);
-                    }
-                    self.ctx.define_type(
-                        type_params_key,
-                        crate::ty::Type::Record(param_record),
-                    );
-                }
-            }
 
             // Type alias: also register in BOTH the ctx's alias
             // registry AND the unifier's alias registry so

@@ -1773,6 +1773,36 @@ impl TypeChecker {
                     },
                 };
 
+                // ENSURE-THEN-RESOLVE (T0724 residual). `__type_params_<name>`
+                // is written by `ensure_stdlib_type_loaded`, the LAZY loader.
+                // Reading the key without first driving that loader made the
+                // param list come back empty for every archive-imported
+                // generic RECORD, so the zip below produced no substitution
+                // and the declared field types stayed as their parameter
+                // names: `Edge { src: 1, tgt: 2, label: 7 }` failed with
+                // `expected 'L', found 'Int'`, and an explicit
+                // `let g: Edge<Int, Int> = ...` did not help — with an empty
+                // param list there is nothing for the type ARGS to bind to.
+                //
+                // The archive itself was never at fault: its descriptor
+                // carries `generic_params=["V","L"]` and
+                // `Record[src:V, tgt:V, label:L]`. Only the load ORDER was.
+                //
+                // Idempotent: the helper short-circuits when the type is
+                // already present, so this costs a lookup on the hot path.
+                {
+                    let name_text = verum_common::Text::from(type_name.as_str());
+                    let mut pending: Vec<Text> = Vec::new();
+                    self.ensure_stdlib_type_loaded(&name_text, &mut pending);
+                    let mut bound = 256usize;
+                    while let Some(next) = pending.pop() {
+                        bound = bound.saturating_sub(1);
+                        if bound == 0 {
+                            break;
+                        }
+                        self.ensure_stdlib_type_loaded(&next, &mut pending);
+                    }
+                }
                 // Get type parameters from the stored type definition
                 let type_params_key = format!("__type_params_{}", type_name);
                 let type_params: List<verum_common::Text> = match self
