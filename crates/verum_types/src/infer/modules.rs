@@ -12727,6 +12727,30 @@ impl TypeChecker {
     /// through this helper first.  See `audit.md §Y` in the
     /// `core-tests/text/text/` directory for the architectural
     /// rationale + the catalogue of affected probe sites.
+    /// Do two types name the SAME head constructor — `Box<_>` vs `Box<Int>`,
+    /// `Maybe<T>` vs `Maybe<Int>` — ignoring their arguments?
+    ///
+    /// Used to decide whether a static method's return type IS the receiver
+    /// type (the `Self`-returning constructor shape) before relating the two.
+    /// Deliberately head-only: comparing arguments would defeat the purpose,
+    /// since binding them is exactly what the caller is asking for.
+    fn same_type_head(a: &Type, b: &Type) -> bool {
+        fn head(t: &Type) -> Option<String> {
+            match t {
+                Type::Generic { name, .. } => Some(name.to_string()),
+                Type::Named { path, .. } => path.segments.last().and_then(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                    _ => None,
+                }),
+                _ => None,
+            }
+        }
+        match (head(a), head(b)) {
+            (Some(x), Some(y)) => x == y,
+            _ => false,
+        }
+    }
+
     pub(crate) fn lookup_type_mount_scoped(
         &self,
         name: &str,
@@ -22197,7 +22221,8 @@ impl TypeChecker {
                         {
                             if crate::ctor_trace_enabled() {
                                 eprintln!(
-                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM@{} {} -> {}",
+                                    line!(),
                                     method.name, resolved_return
                                 );
                             }
@@ -22245,7 +22270,8 @@ impl TypeChecker {
                                 {
                             if crate::ctor_trace_enabled() {
                                 eprintln!(
-                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM@{} {} -> {}",
+                                    line!(),
                                     method.name, resolved_return
                                 );
                             }
@@ -22294,11 +22320,34 @@ impl TypeChecker {
                             self.check_expr(arg, &resolved_param)?;
                         }
 
-                        let resolved_return = self.unifier.apply(return_type);
+                        let mut resolved_return = self.unifier.apply(return_type);
+
+                        // BIND THE RECEIVER'S TYPE ARGUMENTS (see the twin note
+                        // on the arm above). `Box<Int>.new()` took `new`'s
+                        // return type — `Self`, i.e. `Box<T>` with T free — and
+                        // returned it without relating it to the receiver the
+                        // caller spelled out, so the binding failed with
+                        // "the inferred type `Box<_>` is not fully determined"
+                        // while `let b: Box<Int> = Box.new();` worked.
+                        //
+                        // This is the arm that actually fires: EIGHT arms in
+                        // this function print the same trace label, and a probe
+                        // stamped with `line!()` named this one. Guarded on the
+                        // heads matching, so a method returning something other
+                        // than the receiver type is untouched.
+                        if Self::same_type_head(&resolved_return, &receiver_ty)
+                            && self
+                                .unifier
+                                .unify(&resolved_return, &receiver_ty, span)
+                                .is_ok()
+                        {
+                            resolved_return = self.unifier.apply(&resolved_return);
+                        }
                         {
                             if crate::ctor_trace_enabled() {
                                 eprintln!(
-                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM@{} {} -> {}",
+                                    line!(),
                                     method.name, resolved_return
                                 );
                             }
@@ -22357,7 +22406,8 @@ impl TypeChecker {
                     {
                             if crate::ctor_trace_enabled() {
                                 eprintln!(
-                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM@{} {} -> {}",
+                                    line!(),
                                     method.name, resolved_return
                                 );
                             }
@@ -22457,7 +22507,8 @@ impl TypeChecker {
                                     {
                             if crate::ctor_trace_enabled() {
                                 eprintln!(
-                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM@{} {} -> {}",
+                                    line!(),
                                     method.name, resolved_return
                                 );
                             }
@@ -22592,7 +22643,8 @@ impl TypeChecker {
                         {
                             if crate::ctor_trace_enabled() {
                                 eprintln!(
-                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM@{} {} -> {}",
+                                    line!(),
                                     method.name, resolved_return
                                 );
                             }
@@ -22634,7 +22686,8 @@ impl TypeChecker {
                                     {
                             if crate::ctor_trace_enabled() {
                                 eprintln!(
-                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM@{} {} -> {}",
+                                    line!(),
                                     method.name, resolved_return
                                 );
                             }
@@ -22681,7 +22734,8 @@ impl TypeChecker {
                                     {
                             if crate::ctor_trace_enabled() {
                                 eprintln!(
-                                    "[ctor-trace] pre-recv TYPEEXPR-ARM {} -> {}",
+                                    "[ctor-trace] pre-recv TYPEEXPR-ARM@{} {} -> {}",
+                                    line!(),
                                     method.name, resolved_return
                                 );
                             }
