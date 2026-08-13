@@ -62,7 +62,15 @@ public type Http2Error is
     /// NOT a protocol fault: no RFC 7540 error code describes it, the
     /// peer is usually already gone, and no GOAWAY can be delivered —
     /// so it must not be reported as ConnectionError/StreamError.
-    | IoFailure(Text);
+    | IoFailure(Text)
+    /// The peer opened and reset streams faster than the connection's
+    /// budget allows — the RST_STREAM flood shape. Answered with
+    /// `ErrorCode.EnhanceYourCalm` and a GOAWAY.
+    ///
+    /// APPENDED at the end deliberately: variant ORDER is the wire
+    /// representation, so inserting above would renumber every tag that
+    /// follows and silently reinterpret already-encoded frames.
+    | ExcessiveRstStream;
 
 // Convenience constructors.
 public fn connection_error(code: UInt32, reason: &Text) -> Http2Error {
@@ -114,6 +122,8 @@ implement Display for Http2Error {
                 f.write_str(f"HTTP/2 frame size {size} exceeds limit {limit}".as_str()),
             Http2Error.IoFailure(reason) =>
                 f.write_str(f"HTTP/2 transport I/O failure: {reason}".as_str()),
+            Http2Error.ExcessiveRstStream =>
+                f.write_str("HTTP/2 peer exceeded the RST_STREAM budget"),
         }
     }
 }
@@ -137,6 +147,8 @@ implement Debug for Http2Error {
                 f.write_str(f"FrameSizeExceeded {{ size: {size}, limit: {limit} }}".as_str()),
             Http2Error.IoFailure(reason) =>
                 f.write_str(f"IoFailure({reason})".as_str()),
+            Http2Error.ExcessiveRstStream =>
+                f.write_str("ExcessiveRstStream"),
         }
     }
 }
@@ -155,6 +167,7 @@ implement Eq for Http2Error {
             (Http2Error.FrameSizeExceeded { size: sa, limit: la },
              Http2Error.FrameSizeExceeded { size: sb, limit: lb })             => sa == sb && la == lb,
             (Http2Error.IoFailure(a),         Http2Error.IoFailure(b))         => a == b,
+            (Http2Error.ExcessiveRstStream,   Http2Error.ExcessiveRstStream)   => true,
             _ => false,
         }
     }

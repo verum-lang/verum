@@ -641,7 +641,13 @@ async fn read_frame(
     };
     let header = FrameHeader.decode(&hdr_bytes)?;
     if header.length > limits.max_frame_size {
-        return Result.Err(Http2Error.FrameTooLarge);
+        // `FrameSizeExceeded` already exists and CARRIES the two numbers;
+        // `FrameTooLarge` never did — it named a variant the type does not
+        // declare, which made this whole function a panic stub.
+        return Result.Err(Http2Error.FrameSizeExceeded {
+            size: header.length,
+            limit: limits.max_frame_size,
+        });
     }
     let payload = match read_exact_bytes(stream, header.length, token).await {
         Maybe.None => return Result.Err(

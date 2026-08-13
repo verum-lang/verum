@@ -80,14 +80,26 @@ extern {
     ) -> KernReturn;
 
     /// Deallocate virtual memory
-    fn vm_deallocate(
+    // Declared under a `_ffi` name because `super.mod` re-exports the SAFE
+    // wrapper as `vm_deallocate` for callers. Without the rename the wrapper's own
+    // body resolved `vm_deallocate` to that re-export — itself, at the wrapper's
+    // arity — and the arity mismatch made the whole function a panic stub in
+    // the archive. `vm_allocate` above already carried this shape.
+    @ffi_name("vm_deallocate")
+    fn vm_deallocate_ffi(
         target_task: MachPort,
         address: VmAddress,
         size: VmSize,
     ) -> KernReturn;
 
     /// Protect virtual memory
-    fn vm_protect(
+    // Declared under a `_ffi` name because `super.mod` re-exports the SAFE
+    // wrapper as `vm_protect` for callers. Without the rename the wrapper's own
+    // body resolved `vm_protect` to that re-export — itself, at the wrapper's
+    // arity — and the arity mismatch made the whole function a panic stub in
+    // the archive. `vm_allocate` above already carried this shape.
+    @ffi_name("vm_protect")
+    fn vm_protect_ffi(
         target_task: MachPort,
         address: VmAddress,
         size: VmSize,
@@ -185,7 +197,13 @@ extern {
     /// Create semaphore. C: `kern_return_t semaphore_create(task_t task,
     /// semaphore_t *semaphore, int policy, int value);` — both `policy`
     /// and `value` are POSIX `int` (Int32).
-    fn semaphore_create(
+    // Declared under a `_ffi` name because `super.mod` re-exports the SAFE
+    // wrapper as `semaphore_create` for callers. Without the rename the wrapper's own
+    // body resolved `semaphore_create` to that re-export — itself, at the wrapper's
+    // arity — and the arity mismatch made the whole function a panic stub in
+    // the archive. `vm_allocate` above already carried this shape.
+    @ffi_name("semaphore_create")
+    fn semaphore_create_ffi(
         task: MachPort,
         semaphore: &mut SemaphoreT,
         policy: Int32,
@@ -193,7 +211,13 @@ extern {
     ) -> KernReturn;
 
     /// Destroy semaphore
-    fn semaphore_destroy(task: MachPort, semaphore: SemaphoreT) -> KernReturn;
+    // Declared under a `_ffi` name because `super.mod` re-exports the SAFE
+    // wrapper as `semaphore_destroy` for callers. Without the rename the wrapper's own
+    // body resolved `semaphore_destroy` to that re-export — itself, at the wrapper's
+    // arity — and the arity mismatch made the whole function a panic stub in
+    // the archive. `vm_allocate` above already carried this shape.
+    @ffi_name("semaphore_destroy")
+    fn semaphore_destroy_ffi(task: MachPort, semaphore: SemaphoreT) -> KernReturn;
 
     /// Signal semaphore
     fn semaphore_signal(semaphore: SemaphoreT) -> KernReturn;
@@ -746,7 +770,7 @@ public fn safe_vm_allocate(size: VmSize, anywhere: Bool) -> Result<VmAddress, Ke
 
 /// Deallocate virtual memory (safe wrapper)
 public fn safe_vm_deallocate(address: VmAddress, size: VmSize) -> Result<(), KernReturn> {
-    let result = unsafe { vm_deallocate(mach_task_self(), address, size) };
+    let result = unsafe { vm_deallocate_ffi(mach_task_self(), address, size) };
     if result as Int == 0 {
         Result.Ok(())
     } else {
@@ -756,7 +780,7 @@ public fn safe_vm_deallocate(address: VmAddress, size: VmSize) -> Result<(), Ker
 
 /// Protect virtual memory (safe wrapper)
 public fn safe_vm_protect(address: VmAddress, size: VmSize, prot: VmProt) -> Result<(), KernReturn> {
-    let result = unsafe { vm_protect(mach_task_self(), address, size, false, prot) };
+    let result = unsafe { vm_protect_ffi(mach_task_self(), address, size, false, prot) };
     if result as Int == 0 {
         Result.Ok(())
     } else {
@@ -784,7 +808,7 @@ public fn monotonic_nanos() -> UInt64 {
 public fn safe_semaphore_create(initial_value: Int) -> Result<SemaphoreT, KernReturn> {
     let mut sem = SemaphoreT(MachPort(0));
     let result = unsafe {
-        semaphore_create(mach_task_self(), &mut sem, SYNC_POLICY_FIFO, initial_value)
+        semaphore_create_ffi(mach_task_self(), &mut sem, SYNC_POLICY_FIFO, initial_value)
     };
     if result as Int == 0 {
         Result.Ok(sem)
@@ -795,7 +819,7 @@ public fn safe_semaphore_create(initial_value: Int) -> Result<SemaphoreT, KernRe
 
 /// Destroy semaphore (safe wrapper)
 public fn safe_semaphore_destroy(sem: SemaphoreT) -> Result<(), KernReturn> {
-    let result = unsafe { semaphore_destroy(mach_task_self(), sem) };
+    let result = unsafe { semaphore_destroy_ffi(mach_task_self(), sem) };
     if result as Int == 0 {
         Result.Ok(())
     } else {
