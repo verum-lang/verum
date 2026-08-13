@@ -73,7 +73,7 @@ public fn evaluate(tv: &TimeValue, now_seconds: Int64) -> UnixepochResult {
     }
 }
 
-// Modifier classification.
+// DateModifier classification.
 public type ModifierKind is
     | MkOffsetSeconds        // "+/-N seconds"
     | MkOffsetMinutes        // "+/-N minutes"

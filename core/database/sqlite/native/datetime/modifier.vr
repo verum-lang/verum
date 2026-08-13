@@ -245,7 +245,7 @@ fn parse_int_text(t: &Text) -> Maybe<Int> {
     let bs = t.as_bytes();
     if bs.len() == 0 { return Maybe.None; }
     // Three-layer overflow defense (matches the recipe codified in
-    // #70-#74). Modifier arguments arrive from user-supplied SQL —
+    // #70-#74). DateModifier arguments arrive from user-supplied SQL —
     // a long-digit input is either a typo or an attempt to wrap
     // `acc * 10 + d` past Int.MAX into a small-magnitude value that
     // slips past downstream range checks (e.g. month/day validators).

@@ -22,7 +22,7 @@
 //  * `instant` — Instant (julian-day-based common form) + conversions
 //  * `iso` — ISO-8601 parser + renderer
 //  * `julian` — julian_day(year, month, day) + Gregorian round-trip
-//  * `modifier` — Modifier AST + parse + apply
+//  * `modifier` — DateModifier AST + parse + apply
 //  * `format` — strftime-style formatter
 // =============================================================================
 
