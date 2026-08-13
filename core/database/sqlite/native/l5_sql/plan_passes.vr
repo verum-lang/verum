@@ -65,7 +65,7 @@ mount core.database.sqlite.native.l5_sql.planner.{
 /// One planner pass.  Takes a PlanNode by value (consume), returns
 /// `(rewritten_plan, n_edits)`.  `n_edits == 0` signals "no
 /// rewrite happened, this pass is at fixed point".
-public type PlanPassFn = fn(PlanNode) -> (PlanNode, Int);
+public type PlanPassFn is fn(PlanNode) -> (PlanNode, Int);
 
 // -----------------------------------------------------------------------------
 // PlanPassReport — pipeline observability

@@ -750,8 +750,8 @@ const ETIMEDOUT: Int = 110;
 // declarations are Linux-prefixed, the mod.vr re-exports publish bare
 // names; pre-fix those were dangling.
 // =============================================================================
-public type Thread = LinuxThread;
-public type ThreadFn = LinuxThreadFn;
+public type Thread is LinuxThread;
+public type ThreadFn is LinuxThreadFn;
 // Deliberately NOT aliased to the bare names `Mutex` / `Condvar` /
 // `SpinLock` / `Once`. Those names belong to core.sync, and
 // `resolve_type_alias` is keyed by BARE NAME across the whole stdlib:
@@ -763,4 +763,4 @@ public type ThreadFn = LinuxThreadFn;
 // The aliases had ZERO consumers (no direct mount, no glob on
 // `thread.*`), so the collision bought nothing. Reach for the
 // platform types by their own names: DarwinMutex, LinuxMutex, ...
-public type ThreadError = LinuxThreadError;
+public type ThreadError is LinuxThreadError;

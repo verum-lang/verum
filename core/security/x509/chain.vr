@@ -65,7 +65,10 @@ mount core.hash.crypto.sha384.{Sha384};
 mount core.hash.crypto.sha512.{Sha512};
 mount core.security.ecc.ed25519.{Ed25519, Ed25519PublicKey, Ed25519Signature};
 mount core.security.ecc.p256.{P256, P256PublicKey, P256Signature};
-mount core.security.sig.rsa.{RsaHash, verify_pkcs1_v15_prehashed, verify_pss_prehashed};
+mount core.security.sig.rsa.{
+    RsaHash, RsaPublicKey as RsaVerifyKey,
+    verify_pkcs1_v15_prehashed, verify_pss_prehashed,
+};
 
 // =============================================================================
 // Hostile-chain safety cap
@@ -437,7 +440,11 @@ fn verify_rsa_pkcs1(
         SubjectPublicKey.Rsa(rsa) => {
             let vk = RsaVerifyKey { n: rsa.modulus.clone(), e: rsa.exponent.clone() };
             let digest = hash_message(hash.clone(), message.as_slice());
-            match verify_pkcs1_v15_prehashed(&vk, hash, &digest, signature.as_slice()) {
+            // Declared order is (public_key, digest, signature, hash). The
+            // call used to pass (key, HASH, digest, signature), so the digest
+            // arrived where the signature belongs and the hash where the digest
+            // belongs — in a certificate-chain signature check (T0723).
+            match verify_pkcs1_v15_prehashed(&vk, &digest, signature.as_slice(), hash) {
                 Result.Ok(()) => Result.Ok(()),
                 Result.Err(_) => Result.Err(ChainError.BadSignature(-1)),
             }
@@ -461,8 +468,14 @@ fn verify_rsa_pss(
                 RsaPssHash.Sha384Hash => (RsaHash.Sha384_, Sha384.digest(message.as_slice()).to_list()),
                 RsaPssHash.Sha512Hash => (RsaHash.Sha512_, Sha512.digest(message.as_slice()).to_list()),
             };
-            let _ = salt_len;  // verify_pss_prehashed picks salt_len from signature
-            match verify_pss_prehashed(&vk, rsa_hash, &digest, signature.as_slice()) {
+            // Declared order is (public_key, digest, signature, hash, salt_length).
+            // The call used to pass four arguments in the order
+            // (key, hash, digest, signature) and discard `salt_len` with a
+            // comment claiming the callee recovers it from the signature — a
+            // claim nothing can confirm: `verum.rsa.verify_pss_prehashed` has
+            // no implementation in the runtime, and the declaration takes the
+            // length as a parameter. Passing what the caller was given.
+            match verify_pss_prehashed(&vk, &digest, signature.as_slice(), rsa_hash, salt_len) {
                 Result.Ok(()) => Result.Ok(()),
                 Result.Err(_) => Result.Err(ChainError.BadSignature(-1)),
             }

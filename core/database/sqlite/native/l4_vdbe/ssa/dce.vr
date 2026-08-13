@@ -55,7 +55,7 @@ mount core.database.sqlite.native.l4_vdbe.ssa.program.SsaProgram;
 // LiveSet — bitmap indexed by raw ValueId
 // -----------------------------------------------------------------------------
 
-type LiveSet = {
+type LiveSet is {
     bits: List<Bool>,
 };
 

@@ -95,7 +95,7 @@ public fn resolve_pending_phis(lifted: &mut LiftResult) {
 // Resolution: placeholder → final SSA value
 // -----------------------------------------------------------------------------
 
-type Resolution = {
+type Resolution is {
     placeholder_id: ValueId,
     resolved: SsaValue,
 };

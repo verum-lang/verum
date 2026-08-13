@@ -731,6 +731,6 @@ implement FutexCondvar {
 // The aliases had ZERO consumers (no direct mount, no glob on
 // `thread.*`), so the collision bought nothing. Reach for the
 // platform types by their own names: DarwinMutex, LinuxMutex, ...
-public type ThreadError = DarwinThreadError;
-public type Thread = DarwinThread;
-public type ThreadFn = DarwinThreadFn;
+public type ThreadError is DarwinThreadError;
+public type Thread is DarwinThread;
+public type ThreadFn is DarwinThreadFn;

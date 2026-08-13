@@ -607,6 +607,6 @@ implement DarwinDeadlineTimer {
 /// names resolve HERE on this platform, so portable code can mount
 /// sys.<platform>.time.{{Stopwatch}} without naming the platform in
 /// the type.
-public type Stopwatch = DarwinStopwatch;
-public type PerfCounter = DarwinPerfCounter;
-public type DeadlineTimer = DarwinDeadlineTimer;
+public type Stopwatch is DarwinStopwatch;
+public type PerfCounter is DarwinPerfCounter;
+public type DeadlineTimer is DarwinDeadlineTimer;

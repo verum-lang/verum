@@ -104,7 +104,7 @@ fn rtrim_spaces(t: &Text) -> Text {
 /// `Ordering` output.  Stored alongside the metadata so the L3
 /// comparator can dispatch through it without a name → fn lookup
 /// per comparison.
-public type UserCollationFn = fn(&Text, &Text) -> Ordering;
+public type UserCollationFn is fn(&Text, &Text) -> Ordering;
 
 /// Name → collation metadata + optional fn-pointer for UserDefined
 /// kinds.  Seeded with BINARY / NOCASE / RTRIM;  user code registers

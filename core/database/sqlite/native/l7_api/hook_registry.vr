@@ -128,38 +128,38 @@ public fn hook_handle_is_valid(h: &HookHandle) -> Bool {
 // -----------------------------------------------------------------------------
 
 /// `sqlite3_update_hook` — fired by L4 VDBE Insert/Update/Delete.
-public type UpdateHookFn = fn(UpdateOp, &Text, &Text, Int64);
+public type UpdateHookFn is fn(UpdateOp, &Text, &Text, Int64);
 
 /// `sqlite3_commit_hook` — fired by SqliteNativeConnection.commit_tx BEFORE the
 /// actual COMMIT.  Returns `true` to veto (turns commit into
 /// rollback); `false` allows the commit to proceed.
-public type CommitHookFn = fn() -> Bool;
+public type CommitHookFn is fn() -> Bool;
 
 /// `sqlite3_rollback_hook` — observation only, no return value.
-public type RollbackHookFn = fn();
+public type RollbackHookFn is fn();
 
 /// `sqlite3_wal_hook` — fired by L1 WAL writer after each commit.
 /// Receives (db_name, n_frames_in_wal) and returns 0 on OK or a
 /// non-zero error code (caller's choice — typically used to trigger
 /// auto-checkpoint at a frame threshold).
-public type WalHookFn = fn(&Text, Int) -> Int;
+public type WalHookFn is fn(&Text, Int) -> Int;
 
 /// `sqlite3_busy_handler` — called when SQLITE_BUSY would be
 /// returned.  Receives retry-count; returns true to retry, false
 /// to give up.
-public type BusyHandlerFn = fn(Int) -> Bool;
+public type BusyHandlerFn is fn(Int) -> Bool;
 
 /// `sqlite3_progress_handler` — fired every N VDBE instructions.
 /// Returns true to interrupt the running statement.
-public type ProgressHandlerFn = fn() -> Bool;
+public type ProgressHandlerFn is fn() -> Bool;
 
 /// `sqlite3_set_authorizer` — pre-compile gate; receives the
 /// requested action and returns the authorization decision.
-public type AuthorizerFn = fn(&AuthAction) -> AuthDecision;
+public type AuthorizerFn is fn(&AuthAction) -> AuthDecision;
 
 /// `sqlite3_trace` — observability hook; receives the formatted
 /// statement text just before execution.
-public type TraceHookFn = fn(&Text);
+public type TraceHookFn is fn(&Text);
 
 // -----------------------------------------------------------------------------
 // HookSlot — sum-typed callback storage

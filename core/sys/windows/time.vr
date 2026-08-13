@@ -665,6 +665,6 @@ implement WindowsDeadlineTimer {
 /// names resolve HERE on this platform, so portable code can mount
 /// sys.<platform>.time.{{Stopwatch}} without naming the platform in
 /// the type.
-public type Stopwatch = WindowsStopwatch;
-public type PerfCounter = WindowsPerfCounter;
-public type DeadlineTimer = WindowsDeadlineTimer;
+public type Stopwatch is WindowsStopwatch;
+public type PerfCounter is WindowsPerfCounter;
+public type DeadlineTimer is WindowsDeadlineTimer;

@@ -739,7 +739,7 @@ public type DarwinStat is {
 /// (16-field BSD layout, st_mode/st_nlink order differs from Linux) —
 /// the dangling bare name used to resolve to the Linux 18-field
 /// layout, swapping st_mode/st_nlink for every FFI reader.
-public type Stat = DarwinStat;
+public type Stat is DarwinStat;
 
 public type Sockaddr is {
     sa_len: UInt8,
@@ -782,13 +782,13 @@ implement BytewiseFfi for DarwinSockaddrIn {}
 /// platform-native variant; `SockaddrIn` here is the canonical name
 /// downstream callers use.  `core/net/tcp.vr` mounts this name and
 /// the @cfg(target_os = "macos") branch resolves to DarwinSockaddrIn.
-public type SockaddrIn = DarwinSockaddrIn;
+public type SockaddrIn is DarwinSockaddrIn;
 /// Platform-local bare alias (T0435): consumers mounting
 /// `sys.darwin.libsystem.{SockaddrIn6}` get the Darwin layout
 /// (leading sin6_len byte — the classic BSD-vs-Linux divergence);
 /// pre-fix the bare name was DANGLING here and resolved to the
 /// Linux struct.
-public type SockaddrIn6 = DarwinSockaddrIn6;
+public type SockaddrIn6 is DarwinSockaddrIn6;
 
 /// sockaddr_in6 (IPv6)
 public type DarwinSockaddrIn6 is {

@@ -82,7 +82,7 @@ mount core.database.sqlite.native.l4_vdbe.ssa.program.SsaProgram;
 /// to its assigned register slot in the output VdbeProgram.
 /// `block_start[i]` is the first instruction index of block `i` in
 /// the output (-1 until emitted; used for jump patching).
-type LowerState = {
+type LowerState is {
     value_to_reg: List<Int>,             // indexed by ValueId raw
     block_start: List<Int>,              // indexed by BlockId raw
     next_register: Int,

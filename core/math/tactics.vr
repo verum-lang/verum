@@ -66,11 +66,22 @@ public type TacticResult is
 
 /// A single proof goal: a proposition together with its local context
 /// (hypotheses available at this point in the proof).
+/// A named local hypothesis: the name it is bound under, and the
+/// proposition it asserts.
+///
+/// `Goal.hypotheses` used to be `List<{ name: Text, hyp: TacticProp }>` — an
+/// anonymous structural record — while `push_hypothesis` constructed
+/// `Hypothesis { name, hyp }`, a name with no declaration behind it. The
+/// compiler accepted that and guessed the field positions (T0723). Naming
+/// the type makes the existing construction sites correct rather than
+/// rewriting them to an anonymous shape nobody spells.
+public type Hypothesis is { name: Text, hyp: TacticProp };
+
 public type Goal is {
     /// The proposition to be proved.
     proposition: TacticProp,
     /// Local hypotheses in scope, keyed by name.
-    hypotheses: List<{ name: Text, hyp: TacticProp }>,
+    hypotheses: List<Hypothesis>,
     /// An optional display hint used by the interactive mode.
     label: Maybe<Text>,
 };

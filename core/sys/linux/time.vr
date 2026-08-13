@@ -503,6 +503,6 @@ implement LinuxStopwatch {
 /// names resolve HERE on this platform, so portable code can mount
 /// sys.<platform>.time.{{Stopwatch}} without naming the platform in
 /// the type.
-public type Stopwatch = LinuxStopwatch;
-public type PerfCounter = LinuxPerfCounter;
-public type DeadlineTimer = LinuxDeadlineTimer;
+public type Stopwatch is LinuxStopwatch;
+public type PerfCounter is LinuxPerfCounter;
+public type DeadlineTimer is LinuxDeadlineTimer;

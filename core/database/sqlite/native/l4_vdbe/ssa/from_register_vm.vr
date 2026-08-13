@@ -107,7 +107,7 @@ mount core.database.sqlite.native.l4_vdbe.ssa.cfg_construction.{
 /// register `reg_idx` within the current block.  `Maybe.None` means the
 /// value flows in from a predecessor (and will be resolved by phi
 /// insertion in pass 2).
-type RegState = {
+type RegState is {
     reaching: List<Maybe<SsaValue>>,
 };
 
