@@ -128,6 +128,15 @@ pub enum TestType {
     TypecheckPass,
     /// Code should fail typechecking
     TypecheckFail,
+    /// Compilation should fail at ANY phase, not only the type checker.
+    ///
+    /// `typecheck-fail` can only observe diagnostics the TYPE CHECKER
+    /// raises. Several classes are raised later — `E600: circular constant
+    /// dependency detected` is one — and a spec pinning them under
+    /// `typecheck-fail` reports "typecheck unexpectedly succeeded", which
+    /// reads as a MISSING COMPILER CHECK rather than a directive that cannot
+    /// reach the phase. This runs the full compile and expects it to fail.
+    CompileFail,
     /// Verification should pass
     VerifyPass,
     /// Verification should fail
@@ -183,6 +192,7 @@ impl TestType {
             "parse-recover" | "parserecover" => Ok(Self::ParseRecover),
             "typecheck-pass" | "typecheckpass" | "unit" => Ok(Self::TypecheckPass),
             "typecheck-fail" | "typecheckfail" => Ok(Self::TypecheckFail),
+            "compile-fail" | "compilefail" => Ok(Self::CompileFail),
             "verify-pass" | "verifypass" => Ok(Self::VerifyPass),
             "verify-fail" | "verifyfail" => Ok(Self::VerifyFail),
             "run" => Ok(Self::Run),
@@ -334,6 +344,7 @@ impl std::fmt::Display for TestType {
             Self::ParseRecover => "parse-recover",
             Self::TypecheckPass => "typecheck-pass",
             Self::TypecheckFail => "typecheck-fail",
+            Self::CompileFail => "compile-fail",
             Self::VerifyPass => "verify-pass",
             Self::VerifyFail => "verify-fail",
             Self::Run => "run",

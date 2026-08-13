@@ -65,7 +65,7 @@ vcs/
 ### Test File Format
 
 ```verum
-// @test: typecheck-pass|typecheck-fail|run|run-panic|...
+// @test: typecheck-pass|typecheck-fail|compile-fail|run|run-panic|...
 // @level: L0|L1|L2|L3|L4
 // @tier: 0|1|2|3|all (execution tier)
 // @tags: memory-safety, bounds-check, ...
@@ -145,6 +145,9 @@ fn main() {
 fn main() {
     let x: Int = "hello";  // ERROR: Type mismatch
 }
+
+**`compile-fail` vs `typecheck-fail`.** `typecheck-fail` observes only what the TYPE CHECKER raises. Diagnostics from later phases — module resolution, const evaluation, codegen — never reach it, and a spec pinning one of those reports "typecheck unexpectedly succeeded", which reads as a MISSING COMPILER CHECK rather than a directive that cannot see the phase. `compile-fail` runs the full `verum build` and expects a non-zero exit, so `@expected-error: E600` (circular constant dependency) and its kin are pinnable. Use `typecheck-fail` when the diagnostic IS a type error — it is faster and runs in-process.
+
 ```
 
 **Run with Expected Output**:

@@ -1,4 +1,7 @@
-// @test: typecheck-fail
+// @test: compile-fail
+// E600 is raised AFTER the type-check phase, so `typecheck-fail` could not
+// observe it: the file type-checks clean and the runner reported "typecheck
+// unexpectedly succeeded" — indistinguishable from a missing compiler check.
 // @tier: 0
 // @level: L0
 // @tags: modules, circular, constants, error

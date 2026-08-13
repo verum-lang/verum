@@ -782,6 +782,7 @@ impl Executor {
             TestType::ParseRecover => self.execute_parse_recover(directives, tier).await,
             TestType::TypecheckPass => self.execute_typecheck_pass(directives, tier).await,
             TestType::TypecheckFail => self.execute_typecheck_fail(directives, tier).await,
+            TestType::CompileFail => self.execute_compile_fail(directives, tier).await,
             TestType::VerifyPass => self.execute_verify_pass(directives, tier).await,
             TestType::VerifyFail => self.execute_verify_fail(directives, tier).await,
             TestType::Run => self.execute_run(directives, tier).await,
@@ -1454,6 +1455,49 @@ impl Executor {
     }
 
     /// Execute typecheck-fail test using direct library integration.
+    /// `compile-fail`: the whole compile must fail, at whatever phase.
+    ///
+    /// Deliberately NOT routed through the direct in-process integration the
+    /// typecheck variants use — that path stops at the type checker, which is
+    /// exactly the limitation this test type exists to lift. Always spawns
+    /// the CLI's `build`, so a diagnostic from module resolution, const
+    /// evaluation or codegen is observable to a spec.
+    async fn execute_compile_fail(&self, directives: &TestDirectives, tier: Tier) -> TestOutcome {
+        let start = Instant::now();
+        match self.run_compiler_phase(directives, tier, "build").await {
+            Ok(output) => {
+                if output.exit_code != Some(0) {
+                    if self.check_expected_errors(&output.stderr, &directives.expected_errors) {
+                        TestOutcome::Pass {
+                            tier,
+                            duration: start.elapsed(),
+                        }
+                    } else {
+                        TestOutcome::Fail {
+                            tier,
+                            reason: "Compilation failed but with wrong errors".to_string().into(),
+                            expected: Some(format!("{:?}", directives.expected_errors).into()),
+                            actual: Some(output.stderr.clone().into()),
+                            duration: start.elapsed(),
+                        }
+                    }
+                } else {
+                    TestOutcome::Fail {
+                        tier,
+                        reason: "Compilation unexpectedly succeeded".to_string().into(),
+                        expected: Some("Compilation failure".to_string().into()),
+                        actual: Some("Compilation succeeded".to_string().into()),
+                        duration: start.elapsed(),
+                    }
+                }
+            }
+            Err(e) => TestOutcome::Error {
+                tier,
+                error: e.to_string().into(),
+            },
+        }
+    }
+
     fn execute_typecheck_fail_direct(
         &self,
         directives: &TestDirectives,
