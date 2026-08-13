@@ -5739,6 +5739,46 @@ impl TypeChecker {
                     .unwrap_or("?");
 
                 if let Some(type_name_str) = type_name_opt {
+                    // COERCION MARKERS FROM USER CODE (T0725).
+                    //
+                    // `core/base/coercion.vr` declares these as PUBLIC
+                    // protocols, which invites a user to implement them —
+                    // and until now the implementation compiled and did
+                    // nothing: the unifier learned markers only from
+                    // `register_coercion_markers_from_metadata`, which walks
+                    // the STANDARD LIBRARY's metadata. A user's own
+                    // `implement IntCoercible for Fd {}` never reached it, so
+                    // `takes_int(Fd(7))` still failed E400 while the same
+                    // call with a stdlib `Duration` compiled.
+                    //
+                    // Registered here, where the impl's protocol name and
+                    // target type are both already in hand, with the SAME
+                    // dispatch the stdlib path uses — one behaviour, two
+                    // entry points, rather than a second notion of what a
+                    // marker means.
+                    {
+                        let target: Text = type_name_str.as_str().into();
+                        match protocol_name {
+                            "IntCoercible" => {
+                                self.unifier.register_int_coercible_type(target)
+                            }
+                            "TensorLike" => {
+                                self.unifier.register_tensor_family_type(target)
+                            }
+                            "RangeLike" => self.unifier.register_range_like_type(target),
+                            "BytewiseFfi" => {
+                                self.unifier.register_bytewise_ffi_type(target)
+                            }
+                            "SizedNumeric" => {
+                                self.unifier.register_sized_numeric_type(target)
+                            }
+                            "ArrayCoercible" => {
+                                self.unifier.register_array_coercible_type(target.clone());
+                                crate::subtype::register_global_array_coercible(target);
+                            }
+                            _ => {}
+                        }
+                    }
                     // Set current_self_type for Self resolution in method signatures
                     let self_type = self.ast_to_type(for_type)?;
                     let previous_self_type = self.current_self_type.clone();
