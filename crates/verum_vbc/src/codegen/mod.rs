@@ -10934,7 +10934,16 @@ impl VbcCodegen {
                         type_g.push(name.name.to_string());
                         ordered.push(name.name.to_string());
                     }
-                    GenericParamKind::Const { name, .. } => {
+                    // `Meta` alongside `Const`, here and at the three sibling
+                    // sites below. The AST marks `Const` DEPRECATED ("use Meta
+                    // instead"), yet codegen knew only `Const` — so the
+                    // preferred spelling was the broken one: `const N: Int`
+                    // delivered its value into a body while `N: meta USize`
+                    // yielded `()` with no diagnostic, and twelve stdlib
+                    // functions shipped as panic stubs on "undefined variable:
+                    // N / H / k / DIMS" (T0726).
+                    GenericParamKind::Const { name, .. }
+                    | GenericParamKind::Meta { name, .. } => {
                         const_g.push(name.name.to_string());
                         ordered.push(name.name.to_string());
                     }
@@ -12747,7 +12756,8 @@ impl VbcCodegen {
                 .filter_map(|gp| match &gp.kind {
                     verum_ast::ty::GenericParamKind::Type { name, .. }
                     | verum_ast::ty::GenericParamKind::HigherKinded { name, .. }
-                    | verum_ast::ty::GenericParamKind::Const { name, .. } => {
+                    | verum_ast::ty::GenericParamKind::Const { name, .. }
+                    | verum_ast::ty::GenericParamKind::Meta { name, .. } => {
                         Some(name.name.to_string())
                     }
                     _ => None,
@@ -12764,7 +12774,8 @@ impl VbcCodegen {
                 .generics
                 .iter()
                 .filter_map(|gp| match &gp.kind {
-                    verum_ast::ty::GenericParamKind::Const { name, .. } => {
+                    verum_ast::ty::GenericParamKind::Const { name, .. }
+                    | verum_ast::ty::GenericParamKind::Meta { name, .. } => {
                         Some(name.name.to_string())
                     }
                     _ => None,
@@ -16602,7 +16613,8 @@ impl VbcCodegen {
                     self.ctx.generic_type_params.insert(name.name.to_string());
                     self.ctx.generic_type_params_ordered.push(name.name.to_string());
                 }
-                verum_ast::ty::GenericParamKind::Const { name, .. } => {
+                verum_ast::ty::GenericParamKind::Const { name, .. }
+                | verum_ast::ty::GenericParamKind::Meta { name, .. } => {
                     self.ctx.const_generic_params.insert(name.name.to_string());
                     // CONST-GENERIC-VALUE-CARRY-1: fn-level const params
                     // join the SAME ordered positional numbering as type
