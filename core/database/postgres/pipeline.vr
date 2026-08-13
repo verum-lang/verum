@@ -202,11 +202,16 @@ implement PipelineState {
 /// a Mutex + Condvar so the reader and the awaiter can run on
 /// different threads (or the same thread on a single-conn loop).
 public type PipelineResultSink is {
-    inner: Mutex<SinkInner>,
+    inner: Mutex<PipelineSinkInner>,
     notify: Condvar,
 };
 
-type SinkInner is {
+// Renamed from `SinkInner`: core/database/postgres/notify.vr declares a
+// PRIVATE type of that same simple name, and the compiler's layout registry
+// is keyed by the simple name — so every field of this record resolved
+// through a positional GUESS (T0723). Privacy does not separate the two:
+// the registry does not carry visibility.
+type PipelineSinkInner is {
     rows: List<List<WireValue>>,
     row_desc: Maybe<RowDescription>,
     command_tag: Text,
@@ -218,7 +223,7 @@ type SinkInner is {
 implement PipelineResultSink {
     public fn new() -> PipelineResultSink {
         PipelineResultSink {
-            inner: Mutex.new(SinkInner {
+            inner: Mutex.new(PipelineSinkInner {
                 rows: List.new(),
                 row_desc: Maybe.None,
                 command_tag: "".clone(),

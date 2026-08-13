@@ -45,8 +45,8 @@ BASELINE_PRELUDE = 26
 # Same populations under the (name, arity, first-param type) key — the
 # REUSE question. Duplicated WORK, not merely a shared verb.
 BASELINE_ALL_TYPED = 297
-# `--kind types`: two `public type` declarations sharing a SIMPLE NAME in
-# different modules. Frozen at the count measured when the scope was added.
+# `--kind types`: two TOP-LEVEL type declarations — public OR private —
+# sharing a SIMPLE NAME in different modules. Frozen at the measured count.
 #
 # Not a tidiness metric. One of these pairs cost a whole public function:
 # `core/term/render/diff.vr` mounts `core.term.style.Modifier` EXPLICITLY, and
@@ -54,14 +54,20 @@ BASELINE_ALL_TYPED = 297
 # `Modifier` sum — so `write_modifiers` shipped as a panic stub until the
 # SQLite type was renamed `DateModifier`. Every remaining pair is the same
 # shape, waiting for a resolution order to shift under it.
-BASELINE_TYPES = 104
+BASELINE_TYPES = 133
 BASELINE_SQLITE_TYPED = 15
 
 # `public fn name(args)` at column 0 — the free-function surface. Methods
 # live inside `implement` blocks and are indented, so column-0 anchoring
 # is what separates the two without parsing.
 DECL = re.compile(r"^public fn (\w+)\s*\(([^)]*)\)")
-TYPE_DECL = re.compile(r"^public\s+type\s+(\w+)")
+# Any TOP-LEVEL type declaration, public or private. The compiler's
+# layout registry is keyed by SIMPLE NAME and carries no visibility, so a
+# private helper collides exactly as hard as a public type: two files each
+# declaring a private `SinkInner` sent every field of both through the
+# positional GUESS path (T0723). Counting only `public` measured the wrong
+# set — this scope was widened after that case.
+TYPE_DECL = re.compile(r"^(?:public\s+)?type\s+(\w+)")
 
 # The two questions this script answers are NOT the same, and conflating
 # them overstates the reuse problem threefold:
@@ -208,7 +214,7 @@ def main() -> int:
         coll = {k: v for k, v in found.items() if len(v) > 1}
         for (name,), mods in sorted(coll.items()):
             print(f"{name:28s} {', '.join(sorted(mods))}")
-        print(f"\n{len(coll)} colliding public type names [types]")
+        print(f"\n{len(coll)} colliding type names, public or private [types]")
         if args.check and len(coll) != BASELINE_TYPES:
             direction = "rose above" if len(coll) > BASELINE_TYPES else "dropped below"
             print(
