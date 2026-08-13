@@ -543,7 +543,14 @@ public fn client_session_from_nst(
     let mut i: Int = 0;
     while i < nst.extensions.len() {
         match &nst.extensions[i] {
-            Extension.EarlyDataExt(EarlyDataIndication.EarlyDataTicket { max_size }) => {
+            // The field is `max_early_data_size` (see
+            // handshake/extension.vr); `max_size` named a field the variant
+            // does not have, so the read resolved through a positional GUESS
+            // and the session's early-data limit came from a foreign slot
+            // (T0723). Renamed at bind time to keep the body's short name.
+            Extension.EarlyDataExt(
+                EarlyDataIndication.EarlyDataTicket { max_early_data_size: max_size },
+            ) => {
                 max_early = *max_size;
             },
             _ => {},

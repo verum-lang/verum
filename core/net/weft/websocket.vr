@@ -354,7 +354,13 @@ implement<T: WeftTransport> WsSession<T> {
     async fn read_next_frame(&mut self, token: &CancellationToken) -> Result<WsFrame, WsError> {
         loop {
             match ws_decode(&self.read_buf, true, self.max_message_bytes) {
-                DecodeResult.Complete { frame, consumed } => {
+                // The variant is `Decoded`, not `Complete`, and the error
+                // variant is `Err`, not `Error` (see
+                // core/net/websocket.vr). Both names were invented here, so
+                // the `consumed` read resolved through a positional GUESS
+                // and the arm below never matched what `decode` returns
+                // (T0723).
+                DecodeResult.Decoded { frame, consumed } => {
                     // Drop consumed bytes from the buffer.
                     let total = self.read_buf.len();
                     let mut rest: List<Byte> = List.with_capacity(total - consumed);
@@ -381,7 +387,7 @@ implement<T: WeftTransport> WsSession<T> {
                         }
                     }
                 }
-                DecodeResult.Error(e) => return Result.Err(WsError.FrameDecode(e)),
+                DecodeResult.Err(e) => return Result.Err(WsError.FrameDecode(e)),
             }
         }
     }
