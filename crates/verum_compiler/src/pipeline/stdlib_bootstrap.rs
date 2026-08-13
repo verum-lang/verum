@@ -632,6 +632,77 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        // Phase 2.10 (T0723): globally pre-register every RECORD type's
+        // positional field layout from the AST, before any module compiles.
+        //
+        // `global_type_layout_registry` is otherwise filled as modules
+        // COMPLETE (STEP 4's `export_type_layouts` merge-back), so a module
+        // that uses a record declared in a module compiled LATER sees no
+        // layout for it. `resolve_field_index` then falls through to the
+        // guess path, which scans every type in the program and picks the
+        // most-fields candidate — the bake logs `'name' has 179
+        // position-disagreeing candidates`, `'rows' ... guessed
+        // CursorSlot.rows idx 7`. An index chosen that way is a foreign
+        // slot, and for a record shorter than the guessed index it is out of
+        // bounds. That is the FIELD-GUESS-HARD-1 class: 143 of them at the
+        // time this pass was written.
+        //
+        // This is the layout analogue of Phase 2.8's const pre-pass and
+        // Phase 2.9's alias pre-pass, both of which exist because the same
+        // completion-ordered registry starved the same way. The map is a
+        // pure name -> field-name list (no TypeId, no descriptor), which is
+        // what makes an AST-only pre-pass safe: it cannot perturb TypeId
+        // allocation or the descriptor tables.
+        //
+        // First-wins, matching the merge-back below. A record type is
+        // declared in exactly one module, so a collision here means two
+        // modules declare the same SIMPLE name — and for that case the
+        // per-module descriptor path, which runs BEFORE the layout lookup
+        // inside `resolve_field_index`, is the authority. The qualified key
+        // is registered unconditionally because it cannot collide.
+        {
+            let mut layouts_registered = 0usize;
+            let mut simple_name_collisions = 0usize;
+            for (module_name, ast_modules) in &all_parsed_modules {
+                for (_file_path, ast_module) in ast_modules {
+                    for item in &ast_module.items {
+                        let verum_ast::ItemKind::Type(td) = &item.kind else {
+                            continue;
+                        };
+                        let verum_ast::decl::TypeDeclBody::Record(fields) = &td.body else {
+                            continue;
+                        };
+                        if fields.is_empty() {
+                            continue;
+                        }
+                        let names: Vec<String> =
+                            fields.iter().map(|f| f.name.name.to_string()).collect();
+                        let simple = td.name.name.to_string();
+                        let qualified = format!("{module_name}.{simple}");
+                        self.global_type_layout_registry
+                            .entry(qualified)
+                            .or_insert_with(|| names.clone());
+                        match self.global_type_layout_registry.entry(simple) {
+                            std::collections::hash_map::Entry::Occupied(_) => {
+                                simple_name_collisions += 1;
+                            }
+                            std::collections::hash_map::Entry::Vacant(v) => {
+                                v.insert(names);
+                                layouts_registered += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            if config.verbose || std::env::var("VERUM_TRACE_STUB").is_ok() {
+                eprintln!(
+                    "[stage-layout] pre-registered {layouts_registered} record layouts \
+                     ({simple_name_collisions} simple-name collisions kept under their \
+                     qualified key only)"
+                );
+            }
+        }
+
         // ====================================================================
         // STEP 4: Compile each module to VBC
         // ====================================================================
