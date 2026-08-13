@@ -147,6 +147,19 @@ public type AllocError is
     /// failing entry point ("mmap" or "munmap") for diagnostic
     /// disambiguation.
     | UnsupportedOs { op: Text }
+    /// A single allocation exceeded a FIXED per-arena bound — the request is
+    /// well-formed, the arena simply cannot hold it. Distinct from
+    /// `OutOfMemory` (dynamic exhaustion) and from `CapacityOverflow` (the
+    /// size arithmetic itself wrapped): here both numbers are known and
+    /// finite, and the caller can act on the ratio.
+    ///
+    /// APPENDED deliberately — variant order is the wire representation, so
+    /// inserting above would renumber every following tag.
+    ///
+    /// `core/runtime/stack_alloc.vr` constructed this at three sites while
+    /// the type never declared it, so the field writes went to GUESSED slots
+    /// (FIELD-GUESS-HARD-1) instead of failing (T0723).
+    | AllocationTooLarge { requested: Int, max_size: Int }
     ;
 
 implement AllocError {
@@ -161,6 +174,8 @@ implement AllocError {
             InvalidPointer => "invalid pointer for deallocation",
             CapacityOverflow { requested } => f"capacity overflow: {requested} elements would overflow addressable size space",
             UnsupportedOs { op } => f"{op} not supported on this target OS (no platform lowering)",
+            AllocationTooLarge { requested, max_size } =>
+                f"allocation of {requested} exceeds the {max_size} arena bound",
         }
     }
 }
@@ -189,6 +204,8 @@ implement Eq for AllocError {
             (InvalidPointer,                      InvalidPointer)                      => true,
             (CapacityOverflow { requested: a },   CapacityOverflow { requested: b })   => a == b,
             (UnsupportedOs { op: a },             UnsupportedOs { op: b })             => a == b,
+            (AllocationTooLarge { requested: ra, max_size: ma },
+             AllocationTooLarge { requested: rb, max_size: mb })       => ra == rb && ma == mb,
             _ => false,
         }
     }
