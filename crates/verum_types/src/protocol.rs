@@ -9176,6 +9176,45 @@ impl ProtocolChecker {
         // where one is nullary and the other carries a single value.
         // e.g. type Maybe<T> is None | Some(T);
         // =========================================================================
+        // The canonical `Maybe<T>` in its NOMINAL form. The structural arm
+        // below only fires once the type has been expanded to a two-variant
+        // `Type::Variant`, and the protocol arm above needs a registered
+        // `Maybe` impl — so `xs.first()`, whose type is `Maybe<Int>` as a
+        // name, matched NEITHER and `??` fell to the branch that unifies its
+        // default against the whole optional instead of the payload.
+        //
+        // That never worked; it only never SHOWED, because `Maybe<T>` used to
+        // declare itself `IntCoercible` and the resulting mismatch was
+        // absorbed. Removing that declaration (T0722) made the latent rule
+        // visible — `xs.first() ?? 0` reported
+        // `expected 'Maybe<Int>', found 'Int'`.
+        //
+        // Keyed off `WKT::Maybe`, the same well-known-type registry this
+        // function already uses to build `maybe_path` — no new hardcoded
+        // stdlib knowledge enters the compiler here.
+        {
+            let head_and_args: Option<(&str, &List<Type>)> = match ty {
+                Type::Generic { name, args } => Some((name.as_str(), args)),
+                Type::Named { path, args } => path
+                    .segments
+                    .last()
+                    .and_then(|seg| match seg {
+                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
+                        _ => None,
+                    })
+                    .map(|n| (n, args)),
+                _ => None,
+            };
+            if let Some((head, args)) = head_and_args
+                && head == WKT::Maybe.as_str()
+                && args.len() == 1
+            {
+                return Some(MaybeResolution {
+                    inner: args[0].clone(),
+                });
+            }
+        }
+
         if let Type::Variant(variants) = ty {
             if variants.len() == 2 {
                 // Find the nullary variant and the single-field variant
