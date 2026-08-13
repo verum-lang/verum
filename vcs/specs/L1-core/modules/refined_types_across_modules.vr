@@ -39,7 +39,7 @@ module math {
 }
 
 module validation {
-    link crate.math.{Positive, NonZeroFloat, BoundedInt, abs, sqrt, divide};
+    mount cog.math.{Positive, NonZeroFloat, BoundedInt, abs, sqrt, divide};
 
     // Use refined types from another module
     pub fn process_positive(p: Positive) -> Positive {
@@ -100,7 +100,7 @@ module predicates {
 }
 
 module consumer {
-    link crate.predicates.{SafeHtml, Password};
+    mount cog.predicates.{SafeHtml, Password};
 
     pub fn render_content(html: SafeHtml) {
         // SafeHtml is guaranteed to be safe

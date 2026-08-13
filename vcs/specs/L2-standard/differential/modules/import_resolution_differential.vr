@@ -21,7 +21,7 @@ module library {
     }
 
     pub module functions {
-        link super.types.Point;
+        mount super.types.Point;
 
         pub fn distance(p1: &Point, p2: &Point) -> Float {
             let dx = (p2.x - p1.x) as Float;

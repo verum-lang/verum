@@ -8,15 +8,21 @@
 /// Constants cannot depend on each other circularly.
 /// This test verifies the compiler detects and reports this error.
 
+// Without this line the circular-constant check does not run at all and the
+// file type-checks clean — the spec then reports "typecheck unexpectedly
+// succeeded" and looks like a missing compiler check rather than a missing
+// mount. Every other L0 spec carries it; this one was left out.
+mount core.prelude.*;
+
 module const_a {
-    link cog.const_b.VALUE_B;
+    mount cog.const_b.VALUE_B;
 
     // ERROR: VALUE_A depends on VALUE_B which depends on VALUE_A
     pub const VALUE_A: Int = VALUE_B + 1;
 }
 
 module const_b {
-    link cog.const_a.VALUE_A;
+    mount cog.const_a.VALUE_A;
 
     // ERROR: VALUE_B depends on VALUE_A which depends on VALUE_B
     pub const VALUE_B: Int = VALUE_A + 1;

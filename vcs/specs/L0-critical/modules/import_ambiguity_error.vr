@@ -30,8 +30,8 @@ module module_b {
 
 module consumer {
     // Both imports bring in 'Thing' - AMBIGUOUS
-    link cog.module_a.*;
-    link cog.module_b.*;
+    mount cog.module_a.*;
+    mount cog.module_b.*;
 
     pub fn use_thing() {
         // ERROR: 'Thing' is ambiguous

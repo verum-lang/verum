@@ -8,7 +8,7 @@
 // Test: TensorExtended sub-opcodes for linear algebra decompositions
 // Verifies SVD, Eig, Schur, LU, QR, and other matrix factorizations
 
-link math.linalg;
+mount math.linalg;
 
 // =============================================================================
 // LU Decomposition
