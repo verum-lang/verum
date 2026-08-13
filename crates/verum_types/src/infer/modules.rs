@@ -182,6 +182,25 @@ impl TypeChecker {
                 // Clear the current constant path
                 self.current_constant_path = Maybe::None;
 
+                // T0727 probe: the circular-constant check silently stops
+                // applying when the file sits two or more directories below the
+                // cog manifest (measured by bisection: depth 1 fires, depth 2
+                // does not). The cycle is found by matching a constant's FULL
+                // PATH against the dependency edges recorded while checking its
+                // value, so this prints both sides of that comparison.
+                if std::env::var("VERUM_TRACE_CONSTDEP").is_ok() {
+                    let deps: Vec<String> = self
+                        .constant_dependencies
+                        .get(&const_full_path)
+                        .map(|s| s.iter().map(|d| d.to_string()).collect())
+                        .unwrap_or_default();
+                    eprintln!(
+                        "[constdep] module='{}' const='{}' deps={:?}",
+                        self.current_module_path.as_str(),
+                        const_full_path,
+                        deps
+                    );
+                }
                 // Check for circular dependencies involving this constant
                 self.check_constant_cycle(&const_full_path)?;
 
@@ -1321,15 +1340,38 @@ impl TypeChecker {
                         // cycle-detection DFS then could not match against the
                         // real key, so cross-module const cycles went
                         // undetected (E600 never fired). Use the same root.
-                        let crate_root = self
-                            .current_module_path
-                            .as_str()
-                            .split('.')
-                            .next()
-                            .unwrap_or("cog");
+                        // T0727: the ENCLOSING path, not the first segment.
+                        //
+                        // The key a constant is registered under is its FULL
+                        // path — `<current_module_path>.<name>`. This edge has
+                        // to name the sibling module under the SAME enclosing
+                        // path, so the parent of `current_module_path` is what
+                        // belongs here.
+                        //
+                        // Taking the first segment agreed with that only while
+                        // the module path was a single segment — i.e. while the
+                        // file sat directly beside the cog manifest. Measured
+                        // by bisection, the check silently stopped applying two
+                        // directories down:
+                        //   depth 1: const='t.const_a.VALUE_A'
+                        //            deps=["t.const_b.VALUE_B"]        (match)
+                        //   depth 2: const='specs.L0-critical.modules.f.const_a.VALUE_A'
+                        //            deps=["specs.const_b.VALUE_B"]    (no match)
+                        // No match means no edge, no cycle, and E600 never
+                        // fires — a check that stops applying based on where
+                        // the file lives, which is worse than one that is
+                        // absent, because its presence is visible in the
+                        // compiler and its silence is not.
+                        let module_path_str = self.current_module_path.as_str();
+                        let enclosing = match module_path_str.rfind('.') {
+                            Some(i) => &module_path_str[..i],
+                            // Single-segment path: it IS the enclosing scope.
+                            None if !module_path_str.is_empty() => module_path_str,
+                            None => "cog",
+                        };
                         let const_full_path = verum_common::Text::from(format!(
                             "{}.{}.{}",
-                            crate_root, module_name, item_name
+                            enclosing, module_name, item_name
                         ));
                         self.imported_constant_paths
                             .insert(verum_common::Text::from(item_name), const_full_path);
