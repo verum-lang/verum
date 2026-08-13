@@ -18593,9 +18593,17 @@ impl VbcCodegen {
         // cannot legitimately occur — two full census corpora
         // (text-mix 1612 tests, collections 872) logged ZERO guessed
         // emissions. A guess landing here is therefore a latent
-        // cross-type layout defect: refuse LOUDLY at compile time
-        // instead of baking a semantically baseless index (the
-        // D2/CAP-AUDIT memory-unsafety class this task retires).
+        // cross-type layout defect: report LOUDLY at compile time.
+        //
+        // The message used to say "refusing to bake a guessed index" while
+        // returning the guessed index one line below — a compiler telling the
+        // operator it did something it did not do. Only VERUM_STRICT_FIELDS
+        // actually refuses. Corrected rather than made true, because making
+        // it true is gated on the last cases going away: the stdlib bake is
+        // down from 167 of these to 2 (T0723), and both remaining ones are a
+        // protocol built with a record literal — a type that was designed and
+        // never written, not a layout that went missing.
+        //
         // VERUM_FIELD_GUESS_LEGACY=1 restores the silent guess for
         // A/B attribution during the transition window.
         if guessed && std::env::var("VERUM_FIELD_GUESS_LEGACY").is_err() {
@@ -18608,10 +18616,15 @@ impl VbcCodegen {
             eprintln!(
                 "error[FIELD-GUESS-HARD-1]: field '{}' on type {:?} has no \
                  authoritative layout at a positional emission site (fn `{}`) — \
-                 refusing to bake a guessed index. If this site is a genuine \
-                 unknown-type ACCESS it must use the flagged resolver + by-name \
-                 instructions; if the type is known, its descriptor is missing \
-                 from the layout registry (registration-order defect).",
+                 EMITTING A GUESSED INDEX ANYWAY. Set VERUM_STRICT_FIELDS=1 to \
+                 make this refuse. If this site is a genuine unknown-type \
+                 ACCESS it must use the flagged resolver + by-name \
+                 instructions; if the type is known, either its descriptor is \
+                 missing from the layout registry, or the FIELD ITSELF does not \
+                 exist on that type — most of this class turned out to be the \
+                 latter (T0723: a variant never declared, a field renamed at \
+                 the declaration and not the call, a type name that resolves \
+                 nowhere).",
                 field_name, type_name, fn_name
             );
             if std::env::var("VERUM_STRICT_FIELDS").is_ok() {

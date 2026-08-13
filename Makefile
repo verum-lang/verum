@@ -42,6 +42,10 @@ check-op-bytes: ## Gate (T0198): .vr op-byte doc comments match the instruction.
 check-stdlib-proofs: ## Gate (T0230): stdlib theorem-proof ratchet — clean files stay clean, proved counts never fall
 	python3 scripts/ci/proof_gate.py
 
+check-bake-diagnostics: ## Gate (T0723): FIELD-GUESS + panic-stub counts in a bake log
+	@test -n "$(BAKE_LOG)" || { echo "usage: make check-bake-diagnostics BAKE_LOG=<path>"; exit 2; }
+	python3 scripts/ci/check_bake_diagnostics.py "$(BAKE_LOG)" --check
+
 check-barename-collisions: ## Gate (T0538): free-fn (name,arity) collisions across core/ — ratchet
 	python3 scripts/ci/check_barename_collisions.py --check
 	python3 scripts/ci/check_barename_collisions.py --check --scope sqlite
