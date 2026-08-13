@@ -286,7 +286,7 @@ implement QpackSession {
                     }
                 } else {
                     match self.decoder_table.get_by_absolute(idx) {
-                        Maybe.Some(e) => stat.StaticEntry { name: e.name, value: e.value },
+                        Maybe.Some(e) => stat.QpackStaticEntry { name: e.name, value: e.value },
                         Maybe.None    => return Result.Err(QpackSessionError.FieldDecode(
                             QpackDecodeError.InvalidIndex(idx))),
                     }
