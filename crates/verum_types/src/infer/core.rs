@@ -908,7 +908,21 @@ impl TypeChecker {
         //
         // The presence of the TYPE and the presence of its PARAMS are two
         // facts; one guard cannot stand for both.
-        if !type_desc.generic_params.is_empty() {
+        // NARROWED to RECORD descriptors (T0724 follow-up). Hoisting this
+        // for EVERY kind changed inference for already-loaded types and broke
+        // `L0-critical/modules/mount_alias_shadows_builtin.vr` with
+        // `expected 'Maybe', found 'Maybe<_>'` — measured by building the
+        // same tree with and without the hoist and running that spec through
+        // both binaries. `Maybe` is a Variant; the defect this hoist repairs
+        // is the generic RECORD literal (`Edge { src, tgt, label }` arriving
+        // with `L` unsubstituted), so restricting it to records keeps the fix
+        // and leaves every sum type resolving exactly as before.
+        if !type_desc.generic_params.is_empty()
+            && matches!(
+                type_desc.kind,
+                crate::core_metadata::TypeDescriptorKind::Record { .. }
+            )
+        {
             self.type_generics_count
                 .insert(name.clone(), type_desc.generic_params.len());
             // Mirror the eager `__type_params_<name>` record too —
