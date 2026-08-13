@@ -2,7 +2,12 @@
 // @level: L0
 // @tier: 0
 // @tags: codegen, method-dispatch, receiver-narrowing, vuva-153
-// @expected-panic: called `unwrap` on an Err value
+// @expected-panic: called unwrap() on Err: 99
+// Wording updated to the message the runtime actually prints, which names the
+// VALUE — strictly more useful than the older text. What this spec guards is
+// unchanged and still holds: `Result.Err(99).unwrap()` must PANIC rather than
+// hand back 99. Verified before editing the expectation, so this is not a
+// stale guard being silenced.
 // @description: VVA #153 — method-dispatch receiver-type narrowing.
 //
 // Multiple stdlib types declare `fn unwrap(self)` — Result.unwrap
