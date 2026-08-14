@@ -900,6 +900,48 @@ pub(crate) fn call_function_sync(
         .ok_or(InterpreterError::FunctionNotFound(func_id))?;
 
     let reg_count = func.register_count;
+
+    // STUB-EXECUTION PROBE (T0735). `VERUM_TRACE_STUB_EXEC=1` reports a call
+    // about to run a ONE-INSTRUCTION descriptor whose `Type.method` tail
+    // names a function that HAS a real body.
+    //
+    // That is the exact shape codegen synthesises 1448 times in an ordinary
+    // program and documents as never-executed: a `RetV` stub standing in for
+    // a body reachable under a shorter name (codegen/mod.rs:20173). The probe
+    // exists to CHECK that claim rather than assume it.
+    //
+    // Placed in this shared helper because the shape shadows METHODS. An
+    // earlier version sat in `handle_call` and could not fire for its own
+    // motivating case — method dispatch never passes through there. Testing
+    // for an EMPTY body is likewise wrong: these stubs carry a body, and it
+    // is one instruction long.
+    if func.bytecode_length <= 1 && std::env::var_os("VERUM_TRACE_STUB_EXEC").is_some() {
+        let name = state
+            .module
+            .get_string(func.name)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        if let Some(start) = name.rmatch_indices('.').nth(1).map(|(i, _)| i + 1) {
+            let tail = name[start..].to_string();
+            let shadowed = state
+                .module
+                .functions
+                .iter()
+                .enumerate()
+                .find(|(idx, d)| {
+                    *idx as u32 != func_id.0
+                        && d.bytecode_length > 1
+                        && state.module.get_string(d.name) == Some(tail.as_str())
+                })
+                .map(|(idx, _)| idx);
+            if let Some(real) = shadowed {
+                eprintln!(
+                    "[stub-exec] running 1-instruction '{name}' (id={}) while '{tail}' has a real body (id={real})",
+                    func_id.0
+                );
+            }
+        }
+    }
     let return_pc = state.pc();
     let entry_depth = state.call_stack.depth();
 
