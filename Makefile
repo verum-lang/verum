@@ -46,6 +46,9 @@ check-bake-diagnostics: ## Gate (T0723): FIELD-GUESS + panic-stub counts in a ba
 	@test -n "$(BAKE_LOG)" || { echo "usage: make check-bake-diagnostics BAKE_LOG=<path>"; exit 2; }
 	python3 scripts/ci/check_bake_diagnostics.py "$(BAKE_LOG)" --check
 
+check-archive-size: ## Gate (T0737): embedded stdlib archive size — a per-module duplication shows up as a MULTIPLE
+	python3 scripts/ci/check_archive_size.py "$(or $(ARCHIVE),target/precompiled-stdlib/runtime.vbca)" --check
+
 check-barename-collisions: ## Gate (T0538): free-fn (name,arity) collisions across core/ — ratchet
 	python3 scripts/ci/check_barename_collisions.py --check
 	python3 scripts/ci/check_barename_collisions.py --check --scope sqlite
