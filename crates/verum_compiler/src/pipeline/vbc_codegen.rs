@@ -1141,7 +1141,7 @@ pub(crate) fn seed_protocol_registry_from_embedded_stdlib(
 ///
 /// Folds every function's NAME in TABLE ORDER, so a pure reordering changes
 /// the value even when the set of names does not.
-fn trace_module_fingerprint(vbc_module: &VbcModule, site: &str) {
+pub(crate) fn trace_module_fingerprint(vbc_module: &VbcModule, site: &str) {
     if std::env::var("VERUM_TRACE_MODULE_FINGERPRINT").is_err() {
         return;
     }
@@ -1156,8 +1156,18 @@ fn trace_module_fingerprint(vbc_module: &VbcModule, site: &str) {
         acc ^= f.bytecode_length as u64;
         acc = acc.wrapping_mul(0x0000_0100_0000_01b3);
     }
+    let mut instr: u64 = 0xcbf2_9ce4_8422_2325;
+    for f in &vbc_module.functions {
+        let n = f.instructions.as_ref().map(|v| v.len()).unwrap_or(0) as u64;
+        instr ^= n;
+        instr = instr.wrapping_mul(0x0000_0100_0000_01b3);
+    }
     eprintln!(
-        "[module-fingerprint] site={site} functions={} fold=0x{acc:016x}",
-        vbc_module.functions.len()
+        "[module-fingerprint] site={site} functions={} strings={} types={} constants={} ctors={} names=0x{acc:016x} instrs=0x{instr:016x}",
+        vbc_module.functions.len(),
+        vbc_module.strings.len(),
+        vbc_module.types.len(),
+        vbc_module.constants.len(),
+        vbc_module.global_ctors.len(),
     );
 }

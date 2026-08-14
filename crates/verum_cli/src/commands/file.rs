@@ -847,17 +847,46 @@ fn run_script_interpreted(
 
     // 5. Cache store. Serialise the captured VBC module and persist.
     //  Best-effort: a cache-write failure does not fail the run.
+    //
+    //  NEVER PERSIST A MODULE THE FORMAT CANNOT CARRY (T0737).
+    //
+    //  `verum_vbc::serialize` writes no slot for the module-level tables
+    //  below, and `deserialize` hardcodes them empty — the comment there
+    //  says so outright ("the legacy binary deserializer doesn't yet read
+    //  the new sections"). A script whose module has any of them therefore
+    //  behaved one way on its first run and another way on every run after
+    //  it, with no source change in between. Measured on
+    //  vcs/specs/L1-core/atomic_bool_rmw.vr: 62 global ctors at compile
+    //  time, 0 after the round trip, and the static initialisers those
+    //  ctors run never happened, so the second run failed an assertion the
+    //  first run passed.
+    //
+    //  Skipping the store keeps such scripts on the compile path, which is
+    //  correct but not free — those are exactly the scripts the cache would
+    //  help most. The real repair is a versioned section for these tables
+    //  (the format already extends that way: bump `VERSION_MINOR`, gate the
+    //  reader on it); this guard is what makes the defect unreachable in
+    //  the meantime, and it stays useful afterwards as the invariant that
+    //  a lossy artifact is never written.
     if let (Some(c), Some(vbc)) = (cache.as_ref(), session.take_compiled_vbc()) {
-        match verum_vbc::serialize::serialize_module_compressed(
-            &vbc,
-            verum_vbc::compression::CompressionOptions::zstd(),
-        ) {
-            Ok(bytes) => {
-                if let Err(e) = ctx.cache_store(c, &bytes) {
-                    ui::warn(&format!("script cache store failed: {e}"));
+        let cacheable = vbc.global_ctors.is_empty()
+            && vbc.global_dtors.is_empty()
+            && vbc.context_names.is_empty()
+            && vbc.field_id_to_name.is_empty()
+            && vbc.type_field_layouts.is_empty()
+            && vbc.user_function_start == 0;
+        if cacheable {
+            match verum_vbc::serialize::serialize_module_compressed(
+                &vbc,
+                verum_vbc::compression::CompressionOptions::zstd(),
+            ) {
+                Ok(bytes) => {
+                    if let Err(e) = ctx.cache_store(c, &bytes) {
+                        ui::warn(&format!("script cache store failed: {e}"));
+                    }
                 }
+                Err(e) => ui::warn(&format!("script VBC serialise failed: {e}")),
             }
-            Err(e) => ui::warn(&format!("script VBC serialise failed: {e}")),
         }
     }
 

@@ -281,7 +281,43 @@ impl<'s> CompilationPipeline<'s> {
         // when the runner wants to refresh metadata even on cache hits.
         self.session.record_compiled_vbc(vbc_module.clone());
 
+        // Fingerprint the module as it arrives from the cache, so it can
+        // be compared against the one printed at compile time (T0737).
+        super::vbc_codegen::trace_module_fingerprint(&vbc_module, "from-cache");
+
+        // Make the embedded scripting engine able to compile scripts at
+        // runtime (core.script / script_engine_eval). Idempotent.
+        crate::api::ensure_scripting_compiler_installed();
+
         let mut interpreter = VbcInterpreter::new(vbc_module);
+        // PARITY WITH `phase_interpret` (T0737).
+        //
+        // This function runs a module that came back from the script
+        // cache. Everything below was missing here, so a script behaved
+        // one way on its first run (compile → `phase_interpret`) and
+        // another way on every run after it (cache hit → this function),
+        // with no source change in between. Measured on
+        // vcs/specs/L1-core/atomic_bool_rmw.vr: cache miss printed
+        // `atomic-bool ok`, cache hit died on an assertion.
+        //
+        // Setting up an interpreter is therefore not "extra" work the
+        // cache path can skip — it is part of what running a module MEANS,
+        // and the two entry points have to agree on it.
+        {
+            let rt = &self.session.language_features().runtime;
+            interpreter.state.config.async_scheduler = rt.async_scheduler.as_str().to_string();
+            interpreter.state.config.async_worker_threads = rt.async_worker_threads;
+            interpreter.state.config.futures_enabled = rt.futures;
+            interpreter.state.config.nurseries_enabled = rt.nurseries;
+            interpreter.state.config.task_stack_size = rt.task_stack_size;
+            interpreter.state.config.heap_policy = rt.heap_policy.as_str().to_string();
+        }
+        // Production has no wall-clock budget: the 30s deadline and the
+        // instruction cap are test-runner safety nets. Without these two
+        // lines a server or REPL loop ran fine on its first invocation and
+        // was killed on its second.
+        interpreter.state.config.timeout_ms = 0;
+        interpreter.state.config.max_instructions = 0;
         // Transfer the script-mode permission policy (if the CLI
         // installed one) into the interpreter's PermissionRouter
         // before the first instruction dispatches. The router's
@@ -289,6 +325,14 @@ impl<'s> CompilationPipeline<'s> {
         // ≤2ns; the policy itself is consulted only on cache miss.
         if let Some(policy) = self.session.take_script_permission_policy() {
             interpreter.state.permission_router.set_policy(policy.0);
+        }
+        // `@thread_local` static initializers populate their TLS slots
+        // here. `phase_interpret` documents why: without it the CBGR
+        // allocator's LOCAL_HEAP/CURRENT_HEAP bootstrap reads
+        // `Value::default()` from an uninitialised slot. A cached module
+        // carries the same ctors and needs the same run.
+        if let Err(e) = interpreter.run_global_ctors() {
+            return Err(anyhow::anyhow!("VBC global_ctors error: {:?}", e));
         }
         let main_func_id = self.find_main_function_id(&interpreter.state.module)?;
         let main_param_count = interpreter
