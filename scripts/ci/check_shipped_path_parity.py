@@ -15,11 +15,16 @@ without changing the runner: specs that declare `@expected-stdout` and own a
 `run-interpreter` specs exist, 26 declare an expected stdout, 25 of those have
 a `main`, and 3 of the 25 diverged — three DIFFERENT defects, all green in CI:
 
-    atomic_bool_rmw.vr      Assertion failed at pc 52: left != right
-                            (the spec's own assertion, on the atomic-bool
-                            read-modify-write path) — open as T0733
-    block_on_end_to_end.vr  Panic: [xmod-unresolved] cross-module call to
-                            'core.sys.common.__ct...' — open as T0734
+    atomic_bool_rmw.vr      Assertion failed at pc 52: left != right —
+                            FIXED. Not an atomics defect at all: the script
+                            cache returned a module whose 62 global ctors
+                            had been dropped by serialisation, so the second
+                            and every later run skipped static init (T0737).
+    block_on_end_to_end.vr  still divergent, and now for a third reason:
+                            `async fn` compiles to a plain function at
+                            Tier 0, so calling one yields the VALUE where
+                            the typechecker promised a Future, and
+                            `block_on` polls a 42 (T0734).
     tcp_listen_v2.vr        error<E402>: module `core.sys.raw` not found —
                             FIXED. core/sys/raw never existed; four net
                             specs mounted it and all four passed anyway.
@@ -42,7 +47,7 @@ import sys
 
 # Frozen at the measured divergence. Lower it in the same commit that earns
 # it; a silently improving number is how a gate stops measuring.
-BASELINE_DIVERGENT = 2
+BASELINE_DIVERGENT = 1
 
 # Per-spec wall-clock ceiling. Generous on purpose: this gate judges OUTPUT,
 # never speed, and a timeout must not be mistaken for a divergence — it is
