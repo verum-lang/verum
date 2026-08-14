@@ -4096,18 +4096,99 @@ fn harvest_names_in_function(
 ) {
     use verum_common::Maybe;
     use verum_ast::decl::{FunctionBody, FunctionParamKind};
+
+    // Harvest into a local set so LOCAL BINDINGS can be subtracted before the
+    // names reach `out` (T0738).
+    //
+    // A use of `v` inside a function whose body binds `v` refers to that
+    // binding — that is what scoping means, so such a name is not a request
+    // for an archive symbol. Left in, it was one: the unqualified-wanted scan
+    // decodes all 574 archive modules per name, and the module a program
+    // compiles to depended on what its variables were CALLED —
+    //
+    //     let zzz: Int = 3; print(zzz);   12604 functions
+    //     let fd:  Int = 3; print(fd);    48575
+    //     let data: Int = 3; print(data); 62980
+    //
+    // — because `fd` and `data` happen to exist as leaf names somewhere in
+    // the stdlib while `zzz` does not.
+    //
+    // Scope is approximated by the whole function rather than tracked block
+    // by block. The case that costs: a name bound somewhere in the body AND
+    // genuinely referring to a stdlib symbol elsewhere in the same body. It
+    // fails LOUDLY (an undefined-name diagnostic), never silently.
+    let mut local: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut bound: std::collections::HashSet<String> = std::collections::HashSet::new();
+
     for param in func.params.iter() {
-        if let FunctionParamKind::Regular { ty, .. } = &param.kind {
-            harvest_names_in_type(ty, out);
+        if let FunctionParamKind::Regular { ty, pattern, .. } = &param.kind {
+            harvest_names_in_type(ty, &mut local);
+            collect_binding_names_in_pattern(pattern, &mut bound);
         }
     }
     if let Maybe::Some(ret) = &func.return_type {
-        harvest_names_in_type(ret, out);
+        harvest_names_in_type(ret, &mut local);
     }
     if let Maybe::Some(body) = &func.body {
         match body {
-            FunctionBody::Block(block) => harvest_names_in_block(block, out),
-            FunctionBody::Expr(expr) => harvest_names_in_expr(expr, out),
+            FunctionBody::Block(block) => {
+                harvest_names_in_block(block, &mut local);
+                collect_bound_names_in_block(block, &mut bound);
+            }
+            FunctionBody::Expr(expr) => harvest_names_in_expr(expr, &mut local),
+        }
+    }
+    for name in local {
+        if !bound.contains(&name) {
+            out.insert(name);
+        }
+    }
+}
+
+/// Collect the identifiers a pattern BINDS.
+///
+/// Deliberately not `harvest_names_in_pattern`: that one gathers the TYPE and
+/// variant names a pattern mentions, and has no arm for `PatternKind::Ident`
+/// at all — reusing it left the subtraction below inert, which the module-size
+/// measurement caught before the claim was made (T0738).
+fn collect_binding_names_in_pattern(
+    pat: &verum_ast::pattern::Pattern,
+    out: &mut std::collections::HashSet<String>,
+) {
+    use verum_ast::pattern::PatternKind;
+    match &pat.kind {
+        PatternKind::Ident { name, subpattern, .. } => {
+            out.insert(name.name.to_string());
+            if let verum_common::Maybe::Some(inner) = subpattern {
+                collect_binding_names_in_pattern(inner, out);
+            }
+        }
+        PatternKind::Tuple(pats) | PatternKind::Array(pats) | PatternKind::Or(pats)
+        | PatternKind::And(pats) => {
+            for p in pats.iter() {
+                collect_binding_names_in_pattern(p, out);
+            }
+        }
+        PatternKind::Reference { inner, .. } | PatternKind::Paren(inner) => {
+            collect_binding_names_in_pattern(inner, out)
+        }
+        PatternKind::Guard { pattern, .. } => collect_binding_names_in_pattern(pattern, out),
+        _ => {}
+    }
+}
+
+/// Collect the names a block BINDS — `let` patterns, including the ones in
+/// nested blocks — so `harvest_names_in_function` can subtract them (T0738).
+fn collect_bound_names_in_block(
+    block: &verum_ast::expr::Block,
+    out: &mut std::collections::HashSet<String>,
+) {
+    use verum_ast::StmtKind;
+    for stmt in block.stmts.iter() {
+        match &stmt.kind {
+            StmtKind::Let { pattern, .. } => collect_binding_names_in_pattern(pattern, out),
+            StmtKind::LetElse { pattern, .. } => collect_binding_names_in_pattern(pattern, out),
+            _ => {}
         }
     }
 }
