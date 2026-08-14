@@ -2004,7 +2004,7 @@ impl ArchiveCtxCache {
         for n in &reached_qualified {
             wanted.insert(n.clone());
         }
-        let target_entries: Vec<(usize, String)> = reached_module_idxs
+        let mut target_entries: Vec<(usize, String)> = reached_module_idxs
             .iter()
             .filter_map(|idx| {
                 archive
@@ -2013,6 +2013,23 @@ impl ArchiveCtxCache {
                     .map(|e| (*idx as usize, e.name.clone()))
             })
             .collect();
+        // DETERMINISM (T0736). `reached_module_idxs` is a `HashSet<u32>`,
+        // so this vector comes out in a different order every process. The
+        // merge below is sequential and its registration is FIRST-WINS
+        // ("names registered by the primary pass stay first-wins"), so the
+        // order decides which body a name ends up bound to — and, through
+        // the contains_key guards, how many entries are registered at all.
+        //
+        // Measured before this line existed: three consecutive builds of
+        // ONE unchanged source file produced 49103 / 49112 / 49102
+        // functions, and a spec whose dispatch depends on the winner
+        // answered correctly 1 run in 8. Determinism is a precondition for
+        // every A/B in this repository, not a nicety.
+        //
+        // The archive index is the canonical order — the sibling pass at
+        // `apply_lazy` already walks `archive.index` itself and is
+        // unaffected. Sorting by index reproduces that order here.
+        target_entries.sort_unstable_by_key(|(idx, _)| *idx);
         if target_entries.is_empty() {
             return 0;
         }
