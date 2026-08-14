@@ -18616,8 +18616,8 @@ impl VbcCodegen {
             eprintln!(
                 "error[FIELD-GUESS-HARD-1]: field '{}' on type {:?} has no \
                  authoritative layout at a positional emission site (fn `{}`) — \
-                 EMITTING A GUESSED INDEX ANYWAY. Set VERUM_STRICT_FIELDS=1 to \
-                 make this refuse. If this site is a genuine unknown-type \
+                 REFUSING TO EMIT. Set VERUM_FIELD_GUESS_PERMISSIVE=1 to \
+                 emit the guess anyway and see every site at once. If this site is a genuine unknown-type \
                  ACCESS it must use the flagged resolver + by-name \
                  instructions; if the type is known, either its descriptor is \
                  missing from the layout registry, or the FIELD ITSELF does not \
@@ -18627,11 +18627,23 @@ impl VbcCodegen {
                  nowhere).",
                 field_name, type_name, fn_name
             );
-            if std::env::var("VERUM_STRICT_FIELDS").is_ok() {
+            // REFUSAL IS NOW THE DEFAULT (T0723).
+            //
+            // The comment above used to say this was "gated on the last cases
+            // going away": 167 guesses at the start of the campaign, then 2,
+            // and a bake on 2026-08-14 measured ZERO. The gate condition is
+            // met, so the guess stops being emitted rather than merely
+            // announced. `VERUM_FIELD_GUESS_PERMISSIVE=1` restores the old
+            // behaviour for anyone who needs to get a diagnosis out of a
+            // broken tree; `VERUM_STRICT_FIELDS` is kept as a no-op accepted
+            // spelling so existing invocations do not break.
+            if std::env::var("VERUM_FIELD_GUESS_PERMISSIVE").is_err() {
                 panic!(
-                    "FIELD-GUESS-HARD-1 (strict): guessed positional index for \
-                     field '{}' on {:?} — refusing to emit; see the diagnostic \
-                     above for the classification.",
+                    "FIELD-GUESS-HARD-1: guessed positional index for \
+                     field '{}' on {:?} — REFUSING to emit. Set \
+                     VERUM_FIELD_GUESS_PERMISSIVE=1 to get a full diagnosis \
+                     out of a tree in this state; see the diagnostic above \
+                     for the classification.",
                     field_name, type_name
                 );
             }
