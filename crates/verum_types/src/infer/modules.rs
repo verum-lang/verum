@@ -11278,6 +11278,22 @@ impl TypeChecker {
                 let v_repr = self.unifier.apply(&Type::Var(*v));
                 func_type_param_vars.iter().any(|p| p == v)
                     || param_reprs.iter().any(|r| r == &v_repr)
+                    // T0741: a var that a TYPE NAME is bound to is a declared
+                    // parameter, not an unsolved inference variable.
+                    //
+                    // `func_type_param_vars` is filled from `func.generics`,
+                    // and a method of `implement<T> W<T>` declares no generics
+                    // of its own — the block does. Measured with the probes
+                    // above: `generics=0`, list empty, and the identical body
+                    // written as a generic function has `generics=1` and checks
+                    // clean. Consulting the binding instead of the declaration
+                    // covers both spellings without threading a carrier through
+                    // the passes (two attempts at that carrier were inert).
+                    || self
+                        .ctx
+                        .type_defs
+                        .values()
+                        .any(|bound| matches!(bound, Type::Var(tv) if tv == v))
             }) {
                 continue;
             }
