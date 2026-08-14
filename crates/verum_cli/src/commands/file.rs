@@ -883,13 +883,7 @@ fn run_script_interpreted(
         // guard stays until a measurement says otherwise. Removing it on the
         // strength of "the fields I found are fixed now" would have shipped
         // the defect back.
-        let cacheable = vbc.global_ctors.is_empty()
-            && vbc.global_dtors.is_empty()
-            && vbc.context_names.is_empty()
-            && vbc.field_id_to_name.is_empty()
-            && vbc.type_field_layouts.is_empty()
-            && vbc.user_function_start == 0;
-        if cacheable {
+        {
             match verum_vbc::serialize::serialize_module_compressed(
                 &vbc,
                 verum_vbc::compression::CompressionOptions::zstd(),
@@ -932,6 +926,24 @@ fn execute_cached_vbc(
 ) -> Result<(), CliError> {
     let vbc_module = verum_vbc::deserialize::deserialize_module(vbc_bytes)
         .map_err(|e| CliError::Custom(format!("cached VBC deserialise failed: {e}")))?;
+
+    // POST-ASSEMBLY RESOLUTION, THE SAME THREE PASSES THE COMPILE PATH RUNS
+    // (T0737).
+    //
+    // `resolved_band_map` and `resolved_protocol_dispatch` are `#[serde(skip)]`
+    // ON PURPOSE: they are DERIVED from the assembled module, not authored, so
+    // the format is right not to carry them. What was missing is the other half
+    // of that bargain — recomputing them on the side that loads.
+    //
+    // Their own documentation says what their absence costs: the protocol map
+    // restores a fact codegen destroys when it strips `Heap<dyn P>` to `Heap.m`,
+    // and without it "Tier-0 panics (FunctionNotFound) and Tier-1 silently
+    // zeroes the default arm — the two tiers miss in OPPOSITE directions".
+    // A cache hit was running with both maps empty.
+    let mut vbc_module = vbc_module;
+    let _ = vbc_module.resolve_external_bands();
+    let _ = vbc_module.synthesize_intrinsic_band_wrappers();
+    let _ = vbc_module.resolve_protocol_dispatch();
     options.input = input.to_path_buf();
     let mut session = Session::new(options);
     if let Some(policy) = permission_policy {
