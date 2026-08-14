@@ -9881,6 +9881,17 @@ impl TypeChecker {
         // This is needed for phantom type parameters like `fn foo<T: Bound>()` where T
         // doesn't appear in parameters or return type but is still a valid type parameter.
         let mut func_type_param_vars: List<TypeVar> = List::new();
+        // T0741 PROBE (companion to `[ambig-free]` below): does this filling
+        // point run at all for a method of an `implement<…>` block? Measured at
+        // the DECISION point, the list is empty for such a method and holds the
+        // parameter for the identical body in a generic function — so either
+        // this loop is not reached here, or it runs on another checker.
+        if std::env::var_os("VERUM_TRACE_AMBIG_FREE").is_some() {
+            eprintln!(
+                "[ambig-fill] entering func_type_param_vars fill, generics={}",
+                func.generics.len()
+            );
+        }
         // Protocol bounds per type-param var, carried into the scheme the
         // body-check publishes (see the note at the insertion site).
         let mut func_param_protocol_bounds: Map<TypeVar, List<crate::protocol::ProtocolBound>> =
@@ -11249,6 +11260,19 @@ impl TypeChecker {
                         param_reprs.push(self.unifier.apply(&bound));
                     }
                 }
+            }
+            // T0741 PROBE: `VERUM_TRACE_AMBIG_FREE=1` prints what this decision
+            // sees. Seven candidate causes have been falsified by measurement;
+            // this distinguishes the last two — either the declared-parameter
+            // list is EMPTY here for an impl method (so the seeding path is not
+            // reached), or the decision consults something else entirely.
+            if std::env::var_os("VERUM_TRACE_AMBIG_FREE").is_some() {
+                eprintln!(
+                    "[ambig-free] free={} func_type_param_vars={} param_reprs={}",
+                    free.len(),
+                    func_type_param_vars.len(),
+                    param_reprs.len()
+                );
             }
             if free.iter().all(|v| {
                 let v_repr = self.unifier.apply(&Type::Var(*v));
