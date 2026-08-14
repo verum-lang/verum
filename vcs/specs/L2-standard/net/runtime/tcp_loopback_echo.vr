@@ -22,7 +22,7 @@
 // from client side. This covers send/recv/connect/listen/accept/close
 // in one verified roundtrip.
 
-mount core.sys.raw.{
+mount core.intrinsics.runtime.os.{
     __tcp_listen_raw, __tcp_accept_raw,
     __tcp_connect_raw, __tcp_send_raw, __tcp_recv_raw,
     __tcp_close_raw,

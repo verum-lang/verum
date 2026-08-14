@@ -13,16 +13,18 @@ This gate measures that gap on the only population where it CAN be measured
 without changing the runner: specs that declare `@expected-stdout` and own a
 `main`, so the same yardstick applies to both paths. Measured 2026-08-14: 826
 `run-interpreter` specs exist, 26 declare an expected stdout, 25 of those have
-a `main`, and 3 of the 25 diverge — three DIFFERENT defects, all green in CI:
+a `main`, and 3 of the 25 diverged — three DIFFERENT defects, all green in CI:
 
     atomic_bool_rmw.vr      Assertion failed at pc 52: left != right
                             (the spec's own assertion, on the atomic-bool
-                            read-modify-write path)
+                            read-modify-write path) — open as T0733
     block_on_end_to_end.vr  Panic: [xmod-unresolved] cross-module call to
-                            'core.sys.common.__ct...'
-    tcp_listen_v2.vr        error<E402>: module `core.sys.raw` not found
-                            (core/sys/raw does not exist — the spec mounts a
-                            module that is not there, and passes anyway)
+                            'core.sys.common.__ct...' — open as T0734
+    tcp_listen_v2.vr        error<E402>: module `core.sys.raw` not found —
+                            FIXED. core/sys/raw never existed; four net
+                            specs mounted it and all four passed anyway.
+                            The three intrinsics they want are declared
+                            `public fn` in core/intrinsics/runtime/os.vr.
 
 The remaining 800 execution specs assert nothing about their output at all,
 so this gate cannot speak for them; closing that hole needs the runner fix.
@@ -40,7 +42,7 @@ import sys
 
 # Frozen at the measured divergence. Lower it in the same commit that earns
 # it; a silently improving number is how a gate stops measuring.
-BASELINE_DIVERGENT = 3
+BASELINE_DIVERGENT = 2
 
 # Per-spec wall-clock ceiling. Generous on purpose: this gate judges OUTPUT,
 # never speed, and a timeout must not be mistaken for a divergence — it is

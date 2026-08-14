@@ -8,7 +8,7 @@
 // Exercises the real std-net-backed __tcp_listen_raw / __tcp_close_raw
 // intrinsics through the VBC interpreter.
 
-mount core.sys.raw.{__tcp_listen_raw, __tcp_close_raw};
+mount core.intrinsics.runtime.os.{__tcp_listen_raw, __tcp_close_raw};
 
 fn main() {
     // Port 0 = OS picks ephemeral port.

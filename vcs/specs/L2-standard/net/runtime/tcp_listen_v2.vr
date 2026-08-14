@@ -15,7 +15,7 @@
 //      interpreter side; AOT support is a follow-up).
 //   4. __tcp_local_port_raw on an unknown fd returns -1 (no panic).
 
-mount core.sys.raw.{
+mount core.intrinsics.runtime.os.{
     __tcp_listen_v2_raw,
     __tcp_local_port_raw,
     __tcp_close_raw,

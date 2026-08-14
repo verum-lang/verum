@@ -6,7 +6,7 @@
 // @description: Tier-0 runtime smoke — bind a UDP socket on an
 // ephemeral port, close it.
 
-mount core.sys.raw.{__udp_bind_raw, __udp_close_raw};
+mount core.intrinsics.runtime.os.{__udp_bind_raw, __udp_close_raw};
 
 fn main() {
     let fd = __udp_bind_raw(0);
