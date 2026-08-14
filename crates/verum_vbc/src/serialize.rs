@@ -809,6 +809,27 @@ impl Serializer {
         // would skip serialize_extensions entirely and lose the
         // alias data at the archive boundary.
         let has_mount_aliases = !module.mount_aliases.is_empty();
+        // T0737: the six module-level tables the format used to drop on the
+        // floor. `deserialize` hardcoded them empty and the comment there said
+        // so; a script cache round trip therefore returned a module with no
+        // global constructors, and every run after the first skipped static
+        // initialisation. They gate emission for the same reason
+        // `mount_aliases` does — a module whose only non-default extension is
+        // one of these must still get an extensions region.
+        let has_module_tables = !module.global_ctors.is_empty()
+            || !module.global_dtors.is_empty()
+            || !module.context_names.is_empty()
+            || !module.field_id_to_name.is_empty()
+            || !module.type_field_layouts.is_empty()
+            || module.user_function_start != 0;
+        // Four more the format forgot, in a record of their own so the
+        // six-field record written before this line stays readable.
+        // `function_variants` is the one with teeth: monomorphisation
+        // variant sets decide which specialisation a generic call selects.
+        let has_module_tables2 = !module.cfg_keys.is_empty()
+            || !module.function_variants.is_empty()
+            || !module.theorems.is_empty()
+            || !module.discharge_receipts.is_empty();
 
         if !has_shapes
             && !has_device_hints
@@ -819,6 +840,8 @@ impl Serializer {
             && !has_dependencies
             && !has_external_funcs
             && !has_mount_aliases
+            && !has_module_tables
+            && !has_module_tables2
         {
             // No extensions, return zeros
             return Ok((0, 0, VbcFlags::empty()));
@@ -952,9 +975,53 @@ impl Serializer {
         // ends right after `external_function_names`).
         //
         // Wire form: `u32 byte_len + bincode(Vec<(StringId, FunctionId)>)`.
-        if !module.mount_aliases.is_empty() {
+        if !module.mount_aliases.is_empty() || has_module_tables {
+            // The slot is written even when EMPTY once a further record
+            // follows it: these trailing records are positional, so a reader
+            // would otherwise take the next record's length prefix for this
+            // one's. An empty slot costs four bytes and old readers skip it
+            // (they read len=0 and stop).
             let data = bincode::serialize(&module.mount_aliases).map_err(|e| {
                 crate::error::VbcError::Serialization(format!("mount_aliases: {}", e))
+            })?;
+            encode_u32(data.len() as u32, &mut self.output);
+            self.output.extend_from_slice(&data);
+        }
+
+        // T0737: module-level tables, second trailing record.
+        // Wire form: `u32 byte_len + bincode((ctors, dtors, context_names,
+        // field_id_to_name, type_field_layouts, user_function_start))`.
+        // Present iff at least one of them is non-default; readers that
+        // predate it simply stop at the end of the previous record.
+        if has_module_tables {
+            let payload = (
+                &module.global_ctors,
+                &module.global_dtors,
+                &module.context_names,
+                &module.field_id_to_name,
+                &module.type_field_layouts,
+                module.user_function_start,
+            );
+            let data = bincode::serialize(&payload).map_err(|e| {
+                crate::error::VbcError::Serialization(format!("module_tables: {}", e))
+            })?;
+            encode_u32(data.len() as u32, &mut self.output);
+            self.output.extend_from_slice(&data);
+        }
+
+        // T0737: third trailing record — cfg keys, monomorphisation variant
+        // sets, theorems, discharge receipts. Written whenever EITHER this
+        // record or the previous one has content, so the pair stays
+        // positionally unambiguous.
+        if has_module_tables || has_module_tables2 {
+            let payload = (
+                &module.cfg_keys,
+                &module.function_variants,
+                &module.theorems,
+                &module.discharge_receipts,
+            );
+            let data = bincode::serialize(&payload).map_err(|e| {
+                crate::error::VbcError::Serialization(format!("module_tables2: {}", e))
             })?;
             encode_u32(data.len() as u32, &mut self.output);
             self.output.extend_from_slice(&data);

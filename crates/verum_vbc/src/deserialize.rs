@@ -58,6 +58,29 @@ struct ExtensionsData {
  /// serializer wrote the optional trailing record at the end of the
  /// extensions region.
  mount_aliases: Vec<(StringId, FunctionId, StringId)>,
+    /// Module-level tables (T0737), second trailing record. `None` when the
+    /// archive predates it — which is how every archive looked from the
+    /// module's point of view before, because the reader hardcoded these six
+    /// to their defaults no matter what the writer had.
+    /// Third trailing record (T0737): cfg keys, monomorphisation variant
+    /// sets, theorems, discharge receipts — four more the writer had and the
+    /// wire format did not carry.
+    #[allow(clippy::type_complexity)]
+    module_tables2: Option<(
+        Vec<crate::cfg_key::CfgKey>,
+        Vec<crate::module::FunctionVariantSet>,
+        Vec<crate::module::TheoremEntry>,
+        Vec<crate::module::DischargeReceipt>,
+    )>,
+    #[allow(clippy::type_complexity)]
+    module_tables: Option<(
+        Vec<(FunctionId, u32)>,
+        Vec<(FunctionId, u32)>,
+        Vec<StringId>,
+        Vec<String>,
+        std::collections::HashMap<String, Vec<String>>,
+        u32,
+    )>,
 }
 
 /// Deserializes a VBC module from binary data.
@@ -434,22 +457,62 @@ impl<'a> Deserializer<'a> {
  distribution: extensions.distribution,
  autodiff_graph: extensions.autodiff_graph,
  mlir_hints: extensions.mlir_hints,
- global_ctors: Vec::new(),
- global_dtors: Vec::new(),
- context_names: Vec::new(),
- field_id_to_name: Vec::new(),
- type_field_layouts: std::collections::HashMap::new(),
- user_function_start: 0,
+ global_ctors: extensions
+                .module_tables
+                .as_ref()
+                .map(|m| m.0.clone())
+                .unwrap_or_default(),
+ global_dtors: extensions
+                .module_tables
+                .as_ref()
+                .map(|m| m.1.clone())
+                .unwrap_or_default(),
+ context_names: extensions
+                .module_tables
+                .as_ref()
+                .map(|m| m.2.clone())
+                .unwrap_or_default(),
+ field_id_to_name: extensions
+                .module_tables
+                .as_ref()
+                .map(|m| m.3.clone())
+                .unwrap_or_default(),
+ type_field_layouts: extensions
+                .module_tables
+                .as_ref()
+                .map(|m| m.4.clone())
+                .unwrap_or_default(),
+ user_function_start: extensions
+                .module_tables
+                .as_ref()
+                .map(|m| m.5)
+                .unwrap_or(0),
  // Phase 3 (precompile-stdlib epic) — empty by default; the
  // legacy binary deserializer doesn't yet read the new sections.
  // Phase 4/5 add a parallel `.vbca` deserializer that populates
  // these via a sectioned format. Until then, legacy `.vbc` files
  // round-trip as universal-only.
- cfg_keys: Vec::new(),
- function_variants: Vec::new(),
- theorems: Vec::new(),
+ cfg_keys: extensions
+                .module_tables2
+                .as_ref()
+                .map(|m| m.0.clone())
+                .unwrap_or_default(),
+ function_variants: extensions
+                .module_tables2
+                .as_ref()
+                .map(|m| m.1.clone())
+                .unwrap_or_default(),
+ theorems: extensions
+                .module_tables2
+                .as_ref()
+                .map(|m| m.2.clone())
+                .unwrap_or_default(),
  framework_provenance: crate::module::FrameworkProvenance::default(),
- discharge_receipts: Vec::new(),
+ discharge_receipts: extensions
+                .module_tables2
+                .as_ref()
+                .map(|m| m.3.clone())
+                .unwrap_or_default(),
  external_function_names: extensions.external_function_names,
  // Task #11 Phase 3 — populated from the optional trailing
  // mount_aliases record in the extensions region, or empty
@@ -1758,6 +1821,41 @@ impl<'a> Deserializer<'a> {
  }
  }
 
+
+ // T0737: module-level tables, second trailing record. Read only when
+ // bytes remain, so archives written before it stay valid.
+ if self.offset + 4 <= extensions_end {
+     let len = decode_u32(self.data, &mut self.offset)? as usize;
+     if len > 0 {
+         if self.offset + len > extensions_end {
+             return Err(VbcError::eof(self.offset, len));
+         }
+         result.module_tables = Some(
+             bincode::deserialize(&self.data[self.offset..self.offset + len])
+                 .map_err(|e| {
+                     VbcError::Deserialization(format!("module_tables: {}", e))
+                 })?,
+         );
+         self.offset += len;
+     }
+ }
+
+ // T0737: third trailing record — read only when bytes remain.
+ if self.offset + 4 <= extensions_end {
+     let len = decode_u32(self.data, &mut self.offset)? as usize;
+     if len > 0 {
+         if self.offset + len > extensions_end {
+             return Err(VbcError::eof(self.offset, len));
+         }
+         result.module_tables2 = Some(
+             bincode::deserialize(&self.data[self.offset..self.offset + len])
+                 .map_err(|e| {
+                     VbcError::Deserialization(format!("module_tables2: {}", e))
+                 })?,
+         );
+         self.offset += len;
+     }
+ }
  Ok(result)
  }
 

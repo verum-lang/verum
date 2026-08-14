@@ -869,6 +869,20 @@ fn run_script_interpreted(
     //  the meantime, and it stays useful afterwards as the invariant that
     //  a lossy artifact is never written.
     if let (Some(c), Some(vbc)) = (cache.as_ref(), session.take_compiled_vbc()) {
+        // GUARD RETAINED, AND HERE IS WHY IT IS STILL EARNING ITS KEEP.
+        //
+        // Ten module-level tables now survive the round trip (T0737: two
+        // trailing extensions records) — global ctors/dtors, context names,
+        // field-id names, type field layouts, user_function_start, cfg keys,
+        // monomorphisation variant sets, theorems, discharge receipts. The
+        // fingerprint confirms it: `ctors=62` on both sides where it used to
+        // read 62 then 0.
+        //
+        // And a cache HIT still fails where a cache MISS passes. So the
+        // round trip loses something these ten do not account for, and the
+        // guard stays until a measurement says otherwise. Removing it on the
+        // strength of "the fields I found are fixed now" would have shipped
+        // the defect back.
         let cacheable = vbc.global_ctors.is_empty()
             && vbc.global_dtors.is_empty()
             && vbc.context_names.is_empty()
