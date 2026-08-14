@@ -158,6 +158,34 @@ pub(in super::super) fn handle_call(
             // carried-fact resolution — say WHICH callee never resolved
             // instead of leaving the reader a bare sentinel id.
             if crate::stub_ranges::is_xmod_name_reference(func_id.0) {
+                // The band carries the callee's qualified NAME, and a whole
+                // class of these callees is bodyless BY DESIGN — platform
+                // oracles like `core.sys.common.__ctx_store_tier0_raw` that
+                // this file answers from `try_dispatch_intrinsic_*`. Their
+                // producing module is filter-rejected from the merge set
+                // precisely because there is no body worth merging, so
+                // "body absent" is the expected state, not a defect.
+                //
+                // Try the by-name intercept before reporting a miss (T0734).
+                // Measured: `block_on_end_to_end.vr` died here on
+                // `__ctx_store_tier0_raw` while this very file has answered
+                // that name all along — the diagnostic even printed it. A
+                // genuine miss still dies, and still dies NAMED.
+                if let Some(name) = state.module.band_reference_name(func_id.0) {
+                    let name = name.to_string();
+                    let caller_base = state.reg_base();
+                    if let Some(value) = try_dispatch_intrinsic_named(
+                        state,
+                        name,
+                        dst,
+                        args.start,
+                        args.count as u8,
+                        caller_base,
+                    )? {
+                        state.set_reg(dst, value);
+                        return Ok(DispatchResult::Continue);
+                    }
+                }
                 return Err(unresolved_xmod_call(&state.module, func_id));
             }
             return Err(InterpreterError::FunctionNotFound(func_id));
@@ -674,6 +702,34 @@ pub(in super::super) fn handle_call_generic(
             // reference reaching CallG dispatch is the identical
             // load-time resolution defect.
             if crate::stub_ranges::is_xmod_name_reference(func_id.0) {
+                // The band carries the callee's qualified NAME, and a whole
+                // class of these callees is bodyless BY DESIGN — platform
+                // oracles like `core.sys.common.__ctx_store_tier0_raw` that
+                // this file answers from `try_dispatch_intrinsic_*`. Their
+                // producing module is filter-rejected from the merge set
+                // precisely because there is no body worth merging, so
+                // "body absent" is the expected state, not a defect.
+                //
+                // Try the by-name intercept before reporting a miss (T0734).
+                // Measured: `block_on_end_to_end.vr` died here on
+                // `__ctx_store_tier0_raw` while this very file has answered
+                // that name all along — the diagnostic even printed it. A
+                // genuine miss still dies, and still dies NAMED.
+                if let Some(name) = state.module.band_reference_name(func_id.0) {
+                    let name = name.to_string();
+                    let caller_base = state.reg_base();
+                    if let Some(value) = try_dispatch_intrinsic_named(
+                        state,
+                        name,
+                        dst,
+                        args.start,
+                        args.count as u8,
+                        caller_base,
+                    )? {
+                        state.set_reg(dst, value);
+                        return Ok(DispatchResult::Continue);
+                    }
+                }
                 return Err(unresolved_xmod_call(&state.module, func_id));
             }
             return Err(InterpreterError::FunctionNotFound(func_id));
@@ -1190,7 +1246,7 @@ pub(in super::super) fn handle_new_closure(
 fn try_dispatch_intrinsic_by_name(
     state: &mut InterpreterState,
     func_name_id: StringId,
-    _dst: Reg,
+    dst: Reg,
     args_start: Reg,
     arg_count: u8,
     caller_base: u32,
@@ -1202,6 +1258,25 @@ fn try_dispatch_intrinsic_by_name(
         Some(name) => name.to_string(),
         None => return Ok(None),
     };
+    try_dispatch_intrinsic_named(state, func_name, dst, args_start, arg_count, caller_base)
+}
+
+/// The by-NAME half of the intrinsic intercept.
+///
+/// Split out of `try_dispatch_intrinsic_by_name` (T0734) because a caller
+/// can hold the callee's name without holding a `StringId` for it: a
+/// cross-module band reference carries its qualified name in
+/// `external_function_names`, not in the module's string table. Before this
+/// split, such a call had a name the intercept could have answered and no
+/// way to hand it over, so it died with a diagnostic instead of running.
+fn try_dispatch_intrinsic_named(
+    state: &mut InterpreterState,
+    func_name: String,
+    _dst: Reg,
+    args_start: Reg,
+    arg_count: u8,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
 
     // Helper closures to read argument values from the caller's frame
     let get_arg = |state: &InterpreterState, idx: u8| -> Value {
