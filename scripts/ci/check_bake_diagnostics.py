@@ -27,12 +27,15 @@ from __future__ import annotations
 import pathlib
 import sys
 
-# Frozen at the measured counts. What remains is ONE defect class: an API
-# sketched against a PROTOCOL and never written — `SheafInfinityTopos` built
-# with a record literal (the field guess), and `compose_geometric` /
-# `id_geometric` over `InfinityFunctor` (the two stubs). The floor is not zero
-# until those types exist, and writing them from a call site would be
-# inventing the design nobody wrote.
+# FIELD-GUESS reached ZERO on 2026-08-14. The last site was not an unwritten
+# design after all: `theory_topos()` assembled a record literal for
+# `SheafInfinityTopos`, which is a PROTOCOL, while the same module already
+# built that object correctly through the protocol's own constructor
+# (`theory_universe`). A duplicate that had drifted, not a gap.
+#
+# The two panic stubs remain and ARE that class: `compose_geometric` and
+# `id_geometric` over `InfinityFunctor`. Writing them from a call site would
+# be inventing a design nobody wrote.
 #
 # `QuicStream` used to be counted here and was NOT that class: api/stream.vr
 # declares `QuicApiStream` with exactly the three fields the call sites build,
@@ -40,7 +43,7 @@ import sys
 # the uses took FIELD-GUESS from 2 to 1 — hence this baseline moving in the
 # same commit that earned it.
 # Lower these in the same commit that earns it.
-BASELINE_FIELD_GUESS = 1
+BASELINE_FIELD_GUESS = 0
 BASELINE_PANIC_STUBS = 2
 
 
@@ -68,7 +71,19 @@ def main() -> int:
     # A log that contains NEITHER marker is far more likely to be the wrong
     # file — or a bake that died early — than a perfect bake. Refuse to report
     # a clean sheet we cannot distinguish from an empty one.
-    if "Modules compiled" not in text and "Archive size" not in text:
+    # A completed bake announces itself one of two ways: the build-script
+    # wrapper prints "Modules compiled"/"Archive size", and the precompiler
+    # binary run directly ends with
+    # "verum_stdlib_precompiler: 590 modules, 49956 functions in …s, … bytes".
+    # The second form was missing here, so a genuine 3092-line bake log was
+    # rejected as "not a bake" — the refusal was right in spirit and wrong in
+    # its list.
+    completed = (
+        "Modules compiled" in text
+        or "Archive size" in text
+        or "verum_stdlib_precompiler:" in text
+    )
+    if not completed:
         print(
             f"{path} does not look like a completed bake log (no 'Modules compiled' "
             f"or 'Archive size' line). Refusing to read 0/0 as success.",
