@@ -635,11 +635,13 @@ impl<'s> CompilationPipeline<'s> {
                     let _ = merged.resolve_external_bands();
                     let _ = merged.synthesize_intrinsic_band_wrappers();
                     let _ = merged.resolve_protocol_dispatch();
+                    trace_module_fingerprint(&merged, "merged");
                     return Ok(std::sync::Arc::new(merged));
                 }
             }
         }
 
+        trace_module_fingerprint(&vbc_module, "plain");
         Ok(std::sync::Arc::new(vbc_module))
     }
 
@@ -1122,4 +1124,40 @@ pub(crate) fn seed_protocol_registry_from_embedded_stdlib(
     for ast_module in modules {
         codegen.collect_protocol_definitions(ast_module);
     }
+}
+
+/// Order-sensitive fingerprint of a compiled function table (T0736).
+///
+/// Printed when `VERUM_TRACE_MODULE_FINGERPRINT` is set. It exists because
+/// `verum run` and `verum build` compile through different phase sequences
+/// and only the latter can be inspected with `--emit-vbc`: two runs of one
+/// unchanged source that print different fingerprints localise a
+/// nondeterministic iteration to what `run` does and `build` does not.
+///
+/// That measurement is the point. Three earlier attempts to infer the same
+/// thing from OUTCOMES — a spec that answers correctly 1 run in 8 — each
+/// produced a coin flip dressed as a cause, and two were written down as
+/// findings before being retracted.
+///
+/// Folds every function's NAME in TABLE ORDER, so a pure reordering changes
+/// the value even when the set of names does not.
+fn trace_module_fingerprint(vbc_module: &VbcModule, site: &str) {
+    if std::env::var("VERUM_TRACE_MODULE_FINGERPRINT").is_err() {
+        return;
+    }
+    let mut acc: u64 = 0xcbf2_9ce4_8422_2325;
+    for f in &vbc_module.functions {
+        if let Some(name) = vbc_module.get_string(f.name) {
+            for byte in name.as_bytes() {
+                acc ^= *byte as u64;
+                acc = acc.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        acc ^= f.bytecode_length as u64;
+        acc = acc.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    eprintln!(
+        "[module-fingerprint] site={site} functions={} fold=0x{acc:016x}",
+        vbc_module.functions.len()
+    );
 }

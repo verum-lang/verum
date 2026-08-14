@@ -1020,11 +1020,15 @@ impl<'s> CompilationPipeline<'s> {
             Ok(rd) => rd,
             Err(_) => return,
         };
+        // REPRODUCIBILITY (T0736): `read_dir` yields directory order, which
+        // is a filesystem property, not a property of the project. Discovery
+        // order decides module registration order, and registration is
+        // first-wins, so an unsorted walk makes the compiled artifact depend
+        // on how the checkout happens to be laid out. Sort by path so two
+        // machines with the same sources produce the same module table.
+        let mut entries: Vec<std::fs::DirEntry> = entries.flatten().collect();
+        entries.sort_by_key(|e| e.path());
         for entry in entries {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
             let path = entry.path();
             if path.is_dir() {
                 let dir_name = entry.file_name();
@@ -1495,8 +1499,11 @@ impl<'s> CompilationPipeline<'s> {
             return Ok(());
         }
 
-        for entry in std::fs::read_dir(dir)? {
-            let entry = entry?;
+        // REPRODUCIBILITY (T0736): see the note on the sibling walk above —
+        // directory order is not project order.
+        let mut entries: Vec<std::fs::DirEntry> = std::fs::read_dir(dir)?.flatten().collect();
+        entries.sort_by_key(|e| e.path());
+        for entry in entries {
             let path = entry.path();
 
             if path.is_symlink() {
