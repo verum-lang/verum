@@ -1,0 +1,62 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, references, arithmetic, cbgr
+// @timeout: 30000
+// @expected-exit: 0
+// @expected-stdout: 11\n9\n20\n5\n1\n-10\n10\n2\n1
+//
+// Arithmetic reads VALUES through a reference.
+//
+// The value model's integer-compatible reader answers a pointer with its
+// PAYLOAD BITS — an address — because comparison of variant values needs
+// some total order.
+// An arithmetic handler that hands it an unresolved `&Int` therefore gets a
+// plausible number instead of a crash:
+//
+//     let v: Int = 10;  let r = &v;
+//     r + 1  ->  11                  (handle_addi resolved the operand)
+//     r * 2  ->  -281470748852222    (handle_muli did not)
+//     r - 1  ->  -140735374426112
+//
+// The resolve lived in exactly ONE of the thirty-one handlers, tagged
+// `ADDI-RESOLVE-1`, so `+` was right and its whole family was silently
+// wrong.  Every operand now goes through one reader in the arith helpers.
+//
+// Kept at L0 because the wrong answer is SILENT: no panic, no diagnostic,
+// just a number that is off by an address. (T0730)
+//
+// READ THIS BEFORE TRUSTING A GREEN RUN OF THIS FILE. Measured against a
+// binary built WITHOUT the fix: `verum run` on this very file prints
+// `-140734938218496` for `r - 1`, while the conformance runner reports
+// PASS. The runner executes `run_for_test()`, a phase sequence separate
+// from the `run_interpreter()` the shipped `verum run` uses, and the
+// defect does not manifest there at all. Until those two paths are one
+// (T0732), this file gates the SHIPPED path only — run it with
+// `verum run` when you want it to mean something.
+
+fn main() {
+    let v: Int = 10;
+    let r = &v;
+
+    print(r + 1);
+    print(r - 1);
+    print(r * 2);
+    print(r / 2);
+    print(r % 3);
+    print(-r);
+
+    // Both operands behind references.
+    let w: Int = 20;
+    let q = &w;
+    print(q - r);
+
+    // Bitwise handlers share the family and the same operand read.
+    print(r & 3);
+
+    // Float handlers too — compared rather than printed, because the
+    // float renderer's `3` vs `3.0` question is separate from this one.
+    let f: Float = 2.5;
+    let fr = &f;
+    if fr * 2.0 == 5.0 { print(1); } else { print(0); }
+}

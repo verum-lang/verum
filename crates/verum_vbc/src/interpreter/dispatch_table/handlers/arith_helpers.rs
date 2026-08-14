@@ -363,3 +363,29 @@ pub(super) fn saturating_mul(a: i64, b: i64, width: u8, signed: bool) -> i64 {
         }
     }
 }
+
+// ============================================================================
+// Operand reads
+// ============================================================================
+
+/// Read an arithmetic operand out of a register, resolving reference shapes.
+///
+/// Arithmetic operates on VALUES.  A register may hold a CBGR register-ref, a
+/// registered mutable pointer or a `ThinRef` — `&x` written by the user,
+/// or the `&T` an iterator yields — and every arithmetic handler must see
+/// through those before it computes.
+///
+/// This exists because for a long time exactly ONE handler did.  `handle_addi`
+/// carried the resolve inline (tagged `ADDI-RESOLVE-1`); its thirty siblings
+/// did not, so `r + 1` on a `&Int` answered 11 while `r * 2` answered
+/// -281470748852222 — `Value::as_integer_compatible` falls back to the raw
+/// PAYLOAD BITS for a pointer, which is an ADDRESS, so the wrong answer is
+/// silent and plausible rather than a crash.  Reading every operand through
+/// one function is what keeps the family from drifting apart again. (T0730)
+#[inline(always)]
+pub(super) fn arith_operand(
+    state: &super::super::super::state::InterpreterState,
+    reg: crate::instruction::Reg,
+) -> crate::value::Value {
+    super::cbgr_helpers::resolve_arg_value(state, state.get_reg(reg))
+}
