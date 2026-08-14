@@ -62,6 +62,26 @@ independent instances measured in one day:
   (`metadata_known_module_items`) existed but drove only E401's
   "module exports:" *text*, while mounts walked a synthesized mirror
   that had drifted.
+* **Execution pipeline ×2 — the conformance suite runs the OTHER one**
+  (T0732, measured 2026-08-14). `verum run` calls
+  `run_interpreter` (`pipeline/dispatch.rs:316`): stdlib + project +
+  external-cog loads, parse, **safety gate, type check, resolved-call-target
+  application, dependency analysis, verify, CBGR analysis**, interpret.
+  Every `@test: run-interpreter` spec instead reaches
+  `run_for_test` (`pipeline/interpreter.rs:392`): stdlib load, parse,
+  meta registration, macro expansion, interpret — **none of the six
+  phases in bold**. Measured consequence on one file, one binary:
+  `verum run vcs/specs/L0-critical/vbc/e2e/627_*.vr` prints
+  `-140734938218496`, the runner reports PASS. Ruled out as causes: the
+  runner's stdout comparison (breaking `@expected-stdout` fails the test)
+  and stdlib-source-vs-archive (`VERUM_STDLIB_PATH=core` reproduces the
+  same output). Without CBGR analysis a `&v` never becomes a reference, so
+  a whole defect class is structurally invisible to the suite. Adjacent
+  measurement, same day: 124 specs WRITE an `iter().<adapter>(…)` chain
+  and 10 of them execute — which is how T0729 (eager `map`/`filter`
+  breaking every chained adapter) survived. Unifying the two is expected
+  to turn a significant share of the suite red, because those greens are
+  vacuous; size the wave on a sample before landing.
 
 Adjacent measured class, same file-level census (2026-08-08): **20 type
 walkers in `verum_types` recurse through `Tuple`/`Reference` but drop
