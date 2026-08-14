@@ -6852,92 +6852,34 @@ pub(super) fn dispatch_primitive_method(
                         }
                         return Ok(Some(acc));
                     }
-                    "map" => {
-                        // map(closure) -> List - eagerly collects mapped values into a List
-                        let source_ptr = unsafe { (*iter_data).as_ptr::<u8>() };
-                        let front_idx = unsafe { (*iter_data.add(1)).as_i64() } as usize;
-                        let back_idx = unsafe { (*iter_data.add(2)).as_i64() } as usize;
-                        let caller_base = state.reg_base();
-                        let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-
-                        let mut results = Vec::with_capacity(back_idx.saturating_sub(front_idx));
-                        for i in front_idx..back_idx {
-                            let elem = match iter_type {
-                                ITER_TYPE_LIST => {
-                                    let list_header = unsafe {
-                                        source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                                    };
-                                    let backing_ptr =
-                                        unsafe { (*list_header.add(2)).as_ptr::<u8>() };
-                                    let elem_ptr = (backing_ptr as usize)
-                                        + heap::OBJECT_HEADER_SIZE
-                                        + i * std::mem::size_of::<Value>();
-                                    unsafe { *(elem_ptr as *const Value) }
-                                }
-                                ITER_TYPE_ARRAY => {
-                                    let elem_ptr = (source_ptr as usize)
-                                        + heap::OBJECT_HEADER_SIZE
-                                        + i * std::mem::size_of::<Value>();
-                                    unsafe { *(elem_ptr as *const Value) }
-                                }
-                                _ => Value::unit(),
-                            };
-                            let mapped = call_closure_sync(state, closure_val, &[elem])?;
-                            results.push(mapped);
-                        }
-                        // Consume the iterator
-                        unsafe {
-                            *iter_data.add(1) = Value::from_i64(back_idx as i64);
-                        }
-                        let list_val = alloc_list_from_values(state, results)?;
-                        return Ok(Some(list_val));
-                    }
-                    "filter" => {
-                        // filter(predicate) -> List - eagerly collects matching values
-                        let source_ptr = unsafe { (*iter_data).as_ptr::<u8>() };
-                        let front_idx = unsafe { (*iter_data.add(1)).as_i64() } as usize;
-                        let back_idx = unsafe { (*iter_data.add(2)).as_i64() } as usize;
-                        let caller_base = state.reg_base();
-                        let predicate = state.registers.get(caller_base, Reg(args.start.0));
-
-                        let mut results = Vec::new();
-                        for i in front_idx..back_idx {
-                            let elem = match iter_type {
-                                ITER_TYPE_LIST => {
-                                    let list_header = unsafe {
-                                        source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                                    };
-                                    let backing_ptr =
-                                        unsafe { (*list_header.add(2)).as_ptr::<u8>() };
-                                    let elem_ptr = (backing_ptr as usize)
-                                        + heap::OBJECT_HEADER_SIZE
-                                        + i * std::mem::size_of::<Value>();
-                                    unsafe { *(elem_ptr as *const Value) }
-                                }
-                                ITER_TYPE_ARRAY => {
-                                    let elem_ptr = (source_ptr as usize)
-                                        + heap::OBJECT_HEADER_SIZE
-                                        + i * std::mem::size_of::<Value>();
-                                    unsafe { *(elem_ptr as *const Value) }
-                                }
-                                _ => Value::unit(),
-                            };
-                            let keep = call_closure_sync(state, predicate, &[elem])?;
-                            if keep.as_bool() {
-                                results.push(elem);
-                            }
-                        }
-                        // Consume the iterator
-                        unsafe {
-                            *iter_data.add(1) = Value::from_i64(back_idx as i64);
-                        }
-                        let list_val = alloc_list_from_values(state, results)?;
-                        return Ok(Some(list_val));
-                    }
+                    // `map` and `filter` are deliberately NOT handled here.
+                    //
+                    // They used to be, eagerly: each drained the iterator and
+                    // returned a `List`.  The stdlib declares them lazy —
+                    // `Iterator.map` builds `MappedIter`, `Iterator.filter`
+                    // builds `FilterIter` (core/base/iterator.vr) — so this
+                    // fast path did not accelerate the stdlib operation, it
+                    // ANSWERED A DIFFERENT ONE, and every chained call after it
+                    // failed: `xs.iter().map(f).count()` panicked with
+                    // "method 'next' not found", the literal line from
+                    // docs/by-example/05-collections.  The `_ => Value::unit()`
+                    // fallback below also silently mapped Map/Set/Range
+                    // iterators to Units.
+                    //
+                    // Falling through leaves the stdlib impls authoritative,
+                    // which is how `take`/`skip`/`enumerate` — never listed
+                    // here — always worked.  The terminators that remain
+                    // (`next`, `count`, `fold`, `collect`, `all`) are kept
+                    // because they RETURN WHAT THE STDLIB RETURNS; they are
+                    // optimisations, not competing definitions.  Do not add an
+                    // arm here for an adapter that yields a lazy type. (T0729)
                     "collect" => {
                         // collect() -> List - drains remaining iterator elements into a List.
-                        // In this Tier 0 interpreter, map/filter already return Lists eagerly,
-                        // but collect() may be called on a raw iterator from .iter().
+                        // Reached when collect() is called directly on a builtin iterator
+                        // (`xs.iter().collect()`).  A collect() at the end of an adapter
+                        // CHAIN does not arrive here: the receiver is then a stdlib
+                        // `MappedIter`/`FilterIter` record, not a builtin iterator object,
+                        // and the stdlib's own `collect` runs.
                         let source_ptr = unsafe { (*iter_data).as_ptr::<u8>() };
                         let front_idx = unsafe { (*iter_data.add(1)).as_i64() } as usize;
                         let back_idx = unsafe { (*iter_data.add(2)).as_i64() } as usize;

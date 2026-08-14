@@ -1,0 +1,50 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, iterators, adapters, laziness
+// @timeout: 30000
+// @expected-exit: 0
+// @expected-stdout: 3\n42\n2\n[11, 16, 18]\n2\n3\n2\n32
+//
+// Iterator adapter CHAINS: an adapter must yield a lazy adapter value that
+// answers `next`, never an eagerly-built container.
+//
+// The interpreter used to answer `map` and `filter` on a builtin iterator
+// itself, eagerly, returning a `List`.  `Iterator.map` in
+// core/base/iterator.vr returns `MappedIter`; `Iterator.filter` returns
+// `FilterIter`.  So that fast path did not accelerate the stdlib operation,
+// it answered a different one, and every call chained after it died with
+// "method 'next' not found on receiver of runtime kind `Int`" — including
+// the literal line printed in docs/by-example/05-collections:
+//
+//     let doubled: List<Int> = nums.iter().map(|n| n * 2).collect();
+//
+// `take`, `skip` and `enumerate` were never on that hardcoded list and were
+// always correct; they are kept here as controls, so a future re-hardcoding
+// of adapters is caught by the same file that documents why it must not
+// happen. (T0729)
+
+fn main() {
+    let xs: List<Int> = [10, 15, 17];
+
+    // Terminators directly on a builtin iterator — these were always right.
+    print(xs.iter().count());
+    print(xs.iter().fold(0, |acc, x| acc + x));
+
+    // Controls: adapters that were never hardcoded.
+    print(xs.iter().take(2).count());
+
+    // The line from the documentation.
+    let doubled: List<Int> = xs.iter().map(|n| n + 1).collect();
+    print(doubled);
+
+    // An adapter must be chainable with a terminator...
+    print(xs.iter().filter(|x| *x > 12).count());
+    print(xs.iter().map(|x| x + 1).count());
+
+    // ...and with another adapter, which is what "lazy" buys.
+    print(xs.iter().map(|x| x + 1).filter(|x| *x > 12).count());
+
+    // A fold behind an adapter reads mapped elements, not raw ones.
+    print(xs.iter().filter(|x| *x > 12).fold(0, |acc, x| acc + x));
+}

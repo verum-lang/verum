@@ -46,6 +46,42 @@ the prefix.
 | `flat_map(f)` | Flatten nested iteration |
 | `chain(other)` | Concatenate two iterators |
 
+## How many stars does a closure need
+
+`iter()` borrows, so `Self.Item` is `&T`. That single fact decides
+every `*` you will write, and the two halves of the rule differ by one
+level:
+
+* **Transform closures take the item.** `map`, `filter_map`,
+  `for_each`, `fold` hand you `Self.Item` — a `&Int` for a
+  `List<Int>` — and arithmetic reads through it:
+  `nums.iter().map(|x| x * x)`.
+* **Predicate closures take a reference to the item.** `filter`,
+  `any`, `all`, `find`, `position`, `take_while` and `skip_while` are
+  declared `fn(&Self.Item) -> Bool`, so the parameter is `&&Int` and a
+  comparison needs both stars:
+  `nums.iter().filter(|n| **n > 12)`.
+
+If a comparison will not typecheck, add a star; if it still will not,
+you are on the transform side and should remove one. An explicit `*`
+is always allowed where the value is wanted — `|x| *x * *x` and
+`|x| x * x` are the same pipeline, and the first reads better in a
+dense expression.
+
+## Lazy `.iter().map(f)` vs eager `.map(f)`
+
+Both spellings exist and mean different things:
+
+```verum
+let a = nums.iter().map(f);   // MappedIter — nothing computed yet
+let b = nums.map(f);          // List<Int>   — computed and allocated
+```
+
+Chain from `.iter()` when more transforms follow: the whole chain
+fuses into one pass with no intermediate List. Call `.map` directly on
+the collection when the container itself is what you want and there is
+nothing to fuse.
+
 ## Range iterators
 
 `a..b` and `a..=b` are iterators directly — `for i in 0..10` walks
