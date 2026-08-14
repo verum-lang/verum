@@ -1309,6 +1309,25 @@ pub(crate) struct SymbolGraph {
 }
 
 impl SymbolGraph {
+    /// Does ANY archive symbol carry this simple name — as a leaf or as a
+    /// whole qualified name?
+    ///
+    /// The unqualified-wanted scan (T0738) decodes all 574 archive modules
+    /// looking for a simple-name match. A name no symbol carries cannot be
+    /// found by that scan, so the whole decode is waste. Measured: the AST
+    /// name harvest puts the user's LOCAL VARIABLE names into that set —
+    /// `let v: Int = 10; print(v);` shipped `v`, and the search for a
+    /// stdlib function called `v` took the compiled module from 12604
+    /// functions to 66797 and the build from 3.3s to 26.2s.
+    ///
+    /// Free to ask: the graph is already built in these runs (the
+    /// reachability step uses it), so this is a hash lookup against work
+    /// that has been paid for.
+    pub(crate) fn carries_simple_name(&self, name: &str) -> bool {
+        self.leaf_to_qualified.contains_key(name)
+            || self.qualified_to_module.contains_key(name)
+    }
+
     /// Build the global graph by decoding every archive module in
     /// parallel and scanning each function's bytecode. Pure CPU work
     /// over immutable archive bytes — perfectly parallelisable.
@@ -1865,9 +1884,16 @@ impl ArchiveCtxCache {
         // declaration), walk the rest of the archive looking only
         // at simple-name matches.  Most stdlib symbols come in via
         // mounts so this branch typically processes nothing.
+        let symbol_graph = self.graph(archive);
         let unqualified_wanted: std::collections::HashSet<String> = wanted
             .iter()
             .filter(|n| !n.contains('.'))
+            // T0738: a name no archive symbol carries cannot be found by the
+            // scan below, and the scan costs a decode of every module. The
+            // harvest feeds this set from the AST, local variable names
+            // included, so the common case was paying 574 decodes to look
+            // for a function named `v`.
+            .filter(|n| symbol_graph.carries_simple_name(n))
             .cloned()
             .collect();
         if !unqualified_wanted.is_empty() {
@@ -2681,13 +2707,43 @@ impl ArchiveCtxCache {
         // pass; they don't need to drive a function-name probe.
         // Idiomatic Verum stdlib functions are snake_case so this
         // filter has zero false positives on real call sites.
+        // T0738: drop names NO archive symbol carries before paying for the
+        // scan below — it decodes all 574 modules looking for a simple-name
+        // match, so a name that cannot match is pure waste. The AST harvest
+        // feeds this set every path segment it sees, LOCAL VARIABLE NAMES
+        // INCLUDED: `let v: Int = 10; print(v);` shipped `v`, and hunting a
+        // stdlib function called `v` took the module from 12604 functions to
+        // 66797 and the build from 3.3s to 26.2s.
+        //
+        // `carries_simple_name` is a hash lookup on the symbol graph, which
+        // these runs have already built for the reachability step — the
+        // filter is free where the scan it prevents is not.
+        let graph_for_names = self.graph(archive);
         let unqualified_wanted: std::collections::HashSet<String> = unqualified_wanted_full
             .into_iter()
             .filter(|name| {
                 codegen.ctx_mut().lookup_function(name).is_none()
                     && !looks_like_type_name(name)
+                    && graph_for_names.carries_simple_name(name)
             })
             .collect();
+        // FULL-ARCHIVE-SCAN PROBE (T0738). Every name still in this set
+        // costs a decode of all 574 archive modules — the comment above
+        // puts the worst case at ~5 GB of decoded modules. Measured with
+        // it: `print(1)` compiles to a 12604-function module and
+        // `let v: Int = 10; print(v);` to 66797, the difference being the
+        // whole stdlib including Windows bindings on macOS and
+        // `core.math.examples`. `VERUM_TRACE_FULLSCAN=1` names the entries
+        // that bought that, so the trigger is read rather than guessed.
+        if std::env::var_os("VERUM_TRACE_FULLSCAN").is_some() {
+            let mut names: Vec<&String> = unqualified_wanted.iter().collect();
+            names.sort();
+            eprintln!(
+                "[fullscan] {} unqualified name(s) force a full-archive scan: {:?}",
+                names.len(),
+                names
+            );
+        }
         if !unqualified_wanted.is_empty() {
             // Parallel decode + match filter for the second pass too.
             // Each archive.load_module(name) is the heaviest CPU step
