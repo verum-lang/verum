@@ -51,6 +51,15 @@ pub fn serialize_module(module: &VbcModule) -> VbcResult<Vec<u8>> {
     serialize_module_compressed(module, CompressionOptions::none())
 }
 
+/// Serialize a module as an ARCHIVE MEMBER: everything the module owns, minus
+/// the program-level tables described on `Serializer::program_tables`.
+pub fn serialize_archive_member(module: &VbcModule) -> VbcResult<Vec<u8>> {
+    let mut serializer = Serializer::new(CompressionOptions::none());
+    serializer.program_tables = false;
+    serializer.serialize(module)?;
+    Ok(serializer.finish())
+}
+
 /// Serializes a VBC module to binary format with optional compression.
 ///
 /// The bytecode section is compressed using the specified algorithm if it
@@ -83,6 +92,19 @@ pub fn serialize_module_compressed(
 
 /// VBC module serializer.
 struct Serializer {
+    /// Write the PROGRAM-level tables (T0737's two trailing records)?
+    ///
+    /// `field_id_to_name` and `type_field_layouts` are built from the codegen
+    /// context, which during a stdlib bake has accumulated EVERY type in the
+    /// program — so each of the 574 archive members would carry a full copy.
+    /// Measured when they were first written unconditionally: the embedded
+    /// archive went from 20.9 MB to 474.5 MB.
+    ///
+    /// An archive member never needed them (nothing read them before they
+    /// were serialised at all); the assembled program that the script cache
+    /// stores does. So the archive writer turns this off and the cache
+    /// leaves it on.
+    program_tables: bool,
     /// Main output buffer.
     output: Vec<u8>,
     /// Compression options.
@@ -98,6 +120,7 @@ impl Serializer {
             output: Vec::with_capacity(64 * 1024), // 64KB initial capacity
             compression,
             used_algorithm: None,
+            program_tables: true,
         }
     }
 
@@ -816,11 +839,12 @@ impl Serializer {
         // initialisation. They gate emission for the same reason
         // `mount_aliases` does — a module whose only non-default extension is
         // one of these must still get an extensions region.
+        let heavy_ok = self.program_tables;
         let has_module_tables = !module.global_ctors.is_empty()
             || !module.global_dtors.is_empty()
             || !module.context_names.is_empty()
-            || !module.field_id_to_name.is_empty()
-            || !module.type_field_layouts.is_empty()
+            || (heavy_ok && !module.field_id_to_name.is_empty())
+            || (heavy_ok && !module.type_field_layouts.is_empty())
             || module.user_function_start != 0;
         // Four more the format forgot, in a record of their own so the
         // six-field record written before this line stays readable.
@@ -994,12 +1018,21 @@ impl Serializer {
         // Present iff at least one of them is non-default; readers that
         // predate it simply stop at the end of the previous record.
         if has_module_tables {
+            // Empty stand-ins when the program tables are off (archive member).
+            let empty_field_names: Vec<String> = Vec::new();
+            let empty_layouts: std::collections::HashMap<String, Vec<String>> =
+                std::collections::HashMap::new();
+            let (empty_field_names, empty_layouts) = if heavy_ok {
+                (module.field_id_to_name.clone(), module.type_field_layouts.clone())
+            } else {
+                (empty_field_names, empty_layouts)
+            };
             let payload = (
                 &module.global_ctors,
                 &module.global_dtors,
                 &module.context_names,
-                &module.field_id_to_name,
-                &module.type_field_layouts,
+                &empty_field_names,
+                &empty_layouts,
                 module.user_function_start,
             );
             let data = bincode::serialize(&payload).map_err(|e| {

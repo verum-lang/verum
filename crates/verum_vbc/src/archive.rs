@@ -47,7 +47,7 @@ use serde::{Deserialize, Serialize};
 use crate::deserialize::{deserialize_module, deserialize_module_validated};
 use crate::error::{VbcError, VbcResult};
 use crate::module::VbcModule;
-use crate::serialize::serialize_module;
+use crate::serialize::serialize_archive_member;
 
 // ============================================================================
 // Compression Support (VBC Optimization Audit Phase 3)
@@ -714,10 +714,10 @@ impl ArchiveBuilder {
             // Clone and strip the module
             let mut stripped_module = module.clone();
             strip_module_metadata(&mut stripped_module, flags);
-            let data = serialize_module(&stripped_module)?;
+            let data = serialize_archive_member(&stripped_module)?;
             self.add_module_data(name, data, dependencies)
         } else {
-            let data = serialize_module(module)?;
+            let data = serialize_archive_member(module)?;
             self.add_module_data(name, data, dependencies)
         }
     }
@@ -732,7 +732,7 @@ impl ArchiveBuilder {
         module: &VbcModule,
         dependencies: &[&str],
     ) -> VbcResult<usize> {
-        let data = serialize_module(module)?;
+        let data = serialize_archive_member(module)?;
         self.add_module_data(name, data, dependencies)
     }
 
@@ -756,10 +756,10 @@ impl ArchiveBuilder {
         if has_strip_flags {
             let mut stripped_module = module.clone();
             strip_module_metadata(&mut stripped_module, strip_flags);
-            let data = serialize_module(&stripped_module)?;
+            let data = serialize_archive_member(&stripped_module)?;
             self.add_module_data(name, data, dependencies)
         } else {
-            let data = serialize_module(module)?;
+            let data = serialize_archive_member(module)?;
             self.add_module_data(name, data, dependencies)
         }
     }

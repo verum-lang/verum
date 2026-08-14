@@ -566,15 +566,28 @@ theorem jep_is_grothendieck_topology()
 /// `core.theory_interop`. The legacy identifier `mathesis_topos`
 /// is retained as a compatibility alias during the
 /// naming-migration window.
-public fn theory_topos() -> SheafInfinityTopos<InfinityCategory> {
-    SheafInfinityTopos {
-        underlying_site: theory_site,
-    }
+public fn theory_topos() -> SheafInfinityTopos {
+    // `SheafInfinityTopos` is a PROTOCOL, not a record: it declares
+    // `underlying_site`, `sheafification`, `yoneda` and two verified laws.
+    // A record literal cannot build one, and the compiler did not say so —
+    // it guessed a field position by scanning every type in the program and
+    // taking the most-fields candidate, then emitted that index
+    // (FIELD-GUESS-HARD-1, T0723).
+    //
+    // The module already builds this object correctly, once, through the
+    // constructor the protocol's own module provides:
+    //
+    //     public let theory_universe: SheafInfinityTopos =
+    //         @builtin_construct_sheaf_topos(theory_site);
+    //
+    // So this is not a missing design to invent — it is a duplicate that
+    // drifted from the real one. It now returns the real one.
+    theory_universe
 }
 
 /// Compatibility alias — prefer `theory_topos`. Will be removed
 /// after the naming-migration window closes.
-public fn mathesis_topos() -> SheafInfinityTopos<InfinityCategory> {
+public fn mathesis_topos() -> SheafInfinityTopos {
     theory_topos()
 }
 
@@ -1170,3 +1183,7 @@ public let theory_universe: SheafInfinityTopos =
 /// during the naming-migration window; will be dropped once
 /// downstream callers migrate.
 public let mathesis: SheafInfinityTopos = theory_universe;
+
+// T0723: `theory_topos` returns the object `theory_universe` builds through
+// the protocol constructor; it used to assemble a record literal for a
+// PROTOCOL, which the compiler answered by guessing a field index.
