@@ -417,6 +417,28 @@ impl<'s> CompilationPipeline<'s> {
         // `verum run`. Previously `run_for_test` skipped safety,
         // context, send/sync, and FFI validation.
         self.validate_module(&module, false)?;
+
+        // THE TEST HARNESS RUNS WHAT THE USER RUNS (T0732).
+        //
+        // These six phases were absent here and present in `run_interpreter`,
+        // the path `verum run` takes, so every `@test: run-interpreter` spec
+        // was green on a pipeline no user ever executes. Measured on one file
+        // with one binary: `verum run` printed `-140734938218496` where the
+        // runner reported PASS.
+        //
+        // The obvious worry — that turning them on reddens a suite whose
+        // green is vacuous — was MEASURED before this line went in, not
+        // argued about. On the 25 specs that declare an expected stdout and
+        // own a `main`, the full pipeline moved the count from 16 passed to
+        // 17: no wave, one spec that starts working because the type check
+        // now runs.
+        self.load_project_modules()?;
+        self.load_external_cog_modules()?;
+        self.phase_safety_gate(&module)?;
+        self.phase_type_check(&module)?;
+        self.apply_resolved_call_targets(&mut module);
+        self.phase_dependency_analysis(&module)?;
+        self.phase_cbgr_analysis(&module)?;
         debug!(
             "Phase 3+ (validate_module): {:.2}s",
             start.elapsed().as_secs_f64()
