@@ -152,6 +152,43 @@ pin needs headroom), vbc (T0714 envelope-rewind pins), AOT-heavy
 nightly lane (draft below). INVENTORY liveness T0220. FORCE_VERIFY
 sweep T0278.
 
+**R5b. Release-blocking closures, 2026-08-14.** Four things that made a
+release claim unsupportable are measured shut:
+
+* **The suite runs the shipped path** (T0732, 4802c2acb). `run_for_test`
+  skipped the safety gate, type check, resolved-call-target application,
+  dependency analysis, verify and CBGR analysis — six phases `verum run`
+  performs. Measured before: `verum run` on spec 627 printed
+  `-140734938218496` where the runner reported PASS. The wave was measured
+  before landing, not argued: 25 output-asserting specs went 16 → 18 passed
+  across clean runs. `scripts/ci/check_shipped_path_parity.py` ratchets the
+  residue (1 divergence, the async gap T0734).
+* **The compiler no longer guesses a field position** (T0723, e108aebb0).
+  FIELD-GUESS-HARD-1 is 0, down from 167; refusal is the default and
+  `VERUM_FIELD_GUESS_PERMISSIVE=1` is the escape. Verified by re-baking under
+  the new default to byte-identical totals.
+* **A script behaves the same on its second run** (T0737, eecbe6ee4). The
+  script cache returned modules with `global_ctors` dropped by serialisation
+  and `resolved_band_map` / `resolved_protocol_dispatch` never recomputed;
+  ten module tables now ride the wire and the load path runs the same three
+  resolution passes the compile path does.
+* **The shipped artifact has a size gate** (0a84c6a77). Fixing the above took
+  the embedded archive from 20.9 MB to 474.5 MB with every gate green — two
+  program-level tables written per archive member. `make check-archive-size`
+  now bounds it above AND below.
+
+Adjacent measured win: a program's compiled module no longer depends on what
+its local variables are CALLED (T0738, dbaf118d6 + 3f493360e) — `let data`
+cost 62980 functions against `let zzz`'s 12604, because the AST harvest fed
+local bindings into a scan that decodes all 574 archive modules per name.
+Spec 627's first build went 26.2s → 1.96s.
+
+Still open on the release spine: `async fn` produces a value where the
+typechecker promised a Future at Tier 0 (T0734), AOT `fold` with a closure
+returns a pointer (T0728), a protocol-method chain silently drops the
+adapter (T0731), and an unidentified flake in the ONE surface CI gates
+(T0740).
+
 **R6. Verification honesty.** `verify` reports Proved on a violated
 precondition T0657; higher-order reflection T0490; excluded-middle on
 opaque calls T0487; five ProofTerm types T0637; refinement
