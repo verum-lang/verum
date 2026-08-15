@@ -561,14 +561,30 @@ public module prelude {
     // `collections/mod.vr` only re-exports these three (`public mount
     // .list.List;`), so the binding is identical — this removes a hop that
     // hid which module the type comes from, and nothing else.
-    // `List` / `Map` / `Set` are NOT re-exported.
+    // `List` / `Map` / `Set` — the DEFINING modules, which are ring 0.
     //
-    // Same measurement again, and this is the one that had to be checked
-    // rather than reasoned about: with `@no_implicit_prelude`,
-    // `let l: List<Int> = List.new(); l.len()` compiles and runs, and so do
-    // the `Map` and `Set` forms.  CLAUDE.md mandates these as THE semantic
-    // types and the compiler knows them; the prelude was not what made
-    // them reachable.
+    // These were briefly removed, on an experiment that turned out to
+    // answer the wrong question.  With `@no_implicit_prelude` the form
+    // `let l: List<Int> = List.new(); l.len()` compiles and runs, so the
+    // compiler clearly knows the type without this line — but that tests
+    // whether `List` can be USED without the prelude, not whether it can
+    // be MOUNTED FROM it.  Fifteen files in core/ write
+    // `mount core.prelude.{… List …}`, and removal broke every one of
+    // them with `E401: cannot find List in module core.prelude`.
+    //
+    // `core.prelude` is a PUBLISHED SURFACE, not an internal convenience:
+    // what it exports is what a `mount core.prelude.{X}` may name, here
+    // and in user code.  A name reachable by inference is not the same as
+    // a name reachable by import, and only the second is a contract.
+    //
+    // Named through `collections.list` / `.map` / `.set` rather than the
+    // `collections` umbrella, per rings.toml: those three submodules ARE
+    // ring 0 — they are the language's vocabulary — while `collections` as
+    // a whole is ring 2, and naming the umbrella would point the edge
+    // there.
+    public mount super.collections.list.List;
+    public mount super.collections.map.Map;
+    public mount super.collections.set.Set;
 
     // From io (common functions)
     // `print` / `println` / `eprint` / `eprintln` are NOT re-exported.
