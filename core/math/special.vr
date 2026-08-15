@@ -32,6 +32,10 @@ module core.math.special;
 mount super.constants.{PI, E, INFINITY, NEG_INFINITY, NAN, FRAC_PI_2, FRAC_PI_4};
 mount super.elementary.{exp, log, sqrt, pow, sin, cos, abs, floor};
 mount super.ieee754.{is_nan, is_infinite, copysign};
+// Mounted rather than inherited: the prelude used to publish math's
+// 28 names into every file, which §4ter forbids — the language does
+// not name `sqrt` or Euler's number.
+mount core.math.elementary.{tan};
 
 // =============================================================================
 // Gamma Functions

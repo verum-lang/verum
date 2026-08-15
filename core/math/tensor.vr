@@ -54,6 +54,10 @@ mount core.context.random.{Random};
 mount super.elementary.{sqrt, exp, log, sin, cos, abs};
 mount core.random.deterministic.{RandomKey};
 mount super.gpu.{ComputeDevice, DeviceId, DeviceInfo};
+// Mounted rather than inherited: the prelude used to publish math's
+// 28 names into every file, which §4ter forbids — the language does
+// not name `sqrt` or Euler's number.
+mount core.math.elementary.{pow};
 
 // =============================================================================
 // Data Types

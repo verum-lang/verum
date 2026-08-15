@@ -60,6 +60,10 @@ module core.math.elementary;
 
 mount super.constants.*;
 mount super.ieee754.{is_nan, is_infinite, is_finite, copysign, frexp, ldexp};
+// Mounted rather than inherited: the prelude used to publish math's
+// 28 names into every file, which §4ter forbids — the language does
+// not name `sqrt` or Euler's number.
+mount core.math.constants.{PI, INFINITY, NAN};
 
 // =============================================================================
 // Polynomial Evaluation (Horner's Method)

@@ -53,6 +53,10 @@ mount core.math.constants.{PI};
 mount core.math.autodiff.{Differentiable};
 mount core.prelude.{List, Maybe, Bool, USize, Float};
 mount core.math.complex.{Complex};
+// Mounted rather than inherited: the prelude used to publish math's
+// 28 names into every file, which §4ter forbids — the language does
+// not name `sqrt` or Euler's number.
+mount core.math.elementary.{exp};
 
 // =============================================================================
 // Discretization Methods

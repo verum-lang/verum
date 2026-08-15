@@ -44,6 +44,10 @@ mount super.tensor.{add, sub, mul, div, neg, tensor_pow, tensor_exp, tensor_log,
 mount super.tensor.{matmul, transpose, softmax, sum_axis, mean_axis, var_axis};
 mount super.linalg.{Vector, Matrix};
 mount super.algebra.RealField;
+// Mounted rather than inherited: the prelude used to publish math's
+// 28 names into every file, which §4ter forbids — the language does
+// not name `sqrt` or Euler's number.
+mount core.math.elementary.{sin, cos, exp, log, sqrt, pow};
 
 // =============================================================================
 // Differentiation Mode

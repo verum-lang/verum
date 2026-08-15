@@ -92,6 +92,10 @@ mount core.random.deterministic.{RandomKey};
 // which principle 2 — no magic, every dependency explicit — forbids
 // twice over.
 mount core.context.random.{Random};
+// Mounted rather than inherited: the prelude used to publish math's
+// 28 names into every file, which §4ter forbids — the language does
+// not name `sqrt` or Euler's number.
+mount core.math.elementary.{sqrt};
 
 // =============================================================================
 // Convenience Type Alias

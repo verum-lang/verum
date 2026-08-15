@@ -590,18 +590,28 @@ public module prelude {
     public mount super.time.Time;
 
     // From math (common functions and types)
-    public mount super.math.{
-        // Constants
-        PI, E, TAU, INFINITY, NAN,
-        // Elementary functions
-        sin, cos, tan, asin, acos, atan, atan2,
-        exp, log, log10, log2,
-        sqrt, cbrt, pow, abs,
-        floor, ceil, round,
-        min, max, clamp,
-        // Linear algebra
-        Vector, Matrix,
-    };
+    // math is NOT re-exported here.
+    //
+    // §4ter: a name belongs to the prelude iff the LANGUAGE requires it.
+    // The grammar names `Maybe`, `Result`, `Ordering`; it does not name
+    // `sqrt`, `Matrix`, or Euler's number.  Mathematics is a library.
+    //
+    // This block published 28 names, and the measured damage is on record:
+    // fourteen of the prelude's twenty math functions were being served by
+    // sqlite's free functions instead of math's, because the binding was
+    // by bare (name, arity) and sqlite got there first (T0220, T0670).
+    // A name that is ambient everywhere is a name that anyone can win.
+    //
+    // `E` deserves its own sentence.  A one-letter constant published into
+    // every file collides with the universal spelling of the error type
+    // parameter: measured across core/, `E` reads as a TYPE PARAMETER in
+    // 16 files and as Euler's number in 2 — including inside
+    // `core/base/maybe.vr`, where `Result<T, E>` is the subject.
+    //
+    // MEASURED cost of removal: EIGHT files, seven of them inside math/
+    // itself, which now mount `math.elementary` / `math.constants`
+    // directly — a sibling import that says where the function comes
+    // from, instead of an ambient one that does not.
 
     // context.standard is NOT re-exported here.
     //
