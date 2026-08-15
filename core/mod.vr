@@ -603,16 +603,32 @@ public module prelude {
         Vector, Matrix,
     };
 
-    // From context.standard (DI contexts that read like ambient services
-    // when consumers write `using [Logger]` / `Logger.info(...)`).  These
-    // are intentionally surfaced at the prelude level so request-handling
-    // code does not have to repeat `mount context.standard.{...}` in
-    // every middleware / handler file.
-    public mount super.context.standard.{
-        Logger, Database, Auth, Config, Cache, Metrics, Tracer,
-        Clock, Random, FileSystem,
-        ContextLogLevel, ContextLogRecord,
-    };
+    // context.standard is NOT re-exported here.
+    //
+    // It used to be, with this justification: "intentionally surfaced at
+    // the prelude level so request-handling code does not have to repeat
+    // `mount context.standard.{...}` in every middleware / handler file."
+    // That is a convenience argument, and §4ter of
+    // docs/architecture/core-reference-architecture.md answers it: a name
+    // belongs to the prelude IF AND ONLY IF THE LANGUAGE REQUIRES IT.
+    // `Logger`, `Database`, `Auth`, `Config`, `Cache`, `Metrics`,
+    // `Tracer`, `Clock`, `Random`, `FileSystem` are services, not
+    // language.  Principle 2 — no magic, every dependency explicit via
+    // `mount` — forbids it a second time.
+    //
+    // The twelve names were also among the most collision-prone in the
+    // tree: `Database` alone is declared three times in core/
+    // (`context.standard`, `database/common/db_handle`,
+    // `database/sqlite/native/l7_api/database`), and every file received
+    // all three whether it asked or not.
+    //
+    // MEASURED before removal: exactly SIX files in core/ bound one of the
+    // twelve ambiently — three `Logger`, three `Random` — and each now
+    // mounts it explicitly.  The other ten names had no ambient consumer
+    // at all.  (The first count was 106 files; refining it to real binding
+    // positions, then excluding files that already mount the name from
+    // their own module, took it to 6.  Each refinement removed a category
+    // of false positive, not a judgement call.)
 }
 
 // =============================================================================

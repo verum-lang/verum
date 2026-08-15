@@ -66,6 +66,31 @@ modules = [
     "collections.list", "collections.map", "collections.set", "text.text",
 ]
 
+[ring."0.5"]
+name = "contract"
+# Dependency-free CONTRACTS: a `context` declaration that names only
+# foundation types, with no implementation and therefore no platform,
+# no time and no I/O.
+#
+# This layer exists because `core/context/standard.vr` was named by
+# TOPIC and its ring was set by its heaviest member: `Clock` needs
+# Duration/Instant/SystemTime and `FileSystem` needs Read/Write, so all
+# fifteen declarations sat at ring 3 — including `Random`, which needs
+# `Int`, `Float`, `Bool` and `List<Byte>` and nothing else.
+#
+# `core/math/{simple,nn,tensor}.vr` declare `using [Random]`, and math is
+# ring 2.  That edge was invisible for as long as the prelude published
+# `context.standard` into every file without a `mount`; making the
+# dependency explicit made it an honest ring-2 -> ring-3 violation, and
+# the law's answer to a violation is to move the dependency DOWN.
+#
+# Same doctrine as §4quinquies (`security/hash`): cut by GUARANTEE, not
+# by topic.  A contract guarantees nothing about the world, so it cannot
+# owe anything to it.
+modules = [
+    "context.random",
+]
+
 [ring.1]
 name = "platform"
 # ONE cohesive layer, for the same reason ring 0 is: its members are

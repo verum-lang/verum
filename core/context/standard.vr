@@ -555,22 +555,12 @@ public context Clock {
 ///  hex_encode(bytes)
 /// }
 /// ```
-public context Random {
-    /// Generate a random integer in [0, max).
-    fn int(max: Int) -> Int;
-
-    /// Generate a random integer in [min, max).
-    fn int_range(min: Int, max: Int) -> Int;
-
-    /// Generate a random floating-point number in [0.0, 1.0).
-    fn float() -> Float;
-
-    /// Generate random bytes.
-    fn bytes(count: Int) -> List<Byte>;
-
-    /// Generate a random boolean.
-    fn bool() -> Bool;
-}
+// `Random` now lives in `core.context.random` — it needs nothing above the
+// foundation, while this file's ring is set by `Clock` / `FileSystem` /
+// `Cache` / `Config` / `Tracer`, which need `time` and `io`.  Re-exported
+// so every existing consumer of `context.standard.Random` is unaffected.
+// See core/context/random.vr for why the cut is by guarantee, not topic.
+public mount super.random.{Random};
 
 // =============================================================================
 // FileSystem Context (for testable I/O)

@@ -1,0 +1,82 @@
+// =============================================================================
+// context/random.vr — the randomness contract, on its own
+// =============================================================================
+// Layer: 0 (depends on: base)
+// Spec: docs/detailed/16-context-system.md
+// =============================================================================
+//
+// WHY THIS IS NOT IN `context/standard.vr`.
+//
+// `standard.vr` is named by TOPIC — "the standard contexts" — and holds
+// fifteen declarations that do not share a layer.  Six of them need
+// ring-2 types (`Clock` needs Duration/Instant/SystemTime, `FileSystem`
+// needs Read/Write, `Cache` and `Config` need Duration, `Tracer` and
+// `ContextLogRecord` need SystemTime), which is what puts the whole file
+// in ring 3.  `Random` needs `Int`, `Float`, `Bool` and `List<Byte>` —
+// nothing above the foundation.
+//
+// That is the shape core-reference-architecture.md §4quinquies names:
+// cut by GUARANTEE, not by topic.  `core/security/hash` was extracted for
+// the same reason — pure byte computation had come to sit in the same
+// ring as X.509 policy because they shared a directory.
+//
+// The edge that forced the cut is real and was previously invisible:
+// `core/math/{simple,nn,tensor}.vr` declare `using [Random]`, and math is
+// ring 2.  While the prelude published `context.standard`'s twelve names
+// into every file, that dependency existed without appearing in any
+// `mount`, so the ring law never saw it.  Removing the prelude entry made
+// it explicit — and an explicit ring-2 -> ring-3 edge is exactly what the
+// law exists to refuse.  The law's own instruction is "move the
+// dependency down, not widen the ring", and this file is that move.
+//
+// `standard.vr` re-exports `Random` from here, so every existing consumer
+// keeps working unchanged.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1")
+)
+module core.context.random;
+
+mount core.base.primitives.{Int, Float, Bool, Byte};
+mount core.collections.list.{List};
+
+// =============================================================================
+// Random Context
+// =============================================================================
+
+/// Source of randomness, injected rather than ambient.
+///
+/// A context rather than a free function because determinism is a
+/// property of the CALLER's world: a test provides a seeded generator and
+/// gets a reproducible run, production provides the system CSPRNG, and
+/// neither has to know about the other.
+///
+/// # Example
+/// ```verum
+/// fn shuffle_deck(deck: &mut List<Card>) using [Random] {
+///     let n = deck.len();
+///     for i in 0..n {
+///         let j = Random.int_range(i, n);
+///         deck.swap(i, j);
+///     }
+/// }
+/// ```
+public context Random {
+    /// Generate a random integer in [0, max).
+    fn int(max: Int) -> Int;
+
+    /// Generate a random integer in [min, max).
+    fn int_range(min: Int, max: Int) -> Int;
+
+    /// Generate a random floating-point number in [0.0, 1.0).
+    fn float() -> Float;
+
+    /// Generate random bytes.
+    fn bytes(count: Int) -> List<Byte>;
+
+    /// Generate a random boolean.
+    fn bool() -> Bool;
+}

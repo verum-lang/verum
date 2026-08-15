@@ -64,6 +64,13 @@
 module core.redis.client;
 
 mount core.*;
+// The DI context is mounted here rather than arriving ambiently: the
+// prelude published `context.standard`'s twelve names into every file
+// for convenience, which core-reference-architecture.md §4ter forbids
+// (a name belongs to the prelude iff the LANGUAGE requires it) and
+// which principle 2 — no magic, every dependency explicit — forbids
+// twice over.
+mount core.context.standard.{Logger};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount sync.semaphore.Semaphore;
