@@ -1495,6 +1495,14 @@ impl SymbolGraph {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(24);
+        // Complement of the cap above (T0753): the cap bounds the damage
+        // when a callee can ONLY be named by its leaf, but a callee that
+        // resolves EXACTLY needs no fanout at all.  Read once — the check
+        // sits on the hot edge loop below, and `std::env` takes a lock.
+        // Setting this restores the pre-T0753 walker for A/B from ONE
+        // binary; it only ever widens the closure, so it cannot break a
+        // program, only slow it.
+        let no_exact_shortcut = std::env::var_os("VERUM_NO_EXACT_SHORTCUT").is_some();
         let fan_leaf = |leaf: &str,
                         reached: &mut HashSet<String>,
                         queue: &mut VecDeque<String>| {
@@ -1514,8 +1522,35 @@ impl SymbolGraph {
                         for callee in callees {
                             // Direct qualified resolution — always exact,
                             // never fans, so it stays unconditional.
+                            //
+                            // RESOLVED-EXACTLY SHORT-CIRCUIT (T0753).
+                            // When this hits, the callee IS the callee: a
+                            // descriptor row exists under that exact name
+                            // and has just been enqueued. The leaf fanout
+                            // below then stripped its type prefix and
+                            // re-enqueued every same-named impl in the
+                            // library — pure over-approximation on top of
+                            // an exact answer.
+                            //
+                            // Measured: that strip is why qualifying the
+                            // EMISSION sites changed nothing. Two rounds
+                            // of it (c397a56e7, 9494b63fe) left the
+                            // closure at 5502 symbols / 255 modules,
+                            // because the walker discarded the qualifier
+                            // one line later.
+                            //
+                            // A/B from one binary, `Maybe` + `List` probe:
+                            // 6717 -> 2612 symbols, 307 -> 181 modules,
+                            // 10.39 s -> 2.40 s of lazy-apply.  40 L1-core
+                            // programs: identical stdout and exit status,
+                            // and the field-guess candidate sets shrink
+                            // with the closure (T0723's worst site, `name`,
+                            // 489 -> 314 position-disagreeing candidates).
                             if self.qualified_to_module.contains_key(callee) {
                                 enqueue(callee, &mut reached, &mut queue);
+                                if !no_exact_shortcut {
+                                    continue;
+                                }
                             } else if callee.contains('.') {
                                 // **Home-module decode edge** (T0277 leg B
                                 // part 2): a dotted callee with NO
