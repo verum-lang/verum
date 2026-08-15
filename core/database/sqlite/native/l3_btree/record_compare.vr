@@ -63,26 +63,26 @@ mount core.database.sqlite.native.l3_btree.comparator.{
 /// numeric, blob, and NULL columns ignore it.  `desc = true` reverses
 /// the per-column ordering for `ORDER BY col DESC` and for descending
 /// indices.
-public type ColumnSchema is {
+public type RecordColumnSchema is {
     collation: CollationKind,
     desc: Bool,
 };
 
-/// A record's column schema — list of `ColumnSchema` in column order.
+/// A record's column schema — list of `RecordColumnSchema` in column order.
 /// Empty schema is treated as "all BINARY ascending" (back-compat
 /// with the historical `cmp_bytes` fast path).
 public type RecordSchema is {
-    columns: List<ColumnSchema>,
+    columns: List<RecordColumnSchema>,
 };
 
 /// Default-BINARY schema with `n` columns.  Used by callers that
 /// haven't propagated explicit collation (table-scan paths, sorter
 /// without ORDER BY COLLATE).
 public fn record_schema_binary(n: Int) -> RecordSchema {
-    let mut cols: List<ColumnSchema> = List.new();
+    let mut cols: List<RecordColumnSchema> = List.new();
     let mut i: Int = 0;
     while i < n {
-        cols.push(ColumnSchema { collation: Binary, desc: false });
+        cols.push(RecordColumnSchema { collation: Binary, desc: false });
         i = i + 1;
     }
     RecordSchema { columns: cols }
@@ -96,12 +96,12 @@ public fn record_schema_from_choices(
     descs: &List<Bool>,
     n_cols: Int,
 ) -> RecordSchema {
-    let mut cols: List<ColumnSchema> = List.new();
+    let mut cols: List<RecordColumnSchema> = List.new();
     let mut i: Int = 0;
     while i < n_cols {
         let coll = if i < collations.len() { clone_collation_kind(&collations[i]) } else { Binary };
         let desc = if i < descs.len() { descs[i] } else { false };
-        cols.push(ColumnSchema { collation: coll, desc: desc });
+        cols.push(RecordColumnSchema { collation: coll, desc: desc });
         i = i + 1;
     }
     RecordSchema { columns: cols }
@@ -309,7 +309,7 @@ fn cmp_blob(
 fn cmp_one_column(
     a_st: &SerialType, a_buf: &[Byte], a_start: Int,
     b_st: &SerialType, b_buf: &[Byte], b_start: Int,
-    col: &ColumnSchema,
+    col: &RecordColumnSchema,
     registry: Maybe<&CollationRegistry>,
 ) -> Ordering {
     let a_class = type_class_of(a_st);
@@ -424,7 +424,7 @@ public fn cmp_records_with_schema(
 /// the caller's schema has fewer columns than the records being
 /// compared (a case that should be rare in practice but the comparator
 /// must handle it without panicking).
-const DEFAULT_COL_SCHEMA: ColumnSchema = ColumnSchema {
+const DEFAULT_COL_SCHEMA: RecordColumnSchema = RecordColumnSchema {
     collation: Binary,
     desc: false,
 };

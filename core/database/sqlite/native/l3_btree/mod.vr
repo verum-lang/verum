@@ -98,7 +98,7 @@ public mount .comparator.{
 };
 
 public mount .record_compare.{
-    ColumnSchema, RecordSchema, TypeClass,
+    RecordColumnSchema, RecordSchema, TypeClass,
     TcNull, TcNumeric, TcText, TcBlob,
     RecordCompareError, RcRecord, RcShortPayload,
     record_schema_binary, record_schema_from_choices,

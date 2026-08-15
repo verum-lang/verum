@@ -43,7 +43,7 @@ mount core.database.sqlite.native.l3_btree.{
 };
 mount core.database.sqlite.native.l3_btree.cursor.PathStep;
 mount core.database.sqlite.native.l3_btree.record_compare.{
-    ColumnSchema, RecordSchema, record_schema_binary,
+    RecordColumnSchema, RecordSchema, record_schema_binary,
 };
 mount core.database.sqlite.native.l2_record.collation.{
     CollationKind, Binary, Nocase, Rtrim, UserDefined,
