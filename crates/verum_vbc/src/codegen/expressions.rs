@@ -482,7 +482,7 @@ impl VbcCodegen {
             && let Some(pn) = parent_type_name
         {
             let desc_info = parent_type_id
-                .and_then(|t| self.types.iter().find(|d| d.id == t))
+                .and_then(|t| self.type_by_id(t))
                 .map(|d| {
                     (
                         self.ctx
@@ -564,7 +564,7 @@ impl VbcCodegen {
         }
 
         let typed_ok = parent_type_id.and_then(|tid| {
-            let desc = self.types.iter().find(|d| d.id == tid)?;
+            let desc = self.type_by_id(tid)?;
             // **MakeVariantTyped survival check** (#168 / TypeId(148)
             // regression close). The codegen-side `self.types` snapshot
             // can briefly hold a placeholder descriptor (id reserved
@@ -2325,7 +2325,7 @@ impl VbcCodegen {
                         .as_ref()
                         .is_none_or(|scope| scope.contains(name.as_str()))
                     && let Some(tid) = self.type_name_to_id.get(name.as_str()).copied()
-                    && let Some(desc) = self.types.iter().find(|d| d.id == tid)
+                    && let Some(desc) = self.type_by_id(tid)
                     // `type X is ();` descriptors carry the dedicated
                     // `TypeKind::Unit`; a fieldless non-transparent
                     // Record is the equivalent empty-record form.
@@ -7866,10 +7866,7 @@ impl VbcCodegen {
             .map(|f| &f.descriptor)
             && let Some(parent_tid) = desc.parent_type
         {
-            let impl_k = self
-                .types
-                .iter()
-                .find(|t| t.id == parent_tid)
+            let impl_k = self.type_by_id(parent_tid)
                 .map(|t| t.type_params.len())
                 .unwrap_or(0);
             if impl_k > 0
@@ -10854,7 +10851,7 @@ impl VbcCodegen {
             && self
                 .type_name_to_id
                 .get(ctx_ident.name.as_str())
-                .and_then(|tid| self.types.iter().find(|td| td.id == *tid))
+                .and_then(|tid| self.type_by_id(*tid))
                 .is_none_or(|td| td.kind == crate::types::TypeKind::Protocol)
         {
             return Err(CodegenError::with_span(
@@ -21605,7 +21602,7 @@ impl VbcCodegen {
                         .type_name_to_id
                         .get(type_name)
                         .copied()
-                        .and_then(|tid| self.types.iter().find(|d| d.id == tid));
+                        .and_then(|tid| self.type_by_id(tid));
                     for _ in 0..4 {
                         let Some(d) = descriptor else { break };
                         if d.kind != crate::types::TypeKind::Alias {
@@ -21613,7 +21610,7 @@ impl VbcCodegen {
                         }
                         descriptor = match &d.alias_target {
                             Some(crate::types::TypeRef::Concrete(tid)) => {
-                                self.types.iter().find(|t| t.id == *tid)
+                                self.type_by_id(*tid)
                             }
                             _ => None,
                         };
@@ -23104,7 +23101,7 @@ impl VbcCodegen {
                 //      (correct for record construction but not declared
                 //      layout)
                 let alloc_slots = type_id_opt
-                    .and_then(|tid| self.types.iter().find(|t| t.id == tid))
+                    .and_then(|tid| self.type_by_id(tid))
                     .filter(|td| matches!(td.kind, crate::types::TypeKind::Record))
                     .filter(|td| !td.fields.is_empty())
                     .map(|td| td.fields.len() as u32)
@@ -25143,7 +25140,7 @@ impl VbcCodegen {
         // pointer (3 fields × 8 = 24 bytes — though Text raw-pointer
         // arithmetic is rare), every user record.
         if let Some(&type_id) = self.type_name_to_id.get(inner_base) {
-            if let Some(desc) = self.types.iter().find(|t| t.id == type_id) {
+            if let Some(desc) = self.type_by_id(type_id) {
                 let field_count = desc.fields.len() as i64;
                 if field_count > 0 {
                     return field_count * 8;
@@ -39624,7 +39621,7 @@ impl VbcCodegen {
                 for proto_impl in ty.protocols.iter() {
                     let proto_type_id = crate::types::TypeId(proto_impl.protocol.0);
                     let proto_ty =
-                        self.types.iter().find(|t| t.id == proto_type_id);
+                        self.type_by_id(proto_type_id);
                     let proto_name = proto_ty.and_then(|t| {
                         self.ctx.strings.get(t.name.0 as usize).cloned()
                     });

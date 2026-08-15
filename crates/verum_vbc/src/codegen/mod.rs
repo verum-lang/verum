@@ -74,6 +74,143 @@ mod test_params;
 
 pub use context::{CodegenContext, CodegenStats, ExprId, FunctionInfo, LoopContext, TierContext};
 
+/// Where `resolve_mounts` spends its time, per compiled file.
+///
+/// Source-mount resolution walks the mount closure of the file being
+/// compiled and, for every file it reaches, parses it and collects its
+/// declarations.  For a stdlib file whose closure is the whole of `core/`
+/// that is 2560 files and ~20 MB of source, and it happens once per
+/// compiled file — the shape behind T0717 ("solo test >550 s, the suite
+/// eats CPU-hours").
+///
+/// Counting is thread-local because the codegen test harness runs one
+/// compile per test thread; a shared counter would interleave two
+/// unrelated closures into one meaningless total.  Everything is behind
+/// `VERUM_TRACE_MOUNTCOST`, so an un-traced build pays one relaxed
+/// thread-local read per file.
+///
+/// Named for the QUESTION it answers — which phase owns the time — not
+/// for the fix it motivates; the numbers stay meaningful after the fix
+/// lands and are the check that it worked.
+mod mount_cost {
+    // `add_parse` / `add_collect` are called only from the `codegen`-gated
+    // parse loop; without that feature the module is still compiled.
+    #![allow(dead_code)]
+
+    use std::cell::Cell;
+    use std::cell::RefCell;
+    use std::time::Duration;
+
+    /// Files per `declarations` timing bucket in the report.
+    const BUCKET_FILES: u64 = 500;
+
+    thread_local! {
+        /// `declarations` nanoseconds, bucketed by arrival order.
+        static BUCKETS: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
+    }
+
+    thread_local! {
+        static FILES: Cell<u64> = const { Cell::new(0) };
+        static BYTES: Cell<u64> = const { Cell::new(0) };
+        static PARSE_NS: Cell<u64> = const { Cell::new(0) };
+        static PROTO_NS: Cell<u64> = const { Cell::new(0) };
+        static DECLS_NS: Cell<u64> = const { Cell::new(0) };
+        static DISCOVER_NS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    pub(super) fn enabled() -> bool {
+        std::env::var_os("VERUM_TRACE_MOUNTCOST").is_some()
+    }
+
+    pub(super) fn reset() {
+        if !enabled() {
+            return;
+        }
+        FILES.set(0);
+        BYTES.set(0);
+        PARSE_NS.set(0);
+        PROTO_NS.set(0);
+        DECLS_NS.set(0);
+        DISCOVER_NS.set(0);
+        BUCKETS.with_borrow_mut(|b| b.clear());
+    }
+
+    /// Time spent turning this module's `mount` declarations into a file
+    /// list — path-candidate construction, `canonicalize`, glob directory
+    /// walks.  Separated from parse/collect because it was the single
+    /// largest share (96.5 s of 172 s) and nothing named it.
+    pub(super) fn add_discover(took: Duration) {
+        if !enabled() {
+            return;
+        }
+        DISCOVER_NS.set(DISCOVER_NS.get() + took.as_nanos() as u64);
+    }
+
+    pub(super) fn add_parse(bytes: usize, took: Duration) {
+        if !enabled() {
+            return;
+        }
+        FILES.set(FILES.get() + 1);
+        BYTES.set(BYTES.get() + bytes as u64);
+        PARSE_NS.set(PARSE_NS.get() + took.as_nanos() as u64);
+    }
+
+    pub(super) fn add_collect(protocols: Duration, decls: Duration) {
+        if !enabled() {
+            return;
+        }
+        PROTO_NS.set(PROTO_NS.get() + protocols.as_nanos() as u64);
+        DECLS_NS.set(DECLS_NS.get() + decls.as_nanos() as u64);
+        // Bucket by arrival order so the report answers, without a second
+        // run, whether `collect_all_declarations` costs the same for the
+        // 2500th file as for the 1st.  A flat profile means the 29 ms/file
+        // is inherent work; a rising one means the pass re-scans tables that
+        // grow as the closure is absorbed — a different defect with a
+        // different fix.
+        let bucket = (FILES.get() / BUCKET_FILES) as usize;
+        BUCKETS.with_borrow_mut(|b| {
+            if b.len() <= bucket {
+                b.resize(bucket + 1, 0);
+            }
+            b[bucket] += decls.as_nanos() as u64;
+        });
+    }
+
+    pub(super) fn report(source_path: &str, total: Duration) {
+        if !enabled() {
+            return;
+        }
+        let ms = |ns: u64| ns as f64 / 1e6;
+        eprintln!(
+            "[mount-cost] {} files={} bytes={} total={:.0}ms discover={:.0}ms parse={:.0}ms protocols={:.0}ms declarations={:.0}ms other={:.0}ms",
+            source_path,
+            FILES.get(),
+            BYTES.get(),
+            total.as_secs_f64() * 1e3,
+            ms(DISCOVER_NS.get()),
+            ms(PARSE_NS.get()),
+            ms(PROTO_NS.get()),
+            ms(DECLS_NS.get()),
+            total.as_secs_f64() * 1e3
+                - ms(DISCOVER_NS.get() + PARSE_NS.get() + PROTO_NS.get() + DECLS_NS.get()),
+        );
+        BUCKETS.with_borrow(|b| {
+            if b.is_empty() {
+                return;
+            }
+            let per_bucket: Vec<String> = b
+                .iter()
+                .map(|ns| format!("{:.0}", ms(*ns) / BUCKET_FILES as f64))
+                .collect();
+            eprintln!(
+                "[mount-cost] declarations ms/file by arrival order (buckets of {}): {}",
+                BUCKET_FILES,
+                per_bucket.join(" ")
+            );
+        });
+    }
+}
+
 /// Information about a protocol for cross-module default method inheritance.
 #[derive(Debug, Clone)]
 pub struct ProtocolInfo {
@@ -444,6 +581,25 @@ pub struct VbcCodegen {
 
     /// Type descriptors.
     types: Vec<TypeDescriptor>,
+
+    /// `TypeId` → index into [`Self::types`].
+    ///
+    /// Twenty sites answer "which descriptor has this id?" with
+    /// `self.types.iter().find(|t| t.id == …)`.  During a stdlib-closure
+    /// compile `types` holds tens of thousands of descriptors and grows as
+    /// the closure is absorbed, so each of those scans gets more expensive
+    /// the further the compile has got.  That shape is visible in the
+    /// `[mount-cost]` bucket profile of `test_compile_stdlib_char`: the
+    /// per-file cost of `collect_all_declarations` rises from 9 ms for the
+    /// first 500 files to ~34 ms and stays there — the work per file did
+    /// not change, the tables it searches did.
+    ///
+    /// This map is a FAST PATH, never the authority.  [`Self::type_by_id`]
+    /// verifies the id at the indexed slot and falls back to the linear
+    /// scan if it does not match, so a missed maintenance site can only
+    /// cost time — never produce the wrong descriptor.  That property is
+    /// what makes it safe to add to a table mutated from eleven places.
+    type_index: std::collections::HashMap<u32, usize>,
 
     /// Next function ID.
     next_func_id: u32,
@@ -1612,7 +1768,7 @@ impl VbcCodegen {
         // `self.types` directly — populated for both user-phase and
         // archive-phase types, so no cross-mount race.
         let type_id = self.type_name_to_id.get(base_type).copied()?;
-        let desc = self.types.iter().find(|t| t.id == type_id)?;
+        let desc = self.type_by_id(type_id)?;
         if desc.type_params.is_empty() {
             return None;
         }
@@ -1819,6 +1975,7 @@ impl VbcCodegen {
             config,
             functions: Vec::new(),
             types: Vec::new(),
+            type_index: std::collections::HashMap::new(),
             next_func_id: 0,
             next_type_id: 0,
             closure_counter: 0,
@@ -2282,7 +2439,7 @@ impl VbcCodegen {
                     kind: crate::types::TypeKind::Protocol,
                     ..Default::default()
                 };
-                self.types.push(stub);
+                self.push_type_descriptor(stub);
             }
         }
     }
@@ -5648,9 +5805,7 @@ impl VbcCodegen {
                 if let Some(prim) = self.primitive_type_id_to_name(*tid) {
                     return Some(prim.to_string());
                 }
-                self.types
-                    .iter()
-                    .find(|t| t.id == *tid)
+                self.type_by_id(*tid)
                     .and_then(|t| self.ctx.strings.get(t.name.0 as usize).cloned())
             }
             TypeRef::Instantiated { base, args } => {
@@ -5658,9 +5813,7 @@ impl VbcCodegen {
                     .primitive_type_id_to_name(*base)
                     .map(|s| s.to_string())
                     .or_else(|| {
-                        self.types
-                            .iter()
-                            .find(|t| t.id == *base)
+                        self.type_by_id(*base)
                             .and_then(|t| self.ctx.strings.get(t.name.0 as usize).cloned())
                     })?;
                 if args.is_empty() {
@@ -5874,7 +6027,7 @@ impl VbcCodegen {
         // see no variants — every typed variant rendered as a
         // generic record fallback `{tag, payload...}` instead of
         // the proper `Constructor(payload...)` form.
-        if let Some(idx) = self.types.iter().position(|t| t.id == ty.id) {
+        if let Some(idx) = self.type_index_of(ty.id) {
             let existing = &self.types[idx];
             // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0533) — the LINCHPIN. An
             // alias descriptor (`type IoError is StreamError;`) carries no
@@ -5946,7 +6099,7 @@ impl VbcCodegen {
             }
             return;
         }
-        self.types.push(ty);
+        self.push_type_descriptor(ty);
     }
 
     /// Allocate a fresh user-defined `TypeId` that doesn't collide
@@ -6339,7 +6492,7 @@ impl VbcCodegen {
     /// verifier rejects them.
     #[doc(hidden)]
     pub fn push_type_for_test(&mut self, ty: crate::types::TypeDescriptor) {
-        self.types.push(ty);
+        self.push_type_descriptor(ty);
     }
 
     fn check_type_layout_invariants_inner(
@@ -6888,8 +7041,11 @@ impl VbcCodegen {
         if let Ok(canonical) = std::fs::canonicalize(source_path) {
             resolved_files.insert(canonical.to_string_lossy().to_string());
         }
+        mount_cost::reset();
+        let t0 = std::time::Instant::now();
         // Resolve mounts recursively (depth-limited to prevent infinite loops)
         self.resolve_mounts_recursive(module, source_path, core_root, &mut resolved_files, 0);
+        mount_cost::report(source_path, t0.elapsed());
     }
 
     /// Recursively resolves mount declarations up to a bounded depth.
@@ -6909,6 +7065,7 @@ impl VbcCodegen {
         // Collect all files to parse (avoid borrow issues with recursive calls)
         let mut to_parse: Vec<String> = Vec::new();
 
+        let t_discover = std::time::Instant::now();
         for item in module.items.iter() {
             // Honour the per-item @cfg gate. A `mount` whose attribute
             // doesn't match the current TargetConfig must not pull its
@@ -6926,9 +7083,9 @@ impl VbcCodegen {
                     let file_candidates =
                         Self::module_path_to_file_candidates(&module_path, source_path, core_root);
                     for candidate in file_candidates {
-                        let canonical = match std::fs::canonicalize(&candidate) {
-                            Ok(c) => c.to_string_lossy().to_string(),
-                            Err(_) => continue, // File doesn't exist
+                        let canonical = match Self::canonicalize_memo(&candidate) {
+                            Some(c) => c,
+                            None => continue, // File doesn't exist
                         };
                         if resolved_files.contains(&canonical) {
                             continue;
@@ -6964,16 +7121,16 @@ impl VbcCodegen {
                             dir.to_path_buf()
                         };
                         if walk_root.is_dir() {
-                            for vr_file in Self::walk_vr_files(&walk_root) {
-                                let canonical = match std::fs::canonicalize(&vr_file) {
-                                    Ok(c) => c.to_string_lossy().to_string(),
-                                    Err(_) => continue,
+                            for vr_file in Self::walk_vr_files_memo(&walk_root).iter() {
+                                let canonical = match Self::canonicalize_memo(vr_file) {
+                                    Some(c) => c,
+                                    None => continue,
                                 };
                                 if resolved_files.contains(&canonical) {
                                     continue;
                                 }
                                 resolved_files.insert(canonical);
-                                to_parse.push(vr_file);
+                                to_parse.push(vr_file.clone());
                             }
                             break; // Walked one valid root, done with this glob
                         }
@@ -6982,12 +7139,17 @@ impl VbcCodegen {
             }
         }
 
+        mount_cost::add_discover(t_discover.elapsed());
+
         // Parse and register each imported module
         for file_path in to_parse {
             #[cfg(feature = "codegen")]
             if let Ok(source) = std::fs::read_to_string(&file_path) {
+                let t_parse = std::time::Instant::now();
                 let mut parser = verum_fast_parser::Parser::new(&source);
-                if let Ok(imported_module) = parser.parse_module() {
+                let parsed = parser.parse_module();
+                mount_cost::add_parse(source.len(), t_parse.elapsed());
+                if let Ok(imported_module) = parsed {
                     // Recursively resolve mounts from this imported file first
                     self.resolve_mounts_recursive(
                         &imported_module,
@@ -6997,8 +7159,12 @@ impl VbcCodegen {
                         depth + 1,
                     );
                     // Then register its declarations
+                    let t_proto = std::time::Instant::now();
                     self.collect_protocol_definitions(&imported_module);
+                    let d_proto = t_proto.elapsed();
+                    let t_decls = std::time::Instant::now();
                     let _ = self.collect_all_declarations(&imported_module);
+                    mount_cost::add_collect(d_proto, t_decls.elapsed());
                 }
             }
         }
@@ -7051,10 +7217,96 @@ impl VbcCodegen {
         results
     }
 
+    /// [`walk_vr_files`] and [`std::fs::canonicalize`], memoized for the
+    /// lifetime of the process.
+    ///
+    /// T0717 root cause, MEASURED on `test_compile_stdlib_char` (one file,
+    /// mount closure = all of `core/`): 172 s total, of which parsing was
+    /// 0.62 s (0.4 %) and filesystem work 96.5 s (56 %).  The task's recorded
+    /// hypothesis — "the thread re-parses modules continuously" — was wrong;
+    /// the parse is the cheapest part.
+    ///
+    /// The cost is combinatorial, not algorithmic-in-one-place: **1195 of
+    /// core/'s 2560 files declare `mount core.*;`**, and each such glob walks
+    /// the whole `core/` tree again and calls `canonicalize` on every `.vr`
+    /// it finds.  1195 × 2560 ≈ 3.06 M `canonicalize` syscalls plus the
+    /// directory reads, per compiled file.  `resolved_files` deduplicates
+    /// the PARSE but not the WALK, so the second and later globs pay full
+    /// price to rediscover paths already known.
+    ///
+    /// The filesystem is immutable for the duration of a compile — the same
+    /// assumption `resolved_files` already makes when it treats a canonical
+    /// path as a stable identity — so both results are cacheable.  Memoizing
+    /// turns those 3.06 M syscalls into hash lookups.
+    ///
+    /// `VERUM_NO_MOUNT_FS_MEMO=1` restores the un-memoized behaviour (A/B
+    /// kill switch: it must reproduce the old timings exactly, which is how
+    /// the memo is shown to be a cost change and not a behaviour change).
+    fn mount_fs_memo_disabled() -> bool {
+        static DISABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *DISABLED.get_or_init(|| std::env::var_os("VERUM_NO_MOUNT_FS_MEMO").is_some())
+    }
+
+    /// Canonical path for `path`, or `None` when it does not exist.
+    /// Memoized — see [`Self::mount_fs_memo_disabled`].
+    fn canonicalize_memo(path: &str) -> Option<String> {
+        fn uncached(path: &str) -> Option<String> {
+            std::fs::canonicalize(path)
+                .ok()
+                .map(|c| c.to_string_lossy().to_string())
+        }
+        if Self::mount_fs_memo_disabled() {
+            return uncached(path);
+        }
+        static MEMO: std::sync::OnceLock<
+            std::sync::RwLock<std::collections::HashMap<String, Option<String>>>,
+        > = std::sync::OnceLock::new();
+        let memo = MEMO.get_or_init(Default::default);
+        if let Ok(guard) = memo.read()
+            && let Some(hit) = guard.get(path)
+        {
+            return hit.clone();
+        }
+        let value = uncached(path);
+        if let Ok(mut guard) = memo.write() {
+            guard.insert(path.to_string(), value.clone());
+        }
+        value
+    }
+
+    /// Every `.vr` file under `root`.  Memoized — see
+    /// [`Self::mount_fs_memo_disabled`].  Returns a shared handle rather
+    /// than a fresh `Vec` so the 1195 globs that name the same root also
+    /// stop re-allocating ~2560 `String`s apiece.
+    fn walk_vr_files_memo(root: &std::path::Path) -> std::sync::Arc<Vec<String>> {
+        if Self::mount_fs_memo_disabled() {
+            return std::sync::Arc::new(Self::walk_vr_files(root));
+        }
+        static MEMO: std::sync::OnceLock<
+            std::sync::RwLock<
+                std::collections::HashMap<std::path::PathBuf, std::sync::Arc<Vec<String>>>,
+            >,
+        > = std::sync::OnceLock::new();
+        let memo = MEMO.get_or_init(Default::default);
+        if let Ok(guard) = memo.read()
+            && let Some(hit) = guard.get(root)
+        {
+            return std::sync::Arc::clone(hit);
+        }
+        let value = std::sync::Arc::new(Self::walk_vr_files(root));
+        if let Ok(mut guard) = memo.write() {
+            guard.insert(root.to_path_buf(), std::sync::Arc::clone(&value));
+        }
+        value
+    }
+
     /// Walk a directory recursively and collect every `.vr` file path.
     /// Used by the glob-mount expansion to enumerate all sibling
     /// modules under a `mount core.*` / `mount core.text.*` declaration.
     /// Skips hidden directories and target build artefacts.
+    ///
+    /// Call [`Self::walk_vr_files_memo`] instead from resolution paths that
+    /// may repeat a root — this is the uncached primitive.
     fn walk_vr_files(root: &std::path::Path) -> Vec<String> {
         let mut out = Vec::new();
         let mut stack: Vec<std::path::PathBuf> = vec![root.to_path_buf()];
@@ -7547,6 +7799,7 @@ impl VbcCodegen {
         self.ctx.reset();
         self.functions.clear();
         self.types.clear();
+        self.type_index.clear();
         self.next_func_id = 0;
         self.next_type_id = 0;
         self.closure_counter = 0;
@@ -8149,7 +8402,7 @@ impl VbcCodegen {
                         if !self.type_name_to_id.contains_key(&pn) {
                             let proto_id = self.alloc_user_type_id();
                             let name_sid = StringId(self.ctx.intern_string_raw(&pn));
-                            self.types.push(crate::types::TypeDescriptor {
+                            self.push_type_descriptor(crate::types::TypeDescriptor {
                                 id: proto_id,
                                 name: name_sid,
                                 kind: crate::types::TypeKind::Protocol,
@@ -8159,10 +8412,7 @@ impl VbcCodegen {
                         }
                         if let Some(&proto_type_id) = self.type_name_to_id.get(&pn) {
                             // Get protocol method names in vtable order (from protocol's variants)
-                            let method_names: Vec<String> = self
-                                .types
-                                .iter()
-                                .find(|td| td.id == proto_type_id)
+                            let method_names: Vec<String> = self.type_by_id(proto_type_id)
                                 .map(|td| {
                                     td.variants
                                         .iter()
@@ -8343,7 +8593,7 @@ impl VbcCodegen {
                                     self.type_name_to_id.get(ty_name.as_str())
                                 {
                                     if let Some(parent_desc) =
-                                        self.types.iter().find(|t| t.id == parent_tid)
+                                        self.type_by_id(parent_tid)
                                     {
                                         for tp in parent_desc.type_params.iter() {
                                             if let Some(n) =
@@ -15530,7 +15780,7 @@ impl VbcCodegen {
     ) -> Option<TypeRef> {
         let parent_name = self.ctx.current_impl_type_name.as_ref()?;
         let &parent_tid = self.type_name_to_id.get(parent_name.as_str())?;
-        let parent_desc = self.types.iter().find(|t| t.id == parent_tid)?;
+        let parent_desc = self.type_by_id(parent_tid)?;
         if parent_desc.type_params.is_empty() {
             return Some(TypeRef::Concrete(parent_tid));
         }
@@ -17183,7 +17433,7 @@ impl VbcCodegen {
         //    sequences in stdlib bootstrap).
         if let Some(parent_name) = impl_type_name {
             if let Some(&parent_tid) = self.type_name_to_id.get(parent_name.as_str()) {
-                if let Some(parent_desc) = self.types.iter().find(|t| t.id == parent_tid) {
+                if let Some(parent_desc) = self.type_by_id(parent_tid) {
                     for tp in parent_desc.type_params.iter() {
                         if let Some(name) = self.ctx.strings.get(tp.name.0 as usize) {
                             if !method_generic_param_map.contains_key(name) {
@@ -18782,9 +19032,64 @@ impl VbcCodegen {
     /// record with a non-empty positional field list — i.e. field-index
     /// resolution against this key is trustworthy.
     /// META-GROUP-XMODULE-1 helper.
+    /// Append a descriptor to [`Self::types`] and record its index.
+    ///
+    /// The one door.  Pushing directly leaves the index without an entry —
+    /// which costs a linear scan, not correctness, because
+    /// [`Self::type_by_id`] verifies before it trusts.
+    fn push_type_descriptor(&mut self, ty: TypeDescriptor) {
+        self.type_index.insert(ty.id.0, self.types.len());
+        // The ONLY `self.types.push` in the crate — everything else goes
+        // through this function, which is what keeps the index warm.
+        self.types.push(ty);
+    }
+
+    /// The descriptor with this id, via the index when it is warm and via
+    /// a linear scan otherwise.
+    ///
+    /// The `filter` is the whole safety argument: the index is consulted,
+    /// then CHECKED against the descriptor actually sitting at that slot.
+    /// A stale or wrong entry therefore degrades to the scan that was
+    /// there before, and cannot answer with somebody else's type.
+    fn type_by_id(&self, id: crate::types::TypeId) -> Option<&TypeDescriptor> {
+        if !Self::type_index_disabled()
+            && let Some(&idx) = self.type_index.get(&id.0)
+            && let Some(td) = self.types.get(idx)
+            && td.id == id
+        {
+            return Some(td);
+        }
+        self.types.iter().find(|t| t.id == id)
+    }
+
+    /// `VERUM_NO_TYPE_INDEX=1` — A/B kill switch for the index.
+    ///
+    /// Every other change in this campaign carries one, and this one needs
+    /// it for the same reason: without a switch the "before" number has to
+    /// come from a DIFFERENT BUILD, and then any difference can be blamed
+    /// on the build rather than the change.  With the switch, both numbers
+    /// come from one binary in one session — the only form of A/B that
+    /// survives a loaded machine.
+    fn type_index_disabled() -> bool {
+        static DISABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *DISABLED.get_or_init(|| std::env::var_os("VERUM_NO_TYPE_INDEX").is_some())
+    }
+
+    /// Index of the descriptor with this id — the `position` twin of
+    /// [`Self::type_by_id`], with the same verify-then-trust rule.
+    fn type_index_of(&self, id: crate::types::TypeId) -> Option<usize> {
+        if !Self::type_index_disabled()
+            && let Some(&idx) = self.type_index.get(&id.0)
+            && self.types.get(idx).is_some_and(|t| t.id == id)
+        {
+            return Some(idx);
+        }
+        self.types.iter().position(|t| t.id == id)
+    }
+
     fn record_key_is_authoritative(&self, key: &str) -> bool {
         if let Some(&tid) = self.type_name_to_id.get(key)
-            && let Some(td) = self.types.iter().find(|t| t.id == tid)
+            && let Some(td) = self.type_by_id(tid)
             && matches!(td.kind, crate::types::TypeKind::Record)
             && !td.fields.is_empty()
         {
@@ -18939,7 +19244,7 @@ impl VbcCodegen {
                     let is_wrapper_field = self
                         .type_name_to_id
                         .get(wrapper_base)
-                        .and_then(|&tid| self.types.iter().find(|t| t.id == tid))
+                        .and_then(|&tid| self.type_by_id(tid))
                         .map(|td| {
                             td.fields.iter().any(|fd| {
                                 self.ctx
@@ -18978,7 +19283,7 @@ impl VbcCodegen {
                 None => tn,
             };
             if let Some(&tid) = self.type_name_to_id.get(stripped)
-                && let Some(td) = self.types.iter().find(|t| t.id == tid)
+                && let Some(td) = self.type_by_id(tid)
                 && matches!(td.kind, crate::types::TypeKind::Record)
             {
                 // **Authoritative resolution: compare the field's actual
@@ -19419,7 +19724,7 @@ impl VbcCodegen {
         let key: &str = rekeyed.as_deref().unwrap_or(stripped);
 
         let tid = *self.type_name_to_id.get(key)?;
-        let td = self.types.iter().find(|t| t.id == tid)?;
+        let td = self.type_by_id(tid)?;
         let fd = td.fields.iter().find(|fd| {
             self.ctx
                 .strings
@@ -23026,7 +23331,7 @@ impl VbcCodegen {
                 let stub_name_id = crate::types::StringId(
                     self.ctx.intern_string_raw(&proto_name),
                 );
-                self.types.push(crate::types::TypeDescriptor {
+                self.push_type_descriptor(crate::types::TypeDescriptor {
                     id: codegen_id,
                     name: stub_name_id,
                     kind: crate::types::TypeKind::Protocol,
@@ -23108,7 +23413,7 @@ impl VbcCodegen {
             // is the well-known-types convention for the Verum
             // builtins like Maybe/Result/Ordering), use its name.
             let target_name = target_name.or_else(|| {
-                self.types.iter().find(|t| t.id == target_tid).and_then(|t| {
+                self.type_by_id(target_tid).and_then(|t| {
                     self.ctx.strings.get(t.name.0 as usize).cloned()
                 })
             });
@@ -23826,7 +24131,7 @@ impl VbcCodegen {
                             if let Some((new_dst, archive_type_id)) = last_new
                                 && new_dst == *val
                                 && let Some(&user_tid) = type_id_remap.get(&archive_type_id)
-                                && let Some(td) = self.types.iter().find(|t| t.id.0 == user_tid)
+                                && let Some(td) = self.type_by_id(crate::types::TypeId(user_tid))
                                 && let Some(canonical_name) =
                                     self.ctx.strings.get(td.name.0 as usize).cloned()
                             {
