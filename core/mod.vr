@@ -136,6 +136,19 @@ public module subtle;
 // they are a layer above and not part of the group declared just here.
 public module id;
 
+// Currency-aware monetary value, on top of the V0 numeric quartet
+// (Decimal / BigInt / BigDecimal / Rational): a `Money` type, an ISO
+// 4217 `Currency` descriptor with ~25 predefined currencies, and
+// minor-unit-exact arithmetic.
+//
+
+// Same omission `core.action` carried until it was wired below:
+// `core/money/` declares `module core.money;` and its own submodules,
+// so it resolved by exact path (`mount core.money.currency`) while
+// being ABSENT from the stdlib root surface — nothing reachable from
+// `core` could see it, and the prelude had nothing to re-export from.
+public module money;
+
 // =============================================================================
 // Layer 0.5: Mathematics (Depends on: base, intrinsics, simd)
 // =============================================================================
@@ -477,6 +490,16 @@ public module script;
 //  (common, sqlite, postgres, mysql)
 public module proof;
 public module types;
+
+// The `@arch_module(...)` vocabulary itself — `Foundation`,
+// `MsfsStratum` and `Lifecycle` (declared in `core.types` and re-
+// exported here), the canonical-field roster, and the attribute's
+// parser + error type.  Every attested module in the library names
+// these three, so the module that DEFINES them belongs on the root
+// surface; like `core.money` above it was reachable only by exact
+// path.  Sits next to `types` because that is where its vocabulary
+// comes from.
+public module architecture;
 public module verify;
 public module logic;
 public module concurrency;

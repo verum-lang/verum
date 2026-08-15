@@ -59,6 +59,8 @@ public module env;
 public module data;  // Structured dynamic data
 public module cell;  // Interior mutability (Cell, RefCell)
 public module semver;     // Semantic Versioning 2.0.0 parser + comparator
+public module semver_constraint;  // `^1.2`, `>=1.0 <2.0` — ranges over `semver`
+public module retry;      // Backoff policies + retry driver over `Result`
 public module glob;       // Shell-style glob pattern matching (* ** ? [...])
 
 // uuid / ulid / nanoid / snowflake are NOT declared here. 597ef22e2 moved
