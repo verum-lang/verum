@@ -294,11 +294,11 @@ fn test_heap_ord() {
     assert(b > a);
     assert(a <= b);
     assert(b >= a);
-    assert_eq((*a).cmp(&*b), Less); // T0638: a.cmp(&b) should work here
-    assert_eq((*b).cmp(&*a), Greater);
+    assert_eq(a.cmp(&b), Less);
+    assert_eq(b.cmp(&a), Greater);
 
     let c = Heap.new(10);
-    assert_eq((*a).cmp(&*c), Equal); // T0638
+    assert_eq(a.cmp(&c), Equal);
 }
 
 @test
