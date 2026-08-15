@@ -55,6 +55,7 @@ Usage:
     check_type_name_collisions.py                  # gate
     check_type_name_collisions.py --list           # print every collision
     check_type_name_collisions.py --write-baseline # re-record
+    check_type_name_collisions.py --self-test      # check the extractor itself
 """
 
 from __future__ import annotations
@@ -161,7 +162,47 @@ def read_known() -> set[str]:
     }
 
 
+SELF_TEST_CASES = [
+    # (source line, the name it declares — or None)
+    ("type Point is { x: Float };", "Point"),
+    ("public type UserId is (Int);", "UserId"),
+    ("public type affine ArenaScope is { p: Ptr };", "ArenaScope"),
+    ("type linear Token is ();", "Token"),
+    ("type Tree<T> is Leaf(T) | Node { l: Heap<Tree<T>> };", "Tree"),
+    ("type Wrapper<T: Into<U>, U> is { v: T };", "Wrapper"),
+    ("type Iterator is protocol { type Item; };", "Iterator"),
+    ("    type Output = Result<T, BroadcastRecvError>;", None),
+    ("    type Item;", None),
+    ("    type Item: Clone;", None),
+]
+
+
+def self_test() -> int:
+    r"""Check the extractor against hand-written cases of all three forms.
+
+    Both defects this gate has had were in `declares_a_type`, not in the
+    counting around it: a `(\w+)` capture that returned the MODIFIER, and
+    a missing `is` that turned every associated-type binding into a
+    declaration.  Neither shows up as an error — each just moves the
+    number, and a number is exactly what a ratchet is not supposed to
+    argue with.  So the control ships with the instrument.
+    """
+    bad = 0
+    for src, want in SELF_TEST_CASES:
+        got = declares_a_type(src)
+        if got != want:
+            bad += 1
+            print(f"FAIL {src!r} -> {got!r}, expected {want!r}", file=sys.stderr)
+    if bad:
+        print(f"self-test: {bad} of {len(SELF_TEST_CASES)} case(s) FAILED", file=sys.stderr)
+        return 1
+    print(f"[ok] self-test: {len(SELF_TEST_CASES)} extractor case(s) hold")
+    return 0
+
+
 def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
     coll = collisions()
     pairs = as_pairs(coll)
     plat = {n for n, ps in coll.items() if all(PLATFORM.match(p) for p in ps)}

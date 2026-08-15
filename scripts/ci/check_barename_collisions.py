@@ -41,7 +41,17 @@ BASELINE_SQLITE = 84
 # implementation runs, and 14 of the 20 prelude math functions currently
 # resolve to SQLite's SQL builtins and answer `Relaxed` instead of a number
 # (measured 2026-08-11 through `mount core.prelude.*`).
-BASELINE_PRELUDE = 26
+#
+# THE NUMBER CHANGED MEANING on 2026-08-16, so it is not comparable with the
+# 26 recorded before.  `prelude_named_exports` used to read only the
+# explicitly named re-exports of `core/mod.vr`, and that file carries 15
+# mount lines of which TWELVE are globs and three name a symbol (List / Map /
+# Set).  Those three are TYPE names while this scope keys on
+# `(function name, arity)`, so the scope was structurally incapable of
+# reporting a collision — it printed "0 collisions [prelude]" against a
+# baseline of 26 and read as a clean surface.  With the globs resolved the
+# visible surface is 281 names and the honest count is 17.
+BASELINE_PRELUDE = 17
 # Same populations under the (name, arity, first-param type) key — the
 # REUSE question. Duplicated WORK, not merely a shared verb.
 BASELINE_ALL_TYPED = 297
@@ -67,7 +77,19 @@ DECL = re.compile(r"^public fn (\w+)\s*\(([^)]*)\)")
 # declaring a private `SinkInner` sent every field of both through the
 # positional GUESS path (T0723). Counting only `public` measured the wrong
 # set — this scope was widened after that case.
-TYPE_DECL = re.compile(r"^(?:public\s+)?type\s+(\w+)")
+#
+# ONE AUTHORITY for "is this line a type declaration, and what does it
+# declare".  This file used to carry its own
+# `re.compile(r"^(?:public\s+)?type\s+(\w+)")`, and a second copy of a
+# rule is a second chance to disagree with the grammar: `(\w+)` captures
+# the MODIFIER, so all 41 of core/'s `type affine …` / `type linear …`
+# declarations were read as a type named `affine` or `linear`.  The gate
+# duly reported a collision on the name `affine` across 36 files while
+# losing the 41 real names.  `check_type_name_collisions.declares_a_type`
+# reads the grammar's `type_def` production and is now the only place
+# that decision is made.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from check_type_name_collisions import declares_a_type  # noqa: E402
 
 # The two questions this script answers are NOT the same, and conflating
 # them overstates the reuse problem threefold:
@@ -102,20 +124,80 @@ def arity(params: str) -> int:
     return len([p for p in params.split(",") if p.strip()])
 
 
-def prelude_named_exports() -> set[str]:
-    """Names the prelude re-exports EXPLICITLY, from `core/mod.vr`.
+def module_public_surface(dotted: str, depth: int = 2) -> set[str]:
+    """Public names a `core/` module exports, following its own re-exports.
 
-    LIMITATION, stated rather than hidden: the prelude also carries ~13
-    `public mount super.<mod>.*;` globs, whose members are NOT counted here —
-    enumerating them means resolving each module's public surface, which this
-    script deliberately does not do. So the prelude count is a LOWER BOUND on
-    the ambiguous names a user can hit without importing anything.
+    `dotted` is the path after `super.` — `base.panic` resolves to
+    `core/base/panic.vr`, else `core/base/panic/mod.vr`.  Collected: its
+    own column-0 `public fn` / type declarations, its braced and
+    single-name re-exports, and (while `depth` lasts) the surface behind
+    its own globs.  Bounded rather than complete: two hops is what the
+    prelude actually uses, and an unbounded walk would make this script a
+    module resolver.
+    """
+    if depth < 0:
+        return set()
+    rel = dotted.replace(".", "/")
+    for cand in (CORE / f"{rel}.vr", CORE / rel / "mod.vr"):
+        if cand.is_file():
+            path = cand
+            break
+    else:
+        return set()
+    try:
+        src = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return set()
+    names: set[str] = set()
+    for line in src.splitlines():
+        m = DECL.match(line)
+        if m:
+            names.add(m.group(1))
+        t = declares_a_type(line)
+        if t:
+            names.add(t)
+    names |= mount_named_exports(src)
+    # `public mount .sub.*;` / `public mount super.x.y.*;` inside the module.
+    for g in re.finditer(r"public mount (\.?)([\w.]+)\.\*\s*;", src):
+        sub = g.group(2)
+        child = f"{dotted}.{sub}" if g.group(1) == "." else sub
+        names |= module_public_surface(child, depth - 1)
+    return names
+
+
+def mount_named_exports(src: str) -> set[str]:
+    """Explicitly named re-exports in one source: braced lists + singles."""
+    names: set[str] = set()
+    for block in re.finditer(r"public mount [\w.]*\{([^}]*)\}", src, re.S):
+        body = re.sub(r"//[^\n]*", "", block.group(1))
+        for name in re.split(r"[,\s]+", body):
+            if re.fullmatch(r"[A-Za-z_]\w*", name):
+                names.add(name)
+    for one in re.finditer(r"public mount [\w.]*\.(\w+)\s*;", src):
+        names.add(one.group(1))
+    return names
+
+
+def prelude_named_exports() -> set[str]:
+    """Every name a user meets from `core/mod.vr` without importing.
+
+    WHY THIS RESOLVES GLOBS NOW.  It used to read only the explicitly
+    named re-exports and say so — "the prelude count is a LOWER BOUND".
+    But `core/mod.vr` carries 15 mount lines of which TWELVE are globs
+    (`public mount super.base.maybe.*;`) and only three name a symbol
+    (List / Map / Set).  Those three are TYPE names, and this scope keys
+    on `(function name, arity)`, so the lower bound was structurally
+    ZERO: the gate could not report a collision no matter what core/
+    contained, while printing "0 collisions [prelude]" as though the
+    surface were clean.  A bound that cannot move is not a bound.
     """
     try:
         src = PRELUDE_SOURCE.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return set()
     names: set[str] = set()
+    for g in re.finditer(r"public mount super\.([\w.]+)\.\*\s*;", src):
+        names |= module_public_surface(g.group(1))
     # `public mount super.math.{sin, cos, ...};` — braced lists, possibly
     # spanning lines and carrying `//` comments between entries.
     for block in re.finditer(r"public mount super\.[\w.]+\.\{([^}]*)\}", src, re.S):
@@ -139,9 +221,9 @@ def collect_types() -> dict[tuple, set[str]]:
         except OSError:
             continue
         for line in text.splitlines():
-            m = TYPE_DECL.match(line)
-            if m:
-                found[(m.group(1),)].add(rel)
+            name = declares_a_type(line)
+            if name:
+                found[(name,)].add(rel)
     return found
 
 
