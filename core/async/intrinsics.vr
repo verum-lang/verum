@@ -30,7 +30,7 @@ mount super.future.Future;
 mount super.task.{Task, JoinHandle};
 
 // =============================================================================
-// Executor Intrinsic Type
+// ExecutorHandle Intrinsic Type
 // =============================================================================
 
 /// Low-level executor handle for direct task management.
@@ -39,21 +39,36 @@ mount super.task.{Task, JoinHandle};
 /// This provides the intrinsic API used by the compiler when
 /// lowering async/await expressions. User code should prefer
 /// the higher-level `Runtime` from async/executor.vr.
-public type Executor is {
+// Renamed from `Executor` (T0458).  Two modules declared that simple
+// name — this one and `core/shell/executor.vr`, whose `Executor` is a
+// shell-command policy `{timeout, retry, cancel_token, grace}` — and the
+// layout registry keys by the simple name, so whichever registered first
+// answered for both.  That is what fails
+// `codegen::test_params::test_compile_stdlib_async_intrinsics`.
+//
+// This side is the one that yields the name, and its own doc line says
+// why: "User code should prefer the higher-level `Runtime` from
+// async/executor.vr".  An internal opaque handle should not hold the
+// general word.  `ExecutorHandle` is also what it IS — a `handle: Int`.
+//
+// The real cure is a module-qualified registry key (T0458's own
+// acceptance); a rename is the local remedy that unblocks the check
+// without pretending the class is closed.
+public type ExecutorHandle is {
     /// Opaque pointer to the runtime implementation.
     /// May be a C runtime handle or a native Verum executor.
     handle: Int,
 };
 
-implement Executor {
+implement ExecutorHandle {
     /// Get the current thread's executor, or Maybe.None if not in async context.
-    public fn current() -> Maybe<Executor> {
+    public fn current() -> Maybe<ExecutorHandle> {
         // The executor handle is stored in TLS context slot 0
         // by the Runtime.block_on() method.
         @cfg(target_os = "linux")
         {
             match sys.linux.tls.ctx_get(0) {
-                Maybe.Some(ptr) => Maybe.Some(Executor { handle: ptr as Int }),
+                Maybe.Some(ptr) => Maybe.Some(ExecutorHandle { handle: ptr as Int }),
                 Maybe.None => Maybe.None,
             }
         }
@@ -61,7 +76,7 @@ implement Executor {
         @cfg(target_os = "macos")
         {
             match sys.darwin.tls.ctx_get(0) {
-                Maybe.Some(ptr) => Maybe.Some(Executor { handle: ptr as Int }),
+                Maybe.Some(ptr) => Maybe.Some(ExecutorHandle { handle: ptr as Int }),
                 Maybe.None => Maybe.None,
             }
         }
@@ -69,7 +84,7 @@ implement Executor {
         @cfg(target_os = "windows")
         {
             match sys.windows.tls.ctx_get(0) {
-                Maybe.Some(ptr) => Maybe.Some(Executor { handle: ptr as Int }),
+                Maybe.Some(ptr) => Maybe.Some(ExecutorHandle { handle: ptr as Int }),
                 Maybe.None => Maybe.None,
             }
         }
@@ -77,7 +92,7 @@ implement Executor {
 
     /// Check if we're currently inside an async execution context.
     public fn in_async_context() -> Bool {
-        Executor.current().is_some()
+        ExecutorHandle.current().is_some()
     }
 }
 
@@ -103,7 +118,7 @@ public fn spawn_with_env<F: Future>(future: F) -> JoinHandle<F.Output>;
 /// Used when the target executor is known at compile time
 /// (e.g., spawning on main thread's executor).
 @intrinsic("async_executor_spawn")
-public fn executor_spawn<F: Future>(executor: &Executor, future: F) -> JoinHandle<F.Output>;
+public fn executor_spawn<F: Future>(executor: &ExecutorHandle, future: F) -> JoinHandle<F.Output>;
 
 /// Block on a future using an executor.
 ///

@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.full_outer_join_api.plan;
 
-mount core.database.sqlite.native.full_outer_join_api.pair.{JoinPair};
+mount core.database.sqlite.native.full_outer_join_api.pair.{JoinAliasPair};
 mount core.database.sqlite.native.full_outer_join_api.join_kind.{
     JoinKind, JkInner, JkLeft, JkRight, JkFull, JkCross,
     preserves_left, preserves_right,
@@ -31,7 +31,7 @@ public fn strategy_name(s: &JoinStrategy) -> Text {
 }
 
 // Pick the default strategy the planner would emit without other hints.
-public fn default_strategy(p: &JoinPair) -> JoinStrategy {
+public fn default_strategy(p: &JoinAliasPair) -> JoinStrategy {
     match p.kind {
         JkInner => JsNestedLoop,
         JkCross => JsNestedLoop,

@@ -164,7 +164,7 @@ public mount .generator.generator_repeat;
 public mount .generator.generator_successors;
 
 // From intrinsics (async-specific low-level operations)
-public mount .intrinsics.Executor;
+public mount .intrinsics.ExecutorHandle;
 public mount .intrinsics.spawn_with_env;
 public mount .intrinsics.executor_spawn;
 public mount .intrinsics.executor_block_on;
