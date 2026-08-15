@@ -92,6 +92,81 @@ pub use context::{CodegenContext, CodegenStats, ExprId, FunctionInfo, LoopContex
 /// Named for the QUESTION it answers — which phase owns the time — not
 /// for the fix it motivates; the numbers stay meaningful after the fix
 /// lands and are the check that it worked.
+/// Which method names reach a `CallM` UNQUALIFIED, and how often.
+///
+/// The archive's call graph expands a bare leaf over every same-named
+/// impl in the library — the reason the loader carries a fanout cap at
+/// all ("172 distinct `*.next` bodies", `archive_ctx_loader.rs`). After
+/// routing every emission site through `call_method_id`, the closure for
+/// a program touching `Maybe` was UNCHANGED (5500 -> 5502 qualified
+/// symbols, 255 modules, ~7.3 s), which measured those sites as not the
+/// source.
+///
+/// The source is one conditional fallback in the main instance-method
+/// path: `{Type}.{method}` is looked up and, when the function table has
+/// no entry YET — an impl in a module compiled later, a protocol default
+/// — the bare name is emitted. The type is known; the registry is not
+/// complete.
+///
+/// This counts that branch by method name, so the fanout can be aimed at
+/// a list of declarations rather than at the whole registry. Behind
+/// `VERUM_TRACE_BARE_METHOD`, so an untraced build pays one relaxed
+/// env read per fallback.
+mod bare_method {
+    use std::cell::RefCell;
+    use std::collections::BTreeMap;
+
+    thread_local! {
+        static COUNTS: RefCell<BTreeMap<String, u64>> =
+            RefCell::new(BTreeMap::new());
+    }
+
+    pub(super) fn enabled() -> bool {
+        std::env::var_os("VERUM_TRACE_BARE_METHOD").is_some()
+    }
+
+    /// Record one unqualified emission of `method` on a receiver whose
+    /// type WAS known (`ty`) — the pair is what makes the record
+    /// actionable: it names both the leaf that fans out and the type
+    /// whose impl the table was missing.
+    pub(super) fn record(ty: &str, method: &str) {
+        if !enabled() {
+            return;
+        }
+        COUNTS.with_borrow_mut(|m| {
+            *m.entry(format!("{}.{}", ty, method)).or_insert(0) += 1;
+        });
+    }
+
+    /// Print the tally, widest first. Prints NOTHING when the branch
+    /// never fired — and that silence is meaningful here only because
+    /// the counter is keyed by name: an empty report means no fallback,
+    /// not an instrument on a path never taken.
+    pub(super) fn report(label: &str) {
+        if !enabled() {
+            return;
+        }
+        COUNTS.with_borrow(|m| {
+            if m.is_empty() {
+                eprintln!("[bare-method] {}: no unqualified emissions", label);
+                return;
+            }
+            let mut rows: Vec<(&String, &u64)> = m.iter().collect();
+            rows.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+            let total: u64 = rows.iter().map(|(_, c)| **c).sum();
+            eprintln!(
+                "[bare-method] {}: {} unqualified emission(s) over {} distinct name(s)",
+                label,
+                total,
+                rows.len()
+            );
+            for (name, count) in rows.iter().take(20) {
+                eprintln!("[bare-method]   {:>6}  {}", count, name);
+            }
+        });
+    }
+}
+
 mod mount_cost {
     // `add_parse` / `add_collect` are called only from the `codegen`-gated
     // parse loop; without that feature the module is still compiled.
@@ -5231,6 +5306,7 @@ impl VbcCodegen {
     /// and ensures every call target has a descriptor.
     pub fn finalize_module(&mut self) -> CodegenResult<VbcModule> {
         mount_cost::report_aliases("finalize_module");
+        bare_method::report("finalize_module");
         self.dump_vbc_if_requested();
         // Compile any pending constants (struct literals, etc.) before building
         self.compile_pending_constants()?;
@@ -7708,6 +7784,9 @@ impl VbcCodegen {
     /// replaces the per-file `build_module + merge` chain.
     pub fn finalize_module_from_state(&mut self) -> CodegenResult<VbcModule> {
         mount_cost::report_aliases("finalize_module_from_state");
+        // The stdlib bake finalises through THIS one, so the tally that
+        // matters for the archive's fanout is reported here.
+        bare_method::report("finalize_module_from_state");
         self.dump_vbc_if_requested();
         // Stdlib precompile finalize — MINIMAL path.
         //

@@ -6060,6 +6060,14 @@ impl VbcCodegen {
                 } else {
                     Reg(0)
                 };
+                // Bare BY CONSTRUCTION: the receiver is a type PARAMETER
+                // resolved by a CallG-delivered witness, so there is no
+                // type to qualify with. Counted anyway — "legitimately
+                // bare" explains why the type is absent, not what the
+                // archive's graph does with the result, and a witness
+                // call whose name matches many impls fans out like any
+                // other (T0753).
+                crate::codegen::bare_method::record("<witness>", method_ident.name.as_str());
                 let method_id = self.ctx.intern_string_raw(method_ident.name.as_str());
                 let result = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::CallM {
@@ -11234,6 +11242,23 @@ impl VbcCodegen {
                 let method_id = if self.ctx.lookup_function(&qualified_method).is_some() {
                     self.intern_string(&qualified_method)
                 } else {
+                    // The type IS known here — `qualified_method` was just
+                    // built from it. The bare name goes out only because
+                    // the function table has no entry for it YET: an impl
+                    // in a module compiled later, or a protocol default.
+                    // That makes this the registry-completeness half of
+                    // T0753, not the caller-discards-what-it-holds half
+                    // that `call_method_id` closed.
+                    //
+                    // Counted rather than fixed here, because the fix is
+                    // to populate the table before this question is asked
+                    // (T0640's "one shared entry point", T0723's AST
+                    // pre-pass) and that wants to know WHICH names it must
+                    // cover.
+                    crate::codegen::bare_method::record(
+                        &type_name.to_string(),
+                        method.name.as_str(),
+                    );
                     self.intern_string(method.name.as_str())
                 };
                 self.ctx.emit(Instruction::CallM {
@@ -11336,6 +11361,8 @@ impl VbcCodegen {
                             crate::types::TypeParamId(idx as u16),
                         ),
                     });
+                        // второй свидетель (LoadT{Generic}) — считаем, чтобы веер имел имена (T0753).
+                        crate::codegen::bare_method::record("<witness>", method.name.as_str());
                     let method_id =
                         self.ctx.intern_string_raw(method.name.as_str());
                     let result = self.ctx.alloc_temp();
@@ -12234,8 +12261,20 @@ impl VbcCodegen {
                     } else {
                         Reg(0)
                     };
-                    let method_id =
-                        self.ctx.intern_string_raw(method.name.as_str());
+                    // `head` is the alias-resolved TYPE NAME — the same
+                    // one `type_name_to_id` was just keyed by to get `tid`
+                    // for the `LoadT{Concrete}` above. Qualify with it.
+                    //
+                    // Measured before changing it (T0753): a traced bake
+                    // of `core/` attributed ~233 unqualified emissions to
+                    // THIS site — zeroed, fmt, current, new, from_config,
+                    // default, zeros, from_scalar — against ~169 from the
+                    // two witness sites, where the receiver is a type
+                    // PARAMETER and there is genuinely nothing to qualify
+                    // with. So this was the dominant source of bare leaves
+                    // in the archive's call graph, and the only one of the
+                    // three that could be fixed at all.
+                    let method_id = self.call_method_id(Some(&head), method.name.as_str());
                     let result = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::CallM {
                         dst: result,
