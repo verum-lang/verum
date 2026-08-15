@@ -956,57 +956,39 @@ implement<T: Hash + Eq> From<List<T>> for Set<T> {
 }
 
 // =============================================================================
-// Foundation Protocol Impls — delegate to inner Map<T, ()>
+// Hash — delegate to inner Map<T, ()>
 // =============================================================================
-
-implement<T: Hash + Eq + Clone> Clone for Set<T> {
-    fn clone(&self) -> Set<T> {
-        Set { inner: self.inner.clone() }
-    }
-}
-
-implement<T: Hash + Eq> Default for Set<T> {
-    fn default() -> Set<T> {
-        Set.new()
-    }
-}
-
-implement<T: Hash + Eq + Debug> Eq for Set<T> {
-    fn eq(&self, other: &Set<T>) -> Bool {
-        // Equality on Map<K, ()> is keyed by K — set semantics.
-        self.inner == other.inner
-    }
-}
+//
+// This section used to also carry Clone, Default, Eq, Debug and Display
+// for `Set<T>`, all five of which were ALREADY implemented two hundred
+// lines above.  The compiler saw it: `verum check` on this file reported
+// five "[coherence] Overlapping implementations" warnings, one per
+// protocol.  A second author added a "Foundation Protocol Impls" section
+// without noticing the first.
+//
+// `Clone` and `Default` were byte-identical to their twins.  `Debug` and
+// `Display` differed only in idiom — `for item in self.iter()` here, an
+// explicit `loop { match iter.next() }` above — and produced the same
+// output.
+//
+// `Eq` did NOT agree with its twin, which is why the earlier one is the
+// survivor rather than this one:
+//
+//   * this version was bound `T: Hash + Eq + Debug`.  Its body never
+//     used `Debug`; the bound is a copy-paste from the `Debug` impl it
+//     sat beside, and it silently denied `Eq` to every `Set<T>` whose
+//     element type is not Debug.
+//   * this version delegated to `self.inner == other.inner`, making set
+//     equality depend on whatever `Map<K, ()>`'s `==` does.  The
+//     surviving one states set semantics directly — lengths, then
+//     membership — and carries the explicit `ne` that task #39 needs.
+//
+// `Hash` is the one implementation here with no twin, so it stays.
+// =============================================================================
 
 implement<T: Hash + Eq> Hash for Set<T> {
     fn hash(&self, hasher: &mut Hasher) {
         self.inner.hash(hasher);
-    }
-}
-
-implement<T: Hash + Eq + Debug> Debug for Set<T> {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str("{")?;
-        let mut first = true;
-        for item in self.iter() {
-            if !first { f.write_str(", ")?; }
-            item.fmt_debug(f)?;
-            first = false;
-        }
-        f.write_str("}")
-    }
-}
-
-implement<T: Hash + Eq + Display> Display for Set<T> {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str("{")?;
-        let mut first = true;
-        for item in self.iter() {
-            if !first { f.write_str(", ")?; }
-            item.fmt(f)?;
-            first = false;
-        }
-        f.write_str("}")
     }
 }
 
