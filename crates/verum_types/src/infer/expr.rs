@@ -11569,6 +11569,42 @@ impl TypeChecker {
         Ok(InferResult::new(Type::bool()))
     }
 
+    /// Element type behind a pointer-shaped argument of an `@intrinsic(...)`
+    /// call, or `None` when the argument does not synthesise to a pointer.
+    ///
+    /// `args[0]` of `@intrinsic("name", …)` is the NAME literal, so data
+    /// arguments start at index 1.
+    ///
+    /// Several pointer intrinsics used to answer with a bare `TypeVar::fresh()`
+    /// — a type unrelated to anything at the call site. `slice_from_raw_parts`
+    /// returning `&[fresh]` is why
+    ///
+    ///     let rest = unsafe { slice_from_raw_parts(p, n) };
+    ///
+    /// has no determined element type anywhere in core/collections/list.vr.
+    /// The argument already carries the answer; read it instead of inventing
+    /// one (T0742).
+    fn intrinsic_arg_pointee(&mut self, args: &[Expr], idx: usize) -> Option<Type> {
+        let arg = args.get(idx)?;
+        let synthesized = self.infer_expr(arg, InferMode::Synth).ok()?.ty;
+        match self.unifier.apply(&synthesized) {
+            Type::Reference { inner, .. }
+            | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. }
+            | Type::Pointer { inner, .. }
+            | Type::VolatilePointer { inner, .. } => Some(*inner),
+            _ => None,
+        }
+    }
+
+    /// `intrinsic_arg_pointee`, falling back to a fresh variable so a
+    /// non-pointer argument keeps the previous behaviour rather than failing
+    /// the whole inference.
+    fn intrinsic_arg_pointee_or_fresh(&mut self, args: &[Expr], idx: usize) -> Type {
+        self.intrinsic_arg_pointee(args, idx)
+            .unwrap_or_else(|| Type::Var(TypeVar::fresh()))
+    }
+
     fn infer_expr_meta_function(&mut self, expr: &Expr) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::MetaFunction { name, args } = &expr.kind else { unreachable!() };
@@ -11640,9 +11676,10 @@ impl TypeChecker {
                                     }
                                 }
                                 "dealloc" => Type::unit(),
-                                // Pointer operations
+                                // Pointer operations — the pointer argument
+                                // carries the element type; read it.
                                 "ptr_read" | "ptr_read_volatile" => {
-                                    Type::Var(TypeVar::fresh())
+                                    self.intrinsic_arg_pointee_or_fresh(args, 1)
                                 }
                                 "ptr_write"
                                 | "ptr_write_volatile"
@@ -11687,13 +11724,17 @@ impl TypeChecker {
                                 // Slice intrinsics - return reference to slice
                                 "slice_from_raw_parts" => Type::Reference {
                                     inner: Box::new(Type::Slice {
-                                        element: Box::new(Type::Var(TypeVar::fresh())),
+                                        element: Box::new(
+                                            self.intrinsic_arg_pointee_or_fresh(args, 1),
+                                        ),
                                     }),
                                     mutable: false,
                                 },
                                 "slice_from_raw_parts_mut" => Type::Reference {
                                     inner: Box::new(Type::Slice {
-                                        element: Box::new(Type::Var(TypeVar::fresh())),
+                                        element: Box::new(
+                                            self.intrinsic_arg_pointee_or_fresh(args, 1),
+                                        ),
                                     }),
                                     mutable: true,
                                 },

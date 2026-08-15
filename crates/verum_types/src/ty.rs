@@ -2998,6 +2998,22 @@ impl Type {
                 quantity: *quantity,
             },
 
+            // Slice — a CARRIER, not a leaf. Listing it below with the
+            // primitives made substitution a no-op inside `&[T]`: the element
+            // kept whatever variable the declaration minted, so instantiating
+            // `slice_len<T>(slice: &[T])` produced a fresh var that never
+            // reached the element and every call site went on sharing the
+            // declaration's own variable. Downstream that read as `&[_]`, and
+            // unifying it against a method's `&[T]` pinned the enclosing
+            // `implement<T> …` block's parameter (T0742).
+            Type::Slice { element } => Type::Slice {
+                element: Box::new(element.apply_subst_with_depth(
+                    subst,
+                    next_depth,
+                    max_depth,
+                )),
+            },
+
             // Primitives and other leaf types
             Type::Unit
             | Type::Never
@@ -3007,7 +3023,6 @@ impl Type {
             | Type::Char
             | Type::Text
             | Type::Lifetime { .. }
-            | Type::Slice { .. }
             | Type::Placeholder { .. } => self.clone(),
 
             // DynProtocol - substitute into bindings
