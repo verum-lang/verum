@@ -1779,6 +1779,31 @@ impl Unifier {
             // Type variables
             (Var(v1), Var(v2)) if v1 == v2 => Ok(Substitution::new()),
 
+            // Two unification variables: the OLDER one survives as the
+            // representative. `TypeVar::fresh()` hands out ids from a monotone
+            // counter, so a lower id means a wider scope — a declared type
+            // parameter is minted when its signature (or `implement` header) is
+            // read, and every var created while checking a body that mentions it
+            // is minted later.
+            //
+            // Direction here is not cosmetic. The arm below binds whichever var
+            // the caller happened to write on the LEFT, so `unify(T, fresh)`
+            // pinned the DECLARED PARAMETER to a body-local variable that
+            // nothing goes on to solve. One `implement<T> …` block mints a
+            // single var for `T` and shares it across every method
+            // (`check_impl_block_inner` in decls.rs), and the accumulated
+            // substitution is never reset between bodies — so that inverted bind
+            // leaked forward: after `List.from_slice` bound it, `T` read as `_`
+            // for every later method of `core/collections/list.vr` (T0742).
+            (Var(v1), Var(v2)) => {
+                let (younger, older) = if v1.id() >= v2.id() {
+                    (v1, v2)
+                } else {
+                    (v2, v1)
+                };
+                self.bind_var(*younger, &Type::Var(*older), span)
+            }
+
             (Var(v), ty) | (ty, Var(v)) => self.bind_var(*v, ty, span),
 
             // Function types
@@ -5861,6 +5886,89 @@ mod alias_aware_family_pins {
         assert!(u.is_range_like("AliasName"));
         u.register_sized_numeric_type(Text::from("HeadName"));
         assert!(u.is_sized_numeric("AliasName"));
+    }
+}
+
+#[cfg(test)]
+mod var_var_age_discipline {
+    //! When two unification variables meet, the OLDER one must survive as
+    //! the representative — a lower id means a wider scope.
+    //!
+    //! Before this rule the direction came from argument POSITION, so
+    //! `unify(T_declared, fresh)` pinned a declared type parameter to a
+    //! body-local variable nothing solves. Because an `implement<T> …` block
+    //! mints one var for `T` and shares it across every method, and the
+    //! accumulated substitution is never reset between bodies, that binding
+    //! leaked forward through the whole block (T0742).
+    use super::*;
+
+    #[test]
+    fn older_var_survives_regardless_of_argument_order() {
+        let older = TypeVar::fresh();
+        let younger = TypeVar::fresh();
+        assert!(older.id() < younger.id(), "fresh() must be monotone");
+
+        // Both argument orders must reach the SAME representative — that
+        // symmetry is the whole point; a positional rule passes one and
+        // fails the other.
+        for (first, second) in [(older, younger), (younger, older)] {
+            let mut u = Unifier::new();
+            u.unify(&Type::Var(first), &Type::Var(second), Default::default())
+                .expect("two type variables always unify");
+            assert_eq!(
+                u.apply(&Type::Var(younger)),
+                Type::Var(older),
+                "younger must resolve to older (unify order {}, {})",
+                first.id(),
+                second.id(),
+            );
+            assert_eq!(
+                u.apply(&Type::Var(older)),
+                Type::Var(older),
+                "the older var must stay free (unify order {}, {})",
+                first.id(),
+                second.id(),
+            );
+        }
+    }
+
+    /// A declared parameter unified with any number of body-local vars stays
+    /// the representative, so a later scope still sees it unpinned. This is
+    /// the shape the defect actually took: method after method in one
+    /// `implement` block, each contributing its own fresh vars.
+    #[test]
+    fn declared_param_survives_a_run_of_body_locals() {
+        let param = TypeVar::fresh();
+        let mut u = Unifier::new();
+        for _ in 0..8 {
+            let body_local = TypeVar::fresh();
+            u.unify(&Type::Var(param), &Type::Var(body_local), Default::default())
+                .expect("two type variables always unify");
+            assert_eq!(u.apply(&Type::Var(body_local)), Type::Var(param));
+        }
+        assert_eq!(
+            u.apply(&Type::Var(param)),
+            Type::Var(param),
+            "the declared parameter must never be pinned by a body-local var"
+        );
+    }
+
+    /// var→var edges now strictly decrease in id, so the substitution graph
+    /// is acyclic by construction — `a := b` followed by `b := a` can no
+    /// longer be built, whichever order the callers use.
+    #[test]
+    fn var_edges_cannot_form_a_cycle() {
+        let a = TypeVar::fresh();
+        let b = TypeVar::fresh();
+        let mut u = Unifier::new();
+        u.unify(&Type::Var(a), &Type::Var(b), Default::default())
+            .expect("two type variables always unify");
+        u.unify(&Type::Var(b), &Type::Var(a), Default::default())
+            .expect("re-unifying the same pair is a no-op");
+        // `apply` terminating with a bare var is the observable consequence:
+        // a cycle would either loop or resolve to the younger var.
+        assert_eq!(u.apply(&Type::Var(b)), Type::Var(a));
+        assert_eq!(u.apply(&Type::Var(a)), Type::Var(a));
     }
 }
 

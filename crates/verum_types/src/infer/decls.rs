@@ -7110,6 +7110,34 @@ impl TypeChecker {
     }
 
     /// Inner implementation of check_impl_block
+    /// T0742 PROBE (`VERUM_TRACE_IMPL_PARAM=1`): after each method body, print
+    /// what every type parameter of the enclosing `implement` block currently
+    /// resolves to.
+    ///
+    /// One block mints ONE var per parameter and shares it across every method
+    /// (see the loop below), and the accumulated substitution is never reset
+    /// between bodies — so the first body that pins the parameter decides it for
+    /// all the rest. This names that body: the line whose `->` stops being the
+    /// bare parameter var is the method that pinned it.
+    ///
+    /// The probe prints on EVERY method, pinned or not, so silence means the
+    /// loop was never reached — it cannot be read as "nothing was pinned".
+    fn trace_impl_param_pinning(&mut self, param_names: &List<Text>, method: &str) {
+        if std::env::var_os("VERUM_TRACE_IMPL_PARAM").is_none() {
+            return;
+        }
+        for name in param_names.iter() {
+            let bound = self.ctx.lookup_type(name.as_str()).cloned();
+            let resolved = bound.as_ref().map(|b| self.unifier.apply(b));
+            eprintln!(
+                "[impl-param] after {method}: {} = {} -> {}",
+                name.as_str(),
+                bound.map(|b| format!("{b:?}")).unwrap_or_else(|| "<unbound>".into()),
+                resolved.map(|r| format!("{r:?}")).unwrap_or_else(|| "<unbound>".into()),
+            );
+        }
+    }
+
     fn check_impl_block_inner(&mut self, impl_decl: &verum_ast::decl::ImplDecl) -> Result<()> {
         use verum_ast::decl::{ImplItemKind, ImplKind};
 
@@ -7383,6 +7411,7 @@ impl TypeChecker {
                     }
                     if let ImplItemKind::Function(func) = &item.kind {
                         self.check_function(func)?;
+                        self.trace_impl_param_pinning(&type_param_names, &func.name.name);
                         tracing::debug!("Type-checked method {}.{}", ty, func.name.name);
                     }
                 }
