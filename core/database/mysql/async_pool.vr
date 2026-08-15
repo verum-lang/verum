@@ -30,6 +30,9 @@ mount core.database.mysql.async_connection.{
     AsyncMysqlConnection, connect,
 };
 mount core.async.channel.{
+// Mounted rather than inherited: §4ter — the prelude carries only what
+// the LANGUAGE requires, and this is library API.
+mount core.sync.{AtomicInt};
     Sender, Receiver, bounded_channel,
 };
 

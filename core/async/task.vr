@@ -29,6 +29,9 @@ mount .future.*;
 // executor's worker pool — see the BlockingState/BlockingFuture
 // section below for the architectural rationale.
 mount core.runtime.pool.{ThreadPool};
+// Mounted rather than inherited: §4ter — the prelude carries only what
+// the LANGUAGE requires, and this is library API.
+mount core.sync.{Mutex, AtomicInt, AtomicBool};
 
 // =============================================================================
 // Task State

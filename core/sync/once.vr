@@ -22,6 +22,9 @@ mount core.*;
 mount .atomic.*;
 mount core.intrinsics.compiler_fence;
 mount core.intrinsics.spin_hint;
+// Mounted rather than inherited: §4ter — the prelude carries only what
+// the LANGUAGE requires, and this is library API.
+mount core.sync.atomic.{AtomicInt};
 
 // =============================================================================
 // Once

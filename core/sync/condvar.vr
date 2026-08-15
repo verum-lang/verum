@@ -74,6 +74,10 @@ mount sys.darwin.thread.{
 
 @cfg(target_os = "windows")
 mount sys.windows.thread.{
+// Mounted rather than inherited: §4ter — the prelude carries only what
+// the LANGUAGE requires, and this is library API.
+mount core.sync.mutex.{Mutex};
+mount core.sync.atomic.{AtomicInt};
     futex_wait as sys_futex_wait,
     futex_wake as sys_futex_wake,
 };

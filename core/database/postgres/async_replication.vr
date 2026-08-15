@@ -80,6 +80,9 @@ mount core.async.channel.{
     bounded_channel, oneshot,
 };
 mount core.async.task.{spawn_blocking, JoinHandle};
+// Mounted rather than inherited: §4ter — the prelude carries only what
+// the LANGUAGE requires, and this is library API.
+mount core.sync.{AtomicInt};
 
 // =============================================================================
 // Tunables

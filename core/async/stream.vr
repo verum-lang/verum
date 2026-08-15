@@ -54,6 +54,10 @@ mount collections.*;
 mount .poll.*;
 mount .waker.*;
 mount .future.*;
+// Mounted rather than inherited: §4ter — the prelude carries only what
+// the LANGUAGE requires, and this is library API.
+mount core.time.{Duration};
+mount core.time.instant.{Instant};
 
 // =============================================================================
 // Stream Protocol

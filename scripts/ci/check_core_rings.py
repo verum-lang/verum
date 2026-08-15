@@ -19,7 +19,7 @@ the layer of.
 Usage:
     check_core_rings.py            # report; exit 1 on any violation
     check_core_rings.py --census   # report the full edge table, exit 0
-    check_core_rings.py --root-mounts  # count `mount core.*` as the edges it is
+    check_core_rings.py --no-root-mounts  # the pre-2026-08-15 narrow view
 """
 
 from __future__ import annotations
@@ -144,16 +144,30 @@ def targets(mount_body: str, from_file: Path) -> list[str]:
         # It is not "no dependency" — it is a dependency on everything the
         # root re-exports.  See `root_reexports`.
         if EXPAND_ROOT_MOUNTS:
-            return [_longest_module_path([r]) for r in root_reexports()]
+            return list(root_reexports())
         return []
     return [_longest_module_path(parts)]
 
 
 # Whether `mount core.*;` / `mount core.{X};` expand to what the root
-# re-exports.  OFF by default: turning it on changes what the law SEES, and
-# that change is a finding to be decided on (T0749), not a silent new verdict
-# for every existing run.  `--root-mounts` turns it on.
-EXPAND_ROOT_MOUNTS = False
+# re-exports.  ON, and this is the whole point of the gate now.
+#
+# It shipped OFF for one commit, because at that moment turning it on would
+# have decided an architecture question rather than reported one: the law
+# saw 5277 edges and reported zero violations while 1267 of 8785 mount
+# sites — every `mount core.*;` — were invisible to it, and counting them
+# produced 423 upward edges and 15 cycles.
+#
+# Those are gone.  The prelude now publishes exactly the twelve `base.*`
+# submodules §4ter says it should, every other entry having been either
+# mounted explicitly by the handful of files that used it or shown by
+# measurement to be redundant with a compiler built-in.  With root mounts
+# counted the law holds over 20423 edges — four times what it used to
+# check — with zero violations.
+#
+# `--no-root-mounts` restores the narrow view, for comparing against a
+# pre-2026-08-15 run.
+EXPAND_ROOT_MOUNTS = True
 
 
 @lru_cache(maxsize=1)
@@ -185,10 +199,21 @@ def root_reexports() -> tuple[str, ...]:
         return ()
     text = strip_comments(mod.read_text(errors="replace"))
     seen: list[str] = []
-    for m in re.finditer(r"\bpublic\s+mount\s+super\.([A-Za-z_][A-Za-z0-9_]*)", text):
-        name = m.group(1)
-        if name not in seen:
-            seen.append(name)
+    for m in re.finditer(r"\bpublic\s+mount\s+super\.([^;{]+)", text):
+        # Resolve to the module that OWNS the re-exported symbol, not to its
+        # top-level directory.  The distinction is the whole accuracy of this
+        # function: the prelude publishes `collections.List`, a single type,
+        # NOT the `collections` directory.  Attributing the directory turned
+        # 25 named symbols into 9 whole-subtree dependencies and manufactured
+        # cycles (`collections -> io -> collections`) that the code does not
+        # contain — an over-approximation reported as a finding before it was
+        # checked against `core/mod.vr` itself.
+        parts = [p for p in m.group(1).split(".") if p and p != "*"]
+        if not parts:
+            continue
+        owner = _longest_module_path(parts)
+        if owner and owner not in seen:
+            seen.append(owner)
     return tuple(seen)
 
 
@@ -309,9 +334,10 @@ def placement_of(module: str, ring_of: dict[str, float]) -> str | None:
 
 def main() -> int:
     census = "--census" in sys.argv
-    if "--root-mounts" in sys.argv:
+    if "--no-root-mounts" in sys.argv:
         global EXPAND_ROOT_MOUNTS
-        EXPAND_ROOT_MOUNTS = True
+        EXPAND_ROOT_MOUNTS = False
+    if EXPAND_ROOT_MOUNTS:
         print(
             "[root-mounts] `mount core.*;` / `mount core.{…};` counted as edges to "
             f"the {len(root_reexports())} module(s) core/mod.vr re-exports: "

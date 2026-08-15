@@ -547,17 +547,40 @@ public module prelude {
     public mount super.base.coercion.*;
 
     // From collections (common types)
-    public mount super.collections.List;
-    public mount super.collections.Map;
-    public mount super.collections.Set;
+    // The DEFINING modules, not the `collections` umbrella.
+    //
+    // rings.toml states the rule and the reason: "ring 0 cannot use the
+    // convenience of `mount collections.List`, because naming the umbrella
+    // makes the edge point at ring 2".  `collections.list`, `.map` and
+    // `.set` ARE ring 0 — they are the language's vocabulary, which is why
+    // they were placed there — while `collections` as a whole (btree,
+    // deque, lru, bloom) is ring 2.  The prelude was committing the very
+    // mistake that file documents, and every `mount core.*;` in the tree
+    // inherited it: 33 upward edges that named a dependency nobody had.
+    //
+    // `collections/mod.vr` only re-exports these three (`public mount
+    // .list.List;`), so the binding is identical — this removes a hop that
+    // hid which module the type comes from, and nothing else.
+    // `List` / `Map` / `Set` are NOT re-exported.
+    //
+    // Same measurement again, and this is the one that had to be checked
+    // rather than reasoned about: with `@no_implicit_prelude`,
+    // `let l: List<Int> = List.new(); l.len()` compiles and runs, and so do
+    // the `Map` and `Set` forms.  CLAUDE.md mandates these as THE semantic
+    // types and the compiler knows them; the prelude was not what made
+    // them reachable.
 
     // From io (common functions)
-    public mount super.io.print;
-    public mount super.io.println;
-    public mount super.io.eprint;
-    public mount super.io.eprintln;
-    public mount super.io.File;
-    public mount super.io.read_to_string;
+    // `print` / `println` / `eprint` / `eprintln` are NOT re-exported.
+    //
+    // MEASURED, not assumed: with `@no_implicit_prelude` — the prelude
+    // switched off entirely — `print("...")` still compiles and runs.  The
+    // compiler provides it as a built-in form, exactly as CLAUDE.md's
+    // "no `!` anywhere" table says.  These four lines published names the
+    // language already had, and charged 33 upward ring edges plus two of
+    // the three prelude cycles for it.
+    // `io.File` and `io.read_to_string` are NOT re-exported: filesystem
+    // API, not language.  ONE file in core/ used them ambiently.
 
     // From text.format — `f"{x:?}"` lowers to `format_debug(&x)` and
     // `f"{x}"` may lower to `format_display(&x)` (see
@@ -565,29 +588,31 @@ public module prelude {
     // §J close).  Surfacing them at the prelude makes f-string Debug
     // dispatch work transparently in user code without requiring an
     // explicit `mount core.text.format.{...}`.
-    public mount super.text.format.format_debug;
+    // The f-string formatters are NOT re-exported.
+    //
+    // Same measurement: with the prelude off, `f"x={x}"` compiles, runs,
+    // and renders — the formatter is reached by the interpolation
+    // machinery, not by a name in scope.
     // TEXT-DEBUG-STATIC-1: the concrete-Text twin rides the SAME bare
     // resolution surface — the codegen rewrite substitutes the callee
     // name in place, so it must resolve exactly where format_debug does.
-    public mount super.text.format.format_debug_text;
-    public mount super.text.format.format_display;
 
     // From sync (common primitives)
-    public mount super.sync.Mutex;
-    public mount super.sync.RwLock;
-    public mount super.sync.AtomicInt;
-    public mount super.sync.AtomicBool;
+    // sync is NOT re-exported: concurrency is a library.  Fourteen files
+    // used `Mutex` / `RwLock` / `AtomicInt` / `AtomicBool` ambiently and
+    // now mount them — nine of those are inside sync/ itself and mount
+    // `sync.mutex` / `sync.atomic` directly, which is also the ring-0
+    // discipline: name the DEFINING module, not the umbrella.
 
     // From intrinsics.runtime.tier — execution-tier introspection so
     // `if is_interpreted() { ... }` / `get_tier()` work without an explicit
     // mount (TIER-DETECT-PRELUDE-1, T0206).
-    public mount super.intrinsics.runtime.tier.is_interpreted;
-    public mount super.intrinsics.runtime.tier.get_tier;
+    // `intrinsics.runtime.tier` is NOT re-exported: a runtime query, not
+    // language.  ZERO files in core/ used it ambiently.
 
     // From time (common types)
-    public mount super.time.Duration;
-    public mount super.time.Instant;
-    public mount super.time.Time;
+    // time is NOT re-exported: a library.  Five files used `Duration` /
+    // `Instant` / `Time` ambiently and now mount them.
 
     // From math (common functions and types)
     // math is NOT re-exported here.

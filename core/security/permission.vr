@@ -62,6 +62,9 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.security.permission;
+// Mounted rather than inherited: §4ter — the prelude carries only what
+// the LANGUAGE requires, and this is library API.
+mount core.time.{Time};
 
 // =============================================================================
 // 1. Capability scope — coarse-grained namespace.

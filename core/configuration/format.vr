@@ -46,6 +46,9 @@ mount collections.{List, Map};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount configuration.value.{ConfigValue};
 mount configuration.error.{ConfigError, FormatId};
+// Mounted rather than inherited: §4ter — the prelude carries only what
+// the LANGUAGE requires, and this is library API.
+mount core.sync.{RwLock};
 
 // =============================================================================
 // FormatOptions — opaque format-specific options

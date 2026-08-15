@@ -94,6 +94,9 @@ mount core.async.channel.{
 };
 mount core.async.task.{spawn, JoinHandle};
 mount core.async.timer.sleep_ms;
+// Mounted rather than inherited: §4ter — the prelude carries only what
+// the LANGUAGE requires, and this is library API.
+mount core.sync.{Mutex};
 
 // =============================================================================
 // Tunables
