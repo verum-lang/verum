@@ -2500,13 +2500,19 @@ pub(in super::super) fn handle_set_insert(
     // Check load factor and grow if needed (> 70% full)
     if count * 10 >= capacity * 7 {
         let new_capacity = capacity * 2;
-        let new_entries = state.heap.alloc_array(TypeId::UNIT, new_capacity)?;
+        // Two Values per slot: the set shares the Map's [key, value] slot
+        // layout, which is what `handle_new_set` allocates and what the
+        // iterator reads (`entries_data.add(idx * 2)`). Growing by
+        // `new_capacity` alone would re-introduce the flat layout this
+        // handler used to write with, and half the elements would again be
+        // invisible to iteration (T0658).
+        let new_entries = state.heap.alloc_array(TypeId::UNIT, new_capacity * 2)?;
         state.record_allocation();
         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
 
         // Initialize new entries with unit
         let new_data = unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-        for i in 0..new_capacity {
+        for i in 0..(new_capacity * 2) {
             unsafe {
                 *new_data.add(i) = Value::unit();
             }
@@ -2515,15 +2521,15 @@ pub(in super::super) fn handle_set_insert(
         // Rehash existing entries
         let old_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         for i in 0..capacity {
-            let old_elem = unsafe { *old_data.add(i) };
+            let old_elem = unsafe { *old_data.add(i * 2) };
             if !old_elem.is_unit() {
                 let hash = value_hash(old_elem);
                 let mut idx = hash % new_capacity;
                 loop {
-                    let slot = unsafe { *new_data.add(idx) };
+                    let slot = unsafe { *new_data.add(idx * 2) };
                     if slot.is_unit() {
                         unsafe {
-                            *new_data.add(idx) = old_elem;
+                            *new_data.add(idx * 2) = old_elem;
                         }
                         break;
                     }
@@ -2549,12 +2555,12 @@ pub(in super::super) fn handle_set_insert(
     let start_idx = idx;
 
     loop {
-        let slot = unsafe { *entries_data.add(idx) };
+        let slot = unsafe { *entries_data.add(idx * 2) };
 
         if slot.is_unit() {
             // Empty slot - insert new element
             unsafe {
-                *entries_data.add(idx) = elem;
+                *entries_data.add(idx * 2) = elem;
             }
             count += 1;
             unsafe {
@@ -2610,7 +2616,7 @@ pub(in super::super) fn handle_set_contains(
     let start_idx = idx;
 
     loop {
-        let slot = unsafe { *entries_data.add(idx) };
+        let slot = unsafe { *entries_data.add(idx * 2) };
 
         if slot.is_unit() {
             // Empty slot - element not found
@@ -2665,7 +2671,7 @@ pub(in super::super) fn handle_set_remove(
     let start_idx = idx;
 
     loop {
-        let slot = unsafe { *entries_data.add(idx) };
+        let slot = unsafe { *entries_data.add(idx * 2) };
 
         if slot.is_unit() {
             // Empty slot - element not found, nothing to remove
@@ -2676,7 +2682,7 @@ pub(in super::super) fn handle_set_remove(
             // Found element - remove it using tombstone-free deletion
             // We need to rehash subsequent elements in the probe chain
             unsafe {
-                *entries_data.add(idx) = Value::unit();
+                *entries_data.add(idx * 2) = Value::unit();
             }
             count -= 1;
             unsafe {
@@ -2685,20 +2691,20 @@ pub(in super::super) fn handle_set_remove(
 
             // Rehash subsequent elements in probe chain
             let mut next_idx = (idx + 1) % capacity;
-            while !unsafe { *entries_data.add(next_idx) }.is_unit() {
-                let elem_to_rehash = unsafe { *entries_data.add(next_idx) };
+            while !unsafe { *entries_data.add(next_idx * 2) }.is_unit() {
+                let elem_to_rehash = unsafe { *entries_data.add(next_idx * 2) };
                 unsafe {
-                    *entries_data.add(next_idx) = Value::unit();
+                    *entries_data.add(next_idx * 2) = Value::unit();
                 }
 
                 // Reinsert the element
                 let rehash = value_hash(elem_to_rehash);
                 let mut new_idx = rehash % capacity;
                 loop {
-                    let new_slot = unsafe { *entries_data.add(new_idx) };
+                    let new_slot = unsafe { *entries_data.add(new_idx * 2) };
                     if new_slot.is_unit() {
                         unsafe {
-                            *entries_data.add(new_idx) = elem_to_rehash;
+                            *entries_data.add(new_idx * 2) = elem_to_rehash;
                         }
                         break;
                     }
