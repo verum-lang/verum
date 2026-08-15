@@ -286,8 +286,6 @@ VerifyResult	core/security/zk/halo2/verifier.vr
 VerifyResult	core/security/zk/stark/verifier.vr
 WalFrameHeader	core/database/sqlite/native/l1_pager/journal/wal.vr
 WalFrameHeader	core/database/sqlite/native/wal_frame_layout/frame_header.vr
-WalWriter	core/database/sqlite/native/l1_pager/journal/writer.vr
-WalWriter	core/database/sqlite/native/l1_pager/wal_writer.vr
 WatchEvent	core/mesh/k8s/client.vr
 WatchEvent	core/shell/watch.vr
 World	core/logic/kripke.vr

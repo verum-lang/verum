@@ -29,8 +29,12 @@ module core.database.sqlite.native.l1_pager.journal;
 // here; per-mode logic is in the child modules.
 // =============================================================================
 
+// The WAL WRITER lives one level up, in `l1_pager/wal_writer.vr`: it
+// writes through the `WalBackend` abstraction (`WbMem` / `WbFile`) and
+// keeps the in-memory `WalIndex` in lockstep, which is what the pager
+// and every spec test use.  This submodule owns the WAL/rollback
+// SERIALISATION surface that writer builds on, not the writer itself.
 public module wal;
-public module writer;
 public module rollback;
 
 public mount .wal.{
@@ -49,9 +53,4 @@ public mount .rollback.{
     rollback_serialize_header, rollback_parse_header,
     rollback_record_checksum, rollback_serialize_record,
     rollback_parse_record, rollback_replay,
-};
-
-public mount .writer.{
-    WalWriter, WalWriteError,
-    WweIo, WweShortWrite, WweBadPageSize, WweClosed,
 };
