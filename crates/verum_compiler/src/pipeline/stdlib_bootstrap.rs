@@ -85,7 +85,6 @@ impl<'s> CompilationPipeline<'s> {
     ///  result.modules_compiled, result.functions_compiled);
     /// ```
     pub fn compile_core(&mut self) -> Result<StdlibCompilationResult> {
-        use verum_ast::cfg::TargetConfig;
         use verum_vbc::write_archive_to_file;
 
         // Extract config from build_mode (or fail if not in StdlibBootstrap mode)

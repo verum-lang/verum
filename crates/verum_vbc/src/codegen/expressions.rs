@@ -2843,6 +2843,70 @@ impl VbcCodegen {
                 // and falls through to raw pointer arithmetic.
                 let base_ty = VbcCodegen::strip_generic_args(&type_name);
                 let qualified = format!("{}.{}", base_ty, method);
+                // SIBLING-IMPL selection by the RIGHT operand's type
+                // (T0756).
+                //
+                // One type may implement one operator protocol at several
+                // instantiations, and `core/time/instant.vr` does:
+                //
+                //     implement Sub<Duration> for Instant { Output = Instant }
+                //     implement Sub<Instant>  for Instant { Output = Duration }
+                //
+                // Both are registered — `Instant.sub` and
+                // `Instant.sub#impl2` — but the key built above names only
+                // the LEFT type, so it always selected the first and
+                // `instant - instant` produced an Instant. The right
+                // operand is what distinguishes them, and it is the same
+                // thing the type checker matches against
+                // `impl_.protocol_args[0]`.
+                //
+                // Ordinal scan per the established sibling idiom
+                // (`mod.rs:16760`): plain key, then `#impl2`, `#impl3`, …
+                // until a lookup misses. No siblings → the loop exits on
+                // the second probe and nothing changes.
+                let rhs_ty = self
+                    .extract_expr_type_name(right)
+                    .map(|t| VbcCodegen::strip_generic_args(&t).to_string());
+                let mut chosen_key = qualified.clone();
+                if let Some(ref rhs) = rhs_ty
+                    && self
+                        .ctx
+                        .lookup_function(&format!("{}#impl2", qualified))
+                        .is_some()
+                {
+                    let mut key = qualified.clone();
+                    let mut n = 1u32;
+                    loop {
+                        match self.ctx.lookup_function(&key) {
+                            Some(cand) => {
+                                // Index 1, not 0: a method's parameter list
+                                // begins with `self`. Comparing against
+                                // `first()` compares the RECEIVER's type,
+                                // which for `Instant.sub` equals the right
+                                // operand's type in exactly the case this
+                                // scan exists to disambiguate — so the
+                                // first candidate always matched and the
+                                // scan selected the impl it was meant to
+                                // skip. Measured: the fix read as inert
+                                // until this index was corrected.
+                                if cand
+                                    .param_type_names
+                                    .get(1)
+                                    .map(|p| VbcCodegen::strip_generic_args(p) == *rhs)
+                                    .unwrap_or(false)
+                                {
+                                    chosen_key = key.clone();
+                                    break;
+                                }
+                            }
+                            None if n > 1 => break,
+                            None => {}
+                        }
+                        n += 1;
+                        key = format!("{}#impl{}", qualified, n);
+                    }
+                }
+                let qualified = chosen_key;
                 if self.ctx.lookup_function(&qualified).is_some() {
                     // Found operator method — emit CallM with qualified name
                     // (e.g., "Weight.add" not just "add") so the LLVM handler
@@ -2860,10 +2924,28 @@ impl VbcCodegen {
                     });
                     self.ctx.free_temp(left_reg);
                     self.ctx.free_temp(right_reg);
-                    // Track return type for chained operations
+                    // Track return type for chained operations — from the
+                    // CALLEE's declared return type, not the left operand's.
+                    //
+                    // This used to record `type_name`, hardcoding
+                    // `T op X -> T`. That is what an arithmetic operator
+                    // usually does and what `Sub<Instant> for Instant
+                    // { type Output = Duration; }` contradicts: the
+                    // difference between the two `Instant.sub` impls is
+                    // precisely their Output, so taking the left operand's
+                    // type discards the one fact that distinguishes them
+                    // (T0756).
+                    let callee_ret = self
+                        .ctx
+                        .lookup_function(&qualified)
+                        .and_then(|f| f.return_type.clone());
+                    let result_ty = match callee_ret {
+                        Some(tr) => self.type_ref_to_name(&tr),
+                        None => type_name.clone(),
+                    };
                     self.ctx
                         .variable_type_names
-                        .insert(format!("__r{}", dest.0), type_name.clone());
+                        .insert(format!("__r{}", dest.0), result_ty);
                     return Ok(Some(dest));
                 }
 
