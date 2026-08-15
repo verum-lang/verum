@@ -1887,6 +1887,39 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         "crates/verum_compiler/src/pipeline/refinement_verify.rs",
         "crates/verum_compiler/src/precompile.rs",
         "crates/verum_compiler/src/archive_metadata.rs",
+        // The bootstrap compiler itself. `stdlib_bootstrap.rs` parses every
+        // `core/` file, decides which declarations survive to registration,
+        // and drives codegen over them; `core_compiler.rs` owns the module
+        // walk and the target gating that decides which files are compiled
+        // at all. Nothing about the archive is more determined by a source
+        // file than by these two, and neither was a cache input.
+        //
+        // Measured 2026-08-15, the same way the `refinement_verify.rs` entry
+        // above was: an edit to `stdlib_bootstrap.rs` that changes WHICH
+        // BODY of every `@cfg`-paired stdlib function is archived produced a
+        // fresh `verum` binary reporting "Stdlib precompile cache HIT
+        // (blake3 85ae0d82…)" against a `runtime.vbca` thirty minutes older
+        // than the binary. The verification that followed measured the stale
+        // archive and reported the edit inert. It was not inert; it had
+        // never run.
+        "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs",
+        "crates/verum_compiler/src/core_compiler.rs",
+        // `@cfg` PREDICATE SEMANTICS. `TargetConfig::is_set` / `matches` /
+        // `CfgPredicate::evaluate` decide what every `@cfg(...)` in `core/`
+        // MEANS, and the bake picks one arm of 45 multi-arm stdlib functions
+        // by asking them — platform syscall wrappers (`sys_open`, `do_fork`,
+        // `spawn_child`), architecture branches (`context_switch`), and the
+        // debug-assertion family among them.
+        //
+        // Measured 2026-08-15: T0750 taught `is_set` the `debug` predicate,
+        // and every bake afterwards was a cache HIT, so the shipped archive
+        // kept the arms chosen when `debug` was still silently false —
+        // `debug_assert_eq` and `debug_assert_ne` remained no-ops in a
+        // binary whose own evaluator said otherwise. A compiler that
+        // believes one thing and an archive built when it believed another
+        // is the exact failure this list exists to prevent, and the file
+        // defining the belief was not on it.
+        "crates/verum_ast/src/cfg.rs",
         // `TypeId::well_known_name` (T0190) — the reserved-TypeId →
         // canonical-surface-name table `archive_metadata` renders every
         // descriptor through.  Naming one more reserved id changes the

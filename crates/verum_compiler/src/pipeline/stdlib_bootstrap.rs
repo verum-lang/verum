@@ -754,7 +754,11 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         let mut functions_compiled = 0;
-        let target = TargetConfig::host();
+        // Session config, not host — see the note at
+        // `register_stdlib_types_globally`. `TargetConfig::host()` carries
+        // the PRECOMPILER's own `cfg!(debug_assertions)`, false in the
+        // release binary that bakes the archive (T0758).
+        let target = self.session.cfg_evaluator().config().clone();
 
         // Build list of all module names for forward reference detection
         let all_module_names: Vec<&str> = all_parsed_modules
@@ -1614,8 +1618,31 @@ impl<'s> CompilationPipeline<'s> {
         type_checker: &mut verum_types::infer::TypeChecker,
         config: &CoreConfig,
     ) -> Result<()> {
-        use verum_ast::cfg::TargetConfig;
-        let target = TargetConfig::host();
+        // The SESSION's target config, not the host's.
+        //
+        // `TargetConfig::host()` fills `debug_assertions` from
+        // `cfg!(debug_assertions)` — the build profile of the PRECOMPILER
+        // BINARY, which is built `--release`, so the field is false. The
+        // bake then evaluates `@cfg(debug)` as false and `@cfg(not(debug))`
+        // as true, and ships the empty arm of every debug-assertion pair in
+        // `core/base/panic.vr`. Measured: `debug_assert_eq(1, 2, "D")` is a
+        // no-op in every program, from an archive baked by a compiler whose
+        // own evaluator says `debug_assertions` is true (T0758).
+        //
+        // The platform half of `host()` is correct — it reads
+        // `std::env::consts::OS` — which is why `temp_dir`'s `@cfg(unix)`
+        // arm wins over its `@cfg(target_os = "windows")` arm and the defect
+        // stayed invisible: only the build-profile field is wrong, and only
+        // one family of predicates reads it.
+        //
+        // `Session::build_target_config` resolves the same platform facts
+        // plus the manifest's `debug_assertions` override and
+        // `optimization_level`, so it is right on both halves. It is also
+        // what every user compile already uses — CLAUDE.md's rule that a
+        // per-target decision must read the TARGET, never the host, applies
+        // here with an extra edge: this host gate leaks the compiler's own
+        // build profile into the shipped standard library.
+        let target = self.session.cfg_evaluator().config().clone();
 
         // Pass 0: Process imports with aliases
         if config.verbose {
