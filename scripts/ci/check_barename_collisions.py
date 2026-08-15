@@ -120,8 +120,72 @@ from check_type_name_collisions import declares_a_type  # noqa: E402
 # not three copies.
 
 
+def param_list(line: str) -> str | None:
+    """The full parameter list of a `public fn` line, balanced.
+
+    `([^)]*)` stops at the FIRST `)`, which is inside the parameter for
+    any function-typed argument: `fn assert_panics(f: fn() -> Unit, msg:
+    Text)` reads as the single parameter `f: fn(`.  37 of core/'s 10268
+    column-0 `public fn` declarations take one, and each was keyed under
+    the wrong arity — a `(name, arity)` ratchet cannot afford that.
+    """
+    i = line.find("(")
+    if i < 0:
+        return None
+    depth = 0
+    for j in range(i, len(line)):
+        if line[j] == "(":
+            depth += 1
+        elif line[j] == ")":
+            depth -= 1
+            if depth == 0:
+                return line[i + 1 : j]
+    return None
+
+
+def split_params(params: str) -> list[str]:
+    """Split on TOP-LEVEL commas only.
+
+    Two things nest inside a Verum parameter list and both carry commas:
+    a generic argument (`Map<Text, Int>`) and a default value, which may
+    be a string literal (`msg: Text = "expected panic, got none"`).
+    Splitting on every comma counts those as extra parameters.
+    """
+    # `->` carries a `>` that is NOT a closing angle bracket.  Left in,
+    # `f: fn() -> Unit, msg: Text` drops to depth -1 at the arrow and the
+    # following comma stops counting as top level — the parameter list
+    # reads as one parameter.  Blank the arrows first (same length, so
+    # nothing else shifts).
+    params = params.replace("->", "~~")
+    out: list[str] = []
+    depth = 0
+    quote = ""
+    cur = []
+    for ch in params:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = ""
+            continue
+        if ch in "\"'":
+            quote = ch
+            cur.append(ch)
+            continue
+        if ch in "([{<":
+            depth += 1
+        elif ch in ")]}>":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append("".join(cur))
+            cur = []
+            continue
+        cur.append(ch)
+    out.append("".join(cur))
+    return [p.strip() for p in out if p.strip()]
+
+
 def arity(params: str) -> int:
-    return len([p for p in params.split(",") if p.strip()])
+    return len(split_params(params))
 
 
 def module_public_surface(dotted: str, depth: int = 2) -> set[str]:
@@ -176,6 +240,50 @@ def mount_named_exports(src: str) -> set[str]:
     for one in re.finditer(r"public mount [\w.]*\.(\w+)\s*;", src):
         names.add(one.group(1))
     return names
+
+
+SELF_TEST_ARITY = [
+    # (declaration, expected arity) — every shape that broke a naive split
+    ('public fn nothing() -> Int {', 0),
+    ('public fn one(x: Int) -> Int {', 1),
+    ('public fn walk_all(list: &StmtList, visit: fn(Int64)) {', 2),
+    ('public fn assert_panics(f: fn() -> Unit, msg: Text = "a, b") {', 2),
+    ('public fn get(m: &Map<Text, Int>, k: &Text) -> Maybe<Int> {', 2),
+    ('public fn three(a: fn(Int) -> Int, b: Map<Text, List<Int>>, c: Text) {', 3),
+    ('public fn dflt(a: Int, b: Text = "x, y, z") {', 2),
+]
+
+
+def self_test() -> int:
+    """Check the parameter parser against the shapes that have broken it.
+
+    Every defect this gate has had lived in an extractor and showed up
+    only as a moved number: a `(\\w+)` that captured the `affine`
+    MODIFIER instead of the type, a prelude scope that resolved no globs
+    and so could never report anything, and `([^)]*)` stopping at the
+    first `)` — which is INSIDE the parameter for any function-typed
+    argument.  A ratchet is a number nobody argues with, so the parser
+    behind it ships with its cases.
+    """
+    bad = 0
+    for src, want in SELF_TEST_ARITY:
+        got = arity(param_list(src) or "")
+        if got != want:
+            bad += 1
+            print(f"FAIL arity {got} != {want}: {src}", file=sys.stderr)
+    for src, want in (
+        ("public type affine WalWriter is { a: Int };", "WalWriter"),
+        ("    type Output = Result<T, E>;", None),
+    ):
+        got = declares_a_type(src)
+        if got != want:
+            bad += 1
+            print(f"FAIL type {got!r} != {want!r}: {src}", file=sys.stderr)
+    if bad:
+        print(f"self-test: {bad} case(s) FAILED", file=sys.stderr)
+        return 1
+    print(f"[ok] self-test: {len(SELF_TEST_ARITY) + 2} extractor case(s) hold")
+    return 0
 
 
 def prelude_named_exports() -> set[str]:
@@ -240,7 +348,8 @@ def collect(typed: bool = False) -> dict[tuple, set[str]]:
             m = DECL.match(line)
             if not m:
                 continue
-            params = [a.strip() for a in m.group(2).split(",") if a.strip()]
+            full = param_list(line)
+            params = split_params(full if full is not None else m.group(2))
             key: tuple
             if typed:
                 first = params[0].split(":")[-1].strip() if params else "()"
@@ -285,11 +394,19 @@ def main() -> int:
         help="types: `public type` simple-name collisions across modules",
     )
     ap.add_argument(
+        "--self-test",
+        action="store_true",
+        help="check the extractors against hand-written cases and exit",
+    )
+    ap.add_argument(
         "--typed",
         action="store_true",
         help="key on (name, arity, first-param type): duplicated WORK, not a shared verb",
     )
     args = ap.parse_args()
+
+    if getattr(args, "self_test", False):
+        return self_test()
 
     if args.kind == "types":
         found = collect_types()
