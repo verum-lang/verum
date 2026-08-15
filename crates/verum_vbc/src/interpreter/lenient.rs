@@ -55,10 +55,40 @@ use crate::value::Value;
 /// How many times a coercion has invented a value this process.
 static SUBSTITUTIONS: AtomicU64 = AtomicU64::new(0);
 
+/// How many times a coercion ran at all.
+static COERCIONS: AtomicU64 = AtomicU64::new(0);
+
+/// `(coercions, substitutions)` so far.
+///
+/// Both numbers, never just the second one.  A report of "0 invented values"
+/// is worth nothing without the first: zero out of zero means the handlers
+/// were never reached and the instrument never ran, which reads exactly like
+/// zero out of a million and means the opposite.  Measured 2026-08-15 across
+/// 200 conformance specs, the substitution count was 0 — a figure that only
+/// became evidence once the coercion count proved the path was live.
+pub fn counters() -> (u64, u64) {
+    (
+        COERCIONS.load(Ordering::Relaxed),
+        SUBSTITUTIONS.load(Ordering::Relaxed),
+    )
+}
+
 /// Count of invented values so far.  Zero means every operand the enveloped
-/// handlers read was a value the program actually produced.
+/// handlers read was a value the program actually produced — but see
+/// [`counters`] before reading a zero as good news.
 pub fn substitutions() -> u64 {
     SUBSTITUTIONS.load(Ordering::Relaxed)
+}
+
+/// Print `(coercions, substitutions)` at process exit under
+/// `VERUM_TRACE_LENIENT`, so a sweep can read one line per run instead of
+/// grepping for events that may legitimately never occur.
+pub fn report_at_exit() {
+    if std::env::var_os("VERUM_TRACE_LENIENT").is_none() {
+        return;
+    }
+    let (total, invented) = counters();
+    eprintln!("[lenient] coercions={total} invented={invented}");
 }
 
 /// A human-readable name for what actually arrived, so a trace line says
@@ -111,6 +141,7 @@ fn invented(wanted: &'static str, got: Value) {
 #[inline]
 #[track_caller]
 pub(crate) fn f64_or_zero(v: Value) -> f64 {
+    COERCIONS.fetch_add(1, Ordering::Relaxed);
     if v.is_float() {
         v.as_f64()
     } else if v.is_int() {
@@ -126,6 +157,7 @@ pub(crate) fn f64_or_zero(v: Value) -> f64 {
 #[inline]
 #[track_caller]
 pub(crate) fn i64_or_zero(v: Value) -> i64 {
+    COERCIONS.fetch_add(1, Ordering::Relaxed);
     if v.is_int() {
         v.as_i64()
     } else if v.is_float() {

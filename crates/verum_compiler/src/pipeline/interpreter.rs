@@ -213,6 +213,15 @@ impl<'s> CompilationPipeline<'s> {
         &self,
         result: verum_vbc::interpreter::InterpreterResult<verum_vbc::Value>,
     ) -> Result<()> {
+        // T0747: one line per run, both numbers — coercions AND inventions.
+        //
+        // Reported HERE, not in `Interpreter::run_main`, because that is not
+        // the function a run goes through: every entry point reaches the
+        // program via `interpreter.call(main_func_id, …)` and finishes here.
+        // The first placement printed nothing and looked like "nothing was
+        // invented"; it was an instrument on a path never taken.
+        verum_vbc::interpreter::lenient::report_at_exit();
+
         use verum_vbc::interpreter::InterpreterError;
         match result {
             Ok(value) => {
