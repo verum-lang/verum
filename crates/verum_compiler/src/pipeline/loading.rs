@@ -195,8 +195,18 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
         if trace {
+            // NOT "about to parse stdlib from source", which is what this
+            // line used to say and what a reader then spends an hour
+            // chasing.  A miss here means only that the IN-MEMORY registry
+            // cache is cold.  What follows on the Normal path is
+            // `load_stdlib_from_embedded` — a decode of the baked archive,
+            // no .vr file opened.  Source parsing happens only under
+            // StdlibBootstrap or an explicit `VERUM_STDLIB_PATH`, and the
+            // next line says which one ran.
             eprintln!(
-                "[phase] load_stdlib_modules: registry cache MISS — about to parse stdlib from source"
+                "[phase] load_stdlib_modules: in-memory registry cache MISS \
+                 (embedded archive on the Normal path; source only under \
+                 StdlibBootstrap / VERUM_STDLIB_PATH)"
             );
         }
 
