@@ -74,6 +74,45 @@ impl<'s> CompilationPipeline<'s> {
     /// Loads stdlib with two-tier caching: (1) registry cache from prior compilation,
     /// (2) parsed module cache to avoid re-parsing ~166 stdlib modules.
     pub(super) fn load_stdlib_modules(&mut self) -> Result<()> {
+        self.load_stdlib_modules_scoped(None)
+    }
+
+    /// As [`Self::load_stdlib_modules`], materialising only the stdlib
+    /// modules in `scope` (the user file's mount closure ⋃ the implicit
+    /// prelude, as computed by
+    /// [`crate::stdlib_reachability::compute_reachable_stdlib_modules`]).
+    ///
+    /// STDLIB-LOAD-COST-1.  The pipeline's established shape is *load
+    /// everything, then prune*: `run_check_only` builds the whole registry
+    /// and calls `register_modules_for_cross_file_resolution_filtered`
+    /// afterwards, `run_full_compilation` calls
+    /// `clear_non_compilable_stdlib_modules` afterwards.  Pruning after the
+    /// fact frees nothing that was not already allocated — peak memory,
+    /// which is what decides whether N compilers fit on a machine, is set
+    /// by the load, not by what survives it.  Measured on an EMPTY file:
+    /// 8 MB before the pipeline runs, 721 MB by the time the parser
+    /// reports a syntax error, 1059 MB at the end of typecheck.
+    ///
+    /// Passing the scope IN turns "build 2560 modules, keep 40" into
+    /// "build 40".  `None` keeps the unscoped behaviour, and is what every
+    /// caller without a parsed user module still passes.
+    ///
+    /// Two escape hatches, both pre-existing in spirit: `VERUM_FULL_STDLIB=1`
+    /// (already the documented "give me every stdlib module up front" gate)
+    /// and `VERUM_NO_STDLIB_SCOPE=1` as the A/B kill switch for this change
+    /// alone.
+    pub(super) fn load_stdlib_modules_scoped(
+        &mut self,
+        scope: Option<&std::collections::HashSet<String>>,
+    ) -> Result<()> {
+        let scope = if scope.is_some()
+            && (std::env::var_os("VERUM_NO_STDLIB_SCOPE").is_some()
+                || std::env::var_os("VERUM_FULL_STDLIB").is_some())
+        {
+            None
+        } else {
+            scope
+        };
         let start = Instant::now();
         debug!("load_stdlib_modules called");
         let trace = std::env::var("VERUM_TRACE_PHASES").is_ok();
@@ -199,11 +238,11 @@ impl<'s> CompilationPipeline<'s> {
                                 "VERUM_STDLIB_PATH set to non-existent path {:?} — falling back to embedded archive",
                                 p
                             );
-                            return self.load_stdlib_from_embedded();
+                            return self.load_stdlib_from_embedded(scope);
                         }
                     } else {
                         debug!("Normal mode: populating registry from embedded archive");
-                        return self.load_stdlib_from_embedded();
+                        return self.load_stdlib_from_embedded(scope);
                     }
                 }
             };
@@ -1144,6 +1183,57 @@ impl<'s> CompilationPipeline<'s> {
         export_table
     }
 
+    /// `true` when there is no scope at all (load everything) or
+    /// `module_path` is inside it.  The `None` case is the unscoped
+    /// caller, not "nothing is in scope".
+    fn path_in_scope(
+        scope: &Option<std::collections::HashSet<String>>,
+        module_path: &str,
+    ) -> bool {
+        scope.as_ref().is_none_or(|s| s.contains(module_path))
+    }
+
+    /// The mount closure, plus every UMBRELLA module on the way to one of
+    /// its members.
+    ///
+    /// Exact membership against the raw closure is the wrong test, because
+    /// the two sides spell modules at different granularity.
+    /// `compute_reachable_stdlib_modules` filters its result through the
+    /// stdlib index, so it names modules that resolve to a `.vr` FILE
+    /// (`core.base.maybe`).  The metadata shards types and functions under
+    /// the archive ENTRY module — the directory, `core.base` — as well as
+    /// under the precise origin module, and the entry module is what
+    /// `mount core.base.{Maybe}` looks up.  Dropping `core.base` because
+    /// only `core.base.maybe` was named would turn a correct mount into
+    /// "module not found".
+    ///
+    /// The reverse direction is deliberately NOT included.  Admitting every
+    /// DESCENDANT of a closure member would be wrong twice over: the glob
+    /// expansion in `compute_reachable_stdlib_modules` already puts the
+    /// files of a `mount core.text.*` into the closure, so it buys nothing —
+    /// and a single `core` seed (the prelude reaches `core/mod.vr`) would
+    /// then admit the entire stdlib and silently disable the scope.
+    ///
+    /// Segment-boundary splitting, not `starts_with`, is what keeps
+    /// `core.text` from being read as an ancestor of `core.textual`.
+    fn scope_with_umbrellas(
+        scope: &std::collections::HashSet<String>,
+    ) -> std::collections::HashSet<String> {
+        let mut out =
+            std::collections::HashSet::with_capacity(scope.len() * 2);
+        for module in scope {
+            out.insert(module.clone());
+            let mut prefix = module.as_str();
+            while let Some(cut) = prefix.rfind('.') {
+                prefix = &prefix[..cut];
+                if !out.insert(prefix.to_string()) {
+                    break; // this ancestor chain is already recorded
+                }
+            }
+        }
+        out
+    }
+
     /// Populate the module registry from the embedded CoreMetadata.
     ///
     /// Called when no filesystem stdlib directory is found (external-project
@@ -1156,7 +1246,14 @@ impl<'s> CompilationPipeline<'s> {
     /// whose exports are the corresponding types/functions. This is O(n) over
     /// the metadata records (~2 ms) vs O(n) over source parses (~60-120 min
     /// on the full 2540-file stdlib).
-    fn load_stdlib_from_embedded(&mut self) -> Result<()> {
+    ///
+    /// `scope`, when present, restricts the whole pass — grouping included —
+    /// to the user file's mount closure; see
+    /// [`Self::load_stdlib_modules_scoped`].
+    fn load_stdlib_from_embedded(
+        &mut self,
+        scope: Option<&std::collections::HashSet<String>>,
+    ) -> Result<()> {
         use verum_ast::{decl::Visibility, Span};
         use verum_modules::{ExportKind, ExportTable, ExportedItem};
 
@@ -1171,6 +1268,43 @@ impl<'s> CompilationPipeline<'s> {
             }
         };
 
+        // STDLIB-LOAD-COST-1 probe.  Every compile pays a fixed stdlib cost
+        // before it knows anything about the user's program — measured on an
+        // EMPTY file: 8 MB with `--parse-only`, 721 MB once the full pipeline
+        // runs, 1059 MB after typecheck.  Two candidates share that 721 MB:
+        // the bincode decode of the embedded `CoreMetadata` (one 38 MB blob)
+        // and the registry synthesis below (a `Vec<String>` shard per module
+        // plus an `ExportTable` entry per symbol, over ~44k symbols).
+        //
+        // Attributing it needs a stop line between them, and no existing
+        // subcommand sits there: `--parse-only` stops before both, every
+        // other entry point runs both.  Setting this variable stops the
+        // process the instant the decode has happened and BEFORE the
+        // synthesis, so `/usr/bin/time -l` reads the decode's share alone;
+        // the difference against a normal run is the synthesis's share.
+        //
+        // Kept in the tree because the numbers are the check that a fix
+        // worked, not just the evidence that a fix was needed.
+        if std::env::var_os("VERUM_PROBE_STDLIB_DECODE_ONLY").is_some() {
+            eprintln!(
+                "[stdlib-probe] decode-only stop: {} types, {} functions, {} protocols",
+                metadata.types.len(),
+                metadata.functions.len(),
+                metadata.protocols.len()
+            );
+            std::process::exit(0);
+        }
+
+        // STDLIB-LOAD-COST-1: the mount closure, widened to the umbrella
+        // modules its members hang under.  Computed ONCE, here, because the
+        // grouping loops below are where the per-symbol `String`s are
+        // allocated — filtering only at the registration loop would still
+        // pay for all ~44 000 of them and then throw the surplus away.
+        let scope_expanded = scope.map(Self::scope_with_umbrellas);
+        let in_scope = |module_path: &str| -> bool {
+            Self::path_in_scope(&scope_expanded, module_path)
+        };
+
         // Collect the set of all unique module paths declared in the metadata.
         // We group types, protocols, and functions by their module_path.
         //
@@ -1181,7 +1315,14 @@ impl<'s> CompilationPipeline<'s> {
         > = std::collections::BTreeMap::new();
 
         for (name, td) in metadata.types.iter() {
-            let mp = td.module_path.as_str().to_string();
+            let mp = td.module_path.as_str();
+            if !in_scope(mp)
+                && !matches!(&td.origin_module_path,
+                    verum_common::Maybe::Some(om) if in_scope(om.as_str()))
+            {
+                continue;
+            }
+            let mp = mp.to_string();
             // v2.12 TYPE-ORIGIN-MODULE (T0555): `module_path` is the archive
             // ENTRY (directory) module; a type declared in a FILE submodule
             // carries the precise path in `origin_module_path`. The
@@ -1201,6 +1342,9 @@ impl<'s> CompilationPipeline<'s> {
                 }
             }
             for path in paths {
+                if !in_scope(&path) {
+                    continue;
+                }
                 let shard = module_map.entry(path).or_default();
                 shard.0.push(name.as_str().to_string());
                 // Also export variant constructors so `Ok`, `Some`, `None`, etc.
@@ -1250,7 +1394,12 @@ impl<'s> CompilationPipeline<'s> {
                     paths.push(om);
                 }
             }
+            // STDLIB-LOAD-COST-1: same filter as the type loop, applied
+            // before the per-symbol `String` is allocated rather than after.
             for path in paths {
+                if !Self::path_in_scope(&scope_expanded, &path) {
+                    continue;
+                }
                 let e = module_map.entry(path).or_default();
                 match shard {
                     1 => e.1.push(name.to_string()),
@@ -1352,12 +1501,43 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        // STDLIB-LOAD-COST-1, second stop line: the module→(types, protocols,
+        // functions) grouping is complete, no `ModuleInfo` / `ExportTable`
+        // has been built yet.  Together with the decode-only stop above this
+        // splits the fixed cost three ways — decode, grouping, registration —
+        // which is what decides WHICH of them is worth removing.
+        if std::env::var_os("VERUM_PROBE_STDLIB_GROUP_ONLY").is_some() {
+            let symbols: usize = module_map.values().map(|(t, p, f)| t.len() + p.len() + f.len()).sum();
+            eprintln!(
+                "[stdlib-probe] group-only stop: {} modules, {} grouped symbols",
+                module_map.len(),
+                symbols
+            );
+            std::process::exit(0);
+        }
+
         let mut registered = 0usize;
+        let mut skipped = 0usize;
         let module_registry = self.session.module_registry();
 
         for (mp_str, (types, protocols, fns)) in &module_map {
-            let module_path_text = Text::from(mp_str.as_str());
+            // STDLIB-LOAD-COST-1: outside the user's mount closure this
+            // module's `ModuleInfo` + `ExportTable` would be built, held,
+            // and then dropped by the post-hoc prune the callers already
+            // run.  Not building it is the same answer for less.
+            //
+            // The closure is authoritative here for the same reason it is
+            // authoritative in `register_modules_for_cross_file_resolution_filtered`,
+            // which prunes against this very set: it is the transitive mount
+            // reachability of the user file ⋃ the implicit prelude.
+            if let Some(scope) = scope_expanded.as_ref()
+                && !scope.contains(mp_str.as_str())
+            {
+                skipped += 1;
+                continue;
+            }
 
+            let module_path_text = Text::from(mp_str.as_str());
 
             // Skip if already in our modules map (populated by a previous call).
             if self.modules.contains_key(&module_path_text) {
@@ -1461,7 +1641,15 @@ impl<'s> CompilationPipeline<'s> {
 
         // Warm the in-memory registry cache so subsequent module-level
         // TypeChecker instances in check_project skip this work.
-        {
+        //
+        // NOT when scoped: this cache is process-wide and its readers take
+        // it as "the stdlib registry", with no record of which closure
+        // produced it.  Publishing one user file's closure would make the
+        // NEXT file in the same process silently see a stdlib missing
+        // whatever it alone needed — a wrong answer that reads as a
+        // module-not-found in unrelated code.  A partial answer must never
+        // be cached under a total answer's key.
+        if scope.is_none() {
             let cache = global_stdlib_registry_cache();
             let mut guard = cache.write().unwrap_or_else(|p| p.into_inner());
             if guard.is_none() {
@@ -1476,6 +1664,30 @@ impl<'s> CompilationPipeline<'s> {
             registered,
             elapsed.as_secs_f64() * 1000.0
         );
+        if std::env::var_os("VERUM_TRACE_PHASES").is_some() {
+            // Report the SCOPE, not a "skipped" tally.  The grouping loops
+            // above already drop out-of-scope symbols before they reach
+            // `module_map`, so a skip counter on the registration loop can
+            // only ever read 0 — and a 0 that cannot rise reads as
+            // "nothing was excluded", which is the opposite of the truth.
+            // What is honest here is how wide the closure was and how much
+            // of it turned into modules.
+            match scope {
+                Some(s) => eprintln!(
+                    "[stdlib-registry] scoped closure={} modules, umbrellas widened to {}, built={} (late-filtered={}) in {:.2}ms",
+                    s.len(),
+                    scope_expanded.as_ref().map_or(0, |e| e.len()),
+                    registered,
+                    skipped,
+                    elapsed.as_secs_f64() * 1000.0
+                ),
+                None => eprintln!(
+                    "[stdlib-registry] UNSCOPED built={} in {:.2}ms",
+                    registered,
+                    elapsed.as_secs_f64() * 1000.0
+                ),
+            }
+        }
         Ok(())
     }
 

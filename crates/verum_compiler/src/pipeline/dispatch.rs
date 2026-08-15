@@ -49,18 +49,26 @@ impl<'s> CompilationPipeline<'s> {
     pub fn run_full_compilation(&mut self) -> Result<()> {
         let start = Instant::now();
 
-        // Load stdlib modules first (enables std.* imports)
-        self.load_stdlib_modules()?;
-
         // Phase 1: Lexing
         let file_id = self.phase_load_source()?;
 
         // Phase 2: Parsing
         let mut module = self.phase_parse(file_id)?;
 
-        // Lazy-stdlib prune (#281): match the AOT and interpreter paths
-        // by dropping stdlib modules outside the user's mount tree before
-        // type-checking and downstream phases. Honours `VERUM_FULL_STDLIB=1`.
+        // Lazy-stdlib scope (#281): match the AOT and interpreter paths by
+        // never materialising stdlib modules outside the user's mount tree.
+        // STDLIB-LOAD-COST-1 moved the stdlib load below the parse so the
+        // closure is known first — see `run_check_only`.
+        // Honours `VERUM_FULL_STDLIB=1`.
+        let reachable = if std::env::var("VERUM_FULL_STDLIB").is_ok() {
+            None
+        } else {
+            crate::stdlib_reachability::compute_reachable_stdlib_modules(&module)
+        };
+
+        // Load stdlib modules (enables std.* imports)
+        self.load_stdlib_modules_scoped(reachable.as_ref())?;
+
         if std::env::var("VERUM_FULL_STDLIB").is_err() {
             self.clear_non_compilable_stdlib_modules(Some(&module));
         }
@@ -116,31 +124,29 @@ impl<'s> CompilationPipeline<'s> {
     pub fn run_check_only(&mut self) -> Result<()> {
         let start = Instant::now();
 
-        // Load stdlib modules first (enables std.* imports). This populates
-        // `self.modules` with stdlib ASTs but does NOT yet register them in
-        // the session's ModuleRegistry — registration happens below, *after*
-        // the user file is parsed, so the reachability filter (#109) can
-        // prune unreached stdlib modules from the registration set.
-        self.load_stdlib_modules()?;
-
-        // Load sibling project modules (enables cross-file mount imports).
-        // These are user-side files — always registered regardless of the
-        // stdlib reachability filter.
-        self.load_project_modules()?;
-        // Load externally-registered cogs (script-mode `dependencies`,
-        // verum-add deps, etc.) using the same module-registration
-        // machinery so cross-cog `mount foo.bar` resolves transparently.
-        self.load_external_cog_modules()?;
-
+        // STDLIB-LOAD-COST-1 — the user file is read and parsed FIRST.
+        //
+        // It used to be the other way round, and that ordering decided the
+        // whole cost profile of the command: `verum check` on a file with a
+        // syntax error peaked at 721 MB and 0.22 s, because the entire
+        // stdlib registry was materialised before the parser ever looked at
+        // the source.  The same command with `--parse-only` — which skips
+        // the stdlib — peaks at 8 MB and 0.01 s.  Nothing between
+        // `phase_load_source` and `phase_parse` consults the stdlib: the
+        // parser reads source, applies `@cfg`, and injects the implicit
+        // prelude mount, all from the file itself.
+        //
+        // Parsing first also makes the mount closure KNOWN before the load,
+        // which is what lets the load be scoped to it instead of pruned
+        // after it.
         let file_id = self.phase_load_source()?;
         let mut module = self.phase_parse(file_id)?;
 
         // #109 lazy stdlib monomorphization — compute the transitive
         // closure of stdlib modules referenced by the user file's mount
-        // tree (plus the implicit prelude) and pass it to the filtered
-        // Phase 1.5 below. Stdlib modules outside the closure skip
-        // ModuleInfo creation; the lazy resolver still picks them up if
-        // a downstream phase actually walks into them.
+        // tree (plus the implicit prelude). Stdlib modules outside the
+        // closure are never materialised; the lazy resolver still picks
+        // them up if a downstream phase actually walks into them.
         //
         // Two opt-out gates honour callers that need every stdlib
         // module in the registry up front (e.g. `verum audit
@@ -153,6 +159,20 @@ impl<'s> CompilationPipeline<'s> {
         } else {
             crate::stdlib_reachability::compute_reachable_stdlib_modules(&module)
         };
+
+        // Load the stdlib modules the closure names (enables std.* imports).
+        // This populates `self.modules` but does NOT yet register them in
+        // the session's ModuleRegistry — registration happens below.
+        self.load_stdlib_modules_scoped(reachable.as_ref())?;
+
+        // Load sibling project modules (enables cross-file mount imports).
+        // These are user-side files — always registered regardless of the
+        // stdlib reachability filter.
+        self.load_project_modules()?;
+        // Load externally-registered cogs (script-mode `dependencies`,
+        // verum-add deps, etc.) using the same module-registration
+        // machinery so cross-cog `mount foo.bar` resolves transparently.
+        self.load_external_cog_modules()?;
 
         // Register stdlib + project + cog modules for cross-file
         // type/context/import resolution. Without this, `mount
@@ -360,9 +380,38 @@ impl<'s> CompilationPipeline<'s> {
     pub fn run_interpreter(&mut self, args: List<Text>) -> Result<()> {
         let trace = std::env::var("VERUM_TRACE_PHASES").is_ok();
         let t_total = std::time::Instant::now();
-        // Load stdlib modules first (enables std.* imports)
+
+        // STDLIB-LOAD-COST-1 — source first, stdlib second.  See
+        // `run_check_only` for the measurement; the ordering is what makes
+        // the mount closure known before the load rather than after it.
         let t = std::time::Instant::now();
-        self.load_stdlib_modules()?;
+        let file_id = self.phase_load_source()?;
+        if trace { eprintln!("[run_interpreter] phase_load_source: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
+        let t = std::time::Instant::now();
+        let mut module = self.phase_parse(file_id)?;
+        if trace { eprintln!("[run_interpreter] phase_parse: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
+
+        // Lazy-stdlib scope (#281, parity with run_native_compilation):
+        // never materialise stdlib modules outside the user's mount tree.
+        // Without this, `verum run script.vr` walks every loaded stdlib AST
+        // through type-check + codegen + monomorphization and each cold
+        // script run pays the full ~83 K-function cost — even for a
+        // `--help` print.  This used to be a prune AFTER the load; the
+        // closure is now computed before it, so the modules are not built
+        // in the first place.  `clear_non_compilable_stdlib_modules` still
+        // runs: it also drops non-stdlib entries the closure has no say
+        // over, and it is idempotent when the scope already excluded them.
+        // Honours the same `VERUM_FULL_STDLIB=1` opt-out used elsewhere
+        // (full-corpus tooling: `verum audit --framework-axioms` etc.).
+        let reachable = if std::env::var("VERUM_FULL_STDLIB").is_ok() {
+            None
+        } else {
+            crate::stdlib_reachability::compute_reachable_stdlib_modules(&module)
+        };
+
+        // Load stdlib modules (enables std.* imports)
+        let t = std::time::Instant::now();
+        self.load_stdlib_modules_scoped(reachable.as_ref())?;
         if trace {
             eprintln!("[run_interpreter] load_stdlib_modules: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
         }
@@ -378,23 +427,6 @@ impl<'s> CompilationPipeline<'s> {
         self.load_external_cog_modules()?;
         if trace { eprintln!("[run_interpreter] load_external_cog_modules: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
 
-        let t = std::time::Instant::now();
-        let file_id = self.phase_load_source()?;
-        if trace { eprintln!("[run_interpreter] phase_load_source: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
-        let t = std::time::Instant::now();
-        let mut module = self.phase_parse(file_id)?;
-        if trace { eprintln!("[run_interpreter] phase_parse: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
-
-        // Lazy-stdlib prune (#281, parity with run_native_compilation):
-        // drop stdlib modules outside the user's mount tree + the
-        // ALWAYS_INCLUDE runtime-stub list before downstream phases
-        // monomorphize them. Without this, `verum run script.vr`
-        // walks every loaded stdlib AST through type-check + codegen +
-        // monomorphization and each cold script run pays the full
-        // ~83 K-function cost — even for a `--help` print. The AOT
-        // path already does this; the interpreter path simply forgot to.
-        // Honours the same `VERUM_FULL_STDLIB=1` opt-out used elsewhere
-        // (full-corpus tooling: `verum audit --framework-axioms` etc.).
         if std::env::var("VERUM_FULL_STDLIB").is_err() {
             self.clear_non_compilable_stdlib_modules(Some(&module));
         }

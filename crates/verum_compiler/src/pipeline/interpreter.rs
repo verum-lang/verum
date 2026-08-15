@@ -392,16 +392,32 @@ impl<'s> CompilationPipeline<'s> {
     pub fn run_for_test(&mut self) -> Result<TestExecutionResult> {
         let start = Instant::now();
 
-        // Load stdlib modules first (enables std.* imports)
-        self.load_stdlib_modules()?;
-        debug!("Phase 0 (stdlib): {:.2}s", start.elapsed().as_secs_f64());
-
         // Phase 1: Load source
         let file_id = self.phase_load_source()?;
 
         // Phase 2: Parse
         let mut module = self.phase_parse(file_id)?;
         debug!("Phase 2 (parse): {:.2}s", start.elapsed().as_secs_f64());
+
+        // Phase 0 (stdlib) runs HERE, after the parse, and scoped to the
+        // user file's mount closure — byte-identical to what
+        // `run_interpreter` does (STDLIB-LOAD-COST-1).
+        //
+        // The ordering is not a local optimisation that each entry point
+        // may choose for itself.  T0732 closed exactly this class: the
+        // runner used to drive its own phase sequence, so specs were green
+        // on a pipeline no user ever executed.  A load that is scoped in
+        // `verum run` and unscoped here would put the two back out of step
+        // — and this time the divergence would be in WHICH stdlib modules
+        // exist, which is the kind that hides as "passes under the runner,
+        // module not found for the user".
+        let reachable = if std::env::var("VERUM_FULL_STDLIB").is_ok() {
+            None
+        } else {
+            crate::stdlib_reachability::compute_reachable_stdlib_modules(&module)
+        };
+        self.load_stdlib_modules_scoped(reachable.as_ref())?;
+        debug!("Phase 0 (stdlib): {:.2}s", start.elapsed().as_secs_f64());
 
         // Get module path for registration and expansion
         let module_path = Text::from(self.session.options().input.display().to_string());
@@ -639,10 +655,31 @@ impl<'s> CompilationPipeline<'s> {
             self.session.options().input.display().to_string(),
         );
 
-        // Phase 0: Load stdlib modules (populates self.modules for type checking)
+        // Phase 1: Load source
+        let _bc_load = verum_error::breadcrumb::enter("compiler.phase.load_source", "");
+        let file_id = self.phase_load_source()?;
+        drop(_bc_load);
+
+        // Phase 2: Parse (phase_parse records its own timing)
+        let _bc_parse = verum_error::breadcrumb::enter("compiler.phase.parse", "");
+        let module = self.phase_parse(file_id)?;
+        drop(_bc_parse);
+
+        // Phase 0: Load stdlib modules (populates self.modules for type
+        // checking), scoped to the parsed file's mount closure — the same
+        // order and the same scope as `run_interpreter` and `run_for_test`
+        // (STDLIB-LOAD-COST-1).  Keeping the three entry points in step is
+        // the point: a stdlib that is scoped on one path and total on
+        // another is a difference in which modules EXIST, and that shows up
+        // as "builds but does not run" rather than as a clean error.
         let _bc_stdlib = verum_error::breadcrumb::enter("compiler.phase.stdlib_loading", "");
         let t0 = Instant::now();
-        self.load_stdlib_modules()?;
+        let reachable = if std::env::var("VERUM_FULL_STDLIB").is_ok() {
+            None
+        } else {
+            crate::stdlib_reachability::compute_reachable_stdlib_modules(&module)
+        };
+        self.load_stdlib_modules_scoped(reachable.as_ref())?;
         let stdlib_time = t0.elapsed();
         self.session
             .record_phase_metrics("Stdlib Loading", stdlib_time, 0);
@@ -656,16 +693,6 @@ impl<'s> CompilationPipeline<'s> {
         self.session
             .record_phase_metrics("Project Modules", t0.elapsed(), 0);
         drop(_bc_proj);
-
-        // Phase 1: Load source
-        let _bc_load = verum_error::breadcrumb::enter("compiler.phase.load_source", "");
-        let file_id = self.phase_load_source()?;
-        drop(_bc_load);
-
-        // Phase 2: Parse (phase_parse records its own timing)
-        let _bc_parse = verum_error::breadcrumb::enter("compiler.phase.parse", "");
-        let module = self.phase_parse(file_id)?;
-        drop(_bc_parse);
 
         // Phase 2.5: Scan for @device(gpu) annotations to auto-enable GPU compilation.
         // Gated on [codegen].mlir_gpu: when false, GPU annotations are
