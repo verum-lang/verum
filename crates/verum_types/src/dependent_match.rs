@@ -1100,6 +1100,26 @@ impl<'a> DependentPatternChecker<'a> {
                 mutable: *mutable,
                 inner: Box::new(self.substitute_type_params(inner, type_args)),
             },
+            // A slice carries its element the same way an array does; the arm
+            // right above for `Array` had no twin here, so `&[T]` fell through
+            // to the clone-everything default and kept `T` unsubstituted. The
+            // same omission in `Type::apply_subst` is what pinned an
+            // `implement<T> …` block's parameter across its whole body (T0742)
+            // — this walk is the sibling that was still missing it.
+            Type::Slice { element } => Type::Slice {
+                element: Box::new(self.substitute_type_params(element, type_args)),
+            },
+            // The other reference tiers reach a slice exactly as often as
+            // `&T` does; leaving them out would move the hole rather than
+            // close it.
+            Type::CheckedReference { mutable, inner } => Type::CheckedReference {
+                mutable: *mutable,
+                inner: Box::new(self.substitute_type_params(inner, type_args)),
+            },
+            Type::UnsafeReference { mutable, inner } => Type::UnsafeReference {
+                mutable: *mutable,
+                inner: Box::new(self.substitute_type_params(inner, type_args)),
+            },
             _ => ty.clone(),
         }
     }

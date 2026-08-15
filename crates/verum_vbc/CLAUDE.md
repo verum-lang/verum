@@ -200,7 +200,21 @@ Test counts are deliberately not pinned here — they move with every added test
 and a stale number reads as a target to hit.  Run the suite for the current
 figure; what is pinned is the gate.
 
-**Both surfaces are GREEN.**  The two tests previously listed here as known-red
+**The default-features surface is GREEN.  The `codegen` surface is NOT** —
+measured 2026-08-15 on 864d92432, with no local changes: **53 of the
+`codegen::test_params::test_compile_stdlib_*` fixtures fail** (0 passed / 53
+failed / 2214 s for that subset alone).  Tracked as **T0743**; do not read the
+paragraph below as covering them.
+
+Two things kept this invisible.  The feature is off for a plain
+`cargo test -p verum_vbc --lib`, so that run reports a clean 1349/1349 and
+never builds these fixtures — they appear only when another package in the
+same invocation turns `codegen` on (e.g. `-p verum_compiler -p verum_vbc`).
+And CI does not run the surface at all (see the gating table above).  A claim
+of "green" that no routine command can falsify is worth less than no claim;
+re-measure before repeating one.
+
+The two tests previously listed here as known-red
 were fixed under T0627 (493927b7d) and were never compiler defects: each
 located the function under test by a name predicate that matched the wrong
 descriptor.  One used `name.contains("check")`, which matches the stdlib
