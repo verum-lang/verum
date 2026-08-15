@@ -2754,12 +2754,53 @@ impl ArchiveCtxCache {
         // these runs have already built for the reachability step — the
         // filter is free where the scan it prevents is not.
         let graph_for_names = self.graph(archive);
+        // A MOUNT PATH SEGMENT IS NOT A FUNCTION NAME (T0753).
+        //
+        // `collect_mount_names` inserts a Path mount's last segment as a
+        // bare name, under the comment "last segment is the name".  That
+        // holds for a NAME-form mount (`mount core.io.read;` — `read` is
+        // a function) and is a category error for a MODULE-form one
+        // (`mount core.text;` — `text` is a module).  The two forms are
+        // syntactically identical, so the harvest genuinely cannot tell
+        // them apart.  The archive can: if the dot-joined form names an
+        // archive entry, the last segment named a module.
+        //
+        // Left in the set, that one name buys a decode of EVERY archive
+        // module, and the match test there is "does this module's string
+        // table contain `text`" — true of every module that merely CALLS
+        // something named `text`.  Measured on
+        // `mount core.text; fn main() { print("…") }`: 40149 functions
+        // merged from 370 modules, including all three platforms' syscall
+        // layers, sqlite (1986), postgres (966) and x509 — none of it
+        // reachable from `print`.  `VERUM_TRACE_FULLSCAN=1` named the
+        // whole trigger: one name, `text`.
+        //
+        // Dropping it loses nothing.  The qualified pass has already
+        // decoded `core.text` itself (its dotted form is in
+        // `wanted_module_prefixes`), so whatever that module declares
+        // under this simple name is registered there.  The scan could
+        // only add OTHER modules' same-named symbols — the
+        // identity-by-simple-name over-approximation this loader spends
+        // its whole architecture avoiding.
+        let mount_module_segments: std::collections::HashSet<&str> = {
+            let entries: std::collections::HashSet<&str> =
+                archive.index.iter().map(|e| e.name.as_str()).collect();
+            wanted
+                .iter()
+                .filter(|n| entries.contains(n.as_str()))
+                .filter_map(|n| n.rsplit('.').next())
+                .collect()
+        };
+        let keep_mount_segments =
+            std::env::var_os("VERUM_NO_MOUNT_SEGMENT_FILTER").is_some();
         let unqualified_wanted: std::collections::HashSet<String> = unqualified_wanted_full
             .into_iter()
             .filter(|name| {
                 codegen.ctx_mut().lookup_function(name).is_none()
                     && !looks_like_type_name(name)
                     && graph_for_names.carries_simple_name(name)
+                    && (keep_mount_segments
+                        || !mount_module_segments.contains(name.as_str()))
             })
             .collect();
         // FULL-ARCHIVE-SCAN PROBE (T0738). Every name still in this set
