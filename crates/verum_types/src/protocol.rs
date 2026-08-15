@@ -1943,10 +1943,10 @@ impl ProtocolChecker {
     /// This is a convenience method for stdlib integration that doesn't
     /// require constructing a Path.
     pub fn implements_by_name(&self, ty: &Type, protocol_name: &str) -> bool {
-        // Check if any implementation exists for this type and protocol
-        let type_name = self.extract_type_name(ty);
-        let key = (type_name, Text::from(protocol_name));
-        self.impl_index.contains_key(&key)
+        // "By name" is the ANY-instantiation question — a caller holding
+        // only a protocol name cannot be asking about one instantiation —
+        // so it has exactly one implementation, below.
+        self.implements_protocol_any(ty, protocol_name)
     }
 
     /// Check if a type implements any variant of a protocol (ignoring type args).
@@ -1958,11 +1958,47 @@ impl ProtocolChecker {
     /// exact type argument doesn't matter — we just want to know if the type
     /// supports the operation at all.
     pub fn implements_protocol_any(&self, ty: &Type, protocol_base_name: &str) -> bool {
-        let type_key = self.extract_type_name(ty);
+        // `make_type_key`, not `extract_type_name`: the index is written
+        // by `register_impl` through the former, and the two disagree on
+        // every nominal type — `Instant` renders as "named:Instant."
+        // there and as "Instant" here.  They agree only on primitives,
+        // which is why the doc example above (Int32) worked and why this
+        // went unnoticed: asked about any user-defined or stdlib type,
+        // the method answered "does not implement" no matter what was
+        // registered.
+        let type_key = self.make_type_key(ty);
         let prefix = format!("{}<", protocol_base_name);
         self.impl_index.keys().any(|(tk, pk)| {
             tk == &type_key && (pk.as_str() == protocol_base_name || pk.starts_with(&prefix))
         })
+    }
+
+    /// Check if a type implements THIS protocol instantiation.
+    ///
+    /// The precise counterpart to [`Self::implements_protocol_any`]:
+    /// that one answers "does `Instant` implement some `Sub`?", this one
+    /// answers "does `Instant` implement `Sub<Duration>`?". A caller that
+    /// wants to know whether registering an impl would be a re-registration
+    /// must ask THIS question — `Sub<Duration>` and `Sub<Instant>` are two
+    /// implementations, not one implementation registered twice.
+    ///
+    /// It composes the key exactly as `register_impl` does, from the same
+    /// two helpers, so the answer cannot drift from what the index holds.
+    /// Re-deriving the comparison at a call site is what produced T0756:
+    /// a caller compared bare protocol idents, concluded that the second
+    /// instantiation was a duplicate, and dropped it before registration
+    /// ever saw it.
+    pub fn implements_instantiation(
+        &self,
+        ty: &Type,
+        protocol: &Path,
+        protocol_args: &[Type],
+    ) -> bool {
+        let key = (
+            self.make_type_key(ty),
+            self.make_full_protocol_key(protocol, protocol_args),
+        );
+        self.impl_index.contains_key(&key)
     }
 
     /// Extract a type name from a Type for registry lookup
@@ -14165,6 +14201,92 @@ impl UnifiedProtocolError {
 mod tests {
     use super::*;
     use crate::advanced_protocols::*;
+
+    /// Build a bare nominal type for the instantiation tests below.
+    fn named(name: &str) -> Type {
+        Type::Named {
+            path: Path::single(Ident::new(name, Span::default())),
+            args: List::new(),
+        }
+    }
+
+    /// Build `implement P<arg> for target`.
+    fn impl_of(protocol: &str, arg: Option<Type>, target: Type) -> ProtocolImpl {
+        ProtocolImpl {
+            protocol: Path::single(Ident::new(protocol, Span::default())),
+            protocol_args: arg.into_iter().collect(),
+            for_type: target,
+            where_clauses: List::new(),
+            methods: Map::new(),
+            associated_types: Map::new(),
+            associated_consts: Map::new(),
+            specialization: Maybe::None,
+            impl_crate: Maybe::Some("test".into()),
+            span: Span::default(),
+            type_param_fn_bounds: Map::new(),
+        }
+    }
+
+    /// One type may implement one protocol at several instantiations, and
+    /// each is its own implementation.
+    ///
+    /// `core/time/instant.vr` is the motivating case:
+    ///
+    ///     implement Sub<Duration> for Instant { type Output = Instant; }
+    ///     implement Sub<Instant>  for Instant { type Output = Duration; }
+    ///
+    /// `instant - instant` must reach the second.  Until 2026-08-15 it
+    /// reached the first and typed as `Instant`, because a caller in
+    /// `infer/core.rs` decided the second was a duplicate by comparing
+    /// BARE protocol idents and dropped it before registration (T0756).
+    ///
+    /// Registered under Strict coherence deliberately: this pins that
+    /// `check_overlap` also treats the two as non-overlapping, not just
+    /// that the index can hold both.
+    #[test]
+    fn two_instantiations_of_one_protocol_are_two_implementations() {
+        let mut checker = ProtocolChecker::new();
+        let instant = named("Instant");
+        let duration = named("Duration");
+
+        checker
+            .register_impl(impl_of("Sub", Some(duration.clone()), instant.clone()))
+            .expect("Sub<Duration> for Instant");
+        checker
+            .register_impl(impl_of("Sub", Some(instant.clone()), instant.clone()))
+            .expect("Sub<Instant> for Instant — a different instantiation, not a duplicate");
+
+        let sub = Path::single(Ident::new("Sub", Span::default()));
+
+        // The precise question — each instantiation is present on its own.
+        assert!(
+            checker.implements_instantiation(&instant, &sub, &[duration.clone()]),
+            "Sub<Duration> for Instant must be registered"
+        );
+        assert!(
+            checker.implements_instantiation(&instant, &sub, &[instant.clone()]),
+            "Sub<Instant> for Instant must be registered"
+        );
+
+        // Both survive as separate implementations, which is what dispatch
+        // needs in order to pick by the right-hand operand's type.
+        let count = checker
+            .get_implementations(&instant)
+            .iter()
+            .filter(|i| i.protocol.as_ident().map(|id| id.as_str() == "Sub").unwrap_or(false))
+            .count();
+        assert_eq!(count, 2, "both Sub implementations must survive registration");
+
+        // And the imprecise question — the one the broken guard asked —
+        // cannot tell them apart. Asserted so the distinction stays
+        // visible: `implements_protocol_any` is the right answer to a
+        // different question, and reaching for it here is the defect.
+        assert!(checker.implements_protocol_any(&instant, "Sub"));
+        assert!(
+            !checker.implements_instantiation(&instant, &sub, &[named("Text")]),
+            "an instantiation nobody declared must not be reported as present"
+        );
+    }
 
     /// Alias contract: `verum_types::protocol::MethodSource` is
     /// a `pub use` re-export of `verum_protocol_types::
