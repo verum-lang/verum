@@ -127,6 +127,23 @@ pub struct CodegenContext {
     /// before any codegen begins.
     pub target_os: String,
 
+    /// Whether this build carries debug assertions.
+    ///
+    /// Mirrors `CodegenConfig::target_config::debug_assertions`, the
+    /// resolved answer rather than a re-derivation: `Session::
+    /// build_target_config` prefers the manifest's
+    /// `[profile.<name>].debug_assertions` and falls back to
+    /// `optimization_level == 0`, so recomputing it from the level here
+    /// would drop the override.
+    ///
+    /// This is the flag that decides whether a `debug_assert` expands to
+    /// a check or to nothing.  Until 2026-08-15 no such flag reached
+    /// codegen at all, and the interception site emitted `Assert`
+    /// unconditionally under two comments claiming it did not — so
+    /// `debug_assert` fired in release builds, which is the opposite of
+    /// its contract, not a weaker form of it (T0751).
+    pub debug_assertions: bool,
+
     /// Current function name (for error messages).
     pub current_function: Option<String>,
 
@@ -1482,6 +1499,11 @@ impl CodegenContext {
             loop_stack: Vec::new(),
             defer_stack: vec![Vec::new()], // Root scope
             target_os: verum_ast::cfg::TargetConfig::host().target_os.to_string(),
+            // Same default policy as `target_os`: the host's answer,
+            // overwritten from `CodegenConfig::target_config` before any
+            // codegen begins.  Defaulting to TRUE keeps a context built
+            // without a config checking rather than silently skipping.
+            debug_assertions: verum_ast::cfg::TargetConfig::host().debug_assertions,
             current_function: None,
             in_function: false,
             return_type: None,

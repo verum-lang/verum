@@ -277,6 +277,33 @@ fn resolve_type_static_constant(type_name: &str, method: &str) -> Option<i128> {
 /// * Tier-specific runtime constants (kqueue / mmap / etc.) —
 ///   currently fall through to the bottom hand-table; future work
 ///   moves them into `verum_common::posix_*` submodules.
+/// The message a caller wrote at an assertion site, or `default`.
+///
+/// The four assertion handlers — `assert`, `assert_eq`, `assert_ne`,
+/// `debug_assert` — each used to intern a fixed sentence and never read
+/// the argument the caller passed.  `assert(x, "queue must be drained
+/// before close")` reported "assertion failed", and the sentence the
+/// author wrote to explain the failure was dropped at the one moment it
+/// was needed.  141 call sites in `core/` alone pass such a message
+/// (measured 2026-08-15); every one of them was discarded.
+///
+/// Literal messages only, the same reach as `static_assert_msg`: a
+/// computed or f-string message would have to be evaluated at the
+/// failure site, which is a wider change than carrying the one the
+/// caller wrote down.  Anything else falls back to `default`, so the
+/// no-message form keeps the exact sentence it has always produced.
+fn assertion_message(args: &[verum_ast::Expr], idx: usize, default: &str) -> String {
+    args.get(idx)
+        .and_then(|a| match &a.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                verum_ast::literal::LiteralKind::Text(s) => Some(s.as_str().to_string()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap_or_else(|| default.to_string())
+}
+
 fn resolve_stdlib_constant_value(name: &str, target_os: &str) -> i64 {
     // Try platform-conditional dispatch first — covers the bulk of
     // cross-platform-divergent values via canonical lookups.
@@ -8510,7 +8537,8 @@ impl VbcCodegen {
                 let cond_reg = self
                     .compile_expr(&args[0])?
                     .or_internal("assert cond has no value")?;
-                let message_id = self.intern_string("assertion failed");
+                let message_id =
+                    self.intern_string(&assertion_message(args, 1, "assertion failed"));
                 self.ctx.emit(Instruction::Assert {
                     cond: cond_reg,
                     message_id,
@@ -8842,7 +8870,8 @@ impl VbcCodegen {
                 });
 
                 // Assert the comparison result
-                let message_id = self.intern_string("assertion failed: left != right");
+                let message_id =
+                    self.intern_string(&assertion_message(args, 2, "assertion failed: left != right"));
                 self.ctx.emit(Instruction::Assert {
                     cond: cmp_result,
                     message_id,
@@ -8888,7 +8917,8 @@ impl VbcCodegen {
                 self.ctx.free_temp(eq_result);
 
                 // Assert the comparison result
-                let message_id = self.intern_string("assertion failed: left == right");
+                let message_id =
+                    self.intern_string(&assertion_message(args, 2, "assertion failed: left == right"));
                 self.ctx.emit(Instruction::Assert {
                     cond: cmp_result,
                     message_id,
@@ -8901,8 +8931,22 @@ impl VbcCodegen {
             }
 
             "debug_assert" => {
-                // Debug assertions - only emit in debug builds
-                // For now, treat same as assert (runtime will ignore in release)
+                // Checked only when the build carries debug assertions.
+                //
+                // This used to read "only emit in debug builds" and "For
+                // now, treat same as assert (runtime will ignore in
+                // release)", and did neither: it emitted `Assert`
+                // unconditionally, and no runtime ever ignored one.  So
+                // `debug_assert` fired in release builds — the opposite
+                // of its contract, which the registry doc ("release:
+                // no-op"), `core/base/panic.vr`'s `@cfg(debug)` pair and
+                // `core/mem/hazard.vr:323` all state independently.
+                //
+                // Measured 2026-08-15 before the fix: `debug_assert(
+                // false, "MSG")` fires under `verum run` even against a
+                // stdlib whose baked body is the EMPTY arm — this
+                // interception is what executes, so it is the only place
+                // the contract can be honoured (T0751).
                 if args.is_empty() {
                     return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
                         expected: 1,
@@ -8910,10 +8954,18 @@ impl VbcCodegen {
                         function: "debug_assert".to_string(),
                     }));
                 }
+                if !self.ctx.debug_assertions {
+                    // Emit nothing, and do not compile the condition:
+                    // `debug_assert` promises zero release cost, and a
+                    // condition whose evaluation the program depends on
+                    // does not belong in one.
+                    return Ok(Some(None));
+                }
                 let cond_reg = self
                     .compile_expr(&args[0])?
                     .or_internal("debug_assert cond has no value")?;
-                let message_id = self.intern_string("debug assertion failed");
+                let message_id =
+                    self.intern_string(&assertion_message(args, 1, "debug assertion failed"));
                 self.ctx.emit(Instruction::Assert {
                     cond: cond_reg,
                     message_id,

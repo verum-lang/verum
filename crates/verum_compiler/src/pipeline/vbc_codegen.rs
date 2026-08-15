@@ -170,7 +170,15 @@ impl<'s> CompilationPipeline<'s> {
         let config = CodegenConfig {
             module_name: "main".to_string(),
             debug_info: self.session.options().debug_info,
-            optimization_level: 0,
+            // Was the literal `0`, alone among these fields in not
+            // reading the session.  Codegen consults it: the two FFI
+            // contract sites at `expressions.rs:7391` / `7425` emit
+            // `requires` / `ensures` assertions under
+            // `optimization_level() < 2`, commented "debug mode only".
+            // With the literal they were emitted at every level, `-O2`
+            // included — a release-elision that never elided because
+            // the flag never arrived (T0751).
+            optimization_level: self.session.options().optimization_level,
             // Default-off (matches CodegenConfig::default()) — the
             // structural validator currently rejects ~8000 dangling
             // `TypeId(515)` (= Maybe) references emitted by the
@@ -186,7 +194,21 @@ impl<'s> CompilationPipeline<'s> {
             // `strict_codegen`.
             validate: false,
             source_map: false,
-            target_config: verum_ast::cfg::TargetConfig::host(),
+            // The SESSION's config, not the host's.  `Session::
+            // build_target_config` is what resolves `--target`, the
+            // manifest's `[profile.*].debug_assertions`, `--cfg`
+            // features and custom flags; `TargetConfig::host()`
+            // resolves none of them and was what stood here.
+            //
+            // This field is not decorative.  `CodegenContext.target_os`
+            // is filled from it (`codegen/mod.rs:1971`) and its own
+            // doc-comment calls it "the canonical input for
+            // cross-compilation-correct code emission — every codegen
+            // path that materialises a platform-divergent constant …
+            // MUST consult this field rather than the host platform".
+            // Filled from `host()`, it WAS the host platform, so the
+            // rule could not be obeyed by obeying it.
+            target_config: self.session.cfg_evaluator().config().clone(),
             // V-LLSI profile configuration
             is_interpretable: profile.is_vbc_interpretable(),
             is_systems_profile: profile == crate::profile_system::Profile::Systems,

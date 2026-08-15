@@ -116,6 +116,9 @@ mod mount_cost {
         static PROTO_NS: Cell<u64> = const { Cell::new(0) };
         static DECLS_NS: Cell<u64> = const { Cell::new(0) };
         static DISCOVER_NS: Cell<u64> = const { Cell::new(0) };
+        /// `register_import_aliases` — time and call count (T0753).
+        static ALIAS_NS: Cell<u64> = const { Cell::new(0) };
+        static ALIAS_CALLS: Cell<u64> = const { Cell::new(0) };
     }
 
     pub(super) fn enabled() -> bool {
@@ -174,6 +177,44 @@ mod mount_cost {
             }
             b[bucket] += decls.as_nanos() as u64;
         });
+    }
+
+    /// One `register_import_aliases` call (T0753).
+    ///
+    /// Timed INSIDE that function rather than at its two call sites —
+    /// the lenient arm at mod.rs:5100 and the strict one at 9010 — so a
+    /// zero here means the function did not run, not that the arm I
+    /// happened to instrument did not.
+    pub(super) fn add_alias(took: Duration) {
+        if !enabled() {
+            return;
+        }
+        ALIAS_CALLS.set(ALIAS_CALLS.get() + 1);
+        ALIAS_NS.set(ALIAS_NS.get() + took.as_nanos() as u64);
+    }
+
+    /// Report the alias figures on their own.
+    ///
+    /// Separate from [`report`] because that one fires only from
+    /// `resolve_mounts`, which the `verum run` pipeline never calls — so
+    /// on the path where the 7.7 s cliff was measured, the existing
+    /// reporter is an instrument on a path not taken and its silence
+    /// says nothing.  This one fires from `finalize_module`, which every
+    /// compile reaches.
+    ///
+    /// Prints the CALL COUNT beside the time.  A "0 ms" with zero calls
+    /// and a "0 ms" with four hundred calls mean opposite things, and
+    /// only the pair distinguishes them.
+    pub(super) fn report_aliases(label: &str) {
+        if !enabled() || ALIAS_CALLS.get() == 0 {
+            return;
+        }
+        eprintln!(
+            "[mount-cost] {} register_import_aliases: calls={} total={:.1}ms",
+            label,
+            ALIAS_CALLS.get(),
+            ALIAS_NS.get() as f64 / 1e6,
+        );
     }
 
     pub(super) fn report(source_path: &str, total: Duration) {
@@ -1969,6 +2010,10 @@ impl VbcCodegen {
         // file flag dispatch) see the correct target.
         let mut ctx = CodegenContext::new();
         ctx.target_os = config.target_config.target_os.to_string();
+        // Same reason, different field: whether this build checks its
+        // debug assertions is a property of the BUILD, and the only
+        // resolved answer lives here (T0751).
+        ctx.debug_assertions = config.target_config.debug_assertions;
         Self {
             archive_merged_fn_watermark: 0,
             pending_refinement_stamps: Vec::new(),            ctx,
@@ -5185,6 +5230,7 @@ impl VbcCodegen {
     /// drains pending constants / TLS inits / default-method monomorphisations
     /// and ensures every call target has a descriptor.
     pub fn finalize_module(&mut self) -> CodegenResult<VbcModule> {
+        mount_cost::report_aliases("finalize_module");
         self.dump_vbc_if_requested();
         // Compile any pending constants (struct literals, etc.) before building
         self.compile_pending_constants()?;
@@ -7661,6 +7707,7 @@ impl VbcCodegen {
     /// have run for every file in the module — one finalize pass
     /// replaces the per-file `build_module + merge` chain.
     pub fn finalize_module_from_state(&mut self) -> CodegenResult<VbcModule> {
+        mount_cost::report_aliases("finalize_module_from_state");
         self.dump_vbc_if_requested();
         // Stdlib precompile finalize — MINIMAL path.
         //
@@ -10172,7 +10219,22 @@ impl VbcCodegen {
         }
     }
 
+    /// Timing shell for [`Self::register_import_aliases_inner`] (T0753).
+    ///
+    /// Wrapping rather than bracketing the body: the inner function
+    /// returns early from a dozen places, so a start/stop pair inside it
+    /// would time whichever exit I remembered.
     fn register_import_aliases(&mut self, import: &MountDecl) -> CodegenResult<()> {
+        if !mount_cost::enabled() {
+            return self.register_import_aliases_inner(import);
+        }
+        let t0 = std::time::Instant::now();
+        let r = self.register_import_aliases_inner(import);
+        mount_cost::add_alias(t0.elapsed());
+        r
+    }
+
+    fn register_import_aliases_inner(&mut self, import: &MountDecl) -> CodegenResult<()> {
         // #122 — propagate the OUTER `MountDecl.alias` into the tree
         // walker. The grammar admits two surfaces for `as <alias>`:
         //
