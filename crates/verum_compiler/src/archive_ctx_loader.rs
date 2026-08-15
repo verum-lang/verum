@@ -3372,6 +3372,12 @@ fn compute_merge_keep_sets(
     //      spelling callers record),
     //   3. the 2-segment `Type.method` suffix of deep promoted names.
     // Owned keys because form 2 is synthesised.
+    let callm_census = std::env::var_os("VERUM_TRACE_ACCEPT").is_some();
+    let mut callm_bare_edges = 0usize;
+    let mut callm_bare_kept = 0usize;
+    let mut callm_qualified_edges = 0usize;
+    let mut callm_qualified_kept = 0usize;
+    let mut callm_bare_by_name: HashMap<String, (usize, usize)> = HashMap::new();
     let mut name_to_loc: HashMap<String, (usize, u32)> = HashMap::new();
     // CALLM-KEEP-CLOSURE-1: method-DISPATCH resolution indexes.  The
     // fixpoint below follows `Call`-family edges by func-id/name, but a
@@ -3875,6 +3881,25 @@ fn compute_merge_keep_sets(
                             methods_by_bare.get(name)
                         };
                         if let Some(locs) = locs {
+                            // CALLM-KEEP CENSUS (`VERUM_TRACE_ACCEPT=1`):
+                            // the bare arm keeps EVERY same-named method
+                            // in the archive, so its share of the keep
+                            // set is the price of identity-by-simple-name
+                            // at the merge layer. Counted, not guessed.
+                            if callm_census {
+                                if name.contains('.') {
+                                    callm_qualified_edges += 1;
+                                    callm_qualified_kept += locs.len();
+                                } else {
+                                    callm_bare_edges += 1;
+                                    callm_bare_kept += locs.len();
+                                    let e = callm_bare_by_name
+                                        .entry(name.to_string())
+                                        .or_insert((0usize, 0usize));
+                                    e.0 += 1;
+                                    e.1 += locs.len();
+                                }
+                            }
                             let locs = locs.clone();
                             for (eidx, efid) in locs {
                                 push_fn!(eidx, efid);
@@ -3887,6 +3912,26 @@ fn compute_merge_keep_sets(
         }
     }
 
+    if callm_census {
+        let total: usize = keep.iter().map(|k| k.len()).sum();
+        eprintln!(
+            "[callm-keep] bare: {} edges -> {} keeps | qualified: {} edges -> {} keeps | keep-set total {}",
+            callm_bare_edges,
+            callm_bare_kept,
+            callm_qualified_edges,
+            callm_qualified_kept,
+            total,
+        );
+        let mut rows: Vec<(&String, &(usize, usize))> =
+            callm_bare_by_name.iter().collect();
+        rows.sort_by(|a, b| b.1.1.cmp(&a.1.1));
+        for (name, (edges, keeps)) in rows.into_iter().take(15) {
+            eprintln!(
+                "[callm-keep]   bare `{}`: {} edge(s) -> {} keeps",
+                name, edges, keeps
+            );
+        }
+    }
     decoded
         .iter()
         .enumerate()
@@ -4953,6 +4998,14 @@ fn register_module_filtered(
     // functions — the merge pruner's surface seed set.
     let mut registered_ids: std::collections::HashSet<u32> =
         std::collections::HashSet::new();
+    // ACCEPT-ARM CENSUS (`VERUM_TRACE_ACCEPT=1`).  Six independent arms
+    // can admit a function, and the merged module is two orders of
+    // magnitude larger than the reachability closure says it needs, so
+    // the question "which arm admits the bulk" has to be READ, not
+    // reasoned about.  Counted in declaration order, first true wins, so
+    // the columns sum to the module's accepted total.
+    let trace_accept = std::env::var_os("VERUM_TRACE_ACCEPT").is_some();
+    let mut arm_counts = [0usize; 6];
     for fn_desc in &module.functions {
         // **Cold-start optimisation**: gate-then-resolve order.  The
         // simple_name lookup is O(1) via the reverse-index helper but
@@ -5174,6 +5227,22 @@ fn register_module_filtered(
                 .entry(new_id.0)
                 .or_insert_with(|| qualified_borrowed.clone());
             continue;
+        }
+        if trace_accept {
+            let arm = if wanted.contains(simple_name_str) {
+                0
+            } else if wanted.contains(&qualified_borrowed) {
+                1
+            } else if is_method_of_wanted_type {
+                2
+            } else if is_wholesale_module_mount {
+                3
+            } else if last_segment_matches_wanted {
+                4
+            } else {
+                5
+            };
+            arm_counts[arm] += 1;
         }
         registered_ids.insert(fn_desc.id.0);
         let simple_name = simple_name_str.to_string();
@@ -5855,6 +5924,19 @@ fn register_module_filtered(
         {
             ctx.newtype_inner_type.insert(type_name.clone(), inner_name);
         }
+    }
+    if trace_accept && arm_counts.iter().any(|c| *c > 0) {
+        eprintln!(
+            "[accept] {:<34} simple={} qualified={} method-of-type={} \
+             wholesale-mount={} last-seg={} last2={}",
+            module_name,
+            arm_counts[0],
+            arm_counts[1],
+            arm_counts[2],
+            arm_counts[3],
+            arm_counts[4],
+            arm_counts[5],
+        );
     }
     (func_id_remap, registered_ids)
 }
