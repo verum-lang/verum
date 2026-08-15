@@ -38336,26 +38336,54 @@ impl VbcCodegen {
         let gen_func_id =
             self.compile_stream_generator_body(&capture_names, output_expr, clauses)?;
 
-        // Step 3: Emit NewClosure to create the generator closure
-        let closure_reg = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::NewClosure {
-            dst: closure_reg,
-            func_id: gen_func_id,
-            captures: capture_regs,
-        });
+        // Step 3: hand the captured variables to the generator as its
+        // arguments.
+        //
+        // T0658.  `compile_stream_generator_body` registers this function with
+        // `param_count: captures.len()` and `param_names: captures`, and its
+        // own doc comment opens with "Takes captured variables as parameters".
+        // This site used to emit `GenCreate` with `count: 0` under the note
+        // "captures are handled separately" — and the separate handling was a
+        // `NewClosure` whose result register was freed without ever being
+        // read.  Nothing bound the parameters, so the generator body iterated
+        // an unbound source and yielded NOTHING: `stream[e for x in xs]` and
+        // `gen{e for x in xs}` both evaluated to an empty sequence, silently,
+        // with no diagnostic and a plausible-looking result.  Measured on the
+        // same range in one program: a list comprehension gave
+        // `[0, 1, 4, 9, 16]`, the stream and generator forms gave `[]`.
+        //
+        // `GenCreate` reads its arguments from a CONTIGUOUS register range, so
+        // the captures — which live in whatever registers their variables
+        // occupy — are copied into a fresh block first.  This is the same
+        // protocol the working `GenCreate` site (generator function call) uses
+        // for its arguments; the two now agree.
+        let capture_count = capture_regs.len();
+        let args_start = if capture_count > 0 {
+            let first = self.ctx.registers.alloc_fresh();
+            for _ in 1..capture_count {
+                self.ctx.registers.alloc_fresh();
+            }
+            for (i, &src) in capture_regs.iter().enumerate() {
+                let dst = Reg(first.0 + i as u16);
+                if src != dst {
+                    self.ctx.emit(Instruction::Mov { dst, src });
+                }
+            }
+            first
+        } else {
+            Reg(0)
+        };
 
         // Step 4: Create generator instance via GenCreate
-        // Stream comprehension generators have no arguments (captures are handled separately)
         let gen_reg = self.ctx.alloc_temp();
         self.ctx.emit(Instruction::GenCreate {
             dst: gen_reg,
             func_id: gen_func_id,
             args: crate::instruction::RegRange {
-                start: Reg(0),
-                count: 0,
+                start: args_start,
+                count: u8::try_from(capture_count).unwrap_or(u8::MAX),
             },
         });
-        self.ctx.free_temp(closure_reg);
 
         Ok(Some(gen_reg))
     }
