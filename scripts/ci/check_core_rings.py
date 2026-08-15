@@ -19,6 +19,7 @@ the layer of.
 Usage:
     check_core_rings.py            # report; exit 1 on any violation
     check_core_rings.py --census   # report the full edge table, exit 0
+    check_core_rings.py --root-mounts  # count `mount core.*` as the edges it is
 """
 
 from __future__ import annotations
@@ -138,7 +139,57 @@ def targets(mount_body: str, from_file: Path) -> list[str]:
         # `mount base.x.Y;` — core-relative shorthand used across the tree.
     else:
         parts = parts[1:]
-    return [_longest_module_path(parts)] if parts else []
+    if not parts:
+        # The mount named the ROOT (`mount core.*;`, `mount core.{X, Y};`).
+        # It is not "no dependency" — it is a dependency on everything the
+        # root re-exports.  See `root_reexports`.
+        if EXPAND_ROOT_MOUNTS:
+            return [_longest_module_path([r]) for r in root_reexports()]
+        return []
+    return [_longest_module_path(parts)]
+
+
+# Whether `mount core.*;` / `mount core.{X};` expand to what the root
+# re-exports.  OFF by default: turning it on changes what the law SEES, and
+# that change is a finding to be decided on (T0749), not a silent new verdict
+# for every existing run.  `--root-mounts` turns it on.
+EXPAND_ROOT_MOUNTS = False
+
+
+@lru_cache(maxsize=1)
+def root_reexports() -> tuple[str, ...]:
+    """The modules `core/mod.vr` publishes — what `mount core.*;` reaches.
+
+    THE HOLE THIS CLOSES.  `mount core.*;` appears in 1195 of core/'s 2560
+    files, and `mount core.{X, Y};` in 72 more.  Both name the ROOT, and
+    `targets()` used to return NOTHING for them: `parts` becomes `["core"]`,
+    the `core` head is stripped, the list is empty, no edge is recorded.  So
+    the single most-used dependency statement in the standard library was
+    invisible to the law that governs dependencies — 1267 of 8785 mount
+    sites, 14 %.
+
+    Today that is harmless by luck rather than by rule: the root re-exports
+    only the prelude (base, collections, context, intrinsics, io, math,
+    sync, text, time), all of which sit low.  But nothing enforced it.  One
+    `public mount super.database.*;` added to `core/mod.vr` would give 1195
+    files an edge into ring 5, and this gate would keep reporting zero
+    violations, because it cannot see the edge at all.
+
+    Expanding the root mount to what the root actually publishes turns those
+    1267 invisible sites into ordinary edges, checked like every other.  The
+    prelude's own placement is then what the law tests — which is the
+    property the prelude needs to have.
+    """
+    mod = CORE / "mod.vr"
+    if not mod.is_file():
+        return ()
+    text = strip_comments(mod.read_text(errors="replace"))
+    seen: list[str] = []
+    for m in re.finditer(r"\bpublic\s+mount\s+super\.([A-Za-z_][A-Za-z0-9_]*)", text):
+        name = m.group(1)
+        if name not in seen:
+            seen.append(name)
+    return tuple(seen)
 
 
 def _longest_module_path(parts: list[str]) -> str:
@@ -258,6 +309,14 @@ def placement_of(module: str, ring_of: dict[str, float]) -> str | None:
 
 def main() -> int:
     census = "--census" in sys.argv
+    if "--root-mounts" in sys.argv:
+        global EXPAND_ROOT_MOUNTS
+        EXPAND_ROOT_MOUNTS = True
+        print(
+            "[root-mounts] `mount core.*;` / `mount core.{…};` counted as edges to "
+            f"the {len(root_reexports())} module(s) core/mod.vr re-exports: "
+            f"{', '.join(root_reexports())}"
+        )
     ring_of, ring_names, cohesive_rings = load_rings()
 
     edges: dict[tuple[str, str], list[str]] = defaultdict(list)
