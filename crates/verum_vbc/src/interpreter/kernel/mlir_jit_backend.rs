@@ -3476,6 +3476,41 @@ mod tests {
  // A future iteration coverage: persistent on-disk JIT cache
  // -----------------------------------------------------------------
 
+ /// Serialises every test that points `VERUM_JIT_CACHE` somewhere.
+ ///
+ /// T0740, caught 2026-08-15 after the flake had twice been seen as
+ /// "1348 passed; 1 failed" with the failing name lost both times. It is
+ /// `cache_writes_lowered_module_on_first_compile`, panicking with
+ /// "cache dir not created".
+ ///
+ /// `VERUM_JIT_CACHE` is read from a PROCESS-GLOBAL (`std::env::var`, in
+ /// `jit_cache_dir`), and two tests each set it to their own fresh
+ /// directory and `remove_var` it at the end. Run in parallel — which is
+ /// what `cargo test` does by default, and therefore what CI's
+ /// `cargo test --workspace --lib --bins` does — the second test's
+ /// `set_var` redirects the first test's backend, and either test's
+ /// `remove_var` drops the other back to the default cache directory.
+ /// The asserting test then looks in a directory nothing ever wrote to.
+ ///
+ /// The premise in the old comment — "tests are single-threaded for
+ /// env_var purposes by virtue of `--test-threads=1` in CI" — was untrue;
+ /// CI passes no such flag. A per-test unique directory
+ /// (`isolated_jit_cache_dir`) cannot help either: the collision is on the
+ /// ONE variable that points at the directory, not on the directories.
+ ///
+ /// Holding this lock for the whole body of such a test makes ownership of
+ /// the variable exclusive — the property these tests always assumed and
+ /// never had. Poisoning is recovered from rather than propagated: one
+ /// panicking test must not turn its sibling's failure from "flaky" into
+ /// "always poisoned", which would hide the next defect behind this one.
+ static JIT_CACHE_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+ fn lock_jit_cache_env() -> std::sync::MutexGuard<'static, ()> {
+  JIT_CACHE_ENV
+   .lock()
+   .unwrap_or_else(|poisoned| poisoned.into_inner())
+ }
+
  fn isolated_jit_cache_dir() -> std::path::PathBuf {
  // Per-test-process scratch directory. Each test that touches
  // the cache must point `VERUM_JIT_CACHE` at a fresh subdir to
@@ -3513,10 +3548,13 @@ mod tests {
 
  #[test]
  fn cache_writes_lowered_module_on_first_compile() {
+  let _env = lock_jit_cache_env();
  let dir = isolated_jit_cache_dir();
- // SAFETY: tests are single-threaded for env_var purposes by
- // virtue of `--test-threads=1` in CI; per-process
- // experimentation here is acceptable.
+ // SAFETY: `lock_jit_cache_env` above makes this test the sole
+ // owner of `VERUM_JIT_CACHE` for its whole body. The note that
+ // stood here claimed the tests were single-threaded because CI
+ // passes `--test-threads=1`; CI passes no such flag, and that
+ // false premise is the whole of T0740.
  unsafe {
  std::env::set_var("VERUM_JIT_CACHE", &dir);
  }
@@ -3552,6 +3590,7 @@ mod tests {
 
  #[test]
  fn cache_hit_produces_correct_results() {
+  let _env = lock_jit_cache_env();
  // Pre-populate the cache by compiling once; then construct
  // a fresh backend pointing at the same cache and verify the
  // compute output is bit-equivalent.
