@@ -1747,23 +1747,54 @@ impl TypeChecker {
             // when this protocol was already loaded earlier.
             self.register_stdlib_protocol_for_name(&impl_desc.protocol, metadata);
 
-            // Idempotent guard: skip if THIS impl (target_type,
-            // protocol) was already registered.  The protocol-checker
-            // uses (type-key, protocol-key) as its impl-index key —
-            // duplicate registrations would still overwrite cleanly,
-            // but skipping spares the repeated allocation.
+            // Idempotent guard: skip if THIS IMPL — this protocol
+            // INSTANTIATION for this target type — was already
+            // registered.  Re-registration is common (the stdlib
+            // lazy-loader re-enters this per load call) and the skip
+            // spares the repeated allocation.
+            //
+            // The question has to be asked at instantiation granularity.
+            // It used to be asked at bare-name granularity: the guard
+            // compared `i.protocol.as_ident()` against
+            // `impl_desc.protocol` and never looked at the arguments.
+            // `core/time/instant.vr` declares
+            //
+            //     implement Sub<Duration> for Instant { Output = Instant }
+            //     implement Sub<Instant>  for Instant { Output = Duration }
+            //
+            // so the second one looked like a duplicate of the first and
+            // was dropped here, before `register_impl` — which keys on
+            // the full instantiation and would have kept both — ever saw
+            // it.  `instant - instant` then resolved through the only
+            // `Sub for Instant` the checker knew about and typed as
+            // `Instant` instead of `Duration` (T0756).
+            //
+            // `implements_instantiation` composes the key from the same
+            // two helpers `register_impl` uses, so this guard and the
+            // index cannot disagree about what "already registered"
+            // means.
+            //
+            // It is a FAST PATH, not the authority.  `register_impl`
+            // short-circuits on the same key, so being wrong here can
+            // only cost work, never admit a duplicate.  Note one place
+            // it deliberately under-fires: for a GENERIC target the
+            // registration below rebuilds `for_type` with positional
+            // args (`__generic_0..k`) while this probe uses the argless
+            // form, and `make_type_key` includes args — so the probe
+            // misses and the loop falls through to `register_impl`,
+            // which recognises the duplicate and returns. Correct, just
+            // not free. Making it fire there means hoisting the real
+            // `for_type` construction above this point, which is a
+            // larger change than the defect warrants.
             let for_type = Type::Named {
                 path: Self::text_to_path(&impl_desc.target_type),
                 args: List::new(),
             };
+            let protocol_path = Self::text_to_path(&impl_desc.protocol);
+            let protocol_args = Self::parse_impl_protocol_args(impl_desc);
             {
                 let pc = self.protocol_checker.read();
-                if pc.get_implementations(&for_type).iter().any(|i| {
-                    i.protocol
-                        .as_ident()
-                        .map(|id| id.as_str() == impl_desc.protocol.as_str())
-                        .unwrap_or(false)
-                }) {
+                if pc.implements_instantiation(&for_type, &protocol_path, &protocol_args) {
                     proto_deps.push(impl_desc.protocol.clone());
                     continue;
                 }
