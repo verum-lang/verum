@@ -56,6 +56,9 @@ mod dispatch_table;
 mod error;
 pub mod gpu_simulator;
 mod heap;
+/// Numeric coercions for the enveloped handlers — and the count of how
+/// often the interpreter answers with a zero it invented.
+pub mod lenient;
 /// Re-exported for integration tests (`crates/verum_vbc/tests/`) that assert a
 /// heap variant's discriminant: there is no public `Value` API for the sum-type
 /// tag (`Value::tag()` is the NaN-box tag, not the variant tag).

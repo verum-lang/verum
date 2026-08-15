@@ -7,6 +7,7 @@ use super::bytecode_io::*;
 use super::envelope::dispatch_enveloped;
 use crate::instruction::{CharSubOpcode, Opcode};
 use crate::value::Value;
+use crate::interpreter::lenient::{i64_or_zero as lenient_i64, char_or_nul as lenient_char};
 
 /// CharExtended (0x2B) - Character classification and conversion.
 ///
@@ -36,22 +37,6 @@ use crate::value::Value;
 /// compile out); these helpers make debug agree with release.
 // (lenient_f64 deliberately absent here — char arms consume ints and
 // chars only; the float twin lives in math_extended/arith_extended.)
-
-#[inline]
-fn lenient_i64(v: crate::value::Value) -> i64 {
-    if v.is_int() {
-        v.as_i64()
-    } else if v.is_float() {
-        v.as_f64() as i64
-    } else {
-        0
-    }
-}
-
-#[inline]
-fn lenient_char(v: crate::value::Value) -> char {
-    char::from_u32(lenient_i64(v) as u32).unwrap_or('\u{0}')
-}
 
 pub(in super::super) fn handle_char_extended(
     state: &mut InterpreterState,

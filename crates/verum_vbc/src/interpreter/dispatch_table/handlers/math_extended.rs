@@ -7,6 +7,7 @@ use super::bytecode_io::*;
 use super::envelope::dispatch_enveloped;
 use crate::instruction::{MathSubOpcode, Opcode};
 use crate::value::Value;
+use crate::interpreter::lenient::{f64_or_zero as lenient_f64, i64_or_zero as lenient_i64};
 
 /// MathExtended (0x29) - Transcendental and special math functions.
 ///
@@ -39,28 +40,6 @@ use crate::value::Value;
 /// abort (the extended_envelope_pins contract is: wrong value maybe,
 /// dead stream never).  Release semantics are unchanged (the asserts
 /// compile out); these helpers make debug agree with release.
-#[inline]
-fn lenient_f64(v: crate::value::Value) -> f64 {
-    if v.is_float() {
-        v.as_f64()
-    } else if v.is_int() {
-        v.as_i64() as f64
-    } else {
-        0.0
-    }
-}
-
-#[inline]
-fn lenient_i64(v: crate::value::Value) -> i64 {
-    if v.is_int() {
-        v.as_i64()
-    } else if v.is_float() {
-        v.as_f64() as i64
-    } else {
-        0
-    }
-}
-
 pub(in super::super) fn handle_math_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
