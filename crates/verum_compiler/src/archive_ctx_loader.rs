@@ -3913,6 +3913,45 @@ fn compute_merge_keep_sets(
     }
 
     if callm_census {
+        // COUNTERFACTUAL (T0753): the type-surface rule already keeps
+        // every protocol-impl method of a type whose surface is kept, so
+        // the bare-CallM arm only ADDS methods of types whose surface is
+        // NOT kept.  For those the program cannot hold a receiver — unless
+        // the type-surface rule has a coverage gap.  Which of the two it
+        // is decides whether the over-keep is removable, so count it
+        // rather than argue it.
+        let mut kept_type_names: HashSet<&str> = HashSet::new();
+        for (eidx, tid) in seen_types.iter() {
+            if let Some(ty) = aux[*eidx].type_by_id.get(tid) {
+                if let Some(n) = aux[*eidx].name_by_id.get(&ty.name) {
+                    kept_type_names.insert(*n);
+                }
+            }
+        }
+        let (mut owner_kept, mut owner_absent, mut no_owner) = (0usize, 0usize, 0usize);
+        for (eidx, fids) in keep.iter().enumerate() {
+            for fid in fids {
+                let n = match aux[eidx].fn_name_by_id.get(fid) {
+                    Some(n) => *n,
+                    None => continue,
+                };
+                let segs: Vec<&str> = n.split('.').collect();
+                if segs.len() < 2 {
+                    no_owner += 1;
+                } else if kept_type_names.contains(segs[segs.len() - 2]) {
+                    owner_kept += 1;
+                } else {
+                    owner_absent += 1;
+                }
+            }
+        }
+        eprintln!(
+            "[callm-keep] kept types={} | kept fns by owner: surface-kept={} surface-ABSENT={} no-owner={}",
+            kept_type_names.len(),
+            owner_kept,
+            owner_absent,
+            no_owner,
+        );
         let total: usize = keep.iter().map(|k| k.len()).sum();
         eprintln!(
             "[callm-keep] bare: {} edges -> {} keeps | qualified: {} edges -> {} keeps | keep-set total {}",
