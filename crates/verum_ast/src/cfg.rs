@@ -315,9 +315,27 @@ impl TargetConfig {
             "windows" => self.target_family.as_str() == "windows",
             "wasm" => self.target_family.as_str() == "wasm",
 
-            // Build mode flags
+            // Build mode flags.
+            //
+            // `debug` / `release` are the spelling the LANGUAGE uses:
+            // `core/base/panic.vr` guards its four assertion pairs with
+            // `@cfg(debug)` / `@cfg(not(debug))`, and the conformance
+            // specs under `vcs/specs/L1-core/meta/cfg/` are written
+            // against the `debug` / `release` pair.  Until 2026-08-15
+            // this match knew only `debug_assertions`, so both names
+            // fell through to the custom-flag lookup below and were
+            // silently false — which made `@cfg(not(debug))` silently
+            // TRUE and kept the empty arm of every pair.  Every
+            // `debug_assert*` in the prelude was a no-op in every build
+            // mode, `-O0` included (T0750).
+            //
+            // They are aliases, not separate state: one build is either
+            // carrying debug assertions or it is not, and
+            // `Session::build_target_config` already derives that field
+            // from the manifest override, else `optimization_level == 0`.
             "test" => self.test,
-            "debug_assertions" => self.debug_assertions,
+            "debug_assertions" | "debug" => self.debug_assertions,
+            "release" => !self.debug_assertions,
 
             // OS shortcuts
             "linux" => self.target_os.as_str() == "linux",
@@ -1022,6 +1040,54 @@ mod tests {
 
         let config_release = TargetConfig::host().with_debug_assertions(false);
         assert!(!pred.evaluate(&config_release));
+    }
+
+    /// `debug` / `release` are the spelling the LANGUAGE uses —
+    /// `core/base/panic.vr` guards its four assertion pairs with
+    /// `@cfg(debug)` / `@cfg(not(debug))`, and the conformance specs
+    /// under `vcs/specs/L1-core/meta/cfg/` are written against
+    /// `debug` / `release`.  `debug_assertions` is a third name for the
+    /// same fact.
+    ///
+    /// Until 2026-08-15 `is_set` knew only the third one.  `debug` fell
+    /// through to the custom-flag lookup and was silently false, which
+    /// made `@cfg(not(debug))` silently TRUE and kept the EMPTY arm of
+    /// every pair: every `debug_assert*` in the prelude did nothing, in
+    /// every build mode, `-O0` included (T0750).
+    ///
+    /// `test_debug_assertions` above passed throughout.  It asked about
+    /// the one spelling that worked — a test named for the concept while
+    /// covering a single surface of it.
+    ///
+    /// The unknown-name case is asserted too, because it is the reason
+    /// the defect was invisible rather than loud: an unrecognised bare
+    /// predicate is not diagnosed, it is quietly false, and so a
+    /// misspelling deletes code silently.
+    #[test]
+    fn test_debug_and_release_follow_debug_assertions() {
+        for debug_on in [true, false] {
+            let config = TargetConfig::host().with_debug_assertions(debug_on);
+
+            for name in ["debug", "debug_assertions"] {
+                assert_eq!(
+                    CfgPredicate::ident(name, dummy_span()).evaluate(&config),
+                    debug_on,
+                    "@cfg({name}) must follow debug_assertions={debug_on}"
+                );
+            }
+
+            assert_eq!(
+                CfgPredicate::ident("release", dummy_span()).evaluate(&config),
+                !debug_on,
+                "@cfg(release) is the complement of @cfg(debug)"
+            );
+
+            assert!(
+                !CfgPredicate::ident("no_such_cfg_flag", dummy_span()).evaluate(&config),
+                "an unrecognised bare predicate is silently false — the \
+                 fallthrough that hid T0750"
+            );
+        }
     }
 
     #[test]
