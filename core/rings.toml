@@ -66,6 +66,49 @@ modules = [
     "collections.list", "collections.map", "collections.set", "text.text",
 ]
 
+# =============================================================================
+# DECLARED EXCEPTIONS
+# =============================================================================
+#
+# An edge listed here violates the ring law and is allowed to, with the
+# reason written down.  This exists because the alternative is worse: a
+# gate that cannot express "known, and here is why" gets switched off, and
+# a law nobody runs is not a law.
+#
+# The bar is deliberately high — an entry is a claim that moving the
+# dependency down is not merely inconvenient but wrong, and it must name
+# what would have to change for the entry to go away.  Adding one is a
+# decision, and its diff is where that decision gets reviewed.
+[exceptions]
+"base.memory -> mem" = """
+`core/base/memory.vr` is the CBGR reference model — validity, generations,
+capability bits — and it calls the allocator: `cbgr_alloc`,
+`cbgr_dealloc`, `get_header_from_ptr`, plus `AllocationHeader` and
+`HEADER_SIZE` for the pointer-to-header offset (imported precisely so the
+`- 32` that used to be hardcoded at seven sites cannot drift).
+
+`mem` is ring 1 because `mem/allocator.vr` mounts `sys.linux.mem.{mmap,
+munmap, mprotect}`, `sys.darwin.libsystem` and `sys.windows.kernel32`.  An
+allocator cannot avoid the syscall layer, so moving `mem` down would drag
+mmap into the foundation — which is the widening the law forbids.
+
+This edge was INVISIBLE until 2026-08-15: it is written `mount
+super.super.mem.allocator.{…}`, and the gate returned nothing for every
+`super.`-rooted mount on the assumption that relative always means
+intra-module.  Measured, 15 of 581 relative mounts leave their module and
+this is the only one that leaves it upward.
+
+WHAT WOULD RETIRE THIS ENTRY: `mem/header.vr` needs no syscalls — it
+mounts only intrinsics and siblings — so the `AllocationHeader` /
+`HEADER_SIZE` half is a cut-by-guarantee away from ring 0, the same cut
+`context.random` and `security/hash` got.  The allocator half is the real
+question: either ring 0's memory model reaches the CBGR intrinsics
+directly rather than the ring-1 wrapper (blocked today by T0463 —
+`cbgr_dealloc`/`cbgr_realloc` carry no `@intrinsic` attribute), or
+`base/memory.vr` is itself split into the pure reference model and the
+allocating half.
+"""
+
 [ring."0.5"]
 name = "contract"
 # Dependency-free CONTRACTS: a `context` declaration that names only

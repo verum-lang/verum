@@ -121,12 +121,22 @@ def targets(mount_body: str, from_file: Path) -> list[str]:
     `core/io`. Counting those as cross-module edges would make the law
     report violations that do not exist in the code.
 
-    Relative mounts (`mount .sibling.X;`, `mount super.x.Y;`) are
-    intra-module too and yield nothing.
+    Relative mounts (`mount .sibling.X;`, `mount super.x.Y;`) are USUALLY
+    intra-module — but not always, and the difference is decidable rather
+    than assumable.  `super` names the mounting file's own directory and
+    each additional `super` one level above it, so `super.super.mem.…`
+    written in `core/base/memory.vr` resolves to `core/mem`, a DIFFERENT
+    top-level module.  Returning nothing for every relative form hid
+    exactly that: measured 2026-08-15, 15 of 581 `super.`-rooted mounts
+    leave their module, and one of them — `base` (ring 0) reaching
+    `mem.allocator` and `mem.header` (ring 1) — is an upward edge out of
+    the foundation itself.
     """
     body = " ".join(mount_body.split())
-    if body.startswith(".") or body.startswith("super."):
+    if body.startswith("."):
         return []
+    if body.startswith("super."):
+        return _relative_target(body, from_file)
     head = body.split("{")[0].strip()
     parts = [p for p in head.split(".") if p and p != "*"]
     if not parts:
@@ -168,6 +178,12 @@ def targets(mount_body: str, from_file: Path) -> list[str]:
 # `--no-root-mounts` restores the narrow view, for comparing against a
 # pre-2026-08-15 run.
 EXPAND_ROOT_MOUNTS = True
+
+# Edges declared in rings.toml's [exceptions] table: violations that are
+# ALLOWED, each with its reason written where the rings themselves are
+# declared.  Reported, never silent — an exception the reader cannot see
+# is indistinguishable from a gate that missed something.
+EXCEPTIONS: set[str] = set()
 
 
 @lru_cache(maxsize=1)
@@ -216,6 +232,39 @@ def root_reexports() -> tuple[str, ...]:
             seen.append(owner)
     return tuple(seen)
 
+
+
+def _relative_target(body: str, from_file: Path) -> list[str]:
+    """The module a `super.`-rooted mount reaches, when it leaves this one.
+
+    `super` is the mounting file's own directory; every additional `super`
+    climbs one further.  The result is checked against the filesystem —
+    a path that resolves to no directory and no `.vr` yields nothing
+    rather than a guessed edge — and is reported ONLY when it lands in a
+    different top-level module, because the law constrains edges BETWEEN
+    modules and a file reaching its own sibling is not one.
+    """
+    segs = [seg for seg in body.split("{")[0].split(".") if seg]
+    ups = 0
+    while ups < len(segs) and segs[ups] == "super":
+        ups += 1
+    rest = segs[ups:]
+    if not rest:
+        return []
+    base = from_file.parent
+    for _ in range(ups - 1):
+        base = base.parent
+    target = base / rest[0]
+    if not (target.is_dir() or target.with_suffix(".vr").is_file()):
+        return []
+    try:
+        t_parts = target.relative_to(CORE).parts
+        own = from_file.relative_to(CORE).parts
+    except ValueError:
+        return []
+    if not t_parts or not own or t_parts[0] == own[0]:
+        return []
+    return [_longest_module_path(list(t_parts))]
 
 def _longest_module_path(parts: list[str]) -> str:
     """The longest prefix of `parts` that is an actual module.
@@ -276,6 +325,8 @@ def load_rings() -> tuple[dict[str, float], dict[float, str], set[float]]:
     if not RINGS_TOML.exists():
         sys.exit(f"[fail] {RINGS_TOML} missing — the ring law has no declaration to read")
     data = tomllib.loads(RINGS_TOML.read_text())
+    global EXCEPTIONS
+    EXCEPTIONS = set(data.get("exceptions", {}))
     ring_of: dict[str, float] = {}
     names: dict[float, str] = {}
     cohesive: set[float] = set()
@@ -369,12 +420,19 @@ def main() -> int:
     # ring, which inverts the architecture, and (b) a CYCLE, which means
     # the two modules are really one and the split is fiction.
     violations: list[tuple[str, str, int, int, list[str]]] = []
+    excused: list[tuple[str, str, list[str]]] = []
     for (src, dst), sites in sorted(edges.items()):
         rs, rd = ring_for(src, ring_of), ring_for(dst, ring_of)
         if rs is None or rd is None:
             continue
         if rd > rs:
-            violations.append((src, dst, rs, rd, sites))
+            # A declared exception is still REPORTED — an allowance the
+            # reader cannot see is indistinguishable from a gate that
+            # missed something.  It only stops failing the run.
+            if f"{src} -> {dst}" in EXCEPTIONS:
+                excused.append((src, dst, sites))
+            else:
+                violations.append((src, dst, rs, rd, sites))
 
     # Clause (b): cycles among the intra-ring edges.
     intra: dict[str, set[str]] = defaultdict(set)
@@ -431,6 +489,12 @@ def main() -> int:
         print(f"[fail] {len(unplaced)} module(s) not placed in any ring — add them to core/rings.toml:")
         for m in unplaced:
             print(f"    {m}")
+    if excused:
+        print(f"[note] {len(excused)} declared exception(s) — rings.toml [exceptions] carries the reason:")
+        for src, dst, sites in excused:
+            print(f"    {src} -> {dst}  {len(sites)} site(s)")
+        print()
+
     if cycles:
         ok = False
         print(f"[fail] {len(cycles)} dependency cycle(s) inside a ring — the split is fiction, the modules are one:")
