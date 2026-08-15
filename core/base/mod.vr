@@ -317,6 +317,12 @@ public mount .panic.{
     assert_ne,
     debug_assert,
     debug_assert_eq,
+    // `_ne` was missing while its two siblings were here.  The plain
+    // family is re-exported whole — assert / assert_eq / assert_ne —
+    // so publishing two thirds of the debug family is an omission
+    // rather than a cut: §4ter's inclusion law is applied per CONCEPT,
+    // and `debug_assert_ne` is the same concept as the two above it.
+    debug_assert_ne,
     unreachable,
     unimplemented,
     todo,
