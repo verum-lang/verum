@@ -8,13 +8,23 @@ has produced real miscompiles — `ColumnSchema`, `Executor`, `JoinPair`
 were each fixed by renaming one side.
 
 WHY A RATCHET, AND WHY NOW.  T0458's spec recorded 99 colliding public
-type names on 2026-07-19.  Re-measured 2026-08-15: 138.  Roughly forty
-new collisions in under a month, because the existing guardrail
+type names on 2026-07-19, and the existing guardrail
 (`stdlib_unique_type_names`) is PERMANENTLY RED — it demands zero, it
 has never been zero, and a gate that cannot go green is read as broken
 rather than as a finding.  Nothing was watching the growth.
 
-The eventual fix is not renaming 150 types: two modules declaring the
+WHAT THE NUMBER ACTUALLY IS.  The first version of this gate counted
+every line starting `type <name>`, which in Verum introduces three
+different things and only one of them declares a type — see
+`declares_a_type`.  It therefore reported 150 names / 446 declarations
+on 2026-08-15, of which the largest entries were the associated-type
+vocabulary of the protocol library (`Output` in 39 files, `Item` in 32,
+`IntoIter` in 13) — bindings that name no layout and can collide with
+nothing.  Measured through the grammar instead: 134 names / 284
+declarations.  A gate whose baseline is a third noise gets read as
+broken too.
+
+The eventual fix is not renaming 134 types: two modules declaring the
 same simple name is legitimate, and the registry is what should carry
 the qualifier.  Until that lands, this stops the bleeding.
 
@@ -58,8 +68,49 @@ REPO = Path(__file__).resolve().parents[2]
 CORE = REPO / "core"
 KNOWN = REPO / "scripts" / "ci" / "type_name_collisions_known.txt"
 
-# `visibility , 'type' , [ 'affine' | 'linear' ] , identifier`
+# `visibility , 'type' , [ 'affine' | 'linear' ] , identifier , [generics]`
 DECL = re.compile(r"^\s*(?:public\s+)?type\s+(?:(?:affine|linear)\s+)?([A-Za-z_]\w*)")
+
+
+def declares_a_type(line: str) -> str | None:
+    """The declared name, if this line is a `type_def` — else `None`.
+
+    `type` introduces THREE different things in Verum and only one of
+    them is a nominal declaration:
+
+        type Point is { x: Float };          # type_def — declares `Point`
+        type Item;                           # protocol associated type
+        type Output = Result<T, RecvError>;  # associated-type BINDING
+
+    The grammar's discriminator is the `is` keyword (`type_def =
+    visibility, 'type', [...], identifier, [generics], 'is', ...`), and
+    without it this gate counted every `implement Future for X { type
+    Output = ...; }` as a declaration of a type called `Output`.  That
+    was most of what it reported: 39 files "declaring" `Output`, 32
+    `Item`, 13 `IntoIter`, 10 `Target` — the associated-type vocabulary
+    of the protocol library, none of which can collide in a layout
+    registry because none of them names a layout.
+    """
+    m = DECL.match(line)
+    if not m:
+        return None
+    rest = line[m.end() :]
+    # Skip a balanced generic parameter list, which may nest
+    # (`type Wrapper<T: Into<U>> is ...`), so a `[^>]*` scan will not do.
+    if rest.lstrip().startswith("<"):
+        rest = rest.lstrip()
+        depth = 0
+        for i, ch in enumerate(rest):
+            if ch == "<":
+                depth += 1
+            elif ch == ">":
+                depth -= 1
+                if depth == 0:
+                    rest = rest[i + 1 :]
+                    break
+        else:
+            return None
+    return m.group(1) if re.match(r"\s+is\b", rest) else None
 
 # Platform twins are legitimate BY DESIGN — one Stat per OS, selected by
 # module.  They are NOT exempted: T0435 reports precisely these names
@@ -90,9 +141,9 @@ def collisions() -> dict[str, list[str]]:
     for path in sorted(CORE.rglob("*.vr")):
         rel = str(path.relative_to(REPO))
         for line in strip_noise(path.read_text(errors="replace")):
-            m = DECL.match(line)
-            if m:
-                where[m.group(1)].add(rel)
+            name = declares_a_type(line)
+            if name:
+                where[name].add(rel)
     return {n: sorted(p) for n, p in where.items() if len(p) > 1}
 
 
