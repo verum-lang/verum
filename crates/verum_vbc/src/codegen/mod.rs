@@ -6483,6 +6483,30 @@ impl VbcCodegen {
         Ok(())
     }
 
+    /// Scope `current_source_module` to this module's own `module X.Y.Z;`
+    /// declaration for a whole-module compile.
+    ///
+    /// `collect_non_protocol_declarations`, `compile_module_items`,
+    /// `compile_module_items_lenient` and `compile_items_into_state` each do
+    /// this already — the two whole-module entry points drive their own item
+    /// loops and so did not, which is the usual shape of this defect: a
+    /// mechanism wired into one copy of a traversal stays silent in the others.
+    ///
+    /// The consequence is not cosmetic. `resolve_module_path_head` gives up
+    /// when the current module reads as `"main"`, so inside such a compile a
+    /// `super.`-rooted call falls through to `compile_simple_path` and fails
+    /// with "standalone super/crate/relative" — even though the target module
+    /// IS loaded, through the file's own `mount super.tensor.{…}`. Measured on
+    /// core/math/simple.vr's `stack`, whose siblings all reach the same module
+    /// through mounted aliases and compile fine (T0743).
+    fn scope_to_own_module(&mut self, module: &Module) -> Option<String> {
+        let prev = self.ctx.current_source_module.clone();
+        if let Some(name) = Self::resolve_full_module_path(module, &self.config.module_name) {
+            self.ctx.current_source_module = Some(name);
+        }
+        prev
+    }
+
     /// Compiles an AST module to VBC.
     pub fn compile_module(&mut self, module: &Module) -> CodegenResult<VbcModule> {
         self.reset();
@@ -6490,6 +6514,7 @@ impl VbcCodegen {
         self.register_stdlib_constants();
         self.register_stdlib_intrinsics();
         self.register_runtime_io_functions();
+        self.scope_to_own_module(module);
 
         // #107 — module-level @cfg gating. If the AST module carries
         // attributes (e.g., `module.attributes` populated by the parser
@@ -6600,6 +6625,11 @@ impl VbcCodegen {
         self.set_prefer_existing_functions(true);
         self.resolve_mounts(module, source_path, core_root);
         self.set_prefer_existing_functions(false);
+
+        // AFTER `resolve_mounts`, which scopes and restores the scope for each
+        // mounted file itself; from here on the items being compiled are this
+        // file's own.
+        self.scope_to_own_module(module);
 
         // Pass 1: Collect protocol definitions first (for default method inheritance)
         self.collect_protocol_definitions(module);
