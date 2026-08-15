@@ -201,10 +201,36 @@ and a stale number reads as a target to hit.  Run the suite for the current
 figure; what is pinned is the gate.
 
 **The default-features surface is GREEN.  The `codegen` surface is NOT** —
-measured 2026-08-15 on 864d92432, with no local changes: **53 of the
-`codegen::test_params::test_compile_stdlib_*` fixtures fail** (0 passed / 53
-failed / 2214 s for that subset alone).  Tracked as **T0743**; do not read the
-paragraph below as covering them.
+but the number moved twice in one day, so read the dates, not the adjective:
+
+| measured | on | result |
+|---|---|---|
+| 2026-08-15 | 864d92432, clean tree | **53** of the `test_compile_stdlib_*` fixtures fail (0 passed / 53 failed / 2214 s) |
+| 2026-08-15 | 209236f17 (`ColumnSchema` rename) | 53 → **6** |
+| 2026-08-15 | branch `perf/compile-footprint-205a4e3a` | the 6 re-run: **3 passed, 2 failed**, 1 not in the re-run set |
+
+The two that still fail are `async_intrinsics` and `async_select`, and they
+are ONE defect wearing two names — a simple type name declared twice in
+`core/`, where the layout registry keys by that simple name and the second
+declarer resolves against the first one's fields:
+
+* `Executor` — `core/shell/executor.vr:107` vs `core/async/intrinsics.vr:42`
+* `JoinPair` — `core/database/sqlite/native/full_outer_join_api/pair.vr:15`
+  (`{left_alias, right_alias, kind, on_predicate_id, natural}`) vs
+  `core/async/select.vr:291` (`{fut_a, fut_b, result_a, result_b}`)
+
+Both are the class **T0458** owns (module-qualified canonical type identity).
+Renaming one side, as the `ColumnSchema` fix did, is available and cheap but
+is a workaround: two modules declaring the same simple name is legitimate,
+and the registry is what should carry the qualifier.
+
+The three that now pass (`math_simple`, `math_integers`, `math_hyperbolic`)
+were the `standalone super/crate/relative` class, fixed by scoping a
+whole-module compile to its own `module` declaration (T0743, commit
+`2d668fee7`).
+
+Re-measure before repeating any number here.  A 212 s run of five named
+fixtures is enough to keep this table honest; the full surface takes hours.
 
 Two things kept this invisible.  The feature is off for a plain
 `cargo test -p verum_vbc --lib`, so that run reports a clean 1349/1349 and
