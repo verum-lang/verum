@@ -2535,7 +2535,101 @@ impl Type {
             Type::Interval => {
                 // Interval is a primitive type, no free vars
             }
-            _ => {}
+
+            // ── Types that CARRY types and were previously answered by the
+            // catch-all below ────────────────────────────────────────────────
+            //
+            // A missing arm here does not read as "unknown", it reads as "this
+            // type has no type variables" — and two things consume that answer:
+            // generalization (a var it cannot see is never quantified, so the
+            // scheme is shared UNFRESHENED across all call sites) and the
+            // occurs check in `bind_var` (a cycle running through such a type
+            // is invisible).
+            //
+            // Measured for `Slice` (T0742): `slice_len<T>(slice: &[T])` and its
+            // five siblings in `core/intrinsics/memory.vr` had no quantified
+            // vars, so every call site unified against ONE shared var. Calling
+            // any of them from a method of `implement<T> List<T>` pinned that
+            // block's `T` for every later method in the block.
+            Type::Slice { element } => {
+                element.collect_free_vars(vars);
+            }
+            Type::ExtensibleRecord { fields, row_var } => {
+                for ty in fields.values() {
+                    ty.collect_free_vars(vars);
+                }
+                if let Some(row) = row_var {
+                    vars.insert(*row);
+                }
+            }
+            Type::DynProtocol { bindings, .. } => {
+                // `bounds` are protocol NAMES; the associated-type bindings
+                // are real types and can mention variables.
+                for ty in bindings.values() {
+                    ty.collect_free_vars(vars);
+                }
+            }
+            Type::Pi {
+                param_type,
+                return_type,
+                ..
+            } => {
+                param_type.collect_free_vars(vars);
+                return_type.collect_free_vars(vars);
+            }
+            Type::Sigma {
+                fst_type,
+                snd_type,
+                ..
+            } => {
+                fst_type.collect_free_vars(vars);
+                snd_type.collect_free_vars(vars);
+            }
+            Type::Eq { ty, .. } => {
+                // The two sides are VALUE-level terms (`EqTerm`), same reason
+                // `Refined` skips its predicate; the carried type is not.
+                ty.collect_free_vars(vars);
+            }
+            Type::Inductive {
+                params, indices, ..
+            } => {
+                for (_, ty) in params.iter().chain(indices.iter()) {
+                    ty.collect_free_vars(vars);
+                }
+            }
+            Type::Coinductive { params, .. } => {
+                for (_, ty) in params.iter() {
+                    ty.collect_free_vars(vars);
+                }
+            }
+            Type::HigherInductive { params, .. } => {
+                for (_, ty) in params.iter() {
+                    ty.collect_free_vars(vars);
+                }
+            }
+            Type::Quantified { inner, .. } => {
+                inner.collect_free_vars(vars);
+            }
+            Type::CapabilityRestricted { base, .. } => {
+                base.collect_free_vars(vars);
+            }
+
+            // ── Leaves: no component that could hold a type variable ─────────
+            // Spelled out rather than left to a catch-all, so that adding a
+            // variant to `Type` fails to compile here instead of silently
+            // answering "no free variables" for it.
+            Type::Unit
+            | Type::Never
+            | Type::Unknown
+            | Type::Bool
+            | Type::Int
+            | Type::Float
+            | Type::Char
+            | Type::Text
+            | Type::Lifetime { .. }
+            | Type::Universe { .. }
+            | Type::Prop
+            | Type::Placeholder { .. } => {}
         }
     }
 
@@ -3532,4 +3626,181 @@ impl SubstitutionExt for Substitution {
         set
     }
 }
+#[cfg(test)]
+mod free_vars_covers_every_carrier {
+    //! `collect_free_vars` must descend into EVERY type that carries a type.
+    //!
+    //! A missing arm does not read as "unknown" — it answers "no free
+    //! variables", and two consumers act on that: generalization (a var it
+    //! cannot see is never quantified, so the scheme is reused unfreshened at
+    //! every call site) and the occurs check in `Unifier::bind_var` (a cycle
+    //! through such a type is invisible). `Slice` was missing; the six
+    //! `slice_*` intrinsics in `core/intrinsics/memory.vr` therefore shared one
+    //! var across all call sites (T0742).
+    use super::*;
+
+    fn v() -> (TypeVar, Type) {
+        let tv = TypeVar::fresh();
+        (tv, Type::Var(tv))
+    }
+
+    /// The case that was actually broken, stated on its own so a regression
+    /// names itself.
+    #[test]
+    fn slice_element_is_reachable() {
+        let (tv, ty) = v();
+        let slice = Type::Slice {
+            element: Box::new(ty),
+        };
+        assert!(
+            slice.free_vars().contains(&tv),
+            "a var inside `&[T]` must be visible to generalization and to the \
+             occurs check"
+        );
+    }
+
+    /// One case per carrier. Each wraps a fresh var and asserts it comes back
+    /// out; a variant added to `Type` without an arm now fails to compile in
+    /// `collect_free_vars` (the catch-all is gone), and a variant added
+    /// WITHOUT a case here is caught by the count assertion at the end.
+    #[test]
+    fn every_carrying_variant_reports_its_var() {
+        let mut checked = 0;
+        let mut assert_reaches = |ty: Type, tv: TypeVar, what: &str| {
+            assert!(
+                ty.free_vars().contains(&tv),
+                "{what}: the carried var is invisible to collect_free_vars"
+            );
+            checked += 1;
+        };
+
+        let (tv, t) = v();
+        assert_reaches(
+            Type::Slice {
+                element: Box::new(t.clone()),
+            },
+            tv,
+            "Slice",
+        );
+
+        let (tv, t) = v();
+        let mut fields = indexmap::IndexMap::new();
+        fields.insert(Text::from("f"), t);
+        assert_reaches(
+            Type::ExtensibleRecord {
+                fields,
+                row_var: None,
+            },
+            tv,
+            "ExtensibleRecord.fields",
+        );
+
+        let row = TypeVar::fresh();
+        assert_reaches(
+            Type::ExtensibleRecord {
+                fields: indexmap::IndexMap::new(),
+                row_var: Some(row),
+            },
+            row,
+            "ExtensibleRecord.row_var",
+        );
+
+        let (tv, t) = v();
+        let mut bindings = Map::new();
+        bindings.insert(Text::from("Item"), t);
+        assert_reaches(
+            Type::DynProtocol {
+                bounds: List::new(),
+                bindings,
+            },
+            tv,
+            "DynProtocol.bindings",
+        );
+
+        let (tv, t) = v();
+        assert_reaches(
+            Type::Pi {
+                param_name: Text::from("x"),
+                param_type: Box::new(t),
+                return_type: Box::new(Type::Unit),
+            },
+            tv,
+            "Pi.param_type",
+        );
+
+        let (tv, t) = v();
+        assert_reaches(
+            Type::Pi {
+                param_name: Text::from("x"),
+                param_type: Box::new(Type::Unit),
+                return_type: Box::new(t),
+            },
+            tv,
+            "Pi.return_type",
+        );
+
+        let (tv, t) = v();
+        assert_reaches(
+            Type::Sigma {
+                fst_name: Text::from("x"),
+                fst_type: Box::new(t),
+                snd_type: Box::new(Type::Unit),
+            },
+            tv,
+            "Sigma.fst_type",
+        );
+
+        let (tv, t) = v();
+        assert_reaches(
+            Type::Sigma {
+                fst_name: Text::from("x"),
+                fst_type: Box::new(Type::Unit),
+                snd_type: Box::new(t),
+            },
+            tv,
+            "Sigma.snd_type",
+        );
+
+        let (tv, t) = v();
+        assert_reaches(
+            Type::Quantified {
+                inner: Box::new(t),
+                quantity: Quantity::Omega,
+            },
+            tv,
+            "Quantified.inner",
+        );
+
+        let (tv, t) = v();
+        assert_reaches(
+            Type::CapabilityRestricted {
+                base: Box::new(t),
+                capabilities: Default::default(),
+            },
+            tv,
+            "CapabilityRestricted.base",
+        );
+
+        assert_eq!(
+            checked, 10,
+            "every carrier case must run — a short count means one was skipped"
+        );
+    }
+
+    /// The occurs check reads `free_vars`, so a cycle through a slice must be
+    /// visible: without this, `T := &[T]` is accepted and later expansion runs
+    /// away.
+    #[test]
+    fn occurs_through_a_slice_is_visible() {
+        let (tv, t) = v();
+        let cyclic = Type::Reference {
+            inner: Box::new(Type::Slice {
+                element: Box::new(t),
+            }),
+            mutable: false,
+        };
+        assert!(cyclic.free_vars().contains(&tv));
+    }
+}
+
 // Tests moved to tests/ty_tests.rs
