@@ -24,7 +24,7 @@ jobs:
   # (IPv6 / SQL-cast / URI / script DATA excluded). See the script's header.
   # ---------------------------------------------------------------------------
   vr-syntax:
-    name: Verum syntax gate (no Rust `::`, op-byte doc truth)
+    name: Source gates (syntax, rings, ratchets — no build needed)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,6 +75,20 @@ jobs:
       # never earned until that run happened.
       - name: core-tests/INVENTORY.md structural integrity
         run: python3 scripts/ci/check_inventory.py --structural-only
+
+      # EVERY gate that needs only the source tree, in one target.
+      # Measured 2026-08-16: TWELVE such gates exist and this job ran
+      # five of them — the type-name ratchet, the (name,arity) ratchet
+      # in all four of its scopes, the @arch_module attestation ratchet
+      # and the bake pre-pass parity gate were reachable from the
+      # Makefile and from nothing else, so they held no PR to account.
+      # A gate that does not run is a comment.
+      #
+      # The whole set costs 14 seconds, so it is not worth splitting by
+      # cost. `gates-source` is the list — adding a source-only gate
+      # there is what wires it, and this step needs no edit.
+      - name: All source-only gates (make gates-source)
+        run: make gates-source
 
   # ---------------------------------------------------------------------------
   # Job 1: compile + unit tests on Linux (x86_64 + aarch64) and macOS.

@@ -44,7 +44,8 @@ mount super.task.{Task, JoinHandle};
 // shell-command policy `{timeout, retry, cancel_token, grace}` — and the
 // layout registry keys by the simple name, so whichever registered first
 // answered for both.  That is what fails
-// `codegen::test_params::test_compile_stdlib_async_intrinsics`.
+// the `test_compile_stdlib_async_intrinsics` fixture (verum_vbc's
+// codegen test_params surface).
 //
 // This side is the one that yields the name, and its own doc line says
 // why: "User code should prefer the higher-level `Runtime` from

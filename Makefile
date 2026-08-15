@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census check-panic-surface check-dup-emitters
+.PHONY: gates-source check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census check-panic-surface check-dup-emitters
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -55,12 +55,18 @@ check-barename-collisions: ## Gate (T0538): free-fn (name,arity) collisions acro
 	python3 scripts/ci/check_barename_collisions.py --check --scope prelude
 	python3 scripts/ci/check_barename_collisions.py --check --kind types
 
+check-arch-attestation: ## Gate (T0712): every core/ module declares @arch_module — list ratchet
+	python3 scripts/ci/check_arch_attestation.py
+
 check-type-name-collisions: ## Gate (T0458): simple-type-name collisions in core/ — pair-list ratchet
 	python3 scripts/ci/check_type_name_collisions.py --self-test
 	python3 scripts/ci/check_type_name_collisions.py
 
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
+
+gates-source: check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-dup-emitters check-bake-prepass-parity ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+	@echo "gates-source: all source-only gates green"
 
 check-rings: ## Gate: core/ ring law — no upward edges, no cycles (core/rings.toml declares the rings)
 	python3 scripts/ci/check_core_rings.py

@@ -19,7 +19,8 @@ mount base.{Bool, Text};
 // of futures behind `join(a, b)`.  The layout registry keys by the simple
 // name, so a read of `result_a` resolved against THIS record's fields and
 // failed; that is what fails
-// `codegen::test_params::test_compile_stdlib_async_select`.
+// the `test_compile_stdlib_async_select` fixture (verum_vbc's
+// codegen test_params surface).
 //
 // This side yields for the same reason `ColumnSchema` did (209236f17): it
 // is internal to the bundled SQLite engine, while `join(a, b)` is one of
