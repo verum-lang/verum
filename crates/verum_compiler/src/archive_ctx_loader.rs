@@ -3952,6 +3952,23 @@ fn compute_merge_keep_sets(
             owner_absent,
             no_owner,
         );
+        // DECODE-GRANULARITY (T0753): if the walk keeps nearly every
+        // function in every entry it decodes, then the merge size is
+        // set by WHICH ENTRIES get decoded — the archive's bundling —
+        // and not by any rule inside this fixpoint.
+        for (eidx, (entry_name, module)) in decoded.iter().enumerate() {
+            let kept = keep[eidx].len();
+            let tot = module.functions.len();
+            if tot > 0 {
+                eprintln!(
+                    "[decoded] {:<34} kept {}/{} ({}%)",
+                    entry_name,
+                    kept,
+                    tot,
+                    kept * 100 / tot,
+                );
+            }
+        }
         let total: usize = keep.iter().map(|k| k.len()).sum();
         eprintln!(
             "[callm-keep] bare: {} edges -> {} keeps | qualified: {} edges -> {} keeps | keep-set total {}",
