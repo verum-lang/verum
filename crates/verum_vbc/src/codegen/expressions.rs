@@ -3463,7 +3463,11 @@ impl VbcCodegen {
             BinOp::In => {
                 // The "in" operator: left_expr in right_expr
                 // Translates to: right_expr.contains(left_expr)
-                let contains_method_id = self.intern_string("contains");
+                // Receiver is the collection on the right of `in`; its
+                // type is what `contains` should be qualified by (T0753).
+                let recv_ty = self.extract_expr_type_name(right);
+                let contains_method_id =
+                    self.call_method_id(recv_ty.as_deref(), "contains");
 
                 // Free the destination, we'll reallocate it for the call result
                 self.ctx.free_temp(dest);
@@ -5342,7 +5346,22 @@ impl VbcCodegen {
                     if has_neg_method {
                         self.ctx.free_temp(dest);
                         let method_result = self.ctx.alloc_temp();
-                        let method_id = self.intern_string("neg");
+                        // Emit the QUALIFIED name the guard above already
+                        // built and verified. It was constructed
+                        // (`format!("{}.neg", …)`), used to confirm the
+                        // impl resolves, and then discarded in favour of
+                        // the bare `"neg"` — the type was known and thrown
+                        // away at the one place that records it.
+                        //
+                        // A bare method name in a `CallM` is what the
+                        // archive's call graph fans out over: a leaf
+                        // resolves to EVERY same-named impl, which is why
+                        // the loader needs a fanout cap at all
+                        // (archive_ctx_loader.rs:1469, "172 distinct
+                        // `*.next` bodies"). Every site that knows its
+                        // receiver's type and writes the bare name adds to
+                        // that fan (T0753). This one knows.
+                        let method_id = self.call_method_id(type_name.as_deref(), "neg");
                         self.ctx.emit(Instruction::CallM {
                             dst: method_result,
                             receiver: inner_reg,
@@ -5480,7 +5499,11 @@ impl VbcCodegen {
                 if has_not_method {
                     self.ctx.free_temp(dest);
                     let method_result = self.ctx.alloc_temp();
-                    let method_id = self.intern_string("not");
+                    // Qualified, for the reason given at the `neg` site
+                    // above: the guard built `format!("{}.not", name)`,
+                    // proved it resolves, and the emission then dropped
+                    // the qualifier (T0753).
+                    let method_id = self.call_method_id(type_name.as_deref(), "not");
                     self.ctx.emit(Instruction::CallM {
                         dst: method_result,
                         receiver: inner_reg,
@@ -5620,7 +5643,7 @@ impl VbcCodegen {
                         sub_op: sub_op as u8,
                         operands,
                     });
-                } else if let Some(deref_method_id) = inner_type
+                } else if let Some(deref_qualified) = inner_type
                     .as_ref()
                     .and_then(|ty_name| {
                         // TYPE-DEREF-4. `*reference` is a BUILT-IN dereference
@@ -5697,7 +5720,14 @@ impl VbcCodegen {
                         self.ctx
                             .lookup_function(&qualified)
                             .filter(|f| f.param_count == 1) // &self
-                            .map(|f| f.id.0)
+                            // Carry the QUALIFIED NAME out, not the id: the
+                            // emission below needs a string for `CallM`'s
+                            // `method_id`, and this closure is the only
+                            // place the receiver's type name exists
+                            // (T0753). Returning the id meant the caller
+                            // had a verified qualified name and no way to
+                            // spell it, so it emitted the bare `"deref"`.
+                            .map(|_| qualified)
                     })
                 {
                     // Emit CallM(tmp, receiver=inner, method_id="…deref",
@@ -5726,7 +5756,7 @@ impl VbcCodegen {
                     // semantics match user expectation: `*m` yields T
                     // for any type that opts into `Deref<Target = T>`.
                     let tmp_ref = self.ctx.alloc_temp();
-                    let method_id_str = self.ctx.intern_string_raw("deref");
+                    let method_id_str = self.ctx.intern_string_raw(&deref_qualified);
                     self.ctx.emit(Instruction::CallM {
                         dst: tmp_ref,
                         receiver: inner_reg,
@@ -5741,12 +5771,14 @@ impl VbcCodegen {
                         ref_reg: tmp_ref,
                     });
                     self.ctx.free_temp(tmp_ref);
-                    // `deref_method_id` is intentionally unused here —
-                    // the runtime dispatch resolves the actual function
-                    // id via the receiver-type-aware lookup. Holding
-                    // the binding ensures the gate above had a valid
-                    // hit before we commit to the CallM path.
-                    let _ = deref_method_id;
+                    // The gate's binding is now the qualified name and
+                    // is USED, above. It used to be the function id, held
+                    // only to prove the gate had hit — while the emission
+                    // wrote the bare `"deref"`. Runtime dispatch is
+                    // receiver-type-aware either way, so this is not a
+                    // semantic change; the ARCHIVE's call graph is what
+                    // reads the difference, where a bare leaf fans out to
+                    // every `*.deref` in the library (T0753).
                 } else if is_heap_deref {
                     // Heap<T> is transparent — emit Deref so the CBGR runtime sets
                     // cbgr_deref_source. This enables `&*value` to produce a pointer
@@ -8887,7 +8919,9 @@ impl VbcCodegen {
 
                 // Emit CallM { receiver: "Heap", method: "new", args: [inner] }
                 let result = self.ctx.alloc_temp();
-                let method_id = self.intern_string("new");
+                // `name` IS the receiver type here — the arm matched on
+                // `name == "Heap"` — so the qualifier is free (T0753).
+                let method_id = self.call_method_id(Some(name), "new");
                 self.ctx.emit(Instruction::CallM {
                     dst: result,
                     receiver: receiver_reg,
@@ -11570,7 +11604,9 @@ impl VbcCodegen {
             }
 
             let result = self.ctx.alloc_temp();
-            let method_id = self.intern_string("new");
+            // The guard above bound `tn` to "Heap" or "Shared" — the
+            // receiver type, free for the asking (T0753).
+            let method_id = self.call_method_id(Some(tn.as_str()), "new");
             self.ctx.emit(Instruction::CallM {
                 dst: result,
                 receiver: receiver_reg,
@@ -14611,7 +14647,11 @@ impl VbcCodegen {
                 Reg(0)
             };
             let dst = self.ctx.alloc_temp();
-            let method_id = self.intern_string("new");
+            // `type_name` is bound by the guard
+            // (`is_builtin_ctor_collection(&type_name)`) — qualify with
+            // it rather than leaving a bare `new`, one of the widest
+            // leaf names in the archive (T0753).
+            let method_id = self.call_method_id(Some(&type_name), "new");
             self.ctx.emit(Instruction::CallM {
                 dst,
                 receiver: receiver_reg,
@@ -21013,9 +21053,14 @@ impl VbcCodegen {
             } else {
                 target_raw
             };
-            // Emit CallM { method: "deref", receiver: current_reg }.
+            // Emit CallM { method: "<T>.deref", receiver: current_reg }.
+            //
+            // `stripped` is the receiver type — the guard four lines up
+            // built `format!("{}.deref", stripped)` and looked it up to
+            // decide this branch at all. The emission used to drop it and
+            // write the bare name (T0753).
             let derefed = self.ctx.alloc_temp();
-            let method_id = self.intern_string("deref");
+            let method_id = self.call_method_id(Some(stripped), "deref");
             self.ctx.emit(Instruction::CallM {
                 dst: derefed,
                 receiver: current_reg,
@@ -40106,7 +40151,10 @@ impl VbcCodegen {
                     src: formatter_reg,
                 });
             }
-            let fmt_method_id = self.intern_string("fmt");
+            // `fmt` is implemented by nearly every printable type, so a
+            // bare leaf here is one of the widest fans in the archive's
+            // call graph. `type_name` is in scope (T0753).
+            let fmt_method_id = self.call_method_id(Some(&type_name), "fmt");
             self.ctx.emit(Instruction::CallM {
                 dst: fmt_result_reg,
                 receiver: expr_reg,

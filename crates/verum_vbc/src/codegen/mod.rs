@@ -20567,6 +20567,47 @@ impl VbcCodegen {
         self.ctx.intern_string_raw(s)
     }
 
+    /// The `method_id` a `CallM` should carry — qualified whenever the
+    /// receiver's type is known.
+    ///
+    /// Two spellings reach the same runtime dispatcher: bare `"deref"`
+    /// and qualified `"Heap.deref"` both resolve, because dispatch
+    /// consults the receiver's concrete type. They are NOT equivalent to
+    /// the ARCHIVE's static call graph, which has no receiver to consult:
+    /// there a bare leaf resolves to every same-named impl in the
+    /// library. That fan-out is what forces the loader's cap
+    /// (`archive_ctx_loader.rs`, "172 distinct `*.next` bodies, each of
+    /// which calls `self.iter.next()` and so re-fans"), and every
+    /// emission site that knows its receiver's type and writes the bare
+    /// name feeds it (T0753).
+    ///
+    /// So the spelling is not a per-site judgement, and this is the one
+    /// door that decides it — the emission twin of `intern_string`'s
+    /// "every string-table entry must flow through ONE door" above.
+    /// Before it, twenty-two sites each chose independently: six
+    /// qualified, nine wrote a bare literal, and three of those nine had
+    /// BUILT the qualified name to prove the impl resolved and then
+    /// discarded it.
+    ///
+    /// A site that genuinely cannot know its receiver's type — a call on
+    /// a generic parameter `T`, resolved by a `CallG`-delivered witness
+    /// at runtime — passes `None` and gets the bare form, which is then
+    /// correct BY CONSTRUCTION rather than by omission. That distinction
+    /// is the point: `None` records "no type here", where a bare literal
+    /// recorded nothing at all.
+    fn call_method_id(&mut self, receiver_ty: Option<&str>, method: &str) -> u32 {
+        match receiver_ty
+            .map(Self::strip_generic_args)
+            .filter(|ty| !ty.is_empty())
+        {
+            Some(ty) => {
+                let qualified = format!("{}.{}", ty, method);
+                self.ctx.intern_string_raw(&qualified)
+            }
+            None => self.ctx.intern_string_raw(method),
+        }
+    }
+
     /// Walk every emitted function's instruction stream collecting
     /// the FunctionId targets of Call / CallG / TailCall / NewClosure /
     /// Spawn / GenCreate / CallM operands.  For each unique id that
