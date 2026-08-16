@@ -18,13 +18,13 @@ module core.database.sqlite.native.log.record;
 mount core.*;
 mount base.{Text};
 mount core.database.sqlite.native.log.level.{
-    LogLevel, level_from_primary,
+    SqliteLogLevel, level_from_primary,
 };
 
 public type SqliteLogRecord is {
     /// Extended error code as passed to sqlite3_log.
     errcode: Int,
-    level: LogLevel,
+    level: SqliteLogLevel,
     message: Text,
     /// Monotone wall-clock (ns) for deterministic ordering.
     timestamp_ns: Int64,

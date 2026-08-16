@@ -14,14 +14,14 @@ module core.database.sqlite.native.mem_methods.engine;
 mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.mem_methods.vtable.{
-    MethodSet, default_method_set, is_viable,
+    MemMethodSet, default_method_set, is_viable,
 };
 mount core.database.sqlite.native.mem_methods.stats.{
     MemMethodStats, new_stats,
 };
 
 public type MemMethodsEngine is {
-    methods: MethodSet,
+    methods: MemMethodSet,
     stats: MemMethodStats,
     installed: Bool,
 }
@@ -37,7 +37,7 @@ public fn new_engine() -> MemMethodsEngine {
 implement MemMethodsEngine {
     /// Accept the override iff the method set is viable. Returns
     /// true on success.
-    public fn install(&mut self, m: MethodSet) -> Bool {
+    public fn install(&mut self, m: MemMethodSet) -> Bool {
         if !is_viable(&m) { return false; }
         self.methods = m;
         self.installed = true;

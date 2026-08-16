@@ -60,7 +60,7 @@ mount core.async.cancellation.{CancellationToken};
 mount core.net.addr.{SocketAddr};
 
 mount core.net.quic.connection_id.{ConnectionId};
-mount core.net.quic.frame.{Frame, decode_all_frames};
+mount core.net.quic.frame.{QuicFrame, decode_all_frames};
 mount core.net.quic.packet.{LongPacketType};
 mount core.net.quic.recovery.{LossDetection, NewReno, PnSpaceKind, SentPacketInfo};
 mount core.net.quic.stream_sm.{SendStream, RecvStream, ConnFlowControl};
@@ -107,7 +107,7 @@ public type PumpError is
       Transport(TransportError)
     | Crypto(Text)
     | Handshake(Text)
-    | Frame(Text)
+    | QuicFrame(Text)
     | Quic(QuicError)
     | Cancelled;
 
@@ -132,7 +132,7 @@ implement Debug for PumpError {
             PumpError.Transport(e)         => f.write_str(f"Transport({e})".as_str()),
             PumpError.Crypto(reason)       => f.write_str(f"Crypto({reason})".as_str()),
             PumpError.Handshake(reason)    => f.write_str(f"Handshake({reason})".as_str()),
-            PumpError.Frame(reason)        => f.write_str(f"Frame({reason})".as_str()),
+            PumpError.Frame(reason)        => f.write_str(f"QuicFrame({reason})".as_str()),
             PumpError.Quic(e)              => f.write_str(f"Quic({e})".as_str()),
             PumpError.Cancelled            => f.write_str("Cancelled"),
         }
@@ -510,7 +510,7 @@ implement ConnectionPump {
         // tick. Real impl coalesces Initial+Handshake+1-RTT into one
         // UDP datagram (RFC 9000 §12.2) — deferred to the optimisation
         // commit.
-        let mut by_space: List<(PnSpaceKind, List<Frame>)> = [
+        let mut by_space: List<(PnSpaceKind, List<QuicFrame>)> = [
             (PnSpaceKind.Initial,     []),
             (PnSpaceKind.Handshake,   []),
             (PnSpaceKind.Application, []),
@@ -569,7 +569,7 @@ implement ConnectionPump {
         Result.Ok(())
     }
 
-    fn collect_stream_frames(&mut self, out: &mut List<Frame>) {
+    fn collect_stream_frames(&mut self, out: &mut List<QuicFrame>) {
         // Walk send_streams — for each stream with buffered bytes,
         // emit a STREAM frame (with FIN if final_size reached). FC
         // gating + CC window caps are enforced by the sender; the
@@ -585,7 +585,7 @@ implement ConnectionPump {
     async fn send_packet_in_space(
         &mut self,
         space: PnSpaceKind,
-        frames: List<Frame>,
+        frames: List<QuicFrame>,
         now: Instant,
     ) -> Result<(), PumpError> {
         let keys_tx = match space {
@@ -752,7 +752,7 @@ implement ConnectionPump {
     public fn peer_addr(&self) -> SocketAddr { self.peer_addr.clone() }
 }
 
-fn any_ack_eliciting(frames: &List<Frame>) -> Bool {
+fn any_ack_eliciting(frames: &List<QuicFrame>) -> Bool {
     let mut i: Int = 0;
     while i < frames.len() {
         if frames[i].is_ack_eliciting() { return true; }

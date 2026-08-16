@@ -208,7 +208,6 @@ core/database/sqlite/native/l7_api/blob.vr
 core/database/sqlite/native/l7_api/database.vr
 core/database/sqlite/native/l7_api/hooks.vr
 core/database/sqlite/native/l7_api/pragma_api.vr
-core/database/sqlite/native/mem_methods/engine.vr
 core/database/sqlite/native/migrations/mod.vr
 core/database/sqlite/native/migrations/store.vr
 core/database/sqlite/native/mutex_assertions/engine.vr
@@ -220,8 +219,6 @@ core/database/sqlite/native/status/database.vr
 core/database/sqlite/native/status/process.vr
 core/database/sqlite/native/status/stmt.vr
 core/database/sqlite/native/stmt_cache/cache.vr
-core/database/sqlite/native/temp_path/engine.vr
-core/database/sqlite/native/triggers/store.vr
 core/database/sqlite/native/txn/engine.vr
 core/database/sqlite/native/unlock_notify/engine.vr
 core/database/sqlite/native/value_dup_api/registry.vr
@@ -229,12 +226,10 @@ core/database/sqlite/native/verify/btree_invariants.vr
 core/database/sqlite/native/version_api/compile_option.vr
 core/database/sqlite/native/vfs_api/registry.vr
 core/database/sqlite/native/vtab_in/registry.vr
-core/database/sqlite/native/vtab_module/version.vr
 core/database/sqlite/native/vtabs/fts5/dml.vr
 core/database/sqlite/native/vtabs/fts5/functions.vr
 core/database/sqlite/native/vtabs/fts5/query.vr
 core/database/sqlite/native/vtabs/json_each.vr
-core/database/sqlite/native/vtabs/rtree/tree.vr
 core/database/sqlite/typed_database.vr
 core/diagnostics.vr
 core/encoding/jsonb.vr
@@ -315,7 +310,6 @@ core/net/quic/api/stream.vr
 core/net/quic/connection_sm/aead.vr
 core/net/quic/connection_sm/dispatch.vr
 core/net/quic/connection_sm/stream_assembler.vr
-core/net/quic/connection_sm/tx.vr
 core/net/quic/crypto/header_protection.vr
 core/net/quic/lb_cid.vr
 core/net/quic/mod.vr

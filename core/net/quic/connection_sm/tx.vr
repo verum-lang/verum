@@ -42,7 +42,7 @@ mount core.*;
 mount core.collections.list.{List};
 mount core.encoding.varint.{quic_encode_into};
 mount core.net.quic.connection_id.{ConnectionId};
-mount core.net.quic.frame.{Frame, encode_frame};
+mount core.net.quic.frame.{QuicFrame, encode_frame};
 mount core.net.quic.packet.{LongPacketType, encode_packet_number_len};
 mount core.net.quic.version as qv;
 mount core.net.quic.crypto.header_protection.{HpKey, compute_hp_mask, apply_hp_mask};
@@ -108,7 +108,7 @@ public type LongPacketInput<'a> is {
     token:       &'a [Byte],
     packet_number: UInt64,
     largest_acked: Maybe<UInt64>,
-    frames:      &'a List<Frame>,
+    frames:      &'a List<QuicFrame>,
     keys:        &'a QuicSpaceKeys,
 };
 
@@ -181,7 +181,7 @@ public type ShortPacketInput<'a> is {
     key_phase:     Bool,
     packet_number: UInt64,
     largest_acked: Maybe<UInt64>,
-    frames:        &'a List<Frame>,
+    frames:        &'a List<QuicFrame>,
     keys:          &'a QuicSpaceKeys,
 };
 
@@ -217,7 +217,7 @@ public fn build_short_packet(input: ShortPacketInput) -> Result<List<Byte>, TxEr
 // Helpers
 // =============================================================================
 
-fn encode_frames(frames: &List<Frame>) -> Result<List<Byte>, TxError> {
+fn encode_frames(frames: &List<QuicFrame>) -> Result<List<Byte>, TxError> {
     let mut out: List<Byte> = [];
     let mut i: Int = 0;
     while i < frames.len() {

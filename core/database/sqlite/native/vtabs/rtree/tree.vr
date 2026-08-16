@@ -29,7 +29,7 @@ mount core.database.sqlite.native.vtabs.rtree.bbox.{
     BBox, bbox_equal,
 };
 mount core.database.sqlite.native.vtabs.rtree.node.{
-    Node, Leaf, Internal,
+    RTreeNode, Leaf, Internal,
     LeafContent, InternalContent, LeafEntry, InternalEntry,
     leaf_new, internal_new, node_id, node_entry_count,
     node_is_full, node_mbb,
@@ -41,14 +41,14 @@ mount core.database.sqlite.native.vtabs.rtree.node.{
 // -----------------------------------------------------------------------------
 
 public type VtabRTree is {
-    nodes: List<Node>,
+    nodes: List<RTreeNode>,
     root_id: Int,
     n_dims: Int,
     next_id: Int,
 };
 
 public fn rtree_new(n_dims: Int) -> VtabRTree {
-    let mut nodes: List<Node> = List.new();
+    let mut nodes: List<RTreeNode> = List.new();
     nodes.push(leaf_new(0));
     VtabRTree {
         nodes: nodes,

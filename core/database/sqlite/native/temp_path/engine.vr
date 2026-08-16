@@ -14,7 +14,7 @@ module core.database.sqlite.native.temp_path.engine;
 mount core.*;
 mount base.{Bool, Maybe, Text};
 mount core.database.sqlite.native.temp_path.slot.{
-    PathSlot, SetOutcome, SoOk, SoFrozen,
+    PathSlot, TempPathSetOutcome, SoOk, SoFrozen,
     empty_slot, freeze, set_path, get_path,
 };
 
@@ -42,11 +42,11 @@ implement TempPathEngine {
         get_path(&self.data)
     }
 
-    public fn set_temp_directory(&mut self, path: Maybe<Text>) -> SetOutcome {
+    public fn set_temp_directory(&mut self, path: Maybe<Text>) -> TempPathSetOutcome {
         set_path(&mut self.temp, path)
     }
 
-    public fn set_data_directory(&mut self, path: Maybe<Text>) -> SetOutcome {
+    public fn set_data_directory(&mut self, path: Maybe<Text>) -> TempPathSetOutcome {
         set_path(&mut self.data, path)
     }
 

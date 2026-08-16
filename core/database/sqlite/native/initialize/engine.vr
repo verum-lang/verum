@@ -19,7 +19,7 @@ mount core.*;
 mount base.{Bool, Text};
 mount collections.List;
 mount core.database.sqlite.native.shutdown.subsystem.{
-    Subsystem, subsystem_name, init_order,
+    ShutdownSubsystem, subsystem_name, init_order,
 };
 mount core.database.sqlite.native.initialize.phase.{
     InitPhase, IpFresh, IpBringing, IpRunning, IpFailed,
@@ -44,7 +44,7 @@ implement InitEngine {
 
     /// Record the start of work on `sub`. Returns true iff the engine
     /// actually needs to do something; false if already running.
-    public fn begin(&mut self, sub: Subsystem) -> Bool {
+    public fn begin(&mut self, sub: ShutdownSubsystem) -> Bool {
         self.calls = self.calls + 1_i64;
         if self.is_ready() { return false; }
         self.phase = IpBringing(sub);
@@ -83,7 +83,7 @@ public fn drive_full(engine: &mut InitEngine) -> Bool {
     engine.is_ready()
 }
 
-fn clone_subsystem(s: &Subsystem) -> Subsystem {
+fn clone_subsystem(s: &ShutdownSubsystem) -> ShutdownSubsystem {
     match s {
         core.database.sqlite.native.shutdown.subsystem.SsMutex  => core.database.sqlite.native.shutdown.subsystem.SsMutex,
         core.database.sqlite.native.shutdown.subsystem.SsMem    => core.database.sqlite.native.shutdown.subsystem.SsMem,

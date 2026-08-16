@@ -21,7 +21,7 @@ mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.triggers.spec.{
-    TriggerDef, TriggerTiming, TriggerEvent,
+    TriggerDef, TriggerTiming, SqlTriggerEvent,
     TtBefore, TtAfter, TtInsteadOf,
     TeInsert, TeDelete, TeUpdate,
 };
@@ -77,7 +77,7 @@ implement TriggerStore {
         &self,
         table_name: &Text,
         timing: &TriggerTiming,
-        event: &TriggerEvent,
+        event: &SqlTriggerEvent,
     ) -> List<TriggerDef> {
         let mut out: List<TriggerDef> = List.new();
         let mut i: Int = 0;
@@ -159,7 +159,7 @@ fn clone_timing(t: &TriggerTiming) -> TriggerTiming {
     }
 }
 
-fn clone_event(e: &TriggerEvent) -> TriggerEvent {
+fn clone_event(e: &SqlTriggerEvent) -> SqlTriggerEvent {
     match e {
         TeInsert    => TeInsert,
         TeDelete    => TeDelete,

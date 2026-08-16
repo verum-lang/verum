@@ -23,12 +23,12 @@ module core.database.sqlite.native.initialize.phase;
 mount core.*;
 mount base.{Bool, Text};
 mount core.database.sqlite.native.shutdown.subsystem.{
-    Subsystem, subsystem_name,
+    ShutdownSubsystem, subsystem_name,
 };
 
 public type InitPhase is
       IpFresh
-    | IpBringing(Subsystem)
+    | IpBringing(ShutdownSubsystem)
     | IpRunning
     | IpFailed(Text);
 

@@ -33,7 +33,7 @@ mount core.database.sqlite.native.l4_vdbe.register.{
     Register, RNull,
 };
 mount core.database.sqlite.native.triggers.spec.{
-    TriggerDef, TriggerEvent, TeInsert, TeDelete, TeUpdate,
+    TriggerDef, SqlTriggerEvent, TeInsert, TeDelete, TeUpdate,
     RowBindingKind, RbNew, RbOld, row_binding_available_for_event,
 };
 
@@ -84,7 +84,7 @@ implement RowBinding {
 // Pre-fire validation
 // -----------------------------------------------------------------------------
 
-public fn validate_binding_for_event(b: &RowBinding, event: &TriggerEvent) -> Bool {
+public fn validate_binding_for_event(b: &RowBinding, event: &SqlTriggerEvent) -> Bool {
     match event {
         TeInsert    => b.old_row.len() == 0,
         TeDelete    => b.new_row.len() == 0,

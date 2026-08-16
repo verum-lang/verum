@@ -21,7 +21,7 @@ module core.database.sqlite.native.vtab_module.version;
 mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.vtab_module.method_set.{
-    MethodSet, supports_savepoints,
+    VtabModuleMethodSet, supports_savepoints,
 };
 
 public type ModuleVersion is {
@@ -47,7 +47,7 @@ public fn supports_integrity(v: &ModuleVersion) -> Bool {
 
 /// True iff `set` is consistent with the declared iVersion —
 /// savepoint methods cannot appear in iVersion < 2, etc.
-public fn set_consistent_with_version(set: &MethodSet, v: &ModuleVersion) -> Bool {
+public fn set_consistent_with_version(set: &VtabModuleMethodSet, v: &ModuleVersion) -> Bool {
     if supports_savepoints(set) && !supports_savepoint_iversion(v) {
         return false;
     }

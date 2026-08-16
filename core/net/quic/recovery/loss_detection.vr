@@ -44,7 +44,7 @@ mount core.*;
 mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
-mount core.net.quic.frame.{Frame, AckRange};
+mount core.net.quic.frame.{QuicFrame, AckRange};
 mount core.net.quic.recovery.pn_space.{PnSpace, PnSpaceKind, SentPacketInfo, ranges_contain};
 mount core.net.quic.recovery.rtt.{RttEstimator};
 mount core.net.quic.recovery.cc.{CongestionCtrl};
@@ -131,7 +131,7 @@ implement LossDetection {
         ack_delay_us: UInt64,
         now: Instant,
         cc: &mut dyn CongestionCtrl,
-    ) -> List<Frame> {
+    ) -> List<QuicFrame> {
         let acked = self.space_mut(kind).on_ack_received(largest_acked, ranges);
 
         // Feed RTT estimator: if any newly acked packet is the largest
@@ -158,7 +158,7 @@ implement LossDetection {
         // Threshold-based loss detection on remaining in-flight packets.
         let lost = self.detect_lost_packets(kind, largest_acked, now);
         let mut lost_bytes: UInt32 = 0_u32;
-        let mut to_retransmit: List<Frame> = [];
+        let mut to_retransmit: List<QuicFrame> = [];
         let mut i: Int = 0;
         while i < lost.len() {
             let li = &lost[i];

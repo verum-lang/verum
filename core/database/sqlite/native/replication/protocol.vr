@@ -30,7 +30,7 @@ module core.database.sqlite.native.replication.protocol;
 mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
-mount core.database.sqlite.native.replication.role.{Role, RoleReplica, RoleStandby};
+mount core.database.sqlite.native.replication.role.{ReplicationRole, RoleReplica, RoleStandby};
 mount core.database.sqlite.native.replication.frame.{WalFrameRecord, FrameBatch};
 
 // -----------------------------------------------------------------------------
@@ -63,7 +63,7 @@ public fn protocol_error_name(c: &ProtocolErrorCode) -> Text {
 public type Hello is {
     replica_id: Text,
     last_known_position: Int64,
-    role_request: Role,
+    role_request: ReplicationRole,
     /// Protocol version replica speaks.
     proto_version: Int,
 }
@@ -71,7 +71,7 @@ public type Hello is {
 public type HelloAck is {
     epoch: Int64,
     server_id: Text,
-    accepted_role: Role,
+    accepted_role: ReplicationRole,
     /// Protocol version primary speaks.
     proto_version: Int,
 }

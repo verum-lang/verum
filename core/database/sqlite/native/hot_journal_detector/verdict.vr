@@ -8,7 +8,7 @@
 module core.database.sqlite.native.hot_journal_detector.verdict;
 
 mount core.database.sqlite.native.hot_journal_detector.signal.{
-    Signal, is_absent, is_empty, has_owner, header_intact,
+    HotJournalSignal, is_absent, is_empty, has_owner, header_intact,
 };
 mount base.{Bool, Text};
 
@@ -43,7 +43,7 @@ public fn safe_to_read_directly(v: &HotJournalVerdict) -> Bool {
     }
 }
 
-public fn classify(s: &Signal) -> HotJournalVerdict {
+public fn classify(s: &HotJournalSignal) -> HotJournalVerdict {
     if is_absent(s)   { return VdNoJournal; }
     if is_empty(s)    { return VdStaleEmpty; }
     if has_owner(s)   { return VdOwnedByWriter; }
