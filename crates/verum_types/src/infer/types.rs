@@ -1535,6 +1535,39 @@ impl TypeChecker {
                     }
                 }
 
+                // APPLYING TYPE ARGUMENTS TO A TYPE ALIAS IS A SUBSTITUTION,
+                // NOT A REPLACEMENT.  This is the seam where the third
+                // implementation of that rule used to live.
+                //
+                // `ast_to_type(base)` has ALREADY expanded an alias, so for
+                // `IoResult<()>` the base arrives as `Result<T, StreamError>`.
+                // The `Type::Named` arm below then replaced the base's own
+                // arguments with the surface ones and produced
+                // `Result<Unit>` — a `Result` with ONE argument, which the
+                // language has no such thing as.  Nothing rejected it; it
+                // travelled as a well-typed value until `?` asked
+                // `resolve_try_protocol` for a two-argument Result and was
+                // told the function "returns Result<Unit>" (6 core/ files,
+                // and every user alias of Result reproduces it — T0774).
+                //
+                // The unifier already implements this rule correctly
+                // (`try_expand_alias` -> `substitute_alias_params`
+                // substitutes positionally into the alias's parameters).
+                // So the fix is to DELETE the duplicate rather than repair
+                // it: build the application on the UNEXPANDED name and let
+                // the one correct implementation do the work.  For anything
+                // that is not an alias `try_expand_alias` returns None and
+                // the arms below run unchanged.
+                if let verum_ast::ty::TypeKind::Path(base_path) = &base.kind {
+                    let unexpanded = Type::Named {
+                        path: base_path.clone(),
+                        args: type_args.clone(),
+                    };
+                    if let Some(expanded) = self.unifier.try_expand_alias(&unexpanded) {
+                        return Ok(expanded);
+                    }
+                }
+
                 // Return the base type with arguments
                 // Lifetimes are embedded in type_args as Type::Lifetime
                 let result_type = match &base_ty {
@@ -2167,6 +2200,17 @@ impl TypeChecker {
         // - Type variables: returns fresh type variables for Output/Residual
         // - Variant types: recognizes Ok/Err and Some/None patterns
         // - Named/Generic types: queries protocol implementations
+        // CANONICALISE BEFORE ASKING.  `resolve_try_protocol`'s structural
+        // fallback matches on NAME plus ARITY, so it cannot see through a
+        // type alias — `IoResult<T>` (= `Result<T, StreamError>`) is not
+        // `Result` to it.  The unifier owns alias expansion; the protocol
+        // checker should be handed a canonical type rather than growing its
+        // own copy of the rule (which is how `Result<Unit>` was born one
+        // layer up).
+        let inner_ty = self
+            .unifier
+            .try_expand_alias(&inner_ty)
+            .unwrap_or(inner_ty);
         let inner_try = match self.protocol_checker.read().resolve_try_protocol(&inner_ty) {
             Some(resolution) => resolution,
             None => {
@@ -2229,6 +2273,11 @@ impl TypeChecker {
             }
         };
 
+        // Same canonicalisation as the expression side above.
+        let function_return_type = self
+            .unifier
+            .try_expand_alias(&function_return_type)
+            .unwrap_or(function_return_type);
         // Step 4: Resolve Try protocol for return type
         let outer_try = match self
             .protocol_checker
