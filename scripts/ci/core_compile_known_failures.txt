@@ -304,7 +304,6 @@ core/math/ssm.vr
 core/math/syn_mod.vr
 core/math/tensor.vr
 core/mem/allocator.vr
-core/mem/epoch.vr
 core/mem/fat_ref.vr
 core/mem/hazard.vr
 core/mem/heap.vr

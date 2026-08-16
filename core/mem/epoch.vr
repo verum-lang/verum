@@ -228,8 +228,8 @@ implement EpochManager {
 
     /// The new epoch value.
     public fn increment_epoch(&mut self) -> UInt64 {
-        let new_epoch = atomic_fetch_add_u64(&self.epoch, 1, ORDERING_ACQ_REL) + 1;
-        atomic_fetch_add_int(&self.wraparounds, 1, ORDERING_RELAXED);
+        let new_epoch = atomic_fetch_add_u64(&self.epoch as *const UInt64 as *mut UInt64, 1, ORDERING_ACQ_REL) + 1;
+        atomic_fetch_add_int(&self.wraparounds as *const Int as *mut Int, 1, ORDERING_RELAXED);
 
         // Notify all callbacks
         self.notify_callbacks(new_epoch);
@@ -251,7 +251,7 @@ implement EpochManager {
     /// Get total number of wraparounds.
     @inline
     public fn wraparound_count(&self) -> Int {
-        atomic_load_int(&self.wraparounds, ORDERING_RELAXED)
+        atomic_load_int(&self.wraparounds as *const Int, ORDERING_RELAXED)
     }
 
     // =========================================================================
@@ -270,7 +270,7 @@ implement EpochManager {
 
     /// Callback ID that can be used to unregister.
     public fn register_callback(&mut self, callback: EpochCallback) -> Int {
-        let id = atomic_fetch_add_int(&self.next_callback_id, 1, ORDERING_RELAXED);
+        let id = atomic_fetch_add_int(&self.next_callback_id as *const Int as *mut Int, 1, ORDERING_RELAXED);
 
         // Acquire spinlock
         self.lock_callbacks();
@@ -358,7 +358,7 @@ implement EpochManager {
     /// Called when ThinRef.revoke() or FatRef.revoke() is invoked.
     /// Useful for tracking reference invalidation in debug builds.
     public fn register_revocation_callback(&mut self, callback: RevocationCallback) -> Int {
-        let id = atomic_fetch_add_int(&self.next_revocation_id, 1, ORDERING_RELAXED);
+        let id = atomic_fetch_add_int(&self.next_revocation_id as *const Int as *mut Int, 1, ORDERING_RELAXED);
 
         self.lock_revocation();
 
@@ -432,7 +432,7 @@ implement EpochManager {
     /// Acquire callback spinlock (exclusive).
     @inline
     fn lock_callbacks(&mut self) {
-        while atomic_cmpxchg_int(&mut self.callbacks_lock, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED).0 != 0 {
+        while atomic_cmpxchg_int(&self.callbacks_lock as *const Int as *mut Int, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED).0 != 0 {
             spin_hint();
         }
     }
@@ -440,7 +440,7 @@ implement EpochManager {
     /// Release callback spinlock.
     @inline
     fn unlock_callbacks(&mut self) {
-        atomic_store_int(&mut self.callbacks_lock, 0, ORDERING_RELEASE);
+        atomic_store_int(&self.callbacks_lock as *const Int as *mut Int, 0, ORDERING_RELEASE);
     }
 
     /// Acquire callback spinlock (shared, for iteration).
@@ -458,7 +458,7 @@ implement EpochManager {
     /// Acquire revocation spinlock.
     @inline
     fn lock_revocation(&mut self) {
-        while atomic_cmpxchg_int(&mut self.revocation_lock, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED).0 != 0 {
+        while atomic_cmpxchg_int(&self.revocation_lock as *const Int as *mut Int, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED).0 != 0 {
             spin_hint();
         }
     }
@@ -466,7 +466,7 @@ implement EpochManager {
     /// Release revocation spinlock.
     @inline
     fn unlock_revocation(&mut self) {
-        atomic_store_int(&mut self.revocation_lock, 0, ORDERING_RELEASE);
+        atomic_store_int(&self.revocation_lock as *const Int as *mut Int, 0, ORDERING_RELEASE);
     }
 
     @inline
