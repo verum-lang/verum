@@ -29,7 +29,7 @@
 )
 module core.collections.heap;
 mount core.*;
-mount .list.*;
+mount super.list.*;
 
 // =============================================================================
 // BinaryHeap<T>

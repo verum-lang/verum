@@ -58,12 +58,12 @@ mount core.collections.*;
 mount sync.atomic.{AtomicInt, AtomicBool, MemoryOrdering};
 mount sync.mutex.Mutex;
 mount base.memory.{Shared};
-mount .poll.{Poll};
-mount .waker.{Waker, Context};
-mount .future.{Future};
-mount .stream.{Stream, StreamNext};
-mount .async_iterator.{AsyncIterator};
-mount .cancellation.{CancellationToken, CancellationError};
+mount super.poll.{Poll};
+mount super.waker.{Waker, Context};
+mount super.future.{Future};
+mount super.stream.{Stream, StreamNext};
+mount super.async_iterator.{AsyncIterator};
+mount super.cancellation.{CancellationToken, CancellationError};
 
 // =============================================================================
 // Error / Result Types

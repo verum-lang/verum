@@ -56,8 +56,8 @@
 )
 module core.sync.condvar;
 mount core.*;
-mount .atomic.*;
-mount .mutex.*;
+mount super.atomic.*;
+mount super.mutex.*;
 
 // Cross-platform futex imports — real OS blocking, no spin-wait
 @cfg(target_os = "linux")
@@ -72,12 +72,13 @@ mount sys.darwin.thread.{
     futex_wake as sys_futex_wake,
 };
 
-@cfg(target_os = "windows")
-mount sys.windows.thread.{
 // Mounted rather than inherited: §4ter — the prelude carries only what
 // the LANGUAGE requires, and this is library API.
 mount core.sync.mutex.{Mutex};
 mount core.sync.atomic.{AtomicInt};
+
+@cfg(target_os = "windows")
+mount sys.windows.thread.{
     futex_wait as sys_futex_wait,
     futex_wake as sys_futex_wake,
 };

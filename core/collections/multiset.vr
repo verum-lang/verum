@@ -80,7 +80,7 @@
 )
 module core.collections.multiset;
 mount core.*;
-mount .map.*;
+mount super.map.*;
 
 // =============================================================================
 // Multiset<T>

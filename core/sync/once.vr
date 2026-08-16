@@ -19,7 +19,7 @@
 )
 module core.sync.once;
 mount core.*;
-mount .atomic.*;
+mount super.atomic.*;
 mount core.intrinsics.compiler_fence;
 mount core.intrinsics.spin_hint;
 // Mounted rather than inherited: §4ter — the prelude carries only what

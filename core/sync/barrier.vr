@@ -45,9 +45,9 @@
 )
 module core.sync.barrier;
 mount core.*;
-mount .atomic.*;
-mount .mutex.*;
-mount .condvar.*;
+mount super.atomic.*;
+mount super.mutex.*;
+mount super.condvar.*;
 mount core.intrinsics.runtime.time.{monotonic_nanos};
 // Mounted rather than inherited: §4ter — the prelude carries only what
 // the LANGUAGE requires, and this is library API.

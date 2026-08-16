@@ -21,9 +21,9 @@
 module core.async.task;
 mount core.*;
 mount sync.*;
-mount .poll.*;
-mount .waker.*;
-mount .future.*;
+mount super.poll.*;
+mount super.waker.*;
+mount super.future.*;
 // `spawn_blocking` routes through the dedicated blocking thread
 // pool (`core.runtime.pool.ThreadPool`) rather than the async
 // executor's worker pool — see the BlockingState/BlockingFuture

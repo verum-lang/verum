@@ -19,8 +19,8 @@
 )
 module core.async.future;
 mount core.*;
-mount .poll.*;
-mount .waker.*;
+mount super.poll.*;
+mount super.waker.*;
 
 // =============================================================================
 // Future Protocol

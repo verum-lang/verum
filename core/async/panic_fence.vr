@@ -78,9 +78,9 @@
 )
 module core.async.panic_fence;
 mount core.*;
-mount .future.*;
-mount .poll.*;
-mount .waker.*;
+mount super.future.*;
+mount super.poll.*;
+mount super.waker.*;
 mount core.intrinsics.control.{catch_unwind, IntrinsicPanicInfo};
 
 // =============================================================================

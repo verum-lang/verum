@@ -70,10 +70,10 @@ module core.async.generator;
 
 mount core.*;
 mount collections.*;
-mount .poll.*;
-mount .waker.*;
-mount .future.*;
-mount .stream.*;
+mount super.poll.*;
+mount super.waker.*;
+mount super.future.*;
+mount super.stream.*;
 
 // =============================================================================
 // Generator<T> - Sync Generator (Iterator)

@@ -72,7 +72,7 @@
 module core.net.udp;
 mount core.*;
 mount io.*;
-mount .addr.*;
+mount super.addr.*;
 
 // =============================================================================
 // V-LLSI Native Socket Imports

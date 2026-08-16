@@ -52,7 +52,7 @@
 module core.text.regex;
 
 mount core.*;
-mount .regex_engine.{
+mount super.regex_engine.{
     rxe_is_match, rxe_find, rxe_find_all,
     rxe_replace, rxe_replace_all, rxe_split, rxe_captures,
     rx_parse, RxProg,

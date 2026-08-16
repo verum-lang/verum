@@ -19,7 +19,7 @@
 )
 module core.sync.rwlock;
 mount core.*;
-mount .atomic.*;
+mount super.atomic.*;
 
 // Cross-platform futex imports for OS-level blocking
 @cfg(target_os = "linux")

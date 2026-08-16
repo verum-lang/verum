@@ -21,13 +21,11 @@ core/action/monads/writer.vr
 core/action/verify.vr
 core/architecture/mod.vr
 core/archive/tar.vr
-core/async/async_iterator.vr
 core/async/broadcast.vr
 core/async/cancellation.vr
 core/async/channel.vr
 core/async/executor.vr
 core/async/future.vr
-core/async/generator.vr
 core/async/intrinsics.vr
 core/async/panic_fence.vr
 core/async/select.vr
@@ -88,15 +86,12 @@ core/database/common/retry_run.vr
 core/database/mysql/async_binlog.vr
 core/database/mysql/async_connection.vr
 core/database/mysql/async_load_data.vr
-core/database/mysql/async_pool.vr
 core/database/mysql/async_transaction.vr
 core/database/mysql/async_typed_database.vr
 core/database/mysql/binlog_rows.vr
 core/database/mysql/binlog.vr
 core/database/mysql/gtid.vr
 core/database/mysql/introspect.vr
-core/database/mysql/mod.vr
-core/database/mysql/mysql_stream.vr
 core/database/mysql/typed_database.vr
 core/database/postgres/async_base_backup.vr
 core/database/postgres/async_connection.vr
@@ -119,7 +114,6 @@ core/database/postgres/migrations/mod.vr
 core/database/postgres/migrations/store.vr
 core/database/postgres/mod.vr
 core/database/postgres/notify.vr
-core/database/postgres/pg_stream.vr
 core/database/postgres/pipeline.vr
 core/database/postgres/replication_tracker.vr
 core/database/postgres/replication.vr
@@ -372,7 +366,6 @@ core/net/tls13/session/client.vr
 core/net/tls13/session/server.vr
 core/net/udp.vr
 core/net/unix.vr
-core/net/weft/backpressure.vr
 core/net/weft/connection.vr
 core/net/weft/h3.vr
 core/net/weft/health.vr
@@ -466,11 +459,7 @@ core/storage/s3/client.vr
 core/storage/s3/signing.vr
 core/sync/barrier.vr
 core/sync/condvar.vr
-core/sync/mod.vr
-core/sync/mutex.vr
 core/sync/once.vr
-core/sync/rwlock.vr
-core/sync/semaphore.vr
 core/sys/common.vr
 core/sys/darwin/io.vr
 core/sys/darwin/mod.vr
@@ -520,7 +509,6 @@ core/term/widget/textarea.vr
 core/text/mod.vr
 core/text/numeric/bigdecimal.vr
 core/text/numeric/bigint.vr
-core/text/regex.vr
 core/theory_interop/bridges/mod.vr
 core/theory_interop/congruence_closure.vr
 core/theory_interop/core.vr

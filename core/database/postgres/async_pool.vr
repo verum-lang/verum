@@ -46,10 +46,11 @@ mount core.database.common.types.{WireValue, WireFormat};
 mount core.database.postgres.async_connection.{
     AsyncPgConnection, connect,
 };
-mount core.async.channel.{
 // Mounted rather than inherited: §4ter — the prelude carries only what
 // the LANGUAGE requires, and this is library API.
 mount core.sync.{AtomicInt};
+
+mount core.async.channel.{
     Sender, Receiver, bounded_channel,
 };
 
