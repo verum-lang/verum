@@ -386,3 +386,19 @@ public fn compress_block(h: &mut [UInt64; 8], block: &[Byte; 128]) {
     h[6] = h[6].wrapping_add(g);
     h[7] = h[7].wrapping_add(hh);
 }
+
+// Free function shorthand for `Sha512.digest(data)`.  Mirrors the
+// established stdlib pattern of providing module-level wrappers next
+// to inherent-method APIs so consumers can write
+//
+//     mount core.hash.crypto.sha512.{digest as sha512_digest};
+//
+// without needing to bring the unit-marker `Sha512` into scope just
+// to call its static.  `sha256.vr` has carried this shorthand since
+// it was written; its siblings did not, and callers that assumed the
+// family was uniform failed with `cannot find `digest` in module
+// `core.hash.crypto.sha512``.
+@inline
+public fn digest(data: &[Byte]) -> [Byte; 64] {
+    Sha512.digest(data)
+}

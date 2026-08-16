@@ -34,7 +34,16 @@ PRELUDE_SOURCE = CORE / "mod.vr"
 
 # Frozen counts, measured 2026-08-11. Lower them in the commit that earns
 # it; never raise them without a recorded reason.
-BASELINE_ALL = 614
+# 2026-08-16: 614 -> 615.  `digest/1` became a collision when sha384 and
+# sha512 gained the free-function shorthand sha256 has carried since it
+# was written (`public fn digest(data) -> [Byte; N]` next to the
+# inherent `ShaN.digest`).  Counted deliberately: consumers already
+# disambiguate by RENAMING on mount — `core/security/tuf/client.vr`
+# writes `sha256.{digest}` beside `sha512.{digest as sha512_digest}` —
+# and renaming a function resolves (renaming a `const` does not, which
+# is a separate defect).  A family where one of three siblings carries
+# the documented shorthand is worse than one counted collision.
+BASELINE_ALL = 615
 BASELINE_SQLITE = 84
 # The PRELUDE scope — the subset a user meets without importing anything.
 # This is not a stylistic count: for these names the ambiguity DECIDES which

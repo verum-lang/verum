@@ -239,7 +239,6 @@ core/encoding/cbor.vr
 core/encoding/jsonb.vr
 core/encoding/msgpack.vr
 core/eval/cbpv.vr
-core/hash/crypto/sha384.vr
 core/intrinsics/lowlevel/aarch64.vr
 core/intrinsics/mod.vr
 core/intrinsics/runtime/mod.vr
@@ -251,7 +250,6 @@ core/io/process.vr
 core/io/stdio.vr
 core/logic/kripke.vr
 core/logic/linear.vr
-core/mac/hmac.vr
 core/mac/poly1305.vr
 core/math/agent.vr
 core/math/autodiff.vr

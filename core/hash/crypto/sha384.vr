@@ -60,7 +60,12 @@
 )
 module core.hash.crypto.sha384;
 mount core.*;
-mount core.hash.crypto.sha512.{compress_block, BLOCK_SIZE as SHA512_BLOCK};
+mount core.hash.crypto.sha512.{compress_block};
+// `BLOCK_SIZE` is reached through the MODULE rather than a mount
+// alias: renaming a `const` in a mount group does not resolve
+// (renaming a function or a type does).  Module-qualified access
+// is the mechanism that works and needs no rename at all.
+mount core.hash.crypto.sha512;
 
 // =============================================================================
 // Initial hash values — FIPS 180-4 §5.3.4
@@ -124,7 +129,7 @@ implement Sha384 {
         let n = data.len();
 
         if self.buf_len > 0 {
-            let need = SHA512_BLOCK - self.buf_len;
+            let need = sha512.BLOCK_SIZE - self.buf_len;
             let take = if n < need { n } else { need };
             let mut i = 0;
             while i < take {
@@ -133,21 +138,21 @@ implement Sha384 {
             }
             self.buf_len = self.buf_len + take;
             offset = offset + take;
-            if self.buf_len == SHA512_BLOCK {
+            if self.buf_len == sha512.BLOCK_SIZE {
                 compress_block(&mut self.h, &self.buf);
                 self.buf_len = 0;
             }
         }
 
-        while offset + SHA512_BLOCK <= n {
+        while offset + sha512.BLOCK_SIZE <= n {
             let mut block: [Byte; 128] = [0; 128];
             let mut j = 0;
-            while j < SHA512_BLOCK {
+            while j < sha512.BLOCK_SIZE {
                 block[j] = data[offset + j];
                 j = j + 1;
             }
             compress_block(&mut self.h, &block);
-            offset = offset + SHA512_BLOCK;
+            offset = offset + sha512.BLOCK_SIZE;
         }
 
         while offset < n {
@@ -170,19 +175,19 @@ implement Sha384 {
         buf[buf_len] = 0x80;
         buf_len = buf_len + 1;
 
-        if buf_len > SHA512_BLOCK - 16 {
-            while buf_len < SHA512_BLOCK { buf[buf_len] = 0; buf_len = buf_len + 1; }
+        if buf_len > sha512.BLOCK_SIZE - 16 {
+            while buf_len < sha512.BLOCK_SIZE { buf[buf_len] = 0; buf_len = buf_len + 1; }
             compress_block(&mut h, &buf);
             buf_len = 0;
         }
-        while buf_len < SHA512_BLOCK - 16 { buf[buf_len] = 0; buf_len = buf_len + 1; }
+        while buf_len < sha512.BLOCK_SIZE - 16 { buf[buf_len] = 0; buf_len = buf_len + 1; }
 
         let hi_bytes = bits_hi.to_be_bytes();
         let lo_bytes = bits_lo.to_be_bytes();
         let mut k = 0;
         while k < 8 {
-            buf[SHA512_BLOCK - 16 + k] = hi_bytes[k];
-            buf[SHA512_BLOCK - 8 + k]  = lo_bytes[k];
+            buf[sha512.BLOCK_SIZE - 16 + k] = hi_bytes[k];
+            buf[sha512.BLOCK_SIZE - 8 + k]  = lo_bytes[k];
             k = k + 1;
         }
         compress_block(&mut h, &buf);
@@ -209,4 +214,20 @@ implement Sha384 {
         s.update(data);
         s.finalize()
     }
+}
+
+// Free function shorthand for `Sha384.digest(data)`.  Mirrors the
+// established stdlib pattern of providing module-level wrappers next
+// to inherent-method APIs so consumers can write
+//
+//     mount core.hash.crypto.sha384.{digest as sha384_digest};
+//
+// without needing to bring the unit-marker `Sha384` into scope just
+// to call its static.  `sha256.vr` has carried this shorthand since
+// it was written; its siblings did not, and callers that assumed the
+// family was uniform failed with `cannot find `digest` in module
+// `core.hash.crypto.sha384``.
+@inline
+public fn digest(data: &[Byte]) -> [Byte; 48] {
+    Sha384.digest(data)
 }

@@ -61,12 +61,16 @@ module core.mac.hmac;
 mount core.*;
 mount core.hash.legacy.sha1.{Sha1,
     SHA1_BLOCK_SIZE, SHA1_DIGEST_SIZE};
-mount core.hash.crypto.sha256.{Sha256,
-    BLOCK_SIZE as SHA256_BLOCK, OUTPUT_SIZE as SHA256_OUTPUT};
-mount core.hash.crypto.sha384.{Sha384,
-    BLOCK_SIZE as SHA384_BLOCK, OUTPUT_SIZE as SHA384_OUTPUT};
-mount core.hash.crypto.sha512.{Sha512,
-    BLOCK_SIZE as SHA512_BLOCK, OUTPUT_SIZE as SHA512_OUTPUT};
+mount core.hash.crypto.sha256.{Sha256};
+mount core.hash.crypto.sha384.{Sha384};
+mount core.hash.crypto.sha512.{Sha512};
+// The three families all name their constants `BLOCK_SIZE` and
+// `OUTPUT_SIZE`, so this file used to rename each on mount.  A
+// renamed `const` does not resolve (a renamed fn or type does), and
+// module-qualified access says the same thing without a rename.
+mount core.hash.crypto.sha256;
+mount core.hash.crypto.sha384;
+mount core.hash.crypto.sha512;
 
 // =============================================================================
 // HMAC constants — RFC 2104
@@ -95,10 +99,10 @@ implement HmacSha256 {
         let mut k: List<Byte> = [];
         let mut ki: Int = 0;
         while ki < 64 { k.push(0_u8); ki = ki + 1; }
-        if key.len() > SHA256_BLOCK {
+        if key.len() > sha256.BLOCK_SIZE {
             let digest = Sha256.digest(key);
             let mut i = 0;
-            while i < SHA256_OUTPUT { k[i] = digest[i]; i = i + 1; }
+            while i < sha256.OUTPUT_SIZE { k[i] = digest[i]; i = i + 1; }
         } else {
             let mut i = 0;
             while i < key.len() { k[i] = key[i]; i = i + 1; }
@@ -109,7 +113,7 @@ implement HmacSha256 {
         let mut pi: Int = 0;
         while pi < 64 { ipad.push(0_u8); opad.push(0_u8); pi = pi + 1; }
         let mut i = 0;
-        while i < SHA256_BLOCK {
+        while i < sha256.BLOCK_SIZE {
             ipad[i] = k[i] ^ IPAD;
             opad[i] = k[i] ^ OPAD;
             i = i + 1;
@@ -154,10 +158,10 @@ public type HmacSha384 is {
 implement HmacSha384 {
     public fn new(key: &[Byte]) -> HmacSha384 {
         let mut k: [Byte; 128] = [0; 128];
-        if key.len() > SHA384_BLOCK {
+        if key.len() > sha384.BLOCK_SIZE {
             let digest = Sha384.digest(key);
             let mut i = 0;
-            while i < SHA384_OUTPUT { k[i] = digest[i]; i = i + 1; }
+            while i < sha384.OUTPUT_SIZE { k[i] = digest[i]; i = i + 1; }
         } else {
             let mut i = 0;
             while i < key.len() { k[i] = key[i]; i = i + 1; }
@@ -166,7 +170,7 @@ implement HmacSha384 {
         let mut ipad: [Byte; 128] = [0; 128];
         let mut opad: [Byte; 128] = [0; 128];
         let mut i = 0;
-        while i < SHA384_BLOCK {
+        while i < sha384.BLOCK_SIZE {
             ipad[i] = k[i] ^ IPAD;
             opad[i] = k[i] ^ OPAD;
             i = i + 1;
@@ -211,10 +215,10 @@ public type HmacSha512 is {
 implement HmacSha512 {
     public fn new(key: &[Byte]) -> HmacSha512 {
         let mut k: [Byte; 128] = [0; 128];
-        if key.len() > SHA512_BLOCK {
+        if key.len() > sha512.BLOCK_SIZE {
             let digest = Sha512.digest(key);
             let mut i = 0;
-            while i < SHA512_OUTPUT { k[i] = digest[i]; i = i + 1; }
+            while i < sha512.OUTPUT_SIZE { k[i] = digest[i]; i = i + 1; }
         } else {
             let mut i = 0;
             while i < key.len() { k[i] = key[i]; i = i + 1; }
@@ -223,7 +227,7 @@ implement HmacSha512 {
         let mut ipad: [Byte; 128] = [0; 128];
         let mut opad: [Byte; 128] = [0; 128];
         let mut i = 0;
-        while i < SHA512_BLOCK {
+        while i < sha512.BLOCK_SIZE {
             ipad[i] = k[i] ^ IPAD;
             opad[i] = k[i] ^ OPAD;
             i = i + 1;
