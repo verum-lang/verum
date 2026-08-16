@@ -906,6 +906,13 @@ pub struct CompilationPipeline<'s> {
         verum_ast::expr::ResolvedCallTarget,
     >,
 
+    /// Deref steps the typechecker needed to accept a receiver, keyed by
+    /// that receiver's span.  Applied to the AST by the same call as
+    /// `resolved_call_targets`, so codegen sees an explicit `.deref()`
+    /// instead of being expected to re-derive the coercion.
+    pub(crate) deref_adjustments:
+        std::collections::HashMap<verum_ast::span::Span, usize>,
+
     /// MOUNT-BINDING-CARRY-1 (T0148): bare name -> the qualified key a
     /// `mount` resolved to, taken from the type checker after type
     /// checking and handed to codegen's mount authority.
@@ -1214,6 +1221,7 @@ impl<'s> CompilationPipeline<'s> {
             collected_contexts: List::new(),
             type_registry: None,
             resolved_call_targets: std::collections::HashMap::new(),
+            deref_adjustments: std::collections::HashMap::new(),
             resolved_mount_bindings: verum_common::Map::new(),
             // T2-extended single-path: when the compiler binary
             // embeds a precompiled stdlib `runtime.core_metadata`
@@ -1337,6 +1345,7 @@ impl<'s> CompilationPipeline<'s> {
             collected_contexts: List::new(),
             type_registry: None,
             resolved_call_targets: std::collections::HashMap::new(),
+            deref_adjustments: std::collections::HashMap::new(),
             resolved_mount_bindings: verum_common::Map::new(),
             stdlib_metadata: StdlibMetadataState::Eager(None),
             deferred_verification_goals: verum_common::List::new(), // Not used in bootstrap mode

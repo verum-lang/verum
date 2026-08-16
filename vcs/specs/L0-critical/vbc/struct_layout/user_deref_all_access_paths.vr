@@ -1,0 +1,57 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: vbc, struct-layout, deref, autoderef, field-access, index, method
+// @expected-stdout: 20 7 3 ok
+//
+// Pin (T0770) — a user `Deref` impl must be honoured on ALL THREE
+// receiver-shape access paths, and the value must be the TARGET's,
+// not the wrapper's.
+//
+// The sibling pin next door (`shared_field_access_autoderef.vr`)
+// covers `Shared<T>`, which the VBC layer peels with its own opcode.
+// This one covers a protocol `Deref` impl, which it does not: the
+// typechecker resolves through `Deref` and the coercion has to reach
+// the AST as an explicit `.deref()` call, or codegen operates on the
+// wrapper.
+//
+// Pre-fix, with `b: Boxy<List<Int>>` and `r: Boxy<P>`:
+//
+//   b[1]        type error "Cannot index type: Boxy<List<Int>>"
+//               — and, once the typechecker accepted it, the index
+//                 ran against the Boxy STRUCT: "index 1 for list of
+//                 length 1".
+//   b.len()     1  — the wrapper's field count, not the list's 3.
+//   r.field     resolved by scanning field names across the whole
+//               program (FIELD-ACCESS-BYNAME-1).
+//
+// None of those three was an error at runtime; each was a wrong
+// answer, which is why the pin checks VALUES rather than exit status.
+
+type Boxy<T> is { inner: T };
+
+implement<T> Deref for Boxy<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.inner
+    }
+}
+
+type Held is { held_value: Int, other: Int };
+
+fn main() {
+    let b: Boxy<List<Int>> = Boxy { inner: [10, 20, 30] };
+
+    // Path 1 — INDEXING through Deref.
+    let via_index = b[1];
+
+    // Path 2 — FIELD ACCESS through Deref.
+    let r: Boxy<Held> = Boxy { inner: Held { held_value: 7, other: 9 } };
+    let via_field = r.held_value;
+
+    // Path 3 — METHOD CALL through Deref.
+    let via_method = b.len();
+
+    print(f"{via_index} {via_field} {via_method} ok");
+}

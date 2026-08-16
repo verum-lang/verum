@@ -21,7 +21,6 @@ core/action/monads/writer.vr
 core/action/verify.vr
 core/architecture/mod.vr
 core/archive/tar.vr
-core/async/broadcast.vr
 core/async/cancellation.vr
 core/async/channel.vr
 core/async/executor.vr
@@ -100,7 +99,6 @@ core/database/postgres/async_typed_database.vr
 core/database/postgres/auth/scram.vr
 core/database/postgres/base_backup.vr
 core/database/postgres/composite_introspect.vr
-core/database/postgres/composite_registry.vr
 core/database/postgres/connection.vr
 core/database/postgres/introspect.vr
 core/database/postgres/migrations/mod.vr
@@ -301,7 +299,6 @@ core/net/h3/server.vr
 core/net/http.vr
 core/net/proxy/health_check.vr
 core/net/proxy/retry.vr
-core/net/proxy/upstream_pool.vr
 core/net/quic/api/server.vr
 core/net/quic/api/stream.vr
 core/net/quic/connection_sm/aead.vr
@@ -448,12 +445,10 @@ core/term/app/app.vr
 core/term/app/command.vr
 core/term/app/prompt.vr
 core/term/app/subscription.vr
-core/term/event/stream.vr
 core/term/layout/shortcuts.vr
 core/term/mod.vr
 core/term/raw/cursor.vr
 core/term/raw/mod.vr
-core/term/raw/screen.vr
 core/term/raw/termios.vr
 core/term/raw/wincon.vr
 core/term/render/diff.vr

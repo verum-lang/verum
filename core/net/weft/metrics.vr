@@ -124,7 +124,7 @@ implement WeftHistogram {
         // held only for the bucket-find + single increment — no
         // I/O, no awaits. Tracked as a follow-up for
         // [AtomicInt; N] migration.
-        let mut cs = self.counts.lock();
+        let mut cs = self.counts.lock().unwrap_or_else(|p| p.into_inner());
         let mut placed = false;
         let mut i: Int = 0;
         while i < self.bounds_ms.len() {
@@ -161,7 +161,7 @@ implement WeftMetricsRegistry {
 
     /// Get-or-create a counter with the given name.
     public fn counter(&self, name: &Text) -> Shared<WeftCounter> {
-        let mut m = self.counters.lock();
+        let mut m = self.counters.lock().unwrap_or_else(|p| p.into_inner());
         match m.get(name) {
             Maybe.Some(c) => c.clone(),
             Maybe.None => {
@@ -174,7 +174,7 @@ implement WeftMetricsRegistry {
 
     /// Get-or-create a histogram with the given name.
     public fn histogram(&self, name: &Text) -> Shared<WeftHistogram> {
-        let mut m = self.histograms.lock();
+        let mut m = self.histograms.lock().unwrap_or_else(|p| p.into_inner());
         match m.get(name) {
             Maybe.Some(h) => h.clone(),
             Maybe.None => {
@@ -190,7 +190,7 @@ implement WeftMetricsRegistry {
     /// exporter to produce byte-stable wire output across runs.
     public fn counter_snapshot(&self) -> core.collections.list.List<(Text, Int)> {
         let mut out: core.collections.list.List<(Text, Int)> = [];
-        let cs = self.counters.lock();
+        let cs = self.counters.lock().unwrap_or_else(|p| p.into_inner());
         for (name, counter) in cs.iter() {
             out.push((name.clone(), counter.value()));
         }
@@ -204,7 +204,7 @@ implement WeftMetricsRegistry {
         -> core.collections.list.List<(Text, core.net.weft.metrics_otlp.OtlpHistogramSnapshot)>
     {
         let mut out = core.collections.list.List.new();
-        let hs = self.histograms.lock();
+        let hs = self.histograms.lock().unwrap_or_else(|p| p.into_inner());
         for (name, hist) in hs.iter() {
             let counts = hist.counts.lock().clone();
             // #319: count + sum_ms are now AtomicInt (lock-free
@@ -227,16 +227,16 @@ implement WeftMetricsRegistry {
     public fn render_prometheus(&self) -> Text {
         let mut out = TextBuilder.new();
         // Counters.
-        let cs = self.counters.lock();
+        let cs = self.counters.lock().unwrap_or_else(|p| p.into_inner());
         for (name, counter) in cs.iter() {
             out.push_str(f"# TYPE {name} counter\n");
             out.push_str(f"{name} {counter.value()}\n");
         }
         // Histograms.
-        let hs = self.histograms.lock();
+        let hs = self.histograms.lock().unwrap_or_else(|p| p.into_inner());
         for (name, hist) in hs.iter() {
             out.push_str(f"# TYPE {name} histogram\n");
-            let counts = hist.counts.lock();
+            let counts = hist.counts.lock().unwrap_or_else(|p| p.into_inner());
             let mut cumulative: Int = 0;
             let mut i: Int = 0;
             while i < hist.bounds_ms.len() {

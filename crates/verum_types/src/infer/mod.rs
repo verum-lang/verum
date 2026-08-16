@@ -1387,6 +1387,18 @@ pub struct TypeChecker {
     /// parsed AST has a distinct span.
     pub(crate) resolved_call_targets:
         std::collections::HashMap<verum_ast::span::Span, verum_ast::expr::ResolvedCallTarget>,
+
+    /// Where an access resolved only THROUGH `Deref`, and how many steps
+    /// it took.  Keyed by the span of the receiver expression.
+    ///
+    /// Sibling of `resolved_call_targets` and committed by the same
+    /// walk: the typechecker is the single source of truth for "was a
+    /// deref needed here?", and the answer is written into the AST as an
+    /// explicit `.deref()` call rather than re-derived by each backend.
+    /// Codegen used to answer it independently for field access and not
+    /// at all for indexing.
+    pub(crate) deref_adjustments:
+        std::collections::HashMap<verum_ast::span::Span, usize>,
 }
 
 /// Generator context tracking for yield expressions

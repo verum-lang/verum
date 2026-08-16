@@ -1065,7 +1065,6 @@ pub struct VbcCodegen {
     /// Set of type names that are transparent wrappers (single-field generic wrappers).
     /// When a bare wrapper type without generic args is encountered during field resolution,
     /// we fall through to scan-all-types rather than failing.
-    transparent_wrappers: std::collections::HashSet<String>,
 
 
     /// Protocol registry for default method inheritance.
@@ -1530,7 +1529,13 @@ impl VbcCodegen {
     pub fn is_allocating_wrapper(&self, name: &str) -> bool {
         // Allocating wrappers are the transparent wrappers minus Maybe.
         // Maybe is a sum-type wrapper, not an allocating one.
-        self.transparent_wrappers.contains(name) && name != "Maybe"
+        //
+        // The set itself lives with the other well-known-type
+        // predicates: the typechecker needs the same answer to decide
+        // whether a deref must be materialised, and a second
+        // hand-populated copy is how the two layers start disagreeing.
+        verum_common::well_known_types::WellKnownType::name_is_transparent_carrier(name)
+            && name != "Maybe"
     }
 
     /// Returns `true` if `name` is a collection type whose `.new()` constructor
@@ -2304,15 +2309,6 @@ impl VbcCodegen {
                 );
                 m.insert("Maybe".to_string(), vec!["T".to_string()]);
                 m
-            },
-            // Transparent wrapper types: bare wrapper without generic args falls through
-            // to scan-all-types during field resolution.
-            transparent_wrappers: {
-                let mut s = std::collections::HashSet::new();
-                s.insert("Heap".to_string());
-                s.insert("Shared".to_string());
-                s.insert("Maybe".to_string());
-                s
             },
             // Protocol registry for default method inheritance
             protocol_registry: std::collections::HashMap::new(),
@@ -19583,12 +19579,6 @@ impl VbcCodegen {
                         return (pos as u32, false);
                     }
                 }
-            }
-            // Bare wrapper types without generic args: treat as transparent.
-            // These occur when infer_expr_type_name can't determine the inner type.
-            // Fall through to scan-all-types — same as type=None.
-            if self.transparent_wrappers.contains(tn) {
-                // fall through
             }
             // Cross-module field access: type might be registered under a qualified name
             // (e.g., "module_a.Point") but accessed with simple name ("Point") or vice versa.

@@ -193,6 +193,24 @@ impl WellKnownType {
     }
 
     /// Check if the given string names a smart-pointer type (Heap or Shared).
+    /// Wrappers the VBC layer peels with its OWN native `Deref` opcode,
+    /// as opposed to protocol `Deref` impls that need an explicit
+    /// `.deref()` call in the AST.
+    ///
+    /// The distinction is load-bearing in both directions: emitting a
+    /// protocol `.deref()` for one of these mis-dispatches (the
+    /// interpreter peels the carrier BEFORE method resolution, then
+    /// looks for `deref` on the inner type), and omitting it for a real
+    /// `Deref` impl silently reads the wrapper.  Codegen kept this set
+    /// as a hand-populated HashSet; it is a property of the type, so it
+    /// belongs with the other well-known-type predicates.
+    pub fn name_is_transparent_carrier(name: &str) -> bool {
+        matches!(
+            Self::from_name(name),
+            Some(Self::Heap) | Some(Self::Shared) | Some(Self::Maybe)
+        )
+    }
+
     pub fn is_smart_pointer_name(name: &str) -> bool {
         Self::from_name(name).is_some_and(|w| w.is_smart_pointer())
     }

@@ -17117,11 +17117,22 @@ impl TypeChecker {
         // Bounded to 8 hops. Never unwraps when the current level
         // already has the method (so `Mutex.lock()` still binds to
         // Mutex, not to the inner T).
-        let recv_ty = {
+        let (recv_ty, materialised_hops) = {
             let method_name_t: Text = method.name.as_str().into();
             let mut current = recv_ty;
             let mut hops = 0;
+            // Steps through a PROTOCOL `Deref` (as opposed to a carrier
+            // the machine peels itself) have to reach the AST as
+            // explicit `.deref()` calls — otherwise this loop finds the
+            // method on the target while codegen dispatches it on the
+            // wrapper, which answers with a wrong value instead of an
+            // error.  Third of the three access paths; field access and
+            // indexing record the same way.
+            let mut materialised = 0usize;
             while hops < 8 && !self.type_or_dyn_has_method(&current, &method_name_t) {
+                if !current.is_transparent_carrier() {
+                    materialised += 1;
+                }
                 let next = {
                     let checker = self.protocol_checker.read();
                     checker.try_find_associated_type(&current, &verum_common::Text::from("Target"))
@@ -17152,8 +17163,12 @@ impl TypeChecker {
                     None => break,
                 }
             }
-            current
+            // A loop that exited without finding the method took steps
+            // that resolve nothing; only a successful chase is recorded.
+            let found = self.type_or_dyn_has_method(&current, &method_name_t);
+            (current, if found { materialised } else { 0 })
         };
+        self.record_deref_adjustment(receiver.span, materialised_hops);
 
         // ONE-authority union recovery BEFORE any bucket lookup — the
         // early-inherent path keys buckets by the receiver's nominal

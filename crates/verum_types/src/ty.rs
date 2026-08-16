@@ -1551,6 +1551,208 @@ impl Type {
     /// substitute through the unifier (`try_expand_alias`), which is
     /// exact; this is the rule for everyone else, and the floor under
     /// all of them.
+    /// Substitute a parameter map into this type.
+    ///
+    /// THE substitution.  It used to live on `Unifier` as
+    /// `apply_alias_subst`, which meant every other subsystem that needed
+    /// it either reached through a unifier it did not otherwise want or
+    /// grew its own copy — and a second copy of a substitution rule is
+    /// how the malformed `Result<Unit>` class was born.  The body never
+    /// read unifier state, so it belongs here, beside `apply_arguments`.
+    pub fn substitute_params(&self, subst: &Map<Text, Type>) -> Type {
+        Self::substitute_params_impl(self, subst, 0)
+    }
+
+    fn substitute_params_impl(ty: &Type, subst: &Map<Text, Type>, depth: usize) -> Type {
+        const MAX_DEPTH: usize = 100;
+        if depth > MAX_DEPTH {
+            // #306: surface the silent depth-limit fallback so a
+            // chain of self-referential type aliases hitting the
+            // cap is observable in telemetry rather than producing
+            // a mysteriously-unsubstituted type. Conservative fall
+            // back is correct (returns the type unmodified) but
+            // hiding the event from the user makes downstream
+            // type-error messages baffling.
+            tracing::warn!(
+                "apply_alias_subst depth limit ({}) exceeded — \
+                 returning type unchanged.  This typically means \
+                 a self-referential type alias chain; consider \
+                 simplifying the alias graph.",
+                MAX_DEPTH
+            );
+            return ty.clone();
+        }
+        let d = depth + 1;
+        match ty {
+            // Type variables with matching names get substituted
+            Type::Var(tv) => {
+                let name = Text::from(format!("{}", tv));
+                if let Some(replacement) = subst.get(&name) {
+                    return replacement.clone();
+                }
+                ty.clone()
+            }
+            // Generic types: check if the name matches a parameter
+            Type::Generic { name, args } => {
+                if args.is_empty() {
+                    if let Some(replacement) = subst.get(name) {
+                        return replacement.clone();
+                    }
+                }
+                let new_args: List<Type> = args
+                    .iter()
+                    .map(|a| Self::substitute_params_impl(a, subst, d))
+                    .collect();
+                Type::Generic {
+                    name: name.clone(),
+                    args: new_args,
+                }
+            }
+            // Named types: recurse into args
+            Type::Named { path, args } => {
+                // Check if this is a single-segment path that matches a param name
+                if args.is_empty() {
+                    if let Some(ident) = path.as_ident() {
+                        if let Some(replacement) = subst.get(&ident.name) {
+                            return replacement.clone();
+                        }
+                    }
+                }
+                let new_args: List<Type> = args
+                    .iter()
+                    .map(|a| Self::substitute_params_impl(a, subst, d))
+                    .collect();
+                Type::Named {
+                    path: path.clone(),
+                    args: new_args,
+                }
+            }
+            // Variant types: recurse into payloads
+            Type::Variant(variants) => {
+                let new_variants: indexmap::IndexMap<Text, Type> = variants
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Self::substitute_params_impl(v, subst, d)))
+                    .collect();
+                Type::Variant(new_variants)
+            }
+            // Record types: recurse into fields
+            Type::Record(fields) => {
+                let new_fields: indexmap::IndexMap<Text, Type> = fields
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Self::substitute_params_impl(v, subst, d)))
+                    .collect();
+                Type::Record(new_fields)
+            }
+            // Function types: recurse into params and return
+            Type::Function {
+                params,
+                return_type,
+                contexts,
+                properties,
+                type_params,
+            } => {
+                let new_params: List<Type> = params
+                    .iter()
+                    .map(|p| Self::substitute_params_impl(p, subst, d))
+                    .collect();
+                let new_ret = Box::new(Self::substitute_params_impl(return_type, subst, d));
+                Type::Function {
+                    params: new_params,
+                    return_type: new_ret,
+                    contexts: contexts.clone(),
+                    properties: properties.clone(),
+                    type_params: type_params.clone(),
+                }
+            }
+            // Reference types: recurse into inner
+            Type::Reference { inner, mutable } => Type::Reference {
+                inner: Box::new(Self::substitute_params_impl(inner, subst, d)),
+                mutable: *mutable,
+            },
+            Type::CheckedReference { inner, mutable } => Type::CheckedReference {
+                inner: Box::new(Self::substitute_params_impl(inner, subst, d)),
+                mutable: *mutable,
+            },
+            Type::Ownership { inner, mutable } => Type::Ownership {
+                inner: Box::new(Self::substitute_params_impl(inner, subst, d)),
+                mutable: *mutable,
+            },
+            // Tuple types: recurse
+            Type::Tuple(elements) => {
+                let new_elements: List<Type> = elements
+                    .iter()
+                    .map(|e| Self::substitute_params_impl(e, subst, d))
+                    .collect();
+                Type::Tuple(new_elements)
+            }
+            // Array types: recurse into element type
+            Type::Array { element, size } => Type::Array {
+                element: Box::new(Self::substitute_params_impl(element, subst, d)),
+                size: *size,
+            },
+            // Future types: recurse into output
+            Type::Future { output } => Type::Future {
+                output: Box::new(Self::substitute_params_impl(output, subst, d)),
+            },
+            // All other types: return as-is
+            _ => ty.clone(),
+        }
+    }
+
+    pub fn bind_params(head: &Type, recv: &Type) -> Map<Text, Type> {
+        fn args_of(t: &Type) -> Option<&List<Type>> {
+            match t {
+                Type::Named { args, .. } | Type::Generic { args, .. } => Some(args),
+                _ => None,
+            }
+        }
+        fn bare_name(t: &Type) -> Option<Text> {
+            match t {
+                Type::Named { path, args } if args.is_empty() => {
+                    path.as_ident().map(|id| id.name.clone())
+                }
+                Type::Generic { name, args } if args.is_empty() => Some(name.clone()),
+                // A generic impl's head parameters are stored as type
+                // VARIABLES, not as named types — `implement<T> Deref for
+                // G<T>` reaches us as `G<_>`.  `apply_alias_subst` keys its
+                // map on a variable's display form, so key on the same
+                // thing here; keying on anything else would silently miss
+                // every generic impl, which is exactly what a first
+                // attempt at this did (`MutexGuard` unchanged, target
+                // returned as an unbound `_`).
+                Type::Var(tv) => Some(Text::from(format!("{}", tv))),
+                _ => None,
+            }
+        }
+        let mut subst: Map<Text, Type> = Map::new();
+        if let (Some(params), Some(actuals)) = (args_of(head), args_of(recv)) {
+            for (p, a) in params.iter().zip(actuals.iter()) {
+                if let Some(n) = bare_name(p) {
+                    subst.insert(n, a.clone());
+                }
+            }
+        }
+        subst
+    }
+
+    /// Is this a wrapper the VBC layer peels natively?
+    ///
+    /// Deref steps through such a carrier must NOT be materialised as
+    /// `.deref()` calls — the machine already peels them, and an
+    /// explicit call mis-dispatches.  Delegates to the shared
+    /// well-known-type vocabulary.
+    pub fn is_transparent_carrier(&self) -> bool {
+        let name = match self {
+            Type::Generic { name, .. } => name.as_str(),
+            Type::Named { path, .. } => match path.as_ident() {
+                Some(id) => id.name.as_str(),
+                None => return false,
+            },
+            _ => return false,
+        };
+        WKT::name_is_transparent_carrier(name)
+    }
+
     pub fn apply_arguments(self, args: List<Type>) -> Self {
         fn merge(base_args: &List<Type>, args: List<Type>) -> List<Type> {
             if base_args.len() <= args.len() {

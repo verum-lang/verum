@@ -8773,9 +8773,10 @@ impl TypeChecker {
                                     path: path.clone(),
                                     args: args.clone(),
                                 };
-                                if let Some(t) = self
+                                if let Some((t, hops)) = self
                                     .field_type_through_deref(&recv_ty, field.name.as_str())
                                 {
+                                    self.record_deref_adjustment(obj.span, hops);
                                     return Ok(InferResult::new(t));
                                 }
                                 members.sort();
@@ -8868,9 +8869,10 @@ impl TypeChecker {
                     &normalized_ty,
                 ) {
                     Ok(InferResult::new(t))
-                } else if let Some(t) = self
+                } else if let Some((t, hops)) = self
                     .field_type_through_deref(&normalized_ty, field.name.as_str())
                 {
+                    self.record_deref_adjustment(obj.span, hops);
                     // AUTO-DEREF, second of the two field-access paths.  A
                     // receiver that is not a record reaches HERE rather than
                     // the `UnknownField` site, which is why wiring that one
@@ -8999,12 +9001,13 @@ impl TypeChecker {
                             // only the first one left `core/` untouched and the
                             // deref trace silent, which is how the second copy
                             // was found.  Same question, same authority.
-                            if let Some(t) = self
+                            if let Some((t, hops)) = self
                                 .field_type_through_deref(
                                     &normalized_ty,
                                     field.name.as_str(),
                                 )
                             {
+                                self.record_deref_adjustment(obj.span, hops);
                                 return Ok(InferResult::new(t));
                             }
                             Err(TypeError::OtherWithCode {
@@ -9144,6 +9147,19 @@ impl TypeChecker {
                     self.push_diagnostic_for(e);
                 }
             }
+        }
+
+        // Materialise whatever deref the resolution needed.  The
+        // typechecker is the only layer that knows a `Deref` was
+        // consulted; recording it here is what keeps `guard[i]` from
+        // type-checking against `T` while codegen indexes the guard.
+        let index_hops = {
+            let resolved = self.unifier.apply(&arr_result.ty);
+            let pc = self.protocol_checker.read();
+            pc.resolve_index_with_hops(&resolved).map(|(_, h)| h)
+        };
+        if let Some(hops) = index_hops {
+            self.record_deref_adjustment(arr.span, hops);
         }
 
         // Get expected index type via protocol resolution

@@ -201,7 +201,7 @@ implement BufferPool {
     /// — caller is expected to fall back to on-heap List<Byte>.
     public fn acquire(&self) -> Maybe<BufferHandle> {
         self.state.acquires_total.fetch_add(1, MemoryOrdering.AcqRel);
-        let mut free = self.state.free_indices.lock();
+        let mut free = self.state.free_indices.lock().unwrap_or_else(|p| p.into_inner());
         match free.pop() {
             Maybe.None => {
                 self.state.misses_total.fetch_add(1, MemoryOrdering.AcqRel);
@@ -237,7 +237,7 @@ implement BufferPool {
     }
 
     public fn free_count(&self) -> Int {
-        let free = self.state.free_indices.lock();
+        let free = self.state.free_indices.lock().unwrap_or_else(|p| p.into_inner());
         free.len()
     }
 
@@ -306,7 +306,7 @@ implement BufferHandle {
 implement Drop for BufferHandle {
     fn drop(&mut self) {
         // Return index to free list.
-        let mut free = self.pool.free_indices.lock();
+        let mut free = self.pool.free_indices.lock().unwrap_or_else(|p| p.into_inner());
         free.push(self.index);
     }
 }

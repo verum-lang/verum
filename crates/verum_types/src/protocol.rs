@@ -9037,7 +9037,92 @@ impl ProtocolChecker {
     ///
     /// * `Some(IndexResolution)` with key and output types
     /// * `None` if the type isn't indexable
+    /// What does `x` deref to, if anything?
+    ///
+    /// THE deref rule.  `Ref<T>` writes the target as its protocol
+    /// argument and `Deref` as the associated type `Target`; where it is
+    /// written is the only difference, so what happens to it afterwards
+    /// — binding the impl head against the receiver so a generic
+    /// `implement<T> Deref for G<T>` yields `Inner` rather than an
+    /// unbound `T` — is written once, here.  Field access, method
+    /// dispatch and indexing all ask this; none of them re-derives it.
+    pub fn deref_target(&self, ty: &Type) -> Option<Type> {
+        for impl_ in self.get_implementations(ty).iter() {
+            let protocol_name = impl_
+                .protocol
+                .as_ident()
+                .map(|id| id.name.as_str())
+                .unwrap_or("");
+            let target = match protocol_name {
+                "Ref" | "RefMut" => impl_.protocol_args.first(),
+                "Deref" | "DerefMut" => impl_
+                    .associated_types
+                    .get(&verum_common::Text::from("Target")),
+                _ => None,
+            };
+            let Some(target) = target else { continue };
+            let subst = Type::bind_params(&impl_.for_type, ty);
+            return Some(if subst.is_empty() {
+                target.clone()
+            } else {
+                target.substitute_params(&subst)
+            });
+        }
+        None
+    }
+
+    /// How many deref steps to follow before declaring a cycle.
+    const MAX_DEREF_CHAIN: usize = 16;
+
+    /// Resolve `x[i]`, following `Deref` when the receiver does not index
+    /// directly.
+    ///
+    /// A receiver that indexes directly is unaffected — the chain is
+    /// walked only after the direct resolution fails — so this is the
+    /// one place indexing-through-a-guard is decided, rather than the
+    /// six `resolve_index_protocol` call sites that each used to decide
+    /// it (and five of which silently produced a fresh type variable,
+    /// which surfaces much later as "the inferred type `_` is not fully
+    /// determined").
     pub fn resolve_index_protocol(&self, ty: &Type) -> Option<IndexResolution> {
+        self.resolve_index_with_hops(ty).map(|(r, _)| r)
+    }
+
+    /// As `resolve_index_protocol`, but also reports HOW MANY deref steps
+    /// were needed.
+    ///
+    /// The count is not a diagnostic detail — it is what the caller must
+    /// record so the same number of `.deref()` calls appear in the AST.
+    /// Accepting `guard[i]` in the typechecker while codegen indexes the
+    /// guard itself turns a type error into a silently wrong value, so
+    /// the two layers agree through this number.
+    pub fn resolve_index_with_hops(
+        &self,
+        ty: &Type,
+    ) -> Option<(IndexResolution, usize)> {
+        if let Some(direct) = self.resolve_index_direct(ty) {
+            return Some((direct, 0));
+        }
+        let mut cur = ty.clone();
+        let mut hops = 0usize;
+        for _ in 0..Self::MAX_DEREF_CHAIN {
+            // A transparent carrier is peeled by the machine itself, so
+            // the step happens but must not be COUNTED — counting it
+            // would emit a protocol `.deref()` the runtime then
+            // mis-dispatches.
+            if !cur.is_transparent_carrier() {
+                hops += 1;
+            }
+            let target = self.deref_target(&cur)?;
+            if let Some(found) = self.resolve_index_direct(&target) {
+                return Some((found, hops));
+            }
+            cur = target;
+        }
+        None
+    }
+
+    fn resolve_index_direct(&self, ty: &Type) -> Option<IndexResolution> {
         // Handle type variables
         if let Type::Var(_) = ty {
             return Some(IndexResolution {

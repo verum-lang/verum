@@ -1048,6 +1048,7 @@ impl<'s> CompilationPipeline<'s> {
         // falls through to the cascade which is the existing
         // happy-path behaviour.
         self.resolved_call_targets = checker.take_resolved_call_targets();
+        self.deref_adjustments = checker.take_deref_adjustments();
 
         // MOUNT-BINDING-CARRY-1 (T0148): the identity half of the same
         // transfer. `resolve_function_via_metadata_reexports` establishes
@@ -1088,7 +1089,11 @@ impl<'s> CompilationPipeline<'s> {
                 eprintln!("[protostamp]   span={:?} -> {:?}", span, target);
             }
         }
-        verum_types::apply_resolved_call_targets(module, &self.resolved_call_targets);
+        verum_types::apply_resolved_call_targets(
+            module,
+            &self.resolved_call_targets,
+            &self.deref_adjustments,
+        );
     }
 
     /// Phase 3b: Dependency analysis for embedded constraints

@@ -171,7 +171,7 @@ implement ArenaPool {
     /// lease calls `reset()` and returns the arena to the free list.
     public fn acquire(&self) -> ArenaLease {
         let arena = {
-            let mut free = self.state.free.lock();
+            let mut free = self.state.free.lock().unwrap_or_else(|p| p.into_inner());
             match free.pop() {
                 Maybe.Some(a) => a,
                 Maybe.None    => {
@@ -197,7 +197,7 @@ implement ArenaPool {
 
     /// Number of arenas currently warm in the pool.
     public fn warm_count(&self) -> Int {
-        let free = self.state.free.lock();
+        let free = self.state.free.lock().unwrap_or_else(|p| p.into_inner());
         free.len()
     }
 
@@ -274,7 +274,7 @@ implement Drop for ArenaLease {
         arena.reset();
         // Return to pool if warm pool has room, otherwise destroy.
         let cfg = self.pool.config.clone();
-        let mut free = self.pool.free.lock();
+        let mut free = self.pool.free.lock().unwrap_or_else(|p| p.into_inner());
         if free.len() < cfg.warm_count {
             free.push(arena);
         } else {

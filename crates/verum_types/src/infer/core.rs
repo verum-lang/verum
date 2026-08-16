@@ -135,6 +135,33 @@ impl TypeChecker {
         }
     }
 
+    /// Record that the receiver at `span` needed `hops` deref steps.
+    ///
+    /// Keeps the LARGEST count seen: the same receiver may be typed more
+    /// than once (recovery paths re-enter inference), and under-derefing
+    /// silently reads the wrapper while over-derefing fails loudly.
+    pub(crate) fn record_deref_adjustment(
+        &mut self,
+        span: verum_ast::span::Span,
+        hops: usize,
+    ) {
+        if hops == 0 {
+            return;
+        }
+        let slot = self.deref_adjustments.entry(span).or_insert(hops);
+        if *slot < hops {
+            *slot = hops;
+        }
+    }
+
+    /// Take ownership of the deref side-table, leaving an empty one.
+    /// Sibling of `take_resolved_call_targets`.
+    pub fn take_deref_adjustments(
+        &mut self,
+    ) -> std::collections::HashMap<verum_ast::span::Span, usize> {
+        std::mem::take(&mut self.deref_adjustments)
+    }
+
     pub(crate) fn record_resolved_static_call(
         &mut self,
         span: verum_ast::span::Span,
@@ -176,11 +203,16 @@ impl TypeChecker {
     /// phase so the codegen's `compile_method_call` fast path sees
     /// the resolutions.
     pub fn commit_resolved_call_targets(&self, module: &mut verum_ast::Module) {
-        if self.resolved_call_targets.is_empty() {
+        if self.resolved_call_targets.is_empty() && self.deref_adjustments.is_empty()
+        {
             return;
         }
+        let table = CommitTables {
+            calls: &self.resolved_call_targets,
+            derefs: &self.deref_adjustments,
+        };
         for item in module.items.iter_mut() {
-            commit_resolved_in_item(item, &self.resolved_call_targets);
+            commit_resolved_in_item(item, &table);
         }
     }
 
@@ -228,27 +260,39 @@ impl TypeChecker {
 ///
 /// Idempotent — running twice produces the same AST.
 /// No-op when `table` is empty.
-pub fn apply_resolved_call_targets(
-    module: &mut verum_ast::Module,
-    table: &std::collections::HashMap<
+/// The two side-tables the typechecker hands to the AST-commit walk.
+///
+/// One walk, two answers.  A second traversal for the second table is
+/// how a walker starts disagreeing with its sibling about which nodes
+/// exist.
+pub struct CommitTables<'a> {
+    pub calls: &'a std::collections::HashMap<
         verum_ast::span::Span,
         verum_ast::expr::ResolvedCallTarget,
     >,
+    pub derefs: &'a std::collections::HashMap<verum_ast::span::Span, usize>,
+}
+
+pub fn apply_resolved_call_targets(
+    module: &mut verum_ast::Module,
+    calls: &std::collections::HashMap<
+        verum_ast::span::Span,
+        verum_ast::expr::ResolvedCallTarget,
+    >,
+    derefs: &std::collections::HashMap<verum_ast::span::Span, usize>,
 ) {
-    if table.is_empty() {
+    if calls.is_empty() && derefs.is_empty() {
         return;
     }
+    let table = CommitTables { calls, derefs };
     for item in module.items.iter_mut() {
-        commit_resolved_in_item(item, table);
+        commit_resolved_in_item(item, &table);
     }
 }
 
 fn commit_resolved_in_item(
     item: &mut verum_ast::decl::Item,
-    table: &std::collections::HashMap<
-        verum_ast::span::Span,
-        verum_ast::expr::ResolvedCallTarget,
-    >,
+    table: &CommitTables<'_>,
 ) {
     use verum_ast::decl::ItemKind;
     use verum_common::Maybe;
@@ -267,70 +311,61 @@ fn commit_resolved_in_item(
                 }
             }
         }
-        ItemKind::Const(decl) => commit_resolved_in_expr(&mut decl.value, table),
-        ItemKind::Static(decl) => commit_resolved_in_expr(&mut decl.value, table),
+        ItemKind::Const(decl) => commit_resolved_in_expr(&mut decl.value, table, false),
+        ItemKind::Static(decl) => commit_resolved_in_expr(&mut decl.value, table, false),
         _ => {}
     }
 }
 
 fn commit_resolved_in_function_body(
     body: &mut verum_ast::decl::FunctionBody,
-    table: &std::collections::HashMap<
-        verum_ast::span::Span,
-        verum_ast::expr::ResolvedCallTarget,
-    >,
+    table: &CommitTables<'_>,
 ) {
     use verum_ast::decl::FunctionBody;
     match body {
         FunctionBody::Block(block) => commit_resolved_in_block(block, table),
-        FunctionBody::Expr(expr) => commit_resolved_in_expr(expr, table),
+        FunctionBody::Expr(expr) => commit_resolved_in_expr(expr, table, false),
     }
 }
 
 fn commit_resolved_in_block(
     block: &mut verum_ast::expr::Block,
-    table: &std::collections::HashMap<
-        verum_ast::span::Span,
-        verum_ast::expr::ResolvedCallTarget,
-    >,
+    table: &CommitTables<'_>,
 ) {
     use verum_common::Maybe;
     for stmt in block.stmts.iter_mut() {
         commit_resolved_in_stmt(stmt, table);
     }
     if let Maybe::Some(tail) = &mut block.expr {
-        commit_resolved_in_expr(tail, table);
+        commit_resolved_in_expr(tail, table, false);
     }
 }
 
 fn commit_resolved_in_stmt(
     stmt: &mut verum_ast::Stmt,
-    table: &std::collections::HashMap<
-        verum_ast::span::Span,
-        verum_ast::expr::ResolvedCallTarget,
-    >,
+    table: &CommitTables<'_>,
 ) {
     use verum_ast::stmt::StmtKind;
     use verum_common::Maybe;
     match &mut stmt.kind {
         StmtKind::Let { value, .. } => {
             if let Maybe::Some(v) = value {
-                commit_resolved_in_expr(v, table);
+                commit_resolved_in_expr(v, table, false);
             }
         }
         StmtKind::LetElse {
             value, else_block, ..
         } => {
-            commit_resolved_in_expr(value, table);
+            commit_resolved_in_expr(value, table, false);
             commit_resolved_in_block(else_block, table);
         }
-        StmtKind::Expr { expr, .. } => commit_resolved_in_expr(expr, table),
+        StmtKind::Expr { expr, .. } => commit_resolved_in_expr(expr, table, false),
         StmtKind::Item(item) => commit_resolved_in_item(item, table),
-        StmtKind::Defer(e) | StmtKind::Errdefer(e) => commit_resolved_in_expr(e, table),
-        StmtKind::Provide { value, .. } => commit_resolved_in_expr(value, table),
+        StmtKind::Defer(e) | StmtKind::Errdefer(e) => commit_resolved_in_expr(e, table, false),
+        StmtKind::Provide { value, .. } => commit_resolved_in_expr(value, table, false),
         StmtKind::ProvideScope { value, block, .. } => {
-            commit_resolved_in_expr(value, table);
-            commit_resolved_in_expr(block, table);
+            commit_resolved_in_expr(value, table, false);
+            commit_resolved_in_expr(block, table, false);
         }
         _ => {}
     }
@@ -338,54 +373,99 @@ fn commit_resolved_in_stmt(
 
 fn commit_resolved_in_expr(
     expr: &mut verum_ast::Expr,
-    table: &std::collections::HashMap<
-        verum_ast::span::Span,
-        verum_ast::expr::ResolvedCallTarget,
-    >,
+    table: &CommitTables<'_>,
+    // True while walking the LEFT side of an assignment.  A place
+    // expression must not be wrapped: `guard[i] = v` has to write
+    // through the guard, and `guard.deref()[i] = v` would write into a
+    // temporary and drop the store on the floor.
+    place: bool,
 ) {
     use verum_ast::expr::ExprKind;
     use verum_common::Maybe;
     // Stamp THIS node first if the table has a resolution for its span.
     if matches!(expr.kind, ExprKind::MethodCall { .. })
-        && let Some(target) = table.get(&expr.span)
+        && let Some(target) = table.calls.get(&expr.span)
     {
         expr.resolved_call_target = Some(target.clone());
     }
     // Then recurse into children so nested method calls also get stamped.
+    commit_children(expr, table, place);
+
+    // Finally, materialise any deref the typechecker needed to accept
+    // this receiver.  Children are already done, so the freshly built
+    // wrapper is never revisited; the "already a deref call" guard keeps
+    // a second `apply` idempotent.
+    if place {
+        return;
+    }
+    let Some(&hops) = table.derefs.get(&expr.span) else { return };
+    if hops == 0 {
+        return;
+    }
+    if matches!(&expr.kind, ExprKind::MethodCall { method, .. }
+        if method.name.as_str() == "deref")
+    {
+        return;
+    }
+    let span = expr.span;
+    for _ in 0..hops {
+        let inner = expr.clone();
+        *expr = verum_ast::Expr::new(
+            ExprKind::MethodCall {
+                receiver: verum_common::Heap::new(inner),
+                method: verum_ast::ty::Ident::new("deref", span),
+                type_args: Default::default(),
+                args: Default::default(),
+            },
+            span,
+        );
+    }
+}
+
+fn commit_children(
+    expr: &mut verum_ast::Expr,
+    table: &CommitTables<'_>,
+    place: bool,
+) {
+    use verum_ast::expr::ExprKind;
+    use verum_common::Maybe;
     match &mut expr.kind {
         ExprKind::MethodCall {
             receiver, args, ..
         } => {
-            commit_resolved_in_expr(receiver, table);
+            commit_resolved_in_expr(receiver, table, false);
             for a in args.iter_mut() {
-                commit_resolved_in_expr(a, table);
+                commit_resolved_in_expr(a, table, false);
             }
         }
         ExprKind::Call { func, args, .. } => {
-            commit_resolved_in_expr(func, table);
+            commit_resolved_in_expr(func, table, false);
             for a in args.iter_mut() {
-                commit_resolved_in_expr(a, table);
+                commit_resolved_in_expr(a, table, false);
             }
         }
-        ExprKind::Binary { left, right, .. } => {
-            commit_resolved_in_expr(left, table);
-            commit_resolved_in_expr(right, table);
+        ExprKind::Binary { left, op, right } => {
+            commit_resolved_in_expr(left, table, op.is_assignment());
+            commit_resolved_in_expr(right, table, false);
         }
-        ExprKind::Unary { expr, .. } => commit_resolved_in_expr(expr, table),
+        ExprKind::Unary { expr, .. } => commit_resolved_in_expr(expr, table, false),
         ExprKind::Field { expr, .. }
         | ExprKind::OptionalChain { expr, .. }
-        | ExprKind::TupleIndex { expr, .. } => commit_resolved_in_expr(expr, table),
+        | ExprKind::TupleIndex { expr, .. } => {
+            // The receiver chain of a place expression is itself a place.
+            commit_resolved_in_expr(expr, table, place)
+        }
         ExprKind::Index { expr, index } => {
-            commit_resolved_in_expr(expr, table);
-            commit_resolved_in_expr(index, table);
+            commit_resolved_in_expr(expr, table, place);
+            commit_resolved_in_expr(index, table, false);
         }
         ExprKind::Pipeline { left, right }
         | ExprKind::NullCoalesce { left, right } => {
-            commit_resolved_in_expr(left, table);
-            commit_resolved_in_expr(right, table);
+            commit_resolved_in_expr(left, table, false);
+            commit_resolved_in_expr(right, table, false);
         }
-        ExprKind::Cast { expr, .. } => commit_resolved_in_expr(expr, table),
-        ExprKind::Try(e) | ExprKind::TryBlock(e) => commit_resolved_in_expr(e, table),
+        ExprKind::Cast { expr, .. } => commit_resolved_in_expr(expr, table, false),
+        ExprKind::Try(e) | ExprKind::TryBlock(e) => commit_resolved_in_expr(e, table, false),
         ExprKind::Block(block) => commit_resolved_in_block(block, table),
         ExprKind::If {
             then_branch,
@@ -401,52 +481,52 @@ fn commit_resolved_in_expr(
             for ck in condition.conditions.iter_mut() {
                 match ck {
                     verum_ast::expr::ConditionKind::Expr(e) => {
-                        commit_resolved_in_expr(e, table)
+                        commit_resolved_in_expr(e, table, false)
                     }
                     verum_ast::expr::ConditionKind::Let { value, .. } => {
-                        commit_resolved_in_expr(value, table)
+                        commit_resolved_in_expr(value, table, false)
                     }
                 }
             }
             commit_resolved_in_block(then_branch, table);
             if let Maybe::Some(eb) = else_branch {
-                commit_resolved_in_expr(eb, table);
+                commit_resolved_in_expr(eb, table, false);
             }
         }
         ExprKind::Match { expr, arms } => {
-            commit_resolved_in_expr(expr, table);
+            commit_resolved_in_expr(expr, table, false);
             for arm in arms.iter_mut() {
                 if let Maybe::Some(g) = &mut arm.guard {
-                    commit_resolved_in_expr(g, table);
+                    commit_resolved_in_expr(g, table, false);
                 }
-                commit_resolved_in_expr(&mut arm.body, table);
+                commit_resolved_in_expr(&mut arm.body, table, false);
             }
         }
         ExprKind::Loop { body, .. } => commit_resolved_in_block(body, table),
         ExprKind::While { condition, body, .. } => {
-            commit_resolved_in_expr(condition, table);
+            commit_resolved_in_expr(condition, table, false);
             commit_resolved_in_block(body, table);
         }
         ExprKind::For { iter, body, .. } => {
-            commit_resolved_in_expr(iter, table);
+            commit_resolved_in_expr(iter, table, false);
             commit_resolved_in_block(body, table);
         }
-        ExprKind::Closure { body, .. } => commit_resolved_in_expr(body, table),
+        ExprKind::Closure { body, .. } => commit_resolved_in_expr(body, table, false),
         ExprKind::Return(e) => {
             if let Maybe::Some(e) = e {
-                commit_resolved_in_expr(e, table);
+                commit_resolved_in_expr(e, table, false);
             }
         }
         ExprKind::Async(block) => commit_resolved_in_block(block, table),
-        ExprKind::Await(inner) => commit_resolved_in_expr(inner, table),
-        ExprKind::Paren(inner) => commit_resolved_in_expr(inner, table),
-        ExprKind::Throw(error) => commit_resolved_in_expr(error, table),
+        ExprKind::Await(inner) => commit_resolved_in_expr(inner, table, false),
+        ExprKind::Paren(inner) => commit_resolved_in_expr(inner, table, false),
+        ExprKind::Throw(error) => commit_resolved_in_expr(error, table, false),
         ExprKind::Range { start, end, .. } => {
             if let Maybe::Some(s) = start {
-                commit_resolved_in_expr(s, table);
+                commit_resolved_in_expr(s, table, false);
             }
             if let Maybe::Some(e) = end {
-                commit_resolved_in_expr(e, table);
+                commit_resolved_in_expr(e, table, false);
             }
         }
         // Leaves and structurally simple kinds: nothing to recurse.
@@ -638,6 +718,7 @@ impl TypeChecker {
             cfg_evaluator: verum_ast::cfg::CfgEvaluator::new(),
             inference_depth: Cell::new(0),
             resolved_call_targets: std::collections::HashMap::new(),
+            deref_adjustments: std::collections::HashMap::new(),
         }
     }
 
@@ -3065,6 +3146,7 @@ impl TypeChecker {
             cfg_evaluator: verum_ast::cfg::CfgEvaluator::new(),
             inference_depth: Cell::new(0),
             resolved_call_targets: std::collections::HashMap::new(),
+            deref_adjustments: std::collections::HashMap::new(),
         }
     }
 

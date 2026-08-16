@@ -821,6 +821,7 @@ impl TypeChecker {
             cfg_evaluator: verum_ast::cfg::CfgEvaluator::new(),
             inference_depth: Cell::new(0),
             resolved_call_targets: std::collections::HashMap::new(),
+            deref_adjustments: std::collections::HashMap::new(),
         }
     }
 
@@ -957,6 +958,7 @@ impl TypeChecker {
             cfg_evaluator: verum_ast::cfg::CfgEvaluator::new(),
             inference_depth: Cell::new(0),
             resolved_call_targets: std::collections::HashMap::new(),
+            deref_adjustments: std::collections::HashMap::new(),
         }
     }
 
@@ -1094,6 +1096,7 @@ impl TypeChecker {
             cfg_evaluator: verum_ast::cfg::CfgEvaluator::new(),
             inference_depth: Cell::new(0),
             resolved_call_targets: std::collections::HashMap::new(),
+            deref_adjustments: std::collections::HashMap::new(),
         }
     }
 
@@ -2554,6 +2557,34 @@ impl TypeChecker {
                     .protocol_checker
                     .read()
                     .resolve_index_protocol(&resolved_arr_ty);
+                // AUTO-DEREF for indexing.  A receiver that does not
+                // implement `Index` itself may deref to one — that is what
+                // `buf[idx]` means when `buf` is a `MutexGuard<List<T>>`,
+                // and it is the third access path of the same protocol
+                // (method call and field access already ask).  Walk the
+                // chain and retry; a receiver that indexes directly is
+                // never affected because this runs only after the direct
+                // resolution failed.
+                let resolution_opt = match resolution_opt {
+                    Some(r) => Some(r),
+                    None => {
+                        let mut cur = resolved_arr_ty.clone();
+                        let mut found = None;
+                        for _ in 0..16 {
+                            let Some(target) = self.find_deref_target_type(&cur) else {
+                                break;
+                            };
+                            if let Some(r) =
+                                self.protocol_checker.read().resolve_index_protocol(&target)
+                            {
+                                found = Some(r);
+                                break;
+                            }
+                            cur = target;
+                        }
+                        found
+                    }
+                };
                 match resolution_opt {
                     Some(resolution) => {
                         // Check the index has the appropriate type
@@ -2563,10 +2594,18 @@ impl TypeChecker {
                             .unify(&resolution.output, expected, expr.span)?;
                         Ok(InferResult::new(resolution.output))
                     }
-                    None => Err(TypeError::Other(verum_common::Text::from(format!(
-                        "Cannot index type: {}. Type must implement Index protocol.",
-                        arr_result.ty
-                    )))),
+                    // Carries the span: this was a bare `TypeError::Other`,
+                    // so it printed "<no source location attached to this
+                    // diagnostic>" and the reader had no line — the same
+                    // defect E409 had, in the sibling operator.
+                    None => Err(TypeError::InvalidIndex {
+                        message: verum_common::Text::from(format!(
+                            "Cannot index type: {}. Type must implement Index protocol \
+                             (directly or through `Deref`).",
+                            arr_result.ty
+                        )),
+                        span: expr.span,
+                    }),
                 }
             }
 
@@ -12911,17 +12950,26 @@ with .to_float() or .to_int() (at {:?})",
     /// Walks the chain (a guard over a wrapper over a record) with the
     /// same depth cap the other alias/deref walks use, and returns the
     /// field's type at the first target that declares it.
+    /// Find `field` on whatever `recv` derefs to, reporting HOW MANY
+    /// steps it took.
+    ///
+    /// The count is not decoration: the caller records it so the AST
+    /// carries that many explicit `.deref()` calls.  Without it the
+    /// typechecker accepts `guard.field` and codegen falls back to
+    /// guessing a field by name across the whole program — which is a
+    /// wrong value, not an error.
     pub(super) fn field_type_through_deref(
         &self,
         recv: &Type,
         field: &str,
-    ) -> Option<Type> {
+    ) -> Option<(Type, usize)> {
         const MAX_DEREF_CHAIN: usize = 16;
+        let mut hops = if recv.is_transparent_carrier() { 0 } else { 1 };
         let mut current = self.find_deref_target_type(recv)?;
         for _ in 0..MAX_DEREF_CHAIN {
             if let Type::Record(fields) = &current {
                 if let Option::Some(t) = fields.get(field) {
-                    return Some(t.clone());
+                    return Some((t.clone(), hops));
                 }
             }
             let name: Text = match &current {
@@ -12942,55 +12990,22 @@ with .to_float() or .to_int() (at {:?})",
                 };
                 if let Some(f) = fields {
                     if let Option::Some(t) = f.get(field) {
-                        return Some(t.clone());
+                        return Some((t.clone(), hops));
                     }
                 }
+            }
+            if !current.is_transparent_carrier() {
+                hops += 1;
             }
             current = self.find_deref_target_type(&current)?;
         }
         None
     }
 
-    /// Bind a generic impl's head parameters from a concrete receiver.
-    ///
-    /// `for_type` is the impl's self type (`G<T>`), `recv` the receiver
-    /// (`G<Inner>`).  Positional, one level deep: an impl parameter is a
-    /// bare name, so anything else in that position is not a parameter
-    /// and is skipped rather than guessed at.
+    /// Bind an impl head against a receiver.  Delegates to the single
+    /// implementation on `Type`; kept as the inference-side spelling.
     fn bind_impl_params(for_type: &Type, recv: &Type) -> Map<Text, Type> {
-        fn args_of(t: &Type) -> Option<&List<Type>> {
-            match t {
-                Type::Named { args, .. } | Type::Generic { args, .. } => Some(args),
-                _ => None,
-            }
-        }
-        fn bare_name(t: &Type) -> Option<Text> {
-            match t {
-                Type::Named { path, args } if args.is_empty() => {
-                    path.as_ident().map(|id| id.name.clone())
-                }
-                Type::Generic { name, args } if args.is_empty() => Some(name.clone()),
-                // A generic impl's head parameters are stored as type
-                // VARIABLES, not as named types — `implement<T> Deref for
-                // G<T>` reaches us as `G<_>`.  `apply_alias_subst` keys its
-                // map on a variable's display form, so key on the same
-                // thing here; keying on anything else would silently miss
-                // every generic impl, which is exactly what a first
-                // attempt at this did (`MutexGuard` unchanged, target
-                // returned as an unbound `_`).
-                Type::Var(tv) => Some(Text::from(format!("{}", tv))),
-                _ => None,
-            }
-        }
-        let mut subst: Map<Text, Type> = Map::new();
-        if let (Some(params), Some(actuals)) = (args_of(for_type), args_of(recv)) {
-            for (p, a) in params.iter().zip(actuals.iter()) {
-                if let Some(n) = bare_name(p) {
-                    subst.insert(n, a.clone());
-                }
-            }
-        }
-        subst
+        Type::bind_params(for_type, recv)
     }
 
     pub(super) fn find_deref_target_type(&self, ty: &Type) -> Option<Type> {
@@ -13003,60 +13018,18 @@ with .to_float() or .to_int() (at {:?})",
     ///
     /// Queries the protocol checker for Ref<T> implementation on the given type.
     fn find_ref_protocol_target(&self, ty: &Type) -> Option<Type> {
-        // Look for Ref<T> implementation on this type
-        // The protocol checker tracks implementations registered via `implement Ref<T> for SomeType`
-        let protocol_checker_guard = self.protocol_checker.read();
-        let impls = protocol_checker_guard.get_implementations(ty);
+        let target = self.protocol_checker.read().deref_target(ty);
         if std::env::var_os("VERUM_TRACE_DEREF").is_some() {
             eprintln!(
-                "[deref] ty={} impls={} protocols={:?}",
+                "[deref] ty={} -> {}",
                 ty,
-                impls.len(),
-                impls
-                    .iter()
-                    .map(|i| i.protocol.as_ident().map(|x| x.name.as_str().to_string()))
-                    .collect::<Vec<_>>()
+                target
+                    .as_ref()
+                    .map(|t| t.to_string())
+                    .unwrap_or_else(|| "<none>".to_string())
             );
         }
-        for impl_ in impls.iter() {
-            // Extract protocol name from Path
-            let protocol_name = impl_
-                .protocol
-                .as_ident()
-                .map(|id| id.name.as_str())
-                .unwrap_or("");
-
-            if protocol_name == "Ref" || protocol_name == "RefMut" {
-                // Found Ref<T> implementation - the target type is the first protocol argument
-                if let Some(target) = impl_.protocol_args.first() {
-                    return Some(target.clone());
-                }
-            }
-            // Also support Deref/DerefMut protocols (associated type Target)
-            if protocol_name == "Deref" || protocol_name == "DerefMut" {
-                if let Some(target) = impl_
-                    .associated_types
-                    .get(&verum_common::Text::from("Target"))
-                {
-                    // A GENERIC impl (`implement<T> Deref for G<T>`,
-                    // which is how `core/sync/mutex.vr` writes
-                    // `MutexGuard<T>`) records its target as the bare
-                    // parameter `T`.  Returning it verbatim gives an
-                    // unbound name and every downstream lookup finds
-                    // nothing.  Bind the impl head against the receiver
-                    // positionally — `G<T>` seen as `G<Inner>` binds
-                    // `T = Inner` — and substitute through the unifier's
-                    // existing machinery rather than growing a second
-                    // implementation of substitution.
-                    let subst = Self::bind_impl_params(&impl_.for_type, ty);
-                    if subst.is_empty() {
-                        return Some(target.clone());
-                    }
-                    return Some(self.unifier.apply_alias_subst(target, &subst));
-                }
-            }
-        }
-        None
+        target
     }
 
     /// Convert AST type bounds to protocol bounds.
