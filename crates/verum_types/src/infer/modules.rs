@@ -463,7 +463,7 @@ impl TypeChecker {
     /// 2. User module imports (via process_import for cross-module resolution)
     ///
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Import Resolution
-    fn check_import(&mut self, import: &verum_ast::MountDecl) -> Result<()> {
+    pub(super) fn check_import(&mut self, import: &verum_ast::MountDecl) -> Result<()> {
         use verum_ast::MountTreeKind;
         if std::env::var("VERUM_TRACE_TASK20").is_ok() {
             let dbg = match &import.tree.kind {

@@ -94,7 +94,6 @@ core/database/mysql/async_transaction.vr
 core/database/mysql/async_typed_database.vr
 core/database/mysql/binlog.vr
 core/database/mysql/binlog_rows.vr
-core/database/mysql/connection.vr
 core/database/mysql/gtid.vr
 core/database/mysql/introspect.vr
 core/database/mysql/typed_database.vr
@@ -129,7 +128,6 @@ core/database/sqlite/introspect.vr
 core/database/sqlite/mod.vr
 core/database/sqlite/native/alter/engine.vr
 core/database/sqlite/native/alter/validator.vr
-core/database/sqlite/native/auth/dispatch.vr
 core/database/sqlite/native/bind_blob_v2/engine.vr
 core/database/sqlite/native/bind_clear_api/engine.vr
 core/database/sqlite/native/bind_parameter_api/table.vr
@@ -320,7 +318,6 @@ core/net/quic/api/server.vr
 core/net/quic/api/stream.vr
 core/net/quic/connection_sm/aead.vr
 core/net/quic/connection_sm/dispatch.vr
-core/net/quic/connection_sm/mod.vr
 core/net/quic/connection_sm/stream_assembler.vr
 core/net/quic/connection_sm/tx.vr
 core/net/quic/crypto/header_protection.vr
@@ -385,7 +382,6 @@ core/security/ecc/vrf.vr
 core/security/ecc/x25519.vr
 core/security/hpke/mod.vr
 core/security/kdf/argon2.vr
-core/security/kdf/hkdf.vr
 core/security/mod.vr
 core/security/oidc.vr
 core/security/permission.vr
@@ -428,7 +424,6 @@ core/shell/interactive.vr
 core/shell/jobs.vr
 core/shell/mod.vr
 core/shell/permissions.vr
-core/shell/progress.vr
 core/shell/resources.vr
 core/shell/stream.vr
 core/shell/transducer.vr

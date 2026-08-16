@@ -1,0 +1,45 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: types, inference, name-resolution, module-path, mount
+// @expected-stdout: 32 32 ok
+//
+// Pin (T0779) — a fully-qualified module path is legal in expression
+// position, and resolves to the same thing the equivalent `mount` binds.
+//
+// The grammar is unambiguous: `path_expr = path` and
+// `path = [ '.' ] path_segment { '.' path_segment }`, so
+// `core.hash.crypto.sha256.OUTPUT_SIZE` is a path expression.  The
+// checker used to synthesise the receiver chain first, which looked the
+// root segment up as a VARIABLE:
+//
+//     error<E100>: unbound variable: core
+//
+// while the `mount` form of the very same symbol worked.  Five files in
+// `core/` (security/kdf/hkdf.vr, shell/progress.vr,
+// database/mysql/connection.vr, database/sqlite/native/auth/dispatch.vr,
+// net/quic/connection_sm/mod.vr) failed on nothing else.
+//
+// The two spellings are checked against each other rather than against a
+// literal, so the pin fails if either one drifts — a test that only
+// asserted `== 32` would pass if both stopped resolving and the constant
+// were re-declared elsewhere.
+
+mount core.hash.crypto.sha256.{OUTPUT_SIZE};
+
+fn main() {
+    // Via `mount` — the spelling that always worked.
+    let mounted: Int = OUTPUT_SIZE;
+
+    // Fully qualified, in expression position.
+    let qualified: Int = core.hash.crypto.sha256.OUTPUT_SIZE;
+
+    // Equal to each other, not merely equal to a number.
+    let agree: Bool = mounted == qualified;
+
+    if agree {
+        print(f"{mounted} {qualified} ok");
+    } else {
+        print(f"{mounted} {qualified} DISAGREE");
+    }
+}

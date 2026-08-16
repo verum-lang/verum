@@ -7938,9 +7938,91 @@ impl TypeChecker {
         }
     }
 
+    /// Resolve `a.b.c.NAME` as a module item, or `None` if the chain is
+    /// not a module path.
+    ///
+    /// Returns the item's type WITHOUT leaving `NAME` bound: the
+    /// synthetic mount runs in a scope that is popped before returning.
+    /// Type-level facts the loader registers (`insert_root`) survive by
+    /// design — those are module-level facts, not visibility.
+    fn resolve_qualified_path_expr(
+        &mut self,
+        obj: &Expr,
+        field: &verum_ast::ty::Ident,
+    ) -> Option<Type> {
+        let segments = self.extract_module_path_from_field(obj, field)?;
+        // `a.NAME` alone is far more likely to be a field access than a
+        // module reference; require a real module path.
+        if segments.len() < 3 {
+            return None;
+        }
+        let root = *segments.first()?;
+        if self.ctx.env.lookup(root).is_some() {
+            return None;
+        }
+        let item_name = verum_common::Text::from(*segments.last()?);
+        let span = field.span;
+        let path = verum_ast::ty::Path::new(
+            segments
+                .iter()
+                .map(|s| {
+                    verum_ast::ty::PathSegment::Name(verum_ast::ty::Ident::new(*s, span))
+                })
+                .collect(),
+            span,
+        );
+        let decl = verum_ast::MountDecl {
+            visibility: verum_ast::decl::Visibility::Private,
+            tree: verum_ast::decl::MountTree {
+                kind: verum_ast::decl::MountTreeKind::Path(path),
+                alias: verum_common::Maybe::None,
+                span,
+            },
+            alias: verum_common::Maybe::None,
+            span,
+        };
+
+        self.ctx.env.push_scope();
+        let imported = self.check_import(&decl).is_ok();
+        let found = if imported {
+            self.ctx
+                .env
+                .lookup(item_name.as_str())
+                .map(|scheme| scheme.instantiate())
+        } else {
+            None
+        };
+        self.ctx.env.pop_scope();
+        found
+    }
+
     fn infer_expr_field(&mut self, expr: &Expr) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Field { expr: obj, field } = &expr.kind else { unreachable!() };
+
+        // FULLY-QUALIFIED PATH IN EXPRESSION POSITION (T0779).
+        //
+        // `core.hash.crypto.sha256.OUTPUT_SIZE` parses as a chain of
+        // Field accesses whose base is `Path("core")`, so synthesising
+        // the receiver first looks `core` up as a VARIABLE and reports
+        // "unbound variable: core".  The grammar is unambiguous that the
+        // form is legal — `path_expr = path` and `path` is any dotted
+        // segment sequence — so it must resolve.
+        //
+        // It resolves through the SAME machinery as `mount`, because a
+        // qualified path IS a mount of that symbol used once: the
+        // synthetic import below is exactly what the user would have
+        // written, run inside a scope that is popped immediately.  The
+        // scope is what keeps the two forms distinct — after
+        // `core.a.b.NAME`, the bare `NAME` must still be unbound, or a
+        // qualified reference would silently act as an import.
+        //
+        // Asked BEFORE the receiver is synthesised, and only when the
+        // root segment names no binding in scope, so an ordinary field
+        // access on a variable never reaches here.
+        if let Some(resolved) = self.resolve_qualified_path_expr(obj, field) {
+            return Ok(InferResult::new(resolved));
+        }
         // Special case: Module namespace navigation
         // When obj is a module namespace (e.g., `api`), field access navigates into the module
         // This handles paths like `api.v2.func()` where parser creates Field expressions
