@@ -193,10 +193,8 @@ core/database/sqlite/native/l4_vdbe/ssa/jump_threading.vr
 core/database/sqlite/native/l5_sql/access_planning.vr
 core/database/sqlite/native/l5_sql/codegen.vr
 core/database/sqlite/native/l5_sql/compile.vr
-core/database/sqlite/native/l5_sql/mod.vr
 core/database/sqlite/native/l5_sql/parser/ddl.vr
 core/database/sqlite/native/l5_sql/parser/dml.vr
-core/database/sqlite/native/l5_sql/parser/misc.vr
 core/database/sqlite/native/l5_sql/parser/select.vr
 core/database/sqlite/native/l5_sql/parser/stmt.vr
 core/database/sqlite/native/l5_sql/planner.vr

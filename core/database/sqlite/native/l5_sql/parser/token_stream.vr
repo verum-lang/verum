@@ -12,7 +12,7 @@ module core.database.sqlite.native.l5_sql.parser.token_stream;
 // Spec: sqlite-native.md §12.2
 //
 
-// Thin wrapper around a List<Token> that every parser module (select,
+// Thin wrapper around a List<SqlToken> that every parser module (select,
 // insert, ddl, expr, ...) consumes. Keeps the parser machinery
 // lock-step: peek / advance / expect / expect_keyword / accept_*.
 //
@@ -25,7 +25,7 @@ mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.lexer.{
-    Token, SqlKeyword, Operator, Punct, VariableKind,
+    SqlToken, SqlKeyword, Operator, Punct, VariableKind,
 };
 
 // -----------------------------------------------------------------------------
@@ -64,11 +64,11 @@ implement Eq for SqlParseError {
 // -----------------------------------------------------------------------------
 
 public type SqlTokenStream is {
-    tokens: List<Token>,
+    tokens: List<SqlToken>,
     pos: Int,
 };
 
-public fn stream_new(tokens: List<Token>) -> SqlTokenStream {
+public fn stream_new(tokens: List<SqlToken>) -> SqlTokenStream {
     SqlTokenStream { tokens: tokens, pos: 0 }
 }
 
@@ -79,20 +79,20 @@ implement SqlTokenStream {
     /// Peek at the current token without advancing. Returns `TEof` if
     /// the cursor is past the end (defensive — lex() always terminates
     /// with TEof, so this is mostly a belt-and-braces guard).
-    public fn peek(&self) -> Token {
+    public fn peek(&self) -> SqlToken {
         if self.pos >= self.tokens.len() { return TEof; }
         clone_token(&self.tokens[self.pos])
     }
 
     /// Peek `n` tokens ahead (0 = current).
-    public fn peek_n(&self, n: Int) -> Token {
+    public fn peek_n(&self, n: Int) -> SqlToken {
         let idx = self.pos + n;
         if idx >= self.tokens.len() { return TEof; }
         clone_token(&self.tokens[idx])
     }
 
     /// Consume and return the current token.
-    public fn advance(&mut self) -> Token {
+    public fn advance(&mut self) -> SqlToken {
         let t = self.peek();
         self.pos = self.pos + 1;
         t
@@ -204,11 +204,11 @@ implement SqlTokenStream {
 }
 
 // -----------------------------------------------------------------------------
-// Token cloning (no derive(Clone) in Verum v1)
+// SqlToken cloning (no derive(Clone) in Verum v1)
 // -----------------------------------------------------------------------------
 
-fn clone_token_list(xs: &List<Token>) -> List<Token> {
-    let mut out: List<Token> = List.new();
+fn clone_token_list(xs: &List<SqlToken>) -> List<SqlToken> {
+    let mut out: List<SqlToken> = List.new();
     let mut i: Int = 0;
     while i < xs.len() {
         out.push(clone_token(&xs[i]));
@@ -217,7 +217,7 @@ fn clone_token_list(xs: &List<Token>) -> List<Token> {
     out
 }
 
-fn clone_token(t: &Token) -> Token {
+fn clone_token(t: &SqlToken) -> SqlToken {
     match t {
         TKeyword(k)     => TKeyword(k),
         TIdent(s)       => TIdent(s.clone()),

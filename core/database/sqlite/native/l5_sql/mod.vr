@@ -43,7 +43,7 @@ public module plan_passes;
 public module compile;
 
 public mount .lexer.{
-    Token, SqlKeyword, Operator, Punct, VariableKind, LexError, LexerState,
+    SqlToken, SqlKeyword, Operator, Punct, VariableKind, SqlLexError, LexerState,
     lex, lookup_keyword,
 };
 
