@@ -954,12 +954,16 @@ fn convert_simple_ast_type(ast_ty: &verum_ast::ty::Type) -> Type {
                     }
                 })
                 .collect();
+            // One rule for applying arguments — see
+            // `Type::apply_arguments`.  The `Unknown` fallback for a base
+            // that cannot carry arguments is preserved deliberately: this
+            // change is about WHERE the rule lives, not what an
+            // unapplicable base means here.
             match base_type {
-                Type::Named { path, .. } => Type::Named {
-                    path,
-                    args: converted_args,
-                },
-                // Base type resolved to non-Named (e.g., primitive); can't attach generic args
+                b @ (Type::Named { .. }
+                | Type::Generic { .. }
+                | Type::Var(_)
+                | Type::TypeConstructor { .. }) => b.apply_arguments(converted_args),
                 _ => Type::Unknown,
             }
         }

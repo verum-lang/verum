@@ -112,14 +112,11 @@ impl TypeChecker {
                 // Reconstruct the generic type with resolved arguments
 
                 match base_ty {
-                    Type::Named { path, .. } => Type::Named {
-                        path,
-                        args: type_args.clone(),
-                    },
-                    Type::Generic { name, .. } => Type::Generic {
-                        name,
-                        args: type_args.clone(),
-                    },
+                    b @ (Type::Named { .. } | Type::Generic { .. }) => {
+                        // One rule for applying arguments — see
+                        // `Type::apply_arguments`.
+                        b.apply_arguments(type_args.clone())
+                    }
                     // For other base types, try to use Generic if we have a name
                     _ => {
                         // Extract name from the base AST if possible

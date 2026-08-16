@@ -1526,6 +1526,65 @@ impl Type {
         }
     }
 
+    /// Apply surface type arguments to a resolved base type.
+    ///
+    /// THE rule for `Base<A, B, …>`, in one place.  Four sites used to
+    /// carry their own copy of it — `infer/types.rs` twice,
+    /// `type_exporter.rs`, `method_resolution.rs` — and each spelled it
+    /// as "take the base's path, throw its arguments away, put mine
+    /// there".  That is how `IoResult<()>` became `Result<Unit>`: the
+    /// base had already been resolved through the alias to
+    /// `Result<T, StreamError>`, and replacing its arguments dropped
+    /// `StreamError`, producing a one-argument `Result` — a type the
+    /// language does not have.  Nothing rejected it; it surfaced three
+    /// layers later as "cannot use `?` in a function returning
+    /// Result<Unit>".
+    ///
+    /// THE INVARIANT: applying arguments never SHORTENS the argument
+    /// list.  N surface arguments replace the first N of the base's and
+    /// the rest are kept, so a single-parameter alias over a
+    /// two-parameter type resolves correctly (`IoResult<Unit>` ->
+    /// `Result<Unit, StreamError>`) and no site can lose an argument by
+    /// re-deriving the rule slightly differently.
+    ///
+    /// Callers that know the alias's parameter names should still
+    /// substitute through the unifier (`try_expand_alias`), which is
+    /// exact; this is the rule for everyone else, and the floor under
+    /// all of them.
+    pub fn apply_arguments(self, args: List<Type>) -> Self {
+        fn merge(base_args: &List<Type>, args: List<Type>) -> List<Type> {
+            if base_args.len() <= args.len() {
+                return args;
+            }
+            let mut merged: Vec<Type> = args.iter().cloned().collect();
+            merged.extend(base_args.iter().skip(merged.len()).cloned());
+            List::from(merged)
+        }
+        match self {
+            Type::Named { path, args: base_args } => Type::Named {
+                path,
+                args: merge(&base_args, args),
+            },
+            // An associated-type projection applied to arguments is a
+            // type application, not a re-parameterisation.
+            Type::Generic { name, args: base_args } if name.starts_with("::") => Type::TypeApp {
+                constructor: Box::new(Type::Generic { name, args: base_args }),
+                args,
+            },
+            Type::Generic { name, args: base_args } => Type::Generic {
+                name,
+                args: merge(&base_args, args),
+            },
+            // A type VARIABLE or constructor applied to arguments is an
+            // application (HKT): `F<A>` where `F` is still unbound.
+            other @ (Type::Var(_) | Type::TypeConstructor { .. }) => Type::TypeApp {
+                constructor: Box::new(other),
+                args,
+            },
+            other => other,
+        }
+    }
+
     /// Create a Result<T, E> type
     /// Core semantics: value semantics by default, explicit reference/heap allocation, no implicit copying — Semantic types
     pub fn result(ok: Type, err: Type) -> Self {

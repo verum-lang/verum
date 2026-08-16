@@ -593,13 +593,11 @@ impl<'a> TypeExporter<'a> {
                     })
                     .collect();
 
-                match base_type {
-                    Type::Named { path, .. } => Type::Named {
-                        path,
-                        args: type_args,
-                    },
-                    _ => base_type,
-                }
+                // One rule for applying arguments — see
+                // `Type::apply_arguments`.  This site used to replace the
+                // base's arguments, which loses them when the base came
+                // from an alias.
+                base_type.apply_arguments(type_args)
             }
 
             TypeKind::Reference { inner, mutable, .. } => Type::Reference {
