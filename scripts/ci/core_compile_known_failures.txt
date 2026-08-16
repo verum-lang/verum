@@ -35,7 +35,6 @@ core/async/task.vr
 core/base/cell.vr
 core/base/data.vr
 core/base/env.vr
-core/base/glob.vr
 core/base/iterator.vr
 core/base/memory.vr
 core/base/result.vr
@@ -54,11 +53,9 @@ core/cli/smt_verify.vr
 core/cli/verify.vr
 core/cog/archive.vr
 core/cog/manifest.vr
-core/cog/resolve.vr
 core/cog/sign.vr
 core/collections/adjacency_list.vr
 core/collections/btree.vr
-core/collections/consistent_hash.vr
 core/collections/deque.vr
 core/collections/heap.vr
 core/collections/map.vr
@@ -75,7 +72,6 @@ core/context/mod.vr
 core/context/provider.vr
 core/control/continuation.vr
 core/database/common/arena.vr
-core/database/common/check_codegen.vr
 core/database/common/copy_metrics.vr
 core/database/common/db_handle.vr
 core/database/common/migrations/mod.vr
@@ -212,7 +208,6 @@ core/database/sqlite/native/pcache_api/cache.vr
 core/database/sqlite/native/profiler/report.vr
 core/database/sqlite/native/returning_clause_api/spec.vr
 core/database/sqlite/native/rtree/tree.vr
-core/database/sqlite/native/sql_render/literal.vr
 core/database/sqlite/native/status/database.vr
 core/database/sqlite/native/status/process.vr
 core/database/sqlite/native/status/stmt.vr
@@ -235,9 +230,7 @@ core/database/sqlite/native/vtabs/json_each.vr
 core/database/sqlite/native/vtabs/rtree/tree.vr
 core/database/sqlite/typed_database.vr
 core/diagnostics.vr
-core/encoding/cbor.vr
 core/encoding/jsonb.vr
-core/encoding/msgpack.vr
 core/eval/cbpv.vr
 core/intrinsics/lowlevel/aarch64.vr
 core/intrinsics/mod.vr
@@ -268,7 +261,6 @@ core/math/frameworks/mod.vr
 core/math/frameworks/msfs/self_containment.vr
 core/math/frameworks/owl2_fs/count.vr
 core/math/frameworks/owl2_fs/mod.vr
-core/math/frameworks/registry.vr
 core/math/giry.vr
 core/math/graph.vr
 core/math/hott.vr
@@ -308,7 +300,6 @@ core/net/h3/qpack/instructions.vr
 core/net/h3/qpack/mod.vr
 core/net/h3/qpack/session.vr
 core/net/h3/server.vr
-core/net/http_range.vr
 core/net/http.vr
 core/net/proxy/health_check.vr
 core/net/proxy/mod.vr
@@ -317,16 +308,13 @@ core/net/proxy/upstream_pool.vr
 core/net/quic/api/server.vr
 core/net/quic/api/stream.vr
 core/net/quic/connection_sm/aead.vr
-core/net/quic/connection_sm/coalesce.vr
 core/net/quic/connection_sm/dispatch.vr
 core/net/quic/connection_sm/stream_assembler.vr
 core/net/quic/connection_sm/tx.vr
 core/net/quic/crypto/header_protection.vr
-core/net/quic/frame.vr
 core/net/quic/lb_cid.vr
 core/net/quic/mod.vr
 core/net/quic/multipath.vr
-core/net/quic/path.vr
 core/net/quic/recovery/cc/bbr.vr
 core/net/quic/recovery/loss_detection.vr
 core/net/quic/recovery/pn_space.vr
@@ -338,9 +326,7 @@ core/net/tcp.vr
 core/net/tls.vr
 core/net/tls13/handshake/client_sm.vr
 core/net/tls13/handshake/codec.vr
-core/net/tls13/handshake/extension.vr
 core/net/tls13/handshake/resume_verify.vr
-core/net/tls13/handshake/resumption.vr
 core/net/tls13/handshake/server_sm.vr
 core/net/tls13/handshake/ticket_issuer.vr
 core/net/tls13/handshake/zero_rtt_antireplay.vr
@@ -381,7 +367,6 @@ core/search/meilisearch/client.vr
 core/security/aead/chacha20_poly1305.vr
 core/security/cipher/aes.vr
 core/security/cipher/chacha20.vr
-core/security/cose.vr
 core/security/ecc/bls12_381.vr
 core/security/ecc/ed25519.vr
 core/security/ecc/p256.vr
@@ -491,7 +476,6 @@ core/text/mod.vr
 core/text/numeric/bigdecimal.vr
 core/text/numeric/bigint.vr
 core/theory_interop/bridges/mod.vr
-core/theory_interop/congruence_closure.vr
 core/theory_interop/core.vr
 core/theory_interop/protocol.vr
 core/tracing/data.vr

@@ -338,7 +338,7 @@ type CcAlphaEntry is { name: Text, index: Int };
 fn cc_alpha_lookup(ctx: List<CcAlphaEntry>, name: Text) -> Int {
     let mut i: Int = 0;
     while i < ctx.len() as Int {
-        let e: CcAlphaEntry = (*ctx.get(i as Int).expect("cc_alpha_lookup: i < ctx.len() guaranteed by while-condition")).clone();
+        let e: CcAlphaEntry = (ctx.get(i as Int).expect("cc_alpha_lookup: i < ctx.len() guaranteed by while-condition")).clone();
         if e.name == name {
             return e.index;
         }
@@ -484,24 +484,24 @@ implement Debug for CcTerm {
                 f.write_str(f"Var({name})".as_str()),
             CcTerm.Lam { param, body } => {
                 f.write_str(f"Lam({param}, ".as_str())?;
-                (**body).fmt_debug(f)?;
+                (*body).fmt_debug(f)?;
                 f.write_str(")")
             },
             CcTerm.App { func, arg } => {
                 f.write_str("App(")?;
-                (**func).fmt_debug(f)?;
+                (*func).fmt_debug(f)?;
                 f.write_str(", ")?;
-                (**arg).fmt_debug(f)?;
+                (*arg).fmt_debug(f)?;
                 f.write_str(")")
             },
             CcTerm.Reset { inner } => {
                 f.write_str("Reset(")?;
-                (**inner).fmt_debug(f)?;
+                (*inner).fmt_debug(f)?;
                 f.write_str(")")
             },
             CcTerm.Shift { binder, body } => {
                 f.write_str(f"Shift({binder}, ".as_str())?;
-                (**body).fmt_debug(f)?;
+                (*body).fmt_debug(f)?;
                 f.write_str(")")
             },
         }

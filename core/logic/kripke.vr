@@ -589,38 +589,38 @@ implement Debug for ModalForm {
                 f.write_str(f"Atom({name})".as_str()),
             ModalForm.Not { inner } => {
                 f.write_str("Not(")?;
-                (**inner).fmt_debug(f)?;
+                (*inner).fmt_debug(f)?;
                 f.write_str(")")
             },
             ModalForm.And { left, right } => {
                 f.write_str("And(")?;
-                (**left).fmt_debug(f)?;
+                (*left).fmt_debug(f)?;
                 f.write_str(", ")?;
-                (**right).fmt_debug(f)?;
+                (*right).fmt_debug(f)?;
                 f.write_str(")")
             },
             ModalForm.Or { left, right } => {
                 f.write_str("Or(")?;
-                (**left).fmt_debug(f)?;
+                (*left).fmt_debug(f)?;
                 f.write_str(", ")?;
-                (**right).fmt_debug(f)?;
+                (*right).fmt_debug(f)?;
                 f.write_str(")")
             },
             ModalForm.Implies { left, right } => {
                 f.write_str("Implies(")?;
-                (**left).fmt_debug(f)?;
+                (*left).fmt_debug(f)?;
                 f.write_str(", ")?;
-                (**right).fmt_debug(f)?;
+                (*right).fmt_debug(f)?;
                 f.write_str(")")
             },
             ModalForm.Box { inner } => {
                 f.write_str("Box(")?;
-                (**inner).fmt_debug(f)?;
+                (*inner).fmt_debug(f)?;
                 f.write_str(")")
             },
             ModalForm.Diamond { inner } => {
                 f.write_str("Diamond(")?;
-                (**inner).fmt_debug(f)?;
+                (*inner).fmt_debug(f)?;
                 f.write_str(")")
             },
         }

@@ -551,7 +551,7 @@ public fn client_session_from_nst(
             Extension.EarlyDataExt(
                 EarlyDataIndication.EarlyDataTicket { max_early_data_size: max_size },
             ) => {
-                max_early = *max_size;
+                max_early = max_size;
             },
             _ => {},
         }

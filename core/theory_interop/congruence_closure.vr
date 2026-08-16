@@ -259,7 +259,7 @@ fn one_congruence_round(eqs: &EquationSet, uf: &mut UnionFindInt) -> Bool {
     let n: Int = eqs.terms.len() as Int;
     let mut i: Int = 0;
     while i < n {
-        let t: Term = (*eqs.terms.get(i as Int).expect("congruence_closure: i < eqs.terms.len() by loop bound")).clone();
+        let t: Term = (eqs.terms.get(i as Int).expect("congruence_closure: i < eqs.terms.len() by loop bound")).clone();
         if !term_is_constant(t.clone()) {
             let sig: Text = term_signature(&t, &mut uf);
             match sig_table.get(sig.clone()) {
@@ -311,7 +311,7 @@ public fn congruence_close(eqs: EquationSet) -> CongruenceClosure {
     // Seed: union all input equations.
     let mut i: Int = 0;
     while i < eqs.equations.len() as Int {
-        let eq: Equation = (*eqs.equations.get(i as Int).expect("congruence_closure: i < eqs.equations.len() by loop bound")).clone();
+        let eq: Equation = (eqs.equations.get(i as Int).expect("congruence_closure: i < eqs.equations.len() by loop bound")).clone();
         uf.union(eq.lhs, eq.rhs);
         i = i + 1;
     }

@@ -437,30 +437,30 @@ implement Display for LinForm {
             LinForm.Atom { name } => f.write_str(name.as_str()),
             LinForm.MTensor { left, right } => {
                 f.write_str("(")?;
-                (**left).fmt(f)?;
+                (*left).fmt(f)?;
                 f.write_str(" ⊗ ")?;
-                (**right).fmt(f)?;
+                (*right).fmt(f)?;
                 f.write_str(")")
             },
             LinForm.Par { left, right } => {
                 f.write_str("(")?;
-                (**left).fmt(f)?;
+                (*left).fmt(f)?;
                 f.write_str(" ⅋ ")?;
-                (**right).fmt(f)?;
+                (*right).fmt(f)?;
                 f.write_str(")")
             },
             LinForm.With { left, right } => {
                 f.write_str("(")?;
-                (**left).fmt(f)?;
+                (*left).fmt(f)?;
                 f.write_str(" & ")?;
-                (**right).fmt(f)?;
+                (*right).fmt(f)?;
                 f.write_str(")")
             },
             LinForm.Plus { left, right } => {
                 f.write_str("(")?;
-                (**left).fmt(f)?;
+                (*left).fmt(f)?;
                 f.write_str(" ⊕ ")?;
-                (**right).fmt(f)?;
+                (*right).fmt(f)?;
                 f.write_str(")")
             },
             LinForm.OfCourse { inner } => {
@@ -490,40 +490,40 @@ implement Debug for LinForm {
                 f.write_str(f"Atom({name})".as_str()),
             LinForm.MTensor { left, right } => {
                 f.write_str("MTensor(")?;
-                (**left).fmt_debug(f)?;
+                (*left).fmt_debug(f)?;
                 f.write_str(", ")?;
-                (**right).fmt_debug(f)?;
+                (*right).fmt_debug(f)?;
                 f.write_str(")")
             },
             LinForm.Par { left, right } => {
                 f.write_str("Par(")?;
-                (**left).fmt_debug(f)?;
+                (*left).fmt_debug(f)?;
                 f.write_str(", ")?;
-                (**right).fmt_debug(f)?;
+                (*right).fmt_debug(f)?;
                 f.write_str(")")
             },
             LinForm.With { left, right } => {
                 f.write_str("With(")?;
-                (**left).fmt_debug(f)?;
+                (*left).fmt_debug(f)?;
                 f.write_str(", ")?;
-                (**right).fmt_debug(f)?;
+                (*right).fmt_debug(f)?;
                 f.write_str(")")
             },
             LinForm.Plus { left, right } => {
                 f.write_str("Plus(")?;
-                (**left).fmt_debug(f)?;
+                (*left).fmt_debug(f)?;
                 f.write_str(", ")?;
-                (**right).fmt_debug(f)?;
+                (*right).fmt_debug(f)?;
                 f.write_str(")")
             },
             LinForm.OfCourse { inner } => {
                 f.write_str("OfCourse(")?;
-                (**inner).fmt_debug(f)?;
+                (*inner).fmt_debug(f)?;
                 f.write_str(")")
             },
             LinForm.WhyNot { inner } => {
                 f.write_str("WhyNot(")?;
-                (**inner).fmt_debug(f)?;
+                (*inner).fmt_debug(f)?;
                 f.write_str(")")
             },
             LinForm.One    => f.write_str("One"),
@@ -532,7 +532,7 @@ implement Debug for LinForm {
             LinForm.Zero   => f.write_str("Zero"),
             LinForm.Dual { inner } => {
                 f.write_str("Dual(")?;
-                (**inner).fmt_debug(f)?;
+                (*inner).fmt_debug(f)?;
                 f.write_str(")")
             },
         }

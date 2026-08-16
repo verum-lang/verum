@@ -25,7 +25,7 @@ public fn verify_epsilon(declared: Primitive, observed: Enactment) -> AuditVerdi
     let mut any_proof: Bool = false;
     let mut i: Int = 0;
     while i < canonical.steps.len() as Int {
-        let step: Primitive = *canonical.steps.get(i as Int).unwrap();
+        let step: Primitive = canonical.steps.get(i as Int).unwrap();
         if !is_observational(step) { all_observational = false; }
         if is_constructive(step)    { any_constructive = true; }
         if is_proof_producing(step) { any_proof = true; }

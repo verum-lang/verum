@@ -163,7 +163,7 @@ public fn registry_count_meta_classifiers(r: FrameworkRegistry) -> Int {
     let mut count: Int = 0;
     let mut i: Int = 0;
     while i < r.records.len() as Int {
-        let rec = (*r.records.get(i as Int).unwrap()).clone();
+        let rec = (r.records.get(i as Int).unwrap()).clone();
         if rec.is_meta_classifier {
             count = count + 1;
         }

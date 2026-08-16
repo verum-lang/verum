@@ -111,12 +111,12 @@ public fn encode_encoder(instr: &EncoderInstruction, out: &mut List<Byte>) {
     match instr {
         EncoderInstruction.SetCapacity(cap) => {
             // Opcode: 001xxxxx, prefix=5
-            core.net.h3.qpack.integer.encode(out, 5, 0x20_u8, *cap);
+            core.net.h3.qpack.integer.encode(out, 5, 0x20_u8, cap);
         },
         EncoderInstruction.InsertWithNameRef { is_static, name_index, value } => {
             // Opcode: 1Txxxxxx, prefix=6 (T=1 for static, T=0 for dynamic)
             let op: Byte = if *is_static { 0xC0_u8 } else { 0x80_u8 };
-            core.net.h3.qpack.integer.encode(out, 6, op, *name_index);
+            core.net.h3.qpack.integer.encode(out, 6, op, name_index);
             encode_string(out, value.as_slice());
         },
         EncoderInstruction.InsertWithLiteralName { name, value } => {
@@ -127,7 +127,7 @@ public fn encode_encoder(instr: &EncoderInstruction, out: &mut List<Byte>) {
         },
         EncoderInstruction.Duplicate(idx) => {
             // Opcode: 000xxxxx, prefix=5
-            core.net.h3.qpack.integer.encode(out, 5, 0x00_u8, *idx);
+            core.net.h3.qpack.integer.encode(out, 5, 0x00_u8, idx);
         },
     }
 }
@@ -172,15 +172,15 @@ public fn encode_decoder(instr: &DecoderInstruction, out: &mut List<Byte>) {
     match instr {
         DecoderInstruction.SectionAck(sid) => {
             // 1xxxxxxx, prefix=7
-            core.net.h3.qpack.integer.encode(out, 7, 0x80_u8, *sid);
+            core.net.h3.qpack.integer.encode(out, 7, 0x80_u8, sid);
         },
         DecoderInstruction.StreamCancel(sid) => {
             // 01xxxxxx, prefix=6
-            core.net.h3.qpack.integer.encode(out, 6, 0x40_u8, *sid);
+            core.net.h3.qpack.integer.encode(out, 6, 0x40_u8, sid);
         },
         DecoderInstruction.InsertCountIncrement(n) => {
             // 00xxxxxx, prefix=6
-            core.net.h3.qpack.integer.encode(out, 6, 0x00_u8, *n);
+            core.net.h3.qpack.integer.encode(out, 6, 0x00_u8, n);
         },
     }
 }

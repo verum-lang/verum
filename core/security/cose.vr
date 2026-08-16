@@ -463,13 +463,13 @@ fn parse_protected(bstr: &[Byte]) -> Result<CoseHeaders, CoseError> {
     while i < entries.len() {
         let (k, val) = &entries[i];
         let key = match k {
-            CborValue.CborUint(u) => *u as Int,
+            CborValue.CborUint(u) => u as Int,
             _                     => { i = i + 1; continue; },
         };
         if key == 1 {
             match val {
-                CborValue.CborUint(u) => alg_id = Maybe.Some(*u as Int),
-                CborValue.CborNint(n) => alg_id = Maybe.Some(-1 - (*n as Int)),
+                CborValue.CborUint(u) => alg_id = Maybe.Some(u as Int),
+                CborValue.CborNint(n) => alg_id = Maybe.Some(-1 - (n as Int)),
                 _                      => return Result.Err(CoseError.MalformedStructure),
             }
         } else if key == 4 {

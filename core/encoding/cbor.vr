@@ -159,8 +159,8 @@ public fn encode(v: &CborValue) -> List<Byte> {
 
 fn encode_into(v: &CborValue, out: &mut List<Byte>) {
     match v {
-        CborValue.CborUint(u) => write_head(out, 0_u8, *u),
-        CborValue.CborNint(n) => write_head(out, 1_u8, *n),
+        CborValue.CborUint(u) => write_head(out, 0_u8, u),
+        CborValue.CborNint(n) => write_head(out, 1_u8, n),
         CborValue.CborBytes(b) => {
             write_head(out, 2_u8, b.len() as UInt64);
             // Byte-by-byte push avoids the extend_from_slice intrinsic
@@ -192,7 +192,7 @@ fn encode_into(v: &CborValue, out: &mut List<Byte>) {
             }
         },
         CborValue.CborTag { tag, value } => {
-            write_head(out, 6_u8, *tag);
+            write_head(out, 6_u8, tag);
             encode_into(&*value, out);
         },
         CborValue.CborBool(b) => {

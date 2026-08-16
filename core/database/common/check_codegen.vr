@@ -253,7 +253,7 @@ public fn to_check_sql_for_column(
 ) -> Maybe<Text> {
     let stripped = if !nullable {
         match pred {
-            RpOrNull(inner) => *(*inner).clone(),
+            RpOrNull(inner) => (*inner).clone(),
             _               => pred.clone(),
         }
     } else {

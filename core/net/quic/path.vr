@@ -142,7 +142,7 @@ implement QuicPath {
             PathState.Validated => Result.Ok(()),
             PathState.Validating {..} => Result.Ok(()),
             PathState.Unvalidated { received_bytes, sent_bytes } => {
-                let budget = ANTI_AMPLIFICATION_FACTOR * (*received_bytes);
+                let budget = ANTI_AMPLIFICATION_FACTOR * (received_bytes);
                 if (*sent_bytes) + n > budget {
                     Result.Err(PathError.AmplificationLimitExceeded)
                 } else {
@@ -156,7 +156,7 @@ implement QuicPath {
     public fn on_bytes_sent(&mut self, n: UInt64) {
         match &mut self.state {
             PathState.Unvalidated { received_bytes: _, sent_bytes } => {
-                *sent_bytes = *sent_bytes + n;
+                sent_bytes = sent_bytes + n;
             },
             _ => {},
         }
@@ -165,7 +165,7 @@ implement QuicPath {
     public fn on_bytes_received(&mut self, n: UInt64) {
         match &mut self.state {
             PathState.Unvalidated { received_bytes, sent_bytes: _ } => {
-                *received_bytes = *received_bytes + n;
+                received_bytes = received_bytes + n;
             },
             _ => {},
         }
@@ -178,7 +178,7 @@ implement QuicPath {
         let mut challenge: [Byte; 8] = [0_u8; 8];
         fill_secure(&mut challenge);
         let attempts = match &self.state {
-            PathState.Validating { attempts: a, ..} => *a + 1_u32,
+            PathState.Validating { attempts: a, ..} => a + 1_u32,
             _ => 1_u32,
         };
         self.state = PathState.Validating {
@@ -249,8 +249,8 @@ implement QuicPath {
             PathState.Validated => true,
             PathState.Validating {..} => true,  // mid-validation — same rule waived
             PathState.Unvalidated { received_bytes: r, sent_bytes: s } => {
-                let rx: UInt64 = *r;
-                let tx: UInt64 = *s;
+                let rx: UInt64 = r;
+                let tx: UInt64 = s;
                 tx <= ANTI_AMPLIFICATION_FACTOR * rx
             },
             PathState.Failed => true,

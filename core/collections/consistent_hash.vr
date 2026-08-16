@@ -205,7 +205,7 @@ implement ConsistentHashRing {
         let mut iter = keys;
         loop {
             match iter.next() {
-                Maybe.Some(k) => out.push(*k),
+                Maybe.Some(k) => out.push(k),
                 Maybe.None    => break,
             }
         }

@@ -406,7 +406,7 @@ fn alpha_lookup(ctx: List<AlphaEntry>, name: Text) -> Int {
     let n = ctx.len() as Int;
     let mut i: Int = n - 1;
     while i >= 0 {
-        let e: AlphaEntry = (*ctx.get(i).unwrap()).clone();
+        let e: AlphaEntry = (ctx.get(i).unwrap()).clone();
         if e.name == name {
             return e.index;
         }
@@ -599,36 +599,36 @@ implement Debug for CbpvTerm {
                 f.write_str(f"Var({name})".as_str()),
             CbpvTerm.Lam { param, body } => {
                 f.write_str(f"Lam({param}, ".as_str())?;
-                (**body).fmt_debug(f)?;
+                (*body).fmt_debug(f)?;
                 f.write_str(")")
             },
             CbpvTerm.Thunk { inner } => {
                 f.write_str("Thunk(")?;
-                (**inner).fmt_debug(f)?;
+                (*inner).fmt_debug(f)?;
                 f.write_str(")")
             },
             CbpvTerm.Return { value } => {
                 f.write_str("Return(")?;
-                (**value).fmt_debug(f)?;
+                (*value).fmt_debug(f)?;
                 f.write_str(")")
             },
             CbpvTerm.SeqTo { producer, binder, body } => {
                 f.write_str("SeqTo(")?;
-                (**producer).fmt_debug(f)?;
+                (*producer).fmt_debug(f)?;
                 f.write_str(f", {binder}, ".as_str())?;
-                (**body).fmt_debug(f)?;
+                (*body).fmt_debug(f)?;
                 f.write_str(")")
             },
             CbpvTerm.Force { value } => {
                 f.write_str("Force(")?;
-                (**value).fmt_debug(f)?;
+                (*value).fmt_debug(f)?;
                 f.write_str(")")
             },
             CbpvTerm.App { func, arg } => {
                 f.write_str("App(")?;
-                (**func).fmt_debug(f)?;
+                (*func).fmt_debug(f)?;
                 f.write_str(", ")?;
-                (**arg).fmt_debug(f)?;
+                (*arg).fmt_debug(f)?;
                 f.write_str(")")
             },
         }

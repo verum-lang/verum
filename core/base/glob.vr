@@ -251,7 +251,7 @@ fn matches_impl(parts: &[GlobPart], pi: Int, text: &[Byte], ti: Int) -> Bool {
     match part {
         GlobPart.Literal(c) => {
             if ti >= text.len() { return false; }
-            if text[ti] != *c { return false; }
+            if text[ti] != c { return false; }
             matches_impl(parts, pi + 1, text, ti + 1)
         },
         GlobPart.AnySingle => {

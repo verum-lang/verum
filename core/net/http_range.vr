@@ -266,8 +266,8 @@ public fn resolve_and_merge(
 fn resolve_one(spec: &RangeSpec, total: UInt64) -> Maybe<ResolvedRange> {
     match spec {
         RangeSpec.Closed { start, end } => {
-            if *start >= total { return Maybe.None; }
-            let clamped_end = if *end >= total { total - 1_u64 } else { *end };
+            if start >= total { return Maybe.None; }
+            let clamped_end = if end >= total { total - 1_u64 } else { end };
             Maybe.Some(ResolvedRange { start: *start, end: clamped_end })
         },
         RangeSpec.Prefix { start } => {

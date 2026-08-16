@@ -1084,7 +1084,7 @@ fn find_most_recent_satisfier(
                 }
                 Assignment.Derivation { term, cause, .. } => {
                     if &term.package == &t.package {
-                        Maybe.Some((term.clone(), Maybe.Some((**cause).clone())))
+                        Maybe.Some((term.clone(), Maybe.Some((*cause).clone())))
                     } else { Maybe.None }
                 }
             };

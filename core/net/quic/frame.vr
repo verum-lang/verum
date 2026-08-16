@@ -553,22 +553,22 @@ public fn encode_frame(frame: &QuicFrame, out: &mut List<Byte>) -> Int {
         QuicFrame.AckFrame { largest_acked, ack_delay, ranges, ecn } => {
             let with_ecn = match ecn { Maybe.Some(_) => true, Maybe.None => false };
             let _ = quic_encode_into(out, if with_ecn { 3_u64 } else { 2_u64 });
-            encode_ack_body(*largest_acked, *ack_delay, ranges, ecn, out);
+            encode_ack_body(largest_acked, ack_delay, ranges, ecn, out);
         },
         QuicFrame.ResetStream { stream_id, error_code, final_size } => {
             let _ = quic_encode_into(out, 4_u64);
-            let _ = quic_encode_into(out, *stream_id);
-            let _ = quic_encode_into(out, *error_code);
-            let _ = quic_encode_into(out, *final_size);
+            let _ = quic_encode_into(out, stream_id);
+            let _ = quic_encode_into(out, error_code);
+            let _ = quic_encode_into(out, final_size);
         },
         QuicFrame.StopSending { stream_id, error_code } => {
             let _ = quic_encode_into(out, 5_u64);
-            let _ = quic_encode_into(out, *stream_id);
-            let _ = quic_encode_into(out, *error_code);
+            let _ = quic_encode_into(out, stream_id);
+            let _ = quic_encode_into(out, error_code);
         },
         QuicFrame.CryptoFrame { offset, data } => {
             let _ = quic_encode_into(out, 6_u64);
-            let _ = quic_encode_into(out, *offset);
+            let _ = quic_encode_into(out, offset);
             let _ = quic_encode_into(out, data.len() as UInt64);
             append_bytes(data, out);
         },
@@ -579,62 +579,62 @@ public fn encode_frame(frame: &QuicFrame, out: &mut List<Byte>) -> Int {
         },
         QuicFrame.StreamFrame { stream_id, offset, data, fin } => {
             // Always emit with OFF + LEN + FIN flags set as needed.
-            let has_off = *offset > 0_u64;
+            let has_off = offset > 0_u64;
             let mut type_code: UInt64 = 8_u64;
             if has_off { type_code = type_code | 0x04_u64; }
             type_code = type_code | 0x02_u64;           // always set LEN
             if *fin { type_code = type_code | 0x01_u64; }
             let _ = quic_encode_into(out, type_code);
-            let _ = quic_encode_into(out, *stream_id);
-            if has_off { let _ = quic_encode_into(out, *offset); }
+            let _ = quic_encode_into(out, stream_id);
+            if has_off { let _ = quic_encode_into(out, offset); }
             let _ = quic_encode_into(out, data.len() as UInt64);
             append_bytes(data, out);
         },
         QuicFrame.MaxData(limit) => {
             let _ = quic_encode_into(out, 16_u64);
-            let _ = quic_encode_into(out, *limit);
+            let _ = quic_encode_into(out, limit);
         },
         QuicFrame.MaxStreamData { stream_id, limit } => {
             let _ = quic_encode_into(out, 17_u64);
-            let _ = quic_encode_into(out, *stream_id);
-            let _ = quic_encode_into(out, *limit);
+            let _ = quic_encode_into(out, stream_id);
+            let _ = quic_encode_into(out, limit);
         },
         QuicFrame.MaxStreamsBidi(n) => {
             let _ = quic_encode_into(out, 18_u64);
-            let _ = quic_encode_into(out, *n);
+            let _ = quic_encode_into(out, n);
         },
         QuicFrame.MaxStreamsUni(n) => {
             let _ = quic_encode_into(out, 19_u64);
-            let _ = quic_encode_into(out, *n);
+            let _ = quic_encode_into(out, n);
         },
         QuicFrame.DataBlocked(n) => {
             let _ = quic_encode_into(out, 20_u64);
-            let _ = quic_encode_into(out, *n);
+            let _ = quic_encode_into(out, n);
         },
         QuicFrame.StreamDataBlocked { stream_id, limit } => {
             let _ = quic_encode_into(out, 21_u64);
-            let _ = quic_encode_into(out, *stream_id);
-            let _ = quic_encode_into(out, *limit);
+            let _ = quic_encode_into(out, stream_id);
+            let _ = quic_encode_into(out, limit);
         },
         QuicFrame.StreamsBlockedBidi(n) => {
             let _ = quic_encode_into(out, 22_u64);
-            let _ = quic_encode_into(out, *n);
+            let _ = quic_encode_into(out, n);
         },
         QuicFrame.StreamsBlockedUni(n) => {
             let _ = quic_encode_into(out, 23_u64);
-            let _ = quic_encode_into(out, *n);
+            let _ = quic_encode_into(out, n);
         },
         QuicFrame.NewConnectionId { sequence_number, retire_prior_to, connection_id, stateless_reset_token } => {
             let _ = quic_encode_into(out, 24_u64);
-            let _ = quic_encode_into(out, *sequence_number);
-            let _ = quic_encode_into(out, *retire_prior_to);
+            let _ = quic_encode_into(out, sequence_number);
+            let _ = quic_encode_into(out, retire_prior_to);
             out.push(connection_id.len() as Byte);
             append_bytes(connection_id, out);
             out.extend_from_slice(&stateless_reset_token[..]);
         },
         QuicFrame.RetireConnectionId(seq) => {
             let _ = quic_encode_into(out, 25_u64);
-            let _ = quic_encode_into(out, *seq);
+            let _ = quic_encode_into(out, seq);
         },
         QuicFrame.PathChallenge(data) => {
             let _ = quic_encode_into(out, 26_u64);
@@ -646,14 +646,14 @@ public fn encode_frame(frame: &QuicFrame, out: &mut List<Byte>) -> Int {
         },
         QuicFrame.ConnectionCloseTransport { error_code, frame_type, reason } => {
             let _ = quic_encode_into(out, 28_u64);
-            let _ = quic_encode_into(out, *error_code);
-            let _ = quic_encode_into(out, *frame_type);
+            let _ = quic_encode_into(out, error_code);
+            let _ = quic_encode_into(out, frame_type);
             let _ = quic_encode_into(out, reason.len() as UInt64);
             append_bytes(reason, out);
         },
         QuicFrame.ConnectionCloseApplication { error_code, reason } => {
             let _ = quic_encode_into(out, 29_u64);
-            let _ = quic_encode_into(out, *error_code);
+            let _ = quic_encode_into(out, error_code);
             let _ = quic_encode_into(out, reason.len() as UInt64);
             append_bytes(reason, out);
         },

@@ -227,26 +227,26 @@ implement Debug for Protocol {
         match self {
             Protocol.Send { payload, rest } => {
                 f.write_str(f"Send({payload}, ".as_str())?;
-                (**rest).fmt_debug(f)?;
+                (*rest).fmt_debug(f)?;
                 f.write_str(")")
             },
             Protocol.Recv { payload, rest } => {
                 f.write_str(f"Recv({payload}, ".as_str())?;
-                (**rest).fmt_debug(f)?;
+                (*rest).fmt_debug(f)?;
                 f.write_str(")")
             },
             Protocol.Offer { left, right } => {
                 f.write_str("Offer(")?;
-                (**left).fmt_debug(f)?;
+                (*left).fmt_debug(f)?;
                 f.write_str(", ")?;
-                (**right).fmt_debug(f)?;
+                (*right).fmt_debug(f)?;
                 f.write_str(")")
             },
             Protocol.Select { left, right } => {
                 f.write_str("Select(")?;
-                (**left).fmt_debug(f)?;
+                (*left).fmt_debug(f)?;
                 f.write_str(", ")?;
-                (**right).fmt_debug(f)?;
+                (*right).fmt_debug(f)?;
                 f.write_str(")")
             },
             Protocol.End => f.write_str("End"),

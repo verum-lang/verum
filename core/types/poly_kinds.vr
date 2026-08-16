@@ -329,16 +329,16 @@ implement Display for Kind {
                 // so `(K1 -> K2) -> K3` is unambiguous and the
                 // default right-association of `->` survives the
                 // round-trip.
-                let lhs_is_arrow = match **domain {
+                let lhs_is_arrow = match *domain {
                     Kind.KArrow { .. } => true,
                     _                  => false,
                 };
                 if lhs_is_arrow {
                     f.write_str("(")?;
-                    (**domain).fmt(f)?;
+                    (*domain).fmt(f)?;
                     f.write_str(") -> ")?;
                 } else {
-                    (**domain).fmt(f)?;
+                    (*domain).fmt(f)?;
                     f.write_str(" -> ")?;
                 }
                 (**codomain).fmt(f)
@@ -356,9 +356,9 @@ implement Debug for Kind {
                 f.write_str(f"KVar({name})".as_str()),
             Kind.KArrow { domain, codomain } => {
                 f.write_str("KArrow(")?;
-                (**domain).fmt_debug(f)?;
+                (*domain).fmt_debug(f)?;
                 f.write_str(", ")?;
-                (**codomain).fmt_debug(f)?;
+                (*codomain).fmt_debug(f)?;
                 f.write_str(")")
             },
         }

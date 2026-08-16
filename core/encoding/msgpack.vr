@@ -177,7 +177,7 @@ fn encode_into(v: &MsgPackValue, out: &mut List<Byte>) {
         MsgPackValue.Bool(b)  => out.push(if *b { 0xC3_u8 } else { 0xC2_u8 }),
 
         MsgPackValue.PositiveInt(u) => {
-            let n = *u;
+            let n = u;
             if n < 128_u64 {
                 out.push((n & 0x7F_u64) as Byte);        // positive fixint
             } else if n < 0x100_u64 {

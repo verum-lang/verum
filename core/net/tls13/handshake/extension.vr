@@ -314,7 +314,7 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
                 },
                 EarlyDataIndication.EarlyDataTicket { max_early_data_size } => {
                     put_u16(out, 4_u16);
-                    put_u32(out, *max_early_data_size);
+                    put_u32(out, max_early_data_size);
                 },
             }
             Result.Ok(())
@@ -347,7 +347,7 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
 
         Extension.RecordSizeLimitExt { limit } => {
             put_u16(out, EXT_RECORD_SIZE_LIMIT);
-            vec_u16(out, |b| { put_u16(b, *limit); Result.Ok(()) })
+            vec_u16(out, |b| { put_u16(b, limit); Result.Ok(()) })
         },
 
         Extension.PostHandshakeAuthExt => {
@@ -358,7 +358,7 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
         },
 
         Extension.Unknown { ext_type, data } => {
-            put_u16(out, *ext_type);
+            put_u16(out, ext_type);
             vec_u16(out, |b| { put_bytes(b, data.as_slice()); Result.Ok(()) })
         },
     }
