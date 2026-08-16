@@ -76,7 +76,7 @@ mount core.encoding.json.{
     encode,
 };
 mount core.encoding.pem.{decode_all as pem_decode_all, PemBlock};
-mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount core.net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError, Headers, Version};
 mount core.security.ecc.ed25519.{
     Ed25519Seed, Ed25519PublicKey, Ed25519Signature,
     public_key as ed25519_public_key,
@@ -235,16 +235,17 @@ public async fn request_signing_cert<C: HttpClient>(
     let body_bytes = encoding.json.encode(&body);
 
     let url = compose_url(&config.base_url, "/api/v2/signingCert");
-    let mut headers: Map<Text, Text> = Map.new();
-    headers.insert("content-type".to_text(), CONTENT_TYPE_JSON.to_text());
-    headers.insert("accept".to_text(), CONTENT_TYPE_JSON.to_text());
-    headers.insert("user-agent".to_text(), "verum-fulcio/0.1".to_text());
+    let mut headers = Headers.new();
+    headers.set(&"content-type", &CONTENT_TYPE_JSON.to_text());
+    headers.set(&"accept", &CONTENT_TYPE_JSON.to_text());
+    headers.set(&"user-agent", &"verum-fulcio/0.1".to_text());
 
     let req = Request {
+        version: Version.Http11,
         method: Method.Post,
         url,
         headers,
-        body: body_bytes,
+        body: Maybe.Some(body_bytes),
     };
     let resp = client.send(&req).await
         .map_err(|e| NetworkError(e))?;

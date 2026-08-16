@@ -59,7 +59,7 @@ module core.security.tuf.repository;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
-mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount core.net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError, Headers, Version};
 mount io.path.{Path, PathBuf};
 mount sync.rwlock.{RwLock};
 mount time.system_time.{epoch_seconds};
@@ -214,13 +214,14 @@ async fn http_get<C: HttpClient>(
     max_size: Int,
     label: &Text,
 ) -> Result<List<Byte>, RepoError> {
-    let mut headers: Map<Text, Text> = Map.new();
-    headers.insert("user-agent".to_text(), "verum-tuf/0.1".to_text());
+    let mut headers = Headers.new();
+    headers.set(&"user-agent", &"verum-tuf/0.1".to_text());
     let req = Request {
+        version: Version.Http11,
         method:  Method.Get,
         url:     url.clone(),
         headers,
-        body:    List.new(),
+        body: Maybe.None,
     };
     let resp = client.send(&req).await
         .map_err(|e| NetworkError(e))?;

@@ -77,7 +77,7 @@ mount core.*;
 mount core.context.standard.{Logger};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map, Set};
-mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount core.net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError, Headers, Version};
 mount core.security.jwt.{
     JwtAlgorithm, JwtKey, JwtError, JwtHeader, JwtPayload,
     VerifyOptions, verify_compact as jwt_verify_compact,
@@ -180,10 +180,11 @@ public async fn discover<C: HttpClient>(
 {
     let url = compose_discovery_url(expected_issuer);
     let req = Request {
+        version: Version.Http11,
         method: Method.Get,
         url,
         headers: build_accept_json_headers(),
-        body: List.new(),
+        body: Maybe.None,
     };
     let resp = client.send(&req).await
         .map_err(|e| DiscoveryError.NetworkError(e))?;
@@ -208,10 +209,10 @@ fn compose_discovery_url(issuer: &Text) -> Text {
     }
 }
 
-fn build_accept_json_headers() -> Map<Text, Text> {
-    let mut h: Map<Text, Text> = Map.new();
-    h.insert("accept".to_text(), "application/json".to_text());
-    h.insert("user-agent".to_text(), "verum-oidc/0.1".to_text());
+fn build_accept_json_headers() -> Headers {
+    let mut h = Headers.new();
+    h.set(&"accept", &"application/json");
+    h.set(&"user-agent", &"verum-oidc/0.1");
     h
 }
 
@@ -342,10 +343,11 @@ public async fn fetch_jwks<C: HttpClient>(
     jwks_uri: &Text,
 ) -> Result<Jwks, JwksError> {
     let req = Request {
+        version: Version.Http11,
         method:  Method.Get,
         url:     jwks_uri.clone(),
         headers: build_accept_json_headers(),
-        body:    List.new(),
+        body: Maybe.None,
     };
     let resp = client.send(&req).await
         .map_err(|e| JwksError.NetworkError(e))?;

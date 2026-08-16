@@ -74,7 +74,7 @@ mount core.encoding.base64.{
 };
 mount core.encoding.hex.{encode as hex_encode, decode as hex_decode};
 mount core.encoding.jcs.{canonicalize};
-mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount core.net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError, Headers, Version};
 mount core.security.ecc.p256.{P256, P256PublicKey, P256Signature};
 mount core.hash.crypto.sha256.{Sha256, digest};
 mount core.security.sigstore.types.{
@@ -166,15 +166,16 @@ public async fn submit_entry<C: HttpClient>(
     let url = compose_url(&config.base_url, "/api/v2/log/entries");
     let body = build_submit_body(kind, api_ver, spec);
     let body_bytes = encoding.json.encode(&body);
-    let mut headers: Map<Text, Text> = Map.new();
-    headers.insert("content-type".to_text(), CONTENT_TYPE_JSON.to_text());
-    headers.insert("accept".to_text(), CONTENT_TYPE_JSON.to_text());
-    headers.insert("user-agent".to_text(), "verum-rekor/0.1".to_text());
+    let mut headers = Headers.new();
+    headers.set(&"content-type", &CONTENT_TYPE_JSON.to_text());
+    headers.set(&"accept", &CONTENT_TYPE_JSON.to_text());
+    headers.set(&"user-agent", &"verum-rekor/0.1".to_text());
     let req = Request {
+        version: Version.Http11,
         method: Method.Post,
         url,
         headers,
-        body: body_bytes,
+        body: Maybe.Some(body_bytes),
     };
     let resp = client.send(&req).await
         .map_err(|e| NetworkError(e))?;
@@ -230,14 +231,15 @@ async fn fetch_entry_at_url<C: HttpClient>(
     config: &RekorClientConfig,
     url: &Text,
 ) -> Result<LogEntry, RekorError> {
-    let mut headers: Map<Text, Text> = Map.new();
-    headers.insert("accept".to_text(), CONTENT_TYPE_JSON.to_text());
-    headers.insert("user-agent".to_text(), "verum-rekor/0.1".to_text());
+    let mut headers = Headers.new();
+    headers.set(&"accept", &CONTENT_TYPE_JSON.to_text());
+    headers.set(&"user-agent", &"verum-rekor/0.1".to_text());
     let req = Request {
+        version: Version.Http11,
         method:  Method.Get,
         url:     url.clone(),
         headers,
-        body:    List.new(),
+        body: Maybe.None,
     };
     let resp = client.send(&req).await
         .map_err(|e| NetworkError(e))?;

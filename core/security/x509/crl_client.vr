@@ -67,7 +67,7 @@ mount core.security.x509.crl.{
     parse_crl, find_revoked, decode_reason,
 };
 mount core.security.x509.oid.{Oid};
-mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount core.net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError, Headers, Version};
 mount sync.rwlock.{RwLock};
 mount time.system_time.{epoch_seconds};
 
@@ -236,14 +236,15 @@ public async fn fetch_crl<C: HttpClient>(
     client: &C,
     url: &Text,
 ) -> Result<List<Byte>, CrlFetchError> {
-    let mut headers: Map<Text, Text> = Map.new();
-    headers.insert("accept".to_text(), CONTENT_TYPE_PKIX_CRL.to_text());
-    headers.insert("user-agent".to_text(), "verum-crl/0.1".to_text());
+    let mut headers = Headers.new();
+    headers.set(&"accept", &CONTENT_TYPE_PKIX_CRL.to_text());
+    headers.set(&"user-agent", &"verum-crl/0.1".to_text());
     let req = Request {
+        version: Version.Http11,
         method:  Method.Get,
         url:     url.clone(),
         headers,
-        body:    List.new(),
+        body: Maybe.None,
     };
     let resp = client.send(&req).await
         .map_err(|e| CrlFetchError.Network(e))?;
