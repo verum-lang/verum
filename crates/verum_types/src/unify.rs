@@ -1648,7 +1648,31 @@ impl Unifier {
                         })
                 } =>
             {
-                Ok(Substitution::new())
+                // A bare single-letter `Named` is treated as an
+                // unconstrained type parameter that unifies with
+                // anything.  But "unifies" must not mean "learns
+                // nothing": when the counterpart is a unification
+                // VARIABLE, the empty substitution left that variable
+                // unbound, and a receiver like `Wrap<P>` produced
+                // `Guard<_>` — "the inferred type `_` is not fully
+                // determined" — for every user type whose name happens
+                // to be one uppercase letter.  Six other copies of the
+                // "looks like a type parameter" rule were ruled out by
+                // instrumentation before this one, which carries its
+                // own inline copy, was found.
+                //
+                // Binding the variable keeps the arm's permissiveness
+                // and stops it discarding the one fact it had.
+                match other {
+                    Var(v) => {
+                        let named = Named {
+                            path: path.clone(),
+                            args: args.clone(),
+                        };
+                        self.bind_var(*v, &named, span)
+                    }
+                    _ => Ok(Substitution::new()),
+                }
             }
 
             // Type variables

@@ -1,0 +1,53 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: types, inference, unification, type-name
+// @expected-stdout: 7 7 ok
+//
+// Pin (T0776) — a user type whose name is ONE uppercase letter must
+// behave exactly like any other type name.
+//
+// The unifier's `(Named-with-no-args, other)` arm treated a
+// single-uppercase-letter name as an unconstrained type parameter and
+// returned an EMPTY substitution.  When the counterpart was a
+// unification variable, that variable stayed unbound, so the receiver's
+// argument never reached the method's return type:
+//
+//     let w: Wrap<P> = ...;  w.take()   ->  Guard<_>
+//     let z: Wrap<Zed> = ...;  z.take() ->  Guard<Zed>    (fine)
+//
+// Downstream this reads as "the inferred type `_` is not fully
+// determined by this function", far from the cause.  `core/` declares
+// `D` (math/sdg.vr) and `I` (math/hott.vr) at one character, so the
+// stdlib carries the defect too — `Mutex<P>.lock()` came out as
+// `Result<MutexGuard<_>, ..>` and every field access through the guard
+// then failed.
+//
+// The control is in the file: `Zed` has the identical shape and only
+// the name differs, so a regression that breaks BOTH prints nothing and
+// a regression that breaks only the one-letter case prints one value.
+
+type Wrap<T> is { v: T };
+type Guard<T> is { g: T };
+
+implement<T> Wrap<T> {
+    fn take(&self) -> Guard<T> {
+        Guard { g: self.v }
+    }
+}
+
+type P is { q: Int };
+type Zed is { q: Int };
+
+fn main() {
+    let w: Wrap<P> = Wrap { v: P { q: 7 } };
+    let unwrapped = w.take();
+    let one_letter = unwrapped.g.q;
+
+    // Control: same shape, three-letter name.
+    let z: Wrap<Zed> = Wrap { v: Zed { q: 7 } };
+    let unwrapped_z = z.take();
+    let longer_name = unwrapped_z.g.q;
+
+    print(f"{one_letter} {longer_name} ok");
+}
