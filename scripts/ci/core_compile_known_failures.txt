@@ -29,7 +29,6 @@ core/async/future.vr
 core/async/intrinsics.vr
 core/async/panic_fence.vr
 core/async/select.vr
-core/async/semaphore.vr
 core/async/stream.vr
 core/async/task.vr
 core/base/cell.vr
@@ -420,7 +419,6 @@ core/shell/watch.vr
 core/signal.vr
 core/simd/gpu.vr
 core/storage/s3/client.vr
-core/sync/barrier.vr
 core/sync/condvar.vr
 core/sync/once.vr
 core/sys/common.vr

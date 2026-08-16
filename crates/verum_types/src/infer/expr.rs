@@ -8763,6 +8763,21 @@ impl TypeChecker {
                                 (is_fn, ms)
                             };
                             if !is_member_fn {
+                                // AUTO-DEREF, last: the receiver's own members
+                                // did not answer, so look through its `Deref`
+                                // chain exactly as method calls and indexing
+                                // already do.  Tried only after the direct
+                                // lookup fails, so a field the receiver really
+                                // has is never shadowed by its target's.
+                                let recv_ty = Type::Named {
+                                    path: path.clone(),
+                                    args: args.clone(),
+                                };
+                                if let Some(t) = self
+                                    .field_type_through_deref(&recv_ty, field.name.as_str())
+                                {
+                                    return Ok(InferResult::new(t));
+                                }
                                 members.sort();
                                 members.dedup();
                                 return Err(TypeError::UnknownField {
@@ -8852,6 +8867,19 @@ impl TypeChecker {
                     field.name.as_str(),
                     &normalized_ty,
                 ) {
+                    Ok(InferResult::new(t))
+                } else if let Some(t) = self
+                    .field_type_through_deref(&normalized_ty, field.name.as_str())
+                {
+                    // AUTO-DEREF, second of the two field-access paths.  A
+                    // receiver that is not a record reaches HERE rather than
+                    // the `UnknownField` site, which is why wiring that one
+                    // alone left every `core/` case untouched: a
+                    // `MutexGuard<PoolInner<_>>` is not a record, so
+                    // `guard.idle` came out as E103 "Cannot access field on
+                    // non-record type".  Both paths now ask the same
+                    // question of `Deref`, as method calls and indexing
+                    // already did.
                     Ok(InferResult::new(t))
                 } else {
                     Err(TypeError::OtherWithCode {
@@ -8965,6 +8993,19 @@ impl TypeChecker {
                                 return Ok(InferResult::new(Type::Var(
                                     TypeVar::fresh(),
                                 )));
+                            }
+                            // AUTO-DEREF, third and last field-access site.
+                            // This file formats the E103 message TWICE; wiring
+                            // only the first one left `core/` untouched and the
+                            // deref trace silent, which is how the second copy
+                            // was found.  Same question, same authority.
+                            if let Some(t) = self
+                                .field_type_through_deref(
+                                    &normalized_ty,
+                                    field.name.as_str(),
+                                )
+                            {
+                                return Ok(InferResult::new(t));
                             }
                             Err(TypeError::OtherWithCode {
                                 code: verum_common::Text::from("E103"),

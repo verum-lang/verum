@@ -789,7 +789,13 @@ impl Unifier {
     }
 
     /// Recursively apply a name-based substitution to a type.
-    fn apply_alias_subst(&self, ty: &Type, subst: &Map<Text, Type>) -> Type {
+    ///
+    /// Exposed to the crate because binding a generic impl's parameters
+    /// from a receiver (`implement<T> Deref for G<T>` seen as `G<Inner>`)
+    /// is the same operation as substituting an alias's parameters, and a
+    /// second implementation of it is how the `Result<Unit>` class was
+    /// born one layer up.
+    pub(crate) fn apply_alias_subst(&self, ty: &Type, subst: &Map<Text, Type>) -> Type {
         self.apply_alias_subst_impl(ty, subst, 0)
     }
 

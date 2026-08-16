@@ -12896,6 +12896,103 @@ with .to_float() or .to_int() (at {:?})",
     ///
     /// Built-in dereferenceable types (Heap<T>, Shared<T>) are handled here
     /// as well as user-defined types implementing Ref<T>.
+    /// Resolve a field through the receiver's `Deref` chain.
+    ///
+    /// Three access paths can look through a `Deref` implementation —
+    /// method call, indexing, and field access.  The first two already
+    /// consult `find_deref_target_type`; field access did not, so
+    /// `implement<T> Deref for MutexGuard<T>` was declared in
+    /// `core/sync/mutex.vr`, relied upon by `core/` (`guard.field`,
+    /// `buf[i]`), and did nothing for a field: `field 'mutex' not found
+    /// on type 'MutexGuard'`.  A protocol that is declared, implemented
+    /// and honoured by two of three paths is worse than one that does
+    /// not exist, because the library is written against it.
+    ///
+    /// Walks the chain (a guard over a wrapper over a record) with the
+    /// same depth cap the other alias/deref walks use, and returns the
+    /// field's type at the first target that declares it.
+    pub(super) fn field_type_through_deref(
+        &self,
+        recv: &Type,
+        field: &str,
+    ) -> Option<Type> {
+        const MAX_DEREF_CHAIN: usize = 16;
+        let mut current = self.find_deref_target_type(recv)?;
+        for _ in 0..MAX_DEREF_CHAIN {
+            if let Type::Record(fields) = &current {
+                if let Option::Some(t) = fields.get(field) {
+                    return Some(t.clone());
+                }
+            }
+            let name: Text = match &current {
+                Type::Named { path, .. } => self.path_to_string(path),
+                Type::Generic { name, .. } => name.clone(),
+                _ => Text::from(""),
+            };
+            if !name.is_empty() {
+                // Same two-step lookup the field-access site itself uses:
+                // the `__struct_fields_<T>` record first, then the type.
+                let struct_key = format!("__struct_fields_{}", name);
+                let fields = match self.ctx.lookup_type(struct_key.as_str()) {
+                    Option::Some(Type::Record(f)) => Some(f),
+                    _ => match self.ctx.lookup_type(name.as_str()) {
+                        Option::Some(Type::Record(f)) => Some(f),
+                        _ => None,
+                    },
+                };
+                if let Some(f) = fields {
+                    if let Option::Some(t) = f.get(field) {
+                        return Some(t.clone());
+                    }
+                }
+            }
+            current = self.find_deref_target_type(&current)?;
+        }
+        None
+    }
+
+    /// Bind a generic impl's head parameters from a concrete receiver.
+    ///
+    /// `for_type` is the impl's self type (`G<T>`), `recv` the receiver
+    /// (`G<Inner>`).  Positional, one level deep: an impl parameter is a
+    /// bare name, so anything else in that position is not a parameter
+    /// and is skipped rather than guessed at.
+    fn bind_impl_params(for_type: &Type, recv: &Type) -> Map<Text, Type> {
+        fn args_of(t: &Type) -> Option<&List<Type>> {
+            match t {
+                Type::Named { args, .. } | Type::Generic { args, .. } => Some(args),
+                _ => None,
+            }
+        }
+        fn bare_name(t: &Type) -> Option<Text> {
+            match t {
+                Type::Named { path, args } if args.is_empty() => {
+                    path.as_ident().map(|id| id.name.clone())
+                }
+                Type::Generic { name, args } if args.is_empty() => Some(name.clone()),
+                // A generic impl's head parameters are stored as type
+                // VARIABLES, not as named types — `implement<T> Deref for
+                // G<T>` reaches us as `G<_>`.  `apply_alias_subst` keys its
+                // map on a variable's display form, so key on the same
+                // thing here; keying on anything else would silently miss
+                // every generic impl, which is exactly what a first
+                // attempt at this did (`MutexGuard` unchanged, target
+                // returned as an unbound `_`).
+                Type::Var(tv) => Some(Text::from(format!("{}", tv))),
+                _ => None,
+            }
+        }
+        let mut subst: Map<Text, Type> = Map::new();
+        if let (Some(params), Some(actuals)) = (args_of(for_type), args_of(recv)) {
+            for (p, a) in params.iter().zip(actuals.iter()) {
+                if let Some(n) = bare_name(p) {
+                    subst.insert(n, a.clone());
+                }
+            }
+        }
+        subst
+    }
+
     pub(super) fn find_deref_target_type(&self, ty: &Type) -> Option<Type> {
         // Protocol-based deref: query Ref<T> protocol implementations.
         // No hardcoded type names — all dereferenceable types must implement Ref<T>.
@@ -12910,6 +13007,17 @@ with .to_float() or .to_int() (at {:?})",
         // The protocol checker tracks implementations registered via `implement Ref<T> for SomeType`
         let protocol_checker_guard = self.protocol_checker.read();
         let impls = protocol_checker_guard.get_implementations(ty);
+        if std::env::var_os("VERUM_TRACE_DEREF").is_some() {
+            eprintln!(
+                "[deref] ty={} impls={} protocols={:?}",
+                ty,
+                impls.len(),
+                impls
+                    .iter()
+                    .map(|i| i.protocol.as_ident().map(|x| x.name.as_str().to_string()))
+                    .collect::<Vec<_>>()
+            );
+        }
         for impl_ in impls.iter() {
             // Extract protocol name from Path
             let protocol_name = impl_
@@ -12930,7 +13038,21 @@ with .to_float() or .to_int() (at {:?})",
                     .associated_types
                     .get(&verum_common::Text::from("Target"))
                 {
-                    return Some(target.clone());
+                    // A GENERIC impl (`implement<T> Deref for G<T>`,
+                    // which is how `core/sync/mutex.vr` writes
+                    // `MutexGuard<T>`) records its target as the bare
+                    // parameter `T`.  Returning it verbatim gives an
+                    // unbound name and every downstream lookup finds
+                    // nothing.  Bind the impl head against the receiver
+                    // positionally — `G<T>` seen as `G<Inner>` binds
+                    // `T = Inner` — and substitute through the unifier's
+                    // existing machinery rather than growing a second
+                    // implementation of substitution.
+                    let subst = Self::bind_impl_params(&impl_.for_type, ty);
+                    if subst.is_empty() {
+                        return Some(target.clone());
+                    }
+                    return Some(self.unifier.apply_alias_subst(target, &subst));
                 }
             }
         }
