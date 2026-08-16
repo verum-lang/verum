@@ -1,0 +1,53 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: types, inference, cfg, conditional-compilation, platform
+// @expected-stdout: included ok
+//
+// Pin (T0778) — a statement `@cfg(...)` excludes for this target must
+// not be TYPE-CHECKED either.
+//
+// Codegen has always filtered these (`should_compile_stmt`) and the
+// interpreter runs the right branch; only the typechecker walked into
+// blocks belonging to another platform, so:
+//
+//     @cfg(target_arch = "x86_64") { let _ = only_on_x86(); }
+//
+// reported `unbound variable: only_on_x86` on aarch64.  Item-level
+// `@cfg` IS honoured, which is what makes this fatal rather than
+// cosmetic: a cross-platform module gates its `mount` for one arch and
+// uses the symbol only under that arch, and the import disappears while
+// the use stays.  `core/sys/linux/tls.vr` is exactly that shape.
+//
+// The predicates below are chosen so the pin means the same thing on
+// every host, rather than passing for the wrong reason on one arch:
+//
+//   * `all(x86_64, aarch64)` is false on EVERY target — no machine is
+//     both — so the excluded block is excluded everywhere.  Its body
+//     names a function that does not exist; if the block is checked,
+//     the file does not compile.
+//   * `any(x86_64, aarch64)` is true on both hosts this runs on, so the
+//     included block is a real positive control: if the new filter were
+//     over-eager and dropped satisfied statements too, the expected
+//     output would lose its first word.
+
+fn main() {
+    let mut included: Bool = false;
+
+    // Excluded on every target — must not be type-checked.
+    @cfg(all(target_arch = "x86_64", target_arch = "aarch64")) {
+        let _never = zz_this_function_does_not_exist_anywhere();
+    }
+
+    // Included on every host this suite runs on — must still be
+    // type-checked AND executed.
+    @cfg(any(target_arch = "x86_64", target_arch = "aarch64")) {
+        included = true;
+    }
+
+    if included {
+        print("included ok");
+    } else {
+        print("EXCLUDED-TOO-MUCH");
+    }
+}

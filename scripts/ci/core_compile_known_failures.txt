@@ -434,7 +434,6 @@ core/storage/s3/client.vr
 core/sync/barrier.vr
 core/sync/condvar.vr
 core/sync/once.vr
-core/sys/common.vr
 core/sys/darwin/io.vr
 core/sys/darwin/mod.vr
 core/sys/darwin/thread.vr
@@ -447,7 +446,6 @@ core/sys/linux/io.vr
 core/sys/linux/mod.vr
 core/sys/linux/syscall.vr
 core/sys/linux/thread.vr
-core/sys/linux/tls.vr
 core/sys/locking/mod.vr
 core/sys/mmio.vr
 core/sys/mod.vr

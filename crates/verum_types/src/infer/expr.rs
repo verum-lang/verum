@@ -13097,7 +13097,50 @@ impl TypeChecker {
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     pub(super) fn infer_block(&mut self, block: &Block) -> Result<InferResult> {
         let _depth_guard = self.inc_inference_depth("infer_block")?;
-        self.infer_block_inner(block)
+        match self.cfg_filtered_block(block) {
+            Some(filtered) => self.infer_block_inner(&filtered),
+            None => self.infer_block_inner(block),
+        }
+    }
+
+    /// Drop the statements `@cfg(...)` excludes for this target, or
+    /// `None` when the block has none — the overwhelmingly common case,
+    /// which then costs one `is_empty()` per statement and no clone.
+    ///
+    /// T0778: codegen has always filtered these (`should_compile_stmt`),
+    /// and the interpreter runs the right branch — only the TYPECHECKER
+    /// walked into blocks belonging to another platform.  A
+    /// cross-platform module is then guaranteed to report unbound names,
+    /// because ITEM-level `@cfg` *is* honoured: `core/sys/linux/tls.vr`
+    /// gates `mount sys.linux.syscall.SYS_ARCH_PRCTL;` for x86_64 and
+    /// uses the constant only inside x86_64 blocks — correct code, two
+    /// errors on aarch64.
+    ///
+    /// Filtered ONCE here rather than at the seventeen statement loops
+    /// inside `*_block_inner`, so there is a single place that decides
+    /// what belongs to this target — and it asks the same
+    /// `CfgEvaluator` codegen asks, rather than carrying its own copy of
+    /// the rule.
+    fn cfg_filtered_block(&self, block: &Block) -> Option<Block> {
+        if block.stmts.iter().all(|s| s.attributes.is_empty()) {
+            return None;
+        }
+        let kept: verum_common::List<verum_ast::Stmt> = block
+            .stmts
+            .iter()
+            .filter(|s| {
+                s.attributes.is_empty() || self.cfg_evaluator.should_include(&s.attributes)
+            })
+            .cloned()
+            .collect();
+        if kept.len() == block.stmts.len() {
+            return None;
+        }
+        Some(Block {
+            stmts: kept,
+            expr: block.expr.clone(),
+            span: block.span,
+        })
     }
 
     /// Inner implementation of infer_block.
@@ -13210,7 +13253,10 @@ impl TypeChecker {
     /// Check a block against expected type.
     pub(super) fn check_block(&mut self, block: &Block, expected: &Type) -> Result<InferResult> {
         let _depth_guard = self.inc_inference_depth("check_block")?;
-        self.check_block_inner(block, expected)
+        match self.cfg_filtered_block(block) {
+            Some(filtered) => self.check_block_inner(&filtered, expected),
+            None => self.check_block_inner(block, expected),
+        }
     }
 
     fn check_block_inner(&mut self, block: &Block, expected: &Type) -> Result<InferResult> {

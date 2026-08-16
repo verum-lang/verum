@@ -1356,7 +1356,15 @@ pub struct TypeChecker {
     /// Skolem tracker for existential type scope management.
     skolem_tracker: crate::existential::SkolemTracker,
     /// Cfg evaluator for conditional compilation.
-    /// Used to skip type-checking of @cfg-gated items that don't match the current platform.
+    ///
+    /// THE cfg authority for this layer — the same `CfgEvaluator`
+    /// codegen consults through `should_compile_stmt`, so the two cannot
+    /// disagree about what belongs to the target.
+    ///
+    /// Used to skip @cfg-gated ITEMS and, since T0778, @cfg-gated
+    /// STATEMENTS: it was asked about items only, so a block belonging
+    /// to another platform was type-checked while codegen and the
+    /// interpreter both correctly skipped it.
     cfg_evaluator: verum_ast::cfg::CfgEvaluator,
     /// Unified recursion depth counter for type inference.
     /// Tracks combined depth across check_expr, infer_expr, and synth_expr
