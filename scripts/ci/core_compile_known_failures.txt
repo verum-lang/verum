@@ -38,7 +38,6 @@ core/base/env.vr
 core/base/glob.vr
 core/base/iterator.vr
 core/base/memory.vr
-core/base/primitives.vr
 core/base/result.vr
 core/base/serde.vr
 core/cache/adapters/redis.vr
@@ -131,15 +130,11 @@ core/database/sqlite/native/bind_parameter_api/table.vr
 core/database/sqlite/native/bind_pointer/engine.vr
 core/database/sqlite/native/bind_text_v2/engine.vr
 core/database/sqlite/native/bind_zeroblob/engine.vr
-core/database/sqlite/native/builtins/datetime_fns.vr
 core/database/sqlite/native/builtins/dispatch.vr
-core/database/sqlite/native/builtins/json_fns.vr
-core/database/sqlite/native/builtins/math_fns.vr
 core/database/sqlite/native/client_data/registry.vr
 core/database/sqlite/native/concat_ws_fn/fn_.vr
 core/database/sqlite/native/context_api/auxdata.vr
 core/database/sqlite/native/datetime/format.vr
-core/database/sqlite/native/datetime/instant.vr
 core/database/sqlite/native/datetime/iso.vr
 core/database/sqlite/native/datetime/modifier.vr
 core/database/sqlite/native/differential/oracle.vr
@@ -193,7 +188,6 @@ core/database/sqlite/native/l4_vdbe/ssa/jump_threading.vr
 core/database/sqlite/native/l5_sql/access_planning.vr
 core/database/sqlite/native/l5_sql/codegen.vr
 core/database/sqlite/native/l5_sql/compile.vr
-core/database/sqlite/native/l5_sql/cost_annotated.vr
 core/database/sqlite/native/l5_sql/mod.vr
 core/database/sqlite/native/l5_sql/parser/ddl.vr
 core/database/sqlite/native/l5_sql/parser/dml.vr
@@ -215,13 +209,8 @@ core/database/sqlite/native/migrations/mod.vr
 core/database/sqlite/native/migrations/store.vr
 core/database/sqlite/native/mutex_assertions/engine.vr
 core/database/sqlite/native/pcache_api/cache.vr
-core/database/sqlite/native/planner_cost/join_order.vr
-core/database/sqlite/native/planner_cost/selectivity.vr
 core/database/sqlite/native/profiler/report.vr
 core/database/sqlite/native/returning_clause_api/spec.vr
-core/database/sqlite/native/rtree/node.vr
-core/database/sqlite/native/rtree/query.vr
-core/database/sqlite/native/rtree/split.vr
 core/database/sqlite/native/rtree/tree.vr
 core/database/sqlite/native/sql_render/literal.vr
 core/database/sqlite/native/status/database.vr
@@ -243,9 +232,6 @@ core/database/sqlite/native/vtabs/fts5/functions.vr
 core/database/sqlite/native/vtabs/fts5/query.vr
 core/database/sqlite/native/vtabs/fts5/segment.vr
 core/database/sqlite/native/vtabs/json_each.vr
-core/database/sqlite/native/vtabs/rtree/bbox.vr
-core/database/sqlite/native/vtabs/rtree/node.vr
-core/database/sqlite/native/vtabs/rtree/query.vr
 core/database/sqlite/native/vtabs/rtree/tree.vr
 core/database/sqlite/typed_database.vr
 core/diagnostics.vr

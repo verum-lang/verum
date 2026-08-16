@@ -4634,7 +4634,28 @@ impl Unifier {
                         _ => "",
                     })
                     .unwrap_or("");
-                if self.is_tensor_family(pname) {
+                // `Float` and `Float64` NAME THE SAME TYPE.  The
+                // authority says so in as many words —
+                // `canonical_identity_name` folds
+                // `Float | Float64 | f64 | F64` to one identity and keeps
+                // `Float32` separate, on the same rule that makes `Int` and
+                // `Int64` one type while `Int8` stays distinct.  The INTEGER
+                // arm of this match consults the coercion registry; this arm
+                // consulted only `is_tensor_family`, so every mixed
+                // `Float`/`Float64` spelling in the library was a hard
+                // mismatch in BOTH directions (11 core/ files, measured
+                // 2026-08-16) while `Int`/`Int64` unified silently.
+                //
+                // Identity, not coercion: asking the canonical name keeps
+                // `Float32` a genuine mismatch, which `is_sized_numeric`
+                // would have merged.
+                let float_identity =
+                    verum_common::well_known_types::type_names::canonical_identity_name(
+                        "Float",
+                    );
+                let named_identity =
+                    verum_common::well_known_types::type_names::canonical_identity_name(pname);
+                if named_identity == float_identity || self.is_tensor_family(pname) {
                     Ok(Substitution::new())
                 } else {
                     Err(TypeError::Mismatch {
