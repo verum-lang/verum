@@ -361,13 +361,25 @@ public fn modf(x: Float) -> (Float, Float) {
     (integral, fractional)
 }
 
-// Truncate Float32 toward zero.  The Float64 variant lives
-// canonically in `core/math/elementary.vr` (mount it directly via
-// `mount core.math.elementary.trunc;` if needed); a previous
-// `public mount super.elementary.trunc` re-export was removed
-// because it created a `core.math.elementary ↔ core.math.ieee754`
-// cycle (ATS-V-AP-003 DependencyCycle).  No callsites referenced
-// the re-export, so removal is purely structural cleanup.
+// Truncation toward zero, both widths, declared together.
+//
+// The Float64 twin used to live in `core/math/elementary.vr`, and a
+// `public mount super.elementary.trunc` re-export brought it back here
+// until it was removed for creating a
+// `core.math.elementary <-> core.math.ieee754` cycle (ATS-V-AP-003
+// DependencyCycle).  The removal note claimed no callsite referenced
+// it; `modf` below does, so the name has been unbound ever since —
+// invisible because core/ was checked with name resolution off (T0777).
+//
+// Adding the mount back would restore the cycle: `elementary` already
+// mounts from THIS module.  So the declaration moves in the direction
+// the dependency already runs — `trunc` belongs beside `trunc_f32`
+// anyway, since truncation is an IEEE-754 representation operation
+// rather than an elementary function — and `elementary` mounts it from
+// here along with `is_nan`, `copysign` and the rest.
+@intrinsic("llvm.trunc.f64")
+public fn trunc(x: Float) -> Float;
+
 @intrinsic("llvm.trunc.f32")
 public fn trunc_f32(x: Float32) -> Float32;
 

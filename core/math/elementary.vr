@@ -59,7 +59,7 @@
 module core.math.elementary;
 
 mount super.constants.*;
-mount super.ieee754.{is_nan, is_infinite, is_finite, copysign, frexp, ldexp};
+mount super.ieee754.{is_nan, is_infinite, is_finite, copysign, frexp, ldexp, trunc};
 // Mounted rather than inherited: the prelude used to publish math's
 // 28 names into every file, which §4ter forbids — the language does
 // not name `sqrt` or Euler's number.
@@ -605,10 +605,6 @@ public fn round(x: Float) -> Float;
 // Round toward nearest even (banker's rounding)
 @intrinsic("llvm.rint.f64")
 public fn rint(x: Float) -> Float;
-
-// Truncate toward zero
-@intrinsic("llvm.trunc.f64")
-public fn trunc(x: Float) -> Float;
 
 // Fractional part: x - trunc(x)
 @inline(always)

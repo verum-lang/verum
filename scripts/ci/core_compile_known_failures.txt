@@ -274,7 +274,6 @@ core/math/frameworks/owl2_fs/mod.vr
 core/math/giry.vr
 core/math/graph.vr
 core/math/hott.vr
-core/math/ieee754.vr
 core/math/integers.vr
 core/math/kan_extension.vr
 core/math/linalg.vr
