@@ -65,19 +65,19 @@ module core.security.sigstore.rekor;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
-mount encoding.json.{
+mount core.encoding.json.{
     JsonValue, JsonMap, json_object, json_string, json_number,
     json_array, decode, encode,
 };
-mount encoding.base64.{
+mount core.encoding.base64.{
     decode_standard,
 };
-mount encoding.hex.{encode as hex_encode, decode as hex_decode};
-mount encoding.jcs.{canonicalize};
+mount core.encoding.hex.{encode as hex_encode, decode as hex_decode};
+mount core.encoding.jcs.{canonicalize};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
-mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
-mount hash.crypto.sha256.{Sha256, digest};
-mount security.sigstore.types.{
+mount core.security.ecc.p256.{P256, P256PublicKey, P256Signature};
+mount core.hash.crypto.sha256.{Sha256, digest};
+mount core.security.sigstore.types.{
     EntryKind, ApiVersion, EntryBody, HashedRekordBody, IntotoBody, DsseBody,
     LogEntry, SignedEntryTimestamp, RekorInclusionProof, Digest,
     entry_kind_from_text, entry_kind_to_text,

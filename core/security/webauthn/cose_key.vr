@@ -54,11 +54,11 @@ module core.security.webauthn.cose_key;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
-mount encoding.cbor.{
+mount core.encoding.cbor.{
     CborValue, decode, encode,
     CborError,
 };
-mount security.webauthn.types.{
+mount core.security.webauthn.types.{
     WebAuthnError,
     COSE_ALG_ES256, COSE_ALG_EDDSA, COSE_ALG_PS256, COSE_ALG_RS256,
     COSE_ALG_ES384, COSE_ALG_ES512,

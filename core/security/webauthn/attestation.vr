@@ -67,22 +67,22 @@ module core.security.webauthn.attestation;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.List;
-mount encoding.cbor.CborValue;
-mount hash.crypto.sha256.{Sha256, digest};
-mount security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify};
-mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
-mount security.x509.spki.{Spki};
-mount security.sig.rsa.{
+mount core.encoding.cbor.CborValue;
+mount core.hash.crypto.sha256.{Sha256, digest};
+mount core.security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify};
+mount core.security.ecc.p256.{P256, P256PublicKey, P256Signature};
+mount core.security.x509.spki.{Spki};
+mount core.security.sig.rsa.{
     RsaPublicKey as RsaVerifyKey, RsaHash,
     verify_pkcs1_v15_prehashed, verify_pss_prehashed,
 };
-mount security.webauthn.types.{
+mount core.security.webauthn.types.{
     AuthenticatorData, AttestedCredentialData, AttestationFormat,
     WebAuthnError,
     COSE_ALG_ES256, COSE_ALG_EDDSA, COSE_ALG_PS256, COSE_ALG_RS256,
     COSE_ALG_ES384, COSE_ALG_ES512,
 };
-mount security.webauthn.cose_key.{
+mount core.security.webauthn.cose_key.{
     CredentialPublicKey, decode_cose_key_value, alg_of,
 };
 

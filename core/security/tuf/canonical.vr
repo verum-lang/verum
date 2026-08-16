@@ -50,14 +50,14 @@ module core.security.tuf.canonical;
 mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount collections.List;
-mount encoding.json.{
+mount core.encoding.json.{
     JsonValue, JsonMap, json_object, json_string, json_bool,
     json_number, json_null, json_array,
 };
-mount encoding.jcs.{canonicalize, JcsError};
-mount encoding.hex.{encode as hex_encode};
-mount hash.crypto.sha256.{digest};
-mount security.tuf.types.{
+mount core.encoding.jcs.{canonicalize, JcsError};
+mount core.encoding.hex.{encode as hex_encode};
+mount core.hash.crypto.sha256.{digest};
+mount core.security.tuf.types.{
     TufKey, TufKeyType, TufKeyScheme, KeyId, Signature,
 };
 

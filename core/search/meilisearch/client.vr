@@ -43,7 +43,7 @@ module core.search.meilisearch.client;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int, Float};
 mount collections.{List, Map};
-mount encoding.json.{
+mount core.encoding.json.{
     JsonValue, JsonMap,
     json_object, json_string, json_array, json_number, json_bool,
     encode, decode,

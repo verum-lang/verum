@@ -78,15 +78,15 @@ mount core.context.standard.{Logger};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map, Set};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
-mount security.jwt.{
+mount core.security.jwt.{
     JwtAlgorithm, JwtKey, JwtError, JwtHeader, JwtPayload,
     VerifyOptions, verify_compact as jwt_verify_compact,
     decode_header_only,
 };
-mount encoding.json.{
+mount core.encoding.json.{
     JsonValue, JsonMap, decode,
 };
-mount encoding.base64.{decode_url_no_pad as b64url_decode};
+mount core.encoding.base64.{decode_url_no_pad as b64url_decode};
 mount sync.rwlock.{RwLock};
 mount time.rfc3339.{Rfc3339Time};
 mount time.system_time.{epoch_seconds};

@@ -90,23 +90,23 @@ module core.security.tuf.client;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map, Set};
-mount encoding.json.{JsonValue, JsonMap, decode as json_decode};
-mount encoding.hex.{encode as hex_encode};
-mount hash.crypto.sha256.{digest};
-mount hash.crypto.sha512.{digest as sha512_digest};
+mount core.encoding.json.{JsonValue, JsonMap, decode as json_decode};
+mount core.encoding.hex.{encode as hex_encode};
+mount core.hash.crypto.sha256.{digest};
+mount core.hash.crypto.sha512.{digest as sha512_digest};
 mount time.system_time.{epoch_seconds};
 
-mount security.tuf.types.{
+mount core.security.tuf.types.{
     RoleName, RoleDef, KeyId, TufKey, Signed, Signature,
     RootMetadata, RootRoles, TimestampMetadata, SnapshotMetadata,
     TargetsMetadata, TargetFile, MetafileSpec, Delegations, DelegatedRole,
     delegation_matches, role_name_to_text, role_name_from_text,
     validate_root_roles_keys,
 };
-mount security.tuf.canonical.{
+mount core.security.tuf.canonical.{
     canonical_signing_payload, compute_keyid, CanonicalError,
 };
-mount security.tuf.role_verify.{
+mount core.security.tuf.role_verify.{
     verify_role_signatures,
     check_version_monotonic_root, check_version_monotonic_timestamp,
     check_version_monotonic_snapshot, check_version_monotonic_targets,
@@ -114,7 +114,7 @@ mount security.tuf.role_verify.{
     check_not_expired_snapshot, check_not_expired_targets,
     RoleVerifyError,
 };
-mount security.tuf.repository.{TufRepository, RepoError, max_bytes_for_role};
+mount core.security.tuf.repository.{TufRepository, RepoError, max_bytes_for_role};
 
 // =============================================================================
 // Bounds

@@ -60,11 +60,11 @@ module core.security.webauthn.register;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Set};
-mount encoding.json.{JsonValue, JsonMap, decode};
-mount encoding.base64.{decode_url_no_pad as b64url_decode};
-mount encoding.cbor.{CborValue, decode};
-mount hash.crypto.sha256.{Sha256, digest};
-mount security.webauthn.types.{
+mount core.encoding.json.{JsonValue, JsonMap, decode};
+mount core.encoding.base64.{decode_url_no_pad as b64url_decode};
+mount core.encoding.cbor.{CborValue, decode};
+mount core.hash.crypto.sha256.{Sha256, digest};
+mount core.security.webauthn.types.{
     AuthenticatorAttestationResponse, AttestationObject, AttestationFormat,
     AuthenticatorData, AttestedCredentialData, ClientDataType,
     CollectedClientData, TokenBindingStatus, VerifiedCredential,
@@ -74,13 +74,13 @@ mount security.webauthn.types.{
     attestation_format_from_text, client_data_type_from_text,
     parse_flags, CHALLENGE_MIN_BYTES, CHALLENGE_MAX_BYTES,
 };
-mount security.webauthn.cose_key.{
+mount core.security.webauthn.cose_key.{
     CredentialPublicKey, decode_cose_key_value, encode_cose_key, alg_of,
 };
-mount security.webauthn.authenticator_data.{
+mount core.security.webauthn.authenticator_data.{
     parse_authenticator_data, hash_rp_id,
 };
-mount security.webauthn.attestation.{
+mount core.security.webauthn.attestation.{
     verify_attestation, VerifiedAttestation, AttestationType,
 };
 

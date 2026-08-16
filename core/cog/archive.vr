@@ -60,8 +60,8 @@ module core.cog.archive;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount collections.{List, Map};
-mount hash.crypto.sha256.{digest};
-mount encoding.hex.{encode as hex_encode};
+mount core.hash.crypto.sha256.{digest};
+mount core.encoding.hex.{encode as hex_encode};
 mount io.path.{Path, PathBuf};
 
 // =============================================================================

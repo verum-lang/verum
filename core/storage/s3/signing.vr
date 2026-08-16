@@ -65,9 +65,9 @@ module core.storage.s3.signing;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
-mount encoding.hex.{encode as hex_encode};
-mount hash.crypto.sha256.{Sha256, digest};
-mount mac.hmac.{hmac_sha256};
+mount core.encoding.hex.{encode as hex_encode};
+mount core.hash.crypto.sha256.{Sha256, digest};
+mount core.mac.hmac.{hmac_sha256};
 
 // =============================================================================
 // Credentials
@@ -76,7 +76,7 @@ mount mac.hmac.{hmac_sha256};
 // Single authority: `core.security.aws_credentials` (T0155). Re-exported
 // publicly so that every `mount storage.s3.signing.{AwsCredentials}`
 // keeps resolving.
-public mount security.aws_credentials.{AwsCredentials};
+public mount core.security.aws_credentials.{AwsCredentials};
 
 // =============================================================================
 // Signed-request output

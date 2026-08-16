@@ -456,7 +456,6 @@ core/shell/watch.vr
 core/signal.vr
 core/simd/gpu.vr
 core/storage/s3/client.vr
-core/storage/s3/signing.vr
 core/sync/barrier.vr
 core/sync/condvar.vr
 core/sync/once.vr

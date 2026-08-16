@@ -66,14 +66,14 @@ module core.security.sigstore.types;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
-mount encoding.json.{JsonValue};
+mount core.encoding.json.{JsonValue};
 mount time.rfc3339.{Rfc3339Time};
 
 // `Digest` (algorithm + hex) has a single authority in
 // `core.security.provenance`. Re-exported publicly here so that every
 // `mount security.sigstore.types.{... Digest ...}` consumer keeps
 // resolving unchanged after twin unification (T0155).
-public mount security.provenance.{Digest};
+public mount core.security.provenance.{Digest};
 
 // =============================================================================
 // Constants — Sigstore well-known issuers + endpoints
@@ -356,7 +356,7 @@ public type FulcioIdentity is {
 // We re-export the DsseEnvelope from `core.security.provenance` —
 // the Bundle just adds verification material + tlog entries on top.
 
-mount security.provenance.{
+mount core.security.provenance.{
     DsseEnvelope, dsse_envelope_to_json, dsse_envelope_from_json,
     RekorInclusionProof as ProvenanceInclusionProof,
     TlogEntry as ProvenanceTlogEntry,

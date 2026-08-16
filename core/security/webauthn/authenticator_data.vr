@@ -53,8 +53,8 @@ module core.security.webauthn.authenticator_data;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.List;
-mount encoding.cbor.{CborValue, decode, encode, encode_canonical};
-mount security.webauthn.types.{
+mount core.encoding.cbor.{CborValue, decode, encode, encode_canonical};
+mount core.security.webauthn.types.{
     AuthenticatorData, AttestedCredentialData, AuthDataFlags,
     parse_flags, flags_to_byte,
     WebAuthnError, MIN_AUTH_DATA_BYTES, AAGUID_BYTES, RP_ID_HASH_BYTES,

@@ -63,7 +63,7 @@ mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
 mount io.path.{Path, PathBuf};
 mount sync.rwlock.{RwLock};
 mount time.system_time.{epoch_seconds};
-mount security.tuf.types.{RoleName, role_name_to_text};
+mount core.security.tuf.types.{RoleName, role_name_to_text};
 
 // =============================================================================
 // Size caps (per role, in bytes)
