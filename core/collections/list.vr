@@ -38,6 +38,8 @@ mount core.base.coercion.{IntCoercible, Indexable, ArrayCoercible};
 // mount keeps `try_alloc` / `try_realloc` resolvable in
 // `try_with_capacity` and friends.
 mount core.base.memory.{try_alloc, try_realloc};
+mount core.intrinsics.runtime.mem_raw.{memmove_addr};
+mount core.intrinsics.arithmetic.{ilog2};
 
 // Comparison Ordering — canonical `core.base.ordering` (T0502 dedup;
 // the atomics `MemoryOrdering` rename means `mount core.*` surfaces

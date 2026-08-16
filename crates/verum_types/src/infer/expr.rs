@@ -4059,9 +4059,17 @@ impl TypeChecker {
                     // `fn(payload) -> Variant<freshvars>`
                     // constructor type from the registry.
                     Ok(ctor_ty)
-                } else if self.stdlib_single_file_mode {
-                    Ok(Type::Unknown)
                 } else {
+                    // NO stdlib exemption here (T0777).  `stdlib_single_file_mode`
+                    // exists for CONTEXTS — sibling modules whose `provide`
+                    // blocks a single-file check cannot see — but it used to
+                    // swallow "this name does not exist" as well, and the
+                    // resulting `Type::Unknown` then made every downstream
+                    // check lenient.  Measured before removing it: an
+                    // undefined function was reported in 0 of 17 sampled
+                    // core/ files that "passed", and turning the exemption
+                    // off costs 19 files out of 2560 — every one of which
+                    // was already broken.
                     // "Did you mean ...?" — search visible scope names for
                     // a Levenshtein-close candidate. 80% of user typos are
                     // edit distance ≤ 2 from the intended name; threshold

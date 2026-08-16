@@ -38,6 +38,7 @@ mount core.*;
 // Allocator primitives for typed-OOM (#65, #68). See list.vr for
 // rationale on the explicit mount.
 mount core.base.memory.{try_alloc, try_realloc};
+mount core.intrinsics.runtime.mem_raw.{memset_addr};
 
 // Import intrinsics as functions
 mount core.intrinsics.runtime.text.{
@@ -517,10 +518,10 @@ implement Text {
         // store regardless of T and would corrupt adjacent bytes.
         let mut i: Int = 0;
         while i < len {
-            memset_addr(ptr_offset(ptr, i), bytes[i], 1);
+            memset_addr(ptr_offset(ptr, i) as Int, bytes[i], 1);
             i = i + 1;
         }
-        memset_addr(ptr_offset(ptr, len), 0 as Byte, 1);
+        memset_addr(ptr_offset(ptr, len) as Int, 0 as Byte, 1);
         Text {
             ptr: ptr,
             len: len,
@@ -1058,12 +1059,12 @@ implement Text {
             self.grow();
         }
         unsafe {
-            memset_addr(ptr_offset(self.ptr, self.len), byte, 1);
+            memset_addr(ptr_offset(self.ptr, self.len) as Int, byte, 1);
         }
         self.len = self.len + 1;
         // Maintain null terminator.
         unsafe {
-            memset_addr(ptr_offset(self.ptr, self.len), 0 as Byte, 1);
+            memset_addr(ptr_offset(self.ptr, self.len) as Int, 0 as Byte, 1);
         }
     }
 
@@ -1080,11 +1081,11 @@ implement Text {
         if n == 0 { return; }
         self.reserve(n);
         unsafe {
-            memcpy_addr(ptr_offset(self.ptr, self.len), s.as_ptr(), n);
+            memcpy_addr(ptr_offset(self.ptr, self.len) as Int, s.as_ptr() as Int, n);
         }
         self.len = self.len + n;
         unsafe {
-            memset_addr(ptr_offset(self.ptr, self.len), 0 as Byte, 1);
+            memset_addr(ptr_offset(self.ptr, self.len) as Int, 0 as Byte, 1);
         }
     }
 
@@ -2805,7 +2806,7 @@ implement Text {
         // Maintain null terminator via `memset` (single-byte write).
         if !is_null(self.ptr) {
             unsafe {
-                memset_addr(ptr_offset(self.ptr, self.len), 0 as Byte, 1);
+                memset_addr(ptr_offset(self.ptr, self.len) as Int, 0 as Byte, 1);
             }
         }
     }
