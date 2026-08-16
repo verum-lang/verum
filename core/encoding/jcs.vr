@@ -116,9 +116,21 @@ implement Eq for JcsError {
 // Canonicalise a JsonValue
 // =============================================================================
 
-public fn canonicalize_value(v: &JsonValue) -> Result<Text, JcsError> {
+/// Canonicalise to the BYTES that get signed.
+///
+/// JCS exists to produce a byte string a signature can be taken over,
+/// so this is the primitive form and `canonicalize_value` is the text
+/// wrapper on top of it — the emitter already builds a `List<Byte>`
+/// and only converted at the last line.  Splitting it here means one
+/// emitter path, not two.
+public fn canonicalize(v: &JsonValue) -> Result<List<Byte>, JcsError> {
     let mut out: List<Byte> = [];
     emit(v, &mut out)?;
+    Result.Ok(out)
+}
+
+public fn canonicalize_value(v: &JsonValue) -> Result<Text, JcsError> {
+    let out = canonicalize(v)?;
     Result.Ok(Text.from_utf8_unchecked(out.as_slice()))
 }
 

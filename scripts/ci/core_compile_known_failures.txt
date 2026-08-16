@@ -414,7 +414,6 @@ core/security/sigstore/rekor.vr
 core/security/sigstore/types.vr
 core/security/sigstore/verify.vr
 core/security/transparency_log.vr
-core/security/tuf/canonical.vr
 core/security/tuf/client.vr
 core/security/tuf/repository.vr
 core/security/tuf/role_verify.vr
