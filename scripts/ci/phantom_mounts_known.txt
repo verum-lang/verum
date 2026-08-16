@@ -1,0 +1,42 @@
+# Mounts naming a symbol the module does not export.
+# Regenerate: scripts/ci/check_phantom_mounts.py <verum> --write-baseline
+# A line removed is a mount repaired.  A line added is a decision to
+# ship one more import that resolves to an unrelated same-named symbol.
+core.cli.spec	Group
+core.database.common.migrations	MigrationStore
+core.database.common.migrations.store	MigrationStore
+core.database.common.types	WfBinary
+core.database.sqlite.connection	SqliteNativeConnection
+core.database.sqlite.native.affinity_matrix_api.affinity	Affinity
+core.database.sqlite.native.builtins.json_fns	JsonValue
+core.database.sqlite.native.destructor_api.kind	Destructor
+core.database.sqlite.native.double_quoted_string_api.context	StmtKind
+core.database.sqlite.native.drop_modules.keep_list	contains
+core.database.sqlite.native.dst.op	OpStream
+core.database.sqlite.native.fts5.tokenizer.core	Token
+core.database.sqlite.native.hot_journal_detector.signal	Signal
+core.database.sqlite.native.l3_btree.cursor	generate_series
+core.database.sqlite.native.l5_sql	VdbeProgram
+core.database.sqlite.native.l7_api	Transaction
+core.database.sqlite.native.log.level	LogLevel
+core.database.sqlite.native.mem_methods.vtable	MethodSet
+core.database.sqlite.native.replication.role	Role
+core.database.sqlite.native.shutdown.subsystem	Subsystem
+core.database.sqlite.native.status.counter	Counter
+core.database.sqlite.native.temp_path.slot	SetOutcome
+core.database.sqlite.native.triggers.spec	TriggerEvent
+core.database.sqlite.native.vtab_module.method_set	MethodSet
+core.database.sqlite.native.vtabs.fts5.tokenizer	Token
+core.database.sqlite.native.vtabs.rtree.node	Node
+core.encoding.der	DerWriter
+core.intrinsics	RecoveryError
+core.math.hott	Path
+core.math.s_definable.class_s_s	msfs_refined_ss_depth_nonneg
+core.mem.cap_audit	record_attenuate
+core.net.h3.request	H3Status
+core.net.http2	Frame
+core.net.quic	Connection
+core.net.quic.frame	Frame
+core.net.quic.stream_sm	RecvError
+core.security.provenance	RekorInclusionProof
+core.sys.darwin.libsystem	close
