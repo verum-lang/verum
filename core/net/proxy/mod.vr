@@ -20,9 +20,9 @@
 )
 module core.net.proxy;
 
-public mount self.upstream_pool.*;
-public mount self.health_check.*;
-public mount self.loadbalancer.*;
-public mount self.circuit_breaker.*;
-public mount self.retry.*;
-public mount self.rate_limit.*;
+public mount .upstream_pool.*;
+public mount .health_check.*;
+public mount .loadbalancer.*;
+public mount .circuit_breaker.*;
+public mount .retry.*;
+public mount .rate_limit.*;

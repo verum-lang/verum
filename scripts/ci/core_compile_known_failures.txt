@@ -68,7 +68,6 @@ core/concurrency/session.vr
 core/configuration/convert.vr
 core/configuration/mod.vr
 core/configuration/toml.vr
-core/context/mod.vr
 core/context/provider.vr
 core/control/continuation.vr
 core/database/common/arena.vr
@@ -302,7 +301,6 @@ core/net/h3/qpack/session.vr
 core/net/h3/server.vr
 core/net/http.vr
 core/net/proxy/health_check.vr
-core/net/proxy/mod.vr
 core/net/proxy/retry.vr
 core/net/proxy/upstream_pool.vr
 core/net/quic/api/server.vr
@@ -344,7 +342,6 @@ core/net/weft/json_extractor.vr
 core/net/weft/listener.vr
 core/net/weft/metrics_otlp.vr
 core/net/weft/metrics.vr
-core/net/weft/mod.vr
 core/net/weft/refined_routes.vr
 core/net/weft/router.vr
 core/net/weft/tls.vr

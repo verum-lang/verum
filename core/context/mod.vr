@@ -91,18 +91,24 @@
 module core.context;
 
 // Re-export scope types
-public mount self.scope.*;
-public mount self.error.*;
-public mount self.provider.*;
-public mount self.layer.*;
+public mount .scope.*;
+public mount .error.*;
+public mount .provider.*;
+// `.layer` is NOT re-exported: core/context/layer.vr declares its
+// module and its @arch_module attestation and nothing else — 82
+// lines of which every one outside those two is a comment.  A glob
+// over an empty public surface is reported as `module
+// core.context.layer not found`, which is what blocked this file.
+// The module stays reachable by path; there is simply nothing to
+// re-export until it has a declaration.
 
 // Standard contexts library — pre-fix the file shipped (Logger,
 // Database, Auth, Tracer + canonical context-group definitions
 // like WebCtx) but had no re-export here, so user code had to
 // import via direct file path despite the umbrella convention.
-public mount self.standard.*;
+public mount .standard.*;
 
 // Re-export key types for convenience
-public mount self.provider.{Provider, ScopedProvider, LazyProvider, get_context, has_context};
-public mount self.scope.{Scope, ContextScope};
-public mount self.error.ContextError;
+public mount .provider.{Provider, ScopedProvider, LazyProvider, get_context, has_context};
+public mount .scope.{Scope, ContextScope};
+public mount .error.ContextError;
