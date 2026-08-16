@@ -140,6 +140,7 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
         ErrorCodeEntry { code: "E406", numeric: 406, category: ErrorCategory::Type, description: "type inference failure" },
         ErrorCodeEntry { code: "E407", numeric: 407, category: ErrorCategory::Type, description: "recursive type without indirection" },
         ErrorCodeEntry { code: "E408", numeric: 408, category: ErrorCategory::Type, description: "dependent value-argument arity mismatch" },
+        ErrorCodeEntry { code: "E409", numeric: 409, category: ErrorCategory::Type, description: "dereference of a non-reference type" },
 
         // ── E5xx: Verification ────────────────────────────────────────────────
         ErrorCodeEntry { code: "E500", numeric: 500, category: ErrorCategory::Verification, description: "contract violated" },

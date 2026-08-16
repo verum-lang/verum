@@ -3388,9 +3388,21 @@ impl TypeChecker {
                         // Fallback: single-arg generic types are likely smart pointer wrappers
                         Ok(self.unifier.apply(&args[0]))
                     } else {
-                        Err(TypeError::Other(
-                            format!("Cannot dereference non-reference type: {}", inner_ty).into(),
-                        ))
+                        // E409 with the operator's span: this used to be a
+                        // bare `TypeError::Other`, which carries no location,
+                        // so the diagnostic printed
+                        // "<no source location attached to this diagnostic>"
+                        // and the reader had no line to go to.  `span` is a
+                        // parameter of this very function.
+                        Err(TypeError::OtherWithCodeSpanned {
+                            code: verum_common::Text::from("E409"),
+                            msg: format!(
+                                "Cannot dereference non-reference type: {}",
+                                inner_ty
+                            )
+                            .into(),
+                            span,
+                        })
                     }
                 }
                 Type::Named { path, args } => {
@@ -3412,9 +3424,21 @@ impl TypeChecker {
                         // Fallback: single-arg generic types are likely smart pointer wrappers
                         Ok(self.unifier.apply(&args[0]))
                     } else {
-                        Err(TypeError::Other(
-                            format!("Cannot dereference non-reference type: {}", inner_ty).into(),
-                        ))
+                        // E409 with the operator's span: this used to be a
+                        // bare `TypeError::Other`, which carries no location,
+                        // so the diagnostic printed
+                        // "<no source location attached to this diagnostic>"
+                        // and the reader had no line to go to.  `span` is a
+                        // parameter of this very function.
+                        Err(TypeError::OtherWithCodeSpanned {
+                            code: verum_common::Text::from("E409"),
+                            msg: format!(
+                                "Cannot dereference non-reference type: {}",
+                                inner_ty
+                            )
+                            .into(),
+                            span,
+                        })
                     }
                 }
                 // Auto-deref through protocol bounds

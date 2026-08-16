@@ -12341,11 +12341,22 @@ with .to_float() or .to_int() (at {:?})",
                             // Fallback: single-arg generic types are likely smart pointer wrappers
                             Ok(InferResult::new(args[0].clone()))
                         } else {
-                            Err(TypeError::Other(verum_common::Text::from(format!(
-                                "Cannot dereference non-reference type: {}.\n  \
-                                 Hint: Type must be a reference (&T, &checked T, &unsafe T) or implement Ref<T> protocol.",
-                                result.ty
-                            ))))
+                            // E409 carrying the OPERAND's span.  This was a
+                            // bare `TypeError::Other`, so the hint below was
+                            // printed with no location to apply it to; the
+                            // enclosing `infer_unop` even had the span, named
+                            // `_span` as though unused.  `expr.span` points at
+                            // the thing that is not a reference, which is the
+                            // more useful of the two.
+                            Err(TypeError::OtherWithCodeSpanned {
+                                code: verum_common::Text::from("E409"),
+                                msg: verum_common::Text::from(format!(
+                                    "Cannot dereference non-reference type: {}.\n  \
+                                     Hint: Type must be a reference (&T, &checked T, &unsafe T) or implement Ref<T> protocol.",
+                                    result.ty
+                                )),
+                                span: expr.span,
+                            })
                         }
                     }
                     Type::Named { ref path, ref args } => {
@@ -12356,11 +12367,22 @@ with .to_float() or .to_int() (at {:?})",
                             // Fallback: single-arg generic types are likely smart pointer wrappers
                             Ok(InferResult::new(args[0].clone()))
                         } else {
-                            Err(TypeError::Other(verum_common::Text::from(format!(
-                                "Cannot dereference non-reference type: {}.\n  \
-                                 Hint: Type must be a reference (&T, &checked T, &unsafe T) or implement Ref<T> protocol.",
-                                result.ty
-                            ))))
+                            // E409 carrying the OPERAND's span.  This was a
+                            // bare `TypeError::Other`, so the hint below was
+                            // printed with no location to apply it to; the
+                            // enclosing `infer_unop` even had the span, named
+                            // `_span` as though unused.  `expr.span` points at
+                            // the thing that is not a reference, which is the
+                            // more useful of the two.
+                            Err(TypeError::OtherWithCodeSpanned {
+                                code: verum_common::Text::from("E409"),
+                                msg: verum_common::Text::from(format!(
+                                    "Cannot dereference non-reference type: {}.\n  \
+                                     Hint: Type must be a reference (&T, &checked T, &unsafe T) or implement Ref<T> protocol.",
+                                    result.ty
+                                )),
+                                span: expr.span,
+                            })
                         }
                     }
 
