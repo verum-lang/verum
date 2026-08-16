@@ -1,7 +1,7 @@
 // =============================================================================
 // net/http3/client.vr — High-level HTTP/3 client (RFC 9114)
 // =============================================================================
-// Wraps a QUIC Connection with the HTTP/3 framing layer: opens the
+// Wraps a QUIC QuicConnection with the HTTP/3 framing layer: opens the
 // control + QPACK streams during the initial handshake, then serves
 // a request/response API.
 // =============================================================================
@@ -17,12 +17,12 @@ mount core.*;
 mount core.net.addr.{SocketAddr};
 mount core.net.http.{Method, StatusCode, Version};
 mount core.net.http2.hpack.{HeaderField};
-mount core.net.quic.{Connection, QuicConfig};
+mount core.net.quic.{QuicConnection, QuicConfig};
 mount core.net.quic.error.{QuicError};
 mount core.net.http3.error.{Http3Error};
 
 public type Http3Client is {
-    connection: Connection,
+    connection: QuicConnection,
     handle: UInt64,
 }
 

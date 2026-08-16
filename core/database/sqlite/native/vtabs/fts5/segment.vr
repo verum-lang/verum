@@ -30,7 +30,7 @@ module core.database.sqlite.native.vtabs.fts5.segment;
 mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
-mount core.database.sqlite.native.vtabs.fts5.tokenizer.{Token};
+mount core.database.sqlite.native.vtabs.fts5.tokenizer.{Fts5VtabToken};
 
 // -----------------------------------------------------------------------------
 // Fts5SegmentPosting
@@ -134,7 +134,7 @@ public fn segment_empty() -> Fts5VtabSegment {
 }
 
 /// Build a segment from one document's token stream.
-public fn segment_from_tokens(rowid: Int64, column: Int, tokens: List<Token>) -> Fts5VtabSegment {
+public fn segment_from_tokens(rowid: Int64, column: Int, tokens: List<Fts5VtabToken>) -> Fts5VtabSegment {
     let mut entries: List<TermEntry> = List.new();
     let mut i: Int = 0;
     while i < tokens.len() {

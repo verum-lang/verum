@@ -233,7 +233,6 @@ core/database/sqlite/native/vtab_module/version.vr
 core/database/sqlite/native/vtabs/fts5/dml.vr
 core/database/sqlite/native/vtabs/fts5/functions.vr
 core/database/sqlite/native/vtabs/fts5/query.vr
-core/database/sqlite/native/vtabs/fts5/segment.vr
 core/database/sqlite/native/vtabs/json_each.vr
 core/database/sqlite/native/vtabs/rtree/tree.vr
 core/database/sqlite/typed_database.vr

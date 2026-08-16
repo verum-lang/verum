@@ -26,7 +26,6 @@ core.database.sqlite.native.status.counter	Counter
 core.database.sqlite.native.temp_path.slot	SetOutcome
 core.database.sqlite.native.triggers.spec	TriggerEvent
 core.database.sqlite.native.vtab_module.method_set	MethodSet
-core.database.sqlite.native.vtabs.fts5.tokenizer	Token
 core.database.sqlite.native.vtabs.rtree.node	Node
 core.encoding.der	DerWriter
 core.intrinsics	RecoveryError
@@ -35,7 +34,6 @@ core.math.s_definable.class_s_s	msfs_refined_ss_depth_nonneg
 core.mem.cap_audit	record_attenuate
 core.net.h3.request	H3Status
 core.net.http2	Frame
-core.net.quic	Connection
 core.net.quic.frame	Frame
 core.net.quic.stream_sm	RecvError
 core.security.provenance	RekorInclusionProof

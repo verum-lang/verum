@@ -24,7 +24,7 @@ module core.database.sqlite.native.vtabs.fts5.index;
 mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
-mount core.database.sqlite.native.vtabs.fts5.tokenizer.{Token};
+mount core.database.sqlite.native.vtabs.fts5.tokenizer.{Fts5VtabToken};
 mount core.database.sqlite.native.vtabs.fts5.segment.{
     Fts5VtabSegment, Fts5SegmentPostingList, Fts5SegmentPosting,
     segment_empty, segment_from_tokens, segment_lookup, segment_merge,
@@ -66,7 +66,7 @@ implement Fts5Index {
     }
 
     /// Build + add a fresh segment from a single document.
-    public fn add_document(&mut self, rowid: Int64, column: Int, tokens: List<Token>) {
+    public fn add_document(&mut self, rowid: Int64, column: Int, tokens: List<Fts5VtabToken>) {
         let seg = segment_from_tokens(rowid, column, tokens);
         self.add_segment(seg);
     }
