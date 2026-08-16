@@ -1,0 +1,46 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: types, codegen, cfg, conditional-compilation, platform
+// @expected-stdout: impossible=false tautology=true agree=true ok
+//
+// Pin (T0778, second half) — `@cfg(...)` in VALUE position evaluates its
+// PREDICATE, not `true`.
+//
+// Codegen compiled this arm to an unconditional `LoadTrue`, so on any
+// host:
+//
+//     @cfg(target_arch = "x86_64")   -> true
+//     @cfg(target_arch = "aarch64")  -> true
+//
+// Both, on the same machine.  Nothing diagnosed it: the answer was
+// simply wrong, which is the worst shape a defect can take.  The
+// statement form was correct throughout — codegen filtered @cfg-gated
+// statements and the interpreter ran the matching branch — so the two
+// paths failed independently and this one had no symptom to notice.
+//
+// The predicates are chosen to mean the same thing on every target
+// rather than to pass on one arch by luck:
+//
+//   * `all(x86_64, aarch64)` is false everywhere — no machine is both.
+//   * `not(all(x86_64, aarch64))` is its negation, true everywhere.
+//   * `agree` checks the value form against the STATEMENT form on the
+//     same predicate, so the two layers cannot drift apart silently:
+//     a regression in either one flips it.
+
+fn main() {
+    // False on every target that can exist.
+    let impossible: Bool = @cfg(all(target_arch = "x86_64", target_arch = "aarch64"));
+
+    // True on every target that can exist.
+    let tautology: Bool = @cfg(not(all(target_arch = "x86_64", target_arch = "aarch64")));
+
+    // The same predicate, taken through the STATEMENT path.
+    let mut stmt_says: Bool = false;
+    @cfg(not(all(target_arch = "x86_64", target_arch = "aarch64"))) {
+        stmt_says = true;
+    }
+    let agree: Bool = stmt_says == tautology;
+
+    print(f"impossible={impossible} tautology={tautology} agree={agree} ok");
+}

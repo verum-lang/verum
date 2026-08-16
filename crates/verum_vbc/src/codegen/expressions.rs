@@ -31229,8 +31229,50 @@ impl VbcCodegen {
                 });
             }
             "cfg" => {
-                // Configuration check - compile-time constant
-                self.ctx.emit(Instruction::LoadTrue { dst: dest });
+                // `@cfg(pred)` in VALUE position — a compile-time
+                // constant, but the constant is the PREDICATE's value,
+                // not `true` (T0778).  This arm used to emit LoadTrue
+                // unconditionally, so on an aarch64 host
+                //
+                //     @cfg(target_arch = "x86_64")                 -> true
+                //     @cfg(all(target_arch = "x86_64",
+                //              target_arch = "aarch64"))           -> true
+                //
+                // — the second is false on every target that can
+                // exist, and both answered wrongly with no diagnostic.
+                //
+                // Asks the same `CfgEvaluator` that `should_compile_stmt`
+                // and the typechecker consult, so a value and the
+                // statement it guards cannot disagree.
+                let value = match args.first() {
+                    Some(pred_expr) => {
+                        match verum_ast::cfg::parse_cfg_predicate(pred_expr) {
+                            verum_common::Maybe::Some(pred) => {
+                                self.cfg_evaluator.evaluate(&pred)
+                            }
+                            // Unparseable predicate: fail OPEN, matching
+                            // `should_compile_stmt`'s documented
+                            // fall-through, and say so rather than
+                            // answering silently.
+                            verum_common::Maybe::None => {
+                                tracing::warn!(
+                                    "[cfg] @cfg(...) in value position could not be \
+                                     parsed; evaluating as `true` (fail-open).  Check \
+                                     predicate syntax: identifier (`unix`), key-value \
+                                     (`target_os = \"linux\"`), or `all`/`any`/`not`."
+                                );
+                                true
+                            }
+                        }
+                    }
+                    // `@cfg()` with no predicate is vacuously satisfied.
+                    None => true,
+                };
+                if value {
+                    self.ctx.emit(Instruction::LoadTrue { dst: dest });
+                } else {
+                    self.ctx.emit(Instruction::LoadFalse { dst: dest });
+                }
             }
             "const" => {
                 // Compile-time evaluation marker - should have been resolved
