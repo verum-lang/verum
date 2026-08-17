@@ -1,0 +1,51 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: verification, refinement, soundness, substitution, smt
+// @expected-error: E500
+// @expected-error-count: 4
+//
+// Pin (T0789) — substituting the refinement's subject must reach EVERY node
+// of the predicate, not the handful the walk happened to list.
+//
+// `substitute_in_expr` reached 23 of the language's 73 expression forms and
+// returned the node untouched for the other 50.  So in
+//
+//     Int{ (it, 0).0 >= 10 }
+//
+// `it` was never replaced by the value being checked.  The predicate handed
+// to the solver still spoke about an unbound `it`, the solver answered
+// `unknown`, and an unknown verdict was accepted in silence: the refinement
+// advertised a constraint that nothing enforced.  `Int{it >= 10}` — the same
+// constraint without the projection — failed correctly, which is what kept
+// this invisible.
+//
+// The gap was never in the shape of the tuple.  It was that the walk stopped
+// AT THE PROJECTION, exactly as the termination checker's walk did (T0786):
+// `Tuple` was listed, `TupleIndex` was not, so nothing ever descended far
+// enough to find the tuple that was handled.  `Paren`, `Cast`, `NamedArg`,
+// `Pipeline`, `NullCoalesce` and `Try` were absorbed by the same wildcard.
+//
+// The fix is not another list.  The read-only expression walk in the AST
+// crate already covers all 73 forms with no wildcard; what was missing was a
+// mutable twin for rewriters, so each rewriter had rolled its own partial
+// copy.  There is now one shared child walk, and this file is its
+// behavioural pin.
+//
+// The four errors below are the cases the solver can now DECIDE; each has a
+// satisfied twin in `refinement_substitution_satisfied.vr` that must stay
+// silent, because a fix that reported every refinement would also pass a
+// file that only counts errors.
+
+type Projected  is { v: Int{(it, 0).0 >= 10} };
+type Nested     is { v: Int{((it, 0).0, 0).0 >= 10} };
+type Parens     is { v: Int{((it)) >= 10} };
+type ConstSlot  is { v: Int{(0, it).1 >= 10} };
+
+fn main() {
+    let a = Projected { v: 1 };
+    let b = Nested { v: 1 };
+    let c = Parens { v: 1 };
+    let d = ConstSlot { v: 1 };
+    print(a.v + b.v + c.v + d.v);
+}

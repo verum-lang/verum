@@ -1,0 +1,33 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: verification, refinement, soundness, substitution, smt
+// @expected-warning-count: 0
+//
+// Pin (T0789), the other half — the same predicate SHAPES, satisfied by the
+// value, must produce nothing at all.
+//
+// Its sibling `refinement_substitution_reaches_every_node.vr` counts four
+// E500s.  On its own that file is passed by a substitution that reports every
+// refinement it meets, and this campaign has already measured three separate
+// attempts at a soundness warning that did exactly that — one of them was
+// committed and reverted after its output named refinements at lines whose
+// authors had written none.
+//
+// So this file is the control, and it is load-bearing: each type below is a
+// shape whose sibling fails, given a value that satisfies it.  A change that
+// widens reporting fails HERE, where the expected warning count is zero,
+// rather than passing both files and shipping the noise.
+
+type Projected  is { v: Int{(it, 0).0 >= 0} };
+type Nested     is { v: Int{((it, 0).0, 0).0 >= 0} };
+type Parens     is { v: Int{((it)) >= 0} };
+type ConstSlot  is { v: Int{(0, it).1 >= 0} };
+
+fn main() {
+    let a = Projected { v: 1 };
+    let b = Nested { v: 1 };
+    let c = Parens { v: 1 };
+    let d = ConstSlot { v: 1 };
+    print(a.v + b.v + c.v + d.v);
+}

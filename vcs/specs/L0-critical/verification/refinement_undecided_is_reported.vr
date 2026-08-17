@@ -5,31 +5,47 @@
 // @expected-warning: W0500
 // @expected-warning-count: 1
 //
-// Pin (T0788) — a refinement the solver cannot decide against a value
-// known at compile time must be REPORTED, not accepted in silence.
+// Pin (T0788) — a DECLARED refinement the solver cannot decide against a
+// value known at compile time must be REPORTED, not accepted in silence.
 //
-// `(it, 0).0 != (it, 0).0` is false for every possible value, and the
-// file below used to compile with no error and no warning: the verdict
-// arrives as `Unknown { reason: "SMT solver returned unknown" }` and the
-// arm for it was part of a `_ => {}`.  A predicate the solver cannot
-// decide is not thereby true.
+// The verdict for such a predicate arrives as
+// `Unknown { reason: "SMT solver returned unknown" }`, and the arm for it
+// used to be part of a `_ => {}`.  A predicate the solver cannot decide is
+// not thereby true.
 //
 // Gradual verification is deliberate in this language, so the report is a
-// WARNING rather than an error — the point is that the reader is told the
-// constraint is not enforced, instead of being handed a type that
-// advertises a check nobody performs.
+// WARNING rather than an error: the point is that the reader learns the
+// constraint is unenforced instead of being handed a type that advertises
+// a check nobody performs.
 //
-// The count is pinned at exactly ONE, which is the half that keeps this
-// honest.  Warning on every undecided verdict was measured and rejected:
-// the solver answers `Unknown` for ANY predicate against a value it does
-// not yet know, so that version fired on `{it >= -1 && it <= 1}` too —
-// the shape used twenty times in core/ — and a diagnostic that appears on
-// every refinement teaches readers to ignore it.  The rule therefore
-// applies only when the checked value is known at compile time, and
-// `satisfied_stays_quiet` below is the control: it must contribute no
-// warning at all.
+// THREE conditions are load-bearing, and each was learned by measuring a
+// version that fired where nothing was wrong:
+//
+//   * the solver's verdict is `Unknown` — warning on `Valid` is nonsense;
+//   * the checked value is known at compile time — the solver answers
+//     `unknown` for ANY predicate over a value it does not know yet, so
+//     without this the warning appears on every refinement in the stdlib,
+//     `{it >= -1 && it <= 16}` included;
+//   * the predicate is DECLARED, not synthesised — flow-sensitive
+//     narrowing turns an `if` condition into a refinement, and warning
+//     there names a constraint at a line whose author wrote none.
+//
+// The count is pinned at exactly ONE, and the two controls below carry the
+// other half: a satisfied declared refinement and a decidable-but-violated
+// one must contribute no warning at all.  A future version that reverts to
+// warning broadly fails this pin rather than merely adding noise.
+//
+// `via_call` is the undecidable case: a predicate calling a user function.
+// The tuple-projection form is deliberately NOT used here — substituting
+// `it` through a projection now works, so `Int{(it, 0).0 >= 10}` is a hard
+// E500 rather than an undecided one, which is the better outcome and the
+// reason this file names a call instead.
 
-type Undecidable is { taps: Int{(it, 0).0 != (it, 0).0} };
+fn twice(n: Int) -> Int {
+    n + n
+}
+
+type ViaCall is { taps: Int{twice(it) >= 10} };
 
 type Decidable is { taps: Int{it >= -1 && it <= 16} };
 
@@ -39,8 +55,8 @@ fn satisfied_stays_quiet() -> Int {
 }
 
 fn undecided_is_reported() -> Int {
-    let bad = Undecidable { taps: 1 };
-    bad.taps
+    let undecided = ViaCall { taps: 1 };
+    undecided.taps
 }
 
 fn main() {

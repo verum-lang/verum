@@ -1848,19 +1848,107 @@ impl RefinementChecker {
 
             // All other expression types - conservatively clone without substitution
             // This is safe but may miss optimization opportunities
-            _ => expr.clone(),
+            // T0788: a node this walk does not enter keeps its free `it`,
+            // so the predicate reaches the solver un-substituted and comes
+            // back `unknown`.  `TupleIndex` was the case that mattered:
+            // `Tuple` was handled, but the PROJECTION on it was not, so
+            // `(it, 0).0` never had `it` replaced — the same
+            // stopped-at-the-projection shape as the termination walks
+            // (T0786).
+            ExprKind::TupleIndex { expr: inner, index } => Expr::new(
+                ExprKind::TupleIndex {
+                    expr: Box::new(self.substitute_in_expr(inner, var, value)),
+                    index: *index,
+                },
+                expr.span,
+            ),
+            ExprKind::Paren(inner) => Expr::new(
+                ExprKind::Paren(Box::new(self.substitute_in_expr(inner, var, value))),
+                expr.span,
+            ),
+            ExprKind::Cast { expr: inner, ty } => Expr::new(
+                ExprKind::Cast {
+                    expr: Box::new(self.substitute_in_expr(inner, var, value)),
+                    ty: ty.clone(),
+                },
+                expr.span,
+            ),
+            ExprKind::InterpolatedString {
+                handler,
+                parts,
+                exprs,
+            } => Expr::new(
+                ExprKind::InterpolatedString {
+                    handler: handler.clone(),
+                    parts: parts.clone(),
+                    exprs: exprs
+                        .iter()
+                        .map(|e| self.substitute_in_expr(e, var, value))
+                        .collect(),
+                },
+                expr.span,
+            ),
+            // Everything else is structural: the node introduces no
+            // bindings and needs no rule of its own, so substitution is
+            // "rebuild me with each child substituted".
+            //
+            // This arm used to be `expr.clone()`, which made substitution
+            // stop dead at 50 of the 73 `ExprKind` variants — `it` survived
+            // unsubstituted inside `(it, 0).0`, `f(n: it)`, `it |> g`, `it?`
+            // and `a ?? it`.  The predicate then spoke about an unbound `it`,
+            // the solver answered `unknown`, and an unknown verdict was
+            // accepted in silence.  Nothing diagnosed it: the refinement
+            // simply went unchecked.
+            //
+            // The child walk lives in `verum_ast` beside the read-only
+            // `walk_expr` that already covers all 73 variants, so a variant
+            // added to the enum cannot quietly reintroduce the gap.
+            _ => {
+                debug_assert!(
+                    !verum_ast::visit_mut::introduces_bindings(&expr.kind),
+                    "substitution reached a binder through the structural path; \
+                     it needs an explicit arm or the replaced name gets captured"
+                );
+                let mut rebuilt = expr.clone();
+                verum_ast::visit_mut::each_child_expr_mut(&mut rebuilt, &mut |child| {
+                    *child = self.substitute_in_expr(child, var, value);
+                });
+                rebuilt
+            }
         }
     }
 
-    /// Helper: Collect free variables in expression
+    /// The names this expression reads without binding them itself.
+    ///
+    /// Its one caller is capture detection in [`Self::substitute_in_expr`]:
+    /// substituting a value that mentions `n` into a closure whose parameter
+    /// is also `n` would silently change which `n` the body means.
+    ///
+    /// That single use fixes the safe direction of error.  Naming a bound
+    /// variable as free is merely conservative — substitution declines, the
+    /// predicate keeps its original variable, and the solver reports it as
+    /// undecided.  MISSING a free variable is the unsound direction: capture
+    /// detection says "no overlap" and the substitution goes through.
+    ///
+    /// So the binders below are the ones worth an exact rule, and every other
+    /// node is walked structurally through the shared child walk — which
+    /// over-approximates for a binder without an arm here, in the safe
+    /// direction, and cannot miss a node at all.  Before that walk existed
+    /// this function reached 6 of 73 variants: `(a, b).0`, `f(n: a)`, `a.len()`
+    /// and `arr[a]` all reported NO free variables, and it never looked at a
+    /// block's expression statements.
     fn collect_free_vars(&self, expr: &Expr) -> Set<Text> {
+        // The shared walk rewrites in place, so it takes `&mut`.  One clone up
+        // front is the price of not keeping a second, drifting copy of the
+        // structure of every expression node in the language.
+        let mut scratch = expr.clone();
         let mut vars = Set::new();
-        self.collect_free_vars_impl(expr, &mut Set::new(), &mut vars);
+        self.collect_free_vars_impl(&mut scratch, &mut Set::new(), &mut vars);
         vars
     }
 
-    fn collect_free_vars_impl(&self, expr: &Expr, bound: &mut Set<Text>, free: &mut Set<Text>) {
-        match &expr.kind {
+    fn collect_free_vars_impl(&self, expr: &mut Expr, bound: &mut Set<Text>, free: &mut Set<Text>) {
+        match &mut expr.kind {
             ExprKind::Path(path) if path.segments.len() == 1 => {
                 if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
                     let name: Text = ident.name.clone();
@@ -1868,48 +1956,132 @@ impl RefinementChecker {
                         free.insert(name);
                     }
                 }
+                return;
             }
-            ExprKind::Binary { left, right, .. } => {
-                self.collect_free_vars_impl(left, bound, free);
-                self.collect_free_vars_impl(right, bound, free);
-            }
-            ExprKind::Unary { expr: inner, .. } => {
-                self.collect_free_vars_impl(inner, bound, free);
-            }
-            ExprKind::Call { func, args, .. } => {
-                self.collect_free_vars_impl(func, bound, free);
-                for arg in args {
-                    self.collect_free_vars_impl(arg, bound, free);
-                }
-            }
+
+            // Parameters scope over the body and nothing else.
             ExprKind::Closure { params, body, .. } => {
-                let mut new_bound = bound.clone();
-                for param in params {
+                let mut inner_bound = bound.clone();
+                for param in params.iter() {
                     for v in self.pattern_vars(&param.pattern) {
-                        new_bound.insert(v);
+                        inner_bound.insert(v);
                     }
                 }
-                self.collect_free_vars_impl(body, &mut new_bound, free);
+                self.collect_free_vars_impl(body, &mut inner_bound, free);
+                return;
             }
-            ExprKind::Block(block) => {
-                let mut new_bound = bound.clone();
-                for stmt in &block.stmts {
-                    if let verum_ast::StmtKind::Let { pattern, value, .. } = &stmt.kind {
-                        if let Some(init_expr) = value {
-                            self.collect_free_vars_impl(init_expr, &mut new_bound, free);
+
+            // A `let` binds for the statements that FOLLOW it, so the bound
+            // set grows as the block is walked.  Every other statement kind
+            // just contributes its expressions — the earlier version looked
+            // only at `let` and the tail, so `{ f(x); 1 }` reported nothing.
+            ExprKind::Block(block) | ExprKind::Async(block) | ExprKind::Unsafe(block)
+            | ExprKind::Meta(block) => {
+                let mut inner_bound = bound.clone();
+                for stmt in block.stmts.iter_mut() {
+                    match &mut stmt.kind {
+                        verum_ast::StmtKind::Let { pattern, value, .. } => {
+                            if let Some(init) = value {
+                                self.collect_free_vars_impl(init, &mut inner_bound, free);
+                            }
+                            for v in self.pattern_vars(pattern) {
+                                inner_bound.insert(v);
+                            }
                         }
-                        for v in self.pattern_vars(pattern) {
-                            new_bound.insert(v);
+                        verum_ast::StmtKind::LetElse { pattern, value, else_block, .. } => {
+                            self.collect_free_vars_impl(value, &mut inner_bound, free);
+                            let mut else_bound = inner_bound.clone();
+                            let mut as_expr = Expr::new(
+                                ExprKind::Block(else_block.clone()),
+                                else_block.span,
+                            );
+                            self.collect_free_vars_impl(&mut as_expr, &mut else_bound, free);
+                            for v in self.pattern_vars(pattern) {
+                                inner_bound.insert(v);
+                            }
                         }
+                        verum_ast::StmtKind::Expr { expr: stmt_expr, .. } => {
+                            self.collect_free_vars_impl(stmt_expr, &mut inner_bound, free);
+                        }
+                        verum_ast::StmtKind::Defer(inner)
+                        | verum_ast::StmtKind::Errdefer(inner) => {
+                            self.collect_free_vars_impl(inner, &mut inner_bound, free);
+                        }
+                        verum_ast::StmtKind::Provide { value, .. } => {
+                            self.collect_free_vars_impl(value, &mut inner_bound, free);
+                        }
+                        verum_ast::StmtKind::ProvideScope { value, block, .. } => {
+                            self.collect_free_vars_impl(value, &mut inner_bound, free);
+                            self.collect_free_vars_impl(block, &mut inner_bound, free);
+                        }
+                        verum_ast::StmtKind::Item(_) | verum_ast::StmtKind::Empty => {}
                     }
                 }
-                if let Some(final_expr) = &block.expr {
-                    self.collect_free_vars_impl(final_expr, &mut new_bound, free);
+                if let Some(tail) = &mut block.expr {
+                    self.collect_free_vars_impl(tail, &mut inner_bound, free);
                 }
+                return;
             }
-            // Add more cases as needed
+
+            // The pattern scopes over the body and the loop's clauses, but not
+            // over the sequence being iterated.
+            ExprKind::For { pattern, iter, body, invariants, decreases, .. } => {
+                self.collect_free_vars_impl(iter, bound, free);
+                let mut inner_bound = bound.clone();
+                for v in self.pattern_vars(pattern) {
+                    inner_bound.insert(v);
+                }
+                let mut as_expr = Expr::new(ExprKind::Block(body.clone()), body.span);
+                self.collect_free_vars_impl(&mut as_expr, &mut inner_bound, free);
+                for clause in invariants.iter_mut().chain(decreases.iter_mut()) {
+                    self.collect_free_vars_impl(clause, &mut inner_bound, free);
+                }
+                return;
+            }
+
+            // Each arm's pattern scopes over that arm's guard and body only.
+            ExprKind::Match { expr: scrutinee, arms } => {
+                self.collect_free_vars_impl(scrutinee, bound, free);
+                for arm in arms.iter_mut() {
+                    let mut inner_bound = bound.clone();
+                    for v in self.pattern_vars(&arm.pattern) {
+                        inner_bound.insert(v);
+                    }
+                    if let Some(guard) = &mut arm.guard {
+                        self.collect_free_vars_impl(guard, &mut inner_bound, free);
+                    }
+                    self.collect_free_vars_impl(&mut arm.body, &mut inner_bound, free);
+                }
+                return;
+            }
+
+            // Quantifier bindings scope over the domain's siblings and the body.
+            ExprKind::Forall { bindings, body } | ExprKind::Exists { bindings, body } => {
+                let mut inner_bound = bound.clone();
+                for binding in bindings.iter_mut() {
+                    if let Some(domain) = &mut binding.domain {
+                        self.collect_free_vars_impl(domain, &mut inner_bound, free);
+                    }
+                    for v in self.pattern_vars(&binding.pattern) {
+                        inner_bound.insert(v);
+                    }
+                    if let Some(guard) = &mut binding.guard {
+                        self.collect_free_vars_impl(guard, &mut inner_bound, free);
+                    }
+                }
+                self.collect_free_vars_impl(body, &mut inner_bound, free);
+                return;
+            }
+
             _ => {}
         }
+
+        // No bindings of its own, or a binder whose exact rule is not worth
+        // stating for capture detection: walk the children.  Complete over
+        // every `ExprKind` by construction, and conservative in the direction
+        // that keeps substitution honest.
+        let mut visit = |child: &mut Expr| self.collect_free_vars_impl(child, bound, free);
+        verum_ast::visit_mut::each_child_expr_mut(expr, &mut visit);
     }
 
     /// Helper: Check if pattern binds a variable
@@ -2737,6 +2909,25 @@ impl RefinementChecker {
 
             // For other complex expressions, use a simple discriminant hash
             // This is conservative but ensures correctness
+            // Any other node: its kind is already hashed above, and its
+            // children are hashed here.
+            //
+            // This arm used to hash `255u8` and stop, so every instance of an
+            // absorbed kind hashed identically no matter what it contained —
+            // `(a, 0).0` and `(b, 7).1` produced the same value, and 62 of the
+            // language's 73 expression forms were absorbed.  The cache is a
+            // map from this number straight to a verdict, with no equality
+            // check on the condition, so two obligations that collide share an
+            // answer: the first one's verdict is returned for the second.
+            //
+            // Not currently reachable from source, and the reason is worth
+            // recording: `try_syntactic_eval` runs BEFORE the cache and
+            // decides anything closed, while an obligation still holding one
+            // of these nodes is one the SMT encoder does not accept either, so
+            // it comes back `unknown` on both sides of a collision.  The
+            // defect is in the key, not in today's answers — it goes live the
+            // moment the encoder learns any of the 62.  A structural hash owes
+            // its caller injectivity over structure regardless.
             _ => {
                 255u8.hash(hasher);
             }

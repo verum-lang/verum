@@ -601,6 +601,7 @@ fn test_kind_inference_with_refinements() {
             Span::dummy(),
         ),
         binding: RefinementBinding::Inline,
+        provenance: verum_types::refinement::PredicateProvenance::Declared,
         span: Span::dummy(),
     };
 

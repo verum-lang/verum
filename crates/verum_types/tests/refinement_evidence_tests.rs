@@ -475,6 +475,7 @@ fn test_evidence_with_refinement_checker() {
     let predicate = RefinementPredicate {
         predicate: make_binary_expr(BinOp::Gt, make_var_expr("it"), make_int_literal(0)),
         binding: RefinementBinding::Lambda(Text::from("it")),
+        provenance: verum_types::refinement::PredicateProvenance::Declared,
         span: dummy_span(),
     };
     let refinement = RefinementType {
