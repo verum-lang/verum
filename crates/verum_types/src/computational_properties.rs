@@ -785,12 +785,41 @@ pub struct PropertyInferenceContext {
     scope_stack: List<PropertySet>,
 }
 
+/// Builtins whose properties cannot be read off a body, because they have none.
+///
+/// `known_functions` is consulted by the `Call` and `MethodCall` arms of
+/// property inference and was NEVER POPULATED — `register_function` had no
+/// caller anywhere in the tree, so the lookup returned `None` for every callee
+/// and `pure fn s() { print("x"); }` was accepted in silence.
+///
+/// This table is deliberately the smallest thing that closes that for a
+/// builtin: the four printers write to a stream, which is IO by any reading,
+/// and no analysis of a Verum body can discover it because the body is in the
+/// runtime.  It is NOT a general effect table for the standard library — a
+/// user function's properties come from inferring its body, and making that
+/// travel across call sites is a separate, larger piece of work (T0792).
+///
+/// Deliberately absent, and each for a reason:
+///   * `panic` / `unreachable` — Divergent, which a pure function may have;
+///     control flow is a deterministic function of the input.
+///   * `format` and the numeric builtins (`sqrt`, `min`, `abs`, …) — pure.
+///     `IO_AND_NUMERIC_BUILTIN_NAMES` in `infer/env.rs` lists printers and
+///     arithmetic TOGETHER for an unrelated purpose (protecting polymorphic
+///     intrinsics from concrete re-registration); reusing it here would
+///     declare `sqrt` to perform IO.
+const BUILTIN_IO_FUNCTIONS: &[&str] = &["print", "println", "eprint", "eprintln"];
+
 impl PropertyInferenceContext {
     /// Create new property inference context
     pub fn new() -> Self {
+        let mut known_functions = std::collections::HashMap::new();
+        let io = PropertySet::single(ComputationalProperty::IO);
+        for name in BUILTIN_IO_FUNCTIONS {
+            known_functions.insert(Text::from(*name), io.clone());
+        }
         PropertyInferenceContext {
             current_properties: PropertySet::pure(),
-            known_functions: std::collections::HashMap::new(),
+            known_functions,
             scope_stack: List::new(),
         }
     }

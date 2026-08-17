@@ -1,0 +1,48 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: properties, purity, soundness, computational-properties, builtins
+// @expected-error: E503
+// @expected-error-count: 3
+//
+// Pin (T0792, first part) — printing inside a `pure fn` is a side effect and
+// must be reported.
+//
+// Property inference already had the machinery: the call arm looks the callee
+// up in a registry of known function properties.  The registry was NEVER
+// POPULATED — its `register_function` had no caller anywhere in the tree — so
+// every lookup returned nothing and every callee was taken to be pure.  A
+// `pure fn` that printed was therefore accepted in silence, which is the worst
+// shape a defect can take: the compiler was verifying a promise it had stopped
+// reading.
+//
+// The printers are seeded into that registry because their effect cannot be
+// discovered from a Verum body — they have none, the work happens in the
+// runtime.  That is the whole of what this pin covers.  Properties travelling
+// from a USER function to its callers is a separate mechanism and is not
+// claimed here; `purity_allows_pure_wrappers.vr` and the file below hold the
+// line on what must stay quiet.
+//
+// The third case is a printer behind a wrapper, and it needs both halves of
+// the work to fail correctly: T0791 made the wrapper transparent, and this
+// change gave the callee a property worth carrying.  Either one alone leaves
+// it silent.
+
+pure fn prints() -> Int {
+    print("x");
+    2
+}
+
+pure fn prints_a_line() -> Int {
+    println("x");
+    2
+}
+
+pure fn prints_behind_a_wrapper() -> Int {
+    (print("x"));
+    2
+}
+
+fn main() {
+    print(prints() + prints_a_line() + prints_behind_a_wrapper());
+}

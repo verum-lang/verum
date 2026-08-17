@@ -1,0 +1,56 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: properties, purity, soundness, computational-properties, builtins
+//
+// Pin (T0792, the control) — the builtins that are NOT effects must stay that
+// way, and so must the ordinary shape of a pure function.
+//
+// Seeding the property registry with the printers is one edit away from
+// seeding it with the wrong list.  The names live next to each other in
+// `infer/env.rs`, where `IO_AND_NUMERIC_BUILTIN_NAMES` lists printers and
+// arithmetic TOGETHER for an unrelated purpose — protecting polymorphic
+// intrinsics from concrete re-registration.  Reusing that list here would
+// declare `sqrt` to perform IO, and every numeric `pure fn` in the standard
+// library would stop compiling.
+//
+// Three lines are load-bearing beyond the numerics:
+//
+//   * `panic` is Divergent, and a pure function may diverge — control flow is
+//     a deterministic function of the input.  A registry that called it an
+//     effect would reject every guarded pure function.
+//   * a LOCAL mutable accumulator is not a side effect.  This is the most
+//     common shape a pure function has, and a purity rule that flagged every
+//     assignment would break all of them.
+//   * a pure function calling a pure function must stay silent, or property
+//     propagation would be self-poisoning the moment it is switched on.
+
+pure fn numeric(a: Float) -> Float {
+    a.sqrt() + a.abs()
+}
+
+pure fn bounded(a: Int, b: Int) -> Int {
+    a.min(b) + a.max(b)
+}
+
+pure fn guarded(a: Int) -> Int {
+    if a < 0 { panic("neg") } else { a }
+}
+
+pure fn accumulates(a: Int) -> Int {
+    let mut total = 0;
+    if a > 0 { total = a * 2 } else { total = -a };
+    total
+}
+
+pure fn formats(a: Int) -> Text {
+    f"{a}"
+}
+
+pure fn calls_pure(a: Int) -> Int {
+    bounded(a, 1) * 2
+}
+
+fn main() {
+    print(f"{numeric(4.0)} {guarded(1)} {accumulates(3)} {formats(1)} {calls_pure(2)}");
+}
