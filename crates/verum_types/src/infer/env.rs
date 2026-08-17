@@ -3334,7 +3334,7 @@ impl TypeChecker {
                                     },
                                     condition.span,
                                 );
-                                let predicate = crate::refinement::RefinementPredicate::inline(
+                                let predicate = crate::refinement::RefinementPredicate::narrowed(
                                     predicate_expr,
                                     condition.span,
                                 );
@@ -3367,7 +3367,7 @@ impl TypeChecker {
                                     },
                                     condition.span,
                                 );
-                                let predicate = crate::refinement::RefinementPredicate::inline(
+                                let predicate = crate::refinement::RefinementPredicate::narrowed(
                                     predicate_expr,
                                     condition.span,
                                 );

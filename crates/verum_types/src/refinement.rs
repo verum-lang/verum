@@ -94,6 +94,33 @@ pub struct RefinementPredicate {
     pub binding: RefinementBinding,
     /// Source location for error reporting
     pub span: Span,
+    /// Did a human write this predicate, or did the compiler synthesise it?
+    ///
+    /// Flow-sensitive narrowing turns an `if` condition into a
+    /// `Type::Refined` so the branch sees a sharper type
+    /// (`narrow_variable_types_impl`).  That predicate is an ASSUMPTION —
+    /// there is nothing to discharge — while a declared `Int{it >= 1}` is
+    /// an OBLIGATION.  Both were built by `RefinementPredicate::inline`,
+    /// so nothing downstream could tell them apart, and a diagnostic about
+    /// unverified obligations landed on narrowed conditions: it named a
+    /// refinement at `core/math/elementary.vr:431`, a line whose only
+    /// predicate is the `if` that narrows it (T0788).
+    ///
+    /// `binding` deliberately does NOT carry this: it records how the
+    /// subject is NAMED (`it`, a lambda parameter, a sigma variable),
+    /// which is a separate question from where the predicate came from.
+    pub provenance: PredicateProvenance,
+}
+
+/// Where a refinement predicate came from — see
+/// [`RefinementPredicate::provenance`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PredicateProvenance {
+    /// Written in the source as a refinement: an obligation to discharge.
+    Declared,
+    /// Synthesised by the compiler from control flow: an assumption that
+    /// holds on this path, with nothing to prove.
+    Narrowed,
 }
 
 impl RefinementPredicate {
@@ -104,6 +131,22 @@ impl RefinementPredicate {
             predicate,
             binding: RefinementBinding::Inline,
             span,
+            provenance: PredicateProvenance::Declared,
+        }
+    }
+
+    /// Create a refinement the COMPILER synthesised from control flow.
+    ///
+    /// Same shape as [`Self::inline`]; the difference is that this
+    /// predicate is an assumption that holds on the current path, not an
+    /// obligation the author asked to have discharged.  See
+    /// [`RefinementPredicate::provenance`].
+    pub fn narrowed(predicate: Expr, span: Span) -> Self {
+        Self {
+            predicate,
+            binding: RefinementBinding::Inline,
+            span,
+            provenance: PredicateProvenance::Narrowed,
         }
     }
 
@@ -114,6 +157,7 @@ impl RefinementPredicate {
             predicate,
             binding: RefinementBinding::Lambda(var_name),
             span,
+            provenance: PredicateProvenance::Declared,
         }
     }
 
@@ -124,6 +168,7 @@ impl RefinementPredicate {
             predicate,
             binding: RefinementBinding::Sigma(var_name),
             span,
+            provenance: PredicateProvenance::Declared,
         }
     }
 
@@ -155,6 +200,7 @@ impl RefinementPredicate {
             predicate,
             binding: RefinementBinding::Named(predicate_path),
             span,
+            provenance: PredicateProvenance::Declared,
         }
     }
 
@@ -165,6 +211,7 @@ impl RefinementPredicate {
             predicate,
             binding: RefinementBinding::Bare,
             span,
+            provenance: PredicateProvenance::Declared,
         }
     }
 
@@ -192,6 +239,7 @@ impl RefinementPredicate {
             predicate,
             binding: RefinementBinding::Inline,
             span,
+            provenance: PredicateProvenance::Declared,
         }
     }
 
@@ -212,6 +260,7 @@ impl RefinementPredicate {
             predicate: Expr::literal(Literal::bool(true, span)),
             binding: RefinementBinding::Inline,
             span,
+            provenance: PredicateProvenance::Declared,
         }
     }
 

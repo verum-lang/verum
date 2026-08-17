@@ -10300,6 +10300,8 @@ impl TypeChecker {
                                 predicate: (**ref_expr).clone(),
                                 binding: RefinementBinding::Sigma(name.name.clone()),
                                 span: ty.span,
+                                provenance:
+                                    crate::refinement::PredicateProvenance::Declared,
                             })
                         }
                         None => None,
@@ -13909,6 +13911,8 @@ impl TypeChecker {
             predicate: new_expr,
             binding: predicate.binding.clone(),
             span: predicate.span,
+            // Substitution preserves where the predicate came from.
+            provenance: predicate.provenance,
         }
     }
 

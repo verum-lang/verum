@@ -1,0 +1,48 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: verification, refinement, soundness, smt
+// @expected-warning: W0500
+// @expected-warning-count: 1
+//
+// Pin (T0788) — a refinement the solver cannot decide against a value
+// known at compile time must be REPORTED, not accepted in silence.
+//
+// `(it, 0).0 != (it, 0).0` is false for every possible value, and the
+// file below used to compile with no error and no warning: the verdict
+// arrives as `Unknown { reason: "SMT solver returned unknown" }` and the
+// arm for it was part of a `_ => {}`.  A predicate the solver cannot
+// decide is not thereby true.
+//
+// Gradual verification is deliberate in this language, so the report is a
+// WARNING rather than an error — the point is that the reader is told the
+// constraint is not enforced, instead of being handed a type that
+// advertises a check nobody performs.
+//
+// The count is pinned at exactly ONE, which is the half that keeps this
+// honest.  Warning on every undecided verdict was measured and rejected:
+// the solver answers `Unknown` for ANY predicate against a value it does
+// not yet know, so that version fired on `{it >= -1 && it <= 1}` too —
+// the shape used twenty times in core/ — and a diagnostic that appears on
+// every refinement teaches readers to ignore it.  The rule therefore
+// applies only when the checked value is known at compile time, and
+// `satisfied_stays_quiet` below is the control: it must contribute no
+// warning at all.
+
+type Undecidable is { taps: Int{(it, 0).0 != (it, 0).0} };
+
+type Decidable is { taps: Int{it >= -1 && it <= 16} };
+
+fn satisfied_stays_quiet() -> Int {
+    let ok = Decidable { taps: 4 };
+    ok.taps
+}
+
+fn undecided_is_reported() -> Int {
+    let bad = Undecidable { taps: 1 };
+    bad.taps
+}
+
+fn main() {
+    print(satisfied_stays_quiet() + undecided_is_reported());
+}

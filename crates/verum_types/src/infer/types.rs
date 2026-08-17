@@ -773,6 +773,8 @@ impl TypeChecker {
                     predicate: predicate.expr.clone(),
                     binding: binding.clone(),
                     span: predicate.span,
+                    // Lowered from a refinement written in the source.
+                    provenance: crate::refinement::PredicateProvenance::Declared,
                 };
 
                 // Verify dependent type constraint using SMT if enabled for
