@@ -1,0 +1,60 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: properties, purity, soundness, computational-properties
+// @expected-error: E503
+// @expected-error-count: 4
+//
+// Pin (T0791) — the purity gate must see an impure expression through any
+// wrapper, not only through the wrappers someone remembered to list.
+//
+// Property inference declared 45 of the language’s 73 expression forms pure
+// outright — without looking at what they contained.
+// The comment on that arm read "Default: pure for unhandled cases", and that
+// is what it did.  So ONE PAIR OF PARENTHESES defeated the gate:
+//
+//     pure fn s() -> Int { spawn { 1 }; 2 }        error<E503>
+//     pure fn s() -> Int { (spawn { 1 }); 2 }      accepted, silently
+//
+// A `pure fn` is a compiler-verified promise of no side effects, and the
+// compiler was verifying a promise it had stopped reading.
+//
+// What kept this invisible for so long is that the 28 forms which WERE listed
+// are the ones people write: `let _ = spawn { 1 }` reported correctly, so the
+// gate looked like it worked, and every ordinary test of it passed.
+//
+// `spawn` is the impure operation used here because it is the one that
+// `validate_for_pure_fn` rejects with no room for argument.  Fallible and
+// Divergent are deliberately ALLOWED in a pure function — errors and panics
+// are deterministic — so a predicate built on `?` or `panic` would pin
+// nothing.
+//
+// Its control lives in `purity_allows_pure_wrappers.vr`: the same four
+// wrapper shapes around genuinely pure expressions must stay silent.  Union
+// of children can only ADD properties, so the failure mode of this fix is a
+// pure function that stops compiling, and that file is what catches it.
+
+pure fn parenthesised() -> Int {
+    (spawn { 1 });
+    2
+}
+
+pure fn behind_a_projection() -> Int {
+    let _ = (spawn { 1 }, 0).1;
+    2
+}
+
+pure fn inside_an_interpolation() -> Int {
+    let _ = f"{spawn { 1 }}";
+    2
+}
+
+pure fn bare_for_comparison() -> Int {
+    spawn { 1 };
+    2
+}
+
+fn main() {
+    print(parenthesised() + behind_a_projection() + inside_an_interpolation()
+        + bare_for_comparison());
+}

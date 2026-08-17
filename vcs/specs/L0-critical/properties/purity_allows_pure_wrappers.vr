@@ -1,0 +1,37 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: properties, purity, soundness, computational-properties
+//
+// Pin (T0791), the control — the wrappers from
+// `purity_sees_through_wrappers.vr` around expressions that really are pure
+// must produce nothing.
+//
+// The fix there replaced "unhandled forms are pure" with "a form's properties
+// are its children's".  That direction can only ADD properties, so its failure
+// mode is a `pure fn` that no longer compiles — and a file that merely counts
+// E503s cannot tell a fixed gate from an over-eager one.  This one can: every
+// function below uses a wrapper whose sibling fails, over an expression with
+// no side effects at all.
+
+pure fn parenthesised(a: Int) -> Int {
+    ((a)) + (a + 1)
+}
+
+pure fn through_a_projection(a: Int, b: Int) -> Int {
+    let pair = (a + b, a - b);
+    pair.0 + (pair, 0).1
+}
+
+pure fn through_an_interpolation(a: Int) -> Int {
+    f"{a}".len()
+}
+
+pure fn arithmetic_only(a: Int) -> Int {
+    a * 2 + 1
+}
+
+fn main() {
+    print(parenthesised(1) + through_a_projection(3, 2) + through_an_interpolation(4)
+        + arithmetic_only(5));
+}

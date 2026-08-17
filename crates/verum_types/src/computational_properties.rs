@@ -1037,19 +1037,7 @@ impl PropertyInferrer {
             }
 
             // Blocks: union of all statements
-            ExprKind::Block(block) => {
-                let mut combined = PropertySet::pure();
-
-                for stmt in &block.stmts {
-                    combined = combined.union(&self.infer_stmt(stmt));
-                }
-
-                if let Some(expr) = &block.expr {
-                    combined = combined.union(&self.infer_expr(expr));
-                }
-
-                combined
-            }
+            ExprKind::Block(block) => self.infer_block(block),
 
             // Loops may diverge
             ExprKind::Loop { body, .. } => {
@@ -1256,9 +1244,57 @@ impl PropertyInferrer {
                 combined
             }
 
-            // Default: pure for unhandled cases
-            _ => PropertySet::pure(),
+            // Any other node: its properties are its children's.
+            //
+            // This arm used to return `PropertySet::pure()` outright, for 45
+            // of the language's 73 expression forms, without looking at what
+            // they contained — the comment here said "Default: pure for
+            // unhandled cases", which is exactly what it did.  A single pair of
+            // parentheses therefore defeated the purity gate; all four of
+            // these were measured:
+            //
+            //     pure fn s() -> Int { spawn { 1 }; 2 }                 E503
+            //     pure fn s() -> Int { (spawn { 1 }); 2 }               accepted
+            //     pure fn s() -> Int { let _ = (spawn { 1 }, 0).1; 2 }  accepted
+            //     pure fn s() -> Int { let _ = f"{spawn { 1 }}"; 2 }    accepted
+            //
+            // `let _ = spawn { 1 }` still reported, because `Let` was one of
+            // the 28 forms that WERE listed.  That is why this went unnoticed:
+            // the shapes people write most often were covered, so the gate
+            // looked like it worked.
+            //
+            // Union of the children is the conservative rule.  It can only ADD
+            // properties, never remove them, so any residual error shows up as
+            // a `pure fn` that fails to compile — loud — rather than an impure
+            // one that passes.  Nodes contributing a property of their OWN
+            // beyond their children (`for await` is Async, `asm!` is not pure
+            // by any reading) are left for a separate change, because they can
+            // only be measured for what they break if they land alone.
+            _ => {
+                let mut scratch = expr.clone();
+                let mut combined = PropertySet::pure();
+                verum_ast::visit_mut::each_child_expr_mut(&mut scratch, &mut |child| {
+                    combined = combined.union(&self.infer_expr(child));
+                });
+                combined
+            }
         }
+    }
+
+    /// Union of the properties of every statement and of the tail expression.
+    ///
+    /// Extracted so the expression arm and the statement walk cannot drift.
+    /// The knowledge was written out twice, and the statement copy reached
+    /// four of the nine statement forms.
+    fn infer_block(&mut self, block: &verum_ast::expr::Block) -> PropertySet {
+        let mut combined = PropertySet::pure();
+        for stmt in &block.stmts {
+            combined = combined.union(&self.infer_stmt(stmt));
+        }
+        if let Some(expr) = &block.expr {
+            combined = combined.union(&self.infer_expr(expr));
+        }
+        combined
     }
 
     /// Infer properties from a statement
@@ -1281,7 +1317,29 @@ impl PropertyInferrer {
             // Errdefer is similar to Defer - analyze the deferred expression
             StmtKind::Errdefer(expr) => self.infer_expr(expr),
 
-            _ => PropertySet::pure(),
+            // The `else` arm runs on the failing path and belongs to this
+            // statement, so its properties do too.
+            StmtKind::LetElse {
+                value, else_block, ..
+            } => {
+                let value_props = self.infer_expr(value);
+                value_props.union(&self.infer_block(else_block))
+            }
+
+            // A provided value is evaluated here, and the scoped form also
+            // carries the body it provides to.
+            StmtKind::Provide { value, .. } => self.infer_expr(value),
+            StmtKind::ProvideScope { value, block, .. } => {
+                let value_props = self.infer_expr(value);
+                value_props.union(&self.infer_expr(block))
+            }
+
+            // A declaration nested in a block has properties of its own, and
+            // they belong to that declaration rather than to the statement
+            // carrying it.  Nothing runs at this point.
+            StmtKind::Item(_) => PropertySet::pure(),
+
+            StmtKind::Empty => PropertySet::pure(),
         }
     }
 
