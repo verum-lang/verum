@@ -1195,7 +1195,10 @@ impl TerminationChecker {
             // The catch-all is gone; the exhaustiveness checker now names
             // any new variant so this cannot silently regrow.
             // ---------------------------------------------------------
-            ExprKind::Tuple(elements) | ExprKind::SetLiteral { elements } => {
+            // `Tuple` itself was already walked above; the gap was the
+            // PROJECTION `.0` on it (`TupleIndex`, below) — the walk never
+            // reached the tuple because it stopped at the projection.
+            ExprKind::SetLiteral { elements } => {
                 for e in elements.iter() {
                     self.collect_calls_from_expr(e, calls);
                 }
@@ -1823,7 +1826,9 @@ impl TerminationChecker {
             // The catch-all is gone, so a new `ExprKind` cannot quietly
             // reopen the hole.
             // ---------------------------------------------------------
-            ExprKind::Tuple(elements) | ExprKind::SetLiteral { elements } => {
+            // `Tuple` itself was already walked above; the gap was the
+            // PROJECTION `.0` on it (`TupleIndex`, below).
+            ExprKind::SetLiteral { elements } => {
                 for e in elements.iter() {
                     self.find_recursive_calls_impl(e, func_name, calls, match_bindings);
                 }
