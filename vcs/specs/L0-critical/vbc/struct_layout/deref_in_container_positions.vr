@@ -1,0 +1,44 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: vbc, deref, struct-layout, ast-walk, coverage
+// @expected-stdout: 20 20 20 20 20 ok
+//
+// Pin — an expression means the same thing wherever it is written.
+//
+// The AST-commit walk that materialises `Deref` coercions (and stamps
+// resolved call targets) ended in `_ => {}`, and that catch-all was
+// absorbing 32 of the 60 expression nodes that carry sub-expressions.
+// So `b[1]` was correct on its own line and wrong inside a record
+// literal, an array literal, a tuple, a set literal, or a format string
+// — silently, with no diagnostic and nothing in the source to warn a
+// reader that position mattered.
+//
+// The catch-all is gone: the match is exhaustive, so a new `ExprKind`
+// variant cannot be added without deciding what this walk owes it.  This
+// pin covers one representative of each container family; the guarantee
+// it encodes is the general one.
+
+type Boxy<T> is { inner: T };
+
+implement<T> Deref for Boxy<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.inner
+    }
+}
+
+type Holder is { got: Int };
+
+fn main() {
+    let b: Boxy<List<Int>> = Boxy { inner: [10, 20, 30] };
+
+    let plain: Int = b[1];
+    let in_record = Holder { got: b[1] };
+    let in_array: List<Int> = [b[1]];
+    let in_tuple: (Int, Int) = (b[1], 0);
+    let in_format: Text = f"{b[1]}";
+
+    print(f"{plain} {in_record.got} {in_array[0]} {in_tuple.0} {in_format} ok");
+}

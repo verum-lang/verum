@@ -540,8 +540,274 @@ fn commit_children(
                 commit_resolved_in_expr(e, table, false);
             }
         }
-        // Leaves and structurally simple kinds: nothing to recurse.
-        _ => {}
+        // ---------------------------------------------------------------
+        // Everything below used to fall into a `_ => {}`, and that
+        // catch-all is why 32 of the 60 sub-expression-bearing nodes were
+        // never walked: a side-table committed here simply did not reach
+        // them.  Measured on `Record` — `Holder { got: b[1] }` indexed the
+        // WRAPPER while the same `b[1]` on its own line was correct.
+        //
+        // The catch-all is deliberately gone.  A new `ExprKind` variant
+        // now fails to compile until someone decides what this walk owes
+        // it, which is the only mechanism that keeps coverage from
+        // drifting again.
+        // ---------------------------------------------------------------
+        ExprKind::Record { fields, base, .. } => {
+            for f in fields.iter_mut() {
+                if let Maybe::Some(v) = &mut f.value {
+                    commit_resolved_in_expr(v, table, false);
+                }
+            }
+            if let Maybe::Some(b) = base {
+                commit_resolved_in_expr(b, table, false);
+            }
+        }
+        ExprKind::MapLiteral { entries } => {
+            for (k, v) in entries.iter_mut() {
+                commit_resolved_in_expr(k, table, false);
+                commit_resolved_in_expr(v, table, false);
+            }
+        }
+        ExprKind::SetLiteral { elements } => {
+            for e in elements.iter_mut() {
+                commit_resolved_in_expr(e, table, false);
+            }
+        }
+        ExprKind::NamedArg { value, .. } => commit_resolved_in_expr(value, table, false),
+        ExprKind::Yield(e)
+        | ExprKind::Typeof(e)
+        | ExprKind::Lift { expr: e }
+        | ExprKind::StageEscape { expr: e, .. }
+        | ExprKind::Spawn { expr: e, .. }
+        | ExprKind::Attenuate { context: e, .. }
+        | ExprKind::Is { expr: e, .. }
+        | ExprKind::DestructuringAssign { value: e, .. } => {
+            commit_resolved_in_expr(e, table, false)
+        }
+        ExprKind::Unsafe(block) | ExprKind::Meta(block) => {
+            commit_resolved_in_block(block, table)
+        }
+        ExprKind::Break { value, .. } => {
+            if let Maybe::Some(v) = value {
+                commit_resolved_in_expr(v, table, false);
+            }
+        }
+        ExprKind::Continue { .. } => {}
+        ExprKind::MetaFunction { args, .. } => {
+            for a in args.iter_mut() {
+                commit_resolved_in_expr(a, table, false);
+            }
+        }
+        ExprKind::TensorLiteral { data, .. } => commit_resolved_in_expr(data, table, false),
+        ExprKind::UseContext { handler, body, .. } => {
+            commit_resolved_in_expr(handler, table, false);
+            commit_resolved_in_expr(body, table, false);
+        }
+        ExprKind::Forall { bindings, body } | ExprKind::Exists { bindings, body } => {
+            for b in bindings.iter_mut() {
+                if let Maybe::Some(d) = &mut b.domain {
+                    commit_resolved_in_expr(d, table, false);
+                }
+                if let Maybe::Some(g) = &mut b.guard {
+                    commit_resolved_in_expr(g, table, false);
+                }
+            }
+            commit_resolved_in_expr(body, table, false);
+        }
+        ExprKind::Comprehension { expr, clauses }
+        | ExprKind::SetComprehension { expr, clauses }
+        | ExprKind::StreamComprehension { expr, clauses }
+        | ExprKind::GeneratorComprehension { expr, clauses } => {
+            commit_resolved_in_expr(expr, table, false);
+            commit_in_comprehension_clauses(clauses, table);
+        }
+        ExprKind::MapComprehension {
+            key_expr,
+            value_expr,
+            clauses,
+        } => {
+            commit_resolved_in_expr(key_expr, table, false);
+            commit_resolved_in_expr(value_expr, table, false);
+            commit_in_comprehension_clauses(clauses, table);
+        }
+        ExprKind::ForAwait {
+            async_iterable,
+            body,
+            invariants,
+            decreases,
+            ..
+        } => {
+            commit_resolved_in_expr(async_iterable, table, false);
+            commit_resolved_in_block(body, table);
+            for e in invariants.iter_mut().chain(decreases.iter_mut()) {
+                commit_resolved_in_expr(e, table, false);
+            }
+        }
+        ExprKind::TryFinally {
+            try_block,
+            finally_block,
+        } => {
+            commit_resolved_in_expr(try_block, table, false);
+            commit_resolved_in_expr(finally_block, table, false);
+        }
+        ExprKind::TryRecover { try_block, recover } => {
+            commit_resolved_in_expr(try_block, table, false);
+            commit_in_recover_body(recover, table);
+        }
+        ExprKind::TryRecoverFinally {
+            try_block,
+            recover,
+            finally_block,
+        } => {
+            commit_resolved_in_expr(try_block, table, false);
+            commit_in_recover_body(recover, table);
+            commit_resolved_in_expr(finally_block, table, false);
+        }
+        ExprKind::Nursery {
+            body,
+            on_cancel,
+            recover,
+            ..
+        } => {
+            commit_resolved_in_block(body, table);
+            if let Maybe::Some(b) = on_cancel {
+                commit_resolved_in_block(b, table);
+            }
+            if let Maybe::Some(r) = recover {
+                commit_in_recover_body(r, table);
+            }
+        }
+        // A calculation chain carries proof steps rather than ordinary
+        // expressions; it has its own walk in the verification phase and
+        // no side-table of this walk's applies to it.  Stated as an arm
+        // rather than left to a catch-all so the decision is visible.
+        ExprKind::CalcBlock(_) => {}
+        // Leaves: literals, paths, `self`, and friends carry no
+        // sub-expression.  Listed explicitly for the same reason.
+        ExprKind::Tuple(elements) => {
+            for e in elements.iter_mut() {
+                commit_resolved_in_expr(e, table, false);
+            }
+        }
+        ExprKind::Array(array) => match array {
+            verum_ast::expr::ArrayExpr::List(elements) => {
+                for e in elements.iter_mut() {
+                    commit_resolved_in_expr(e, table, false);
+                }
+            }
+            verum_ast::expr::ArrayExpr::Repeat { value, count } => {
+                commit_resolved_in_expr(value, table, false);
+                commit_resolved_in_expr(count, table, false);
+            }
+        },
+        ExprKind::StreamLiteral(stream) => match &mut stream.kind {
+            verum_ast::expr::StreamLiteralKind::Elements { elements, .. } => {
+                for e in elements.iter_mut() {
+                    commit_resolved_in_expr(e, table, false);
+                }
+            }
+            verum_ast::expr::StreamLiteralKind::Range { start, end, .. } => {
+                commit_resolved_in_expr(start, table, false);
+                if let Maybe::Some(e) = end {
+                    commit_resolved_in_expr(e, table, false);
+                }
+            }
+        },
+        ExprKind::Select { arms, .. } => {
+            for arm in arms.iter_mut() {
+                if let Maybe::Some(f) = &mut arm.future {
+                    commit_resolved_in_expr(f, table, false);
+                }
+                if let Maybe::Some(g) = &mut arm.guard {
+                    commit_resolved_in_expr(g, table, false);
+                }
+                commit_resolved_in_expr(&mut arm.body, table, false);
+            }
+        }
+        // `@inject(Type)` names a type to resolve from the context, and
+        // carries no expression of its own.
+        ExprKind::Inject { .. } => {}
+        // Carry TOKENS or TYPES rather than typed expressions, so this
+        // walk owes them nothing.  `MacroCall` is expanded in phase 3,
+        // long before any side-table exists.  Each is an arm rather than
+        // a silent default so the judgement is on the record.
+        ExprKind::Quote { .. }
+        | ExprKind::MacroCall { .. }
+        | ExprKind::TypeBound { .. }
+        | ExprKind::TypeProperty { .. }
+        | ExprKind::TypeExpr(_) => {}
+        ExprKind::InlineAsm { operands, .. } => {
+            use verum_ast::expr::AsmOperandKind;
+            for op in operands.iter_mut() {
+                match &mut op.kind {
+                    // An `out`/`inout` operand is a PLACE, so it takes the
+                    // same treatment as an assignment target: no coercion
+                    // is materialised into it.
+                    AsmOperandKind::In { expr, .. } => {
+                        commit_resolved_in_expr(expr, table, false)
+                    }
+                    AsmOperandKind::Out { place, .. }
+                    | AsmOperandKind::InOut { place, .. } => {
+                        commit_resolved_in_expr(place, table, true)
+                    }
+                    AsmOperandKind::InLateOut {
+                        in_expr, out_place, ..
+                    } => {
+                        commit_resolved_in_expr(in_expr, table, false);
+                        commit_resolved_in_expr(out_place, table, true);
+                    }
+                    AsmOperandKind::Const { expr } => {
+                        commit_resolved_in_expr(expr, table, false)
+                    }
+                    // A symbol operand names a path and a clobber names a
+                    // register; neither carries an expression.
+                    AsmOperandKind::Sym { .. } | AsmOperandKind::Clobber { .. } => {}
+                }
+            }
+        }
+        ExprKind::CopatternBody { arms, .. } => {
+            for arm in arms.iter_mut() {
+                commit_resolved_in_expr(&mut arm.body, table, false);
+            }
+        }
+        ExprKind::Literal(_) | ExprKind::Path(_) => {}
+    }
+}
+
+fn commit_in_comprehension_clauses(
+    clauses: &mut verum_common::List<verum_ast::expr::ComprehensionClause>,
+    table: &CommitTables<'_>,
+) {
+    use verum_ast::expr::ComprehensionClauseKind;
+    for clause in clauses.iter_mut() {
+        match &mut clause.kind {
+            ComprehensionClauseKind::For { iter, .. } => {
+                commit_resolved_in_expr(iter, table, false)
+            }
+            ComprehensionClauseKind::If(cond) => commit_resolved_in_expr(cond, table, false),
+            ComprehensionClauseKind::Let { value, .. } => {
+                commit_resolved_in_expr(value, table, false)
+            }
+        }
+    }
+}
+
+fn commit_in_recover_body(
+    recover: &mut verum_ast::expr::RecoverBody,
+    table: &CommitTables<'_>,
+) {
+    use verum_ast::expr::RecoverBody;
+    use verum_common::Maybe;
+    match recover {
+        RecoverBody::MatchArms { arms, .. } => {
+            for arm in arms.iter_mut() {
+                if let Maybe::Some(g) = &mut arm.guard {
+                    commit_resolved_in_expr(g, table, false);
+                }
+                commit_resolved_in_expr(&mut arm.body, table, false);
+            }
+        }
+        RecoverBody::Closure { body, .. } => commit_resolved_in_expr(body, table, false),
     }
 }
 
