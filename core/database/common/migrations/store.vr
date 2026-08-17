@@ -102,7 +102,7 @@ implement MigrationStoreConfig {
 // MigrationStore — the core protocol
 // =============================================================================
 
-public protocol MigrationStore {
+public type MigrationStore is protocol {
     /// Adapter dialect identifier (e.g., "sqlite", "postgres"). Used in
     /// diagnostics and run-report headers.
     fn dialect(&self) -> Text;

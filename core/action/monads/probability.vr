@@ -66,11 +66,11 @@ public fn prob_bind<A, B>(
     let mut joined: List<(B, Float)> = List.new();
     let mut i: Int = 0;
     while i < m.support.len() as Int {
-        let pair_a = (*m.support.get(i as Int).unwrap()).clone();
+        let pair_a = (m.support.get(i as Int).unwrap()).clone();
         let inner: Probability<B> = f(pair_a.0);
         let mut j: Int = 0;
         while j < inner.support.len() as Int {
-            let pair_b = (*inner.support.get(j as Int).unwrap()).clone();
+            let pair_b = (inner.support.get(j as Int).unwrap()).clone();
             joined.push((pair_b.0, pair_a.1 * pair_b.1));
             j = j + 1;
         }
@@ -86,7 +86,7 @@ public fn prob_strength<A, B>(a: A, mb: Probability<B>) -> Probability<(A, B)> {
     let mut paired: List<((A, B), Float)> = List.new();
     let mut i: Int = 0;
     while i < mb.support.len() as Int {
-        let pair_b = (*mb.support.get(i as Int).unwrap()).clone();
+        let pair_b = (mb.support.get(i as Int).unwrap()).clone();
         paired.push(((a.clone(), pair_b.0), pair_b.1));
         i = i + 1;
     }
@@ -100,7 +100,7 @@ public fn prob_total_weight<A>(m: Probability<A>) -> Float {
     let mut total: Float = 0.0;
     let mut i: Int = 0;
     while i < m.support.len() as Int {
-        let pair = (*m.support.get(i as Int).unwrap()).clone();
+        let pair = (m.support.get(i as Int).unwrap()).clone();
         total = total + pair.1;
         i = i + 1;
     }

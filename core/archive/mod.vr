@@ -205,7 +205,7 @@ implement Debug for ArchiveError {
 //
 // Bidirectional packaging interface. Format adapters implement this to
 // participate in the universal subsystem.
-public protocol Archive {
+public type Archive is protocol {
     fn algorithm(&self) -> ArchiveAlgorithm;
 
     /// Pack a list of entries into a single byte stream.

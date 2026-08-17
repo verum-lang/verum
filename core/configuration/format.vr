@@ -119,7 +119,7 @@ public fn default_capabilities() -> FormatCapabilities {
 //
 // The universal interface for every configuration format. Implementations
 // live in `core/configuration/<format>.vr`.
-public protocol ConfigFormat {
+public type ConfigFormat is protocol {
     /// Stable identifier. Must match `format_id_<name>()` in error.vr if
     /// the format is built-in.
     fn format_id(&self) -> FormatId;

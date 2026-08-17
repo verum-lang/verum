@@ -327,7 +327,7 @@ public fn effect_kind_name(kind: EffectKind) -> Text {
 public fn parallel_coherent(kinds: List<EffectKind>) -> Bool {
     let mut i: Int = 0;
     while i < kinds.len() as Int {
-        if !is_commutative_effect(*kinds.get(i as Int).unwrap()) {
+        if !is_commutative_effect(kinds.get(i as Int).unwrap()) {
             return false;
         }
         i = i + 1;

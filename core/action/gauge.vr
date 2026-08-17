@@ -62,8 +62,8 @@ fn enactment_eq(a: Enactment, b: Enactment) -> Bool {
     if a.steps.len() != b.steps.len() { return false; }
     let mut i: Int = 0;
     while i < a.steps.len() as Int {
-        if !primitive_eq(*a.steps.get(i as Int).unwrap(),
-                         *b.steps.get(i as Int).unwrap()) {
+        if !primitive_eq(a.steps.get(i as Int).unwrap(),
+                         b.steps.get(i as Int).unwrap()) {
             return false;
         }
         i = i + 1;

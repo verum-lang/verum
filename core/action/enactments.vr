@@ -42,7 +42,7 @@ public fn compose(a: Enactment, b: Enactment) -> Enactment {
     let mut joined: List<Primitive> = a.steps.clone();
     let mut i: Int = 0;
     while i < b.steps.len() as Int {
-        joined.push(*b.steps.get(i as Int).unwrap());
+        joined.push(b.steps.get(i as Int).unwrap());
         i = i + 1;
     }
     let rank: Int = if a.activation_rank >= b.activation_rank {
