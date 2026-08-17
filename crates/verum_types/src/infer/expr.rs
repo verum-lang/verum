@@ -2064,7 +2064,50 @@ impl TypeChecker {
                                 }
                                 // Syntactic can't confirm → gradual verification
                             }
-                            // Valid, Unknown, or Err — gradual verification
+                            // An SMT `unknown` on a STATICALLY KNOWN value is
+                            // not a pass (T0788).
+                            //
+                            // Measured verdicts, value 1 against two predicates:
+                            //
+                            //   {it >= -1 && it <= 1}  literal      -> Valid
+                            //   {it >= -1 && it <= 1}  non-literal  -> Unknown
+                            //   {(it,0).0 != (it,0).0} literal      -> Unknown
+                            //   {(it,0).0 != (it,0).0} non-literal  -> Unknown
+                            //
+                            // `Unknown` on a non-literal is ordinary gradual
+                            // verification — the value is not known yet, and
+                            // warning there would fire on every refinement in
+                            // the stdlib.  `Unknown` on a LITERAL means the
+                            // predicate's own shape defeated both the solver
+                            // and the syntactic evaluator, and that case used
+                            // to be swallowed by a `_ => {}`: hence
+                            // `Int{(it, 0).0 != (it, 0).0}` — false for every
+                            // value — compiled in silence.
+                            //
+                            // Gradual verification is deliberate here, so this
+                            // is a warning: the constraint is not enforced, and
+                            // the reader is told rather than handed a type that
+                            // advertises a check nobody performs.
+                            Ok(crate::refinement::VerificationResult::Unknown { ref reason })
+                                if matches!(expr.kind, ExprKind::Literal(_)) =>
+                            {
+                                let msg = format!(
+                                    "refinement {} was NOT verified against a value known \
+                                     at compile time ({}), so the constraint is not \
+                                     enforced here — express the predicate in terms the \
+                                     solver decides (comparisons, arithmetic, \
+                                     `&&`/`||`/`!`), or check it explicitly in code",
+                                    predicate, reason
+                                );
+                                let diag = Diagnostic::new_warning(
+                                    msg,
+                                    span_to_line_col(expr.span),
+                                    "W0500",
+                                );
+                                self.diagnostics.push(diag);
+                            }
+                            // Valid, Unknown on a value not yet known, or an
+                            // error reaching the solver.
                             _ => {}
                         }
                     }
