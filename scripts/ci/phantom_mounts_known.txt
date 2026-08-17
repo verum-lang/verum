@@ -3,14 +3,18 @@
 # A line removed is a mount repaired.  A line added is a decision to
 # ship one more import that resolves to an unrelated same-named symbol.
 #
-# NOT every line here is a misspelling.  Names declared inside an `extern`
-# block are absent from the archive metadata (T0781), so a mount naming one
-# is reported here even though the declaration exists in the module's
-# source.  On this baseline that is the libsystem group — close, open,
-# kqueue, kevent — and repairing those by renaming would break working FFI.
-# Check the module source before treating a line as a typo.
-core.database.common.migrations	MigrationStore
-core.database.common.migrations.store	MigrationStore
+# NOT every line here is a misspelling.  Names declared inside an
+# `extern` block are absent from the archive metadata (T0781), so a
+# mount naming one is reported even though the declaration exists in
+# the module's source.  On this baseline that is the libsystem group
+# — close, open, kqueue, kevent — and repairing those by renaming
+# would break working FFI.  Read the module source before treating a
+# line here as a typo.
+#
+# This paragraph lives in the SCRIPT, not only in the file it writes:
+# the first regeneration after it was added by hand silently dropped
+# it, which would have left the next reader with seven lines that
+# look like misspellings and are not.
 core.database.common.types	WfBinary
 core.database.common.types	WfText
 core.database.sqlite.native.drop_modules.keep_list	contains
@@ -32,12 +36,3 @@ core.sys.darwin.libsystem	close
 core.sys.darwin.libsystem	kevent
 core.sys.darwin.libsystem	kqueue
 core.sys.darwin.libsystem	open
-core.sys.darwin.libsystem	sys_accept
-core.sys.darwin.libsystem	sys_bind
-core.sys.darwin.libsystem	sys_close
-core.sys.darwin.libsystem	sys_connect
-core.sys.darwin.libsystem	sys_listen
-core.sys.darwin.libsystem	sys_recv
-core.sys.darwin.libsystem	sys_send
-core.sys.darwin.libsystem	sys_shutdown
-core.sys.darwin.libsystem	sys_socket
