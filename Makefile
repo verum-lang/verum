@@ -66,12 +66,15 @@ check-type-name-collisions: ## Gate (T0458): simple-type-name collisions in core
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
 
-gates-source: check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-dup-emitters check-bake-prepass-parity ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+gates-source: check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-dup-emitters check-bake-prepass-parity check-protocol-form ## Every gate that needs only the SOURCE TREE — no build, no artefacts
 	@echo "gates-source: all source-only gates green"
 
 check-phantom-mounts: ## Gate (T0780): mounts naming a symbol the module does not export. NEEDS a built verum; ~15 min, NOT in gates-source.
 	@test -n "$(VERUM)" || (echo "usage: make check-phantom-mounts VERUM=/path/to/verum" && false)
 	python3 scripts/ci/check_phantom_mounts.py $(VERUM)
+
+check-protocol-form: ## Gate (T0794): protocols in core/ use the grammatical `type X is protocol` form
+	python3 scripts/ci/check_protocol_form.py
 
 check-rings: ## Gate: core/ ring law — no upward edges, no cycles (core/rings.toml declares the rings)
 	python3 scripts/ci/check_core_rings.py
