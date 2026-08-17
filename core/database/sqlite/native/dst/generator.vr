@@ -4,7 +4,7 @@
 // Spec: sqlite-native.md §22.5 (DST)
 //
 
-// Generates an `OpStream` from a `DstSeed` according to a configurable
+// Generates an `DstOpStream` from a `DstSeed` according to a configurable
 // op mix. The generator maintains a small "live keys" set so update /
 // delete / select draws don't always miss.
 // =============================================================================
@@ -23,7 +23,7 @@ mount core.database.sqlite.native.dst.seed.{DstSeed};
 mount core.database.sqlite.native.dst.op.{
     DbOp, OpInsert, OpUpdate, OpDelete, OpSelectById,
     OpBegin, OpCommit, OpRollback, OpCheckpoint,
-    OpStream, op_stream_empty,
+    DstOpStream, op_stream_empty,
 };
 
 // -----------------------------------------------------------------------------
@@ -81,8 +81,8 @@ public fn generator_new(seed: DstSeed, mix: OpMix) -> DstGenerator {
 implement DstGenerator {
     public fn live_count(&self) -> Int { self.live_keys.len() }
 
-    /// Emit `n` ops into a fresh OpStream.
-    public fn emit(&mut self, n: Int) -> OpStream {
+    /// Emit `n` ops into a fresh DstOpStream.
+    public fn emit(&mut self, n: Int) -> DstOpStream {
         let mut s = op_stream_empty();
         let mut i: Int = 0;
         while i < n {

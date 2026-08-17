@@ -21,22 +21,22 @@ mount core.database.sqlite.native.status.kind.{
     DsCacheUsedShared, DsCacheSpill,
 };
 mount core.database.sqlite.native.status.counter.{
-    Counter, CounterPair, counter_zero, counter_pair_zero,
+    StatusCounter, CounterPair, counter_zero, counter_pair_zero,
 };
 
 public type DbStatus is {
-    lookaside_used: Counter,
-    schema_used: Counter,
-    stmt_used: Counter,
-    cache_used: Counter,
-    cache_used_shared: Counter,
-    cache_spill: Counter,
-    deferred_fks: Counter,
+    lookaside_used: StatusCounter,
+    schema_used: StatusCounter,
+    stmt_used: StatusCounter,
+    cache_used: StatusCounter,
+    cache_used_shared: StatusCounter,
+    cache_spill: StatusCounter,
+    deferred_fks: StatusCounter,
     /// Hit/miss pairs.
     lookaside: CounterPair,
     cache: CounterPair,
     /// Cache writes — incremented per dirty page write-back.
-    cache_writes: Counter,
+    cache_writes: StatusCounter,
 }
 
 public fn db_status_new() -> DbStatus {

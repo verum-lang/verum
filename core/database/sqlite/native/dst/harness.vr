@@ -36,7 +36,7 @@ mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.dst.seed.{DstSeed, seed_from_u64};
 mount core.database.sqlite.native.dst.op.{
-    DbOp, OpStream, OpCommit,
+    DbOp, DstOpStream, OpCommit,
 };
 mount core.database.sqlite.native.dst.generator.{
     DstGenerator, generator_new, default_mix,
@@ -66,7 +66,7 @@ public type StepPlan is {
 // -----------------------------------------------------------------------------
 
 public type DstHarness is {
-    stream: OpStream,
+    stream: DstOpStream,
     schedule: FaultSchedule,
     op_idx: Int,
     terminated: Bool,

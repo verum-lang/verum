@@ -15,7 +15,7 @@ mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.fts5.tokenizer.core.{
-    Token, Tokenizer, token, is_word_byte, lowercase_byte,
+    Fts5Token, Tokenizer, token, is_word_byte, lowercase_byte,
 };
 
 public type SimpleTokenizer is { unit: Bool }
@@ -25,9 +25,9 @@ public fn simple_tokenizer() -> SimpleTokenizer { SimpleTokenizer { unit: true }
 implement Tokenizer for SimpleTokenizer {
     fn name(&self) -> Text { "simple".clone() }
 
-    fn tokenize(&self, text: &Text) -> List<Token> {
+    fn tokenize(&self, text: &Text) -> List<Fts5Token> {
         let bs = text.as_bytes();
-        let mut out: List<Token> = List.new();
+        let mut out: List<Fts5Token> = List.new();
         let mut i: Int = 0;
         let mut pos: Int = 0;
         while i < bs.len() {

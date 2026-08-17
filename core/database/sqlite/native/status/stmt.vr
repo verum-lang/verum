@@ -17,17 +17,17 @@ mount core.database.sqlite.native.status.kind.{
     SqliteStatStmtKind, SqliteStatStmtKind.SsFullscanStep, SqliteStatStmtKind.SsSort, SqliteStatStmtKind.SsAutoindex, SqliteStatStmtKind.SsVmStep,
     SsReprepare, SsRun, SsFilterMiss, SsFilterHit,
 };
-mount core.database.sqlite.native.status.counter.{Counter, counter_zero};
+mount core.database.sqlite.native.status.counter.{StatusCounter, counter_zero};
 
 public type StmtStatus is {
-    fullscan_step: Counter,
-    sort: Counter,
-    autoindex: Counter,
-    vm_step: Counter,
-    reprepare: Counter,
-    run: Counter,
-    filter_miss: Counter,
-    filter_hit: Counter,
+    fullscan_step: StatusCounter,
+    sort: StatusCounter,
+    autoindex: StatusCounter,
+    vm_step: StatusCounter,
+    reprepare: StatusCounter,
+    run: StatusCounter,
+    filter_miss: StatusCounter,
+    filter_hit: StatusCounter,
 }
 
 public fn stmt_status_new() -> StmtStatus {

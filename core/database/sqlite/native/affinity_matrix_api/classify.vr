@@ -1,4 +1,4 @@
-// Classify a declared-type string into an Affinity using SQLite §3.1 rules.
+// Classify a declared-type string into an MatrixAffinity using SQLite §3.1 rules.
 
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
@@ -8,7 +8,7 @@
 module core.database.sqlite.native.affinity_matrix_api.classify;
 
 mount core.database.sqlite.native.affinity_matrix_api.affinity.{
-    Affinity, AfInteger, AfText, AfBlob, AfReal, AfNumeric,
+    MatrixAffinity, AfInteger, AfText, AfBlob, AfReal, AfNumeric,
 };
 mount base.{Bool, Text};
 
@@ -42,7 +42,7 @@ fn contains_substr_ci(haystack: &Text, needle: &Text) -> Bool {
     false
 }
 
-public fn classify(declared: &Text) -> Affinity {
+public fn classify(declared: &Text) -> MatrixAffinity {
     if declared.len() == 0 { return AfBlob; }
     let d = declared.clone();
     if contains_substr_ci(&d, &"INT".clone()) { return AfInteger; }

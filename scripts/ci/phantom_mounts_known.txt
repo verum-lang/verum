@@ -7,17 +7,12 @@ core.database.common.migrations	MigrationStore
 core.database.common.migrations.store	MigrationStore
 core.database.common.types	WfBinary
 core.database.sqlite.connection	SqliteNativeConnection
-core.database.sqlite.native.affinity_matrix_api.affinity	Affinity
 core.database.sqlite.native.builtins.json_fns	JsonValue
 core.database.sqlite.native.destructor_api.kind	Destructor
-core.database.sqlite.native.double_quoted_string_api.context	StmtKind
 core.database.sqlite.native.drop_modules.keep_list	contains
-core.database.sqlite.native.dst.op	OpStream
-core.database.sqlite.native.fts5.tokenizer.core	Token
 core.database.sqlite.native.l3_btree.cursor	generate_series
 core.database.sqlite.native.l5_sql	VdbeProgram
 core.database.sqlite.native.l7_api	Transaction
-core.database.sqlite.native.status.counter	Counter
 core.database.sqlite.native.triggers.spec	TriggerTiming
 core.encoding.der	DerWriter
 core.intrinsics	RecoveryError

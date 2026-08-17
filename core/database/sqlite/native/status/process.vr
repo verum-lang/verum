@@ -21,16 +21,16 @@ mount core.database.sqlite.native.status.kind.{
     PsPagecacheSize, PsScratchSize, PsMallocCount,
     process_code, process_name,
 };
-mount core.database.sqlite.native.status.counter.{Counter, counter_zero};
+mount core.database.sqlite.native.status.counter.{StatusCounter, counter_zero};
 
 public type ProcessStatus is {
-    memory_used: Counter,
-    pagecache_used: Counter,
-    pagecache_overflow: Counter,
-    pagecache_size: Counter,
-    malloc_size: Counter,
-    malloc_count: Counter,
-    parser_stack: Counter,
+    memory_used: StatusCounter,
+    pagecache_used: StatusCounter,
+    pagecache_overflow: StatusCounter,
+    pagecache_size: StatusCounter,
+    malloc_size: StatusCounter,
+    malloc_count: StatusCounter,
+    parser_stack: StatusCounter,
 }
 
 public fn process_status_new() -> ProcessStatus {

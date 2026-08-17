@@ -19,7 +19,7 @@ mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.fts5.tokenizer.core.{
-    Token, Tokenizer, token, lowercase_byte,
+    Fts5Token, Tokenizer, token, lowercase_byte,
 };
 
 public type TrigramTokenizer is { unit: Bool }
@@ -29,9 +29,9 @@ public fn trigram_tokenizer() -> TrigramTokenizer { TrigramTokenizer { unit: tru
 implement Tokenizer for TrigramTokenizer {
     fn name(&self) -> Text { "trigram".clone() }
 
-    fn tokenize(&self, text: &Text) -> List<Token> {
+    fn tokenize(&self, text: &Text) -> List<Fts5Token> {
         let bs = text.as_bytes();
-        let mut out: List<Token> = List.new();
+        let mut out: List<Fts5Token> = List.new();
         if bs.len() < 3 { return out; }
         let mut i: Int = 0;
         let mut pos: Int = 0;

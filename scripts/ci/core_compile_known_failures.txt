@@ -143,10 +143,7 @@ core/database/sqlite/native/datetime/format.vr
 core/database/sqlite/native/datetime/iso.vr
 core/database/sqlite/native/datetime/modifier.vr
 core/database/sqlite/native/differential/oracle.vr
-core/database/sqlite/native/double_quoted_string_api/resolver.vr
 core/database/sqlite/native/drop_modules/plan.vr
-core/database/sqlite/native/dst/generator.vr
-core/database/sqlite/native/dst/harness.vr
 core/database/sqlite/native/encryption/cipher.vr
 core/database/sqlite/native/exec/engine.vr
 core/database/sqlite/native/export/data_dump.vr
@@ -154,10 +151,6 @@ core/database/sqlite/native/export/schema_dump.vr
 core/database/sqlite/native/export/value.vr
 core/database/sqlite/native/ext/registry.vr
 core/database/sqlite/native/fts5/query/ast.vr
-core/database/sqlite/native/fts5/tokenizer/porter.vr
-core/database/sqlite/native/fts5/tokenizer/simple.vr
-core/database/sqlite/native/fts5/tokenizer/trigram.vr
-core/database/sqlite/native/fts5/tokenizer/unicode61.vr
 core/database/sqlite/native/fts5_offsets_fn_api/auxdata.vr
 core/database/sqlite/native/fuzz/grammar.vr
 core/database/sqlite/native/get_table_api/engine.vr
@@ -215,9 +208,6 @@ core/database/sqlite/native/pcache_api/cache.vr
 core/database/sqlite/native/profiler/report.vr
 core/database/sqlite/native/returning_clause_api/spec.vr
 core/database/sqlite/native/rtree/tree.vr
-core/database/sqlite/native/status/database.vr
-core/database/sqlite/native/status/process.vr
-core/database/sqlite/native/status/stmt.vr
 core/database/sqlite/native/stmt_cache/cache.vr
 core/database/sqlite/native/txn/engine.vr
 core/database/sqlite/native/unlock_notify/engine.vr

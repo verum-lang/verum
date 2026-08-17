@@ -8,7 +8,7 @@
 module core.database.sqlite.native.double_quoted_string_api.resolver;
 
 mount core.database.sqlite.native.double_quoted_string_api.context.{
-    DqsConfig, StmtKind, SkDml, SkDdl, SkPragma,
+    DqsConfig, DqsStmtKind, SkDml, SkDdl, SkPragma,
     dml_enabled, ddl_enabled,
 };
 mount base.{Bool, Text};
@@ -41,7 +41,7 @@ public fn is_error(r: &DoubleQuotedResolution) -> Bool {
 //  * else → error
 public fn resolve(
     cfg: &DqsConfig,
-    kind: &StmtKind,
+    kind: &DqsStmtKind,
     identifier_in_scope: Bool,
 ) -> DoubleQuotedResolution {
     if identifier_in_scope { return RsIdentifier; }
