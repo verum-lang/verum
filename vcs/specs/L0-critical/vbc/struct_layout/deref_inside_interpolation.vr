@@ -1,0 +1,52 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: vbc, deref, interpolation, format-string, struct-layout
+// @expected-stdout: 20 20 999 ok
+//
+// Pin — an interpolated expression gets the same treatment as one
+// written outside a format string.
+//
+// The AST-commit walk that materialises `Deref` coercions (and stamps
+// resolved call targets, which predates it) had no arm for
+// `InterpolatedString`, so it never descended into the interpolated
+// expressions.  For the same receiver:
+//
+//     print(b[1]);        //  20     — correct
+//     print(f"{b[1]}");   //  panic: index 1 for list of length 1
+//
+// The second indexed the WRAPPER.  Nothing distinguished the two at the
+// source level, which is what makes this worth pinning rather than
+// noting: a reader has no reason to suspect that moving an expression
+// into a format string changes what it means.
+//
+// The third value guards the other half of the rule: a wrapper that
+// defines a method of its own keeps it — the chain is walked only when
+// the receiver itself does not answer.
+
+type Boxy<T> is { inner: T };
+
+implement<T> Deref for Boxy<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.inner
+    }
+}
+
+implement<T> Boxy<T> {
+    // Shadows `List.len` deliberately: a direct match must win.
+    public fn len(&self) -> Int {
+        999
+    }
+}
+
+fn main() {
+    let b: Boxy<List<Int>> = Boxy { inner: [10, 20, 30] };
+
+    let outside: Int = b[1];
+    let inside: Text = f"{b[1]}";
+    let own: Int = b.len();
+
+    print(f"{outside} {inside} {own} ok");
+}

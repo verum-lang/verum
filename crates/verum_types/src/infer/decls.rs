@@ -5005,7 +5005,48 @@ impl TypeChecker {
     ///
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     pub fn register_impl_block(&mut self, impl_decl: &verum_ast::decl::ImplDecl) -> Result<()> {
-        self.register_impl_block_inner(impl_decl)
+        match self.cfg_filtered_impl(impl_decl) {
+            Some(filtered) => self.register_impl_block_inner(&filtered),
+            None => self.register_impl_block_inner(impl_decl),
+        }
+    }
+
+    /// Drop the impl items `@cfg(...)` excludes for this target, or `None`
+    /// when the block has none — the overwhelmingly common case, which
+    /// then costs one `is_empty()` per item and no clone.
+    ///
+    /// T0784: item-level `@cfg` was honoured for top-level items and not
+    /// for items INSIDE an `implement` block, so a method written once per
+    /// platform was reported as a duplicate AND its body was type-checked
+    /// for the wrong target.  `core/net/unix.vr` spells `peer_cred` three
+    /// times — Linux `ucred`, macOS `xucred`, Windows unsupported — and
+    /// the Linux body calls a direct syscall that exists only there.
+    ///
+    /// Filtered ONCE here rather than at the eight `impl_decl.items` loops
+    /// downstream, so a single place decides what belongs to this target,
+    /// and it asks the same `CfgEvaluator` codegen and the statement
+    /// filter ask.
+    fn cfg_filtered_impl(
+        &self,
+        impl_decl: &verum_ast::decl::ImplDecl,
+    ) -> Option<verum_ast::decl::ImplDecl> {
+        if impl_decl.items.iter().all(|i| i.attributes.is_empty()) {
+            return None;
+        }
+        let kept: verum_common::List<verum_ast::decl::ImplItem> = impl_decl
+            .items
+            .iter()
+            .filter(|i| {
+                i.attributes.is_empty() || self.cfg_evaluator.should_include(&i.attributes)
+            })
+            .cloned()
+            .collect();
+        if kept.len() == impl_decl.items.len() {
+            return None;
+        }
+        let mut out = impl_decl.clone();
+        out.items = kept;
+        Some(out)
     }
 
     /// Inner implementation of register_impl_block
@@ -7121,7 +7162,10 @@ impl TypeChecker {
     ///
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deeply nested impl blocks.
     pub(super) fn check_impl_block(&mut self, impl_decl: &verum_ast::decl::ImplDecl) -> Result<()> {
-        self.check_impl_block_inner(impl_decl)
+        match self.cfg_filtered_impl(impl_decl) {
+            Some(filtered) => self.check_impl_block_inner(&filtered),
+            None => self.check_impl_block_inner(impl_decl),
+        }
     }
 
     /// Inner implementation of check_impl_block

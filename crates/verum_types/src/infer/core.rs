@@ -464,6 +464,17 @@ fn commit_children(
             commit_resolved_in_expr(left, table, false);
             commit_resolved_in_expr(right, table, false);
         }
+        // An `f"…{expr}…"` interpolation is ordinary expression territory,
+        // and this walk never entered it — so neither the deref
+        // coercions (T0770) nor the resolved-call stamps reached inside a
+        // format string.  Measured: `print(b[1])` yields 20 while
+        // `print(f"{b[1]}")` indexed the WRAPPER and panicked, for the
+        // same `b`.
+        ExprKind::InterpolatedString { exprs, .. } => {
+            for e in exprs.iter_mut() {
+                commit_resolved_in_expr(e, table, false);
+            }
+        }
         ExprKind::Cast { expr, .. } => commit_resolved_in_expr(expr, table, false),
         ExprKind::Try(e) | ExprKind::TryBlock(e) => commit_resolved_in_expr(e, table, false),
         ExprKind::Block(block) => commit_resolved_in_block(block, table),

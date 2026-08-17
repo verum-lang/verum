@@ -102,7 +102,7 @@ implement UnixError {
     /// integer values. Unknown errnos fall through to
     /// `UnixError.IoFailure(<formatted>)` so the caller still sees the
     /// raw code in the message.
-    public fn from_os_error(e: OsError) -> UnixError {
+    public fn from_os_error(e: OSError) -> UnixError {
         // POSIX-stable mappings — same integer values on
         // Linux and Darwin.
         match e.code {
