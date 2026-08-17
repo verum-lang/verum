@@ -2930,6 +2930,10 @@ impl RefinementChecker {
             // its caller injectivity over structure regardless.
             _ => {
                 255u8.hash(hasher);
+                let mut scratch = expr.clone();
+                verum_ast::visit_mut::each_child_expr_mut(&mut scratch, &mut |child| {
+                    Self::hash_expr(child, hasher);
+                });
             }
         }
     }
