@@ -28,7 +28,7 @@ module core.cli.builder;
 
 mount core.{Maybe, Result, List, Text, Char, Bool};
 mount core.cli.spec.{
-    CommandSpec, ArgSpec, FlagSpec, Group, GroupKind, Arity, Example,
+    CommandSpec, ArgSpec, FlagSpec, ArgGroup, GroupKind, Arity, Example,
     CommandSettings, RefinementHandle, CompletionSource, InteractivePolicy,
     HandlerRef,
 };
@@ -92,7 +92,7 @@ implement AppBuilder {
     }
 
     /// Add an argument group.
-    public fn group(mut self, g: Group) -> AppBuilder {
+    public fn group(mut self, g: ArgGroup) -> AppBuilder {
         self.spec.groups.push(g);
         self
     }

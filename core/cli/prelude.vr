@@ -14,7 +14,7 @@
 // What you get:
 //   * `App` / `HandlerContext` from `runtime`
 //   * `AppBuilder` / `ArgBuilder` / `FlagBuilder` from `builder`
-//   * `CommandSpec` / `ArgSpec` / `FlagSpec` / `Group` / `Arity` / `Example`
+//   * `CommandSpec` / `ArgSpec` / `FlagSpec` / `ArgGroup` / `Arity` / `Example`
 //   * `ExitCode` / `ParseError`
 //   * `FromArg` / `ValueEnum` / `ArgKind`
 //
@@ -28,7 +28,7 @@
 module core.cli.prelude;
 
 public mount core.cli.spec.{
-    CommandSpec, ArgSpec, FlagSpec, Group, GroupKind, Arity, Example,
+    CommandSpec, ArgSpec, FlagSpec, ArgGroup, GroupKind, Arity, Example,
     HandlerRef, ColorChoice, ErrorFormat, TopicSeparator, InvocationStyle,
     InteractivePolicy, CompletionSource, CommandSettings, RefinementHandle,
 };

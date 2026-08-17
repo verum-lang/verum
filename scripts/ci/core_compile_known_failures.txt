@@ -49,13 +49,10 @@ core/base/memory.vr
 core/base/result.vr
 core/base/serde.vr
 core/cache/adapters/redis.vr
-core/cli/builder.vr
 core/cli/example.vr
 core/cli/help.vr
-core/cli/json_schema.vr
 core/cli/parser.vr
 core/cli/plugin.vr
-core/cli/prelude.vr
 core/cli/repl.vr
 core/cli/runtime.vr
 core/cli/smt_verify.vr
@@ -219,7 +216,6 @@ core/database/sqlite/native/vtab_in/registry.vr
 core/database/sqlite/native/vtabs/fts5/dml.vr
 core/database/sqlite/native/vtabs/fts5/functions.vr
 core/database/sqlite/native/vtabs/fts5/query.vr
-core/database/sqlite/native/vtabs/json_each.vr
 core/database/sqlite/typed_database.vr
 core/diagnostics.vr
 core/encoding/jsonb.vr

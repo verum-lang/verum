@@ -32,7 +32,7 @@ mount core.*;
 mount base.{Text, Maybe, Bool, Result, Ok, Err, Some, None};
 mount collections.List;
 mount core.database.sqlite.native.builtins.json_fns.{
-    JsonValue, JNull, JBool, JNumber, JString, JArray, JObject, JsonField,
+    SqlJsonValue, JNull, JBool, JNumber, JString, JArray, JObject, JsonField,
     parse_json, serialise,
 };
 
@@ -181,11 +181,11 @@ public type SetMode is SmSet | SmInsert | SmReplace;
 /// Apply `mode`-specific mutation: set replaces or inserts; insert
 /// only adds when missing; replace only updates when present.
 public fn apply_mutation(
-    root: &JsonValue,
+    root: &SqlJsonValue,
     path: &List<PathSeg>,
-    new_value: &JsonValue,
+    new_value: &SqlJsonValue,
     mode: SetMode,
-) -> JsonValue {
+) -> SqlJsonValue {
     if path.len() == 0 {
         // Root replacement
         match mode {
@@ -199,12 +199,12 @@ public fn apply_mutation(
 }
 
 fn mutate(
-    cur: &JsonValue,
+    cur: &SqlJsonValue,
     path: &List<PathSeg>,
     idx: Int,
-    new_value: &JsonValue,
+    new_value: &SqlJsonValue,
     mode: &SetMode,
-) -> JsonValue {
+) -> SqlJsonValue {
     if idx >= path.len() {
         match mode {
             SmInsert => clone_json(cur),
@@ -220,13 +220,13 @@ fn mutate(
 }
 
 fn mutate_field(
-    cur: &JsonValue,
+    cur: &SqlJsonValue,
     name: &Text,
     path: &List<PathSeg>,
     idx: Int,
-    new_value: &JsonValue,
+    new_value: &SqlJsonValue,
     mode: &SetMode,
-) -> JsonValue {
+) -> SqlJsonValue {
     match cur {
         JObject(fields) => {
             let mut out: List<JsonField> = List.new();
@@ -262,16 +262,16 @@ fn mutate_field(
 }
 
 fn mutate_index(
-    cur: &JsonValue,
+    cur: &SqlJsonValue,
     idx_value: Int,
     path: &List<PathSeg>,
     idx: Int,
-    new_value: &JsonValue,
+    new_value: &SqlJsonValue,
     mode: &SetMode,
-) -> JsonValue {
+) -> SqlJsonValue {
     match cur {
         JArray(items) => {
-            let mut out: List<JsonValue> = List.new();
+            let mut out: List<SqlJsonValue> = List.new();
             let mut i: Int = 0;
             let in_range = idx_value >= 0 && idx_value < items.len();
             let mode_allow_create = match mode { SmReplace => false, _ => true };
@@ -295,7 +295,7 @@ fn mutate_index(
     }
 }
 
-fn mutate_create_leaf(path: &List<PathSeg>, idx: Int, new_value: &JsonValue) -> JsonValue {
+fn mutate_create_leaf(path: &List<PathSeg>, idx: Int, new_value: &SqlJsonValue) -> SqlJsonValue {
     if idx >= path.len() { return clone_json(new_value); }
     let seg = &path[idx];
     match seg {
@@ -307,7 +307,7 @@ fn mutate_create_leaf(path: &List<PathSeg>, idx: Int, new_value: &JsonValue) -> 
         }
         PsIndex(_) => {
             let inner = mutate_create_leaf(path, idx + 1, new_value);
-            let mut items: List<JsonValue> = List.new();
+            let mut items: List<SqlJsonValue> = List.new();
             items.push(inner);
             JArray(items)
         }
@@ -318,12 +318,12 @@ fn mutate_create_leaf(path: &List<PathSeg>, idx: Int, new_value: &JsonValue) -> 
 // json_remove
 // -----------------------------------------------------------------------------
 
-public fn apply_remove(root: &JsonValue, path: &List<PathSeg>) -> JsonValue {
+public fn apply_remove(root: &SqlJsonValue, path: &List<PathSeg>) -> SqlJsonValue {
     if path.len() == 0 { return JNull; }
     remove(root, path, 0)
 }
 
-fn remove(cur: &JsonValue, path: &List<PathSeg>, idx: Int) -> JsonValue {
+fn remove(cur: &SqlJsonValue, path: &List<PathSeg>, idx: Int) -> SqlJsonValue {
     if idx + 1 >= path.len() {
         // Final segment — drop it.
         let seg = &path[idx];
@@ -347,7 +347,7 @@ fn remove(cur: &JsonValue, path: &List<PathSeg>, idx: Int) -> JsonValue {
             },
             PsIndex(i_val) => match cur {
                 JArray(items) => {
-                    let mut out: List<JsonValue> = List.new();
+                    let mut out: List<SqlJsonValue> = List.new();
                     let mut i: Int = 0;
                     while i < items.len() {
                         if i != i_val { out.push(clone_json(&items[i])); }
@@ -384,7 +384,7 @@ fn remove(cur: &JsonValue, path: &List<PathSeg>, idx: Int) -> JsonValue {
             },
             PsIndex(i_val) => match cur {
                 JArray(items) => {
-                    let mut out: List<JsonValue> = List.new();
+                    let mut out: List<SqlJsonValue> = List.new();
                     let mut i: Int = 0;
                     while i < items.len() {
                         if i == i_val {
@@ -416,7 +416,7 @@ fn remove(cur: &JsonValue, path: &List<PathSeg>, idx: Int) -> JsonValue {
 // Non-object patches replace `base` entirely.
 // =============================================================================
 
-public fn apply_patch(base: &JsonValue, patch: &JsonValue) -> JsonValue {
+public fn apply_patch(base: &SqlJsonValue, patch: &SqlJsonValue) -> SqlJsonValue {
     match patch {
         JObject(p_fields) => match base {
             JObject(b_fields) => {
@@ -470,7 +470,7 @@ public fn apply_patch(base: &JsonValue, patch: &JsonValue) -> JsonValue {
     }
 }
 
-fn find_field(fields: &List<JsonField>, key: &Text) -> Maybe<JsonValue> {
+fn find_field(fields: &List<JsonField>, key: &Text) -> Maybe<SqlJsonValue> {
     let mut i: Int = 0;
     while i < fields.len() {
         if fields[i].key == key { return Maybe.Some(clone_json(&fields[i].value)); }
@@ -492,14 +492,14 @@ fn field_present(fields: &List<JsonField>, key: &Text) -> Bool {
 // Helpers
 // -----------------------------------------------------------------------------
 
-fn clone_json(v: &JsonValue) -> JsonValue {
+fn clone_json(v: &SqlJsonValue) -> SqlJsonValue {
     match v {
         JNull       => JNull,
         JBool(b)    => JBool(b),
         JNumber(x)  => JNumber(x),
         JString(s)  => JString(s.clone()),
         JArray(its) => {
-            let mut out: List<JsonValue> = List.new();
+            let mut out: List<SqlJsonValue> = List.new();
             let mut i: Int = 0;
             while i < its.len() { out.push(clone_json(&its[i])); i = i + 1; }
             JArray(out)

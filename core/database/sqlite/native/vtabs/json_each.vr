@@ -52,7 +52,7 @@ mount core.database.sqlite.native.vtabs.protocol.{
     VtabError, VtabConstraint, VtabSchema, VtabColumn,
 };
 mount core.database.sqlite.native.builtins.json_fns.{
-    JsonValue, JNull, JBool, JNumber, JString, JArray, JObject, JsonField,
+    SqlJsonValue, JNull, JBool, JNumber, JString, JArray, JObject, JsonField,
     parse_json, serialise,
 };
 
@@ -167,7 +167,7 @@ implement EachCursor {
 // Walkers
 // -----------------------------------------------------------------------------
 
-fn walk_immediate(root: &JsonValue, base_path: &Text, out: &mut List<EachRow>, next_id: &mut Int64) {
+fn walk_immediate(root: &SqlJsonValue, base_path: &Text, out: &mut List<EachRow>, next_id: &mut Int64) {
     match root {
         JArray(items) => {
             let mut i: Int = 0;
@@ -225,7 +225,7 @@ fn walk_immediate(root: &JsonValue, base_path: &Text, out: &mut List<EachRow>, n
     }
 }
 
-fn walk_recursive(node: &JsonValue, path: &Text, parent: Maybe<Int64>, out: &mut List<EachRow>, next_id: &mut Int64) {
+fn walk_recursive(node: &SqlJsonValue, path: &Text, parent: Maybe<Int64>, out: &mut List<EachRow>, next_id: &mut Int64) {
     let id = *next_id;
     *next_id = *next_id + 1_i64;
     let key_reg: Register = RNull;
@@ -294,7 +294,7 @@ fn format_dot(base: &Text, key: &Text) -> Text {
     out
 }
 
-fn type_name(v: &JsonValue) -> Text {
+fn type_name(v: &SqlJsonValue) -> Text {
     match v {
         JNull       => "null".clone(),
         JBool(b)    => { if b { "true".clone() } else { "false".clone() } }
@@ -305,7 +305,7 @@ fn type_name(v: &JsonValue) -> Text {
     }
 }
 
-fn json_to_value_register(v: &JsonValue) -> Register {
+fn json_to_value_register(v: &SqlJsonValue) -> Register {
     match v {
         JNull      => RNull,
         JBool(b)   => RInt(if b { 1 as Int64 } else { 0 as Int64 }),
@@ -319,7 +319,7 @@ fn json_to_value_register(v: &JsonValue) -> Register {
     }
 }
 
-fn json_to_atom(v: &JsonValue) -> Register {
+fn json_to_atom(v: &SqlJsonValue) -> Register {
     match v {
         JArray(_) | JObject(_) => RNull,
         scalar                 => json_to_value_register(scalar),

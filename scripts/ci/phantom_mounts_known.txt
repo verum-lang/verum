@@ -2,18 +2,14 @@
 # Regenerate: scripts/ci/check_phantom_mounts.py <verum> --write-baseline
 # A line removed is a mount repaired.  A line added is a decision to
 # ship one more import that resolves to an unrelated same-named symbol.
-core.cli.spec	Group
 core.database.common.migrations	MigrationStore
 core.database.common.migrations.store	MigrationStore
 core.database.common.types	WfBinary
 core.database.sqlite.connection	SqliteNativeConnection
-core.database.sqlite.native.builtins.json_fns	JsonValue
-core.database.sqlite.native.destructor_api.kind	Destructor
 core.database.sqlite.native.drop_modules.keep_list	contains
 core.database.sqlite.native.l3_btree.cursor	generate_series
 core.database.sqlite.native.l5_sql	VdbeProgram
 core.database.sqlite.native.l7_api	Transaction
-core.database.sqlite.native.triggers.spec	TriggerTiming
 core.encoding.der	DerWriter
 core.intrinsics	RecoveryError
 core.math.hott	Path

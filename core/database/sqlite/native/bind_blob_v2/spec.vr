@@ -14,7 +14,7 @@ module core.database.sqlite.native.bind_blob_v2.spec;
 mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.destructor_api.kind.{
-    Destructor,
+    BindDestructorKind,
 };
 
 public type BindApi is
@@ -23,11 +23,11 @@ public type BindApi is
 
 public type BindBlobSpec is {
     byte_len: Int64,
-    destructor: Destructor,
+    destructor: BindDestructorKind,
     api: BindApi,
 }
 
-public fn v1_spec(byte_len: Int, destructor: Destructor) -> BindBlobSpec {
+public fn v1_spec(byte_len: Int, destructor: BindDestructorKind) -> BindBlobSpec {
     BindBlobSpec {
         byte_len: byte_len as Int64,
         destructor: destructor,
@@ -35,7 +35,7 @@ public fn v1_spec(byte_len: Int, destructor: Destructor) -> BindBlobSpec {
     }
 }
 
-public fn v2_spec(byte_len: Int64, destructor: Destructor) -> BindBlobSpec {
+public fn v2_spec(byte_len: Int64, destructor: BindDestructorKind) -> BindBlobSpec {
     BindBlobSpec {
         byte_len: byte_len,
         destructor: destructor,

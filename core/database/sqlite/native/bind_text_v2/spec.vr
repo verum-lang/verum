@@ -17,7 +17,7 @@ mount core.database.sqlite.native.text_encoding.kind.{
     TextEncoding, TeUtf8, TeUtf16Le, TeUtf16Be, is_utf16,
 };
 mount core.database.sqlite.native.destructor_api.kind.{
-    Destructor, DStatic, DTransient, DCustom,
+    BindDestructorKind, DStatic, DTransient, DCustom,
 };
 
 public type BindTextSpec is {
@@ -25,10 +25,10 @@ public type BindTextSpec is {
     /// -1 ⇒ "read to NUL" (UTF-8) or "read to zero-code-unit" (UTF-16).
     /// Otherwise byte length (always bytes, even for UTF-16).
     byte_len: Int64,
-    destructor: Destructor,
+    destructor: BindDestructorKind,
 }
 
-public fn utf8_spec(byte_len: Int64, destructor: Destructor) -> BindTextSpec {
+public fn utf8_spec(byte_len: Int64, destructor: BindDestructorKind) -> BindTextSpec {
     BindTextSpec {
         encoding: TeUtf8,
         byte_len: byte_len,
@@ -36,7 +36,7 @@ public fn utf8_spec(byte_len: Int64, destructor: Destructor) -> BindTextSpec {
     }
 }
 
-public fn utf16le_spec(byte_len: Int64, destructor: Destructor) -> BindTextSpec {
+public fn utf16le_spec(byte_len: Int64, destructor: BindDestructorKind) -> BindTextSpec {
     BindTextSpec {
         encoding: TeUtf16Le,
         byte_len: byte_len,

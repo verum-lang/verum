@@ -27,7 +27,7 @@ module core.cli.json_schema;
 mount core.{Maybe, Result, List, Text, Int, Bool};
 mount core.text.builder.TextBuilder;
 mount core.cli.spec.{
-    CommandSpec, ArgSpec, FlagSpec, Group, GroupKind, Arity,
+    CommandSpec, ArgSpec, FlagSpec, ArgGroup, GroupKind, Arity,
     CompletionSource,
 };
 
@@ -174,7 +174,7 @@ fn write_flags(b: &mut TextBuilder, flags: &List<FlagSpec>, depth: Int) {
     b.push("],\n");
 }
 
-fn write_groups(b: &mut TextBuilder, groups: &List<Group>, depth: Int) {
+fn write_groups(b: &mut TextBuilder, groups: &List<ArgGroup>, depth: Int) {
     if groups.len() == 0 { return; }
     indent(b, depth);
     b.push("\"groups\": [\n");
