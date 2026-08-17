@@ -87,8 +87,8 @@ def wanted_names(root: pathlib.Path) -> dict[str, set[str]]:
     return want
 
 
-def probe(verum: str, workdir: pathlib.Path, module: str, names: list[str]):
-    """Ask the compiler which of `names` the module does not export."""
+def probe_once(verum: str, workdir: pathlib.Path, module: str, names: list[str]):
+    """One compiler run; returns the names it reported as missing."""
     src = workdir / (module.replace(".", "_") + ".vr")
     src.write_text(
         "mount %s.{%s};\n\nfn main() { print(\"ok\"); }\n" % (module, ", ".join(names))
@@ -103,6 +103,30 @@ def probe(verum: str, workdir: pathlib.Path, module: str, names: list[str]):
         (found_module, name)
         for name, found_module in NOT_FOUND_RE.findall(run.stdout + run.stderr)
     ]
+
+
+def probe(verum: str, workdir: pathlib.Path, module: str, names: list[str]):
+    """Every name in `names` the module does not export.
+
+    The compiler reports only the FIRST missing name in a mount group and
+    stops — measured: a group with two deliberate phantoms yields one E401.
+    A single run per module would therefore report "one phantom per module"
+    and read as a total.  So each hit is removed and the module re-probed
+    until it comes back clean; the extra cost is one run per phantom found,
+    not one per name checked.
+    """
+    remaining = list(names)
+    hits: list[tuple[str, str]] = []
+    for _ in range(len(names)):
+        found = probe_once(verum, workdir, module, remaining)
+        if not found:
+            break
+        hits.extend(found)
+        missing = {name for _, name in found}
+        remaining = [n for n in remaining if n not in missing]
+        if not remaining:
+            break
+    return hits
 
 
 def self_test(verum: str, workdir: pathlib.Path) -> bool:

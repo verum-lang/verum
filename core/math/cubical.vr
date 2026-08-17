@@ -37,7 +37,7 @@
 module core.math.cubical;
 
 mount core.math.hott.{
-    I, i0, i1, Path, refl, transport, hcomp,
+    I, i0, i1, refl, transport, hcomp,
     sym, trans, ap, apd, cong, concat,
     IsEquiv, Equiv, equiv_id, equiv_inv, equiv_compose,
     ua, ua_inv, happly,

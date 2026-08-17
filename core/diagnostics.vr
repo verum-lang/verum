@@ -89,9 +89,11 @@ public mount core.mem.diagnostics.{
 
 public mount core.mem.cap_audit.{
     CapEvent, CapEventKind,
-    record_revoke, record_attenuate,
-    record_ref_incr, record_ref_decr,
-    record_gen_bump, record_epoch_advance,
+};
+// The `record_*` writers live in the RING module; `cap_audit` declares
+// only the event types and re-exports none of them (T0780).
+public mount core.mem.cap_audit_ring.{
+    record_revoke, record_attenuate, record_ref_incr, record_ref_decr, record_gen_bump, record_epoch_advance,
 };
 
 /// Producer + reader API for the capability-audit ring buffer. The

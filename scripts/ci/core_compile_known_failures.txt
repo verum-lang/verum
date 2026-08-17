@@ -217,7 +217,6 @@ core/database/sqlite/native/vtabs/fts5/dml.vr
 core/database/sqlite/native/vtabs/fts5/functions.vr
 core/database/sqlite/native/vtabs/fts5/query.vr
 core/database/sqlite/typed_database.vr
-core/diagnostics.vr
 core/encoding/jsonb.vr
 core/eval/cbpv.vr
 core/intrinsics/lowlevel/aarch64.vr
