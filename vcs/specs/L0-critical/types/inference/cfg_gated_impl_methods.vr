@@ -1,0 +1,46 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: types, cfg, conditional-compilation, impl, platform
+// @expected-stdout: one-body ok
+//
+// Pin (T0778 family) — methods in one `implement` block may share a name
+// when `@cfg` leaves exactly one of them for this target.
+//
+// The duplicate-item check walked every item regardless of `@cfg`, so
+// the idiomatic way to write a platform-dependent method — one body per
+// OS, which is how `core/net/unix.vr` spells `peer_cred` — was rejected:
+//
+//     error: duplicate method 'describe' in impl block.
+//       help: rename one of the definitions, or merge their bodies …
+//
+// That advice is the opposite of correct here, which is why this is
+// worse than a false alarm: following it would collapse three platform
+// implementations into one.
+//
+// The predicates below are chosen so exactly one body survives on ANY
+// target, not just on the machine that happens to run the suite: the
+// three cover linux / macos / windows, and the fourth is false
+// everywhere so the file also proves an excluded body is not merely
+// tolerated but genuinely dropped.
+
+type Holder is { v: Int };
+
+implement Holder {
+    @cfg(target_os = "linux")
+    public fn describe(&self) -> Text { "one-body".clone() }
+
+    @cfg(target_os = "macos")
+    public fn describe(&self) -> Text { "one-body".clone() }
+
+    @cfg(target_os = "windows")
+    public fn describe(&self) -> Text { "one-body".clone() }
+
+    @cfg(all(target_os = "linux", target_os = "windows"))
+    public fn describe(&self) -> Text { "IMPOSSIBLE".clone() }
+}
+
+fn main() {
+    let h = Holder { v: 1 };
+    print(f"{h.describe()} ok");
+}

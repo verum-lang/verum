@@ -5172,12 +5172,27 @@ impl TypeChecker {
     /// merge). Method/const/type/proof names share a single per-impl
     /// namespace, so we reject collisions across kinds too.
     fn check_no_duplicate_impl_items(
+        &self,
         impl_decl: &verum_ast::decl::ImplDecl,
     ) -> Result<()> {
         use std::collections::HashSet;
         use verum_ast::decl::ImplItemKind;
         let mut seen: HashSet<String> = HashSet::new();
         for item in impl_decl.items.iter() {
+            // A method excluded by `@cfg` is not part of THIS target's
+            // program, so it cannot collide with anything (T0778 family).
+            // Three platform bodies under one name is the correct way to
+            // write a platform-dependent method — `core/net/unix.vr`
+            // spells `peer_cred` once per OS — and reporting them as a
+            // duplicate is worse than a false alarm: the advice below
+            // says to rename or merge them, which is precisely what must
+            // NOT be done.  Asks the same `CfgEvaluator` the statement
+            // filter and codegen ask.
+            if !item.attributes.is_empty()
+                && !self.cfg_evaluator.should_include(&item.attributes)
+            {
+                continue;
+            }
             let name = match &item.kind {
                 ImplItemKind::Function(f) => f.name.name.as_str().to_string(),
                 ImplItemKind::Type { name, .. } => name.name.as_str().to_string(),
@@ -5215,7 +5230,7 @@ impl TypeChecker {
     ) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
         use verum_common::Text;
-        Self::check_no_duplicate_impl_items(impl_decl)?;
+        self.check_no_duplicate_impl_items(impl_decl)?;
         let ImplKind::Inherent(for_type) = &impl_decl.kind
             else { unreachable!() };
         let type_param_names = type_param_names.clone();
@@ -5702,7 +5717,7 @@ impl TypeChecker {
     ) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
         use verum_common::Text;
-        Self::check_no_duplicate_impl_items(impl_decl)?;
+        self.check_no_duplicate_impl_items(impl_decl)?;
         let ImplKind::Protocol { protocol, protocol_args, for_type } = &impl_decl.kind
             else { unreachable!() };
         let type_param_names = type_param_names.clone();

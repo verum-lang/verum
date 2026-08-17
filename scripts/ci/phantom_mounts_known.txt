@@ -2,6 +2,13 @@
 # Regenerate: scripts/ci/check_phantom_mounts.py <verum> --write-baseline
 # A line removed is a mount repaired.  A line added is a decision to
 # ship one more import that resolves to an unrelated same-named symbol.
+#
+# NOT every line here is a misspelling.  Names declared inside an `extern`
+# block are absent from the archive metadata (T0781), so a mount naming one
+# is reported here even though the declaration exists in the module's
+# source.  On this baseline that is the libsystem group — close, open,
+# kqueue, kevent — and repairing those by renaming would break working FFI.
+# Check the module source before treating a line as a typo.
 core.database.common.migrations	MigrationStore
 core.database.common.migrations.store	MigrationStore
 core.database.common.types	WfBinary

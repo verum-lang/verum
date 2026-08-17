@@ -62,8 +62,18 @@ mount core.sys.linux.syscall.{
 
 @cfg(target_os = "macos")
 mount core.sys.darwin.libsystem.{
-    sys_socket, sys_connect, sys_bind, sys_listen, sys_accept,
-    sys_send, sys_recv, sys_shutdown, sys_close,
+    // Aliased to sys_* for platform abstraction, exactly as
+    // core/net/tcp.vr does — libsystem declares the safe_* wrappers,
+    // never the bare sys_* names (T0780).
+    safe_socket as sys_socket,
+    safe_connect as sys_connect,
+    safe_bind as sys_bind,
+    safe_listen as sys_listen,
+    safe_accept as sys_accept,
+    safe_send as sys_send,
+    safe_recv as sys_recv,
+    safe_shutdown as sys_shutdown,
+    safe_close as sys_close,
     safe_set_nonblocking, safe_set_reuseaddr, safe_set_nosigpipe,
     AF_UNIX, SOCK_STREAM,
     MSG_DONTWAIT,
