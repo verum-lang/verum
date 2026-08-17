@@ -1,0 +1,64 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: verification, termination, total, soundness, ast-walk
+// @expected-stdout: 0 6 6 0 ok
+//
+// Pin (T0786, SOUNDNESS) — the totality checker must see a recursive call
+// wherever it is written.
+//
+// Both walks in termination.rs ended in a `_ => {}` annotated "other
+// expressions we don't need to traverse for termination checking". They
+// did need to: a call inside a tuple or a format-string interpolation was
+// invisible, so
+//
+//     @total fn loops(n: Int) -> Int { (loops(n), 0).0 }
+//     @total fn loops(n: Int) -> Int { f"{loops(n)}".len() }
+//
+// were ACCEPTED — `@total` granted to a function that does not terminate
+// — while the direct, record-literal and array-literal spellings were
+// correctly rejected with E321.  A totality claim that can be obtained by
+// choosing where to write the call is worth nothing.
+//
+// This pin approaches it from the side a spec test can assert: every
+// function below recurses through one of the once-invisible positions AND
+// decreases, so each must be ACCEPTED and produce the right answer.  If a
+// walk stops descending into one of these positions the call vanishes
+// from the measure analysis; if it descends but mis-analyses it, the file
+// is rejected.  Both failures are visible here, in opposite directions.
+//
+// A fourth position, an array literal, was drafted and dropped.  Written
+// as `[via_array(n - 1)][0]` the file does not compile: the element type
+// comes out as `!`, because the recursive callee's return type is not yet
+// known while the literal is inferred.  `[2][0]` on a non-recursive
+// element is fine, so this is narrower than "array literals" — it is
+// self-reference inside a literal.  Left out rather than papered over, so
+// this file states only what it can state honestly.  (That diagnostic
+// also arrives with no source location.)
+//
+// The negative direction — unbounded recursion in the same positions
+// being rejected — cannot be written as a run-interpreter spec (the file
+// must compile to run), and is covered by the E321 measurements recorded
+// in T0786.
+
+@total
+fn plain(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    plain(n - 1) + n
+}
+
+@total
+fn via_tuple(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    (via_tuple(n - 1), 0).0 + n
+}
+
+@total
+fn via_format(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    f"{via_format(n - 1)}".len() + n
+}
+
+fn main() {
+    print(f"{plain(0)} {plain(3)} {via_tuple(3)} {via_format(0)} ok");
+}

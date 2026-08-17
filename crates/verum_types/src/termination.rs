@@ -1178,14 +1178,254 @@ impl TerminationChecker {
             ExprKind::Paren(inner) => {
                 self.collect_calls_from_expr(inner, calls);
             }
+            // ---------------------------------------------------------
+            // T0786 (SOUNDNESS).  These used to fall into a `_ => {}`
+            // annotated "other expressions we don't need to traverse for
+            // termination checking".  They do: a recursive call inside a
+            // tuple or a format-string interpolation was invisible, so
+            //
+            //     @total fn loops(n: Int) -> Int { (loops(n), 0).0 }
+            //     @total fn loops(n: Int) -> Int { f"{loops(n)}".len() }
+            //
+            // were ACCEPTED while the direct and record-literal forms were
+            // correctly rejected with E321.  A verifier that grants
+            // `@total` to a non-terminating function is worse than one
+            // that has no such claim.
+            //
+            // The catch-all is gone; the exhaustiveness checker now names
+            // any new variant so this cannot silently regrow.
+            // ---------------------------------------------------------
+            ExprKind::Tuple(elements) | ExprKind::SetLiteral { elements } => {
+                for e in elements.iter() {
+                    self.collect_calls_from_expr(e, calls);
+                }
+            }
+            ExprKind::InterpolatedString { exprs, .. } => {
+                for e in exprs.iter() {
+                    self.collect_calls_from_expr(e, calls);
+                }
+            }
+            ExprKind::MapLiteral { entries } => {
+                for (k, v) in entries.iter() {
+                    self.collect_calls_from_expr(k, calls);
+                    self.collect_calls_from_expr(v, calls);
+                }
+            }
+            ExprKind::NamedArg { value, .. }
+            | ExprKind::OptionalChain { expr: value, .. }
+            | ExprKind::TupleIndex { expr: value, .. }
+            | ExprKind::Yield(value)
+            | ExprKind::Typeof(value)
+            | ExprKind::Lift { expr: value }
+            | ExprKind::StageEscape { expr: value, .. }
+            | ExprKind::Spawn { expr: value, .. }
+            | ExprKind::Attenuate { context: value, .. }
+            | ExprKind::Is { expr: value, .. }
+            | ExprKind::DestructuringAssign { value, .. } => {
+                self.collect_calls_from_expr(value, calls)
+            }
+            ExprKind::Pipeline { left, right } | ExprKind::NullCoalesce { left, right } => {
+                self.collect_calls_from_expr(left, calls);
+                self.collect_calls_from_expr(right, calls);
+            }
+            ExprKind::TryBlock(inner) | ExprKind::Throw(inner) => {
+                self.collect_calls_from_expr(inner, calls)
+            }
+            ExprKind::TensorLiteral { data, .. } => self.collect_calls_from_expr(data, calls),
+            ExprKind::StreamLiteral(stream) => match &stream.kind {
+                verum_ast::expr::StreamLiteralKind::Elements { elements, .. } => {
+                    for e in elements.iter() {
+                        self.collect_calls_from_expr(e, calls);
+                    }
+                }
+                verum_ast::expr::StreamLiteralKind::Range { start, end, .. } => {
+                    self.collect_calls_from_expr(start, calls);
+                    if let verum_common::Maybe::Some(e) = end {
+                        self.collect_calls_from_expr(e, calls);
+                    }
+                }
+            },
+            ExprKind::ForAwait {
+                async_iterable,
+                body,
+                invariants,
+                decreases,
+                ..
+            } => {
+                self.collect_calls_from_expr(async_iterable, calls);
+                self.collect_calls_from_block(body, calls);
+                for e in invariants.iter().chain(decreases.iter()) {
+                    self.collect_calls_from_expr(e, calls);
+                }
+            }
+            ExprKind::Select { arms, .. } => {
+                for arm in arms.iter() {
+                    if let verum_common::Maybe::Some(f) = &arm.future {
+                        self.collect_calls_from_expr(f, calls);
+                    }
+                    if let verum_common::Maybe::Some(g) = &arm.guard {
+                        self.collect_calls_from_expr(g, calls);
+                    }
+                    self.collect_calls_from_expr(&arm.body, calls);
+                }
+            }
+            ExprKind::Nursery {
+                body,
+                on_cancel,
+                recover,
+                ..
+            } => {
+                self.collect_calls_from_block(body, calls);
+                if let verum_common::Maybe::Some(b) = on_cancel {
+                    self.collect_calls_from_block(b, calls);
+                }
+                if let verum_common::Maybe::Some(r) = recover {
+                    self.collect_calls_from_recover(r, calls);
+                }
+            }
+            ExprKind::MetaFunction { args, .. } => {
+                for a in args.iter() {
+                    self.collect_calls_from_expr(a, calls);
+                }
+            }
+            // Carry TOKENS, not typed expressions: `MacroCall` is expanded
+            // in phase 3 and `Quote` is staged syntax, so no call of THIS
+            // function's recursion can hide in either.
+            ExprKind::Quote { .. } | ExprKind::MacroCall { .. } => {}
+            ExprKind::UseContext { handler, body, .. } => {
+                self.collect_calls_from_expr(handler, calls);
+                self.collect_calls_from_expr(body, calls);
+            }
+            ExprKind::Forall { bindings, body } | ExprKind::Exists { bindings, body } => {
+                for b in bindings.iter() {
+                    if let verum_common::Maybe::Some(d) = &b.domain {
+                        self.collect_calls_from_expr(d, calls);
+                    }
+                    if let verum_common::Maybe::Some(g) = &b.guard {
+                        self.collect_calls_from_expr(g, calls);
+                    }
+                }
+                self.collect_calls_from_expr(body, calls);
+            }
+            // Carry TYPES, not expressions.
+            ExprKind::TypeBound { .. }
+            | ExprKind::TypeProperty { .. }
+            | ExprKind::TypeExpr(_) => {}
+            ExprKind::InlineAsm { operands, .. } => {
+                use verum_ast::expr::AsmOperandKind;
+                for op in operands.iter() {
+                    match &op.kind {
+                        AsmOperandKind::In { expr, .. }
+                        | AsmOperandKind::Out { place: expr, .. }
+                        | AsmOperandKind::InOut { place: expr, .. }
+                        | AsmOperandKind::Const { expr } => {
+                            self.collect_calls_from_expr(expr, calls)
+                        }
+                        AsmOperandKind::InLateOut {
+                            in_expr, out_place, ..
+                        } => {
+                            self.collect_calls_from_expr(in_expr, calls);
+                            self.collect_calls_from_expr(out_place, calls);
+                        }
+                        AsmOperandKind::Sym { .. } | AsmOperandKind::Clobber { .. } => {}
+                    }
+                }
+            }
+            ExprKind::CopatternBody { arms, .. } => {
+                for arm in arms.iter() {
+                    self.collect_calls_from_expr(&arm.body, calls);
+                }
+            }
+            // A calculation chain is proof text checked by the
+            // verification phase, not a call site of the function under
+            // termination analysis.
+            ExprKind::CalcBlock(_) => {}
+            // Names a type to resolve from the context; carries no call.
+            ExprKind::Inject { .. } => {}
+            ExprKind::TryFinally {
+                try_block,
+                finally_block,
+            } => {
+                self.collect_calls_from_expr(try_block, calls);
+                self.collect_calls_from_expr(finally_block, calls);
+            }
+            ExprKind::TryRecover { try_block, recover } => {
+                self.collect_calls_from_expr(try_block, calls);
+                self.collect_calls_from_recover(recover, calls);
+            }
+            ExprKind::TryRecoverFinally {
+                try_block,
+                recover,
+                finally_block,
+            } => {
+                self.collect_calls_from_expr(try_block, calls);
+                self.collect_calls_from_recover(recover, calls);
+                self.collect_calls_from_expr(finally_block, calls);
+            }
+            ExprKind::Comprehension { expr, clauses }
+            | ExprKind::SetComprehension { expr, clauses }
+            | ExprKind::StreamComprehension { expr, clauses }
+            | ExprKind::GeneratorComprehension { expr, clauses } => {
+                self.collect_calls_from_expr(expr, calls);
+                self.collect_calls_from_clauses(clauses, calls);
+            }
+            ExprKind::MapComprehension {
+                key_expr,
+                value_expr,
+                clauses,
+            } => {
+                self.collect_calls_from_expr(key_expr, calls);
+                self.collect_calls_from_expr(value_expr, calls);
+                self.collect_calls_from_clauses(clauses, calls);
+            }
             // Literals, paths, continue - no nested expressions
             ExprKind::Literal(_) | ExprKind::Path(_) | ExprKind::Continue { .. } => {}
             // Async/unsafe blocks
             ExprKind::Async(body) | ExprKind::Unsafe(body) | ExprKind::Meta(body) => {
                 self.collect_calls_from_block(body, calls);
             }
-            // Other expressions we don't need to traverse for termination checking
-            _ => {}
+        }
+    }
+
+    /// Recursive calls inside a `recover` body.
+    fn collect_calls_from_recover(
+        &self,
+        recover: &verum_ast::expr::RecoverBody,
+        calls: &mut List<Text>,
+    ) {
+        use verum_ast::expr::RecoverBody;
+        use verum_common::Maybe;
+        match recover {
+            RecoverBody::MatchArms { arms, .. } => {
+                for arm in arms.iter() {
+                    if let Maybe::Some(g) = &arm.guard {
+                        self.collect_calls_from_expr(g, calls);
+                    }
+                    self.collect_calls_from_expr(&arm.body, calls);
+                }
+            }
+            RecoverBody::Closure { body, .. } => self.collect_calls_from_expr(body, calls),
+        }
+    }
+
+    /// Recursive calls inside comprehension clauses — the iterated
+    /// expression, the guard, and any `let` binding all count.
+    fn collect_calls_from_clauses(
+        &self,
+        clauses: &List<verum_ast::expr::ComprehensionClause>,
+        calls: &mut List<Text>,
+    ) {
+        use verum_ast::expr::ComprehensionClauseKind;
+        for clause in clauses.iter() {
+            match &clause.kind {
+                ComprehensionClauseKind::For { iter, .. } => {
+                    self.collect_calls_from_expr(iter, calls)
+                }
+                ComprehensionClauseKind::If(cond) => self.collect_calls_from_expr(cond, calls),
+                ComprehensionClauseKind::Let { value, .. } => {
+                    self.collect_calls_from_expr(value, calls)
+                }
+            }
         }
     }
 
@@ -1566,10 +1806,281 @@ impl TerminationChecker {
             ExprKind::Async(body) | ExprKind::Unsafe(body) | ExprKind::Meta(body) => {
                 self.find_recursive_calls_in_block(body, func_name, calls, match_bindings);
             }
+            // ---------------------------------------------------------
+            // T0786 (SOUNDNESS).  This is the walk that drives E321, and
+            // its `_ => {}` was annotated "other expressions we don't need
+            // to traverse".  A recursive call inside a tuple or a
+            // format-string interpolation was therefore invisible:
+            //
+            //     @total fn loops(n: Int) -> Int { (loops(n), 0).0 }
+            //     @total fn loops(n: Int) -> Int { f"{loops(n)}".len() }
+            //
+            // were ACCEPTED while the direct, record-literal and
+            // array-literal forms were correctly rejected.  Granting
+            // `@total` to a function that does not terminate is the one
+            // failure a totality checker must not have.
+            //
+            // The catch-all is gone, so a new `ExprKind` cannot quietly
+            // reopen the hole.
+            // ---------------------------------------------------------
+            ExprKind::Tuple(elements) | ExprKind::SetLiteral { elements } => {
+                for e in elements.iter() {
+                    self.find_recursive_calls_impl(e, func_name, calls, match_bindings);
+                }
+            }
+            ExprKind::InterpolatedString { exprs, .. } => {
+                for e in exprs.iter() {
+                    self.find_recursive_calls_impl(e, func_name, calls, match_bindings);
+                }
+            }
+            ExprKind::MapLiteral { entries } => {
+                for (k, v) in entries.iter() {
+                    self.find_recursive_calls_impl(k, func_name, calls, match_bindings);
+                    self.find_recursive_calls_impl(v, func_name, calls, match_bindings);
+                }
+            }
+            ExprKind::NamedArg { value: inner, .. }
+            | ExprKind::OptionalChain { expr: inner, .. }
+            | ExprKind::TupleIndex { expr: inner, .. }
+            | ExprKind::Yield(inner)
+            | ExprKind::Typeof(inner)
+            | ExprKind::Throw(inner)
+            | ExprKind::TryBlock(inner)
+            | ExprKind::Lift { expr: inner }
+            | ExprKind::StageEscape { expr: inner, .. }
+            | ExprKind::Spawn { expr: inner, .. }
+            | ExprKind::Attenuate { context: inner, .. }
+            | ExprKind::Is { expr: inner, .. }
+            | ExprKind::TensorLiteral { data: inner, .. }
+            | ExprKind::DestructuringAssign { value: inner, .. } => {
+                self.find_recursive_calls_impl(inner, func_name, calls, match_bindings)
+            }
+            ExprKind::Pipeline { left, right }
+            | ExprKind::NullCoalesce { left, right }
+            | ExprKind::TryFinally {
+                try_block: left,
+                finally_block: right,
+            } => {
+                self.find_recursive_calls_impl(left, func_name, calls, match_bindings);
+                self.find_recursive_calls_impl(right, func_name, calls, match_bindings);
+            }
+            ExprKind::TryRecover { try_block, recover } => {
+                self.find_recursive_calls_impl(try_block, func_name, calls, match_bindings);
+                self.find_recursive_in_recover(recover, func_name, calls, match_bindings);
+            }
+            ExprKind::TryRecoverFinally {
+                try_block,
+                recover,
+                finally_block,
+            } => {
+                self.find_recursive_calls_impl(try_block, func_name, calls, match_bindings);
+                self.find_recursive_in_recover(recover, func_name, calls, match_bindings);
+                self.find_recursive_calls_impl(
+                    finally_block,
+                    func_name,
+                    calls,
+                    match_bindings,
+                );
+            }
+            ExprKind::Comprehension { expr, clauses }
+            | ExprKind::SetComprehension { expr, clauses }
+            | ExprKind::StreamComprehension { expr, clauses }
+            | ExprKind::GeneratorComprehension { expr, clauses } => {
+                self.find_recursive_calls_impl(expr, func_name, calls, match_bindings);
+                self.find_recursive_in_clauses(clauses, func_name, calls, match_bindings);
+            }
+            ExprKind::MapComprehension {
+                key_expr,
+                value_expr,
+                clauses,
+            } => {
+                self.find_recursive_calls_impl(key_expr, func_name, calls, match_bindings);
+                self.find_recursive_calls_impl(value_expr, func_name, calls, match_bindings);
+                self.find_recursive_in_clauses(clauses, func_name, calls, match_bindings);
+            }
+            ExprKind::StreamLiteral(stream) => match &stream.kind {
+                verum_ast::expr::StreamLiteralKind::Elements { elements, .. } => {
+                    for e in elements.iter() {
+                        self.find_recursive_calls_impl(e, func_name, calls, match_bindings);
+                    }
+                }
+                verum_ast::expr::StreamLiteralKind::Range { start, end, .. } => {
+                    self.find_recursive_calls_impl(start, func_name, calls, match_bindings);
+                    if let verum_common::Maybe::Some(e) = end {
+                        self.find_recursive_calls_impl(e, func_name, calls, match_bindings);
+                    }
+                }
+            },
+            ExprKind::Select { arms, .. } => {
+                for arm in arms.iter() {
+                    if let verum_common::Maybe::Some(f) = &arm.future {
+                        self.find_recursive_calls_impl(f, func_name, calls, match_bindings);
+                    }
+                    if let verum_common::Maybe::Some(g) = &arm.guard {
+                        self.find_recursive_calls_impl(g, func_name, calls, match_bindings);
+                    }
+                    self.find_recursive_calls_impl(
+                        &arm.body,
+                        func_name,
+                        calls,
+                        match_bindings,
+                    );
+                }
+            }
+            ExprKind::MetaFunction { args, .. } => {
+                for a in args.iter() {
+                    self.find_recursive_calls_impl(a, func_name, calls, match_bindings);
+                }
+            }
+            ExprKind::UseContext { handler, body, .. } => {
+                self.find_recursive_calls_impl(handler, func_name, calls, match_bindings);
+                self.find_recursive_calls_impl(body, func_name, calls, match_bindings);
+            }
+            ExprKind::Forall { bindings, body } | ExprKind::Exists { bindings, body } => {
+                for b in bindings.iter() {
+                    if let verum_common::Maybe::Some(d) = &b.domain {
+                        self.find_recursive_calls_impl(d, func_name, calls, match_bindings);
+                    }
+                    if let verum_common::Maybe::Some(g) = &b.guard {
+                        self.find_recursive_calls_impl(g, func_name, calls, match_bindings);
+                    }
+                }
+                self.find_recursive_calls_impl(body, func_name, calls, match_bindings);
+            }
+            ExprKind::CopatternBody { arms, .. } => {
+                for arm in arms.iter() {
+                    self.find_recursive_calls_impl(
+                        &arm.body,
+                        func_name,
+                        calls,
+                        match_bindings,
+                    );
+                }
+            }
+            ExprKind::InlineAsm { operands, .. } => {
+                use verum_ast::expr::AsmOperandKind;
+                for op in operands.iter() {
+                    match &op.kind {
+                        AsmOperandKind::In { expr, .. }
+                        | AsmOperandKind::Out { place: expr, .. }
+                        | AsmOperandKind::InOut { place: expr, .. }
+                        | AsmOperandKind::Const { expr } => self
+                            .find_recursive_calls_impl(expr, func_name, calls, match_bindings),
+                        AsmOperandKind::InLateOut {
+                            in_expr, out_place, ..
+                        } => {
+                            self.find_recursive_calls_impl(
+                                in_expr,
+                                func_name,
+                                calls,
+                                match_bindings,
+                            );
+                            self.find_recursive_calls_impl(
+                                out_place,
+                                func_name,
+                                calls,
+                                match_bindings,
+                            );
+                        }
+                        AsmOperandKind::Sym { .. } | AsmOperandKind::Clobber { .. } => {}
+                    }
+                }
+            }
+            ExprKind::ForAwait {
+                async_iterable,
+                body,
+                invariants,
+                decreases,
+                ..
+            } => {
+                self.find_recursive_calls_impl(
+                    async_iterable,
+                    func_name,
+                    calls,
+                    match_bindings,
+                );
+                self.find_recursive_calls_in_block(body, func_name, calls, match_bindings);
+                for e in invariants.iter().chain(decreases.iter()) {
+                    self.find_recursive_calls_impl(e, func_name, calls, match_bindings);
+                }
+            }
+            ExprKind::Nursery {
+                body,
+                on_cancel,
+                recover,
+                ..
+            } => {
+                self.find_recursive_calls_in_block(body, func_name, calls, match_bindings);
+                if let verum_common::Maybe::Some(b) = on_cancel {
+                    self.find_recursive_calls_in_block(b, func_name, calls, match_bindings);
+                }
+                if let verum_common::Maybe::Some(r) = recover {
+                    self.find_recursive_in_recover(r, func_name, calls, match_bindings);
+                }
+            }
+            // Carry TOKENS or TYPES, or are resolved before this phase.
+            ExprKind::Quote { .. }
+            | ExprKind::MacroCall { .. }
+            | ExprKind::TypeBound { .. }
+            | ExprKind::TypeProperty { .. }
+            | ExprKind::TypeExpr(_)
+            | ExprKind::Inject { .. }
+            | ExprKind::CalcBlock(_) => {}
             // Literals, paths, continue - no nested expressions
             ExprKind::Literal(_) | ExprKind::Path(_) | ExprKind::Continue { .. } => {}
-            // Other expressions we don't need to traverse for termination checking
-            _ => {}
+        }
+    }
+
+    /// Recursive calls inside a `recover` body.
+    fn find_recursive_in_recover(
+        &self,
+        recover: &verum_ast::expr::RecoverBody,
+        func_name: &Text,
+        calls: &mut List<RecursiveCall>,
+        match_bindings: &Map<Text, Text>,
+    ) {
+        use verum_ast::expr::RecoverBody;
+        match recover {
+            RecoverBody::MatchArms { arms, .. } => {
+                for arm in arms.iter() {
+                    if let verum_common::Maybe::Some(g) = &arm.guard {
+                        self.find_recursive_calls_impl(g, func_name, calls, match_bindings);
+                    }
+                    self.find_recursive_calls_impl(
+                        &arm.body,
+                        func_name,
+                        calls,
+                        match_bindings,
+                    );
+                }
+            }
+            RecoverBody::Closure { body, .. } => {
+                self.find_recursive_calls_impl(body, func_name, calls, match_bindings)
+            }
+        }
+    }
+
+    /// Recursive calls inside comprehension clauses.
+    fn find_recursive_in_clauses(
+        &self,
+        clauses: &List<verum_ast::expr::ComprehensionClause>,
+        func_name: &Text,
+        calls: &mut List<RecursiveCall>,
+        match_bindings: &Map<Text, Text>,
+    ) {
+        use verum_ast::expr::ComprehensionClauseKind;
+        for clause in clauses.iter() {
+            match &clause.kind {
+                ComprehensionClauseKind::For { iter, .. } => {
+                    self.find_recursive_calls_impl(iter, func_name, calls, match_bindings)
+                }
+                ComprehensionClauseKind::If(cond) => {
+                    self.find_recursive_calls_impl(cond, func_name, calls, match_bindings)
+                }
+                ComprehensionClauseKind::Let { value, .. } => {
+                    self.find_recursive_calls_impl(value, func_name, calls, match_bindings)
+                }
+            }
         }
     }
 
