@@ -1,0 +1,64 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: parser, precedence, bitwise, grammar
+// @expected-stdout: 14 14 12 30 5 ok
+//
+// Pin (T0816) — bitwise operators use the C ladder: & tighter than ^,
+// ^ tighter than |.
+//
+// grammar/verum.ebnf:1534 says otherwise. It declares ONE flat,
+// left-associative level for all three:
+//
+//     bitwise_expr = shift_expr , { ( '&' | '|' | '^' ) , shift_expr } ;
+//
+// Under that reading `a | b & c` with a=12 b=10 c=6 is (a|b)&c = 6. The
+// compiler answers 14, which is a|(b&c). The grammar and the compiler
+// therefore disagree about the VALUE of an expression, and CLAUDE.md names
+// the grammar the ONLY source of truth and requires checking it before
+// writing any .vr file — so the document authors are told to trust is the
+// one that is wrong.
+//
+// This spec exists because nothing compared the two. An ebnf file is not
+// executable; the fix to T0816 is to split the production into three
+// levels, and this pin is what keeps them from drifting apart again.
+//
+// It surfaced from core/security/tuf/client.vr:595, which accumulates a
+// constant-time comparison as
+//
+//     diff = diff | (ab[i] as Int) ^ (bb[i] as Int);
+//
+// with no parentheses around the XOR. Under the grammar's reading that is
+// (diff | ab[i]) ^ bb[i] — not a difference accumulator, and the trailing
+// `diff == 0` would be meaningless. Under the compiler's real precedence it
+// is the intended diff | (a ^ b). The code is right and the spec is wrong,
+// which is the worse direction: following the mandated practice leads a
+// reader to condemn a correct security primitive.
+//
+// Values are chosen so every row DISTINGUISHES the two readings — the
+// grammar's answer would be 6 where this expects 14, 8 where it expects 12,
+// and 1 where it expects 5. A row where both readings agree would pass under either and is not
+// pinned here; `a & b | c` is such a row and is deliberately absent.
+
+fn main() {
+    let a: Int = 12;
+    let b: Int = 10;
+    let c: Int = 6;
+
+    // grammar reading: (a|b)&c = 6      compiler: a|(b&c) = 14
+    let or_and: Int = a | b & c;
+    // grammar reading: (a^b)&c = 6      compiler: a^(b&c) = 14
+    let xor_and: Int = a ^ b & c;
+    // grammar reading: (a|b)^c = 8      compiler: a|(b^c) = 12
+    let or_xor: Int = a | b ^ c;
+    // both readings agree; pins that shift stays tighter than every bitwise op
+    let shift_or: Int = a << 1 | c;
+
+    let d: Int = 5;
+    let e: Int = 3;
+    let f: Int = 6;
+    // grammar reading: (d|e)^f = 1      compiler: d|(e^f) = 5
+    let acc: Int = d | e ^ f;
+
+    print(f"{or_and} {xor_and} {or_xor} {shift_or} {acc} ok");
+}
