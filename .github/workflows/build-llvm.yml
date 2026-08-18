@@ -164,7 +164,14 @@ jobs:
           set -euo pipefail
           # llvm-config gains a .exe suffix on Windows; static libs are
           # .a with GNU/clang toolchains and .lib with MSVC.
-          test -f install/bin/llvm-config || test -f install/bin/llvm-config.exe
+          # The consumer needs TOOLS, not just a config script: Phase 7.5
+          # shells out to llc / opt / llvm-link, and publishing an archive
+          # without them produces a green build here and "Failed to
+          # execute llc" in every downstream job.
+          for tool in llvm-config llc opt llvm-link; do
+            test -f "install/bin/${tool}" || test -f "install/bin/${tool}.exe" \
+              || { echo "::error::install/bin/${tool} missing — refusing to publish an incomplete prebuilt"; exit 1; }
+          done
           test -d install/include
           # Match lib-prefixed Unix names (libLLVMCore.a, liblldCommon.a) AND
           # bare MSVC names (LLVMCore.lib, lldCommon.lib). LLD's libraries are

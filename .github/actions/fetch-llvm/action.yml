@@ -84,7 +84,11 @@ runs:
       run: |
         set -euo pipefail
 
-        if [[ -f llvm/install/bin/llvm-config || -f llvm/install/bin/llvm-config.exe ]]; then
+        if [[ -f llvm/install/bin/llc || -f llvm/install/bin/llc.exe ]] \
+           && { [[ -f llvm/install/bin/llvm-config ]] || [[ -f llvm/install/bin/llvm-config.exe ]]; }; then
+          # Keyed on `llc` as well as `llvm-config`: a half-populated
+          # install/ used to satisfy this check and skip the download
+          # that would have repaired it.
           echo "llvm/install/ already present — skipping download"
           echo "fetched=already_present" >> "$GITHUB_OUTPUT"
           exit 0
@@ -121,7 +125,26 @@ runs:
         zstd -d -c "${ARCHIVE}" | tar -xf - -C llvm
         rm -f "${ARCHIVE}" "${ARCHIVE}.sha256"
 
-        test -f llvm/install/bin/llvm-config || test -f llvm/install/bin/llvm-config.exe
+        # Completeness, not existence.  `llvm-config` alone proved only
+        # that SOMETHING unpacked: a truncated archive leaves it in place
+        # while `llc` / `opt` are missing, and the failure then surfaces
+        # an hour later inside a compile as "Failed to execute llc" —
+        # after the runtime has already fallen back to the host's
+        # `/usr/bin/opt-18`, mixing LLVM versions.  Measured on CI run
+        # 32122539690: the no-libc invariant job failed exactly that way.
+        #
+        # Check the tools Phase 7.5 actually shells out to.
+        missing=""
+        for tool in llvm-config llc opt llvm-link; do
+          if [[ ! -f "llvm/install/bin/${tool}" && ! -f "llvm/install/bin/${tool}.exe" ]]; then
+            missing="${missing} ${tool}"
+          fi
+        done
+        if [[ -n "${missing}" ]]; then
+          echo "::error::prebuilt LLVM unpacked without:${missing} — the archive is incomplete for this triple. Re-run the 'Build LLVM (prebuilt cache)' workflow, or delete the release asset so this action falls back to a source build."
+          ls -la llvm/install/bin | head -40 || true
+          exit 1
+        fi
         echo "fetched=hit" >> "$GITHUB_OUTPUT"
 
     - name: Build LLVM from source (fallback)
