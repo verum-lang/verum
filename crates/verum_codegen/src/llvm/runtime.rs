@@ -6057,8 +6057,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
-    /// verum_random_u64() -> i64
-    /// Xorshift64* PRNG with auto-seeding from monotonic time.
     /// `verum_random_u64() -> i64` — the intrinsic behind
     /// `@intrinsic("random_u64")`.
     ///
