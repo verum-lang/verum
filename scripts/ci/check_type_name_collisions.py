@@ -70,7 +70,13 @@ CORE = REPO / "core"
 KNOWN = REPO / "scripts" / "ci" / "type_name_collisions_known.txt"
 
 # `visibility , 'type' , [ 'affine' | 'linear' ] , identifier , [generics]`
-DECL = re.compile(r"^\s*(?:public\s+)?type\s+(?:(?:affine|linear)\s+)?([A-Za-z_]\w*)")
+#
+# `visibility` is `( 'public' | 'pub' )` (verum.ebnf:410) — BOTH spellings,
+# and core/ uses both: 28 declarations say `pub type`.  Accepting only
+# `public` left those 28 invisible to this gate, so a collision involving
+# one of them would have passed silently.  None of the 28 collides today,
+# which is exactly why the omission survived: fixing it changes no count.
+DECL = re.compile(r"^\s*(?:(?:public|pub)\s+)?type\s+(?:(?:affine|linear)\s+)?([A-Za-z_]\w*)")
 
 
 def declares_a_type(line: str) -> str | None:
@@ -166,6 +172,10 @@ SELF_TEST_CASES = [
     # (source line, the name it declares — or None)
     ("type Point is { x: Float };", "Point"),
     ("public type UserId is (Int);", "UserId"),
+    # `visibility` admits both spellings (verum.ebnf:410) and core/ uses
+    # both; accepting only `public` hid 28 declarations from this gate.
+    ("pub type SessionId is (Int);", "SessionId"),
+    ("pub type affine PinnedBuf is { p: Ptr };", "PinnedBuf"),
     ("public type affine ArenaScope is { p: Ptr };", "ArenaScope"),
     ("type linear Token is ();", "Token"),
     ("type Tree<T> is Leaf(T) | Node { l: Heap<Tree<T>> };", "Tree"),
