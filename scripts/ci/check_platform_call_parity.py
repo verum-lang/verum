@@ -105,6 +105,16 @@ BASELINE = 32
 _declared: dict[Path, set[str]] = {}
 
 
+def shown_path(path: Path) -> str:
+    """Repo-relative when possible. The self-check runs this gate against a
+    scratch tree outside the repo, and an unguarded relative_to turns a
+    correct finding into a traceback."""
+    try:
+        return str(path.relative_to(REPO))
+    except ValueError:
+        return str(path)
+
+
 def declared_in(path: Path) -> set[str]:
     if path not in _declared:
         _declared[path] = {
@@ -168,7 +178,7 @@ def scan() -> tuple[dict, list, int]:
                     platform, middle, leaf = match.group(1), match.group(2), match.group(3)
                     segments = [s for s in middle.strip(".").split(".") if s]
                     module = target_module(platform, segments)
-                    rel = path.relative_to(REPO)
+                    rel = shown_path(path)
                     if module is None:
                         dotted = f"sys.{platform}{middle}"
                         no_module.append((f"{rel}:{lineno}", f"{dotted}.{leaf}"))
