@@ -132,6 +132,12 @@ name = "contract"
 # owe anything to it.
 modules = [
     "context.random",
+    # `base/serde.vr` is the same shape: Serialize / Deserialize
+    # protocols and nothing that performs them.  It sat in ring 0 only
+    # because it lives under `base/`, and a submodule inherits its
+    # parent's ring unless it is named here.  Nothing in ring 0 mounts
+    # it; its own mounts reach `base` alone.
+    "base.serde",
 ]
 
 [ring.1]
@@ -166,6 +172,12 @@ modules = [
     # `core.security.x509` parsing an IP for SAN matching both had to
     # reach into ring 5.
     "net.addr",
+    # `base/env.vr` is "Environment and Process Operations" — reading the
+    # environment and asking about the process is the platform boundary,
+    # not the language's vocabulary. It sat in ring 0 by inheriting
+    # `base/`'s ring; its only consumer below ring 5 is `io.fs` (ring 2),
+    # so ring 1 is where it fits from both sides.
+    "base.env",
 ]
 # Two submodules placed by measurement rather than by their parent's name:
 #
@@ -256,6 +268,38 @@ modules = [
     # `core.base.snowflake` claimed a Snowflake ID is a primitive of the
     # LANGUAGE, next to Maybe and Result; it is not.
     "id",
+    # THE SAME CORRECTION, CONTINUED (2026-08-18).  `base/` still held
+    # eight files that are algorithms over values, not the language's
+    # vocabulary, and each was sitting in ring 0 for one reason: a
+    # submodule inherits its parent's ring unless it is named here, so
+    # `core/base/<x>.vr` was ring 0 by filesystem accident.
+    #
+    # The prelude never published any of them — `core/mod.vr` states the
+    # inclusion law ("a name belongs in the prelude only if the LANGUAGE
+    # ITSELF requires it to be in scope everywhere") and none of these
+    # qualify.  Ring 0's own membership comment says the same thing from
+    # the other side: it is "what the grammar, the checker and @derive
+    # name".  A Levenshtein distance is not.
+    #
+    # Measured before placing them: none is mounted by anything in ring
+    # 0 (zero edges), each mounts only ring-0 modules, and the LOWEST
+    # ring among their consumers is 3 — so ring 2 clears both bounds.
+    #
+    #   semver / semver_constraint  version parsing + range algebra;
+    #                               consumers are `cog.*` (ring 4)
+    #   glob                        shell-style pattern matching;
+    #                               consumers are `shell.*` (ring 5)
+    #   string_distance             Levenshtein + Jaro-Winkler;
+    #                               consumer is `cli.error` (ring 5)
+    #   data                        a dynamic JSON-shaped value tree
+    #   log                         a logging protocol + helpers
+    #   retry                       retry-with-backoff over Result
+    #   coinductive                 productivity / bisimulation for
+    #                               greatest fixed points; consumer is
+    #                               `action.ludics_lazy` (ring 3)
+    "base.semver", "base.semver_constraint", "base.glob",
+    "base.string_distance", "base.data", "base.log", "base.retry",
+    "base.coinductive",
 ]
 
 [ring.3]
