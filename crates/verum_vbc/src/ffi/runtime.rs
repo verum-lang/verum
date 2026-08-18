@@ -1352,7 +1352,17 @@ mod tests {
         assert_eq!(runtime.get_errno(), 0);
     }
 
+    /// `System` is libSystem.B.dylib — an APPLE library name.
+    ///
+    /// This ran on every platform and failed on Linux, where there is no
+    /// such library, contributing two of the fifteen red unit tests in
+    /// CI run 32166197035. A test whose subject does not exist on the
+    /// runner is not a failing test; it is a test that should not have
+    /// been selected. (The no-libc architecture names libSystem as the
+    /// macOS boundary precisely because Linux uses raw syscalls
+    /// instead.)
     #[test]
+    #[cfg(target_os = "macos")]
     fn test_load_libsystem() {
         let mut runtime = FfiRuntime::new().unwrap();
         let result = runtime.load_library("System");
@@ -1363,7 +1373,9 @@ mod tests {
         );
     }
 
+    /// Same subject, same reason: resolves `getpid` out of libSystem.
     #[test]
+    #[cfg(target_os = "macos")]
     fn test_resolve_getpid() {
         let mut runtime = FfiRuntime::new().unwrap();
         let handle = runtime.load_library("System").unwrap();
@@ -1376,7 +1388,9 @@ mod tests {
         );
     }
 
+    /// Same subject again: calls `getpid` through libSystem.
     #[test]
+    #[cfg(target_os = "macos")]
     fn test_call_getpid() {
         let mut runtime = FfiRuntime::new().unwrap();
         let handle = runtime.load_library("System").unwrap();
