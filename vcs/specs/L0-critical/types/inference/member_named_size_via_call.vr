@@ -1,0 +1,27 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: types, layout, field-access
+// @expected-stdout: 10 10 ok
+//
+// Control for T0815 — the half that works today and must keep working.
+//
+// A member named `size` read off a CALL is fine, and a program containing
+// such a read has working local reads too. That second fact is why this
+// control cannot live in the same file as the pin it guards: one
+// `build().size` anywhere makes `s.size` succeed as well, so a combined
+// spec would pass while the defect was fully in place.
+//
+// core/ declares 68 fields and 23 methods named `size`, so this path is
+// load-bearing: a fix for the local read must not be a fix that renames
+// the member or special-cases it away.
+
+type Sized is { size: Int };
+
+fn build() -> Sized { Sized { size: 10 } }
+
+fn main() {
+    let from_call: Int = build().size;
+    let s = Sized { size: 10 };
+    print(f"{from_call} {s.size} ok");
+}

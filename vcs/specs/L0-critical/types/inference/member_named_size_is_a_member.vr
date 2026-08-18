@@ -1,0 +1,46 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: types, layout, field-access, startup
+// @expected-stdout: 10 ok
+// @skip: T0815 is open — reading a member named `size` off a local variable
+//        aborts in global_ctors before main. This spec states the
+//        expectation and is the acceptance control for that task; the skip
+//        comes off in the commit that fixes the read, not by renaming the
+//        member.
+//
+// Pin (T0815) — `size` is an ordinary member name.
+//
+// Today this file dies before main, with no source location and no mention
+// of `size`:
+//
+//     error: VBC global_ctors error: LayoutMismatch { type_id: TypeId(515),
+//     tag: 0, got_field_count: 0, expected_field_count: None,
+//     reason: "unknown type_id" }
+//
+// `verum check` reports nothing either way, so this can only be pinned by
+// RUNNING.
+//
+// `size` is alone in this. Tested as both field and method against the same
+// template: alignment, stride and bits are fine — though they sit in the
+// same reserved list at crates/verum_types/src/infer/expr.rs:9042 — and so
+// are len, new, clone, hash, next, value, data, name, kind, index, count
+// and capacity. The lead is that a member read named `size` is routed to
+// the layout-property path at
+// crates/verum_vbc/src/codegen/expressions.rs:20628 — the one answering
+// `SomeType.size` as a sizeof query — instead of to a field read.
+//
+// THE CONTROL IS DELIBERATELY IN A SEPARATE FILE.
+// `member_named_size_via_call.vr` reads the same member off a CALL and
+// passes today. Putting the two in one file makes BOTH work: a single
+// `build().size` anywhere in the program is enough to make the local read
+// succeed as well, which is itself the sharpest clue about the mechanism —
+// and which silently destroys any spec that tries to carry its own control
+// here.
+
+type Sized is { size: Int };
+
+fn main() {
+    let s = Sized { size: 10 };
+    print(f"{s.size} ok");
+}
