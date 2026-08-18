@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: gates-source check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census check-panic-surface check-dup-emitters
+.PHONY: gates-source check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census check-panic-surface check-dup-emitters
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -66,7 +66,7 @@ check-type-name-collisions: ## Gate (T0458): simple-type-name collisions in core
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
 
-gates-source: check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+gates-source: check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication ## Every gate that needs only the SOURCE TREE — no build, no artefacts
 	@echo "gates-source: all source-only gates green"
 
 check-phantom-mounts: ## Gate (T0780): mounts naming a symbol the module does not export. NEEDS a built verum; ~15 min, NOT in gates-source.
@@ -75,6 +75,9 @@ check-phantom-mounts: ## Gate (T0780): mounts naming a symbol the module does no
 
 check-protocol-form: ## Gate (T0794): protocols in core/ use the grammatical `type X is protocol` form
 	python3 scripts/ci/check_protocol_form.py
+
+check-constant-time-duplication: ## Gate (T0817): a constant-time comparator hand-rolled outside core/subtle/ — one implementation should carry that promise
+	python3 scripts/ci/check_constant_time_duplication.py
 
 check-cfg-block-tail: ## Gate (T0805): a function whose value is meant to come from an @cfg block — a gated block is a statement, so the function yields Unit
 	python3 scripts/ci/check_cfg_block_tail.py
