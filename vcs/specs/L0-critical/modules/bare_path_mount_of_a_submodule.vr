@@ -1,0 +1,54 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: modules, mount, name-resolution, submodule
+// @skip: T0795 is open — the bare-path mount of an axiom-only submodule still
+//        reports E401. This spec states the expectation and is the acceptance
+//        control for that task; it is NOT skipped because the case is
+//        uninteresting, and the skip comes off in the commit that fixes the
+//        resolution, not by editing the expectation.
+//
+// Pin (T0795) — `mount a.b.c;` where `a.b.c` names a MODULE must mount the
+// module, whatever else has been loaded first.
+//
+// The meaning of that statement depends on load order today.  The branch
+// asks the module registry, which answers only for modules something has
+// already loaded — and a bare-path mount is frequently the very statement
+// that would have loaded this one.  On a miss it falls through to "treat `c`
+// as an item of module `a.b`" and reported
+//
+//     error<E401>: cannot find `diakrisis` in module `core.math.frameworks`
+//
+// from inside that module's OWN mod.vr.
+//
+// Measured over the 68 sites in `core/` where a `mod.vr` re-exports its own
+// child by full path: 38 resolved and 30 did not, split exactly by whether
+// the child declared a public `fn` — the `fn` being not the mechanism but the
+// thing that gets the module loaded by an earlier pass.  Proof in one file,
+// measured today:
+//
+//     mount core.math.frameworks.diakrisis;      E401
+//     ---
+//     mount core.math.frameworks.diakrisis.*;    ok
+//     mount core.math.frameworks.diakrisis;      ok    <- same line, now fine
+//
+// So the statement's meaning is decided by what preceded it, which is the
+// whole defect.
+//
+// `diakrisis` is chosen because its public surface is axioms only, which is
+// the shape that never gets loaded on its own.  A module with a public `fn`
+// passes this pin even with the defect fully in place.
+//
+// That is not hypothetical.  The sibling spec
+// `mount_unbraced_archive_submodule.vr` pins this exact mount form and is
+// GREEN, because it mounts `core.net.addr` — a module full of
+// types and functions, and therefore always already loaded.  A gate over the
+// right syntax can still miss the defect entirely if its input is on the easy
+// side of the split, so the two specs are complementary rather than
+// redundant: that one fixes the form, this one fixes the input.
+
+mount core.math.frameworks.diakrisis;
+
+fn main() {
+    print("ok");
+}

@@ -1,0 +1,21 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: modules, mount, name-resolution, submodule
+// @expected-error: E401
+//
+// Pin (T0795), the control — widening `mount a.b.c;` to mean "the module
+// a.b.c" must not make it accept a path that names nothing.
+//
+// Its sibling `bare_path_mount_of_a_submodule.vr` is passed just as well by a
+// branch that stops checking, and this campaign has already measured that
+// exact failure twice: a glob whose module does not exist returning Ok, and a
+// mount naming a nonexistent item registering nothing and reporting nothing.
+// Widening a resolution rule without pinning the rejection is how a gate goes
+// vacuous.
+
+mount core.math.frameworks.zz_no_such_module;
+
+fn main() {
+    print("ok");
+}
