@@ -141,9 +141,14 @@ runs:
           fi
         done
         if [[ -n "${missing}" ]]; then
-          echo "::error::prebuilt LLVM unpacked without:${missing} — the archive is incomplete for this triple. Re-run the 'Build LLVM (prebuilt cache)' workflow, or delete the release asset so this action falls back to a source build."
-          ls -la llvm/install/bin | head -40 || true
-          exit 1
+          # WARN, DO NOT FAIL.  Most jobs (unit tests, lints, source
+          # gates) never shell out to these tools, and failing the fetch
+          # took every one of them down — a worse outcome than the single
+          # job that actually needs them. The AOT-facing steps assert
+          # their own prerequisite; this makes the cause visible an hour
+          # before they do.
+          echo "::warning::prebuilt LLVM for this triple unpacked without:${missing} — AOT steps that shell out to them will fail. Re-run the 'Build LLVM (prebuilt cache)' workflow, or delete the release asset so this action falls back to a source build."
+          ls llvm/install/bin | head -40 || true
         fi
         echo "fetched=hit" >> "$GITHUB_OUTPUT"
 

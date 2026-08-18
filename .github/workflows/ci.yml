@@ -652,6 +652,24 @@ jobs:
       # Builds a smoke .vr program and verifies the produced binary
       # only links the platform's permitted system boundary
       # (libSystem.B.dylib on macOS; ld-linux on Linux; nothing else).
+      - name: Assert the LLVM tools this job needs are present
+        # The smoke build shells out to llc / opt / llvm-link (Phase 7.5).
+        # When the fetched prebuilt lacks them the compiler silently falls
+        # back to the host's `opt-18`, mixes LLVM versions, and dies at
+        # `llc` — reported as a no-libc failure, which is not what broke.
+        # Measured on CI run 32164849233: the linux-x86_64 prebuilt ships
+        # llvm-config, lld and wasm-ld but NOT llc, opt or llvm-link.
+        run: |
+          set -euo pipefail
+          missing=""
+          for tool in llc opt llvm-link; do
+            [[ -f "llvm/install/bin/${tool}" ]] || missing="${missing} ${tool}"
+          done
+          if [[ -n "${missing}" ]]; then
+            echo "::error::the prebuilt LLVM for this runner lacks:${missing} — this job cannot build an AOT binary. Fix the prebuilt (build-llvm.yml) rather than this job."
+            exit 1
+          fi
+
       - name: Check AOT binary doesn't link libc
         # tee + failure artifact: this step failed on ubuntu with its
         # log blob vanished on every run since the tests-gate went
