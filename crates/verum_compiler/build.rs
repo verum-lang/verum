@@ -486,11 +486,24 @@ fn main() {
                 Ok(s) if s.success() => {
                     let staged_vbca = staging_dir.join("runtime.vbca");
                     let staged_meta = staging_dir.join("runtime.core_metadata");
+                    let staged_graph = staging_dir.join("runtime.symbol_graph");
                     let publish_meta = precompile_dir.join("runtime.core_metadata");
+                    let publish_graph = precompile_dir.join("runtime.symbol_graph");
+                    // EVERY artefact the bake produces must be published,
+                    // and the list is here rather than in the baker: the
+                    // staging directory is deleted below, so an artefact
+                    // missing from this list is silently discarded and the
+                    // only symptom is a slower compiler.  That is exactly
+                    // how the symbol-graph sidecar was lost on its first
+                    // run (T0753) — the baker wrote it, the publish step
+                    // did not know about it.
                     let published = staged_vbca.is_file()
                         && staged_meta.is_file()
                         && std::fs::rename(&staged_meta, &publish_meta).is_ok()
                         && std::fs::rename(&staged_vbca, &precompile_archive).is_ok();
+                    if published && staged_graph.is_file() {
+                        let _ = std::fs::rename(&staged_graph, &publish_graph);
+                    }
                     if published {
                         let _ = std::fs::create_dir_all(checksum_path.parent().unwrap());
                         let _ = std::fs::write(&checksum_path, &current_hash);
@@ -545,8 +558,10 @@ fn main() {
         }
     }
     let precompile_metadata = precompile_dir.join("runtime.core_metadata");
+    let precompile_symbol_graph = precompile_dir.join("runtime.symbol_graph");
     let runtime_vbc_path = Path::new(&out_dir).join("stdlib_runtime.vbca");
     let runtime_metadata_path = Path::new(&out_dir).join("stdlib_runtime.core_metadata");
+    let runtime_symbol_graph_path = Path::new(&out_dir).join("stdlib_runtime.symbol_graph");
     if precompile_archive.is_file() {
         match fs::read(&precompile_archive) {
             Ok(bytes) => {
@@ -635,6 +650,42 @@ fn main() {
             "cargo:warning=No precompiled stdlib metadata at {} — typecheck will fall back to source-driven path.  Run `verum stdlib precompile` to refresh.",
             precompile_metadata.display()
         );
+    }
+
+    // T0753: the archive's call-graph index, baked by
+    // `precompile::write_symbol_graph_alongside_archive`.  An empty
+    // placeholder is a WORKING build, not a broken one — the loader
+    // scans the archive instead, which is what every build did before
+    // this sidecar existed.  It is slower, so say so loudly enough to
+    // be noticed in a build log.
+    match fs::read(&precompile_symbol_graph) {
+        Ok(bytes) if !bytes.is_empty() => {
+            let _ = fs::write(&runtime_symbol_graph_path, &bytes);
+            println!(
+                "cargo:rustc-env=STDLIB_SYMBOL_GRAPH_PATH={}",
+                runtime_symbol_graph_path.display()
+            );
+            println!(
+                "cargo:warning=Embedded stdlib symbol graph: {:.1}KB ({})",
+                bytes.len() as f64 / 1024.0,
+                precompile_symbol_graph.display()
+            );
+            println!(
+                "cargo:rerun-if-changed={}",
+                precompile_symbol_graph.display()
+            );
+        }
+        _ => {
+            let _ = fs::write(&runtime_symbol_graph_path, &[] as &[u8]);
+            println!(
+                "cargo:rustc-env=STDLIB_SYMBOL_GRAPH_PATH={}",
+                runtime_symbol_graph_path.display()
+            );
+            println!(
+                "cargo:warning=No stdlib symbol graph at {} — every compiler start will rebuild it by decoding the whole archive (~0.4-0.8s).  Run `verum stdlib precompile` to refresh.",
+                precompile_symbol_graph.display()
+            );
+        }
     }
 }
 
@@ -1603,7 +1654,7 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// invalidate independently of source.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
 const PRECOMPILE_SCHEMA_VERSION: &str =
-    "v43-2026-08-09-glob_reexport_matches_origin_module";
+    "v44-2026-08-18-symbol_graph_sidecar";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].

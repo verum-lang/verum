@@ -194,6 +194,8 @@ pub mod archive_metadata;
 /// bytes).  Single source of truth for `pipeline.stdlib_metadata`
 /// in archive-driven mode.
 pub mod embedded_stdlib_metadata;
+pub mod embedded_symbol_graph; // T0753: the archive's call-graph index, baked instead of rebuilt
+pub mod symbol_graph_baked; // T0753: byte layout + reader for the above
 pub mod camg; // #103: Content-Addressed Module Graph — fundamental rewrite of module loading
 pub mod cfg_eval; // #106: pure cfg-predicate evaluation extracted from pipeline.rs
 pub mod compilation_metrics;

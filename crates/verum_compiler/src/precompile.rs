@@ -159,7 +159,45 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
         cfg.verbose,
     )?;
 
+    // T0753: the archive's own call-graph index.  Every compiler start
+    // used to rebuild it by decoding all 590 entries and disassembling
+    // every body — 350–810 ms and most of a ~700 MB peak, for an answer
+    // that depends only on the archive.  Written here, read as bytes.
+    write_symbol_graph_alongside_archive(&result.output_path, cfg.verbose)?;
+
     Ok(result)
+}
+
+/// Scan the freshly-written archive into a [`crate::symbol_graph_baked`]
+/// block and write it beside the archive as `runtime.symbol_graph`.
+///
+/// Failure is propagated for the same reason the metadata sidecar's is:
+/// a bake that silently ships without its index produces a compiler
+/// that is correct and slow, which is exactly the failure this task
+/// exists to stop shipping unnoticed.
+fn write_symbol_graph_alongside_archive(archive_path: &Path, verbose: bool) -> Result<()> {
+    let archive = verum_vbc::archive::read_archive_from_file(archive_path)
+        .with_context(|| {
+            format!(
+                "read freshly-written archive {} for symbol-graph extraction",
+                archive_path.display()
+            )
+        })?;
+    let baked = crate::archive_ctx_loader::SymbolGraph::scan_and_encode(&archive);
+    let out_path = archive_path.with_extension("symbol_graph");
+    std::fs::write(&out_path, baked.as_bytes()).with_context(|| {
+        format!("write symbol graph sidecar {}", out_path.display())
+    })?;
+    if verbose {
+        eprintln!(
+            "verum stdlib precompile: symbol graph {} functions / {} entries, {:.1} KB -> {}",
+            baked.function_count(),
+            baked.entry_count(),
+            baked.as_bytes().len() as f64 / 1024.0,
+            out_path.display(),
+        );
+    }
+    Ok(())
 }
 
 /// Open the freshly-written `runtime.vbca`, convert it to

@@ -49,6 +49,84 @@ use verum_vbc::instruction::Instruction;
 use verum_vbc::module::VbcModule;
 use verum_vbc::types::{StringId, TypeId, TypeRef, VariantKind};
 
+/// Per-phase accounting for the archive→ctx load (T0753).
+///
+/// The load has five distinct phases and one wall-clock number, so a
+/// regression in any of them reads as "the compile got slower".  Named
+/// for the QUESTION it answers — which phase owns the time — not for
+/// the fix it motivates, so the numbers stay meaningful after a fix
+/// lands and are the check that it worked.
+///
+/// Thread-local because the codegen test harness runs one compile per
+/// test thread; a shared accumulator would interleave two unrelated
+/// loads into one meaningless total.  Behind `VERUM_TRACE_LOADCOST`,
+/// so an untraced build pays one relaxed env read per phase.
+pub(crate) mod loadcost {
+    use std::cell::RefCell;
+    use std::time::Duration;
+
+    thread_local! {
+        static STAGES: RefCell<Vec<(&'static str, Duration)>> =
+            const { RefCell::new(Vec::new()) };
+    }
+
+    pub(crate) fn enabled() -> bool {
+        std::env::var_os("VERUM_TRACE_LOADCOST").is_some()
+    }
+
+    pub(crate) fn record(stage: &'static str, d: Duration) {
+        if !enabled() {
+            return;
+        }
+        STAGES.with_borrow_mut(|v| v.push((stage, d)));
+    }
+
+    /// Run `f`, recording its duration under `stage`.  Wrapping rather
+    /// than bracketing: the phases below return early from several
+    /// places, and a start/stop pair would time whichever exit the
+    /// author remembered.
+    pub(crate) fn timed<T>(stage: &'static str, f: impl FnOnce() -> T) -> T {
+        if !enabled() {
+            return f();
+        }
+        let t0 = std::time::Instant::now();
+        let r = f();
+        record(stage, t0.elapsed());
+        r
+    }
+
+    /// Print and reset.  `total` is measured by the caller around the
+    /// whole load, so the gap between it and the sum of the phases is
+    /// itself a reading — it names how much lives outside any phase
+    /// this instrument covers.
+    pub(crate) fn report(label: &str, total: Duration) {
+        if !enabled() {
+            return;
+        }
+        STAGES.with_borrow_mut(|v| {
+            let accounted: Duration = v.iter().map(|(_, d)| *d).sum();
+            eprintln!(
+                "[loadcost] {}: {:.1} ms total",
+                label,
+                total.as_secs_f64() * 1000.0
+            );
+            for (s, d) in v.iter() {
+                eprintln!(
+                    "[loadcost]   {:<26} {:>9.1} ms",
+                    s,
+                    d.as_secs_f64() * 1000.0
+                );
+            }
+            eprintln!(
+                "[loadcost]   {:<26} {:>9.1} ms",
+                "(unaccounted)",
+                total.saturating_sub(accounted).as_secs_f64() * 1000.0
+            );
+            v.clear();
+        });
+    }
+}
+
 /// Errors raised while loading the archive into codegen ctx.  Best-
 /// effort: the loader skips per-entry failures with a `tracing::warn!`
 /// and only returns `Err` on archive-level decode failures that make
@@ -1279,59 +1357,54 @@ fn build_wanted_module_prefixes(
 ///   #23 / #24 / #26) producing silent runtime `nil`s — the architectural
 ///   loss outweighs the cold-start cost.
 pub(crate) struct SymbolGraph {
-    /// Descriptor name (e.g. `Text.new`, `Maybe.is_some`,
-    /// `sys.bitfield.USIZE_BITS`) → archive entry index that defines it.
-    /// First-defining-module wins on collisions to match
-    /// `register_function`'s first-wins discipline.
-    qualified_to_module: HashMap<String, u32>,
-    /// Simple leaf name → all qualified names sharing that leaf.
-    /// Used when a seed is a bare leaf (`PAGE_SIZE`) and we need to
-    /// fan out to every qualified name ending in `.PAGE_SIZE`.
-    leaf_to_qualified: HashMap<String, Vec<String>>,
-    /// Type-prefix (first segment) → all qualified names with that
-    /// prefix. Used when a seed is a bare type name (`Text`, `Maybe`)
-    /// and we need to reach every `Text.*` / `Maybe.*` method.
-    prefix_to_qualified: HashMap<String, Vec<String>>,
-    /// Per-module function call edges: outer key = archive entry idx,
-    /// inner key = function descriptor name in that module, inner value
-    /// = list of callee descriptor names (qualified or bare) emitted
-    /// by this function's bytecode.
-    edges: HashMap<u32, HashMap<String, Vec<String>>>,
-    /// Archive entry name → entry index. Home-module resolution for
-    /// callee names that have NO function descriptor anywhere —
-    /// cross-module variant-constructor references
-    /// (`…alter.validator.VeNoSuchTable`), FFI extern names
-    /// (`core.sys.darwin.libsystem.arc4random_buf`) and re-export
-    /// spellings. Such a name still names its HOME MODULE by prefix;
-    /// decoding that module is what registers the constructor / extern
-    /// so merge-time band resolution can bind it (T0277 leg B part 2).
-    entry_by_name: HashMap<String, u32>,
+    /// The whole index, in the baked byte layout — see
+    /// [`crate::symbol_graph_baked`].  ONE representation, whether the
+    /// bytes came from the embedded sidecar (no work at start-up) or
+    /// from scanning an archive (the fallback below).  Keeping a single
+    /// reader is what stops the two paths drifting: a bug reachable
+    /// through one is reachable through the other.
+    baked: crate::symbol_graph_baked::BakedSymbolGraph,
 }
 
 impl SymbolGraph {
-    /// Does ANY archive symbol carry this simple name — as a leaf or as a
-    /// whole qualified name?
-    ///
-    /// The unqualified-wanted scan (T0738) decodes all 574 archive modules
-    /// looking for a simple-name match. A name no symbol carries cannot be
-    /// found by that scan, so the whole decode is waste. Measured: the AST
-    /// name harvest puts the user's LOCAL VARIABLE names into that set —
-    /// `let v: Int = 10; print(v);` shipped `v`, and the search for a
-    /// stdlib function called `v` took the compiled module from 12604
-    /// functions to 66797 and the build from 3.3s to 26.2s.
-    ///
-    /// Free to ask: the graph is already built in these runs (the
-    /// reachability step uses it), so this is a hash lookup against work
-    /// that has been paid for.
-    pub(crate) fn carries_simple_name(&self, name: &str) -> bool {
-        self.leaf_to_qualified.contains_key(name)
-            || self.qualified_to_module.contains_key(name)
+    /// Read the graph the bake wrote.  `None` when this build embeds
+    /// no sidecar or the bytes are not readable by this format
+    /// version — every caller then falls back to [`Self::build`], so a
+    /// rejected sidecar costs start-up time, never correctness.
+    fn from_embedded() -> Option<Self> {
+        // A/B FROM ONE BINARY.  Comparing two BUILDS lets every
+        // difference be blamed on the build; this switch makes the
+        // baked and the scanned graph comparable within a single
+        // binary, which is what the differential corpus run needs to
+        // mean anything.
+        if std::env::var_os("VERUM_NO_BAKED_SYMBOL_GRAPH").is_some() {
+            return None;
+        }
+        let bytes = crate::embedded_symbol_graph::embedded_bytes()?;
+        crate::symbol_graph_baked::BakedSymbolGraph::from_bytes(std::borrow::Cow::Borrowed(
+            bytes,
+        ))
+        .map(|baked| Self { baked })
     }
 
-    /// Build the global graph by decoding every archive module in
-    /// parallel and scanning each function's bytecode. Pure CPU work
-    /// over immutable archive bytes — perfectly parallelisable.
+    /// Scan an archive and encode the result — the fallback, and the
+    /// producer the bake itself calls.  Decodes every archive module in
+    /// parallel and disassembles each function body: pure CPU work over
+    /// immutable archive bytes, perfectly parallelisable, and the
+    /// several hundred milliseconds this file exists to stop paying at
+    /// every compiler start.
     fn build(archive: &VbcArchive) -> Self {
+        Self {
+            baked: Self::scan_and_encode(archive),
+        }
+    }
+
+    /// The scan, kept separate so the bake can call it to PRODUCE the
+    /// sidecar without constructing a graph it will not use.
+    pub(crate) fn scan_and_encode(
+        archive: &VbcArchive,
+    ) -> crate::symbol_graph_baked::BakedSymbolGraph {
+        use crate::symbol_graph_baked::{BakedSymbolGraph, EncodedFunction};
         use rayon::prelude::*;
 
         let per_module: Vec<(u32, ModuleSymbolView)> = (0..archive.index.len())
@@ -1343,25 +1416,25 @@ impl SymbolGraph {
             })
             .collect();
 
-        let mut qualified_to_module: HashMap<String, u32> = HashMap::new();
-        let mut leaf_to_qualified: HashMap<String, Vec<String>> = HashMap::new();
-        let mut prefix_to_qualified: HashMap<String, Vec<String>> = HashMap::new();
-        let mut edges: HashMap<u32, HashMap<String, Vec<String>>> = HashMap::new();
-        let entry_by_name: HashMap<String, u32> = archive
-            .index
-            .iter()
-            .enumerate()
-            .map(|(i, e)| (e.name.clone(), i as u32))
-            .collect();
+        let entries: Vec<String> =
+            archive.index.iter().map(|e| e.name.clone()).collect();
+
+        // Rows in DISCOVERY order; the encoder keeps the first row for
+        // a repeated name, which is `register_function`'s first-wins
+        // rule and the rule the previous `HashMap::entry().or_insert()`
+        // form implemented.
+        let mut funcs: Vec<EncodedFunction> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut leaf_index: HashMap<String, Vec<String>> = HashMap::new();
+        let mut prefix_index: HashMap<String, Vec<String>> = HashMap::new();
+
         for (idx, view) in per_module {
             let entry_name: &str = archive
                 .index
                 .get(idx as usize)
                 .map(|e| e.name.as_str())
                 .unwrap_or("");
-            let mut module_edges: HashMap<String, Vec<String>> = HashMap::new();
             for ModuleFunction { name, callees } in view.functions {
-                qualified_to_module.entry(name.clone()).or_insert(idx);
                 // **Spelling completeness** (T0277 leg B part 2): a
                 // caller's edge records the callee under the spelling
                 // THE CALLER KNEW — commonly the fully-ROOTED canonical
@@ -1373,56 +1446,63 @@ impl SymbolGraph {
                 // descriptor spelling, so rooted edges fell off the
                 // graph and the callee's module was never decoded.
                 // Register the canonical spelling as a first-class
-                // node: same module, ALIASED edge row so the BFS can
+                // node: same module, SAME edge row so the BFS can
                 // continue THROUGH the callee's own edges.
                 let canonical = merge_module_and_simple_name(entry_name, &name);
-                if canonical.as_str() != name {
-                    qualified_to_module.entry(canonical.clone()).or_insert(idx);
-                    module_edges.insert(canonical, callees.clone());
+                if canonical.as_str() != name && seen.insert(canonical.clone()) {
+                    funcs.push(EncodedFunction {
+                        name: canonical,
+                        module: idx,
+                        callees: callees.clone(),
+                    });
                 }
-                if let Some(leaf) = name.rsplit('.').next() {
-                    if leaf != name {
-                        leaf_to_qualified
-                            .entry(leaf.to_string())
-                            .or_default()
-                            .push(name.clone());
-                    }
+                // The leaf and prefix indexes carry the DESCRIPTOR
+                // spelling only.  Indexing the canonical alias too
+                // would widen every bare-leaf fanout by the alias set
+                // — the over-approximation this loader spends its
+                // architecture avoiding.
+                if let Some(leaf) = name.rsplit('.').next()
+                    && leaf != name
+                {
+                    leaf_index
+                        .entry(leaf.to_string())
+                        .or_default()
+                        .push(name.clone());
                 }
-                if let Some(prefix) = name.split('.').next() {
-                    if prefix != name {
-                        prefix_to_qualified
-                            .entry(prefix.to_string())
-                            .or_default()
-                            .push(name.clone());
-                    }
+                if let Some(prefix) = name.split('.').next()
+                    && prefix != name
+                {
+                    prefix_index
+                        .entry(prefix.to_string())
+                        .or_default()
+                        .push(name.clone());
                 }
-                module_edges.insert(name, callees);
+                if seen.insert(name.clone()) {
+                    funcs.push(EncodedFunction {
+                        name,
+                        module: idx,
+                        callees,
+                    });
+                }
             }
-            edges.insert(idx, module_edges);
         }
-        Self {
-            qualified_to_module,
-            leaf_to_qualified,
-            prefix_to_qualified,
-            edges,
-            entry_by_name,
-        }
+
+        let leaf_rows: Vec<(String, Vec<String>)> = leaf_index.into_iter().collect();
+        let prefix_rows: Vec<(String, Vec<String>)> = prefix_index.into_iter().collect();
+        BakedSymbolGraph::from_parts(&entries, &funcs, &leaf_rows, &prefix_rows)
     }
 
-    /// Longest-dot-prefix home-module resolution for a qualified name
-    /// with no function descriptor (variant constructor, FFI extern,
-    /// re-export spelling). `a.b.c.D` tries `a.b.c`, then `a.b`, then
-    /// `a` against the archive entry index. Bounded by segment count —
-    /// no fanout.
-    fn home_module_of(&self, name: &str) -> Option<u32> {
-        let mut prefix = name;
-        while let Some(pos) = prefix.rfind('.') {
-            prefix = &prefix[..pos];
-            if let Some(&idx) = self.entry_by_name.get(prefix) {
-                return Some(idx);
-            }
-        }
-        None
+    /// True when SOME archive symbol is spelled exactly `name`.
+    ///
+    /// Guards the whole-archive simple-name scan (T0738): a name no
+    /// symbol carries cannot be found by that scan, so the whole decode
+    /// is waste.  Measured: the AST name harvest puts the user's LOCAL
+    /// VARIABLE names into that set — `let v: Int = 10; print(v);`
+    /// shipped `v`, and the search for a stdlib function called `v`
+    /// took the compiled module from 12604 functions to 66797 and the
+    /// build from 3.3 s to 26.2 s.
+    pub(crate) fn carries_simple_name(&self, name: &str) -> bool {
+        self.baked.carries_simple_name(name)
     }
 
     /// BFS from seed names. Returns:
@@ -1430,37 +1510,65 @@ impl SymbolGraph {
     ///   from the seeds via the call graph.
     /// * `reached_modules`: archive entry indices containing at least
     ///   one reached qualified function. Drives module-level decoding.
+    ///
+    /// The walk carries FUNCTION INDICES, not names: an index is the
+    /// row number in the baked table, so membership is a bitset-shaped
+    /// `HashSet<u32>` and the per-step name allocation the previous
+    /// `HashSet<String>` form paid is gone.  Names are materialised
+    /// once, at the end, for the caller.
     pub(crate) fn reachable(
         &self,
         seeds: &HashSet<String>,
     ) -> (HashSet<String>, HashSet<u32>) {
-        let mut reached: HashSet<String> = HashSet::new();
+        let mut reached: HashSet<u32> = HashSet::new();
         let mut modules: HashSet<u32> = HashSet::new();
-        let mut queue: VecDeque<String> = VecDeque::new();
+        let mut queue: VecDeque<u32> = VecDeque::new();
 
-        let enqueue = |name: &str,
-                       reached: &mut HashSet<String>,
-                       queue: &mut VecDeque<String>| {
-            if reached.insert(name.to_string()) {
-                queue.push_back(name.to_string());
-            }
-        };
+        // REACHABILITY PROVENANCE (T0753).  The closure for a program
+        // that pushes two Ints onto a `List` reaches 188 archive
+        // entries — TLS 1.3 handshake, QUIC, Redis, x509 among them —
+        // and the fanout cap barely moves that number, so the pull is
+        // through EXACT edges.  Which edges is not derivable from the
+        // totals: only the chain names the bridge.  `VERUM_TRACE_REACH`
+        // records one parent per reached function (the edge that FIRST
+        // reached it — the shortest path, since this is a BFS) and
+        // prints the chain from a seed to the first name matching
+        // `VERUM_TRACE_REACH_PATH`, plus the per-entry symbol counts.
+        //
+        // `None` marks a seed.  Off by default.
+        let trace_reach = std::env::var_os("VERUM_TRACE_REACH").is_some()
+            || std::env::var_os("VERUM_TRACE_REACH_PATH").is_some();
+        let mut parent: HashMap<u32, Option<u32>> = HashMap::new();
+
+        macro_rules! enqueue {
+            ($idx:expr, $via:expr) => {{
+                let i: u32 = $idx;
+                if reached.insert(i) {
+                    if trace_reach {
+                        parent.insert(i, $via);
+                    }
+                    queue.push_back(i);
+                }
+            }};
+        }
 
         // Seed expansion: a seed can be (1) an exact qualified
         // descriptor name, (2) a bare leaf shared by multiple
         // qualifieds, or (3) a bare type prefix. Walk all three.
         for seed in seeds {
-            if self.qualified_to_module.contains_key(seed) {
-                enqueue(seed, &mut reached, &mut queue);
+            if let Some(i) = self.baked.function_index(seed) {
+                enqueue!(i, None);
             }
-            if let Some(matches) = self.leaf_to_qualified.get(seed) {
-                for q in matches {
-                    enqueue(q, &mut reached, &mut queue);
+            if let Some(matches) = self.baked.leaf_matches(seed) {
+                let ids: Vec<u32> = matches.collect();
+                for i in ids {
+                    enqueue!(i, None);
                 }
             }
-            if let Some(matches) = self.prefix_to_qualified.get(seed) {
-                for q in matches {
-                    enqueue(q, &mut reached, &mut queue);
+            if let Some(matches) = self.baked.prefix_matches(seed) {
+                let ids: Vec<u32> = matches.collect();
+                for i in ids {
+                    enqueue!(i, None);
                 }
             }
         }
@@ -1468,13 +1576,13 @@ impl SymbolGraph {
         // **Polymorphic-method fanout cap** (closes the iterator
         // archive-load blow-up). A bare protocol-method callee such as
         // `next` / `map` / `clone` / `eq` resolves, in the archive's
-        // `leaf_to_qualified` index, to EVERY type's same-named impl —
-        // 172 distinct `*.next` bodies, each of which calls
-        // `self.iter.next()` (another bare `next` CallM edge) and so
-        // re-fans to all 172 transitively. The naive closure therefore
-        // pulls in nearly the whole archive (585 modules decoded), and
-        // the lazy-apply took ~85s for any user code that merely calls a
-        // method named `next`.
+        // leaf index, to EVERY type's same-named impl — 172 distinct
+        // `*.next` bodies, each of which calls `self.iter.next()`
+        // (another bare `next` CallM edge) and so re-fans to all 172
+        // transitively. The naive closure therefore pulls in nearly the
+        // whole archive (585 modules decoded), and the lazy-apply took
+        // ~85s for any user code that merely calls a method named
+        // `next`.
         //
         // The fix is grounded in the runtime dispatch model: a bare
         // method call (`CallM`) is resolved by the RECEIVER's concrete
@@ -1503,95 +1611,173 @@ impl SymbolGraph {
         // binary; it only ever widens the closure, so it cannot break a
         // program, only slow it.
         let no_exact_shortcut = std::env::var_os("VERUM_NO_EXACT_SHORTCUT").is_some();
-        let fan_leaf = |leaf: &str,
-                        reached: &mut HashSet<String>,
-                        queue: &mut VecDeque<String>| {
-            if let Some(matches) = self.leaf_to_qualified.get(leaf) {
-                if matches.len() <= max_bare_leaf_fanout {
-                    for q in matches {
-                        enqueue(q, reached, queue);
+
+        macro_rules! fan_leaf {
+            ($leaf:expr, $via:expr) => {{
+                let leaf: &str = $leaf;
+                if self.baked.leaf_match_count(leaf) <= max_bare_leaf_fanout
+                    && let Some(matches) = self.baked.leaf_matches(leaf)
+                {
+                    let ids: Vec<u32> = matches.collect();
+                    for i in ids {
+                        enqueue!(i, $via);
                     }
                 }
-            }
-        };
-        while let Some(name) = queue.pop_front() {
-            if let Some(idx) = self.qualified_to_module.get(&name) {
-                modules.insert(*idx);
-                if let Some(module_edges) = self.edges.get(idx) {
-                    if let Some(callees) = module_edges.get(&name) {
-                        for callee in callees {
-                            // Direct qualified resolution — always exact,
-                            // never fans, so it stays unconditional.
-                            //
-                            // RESOLVED-EXACTLY SHORT-CIRCUIT (T0753).
-                            // When this hits, the callee IS the callee: a
-                            // descriptor row exists under that exact name
-                            // and has just been enqueued. The leaf fanout
-                            // below then stripped its type prefix and
-                            // re-enqueued every same-named impl in the
-                            // library — pure over-approximation on top of
-                            // an exact answer.
-                            //
-                            // Measured: that strip is why qualifying the
-                            // EMISSION sites changed nothing. Two rounds
-                            // of it (c397a56e7, 9494b63fe) left the
-                            // closure at 5502 symbols / 255 modules,
-                            // because the walker discarded the qualifier
-                            // one line later.
-                            //
-                            // A/B from one binary, `Maybe` + `List` probe:
-                            // 6717 -> 2612 symbols, 307 -> 181 modules,
-                            // 10.39 s -> 2.40 s of lazy-apply.  40 L1-core
-                            // programs: identical stdout and exit status,
-                            // and the field-guess candidate sets shrink
-                            // with the closure (T0723's worst site, `name`,
-                            // 489 -> 314 position-disagreeing candidates).
-                            if self.qualified_to_module.contains_key(callee) {
-                                enqueue(callee, &mut reached, &mut queue);
-                                if !no_exact_shortcut {
-                                    continue;
-                                }
-                            } else if callee.contains('.') {
-                                // **Home-module decode edge** (T0277 leg B
-                                // part 2): a dotted callee with NO
-                                // descriptor row anywhere is a by-name
-                                // reference to something that is not a
-                                // function-table entry — a variant
-                                // constructor, an FFI extern, or a
-                                // re-export spelling. It cannot be
-                                // walked further, but its HOME module
-                                // must still join the decode set so the
-                                // constructor/extern REGISTERS and
-                                // merge-time band resolution binds the
-                                // name instead of leaving a dangling
-                                // band id (const-zero stub → SIGBUS at
-                                // AOT; `[xmod-unresolved]` at Tier-0).
-                                // Longest-prefix, one module, no fanout.
-                                if let Some(home_idx) = self.home_module_of(callee) {
-                                    modules.insert(home_idx);
-                                }
-                            }
-                            // CallM frequently emits `Type.method`-form
-                            // strings whose receiver type prefix isn't
-                            // a module path — `Text.from_utf8_unchecked`
-                            // resolves via the leaf_to_qualified index.
-                            fan_leaf(callee.as_str(), &mut reached, &mut queue);
-                            // For descriptor-name-promoted forms like
-                            // `sys.bitfield.test_bit` whose leaf is
-                            // `test_bit`, also try matching the full
-                            // callee against `Type.method` forms
-                            // ending in this string by stripping the
-                            // type prefix.
-                            if let Some(dot_pos) = callee.find('.') {
-                                let after_type = &callee[dot_pos + 1..];
-                                fan_leaf(after_type, &mut reached, &mut queue);
-                            }
-                        }
+            }};
+        }
+
+        while let Some(fidx) = queue.pop_front() {
+            modules.insert(self.baked.module_of_index(fidx));
+            let callees: Vec<&str> = self.baked.callees(fidx).collect();
+            for callee in callees {
+                // Direct qualified resolution — always exact, never
+                // fans, so it stays unconditional.
+                //
+                // RESOLVED-EXACTLY SHORT-CIRCUIT (T0753).  When this
+                // hits, the callee IS the callee: a descriptor row
+                // exists under that exact name and has just been
+                // enqueued. The leaf fanout below then stripped its
+                // type prefix and re-enqueued every same-named impl in
+                // the library — pure over-approximation on top of an
+                // exact answer.
+                //
+                // Measured: that strip is why qualifying the EMISSION
+                // sites changed nothing. Two rounds of it (c397a56e7,
+                // 9494b63fe) left the closure at 5502 symbols / 255
+                // modules, because the walker discarded the qualifier
+                // one line later.
+                //
+                // A/B from one binary, `Maybe` + `List` probe: 6717 ->
+                // 2612 symbols, 307 -> 181 modules, 10.39 s -> 2.40 s
+                // of lazy-apply.  40 L1-core programs: identical stdout
+                // and exit status, and the field-guess candidate sets
+                // shrink with the closure (T0723's worst site, `name`,
+                // 489 -> 314 position-disagreeing candidates).
+                if let Some(cidx) = self.baked.function_index(callee) {
+                    enqueue!(cidx, Some(fidx));
+                    if !no_exact_shortcut {
+                        continue;
                     }
+                } else if callee.contains('.') {
+                    // **Home-module decode edge** (T0277 leg B part 2):
+                    // a dotted callee with NO descriptor row anywhere
+                    // is a by-name reference to something that is not a
+                    // function-table entry — a variant constructor, an
+                    // FFI extern, or a re-export spelling. It cannot be
+                    // walked further, but its HOME module must still
+                    // join the decode set so the constructor/extern
+                    // REGISTERS and merge-time band resolution binds
+                    // the name instead of leaving a dangling band id
+                    // (const-zero stub → SIGBUS at AOT;
+                    // `[xmod-unresolved]` at Tier-0).  Longest-prefix,
+                    // one module, no fanout.
+                    if let Some(home_idx) = self.baked.home_module_of(callee) {
+                        modules.insert(home_idx);
+                    }
+                }
+                // CallM frequently emits `Type.method`-form strings
+                // whose receiver type prefix isn't a module path —
+                // `Text.from_utf8_unchecked` resolves via the leaf
+                // index.
+                fan_leaf!(callee, Some(fidx));
+                // For descriptor-name-promoted forms like
+                // `sys.bitfield.test_bit` whose leaf is `test_bit`,
+                // also try matching the full callee against
+                // `Type.method` forms ending in this string by
+                // stripping the type prefix.
+                if let Some(dot_pos) = callee.find('.') {
+                    fan_leaf!(&callee[dot_pos + 1..], Some(fidx));
                 }
             }
         }
-        (reached, modules)
+
+        if trace_reach {
+            self.report_reach(&reached, &modules, &parent);
+        }
+        let names: HashSet<String> = reached
+            .iter()
+            .map(|i| self.baked.function_name(*i).to_string())
+            .collect();
+        (names, modules)
+    }
+
+    /// Print WHY the closure is the size it is (T0753).
+    ///
+    /// Two readings, because the totals hide different things:
+    ///
+    ///  * per-entry symbol counts — which archive entries the closure
+    ///    actually lands in, biggest first.  An entry with three
+    ///    reached symbols still costs a whole bundle decode, so the
+    ///    long tail is as expensive as the head.
+    ///  * one chain — `VERUM_TRACE_REACH_PATH=<substring>` walks the
+    ///    parent map back from the first reached name matching the
+    ///    substring to its seed.  That chain names the BRIDGE edge,
+    ///    which is the only thing that says whether the pull is a real
+    ///    dependency or an over-approximation.
+    fn report_reach(
+        &self,
+        reached: &HashSet<u32>,
+        modules: &HashSet<u32>,
+        parent: &HashMap<u32, Option<u32>>,
+    ) {
+        let mut per_entry: HashMap<u32, usize> = HashMap::new();
+        for f in reached {
+            *per_entry.entry(self.baked.module_of_index(*f)).or_insert(0) += 1;
+        }
+        let mut rows: Vec<(u32, usize)> = per_entry.into_iter().collect();
+        rows.sort_by(|a, b| b.1.cmp(&a.1));
+        eprintln!(
+            "[reach] {} symbols in {} entries",
+            reached.len(),
+            modules.len()
+        );
+        for (idx, n) in rows.iter().take(30) {
+            eprintln!("[reach]   {:<34} {:>6}", self.baked.entry_name(*idx), n);
+        }
+        if rows.len() > 30 {
+            let tail: usize = rows.iter().skip(30).map(|(_, n)| *n).sum();
+            eprintln!(
+                "[reach]   {:<34} {:>6}  (in {} further entries)",
+                "(tail)",
+                tail,
+                rows.len() - 30
+            );
+        }
+        let Ok(needle) = std::env::var("VERUM_TRACE_REACH_PATH") else {
+            return;
+        };
+        let mut hits: Vec<u32> = reached
+            .iter()
+            .copied()
+            .filter(|i| self.baked.function_name(*i).contains(needle.as_str()))
+            .collect();
+        hits.sort_by_key(|i| self.baked.function_name(*i));
+        let Some(target) = hits.first().copied() else {
+            eprintln!("[reach] no reached symbol contains {:?}", needle);
+            return;
+        };
+        eprintln!(
+            "[reach] chain to {:?} ({} reached symbols match):",
+            self.baked.function_name(target),
+            hits.len()
+        );
+        let mut chain: Vec<u32> = vec![target];
+        let mut cur = target;
+        while let Some(Some(via)) = parent.get(&cur).copied() {
+            chain.push(via);
+            cur = via;
+            if chain.len() > 64 {
+                break;
+            }
+        }
+        for (i, step) in chain.iter().rev().enumerate() {
+            eprintln!(
+                "[reach]   {:>2}. {}   [{}]",
+                i,
+                self.baked.function_name(*step),
+                self.baked.entry_name(self.baked.module_of_index(*step))
+            );
+        }
     }
 
     /// Returns the archive entry name that defines `qualified_name`,
@@ -1603,7 +1789,7 @@ impl SymbolGraph {
         qualified_name: &str,
         archive: &'a VbcArchive,
     ) -> Option<&'a str> {
-        let idx = *self.qualified_to_module.get(qualified_name)? as usize;
+        let idx = self.baked.module_of(qualified_name)? as usize;
         archive.index.get(idx).map(|e| e.name.as_str())
     }
 }
@@ -1779,7 +1965,16 @@ impl ArchiveCtxCache {
     /// process lifetime — first call pays the full archive decode
     /// (~250ms on a 12 MB archive), every later call is free.
     pub(crate) fn graph(&self, archive: &VbcArchive) -> &SymbolGraph {
-        self.graph.get_or_init(|| SymbolGraph::build(archive))
+        self.graph
+            .get_or_init(|| {
+                loadcost::timed("symbol_graph_load", || {
+                    // The sidecar is the fast path AND the default; the
+                    // scan below is what a compiler built without a bake
+                    // still has to do, so both must stay exercised.
+                    SymbolGraph::from_embedded()
+                        .unwrap_or_else(|| SymbolGraph::build(archive))
+                })
+            })
     }
 
     /// Lazily build the cache from `archive` (idempotent — first call
@@ -2182,7 +2377,7 @@ impl ArchiveCtxCache {
                 let g = self.graph(archive);
                 for h in hits {
                     let reg = codegen.ctx_mut().lookup_function(h).is_some();
-                    let in_graph = g.qualified_to_module.get(h.as_str()).copied();
+                    let in_graph = g.baked.module_of(h.as_str());
                     let entry = in_graph
                         .and_then(|i| archive.index.get(i as usize))
                         .map(|e| e.name.as_str())
@@ -2215,6 +2410,7 @@ impl ArchiveCtxCache {
         codegen: &mut verum_vbc::codegen::VbcCodegen,
         user_module: &verum_ast::Module,
     ) -> (usize, usize) {
+        let t_load = std::time::Instant::now();
         self.begin_compilation_epoch();
         // **ONE-authority alias seeding** (T0695/T0692): every codegen
         // that loads the embedded archive gets the DECLARED type
@@ -2258,6 +2454,7 @@ impl ArchiveCtxCache {
             );
         }
         if wanted.is_empty() {
+            loadcost::report("apply_lazy_with_types (empty wanted)", t_load.elapsed());
             return (0, 0);
         }
         let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
@@ -2385,7 +2582,8 @@ impl ArchiveCtxCache {
         // into `wanted_module_prefixes`. Every cross-module dependency
         // surfaces by construction — no hardcoded entries.
         let graph = self.graph(archive);
-        let (reached_qualified, reached_module_idxs) = graph.reachable(&wanted);
+        let (reached_qualified, reached_module_idxs) =
+            loadcost::timed("bfs_reachable", || graph.reachable(&wanted));
         if std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok() {
             eprintln!(
                 "[reachable] wanted={} reached_qualified={} reached_modules={}",
@@ -2448,7 +2646,7 @@ impl ArchiveCtxCache {
             .filter(|(_, e)| wanted_module_prefixes.contains(&e.name))
             .map(|(i, e)| (i, e.name.clone()))
             .collect();
-        let decoded: Vec<(String, VbcModule)> = {
+        let decoded: Vec<(String, VbcModule)> = loadcost::timed("decode_entries", || {
             use rayon::prelude::*;
             target_entries
                 .par_iter()
@@ -2459,7 +2657,7 @@ impl ArchiveCtxCache {
                         .map(|m| (name.clone(), m))
                 })
                 .collect()
-        };
+        });
         // Split borrows: ctx and next_func_id are separate fields, but
         // both need &mut from VbcCodegen.  Re-using the same raw-ptr
         // round-trip discipline as the apply_lazy call site in
@@ -2494,6 +2692,7 @@ impl ArchiveCtxCache {
         let mut registered_ids_by_entry: std::collections::HashMap<String, std::collections::HashSet<u32>> =
             std::collections::HashMap::new();
         let prune_disabled = std::env::var("VERUM_NO_MOUNT_PRUNE").is_ok();
+        let t_register = std::time::Instant::now();
         for (entry_name, module) in &decoded {
             // Function side first so Pass 4 (variant ctors) sees
             // the stable function-id namespace.
@@ -2513,6 +2712,7 @@ impl ArchiveCtxCache {
             registered_ids_by_entry.insert(entry_name.clone(), registered_ids);
             per_archive_remaps.push((entry_name.clone(), func_id_remap));
         }
+        loadcost::record("register_filtered", t_register.elapsed());
         // ── UMBRELLA-MOUNT-PRUNE-1: function-granular merge pruning ──
         //
         // `func_id_remap` is TOTAL over each entry's function table (id
@@ -2536,12 +2736,14 @@ impl ArchiveCtxCache {
             if prune_disabled {
                 None
             } else {
-                Some(compute_merge_keep_sets(
-                    &decoded,
-                    &registered_ids_by_entry,
-                    &reached_qualified,
-                    &wanted,
-                ))
+                Some(loadcost::timed("keep_set_fixpoint", || {
+                    compute_merge_keep_sets(
+                        &decoded,
+                        &registered_ids_by_entry,
+                        &reached_qualified,
+                        &wanted,
+                    )
+                }))
             };
         // Type side — push every non-protocol descriptor.  MUST happen
         // before body merge so the body's TypeId remap (consults
@@ -3069,6 +3271,7 @@ impl ArchiveCtxCache {
                 );
             }
         }
+        loadcost::report("apply_lazy_with_types", t_load.elapsed());
         (fn_modules, type_modules)
     }
 }
@@ -6591,10 +6794,10 @@ mod tests {
         let graph = cache.graph(archive);
 
         // Step 1: graph must have Text.new in qualified_to_module.
-        let text_new_module_idx = *graph
-            .qualified_to_module
-            .get("Text.new")
-            .expect("graph must index Text.new in qualified_to_module");
+        let text_new_module_idx = graph
+            .baked
+            .module_of("Text.new")
+            .expect("graph must index Text.new in its function table");
         let text_new_entry = &archive.index[text_new_module_idx as usize];
         eprintln!(
             "Text.new is defined in archive entry: {} (idx {})",
@@ -6660,8 +6863,8 @@ mod tests {
         let graph = cache.graph(archive);
         // Quick sanity: graph indexes some functions.
         assert!(
-            !graph.qualified_to_module.is_empty(),
-            "graph qualified-to-module index empty — graph build broken"
+            graph.baked.function_count() > 0,
+            "graph function table empty — graph build broken"
         );
         // Seed `Text` should reach `Text.new` (and other Text methods)
         // via the prefix index.
@@ -6671,9 +6874,13 @@ mod tests {
         assert!(
             reached.contains("Text.new"),
             "graph reachability from seed `Text` MUST reach `Text.new`; \
-             qualified_to_module has Text.new = {}, prefix_to_qualified[Text].len() = {}",
-            graph.qualified_to_module.contains_key("Text.new"),
-            graph.prefix_to_qualified.get("Text").map(|v| v.len()).unwrap_or(0),
+             function table has Text.new = {}, prefix index for Text has {} entries",
+            graph.baked.function_index("Text.new").is_some(),
+            graph
+                .baked
+                .prefix_matches("Text")
+                .map(|m| m.count())
+                .unwrap_or(0),
         );
         assert!(
             reached.contains("Maybe.is_some") || reached.contains("Map.contains_key"),
@@ -6682,6 +6889,102 @@ mod tests {
              Text impl methods); reached={} entries",
             reached.len(),
         );
+    }
+
+    /// The baked sidecar must answer exactly what a fresh scan of the
+    /// same archive answers (T0753).
+    ///
+    /// This is the gate that makes the sidecar safe to trust. The two
+    /// producers run at different times, in different processes, from
+    /// different code paths — the bake writes it, the fallback derives
+    /// it — and a divergence between them does not fail loudly: it
+    /// changes which archive entries a compile decodes, which changes
+    /// which bodies are merged, which surfaces as a missing method at
+    /// RUN time in some unrelated program. Compare them directly.
+    #[test]
+    fn baked_symbol_graph_matches_a_fresh_scan() {
+        let Some(archive) = crate::embedded_stdlib_vbc::get_runtime_archive() else {
+            eprintln!("no embedded archive in this build — nothing to compare");
+            return;
+        };
+        let Some(bytes) = crate::embedded_symbol_graph::embedded_bytes() else {
+            panic!(
+                "this build embeds an archive but no symbol-graph sidecar — \
+                 every compiler start will rebuild the graph by decoding all \
+                 {} entries. Run `verum stdlib precompile`.",
+                archive.module_count()
+            );
+        };
+        let baked = crate::symbol_graph_baked::BakedSymbolGraph::from_bytes(
+            std::borrow::Cow::Borrowed(bytes),
+        )
+        .expect("embedded sidecar must be readable by the format version that embedded it");
+        let scanned = SymbolGraph::scan_and_encode(archive);
+
+        assert_eq!(
+            baked.entry_count(),
+            scanned.entry_count(),
+            "entry count differs between the baked sidecar and a fresh scan"
+        );
+        assert_eq!(
+            baked.function_count(),
+            scanned.function_count(),
+            "function count differs between the baked sidecar and a fresh scan"
+        );
+
+        // Walk every row rather than sampling: a sample would pass on
+        // the 99.9 % of names that agree and miss the one re-export
+        // spelling that does not, which is exactly the shape of every
+        // defect this file has carried.
+        let mut mismatches: Vec<String> = Vec::new();
+        for i in 0..scanned.function_count() as u32 {
+            let name = scanned.function_name(i);
+            if baked.function_name(i) != name {
+                mismatches.push(format!(
+                    "row {i}: baked {:?} vs scanned {:?}",
+                    baked.function_name(i),
+                    name
+                ));
+                if mismatches.len() > 8 {
+                    break;
+                }
+                continue;
+            }
+            if baked.module_of_index(i) != scanned.module_of_index(i) {
+                mismatches.push(format!(
+                    "{name}: baked entry {} vs scanned entry {}",
+                    baked.entry_name(baked.module_of_index(i)),
+                    scanned.entry_name(scanned.module_of_index(i)),
+                ));
+            }
+            let a: Vec<&str> = baked.callees(i).collect();
+            let b: Vec<&str> = scanned.callees(i).collect();
+            if a != b {
+                mismatches.push(format!(
+                    "{name}: {} baked callees vs {} scanned",
+                    a.len(),
+                    b.len()
+                ));
+            }
+            if mismatches.len() > 8 {
+                break;
+            }
+        }
+        assert!(
+            mismatches.is_empty(),
+            "baked symbol graph disagrees with a fresh scan of the same archive:\n  {}",
+            mismatches.join("\n  ")
+        );
+
+        // The leaf index drives the fanout cap, so a difference there
+        // changes the closure size without changing any name above.
+        for probe in ["next", "map", "clone", "eq", "fmt", "new", "len"] {
+            assert_eq!(
+                baked.leaf_match_count(probe),
+                scanned.leaf_match_count(probe),
+                "leaf index for {probe:?} differs — the fanout cap would see a different number"
+            );
+        }
     }
 
     /// Cache layer round-trip: first call builds, second clones.
