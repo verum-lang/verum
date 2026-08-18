@@ -1,0 +1,51 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: protocols, conformance, implement, soundness
+// @expected-error: E405
+// @skip: T0812 is open — an implement block missing a required method
+//        type-checks today and panics at the call. The spec states the
+//        expectation and is the acceptance control for that task; the skip
+//        comes off in the commit that adds the check, not by editing what
+//        the spec expects.
+//
+// Pin (T0812) — an `implement P for T` block must provide every method P
+// requires.
+//
+// The compiler checks that an implementation EXISTS, not that it is
+// COMPLETE, and the two are checked by the same rule. Measured with a
+// control in the same batch:
+//
+//     implement P for R { fn m(&self) -> Int { 7 } }   runs, 7
+//     no implement at all, used at a bound <T: P>      E405        caught
+//     implement P for R { }                            CLEAN -> panic
+//
+// So writing an EMPTY implementation silences the very diagnostic that
+// catches the same mistake when the implementation is absent. A bound
+// `T: P` then promises a method the type does not have, and the program
+// type-checks its way to a guaranteed runtime panic.
+//
+// A protocol method WITH a body is a default and stays optional — 124 of
+// those exist in core/, and a completeness check that ignores the
+// distinction lights up every Iterator implementation in the library. This
+// spec pins both halves: `polite` has a body and must NOT be demanded,
+// `hello` has none and must be.
+//
+// Measured motivation, core/ on 2026-08-18: twelve implementations are
+// incomplete. Four are `Debug` providing `fmt` where
+// core/base/protocols.vr:303 requires `fmt_debug`, so debug-formatting
+// those types panics rather than failing to compile.
+
+type Greet is protocol {
+    fn hello(&self) -> Text;
+    fn polite(&self) -> Text { self.hello() }
+};
+
+type Silent is { v: Int };
+
+implement Greet for Silent { }
+
+fn main() {
+    let s = Silent { v: 1 };
+    print(s.polite());
+}

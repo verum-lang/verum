@@ -1,0 +1,51 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: protocols, conformance, implement
+// @expected-stdout: hi|hi!|one-liner|ok
+//
+// Control for T0812 — the half a completeness check must not break.
+//
+// Three shapes that are legal today and must stay legal:
+//
+//   * a protocol method WITH a body is a default; an implementation that
+//     omits it is complete. `polite` is never written below and must not
+//     be demanded — the library has 124 such methods, and a check that
+//     ignores defaults would reject every Iterator implementation.
+//   * an implementation may satisfy the protocol on the `implement` line
+//     itself. Eight capability implementations in core/ are one-liners,
+//     and a completeness scan that starts at the following line reports
+//     them all as empty.
+//   * a default method may call a required one, so the check cannot be a
+//     simple "every declared name appears" over the protocol body.
+//
+// Values are distinct so a regression cannot pass by dispatching to the
+// wrong implementation and still printing something plausible.
+
+type Greet is protocol {
+    fn hello(&self) -> Text;
+    fn polite(&self) -> Text { f"{self.hello()}!" }
+};
+
+type Plain is { v: Int };
+implement Greet for Plain {
+    fn hello(&self) -> Text { "hi" }
+}
+
+type Terse is { v: Int };
+implement Greet for Terse { fn hello(&self) -> Text { "one-liner" } }
+
+fn main() {
+    let p = Plain { v: 1 };
+    let t = Terse { v: 2 };
+    // One method call per interpolation, and the pieces joined through
+    // locals rather than in a single format string. T0814 — two method
+    // calls in one substitution list return the same value — would
+    // otherwise make this control fail for a reason it does not test:
+    // it printed "one-liner hi! one-liner ok" against an expected
+    // "hi hi! one-liner ok" before this was written out.
+    let a: Text = p.hello();
+    let b: Text = p.polite();
+    let c: Text = t.hello();
+    print(f"{a}|{b}|{c}|ok");
+}
