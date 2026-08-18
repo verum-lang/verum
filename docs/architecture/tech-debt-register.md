@@ -134,6 +134,61 @@ NOT cover. The gate now refuses a truncated stream outright — it
 compares the suite's `selected` count against the `test` events that
 arrived — so a partial run can no longer pass as a small green one.
 
+**R3b. THE CHECKER CHECKS SIGNATURES, NOT DECLARATION INTERIORS —
+measured 2026-08-18.** A name or a bound is verified where it appears in
+a function signature and unverified where it appears inside a
+declaration. Every row below was measured against a control in the same
+batch, so the split is the finding, not the absence:
+
+| position | unknown name / unsatisfied bound |
+|---|---|
+| `let x: Nope`, parameter, return, variant payload `A(Nope)` | E101 |
+| `fn f<T: NopeProto>` inline bound, no `implement` at all | E405 |
+| missing method on a value, missing field, 3 segments from a VALUE | E400 / E404 |
+| local call with wrong arity | E102 |
+| **record field, alias right-hand side, generic argument in a field** | **silent** |
+| **`where T: P`** | **silent** |
+| **protocol method return type and parameter type, associated-type bound, `type G<T: P>`** | **silent** |
+| **`implement P for R { }` missing a required method** | **silent, then panics at the call** |
+| **`a.b.absent()` — 3+ segment module path, missing leaf or middle** | **silent, returns `nil`** |
+| **arity through any module path, at any length** | **silent, returns `nil`** |
+
+* **T0806** — a module-path call of two or more segments is not resolved
+  and its arity is never checked; `nil` satisfies any declared return
+  type. 459 module-rooted calls in 142 files; 13 name a callee declared
+  nowhere. Gates: `check-dead-module-path-calls` (13),
+  `check-platform-call-parity` (130 resolved / 32 not). Consequences
+  already measured: T0807 (heap pointer-encoding keys never seeded on any
+  platform — every arm calls something absent), T0808 (the default panic
+  handler neither prints nor aborts on macOS), T0809 (park/unpark bypass a
+  futex layer that exists on all three platforms).
+* **T0811** — a type path's qualifier is DISCARDED and only the leaf
+  resolves, so `a.zzz.AlsoAbsent` becomes a phantom type named after
+  itself. This is the mechanism behind T0796: four X.509 files declared
+  certificate validity fields as `core.encoding.der.Time`, a module that
+  declares `DerTime` and no `Time`, and the fields were typed `Unit`.
+* **T0812** — conformance is not enforced, only existence. An empty
+  `implement` silences the E405 that catches the same mistake when the
+  block is absent. 12 instances; gate `check-protocol-conformance`. Four
+  are `Debug` implementations providing `fmt` where the protocol requires
+  `fmt_debug`.
+* **T0813** — a `where` bound is unchecked while the inline form is
+  checked. With ONE implementation of the protocol in scope the call
+  dispatches to it, so a non-conforming type silently receives another
+  type's method — a wrong value, not a panic. 434 `where` lines in 51
+  files carry Clone, Ord, Eq, Send and kin.
+* **T0805** — a gated block is a statement, so a function whose body ends
+  in one yields `Unit`. 43 sites measured, 27 fixed, gate
+  `check-cfg-block-tail` ratchets the remaining 16.
+
+Two more of the same family sit outside the type system proper: T0814
+(a method call inside a format substitution returns another method's
+value, deterministically, while the plain call is correct) and T0815 (a
+member named `size` read off a local aborts in global_ctors before main).
+T0816 is the specification half — `grammar/verum.ebnf:1534` gives the
+three bitwise operators one flat precedence level while the compiler uses
+the C ladder, so the authoritative grammar predicts a different VALUE.
+
 **R4. Execution truth (both tiers, loud-by-default).** CallM
 const-zero degrade class A1/T0103-residue (strict-mono default =
 T0693). AOT adapter lowering T0260. FFI placeholder arms A9/T0110,
