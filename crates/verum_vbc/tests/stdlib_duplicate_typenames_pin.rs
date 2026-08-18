@@ -83,10 +83,16 @@ fn duplicated_protocol_names_are_the_known_set() {
         .collect();
 
     // Every one of these is silently shadowed at metadata-merge time, with
-    // the winner decided by load order. Write, Numeric and Module are core protocols.
-    let expected = [
-        "DecidableEq", "Limit",
-    ];
+    // the winner decided by load order.
+    //
+    // `Limit` left this list on 2026-08-18: `math/analysis.vr` and
+    // `math/category.vr` both declared it, and the categorical
+    // implementation in math/examples.vr resolved to the analytic
+    // protocol — reported by the conformance gate as a missing
+    // `epsilon_delta`. The analytic one is now `AnalyticLimit`.
+    // The instruction below is the one that applies: a name removed
+    // shrinks the list.
+    let expected = ["DecidableEq"];
     assert_eq!(
         dupes,
         expected,
