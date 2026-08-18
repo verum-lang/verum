@@ -73,7 +73,7 @@ BASELINE_ALL_TYPED = 297
 # `Modifier` sum — so `write_modifiers` shipped as a panic stub until the
 # SQLite type was renamed `DateModifier`. Every remaining pair is the same
 # shape, waiting for a resolution order to shift under it.
-BASELINE_TYPES = 133
+BASELINE_TYPES = 132
 BASELINE_SQLITE_TYPED = 15
 
 # `public fn name(args)` at column 0 — the free-function surface. Methods
