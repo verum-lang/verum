@@ -1,0 +1,55 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: modules, name-resolution, module-path, call
+// @expected-error: E100
+// @skip: T0806 is open — a call through a module path of three or more
+//        segments is not resolved, so this file checks CLEAN today and the
+//        call evaluates to `nil`. The spec states the expectation and is the
+//        acceptance control for that task; the skip comes off in the commit
+//        that fixes the resolution, not by editing the expectation.
+//
+// Pin (T0806) — a call through a module path must name something.
+//
+// The two-segment form of exactly this mistake IS diagnosed:
+//
+//     m.absent()          ->  error<E100>: unbound variable: absent
+//
+// so the gap is not "module calls are unchecked" but a length threshold.
+// At three segments the same mistake is accepted silently, and the call
+// evaluates to `nil` — which satisfies whatever return type the caller
+// declared. A typo becomes a wrong VALUE rather than a compile error.
+//
+// Measured 2026-08-18, each line with a positive control in the same batch:
+//
+//     m.absent()             two segments, real module        E100
+//     zz.absent()            two segments, unknown root       E100
+//     "x".absent_method()    missing method on a value        E400
+//     p.absent_field         missing field on a record        E404
+//     p.sub.deep.absent()    three segments FROM A VALUE      E404
+//     a.b.f() wrong type     real path, wrong declared type   E400
+//
+//     a.b.absent()           three segments, missing LEAF     silent -> nil
+//     a.zzz.f()              three segments, missing MIDDLE   silent -> nil
+//     zz.a.b.c.d.absent()    six segments                     silent -> nil
+//
+// Everything adjacent is diagnosed well, which is why this survived: read
+// the code and name resolution looks like it works.
+//
+// The modules here are declared in this file so the spec depends on no
+// archive state. `deeper.reachable` is called first and must resolve —
+// were the fix to reject good paths along with bad ones, this file would
+// still fail, but for the wrong reason, so the companion spec
+// `module_path_call_control.vr` pins the good path passing on its own.
+
+module outer {
+    public module deeper {
+        public fn reachable() -> Int { 7 }
+    }
+}
+
+fn main() {
+    let good: Int = outer.deeper.reachable();
+    let bad: Int = outer.deeper.not_declared_anywhere();
+    print(f"{good} {bad}");
+}

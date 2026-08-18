@@ -1,0 +1,42 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: modules, name-resolution, module-path, call
+// @expected-stdout: 7 42 ok
+//
+// Control for T0806 — a module-path call that DOES name something resolves,
+// returns its value, and type-checks against the declared type.
+//
+// This is the half a fix must not break. The defect being fixed is that a
+// three-segment call with a missing segment is accepted silently; the
+// cheapest wrong fix is to reject three-segment calls, or to stop inferring
+// through them, and this spec fails immediately if that happens.
+//
+// It also pins the two properties the silent path destroys, so a regression
+// cannot hide as a plausible value:
+//
+//   * the call returns the callee's ACTUAL result, not `nil` — 7 and 42 are
+//     distinct and neither is a default;
+//   * the result is usable as its declared type, exercised by the
+//     arithmetic below rather than only by an annotation.
+//
+// Both depths are covered: three segments through a nested module, and four
+// through one nested a level deeper, since the reported threshold is a path
+// LENGTH and a fix keyed to length could pass at one depth and fail at the
+// next.
+
+module outer {
+    public module deeper {
+        public fn seven() -> Int { 7 }
+
+        public module deepest {
+            public fn six() -> Int { 6 }
+        }
+    }
+}
+
+fn main() {
+    let a: Int = outer.deeper.seven();
+    let b: Int = outer.deeper.deepest.six() * 7;
+    print(f"{a} {b} ok");
+}
