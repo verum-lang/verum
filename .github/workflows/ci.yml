@@ -421,6 +421,16 @@ jobs:
       - name: Run L0-critical (100% required)
         working-directory: vcs
         # tee + failure artifact — runner log blobs vanish on failures.
+        #
+        # VTEST_TRACE_SPEC (T0829): the runner has been dying mid-sweep
+        # with glibc's `malloc(): invalid size (unsorted)` and SIGABRT,
+        # and the log carried no spec path — a result line is printed
+        # when a test FINISHES, which is the case a crash denies. This
+        # prints the path before each spec runs, so the last lines before
+        # the abort name the suspects. Remove once the corruption is
+        # located.
+        env:
+          VTEST_TRACE_SPEC: "1"
         run: make test-l0 PARALLEL=4 2>&1 | tee l0.log; exit ${PIPESTATUS[0]}
 
       - name: Run L1-core (100% required)

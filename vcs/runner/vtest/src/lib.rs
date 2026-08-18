@@ -540,6 +540,24 @@ impl VTestRunner {
                         return;
                     }
 
+                    // BREADCRUMB BEFORE THE WORK, NOT AFTER (T0829).
+                    //
+                    // When the runner dies mid-sweep — CI run 32122539690
+                    // ended in glibc's `malloc(): invalid size (unsorted)`
+                    // followed by SIGABRT — the log holds eleven thousand
+                    // lines of phase chatter and not one spec path, so the
+                    // crash cannot be attributed to a file. A result line
+                    // is printed after a test finishes, which is exactly
+                    // the case a crash denies.
+                    //
+                    // Off unless `VTEST_TRACE_SPEC` is set: at parallel 4
+                    // this is one line per spec and would drown a normal
+                    // run. With it set, the last line before the abort
+                    // names the suspects.
+                    if std::env::var_os("VTEST_TRACE_SPEC").is_some() {
+                        eprintln!("[vtest] START {}", directives.source_path);
+                    }
+
                     // Execute the test with optional retries
                     let mut result = match executor.execute(directives.clone()).await {
                         Ok(r) => r,
