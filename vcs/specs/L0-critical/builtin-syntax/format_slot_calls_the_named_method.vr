@@ -1,0 +1,53 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: format, interpolation, methods, dispatch, wrong-value
+// @expected-stdout: 10 20 | 10 | 10 20 | 20 20 ok
+// @skip: T0814 is open — a method call inside a format substitution returns
+//        another method's value. This spec states the expectation and is the
+//        acceptance control for that task; the skip comes off in the commit
+//        that fixes the evaluation, not by editing the expected output.
+//
+// Pin (T0814) — a format substitution must call the method it names.
+//
+// The same call written plainly is correct, so the two paths disagree and
+// the format path is the wrong one:
+//
+//     print(a.one()); print(a.two());     ->  10 then 20     CORRECT
+//     print(f"{a.one()} {a.two()}");      ->  "20 20"        WRONG
+//
+// A single substitution is enough — slot interference is not the mechanism:
+//
+//     print(f"{t.one()}");                ->  20, expected 10
+//
+// Ruled out by measurement, each by changing one thing: dispatch itself
+// (plain print is always right), the implement block style, structural
+// identity of the types, the receiver's name, the type's name, and slot
+// adjacency. Renaming the methods to alpha/beta makes the same file
+// correct, so the trigger involves the name set — `one` is declared 8+
+// times across core/ as a zero-argument associated function — but no
+// single-variable change isolated it.
+//
+// This file pins the four shapes together on ONE type so a partial fix
+// cannot pass: the two-slot case, the single-slot case, the pair that works
+// today, and a mixed pair. The values are distinct and asymmetric (10 vs
+// 20) so no output that a broken evaluation can produce happens to match.
+//
+// Why it is L0: format strings are the library's diagnostic surface. 17 of
+// them in 13 files interpolate two or more method calls, nearly all on
+// error and Debug paths — including a panic in core/proof/reflection.vr
+// whose whole job is to report a length mismatch.
+
+type Thing is { p: Int, q: Int };
+
+implement Thing {
+    fn one(&self)   -> Int { self.p }
+    fn two(&self)   -> Int { self.q }
+    fn alpha(&self) -> Int { self.p }
+    fn beta(&self)  -> Int { self.q }
+}
+
+fn main() {
+    let t = Thing { p: 10, q: 20 };
+    print(f"{t.one()} {t.two()} | {t.one()} | {t.alpha()} {t.beta()} | {t.two()} {t.beta()} ok");
+}
