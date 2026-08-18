@@ -2215,7 +2215,7 @@ impl ArchiveCtxCache {
         for item in user_module.items.iter() {
             collect_referenced_function_names(item, &mut harvest);
         }
-        let mut wanted: std::collections::HashSet<String> =
+        let wanted: std::collections::HashSet<String> =
             std::mem::take(&mut harvest.names);
         if wanted.is_empty() {
             return 0;
