@@ -34,7 +34,6 @@ mount core.net.addr.{SocketAddr, Ipv4Addr, Ipv6Addr};
 mount core.net.dns.{resolve as dns_resolve};
 
 implement ToSocketAddrs for (&Text, Int) {
-    type Iter = List<SocketAddr>;
     fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
         let (host, port) = *self;
         // Try IPv4 first
@@ -77,7 +76,6 @@ implement ToSocketAddrs for (&Text, Int) {
 /// IPv4/IPv6 first via `SocketAddr.parse`; on failure fall back to
 /// splitting `host:port` and DNS-resolving the host.
 implement ToSocketAddrs for Text {
-    type Iter = List<SocketAddr>;
     fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
         if let Result.Ok(addr) = SocketAddr.parse(self) {
             return Result.Ok(List.of(addr));
@@ -125,8 +123,7 @@ implement ToSocketAddrs for Text {
 /// the prior form `Iterator<Item>` was a no-op (Item was unbound).
 /// Drop the bound entirely until #75 lands.
 public type ToSocketAddrs is protocol {
-    type Iter;
-    fn to_socket_addrs(&self) -> Result<Self.Iter, IoError>;
+    fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError>;
 };
 
 // Implementations for common types.
@@ -148,7 +145,6 @@ public type ToSocketAddrs is protocol {
 // match a SAN entry without acquiring a name-resolution stack.
 
 implement ToSocketAddrs for SocketAddr {
-    type Iter = List<SocketAddr>;
     fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
         let mut v: List<SocketAddr> = [];
         v.push(*self);
