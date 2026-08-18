@@ -1905,27 +1905,42 @@ fn test_extern_fn_default_abi() {
     }
 }
 
+/// An extern function DECLARES a foreign symbol; it does not define one.
+///
+/// `grammar/verum.ebnf:1246` spells `extern_fn_decl` as ending in `;` —
+/// there is no body production — and the parser was brought in line with
+/// it (T0643). These two tests asserted the opposite and kept asserting
+/// it afterwards, which is what a pin does when the decision it pins is
+/// reversed and nobody re-reads it: they became a demand that the parser
+/// accept something the grammar does not have.
+///
+/// Kept, inverted: the form must be REJECTED, and the diagnostic must
+/// still say what to write instead. A test that only checked `is_err()`
+/// would go on passing if the parser started failing for some unrelated
+/// reason, so the message is part of the assertion.
 #[test]
-fn test_extern_fn_can_have_body() {
-    // Extern functions with bodies are "exported" functions
+fn test_extern_fn_body_is_rejected() {
     let source = r#"extern fn foo() { }"#;
-    let result = parse_module(source);
+    let err = parse_module(source)
+        .err()
+        .expect("an extern fn with a block body must be rejected — grammar/verum.ebnf: extern_fn_decl");
+    let text = format!("{err:?}");
     assert!(
-        result.is_ok(),
-        "Extern functions with bodies are exported functions: {:?}",
-        result.err()
+        text.contains("has no body"),
+        "the diagnostic must say an extern fn has no body and point at the `;`, got: {text}"
     );
 }
 
 #[test]
-fn test_extern_fn_can_have_expr_body() {
-    // Extern functions with expression bodies are also valid exported functions
+fn test_extern_fn_expr_body_is_rejected() {
     let source = r#"extern fn foo() = 42;"#;
-    let result = parse_module(source);
+    let err = parse_module(source)
+        .err()
+        .expect("an extern fn with an expression body must be rejected — grammar/verum.ebnf: extern_fn_decl");
+    let text = format!("{err:?}");
     assert!(
-        result.is_ok(),
-        "Extern functions with expression bodies are exported functions: {:?}",
-        result.err()
+        text.contains("has no body"),
+        "the diagnostic must say an extern fn has no body and point at the `;`, got: {text}"
     );
 }
 
