@@ -1,0 +1,49 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: modules, name-resolution, module-path, arity
+// @expected-error: E102
+// @skip: T0806 is open — arity is not checked through a module path at any
+//        length, so this file checks CLEAN today and the call evaluates to
+//        `nil`. The skip comes off in the commit that fixes the check, not
+//        by editing the expectation.
+//
+// Pin (T0806, second half) — a call through a module path must satisfy the
+// callee's arity.
+//
+// This is a SEPARATE defect from the missing-name half, and it fails at a
+// length where the name half already works:
+//
+//     fn f(a: Int); f()       local call, too few    E102
+//     fn f(a: Int); f(1,2,3)  local call, too many   E102
+//     m.absent()              module path, no such name, 2 segments   E100
+//
+//     m.f()                   module path, too few, 2 segments   silent -> nil
+//     a.b.f()                 module path, too few, 3 segments   silent -> nil
+//
+// So at two segments the name is resolved and the arity of the very same
+// call is not. Fixing the length threshold alone leaves this in place.
+//
+// It has a practical consequence for anyone probing the other half: an
+// oracle built as "assign the result to a deliberately wrong type" cannot
+// tell a live path from a dead one when the arity is wrong, because both
+// sides are silent. A batch of 22 such probes in one file reported exactly
+// one error — from the single control whose zero arity happened to match.
+// That reads like stop-after-first-error, and is not: three errors in one
+// file are all three reported.
+//
+// `outer.inner.takes_one(1)` is called first and must keep working; the
+// companion control `module_path_call_control.vr` pins the good path on its
+// own so a fix cannot pass by rejecting module-path calls wholesale.
+
+module outer {
+    public module inner {
+        public fn takes_one(a: Int) -> Int { a }
+    }
+}
+
+fn main() {
+    let good: Int = outer.inner.takes_one(1);
+    let bad: Int = outer.inner.takes_one();
+    print(f"{good} {bad}");
+}
