@@ -1388,12 +1388,31 @@ implement GrothendieckTopology<IntegerPathCategory> for DiscreteTopology {
 }
 
 /// The **trivial ∞-site** on `IntegerPathCategory` equipped with the
-/// discrete topology. Concrete acid test for the `Site<C>` protocol.
+/// discrete topology. A concrete carrier for the site vocabulary — see
+/// the note on its `implement` block for why it implements no protocol.
 public type TrivialSite is {
     marker: Int,
 };
 
-implement Site<IntegerPathCategory> for TrivialSite {
+// THERE IS NO `Site` PROTOCOL TO IMPLEMENT (2026-08-18).
+//
+// This block used to read `implement Site<IntegerPathCategory> for
+// TrivialSite`, and the library has two public `Site`s, neither of which
+// it could have meant:
+//
+//   * `core/math/infinity_topos.vr:129` — a RECORD, `Site<C>`, whose
+//     `underlying_category` is a FIELD. A record cannot be implemented.
+//   * `core/math/frameworks/lurie_htt.vr:23` — a protocol whose one
+//     method is `is_presentable`, which is not written here.
+//
+// The name resolved to the protocol, so the conformance gate reported
+// TrivialSite as missing `is_presentable` while saying nothing about the
+// two methods it does define — they belong to no protocol at all.
+//
+// They are inherent methods of the type, so that is what they are now.
+// The doc comment above no longer claims to be an acid test for a
+// `Site<C>` protocol: naming one that does not exist is how this started.
+implement TrivialSite {
     fn underlying_category(&self) -> Int {
         self.marker
     }

@@ -79,7 +79,7 @@ SIG_ANY = re.compile(
     r"(?:(?:public|pub)\s+)?(?:async\s+|unsafe\s+|pure\s+)*\bfn\s+(\w+)\s*[<(]"
 )
 
-BASELINE = 7
+BASELINE = 6
 
 
 def shown_path(path: Path) -> str:
