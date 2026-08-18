@@ -277,8 +277,13 @@ fn parse_port(b: &[Byte]) -> UInt16 {
 }
 
 async fn resolve(host: &Text, port: UInt16) -> Result<SocketAddr, QuicClientError> {
-    match core.net.dns.resolve_first(host).await {
-        Result.Ok(addr) => Result.Ok(SocketAddr.new(addr, port)),
+    // `resolve_async` pairs each address with the port itself, so no
+    // SocketAddr.new here; its port parameter is Int, this one is UInt16.
+    match core.net.dns.resolve_async(host, port as Int).await {
+        Result.Ok(addrs) => match addrs.first() {
+            Maybe.Some(addr) => Result.Ok(addr),
+            Maybe.None       => Result.Err(QuicClientError.Resolve(host.clone())),
+        },
         Result.Err(_)   => Result.Err(QuicClientError.Resolve(host.clone())),
     }
 }

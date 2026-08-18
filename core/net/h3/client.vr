@@ -191,9 +191,14 @@ async fn resolve_host(url: &Url) -> Result<SocketAddr, H3ClientError> {
     // paired with the URL's port (defaulting to 443 for https).
     let host = url.host();
     let port = url.port_or_default();
-    match core.net.dns.resolve_first(&host).await {
-        Result.Ok(addr) => Result.Ok(SocketAddr.new(addr, port)),
-        Result.Err(_)   => Result.Err(H3ClientError.Resolve(host)),
+    // `resolve_async` already pairs each address with the port and returns
+    // the whole list; the first entry is the A/AAAA record we want.
+    match core.net.dns.resolve_async(&host, port).await {
+        Result.Ok(addrs) => match addrs.first() {
+            Maybe.Some(addr) => Result.Ok(addr),
+            Maybe.None       => Result.Err(H3ClientError.Resolve(host.clone())),
+        },
+        Result.Err(_)   => Result.Err(H3ClientError.Resolve(host.clone())),
     }
 }
 

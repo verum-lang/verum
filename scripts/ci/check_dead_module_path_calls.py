@@ -22,16 +22,23 @@ and `nil` satisfies whatever return type was declared.  A typo in a
 qualified call is therefore not a compile error but a wrong VALUE, which is
 the worst shape a defect can take.
 
-Two of the calls this gate found were live defects rather than dead code:
+Five of the thirteen calls this gate found are now FIXED, and they were the
+live defects rather than dead code:
 
-    core/security/tuf/role_verify.vr   time.rfc3339.to_epoch(expires)
-    core/net/h3/client.vr              core.net.dns.resolve_first(&host)
+    core/security/tuf/role_verify.vr    time.rfc3339.to_epoch(expires)
+    core/security/sigstore/verify.vr    the same, twice
+    core/net/h3/client.vr               core.net.dns.resolve_first(&host)
+    core/net/quic/api/client.vr         the same
 
-`core/time/rfc3339.vr` declares parse / format_utc / now_utc / add_seconds
-/ diff_seconds and no `to_epoch`; the caller is reached from the public
-`check_not_expired_targets`, so TUF metadata expiry compared an Int against
-nil.  `core/net/dns.vr` declares `resolve` and `resolve_async` and no
-`resolve_first`.
+`core/time/rfc3339.vr` declares no `to_epoch`; `Rfc3339Time` carries a
+`unix_seconds` field, which is what all three callers wanted. TUF metadata
+expiry had been comparing an Int against nil, reached from the public
+`check_not_expired_targets`. `core/net/dns.vr` declares `resolve` and
+`resolve_async` and no `resolve_first`; `resolve_async` already pairs each
+address with the port, so the callers take the first entry of its list.
+
+Both DNS files checked CLEAN before the fix and clean after — the dead call
+produced no diagnostic at all, which is the shape this gate exists for.
 
 WHAT THIS GATE CHECKS — AND WHAT IT DELIBERATELY DOES NOT
 ---------------------------------------------------------
@@ -77,7 +84,7 @@ DECL = re.compile(r"\bfn\s+([a-z_][a-z0-9_]*)")
 ALWAYS_MODULE_ROOTS = {"core", "super", "cog"}
 
 # Known count at the time the gate landed; the gate ratchets DOWNWARD only.
-BASELINE = 13
+BASELINE = 8
 
 
 def module_roots(text: str) -> set[str]:

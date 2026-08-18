@@ -357,7 +357,7 @@ public fn check_not_expired_targets(meta: &TargetsMetadata) -> Result<(), RoleVe
 }
 
 fn check_not_expired_at(expires: &Rfc3339Time, now: Int) -> Result<(), RoleVerifyError> {
-    let expires_unix = time.rfc3339.to_epoch(expires);
+    let expires_unix = expires.unix_seconds;
     if now >= expires_unix {
         return Result.Err(Expired { expires: expires.clone(), now });
     }

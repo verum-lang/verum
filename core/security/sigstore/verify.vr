@@ -231,7 +231,7 @@ public async fn verify_bundle<C: HttpClient>(
     // anchor for cert-validity time.
     if bundle.tlog_entries.is_empty() { return Result.Err(NoTlogEntries); }
     let anchor_entry = &bundle.tlog_entries[0];
-    let integrated_time = time.rfc3339.to_epoch(&anchor_entry.integrated_time);
+    let integrated_time = anchor_entry.integrated_time.unix_seconds;
 
     // Step 3: validate EE cert against Fulcio CA at integratedTime.
     let nb = security.x509.time.time_to_unix(&ee.tbs.validity.not_before);
@@ -372,7 +372,7 @@ fn log_entry_from_provenance(p: &core.security.provenance.TlogEntry) -> LogEntry
         uuid:            "".to_text(),
         body_b64:        p.canonicalized_body_b64.clone(),
         body:            EntryBody.Raw(JsonValue.JsonNull),
-        integrated_time: time.rfc3339.to_epoch(&p.integrated_time),
+        integrated_time: p.integrated_time.unix_seconds,
         log_id_hex:      p.log_id_hex.clone(),
         log_index:       p.log_index,
         set:             security.sigstore.types.SignedEntryTimestamp { signature_b64: "".to_text() },
