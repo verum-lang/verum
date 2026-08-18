@@ -244,13 +244,17 @@ Memory overhead:   < 5%
 
 ### File Organization
 - Tests in `tests/`, not inline `#[cfg(test)]`
-  - **But know that `tests/` does not gate today.** CI's only test run is
-    `cargo test --workspace --lib --bins` (`.github/workflows/ci.yml`),
-    and `--lib --bins` excludes integration tests. 849 files under
-    `crates/*/tests/` are therefore never run on a PR, while the 751
-    files carrying inline `#[cfg(test)]` are. A gate you land in
-    `tests/` guards nothing until CI runs `--tests` — put it there
-    anyway, and say in the commit that it is currently inert.
+  - **`tests/` DOES gate — the note that said otherwise was stale.**
+    `.github/workflows/ci.yml` runs `--tests` for the pure tier plus
+    `verum_types`, `verum_verification`, `verum_smt`, `verum_vbc`,
+    `verum_lsp` and `verum_codegen` (jobs `integration` and
+    `integration-vbc`), on top of the `--lib --bins` unit job. That
+    campaign is T0709; check the job list before assuming a suite is
+    inert, and say in the commit which job runs your gate.
+  - Still NOT gated on a PR: the AOT-heavy crates (`verum_cli`,
+    `verum_compiler`, `verum_codegen`'s AOT suites,
+    `verum_integration_tests`), which run in `nightly-aot.yml` as a
+    non-blocking measurement lane.
 - Benchmarks in `benches/` (criterion)
 - One implementation per feature
 
