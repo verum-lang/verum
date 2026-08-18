@@ -84,6 +84,7 @@ core/math/tensor.vr	unverifiable	0	0
 core/math/topology.vr	clean	30	0
 core/meta/oracle.vr	clean	9	0
 core/theory_interop/core.vr	unverifiable	0	0
+core/verify/kernel_v0/context.vr	clean	1	0
 core/verify/kernel_v0/lemmas/beta.vr	failures	1	1
 core/verify/kernel_v0/lemmas/cartesian.vr	failures	4	1
 core/verify/kernel_v0/lemmas/eta.vr	failures	2	1
