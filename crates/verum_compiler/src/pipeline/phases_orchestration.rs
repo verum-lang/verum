@@ -201,7 +201,7 @@ impl<'s> CompilationPipeline<'s> {
         // Mode selection:
         // - NormalBuild (stdlib_metadata = Some): Use pre-compiled stdlib types
         // - StdlibBootstrap (stdlib_metadata = None): Use builtins only
-        let mut checker = match self.stdlib_metadata.get() {
+        let mut checker = crate::archive_ctx_loader::loadcost::timed("tc_new_with_core", || match self.stdlib_metadata.get() {
             Some(metadata) => {
                 debug!(
                     "Phase 3: Using stdlib metadata for type checking ({} types)",
@@ -213,12 +213,12 @@ impl<'s> CompilationPipeline<'s> {
                 // Compiling stdlib itself - use minimal context
                 TypeChecker::with_minimal_context()
             }
-        };
+        });
 
         // Register built-in types and functions
         // NOTE: In NormalBuild mode, these may already be loaded from stdlib metadata,
         // but register_builtins() is idempotent and ensures core intrinsics are available.
-        checker.register_builtins();
+        crate::archive_ctx_loader::loadcost::timed("tc_register_builtins", || checker.register_builtins());
 
         // T2-extended-perf: lazy stdlib type registration.  The
         // `new_with_core` constructor stores `core_metadata` but
@@ -228,7 +228,9 @@ impl<'s> CompilationPipeline<'s> {
         // For a hello.vr touching ~5 stdlib symbols this drops the
         // typecheck from 3.8s to ~50ms.
         if self.stdlib_metadata.is_some() {
-            checker.register_stdlib_types_for_module(module);
+            crate::archive_ctx_loader::loadcost::timed("tc_stdlib_types_for_module", || {
+                checker.register_stdlib_types_for_module(module)
+            });
 
             // **Audit-driven fundamental fix** — seed blanket
             // protocol impls from `core/base/protocols.vr` so
@@ -240,7 +242,9 @@ impl<'s> CompilationPipeline<'s> {
             // no impl items to register.  Mirrors the codegen-side
             // `seed_protocol_registry_from_embedded_stdlib` at
             // `pipeline/vbc_codegen.rs:830`.
-            seed_typechecker_blanket_impls(&mut checker);
+            crate::archive_ctx_loader::loadcost::timed("tc_blanket_impls", || {
+                seed_typechecker_blanket_impls(&mut checker)
+            });
         }
 
         // Apply `[protocols].coherence` from manifest. Closes the
@@ -286,9 +290,11 @@ impl<'s> CompilationPipeline<'s> {
         // Post-cycle-break (2026-04-24): `RefinementChecker` no longer
         // auto-constructs a Z3 backend. Install the concrete bridge from
         // `verum_smt` so refinement subsumption keeps working.
-        checker.set_smt_backend(Box::new(
-            verum_smt::refinement_backend::RefinementZ3Backend::new(),
-        ));
+        crate::archive_ctx_loader::loadcost::timed("tc_smt_backend", || {
+            checker.set_smt_backend(Box::new(
+                verum_smt::refinement_backend::RefinementZ3Backend::new(),
+            ))
+        });
 
         // Enable lenient contexts if the module has meta functions with using clauses.
         // Meta contexts (MetaTypes, MetaRuntime, etc.) are handled at the meta evaluation
@@ -597,6 +603,7 @@ impl<'s> CompilationPipeline<'s> {
 
         // Pass 0: Process imports to register imported types and functions
         // This enables cross-file type resolution for imported types
+        let t_passes = std::time::Instant::now();
         for item in &module.items {
             if let verum_ast::ItemKind::Mount(import) = &item.kind {
                 if let Err(type_error) =
@@ -928,6 +935,8 @@ impl<'s> CompilationPipeline<'s> {
             checker.stdlib_single_file_mode = true;
         }
 
+        crate::archive_ctx_loader::loadcost::record("tc_passes_0_to_4", t_passes.elapsed());
+        let t_bodies = std::time::Instant::now();
         // Pass 5: Type check all items (function bodies, impl blocks, etc.)
         for item in module.items.iter() {
             if let Err(type_error) = checker.check_item(item) {
@@ -980,7 +989,9 @@ impl<'s> CompilationPipeline<'s> {
         }
         self.deferred_verification_goals = deferred_goals;
 
+        crate::archive_ctx_loader::loadcost::record("tc_pass5_bodies", t_bodies.elapsed());
         let elapsed = start.elapsed();
+        crate::archive_ctx_loader::loadcost::report("phase_type_check", elapsed);
         let metrics = checker.metrics();
 
         info!(

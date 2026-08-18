@@ -1519,6 +1519,7 @@ impl SymbolGraph {
     pub(crate) fn reachable(
         &self,
         seeds: &HashSet<String>,
+        bare_method_seeds: &HashSet<String>,
     ) -> (HashSet<String>, HashSet<u32>) {
         let mut reached: HashSet<u32> = HashSet::new();
         let mut modules: HashSet<u32> = HashSet::new();
@@ -1552,6 +1553,15 @@ impl SymbolGraph {
             }};
         }
 
+        let max_bare_leaf_fanout: usize = std::env::var("VERUM_LEAF_FANOUT_CAP")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(24);
+        // Restores the pre-T0753 seed expansion for A/B from ONE
+        // binary.  It only ever widens the closure, so it cannot break
+        // a program, only slow it.
+        let no_seed_method_cap = std::env::var_os("VERUM_NO_SEED_METHOD_CAP").is_some();
+
         // Seed expansion: a seed can be (1) an exact qualified
         // descriptor name, (2) a bare leaf shared by multiple
         // qualifieds, or (3) a bare type prefix. Walk all three.
@@ -1559,7 +1569,27 @@ impl SymbolGraph {
             if let Some(i) = self.baked.function_index(seed) {
                 enqueue!(i, None);
             }
-            if let Some(matches) = self.baked.leaf_matches(seed) {
+            // BARE-METHOD SEED CAP (T0753).  A seed that came from a
+            // bare method call (`xs.new()` -> `new`) expands, through
+            // the leaf index, to every same-named impl in the library
+            // — and the walk then follows each one's call graph.  That
+            // is the same over-approximation the fanout cap below
+            // rejects INSIDE the walk, on the same grounds: a `CallM`
+            // resolves against the receiver's concrete runtime type,
+            // and that type's module is reached independently (its
+            // constructor, a qualified edge, or the qualified
+            // `List.new` twin the harvest emits alongside the bare
+            // name).  Only the seed expansion never applied it.
+            //
+            // Names the user wrote as functions are NOT affected: they
+            // are not bare-method seeds, so `abs(-3)` still fans its
+            // leaf however many `*.abs` exist.
+            let capped = !no_seed_method_cap
+                && bare_method_seeds.contains(seed.as_str())
+                && self.baked.leaf_match_count(seed) > max_bare_leaf_fanout;
+            if !capped
+                && let Some(matches) = self.baked.leaf_matches(seed)
+            {
                 let ids: Vec<u32> = matches.collect();
                 for i in ids {
                     enqueue!(i, None);
@@ -1599,10 +1629,6 @@ impl SymbolGraph {
         // their needed impl arrives via the receiver type's module.
         // Low-fanout leaves (e.g. `Text.from_utf8_unchecked`, a unique
         // helper) keep their precise resolution.
-        let max_bare_leaf_fanout: usize = std::env::var("VERUM_LEAF_FANOUT_CAP")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(24);
         // Complement of the cap above (T0753): the cap bounds the damage
         // when a callee can ONLY be named by its leaf, but a callee that
         // resolves EXACTLY needs no fanout at all.  Read once — the check
@@ -2032,11 +2058,12 @@ impl ArchiveCtxCache {
         user_module: &verum_ast::Module,
         next_id: &mut u32,
     ) {
-        let mut wanted: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut harvest = Harvest::default();
         for item in user_module.items.iter() {
-            collect_referenced_function_names(item, &mut wanted);
+            collect_referenced_function_names(item, &mut harvest);
         }
+        let mut wanted: std::collections::HashSet<String> =
+            std::mem::take(&mut harvest.names);
         // TEXT-DEBUG-STATIC-1 wanted-pair: the codegen rewrites a
         // statically-Text `format_debug(&x)` call (the `f"{x:?}"`
         // desugar) to the concrete `format_debug_text` twin — but that
@@ -2184,11 +2211,12 @@ impl ArchiveCtxCache {
         codegen: &mut verum_vbc::codegen::VbcCodegen,
         user_module: &verum_ast::Module,
     ) -> usize {
-        let mut wanted: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut harvest = Harvest::default();
         for item in user_module.items.iter() {
-            collect_referenced_function_names(item, &mut wanted);
+            collect_referenced_function_names(item, &mut harvest);
         }
+        let mut wanted: std::collections::HashSet<String> =
+            std::mem::take(&mut harvest.names);
         if wanted.is_empty() {
             return 0;
         }
@@ -2255,7 +2283,12 @@ impl ArchiveCtxCache {
             return 0;
         }
         let graph = self.graph(archive);
-        let (reached_qualified, reached_module_idxs) = graph.reachable(&unresolved);
+        // No AST here — `extra_wanted` arrives as bare names that could
+        // NOT be resolved in ctx, so their provenance is unknown and the
+        // seed cap must not apply: this path exists precisely to find
+        // something the earlier, narrower pass missed.
+        let (reached_qualified, reached_module_idxs) =
+            graph.reachable(&unresolved, &HashSet::new());
         let mut wanted = unresolved;
         for n in &reached_qualified {
             wanted.insert(n.clone());
@@ -2426,11 +2459,13 @@ impl ArchiveCtxCache {
         if let Some(metadata) = crate::embedded_stdlib_metadata::get_runtime_metadata() {
             crate::pipeline::vbc_codegen::seed_reexport_type_aliases(codegen, &metadata);
         }
-        let mut wanted: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut harvest = Harvest::default();
         for item in user_module.items.iter() {
-            collect_referenced_function_names(item, &mut wanted);
+            collect_referenced_function_names(item, &mut harvest);
         }
+        let bare_method_seeds = std::mem::take(&mut harvest.bare_methods);
+        let mut wanted: std::collections::HashSet<String> =
+            std::mem::take(&mut harvest.names);
         // TEXT-DEBUG-STATIC-1 wanted-pair: the codegen rewrites a
         // statically-Text `format_debug(&x)` call (the `f"{x:?}"`
         // desugar) to the concrete `format_debug_text` twin — but that
@@ -2583,7 +2618,9 @@ impl ArchiveCtxCache {
         // surfaces by construction — no hardcoded entries.
         let graph = self.graph(archive);
         let (reached_qualified, reached_module_idxs) =
-            loadcost::timed("bfs_reachable", || graph.reachable(&wanted));
+            loadcost::timed("bfs_reachable", || {
+                graph.reachable(&wanted, &bare_method_seeds)
+            });
         if std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok() {
             eprintln!(
                 "[reachable] wanted={} reached_qualified={} reached_modules={}",
@@ -4375,7 +4412,7 @@ fn collect_cross_module_callee_names(module: &VbcModule, out: &mut HashSet<Strin
 /// tag-as-index fallback typed `v` with the WRONG generic arg.
 fn harvest_names_in_pattern(
     pat: &verum_ast::pattern::Pattern,
-    out: &mut std::collections::HashSet<String>,
+    out: &mut Harvest,
 ) {
     use verum_ast::pattern::{PatternKind, VariantPatternData};
     match &pat.kind {
@@ -4438,9 +4475,58 @@ fn harvest_names_in_pattern(
     }
 }
 
+/// What the AST harvest produces: names, and the subset of them that
+/// came from a BARE method call.
+///
+/// The distinction is load-bearing for the symbol-graph seed expansion
+/// (T0753).  `xs.new()` harvests two things — the qualified
+/// `List.new`, and the bare `new`.  The bare one is what the merge
+/// keep-set needs (a `CallM` edge carries only a method name, so
+/// presence-only over-keep is the rule there).  Feeding it to the
+/// graph walk as a SEED is a different matter: the seed expands a leaf
+/// to EVERY same-named qualified in the library, so one `xs.new()`
+/// enqueues `TlsClient.new`, `RedisClient.new`, `Database.new` … and
+/// the walk then follows each of their call graphs.
+///
+/// Measured on `let mut xs: List<Int> = List.new(); xs.push(1); …`:
+/// the closure is 2540 symbols across 188 archive entries — TLS 1.3
+/// handshake, QUIC, Redis, Postgres among them — and the chain from
+/// the provenance trace starts at `TlsClient.new` AS A SEED, with no
+/// edge leading to it.  The same program with the `.new` call removed
+/// reaches 291 symbols in 73 entries and costs 17.4 G instructions
+/// against 42.1 G.
+///
+/// This is the case the fanout cap already handles INSIDE the walk
+/// ("a bare method call is resolved by the RECEIVER's concrete runtime
+/// type … blanket-fanning a bare leaf to every same-named impl is
+/// redundant for correctness"), and the seed expansion is where that
+/// reasoning was never applied.
+#[derive(Default)]
+pub(crate) struct Harvest {
+    /// Every name the archive filters consult.
+    names: std::collections::HashSet<String>,
+    /// The subset harvested from a bare method call.
+    bare_methods: std::collections::HashSet<String>,
+}
+
+impl Harvest {
+    fn insert(&mut self, name: String) -> bool {
+        self.names.insert(name)
+    }
+
+    /// Record a name that came from a bare method call.  It still
+    /// joins `names` — every consumer that filters on the wanted set
+    /// keeps seeing it; only the graph seed expansion reads the
+    /// distinction.
+    fn insert_bare_method(&mut self, name: String) {
+        self.names.insert(name.clone());
+        self.bare_methods.insert(name);
+    }
+}
+
 fn collect_referenced_function_names(
     item: &verum_ast::Item,
-    out: &mut std::collections::HashSet<String>,
+    out: &mut Harvest,
 ) {
     use verum_ast::ItemKind;
     match &item.kind {
@@ -4472,7 +4558,7 @@ fn collect_referenced_function_names(
 /// here AND whose parent type is not here gets skipped.
 fn harvest_names_in_function(
     func: &verum_ast::decl::FunctionDecl,
-    out: &mut std::collections::HashSet<String>,
+    out: &mut Harvest,
 ) {
     use verum_common::Maybe;
     use verum_ast::decl::{FunctionBody, FunctionParamKind};
@@ -4497,7 +4583,7 @@ fn harvest_names_in_function(
     // by block. The case that costs: a name bound somewhere in the body AND
     // genuinely referring to a stdlib symbol elsewhere in the same body. It
     // fails LOUDLY (an undefined-name diagnostic), never silently.
-    let mut local: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut local = Harvest::default();
     let mut bound: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for param in func.params.iter() {
@@ -4518,9 +4604,17 @@ fn harvest_names_in_function(
             FunctionBody::Expr(expr) => harvest_names_in_expr(expr, &mut local),
         }
     }
-    for name in local {
+    for name in local.names {
         if !bound.contains(&name) {
-            out.insert(name);
+            // A bare method name survives the local-binding filter as
+            // a bare method name: `xs.push(1)` harvests `push`, and
+            // dropping the provenance here would put it back into the
+            // unrestricted seed set.
+            if local.bare_methods.contains(&name) {
+                out.insert_bare_method(name);
+            } else {
+                out.insert(name);
+            }
         }
     }
 }
@@ -4575,7 +4669,7 @@ fn collect_bound_names_in_block(
 
 fn harvest_names_in_impl(
     impl_decl: &verum_ast::decl::ImplDecl,
-    out: &mut std::collections::HashSet<String>,
+    out: &mut Harvest,
 ) {
     use verum_ast::decl::{ImplItemKind, ImplKind};
     match &impl_decl.kind {
@@ -4596,7 +4690,7 @@ fn harvest_names_in_impl(
 
 fn harvest_names_in_block(
     block: &verum_ast::expr::Block,
-    out: &mut std::collections::HashSet<String>,
+    out: &mut Harvest,
 ) {
     use verum_common::Maybe;
     for stmt in block.stmts.iter() {
@@ -4609,7 +4703,7 @@ fn harvest_names_in_block(
 
 fn harvest_names_in_stmt(
     stmt: &verum_ast::Stmt,
-    out: &mut std::collections::HashSet<String>,
+    out: &mut Harvest,
 ) {
     use verum_common::Maybe;
     use verum_ast::stmt::StmtKind;
@@ -4664,7 +4758,7 @@ fn harvest_names_in_stmt(
 /// build with `no method named X found for type Y`.
 fn harvest_names_in_expr(
     expr: &verum_ast::Expr,
-    out: &mut std::collections::HashSet<String>,
+    out: &mut Harvest,
 ) {
     use verum_common::Maybe;
     use verum_ast::expr::ExprKind;
@@ -4715,7 +4809,7 @@ fn harvest_names_in_expr(
             // the keep closure's CALLM rule already resolves bare keys
             // to every same-suffix candidate ("presence-only over-keep;
             // dispatch precision is the runtime's job").
-            out.insert(method.name.to_string());
+            out.insert_bare_method(method.name.to_string());
             harvest_names_in_expr(receiver, out);
             for ga in type_args.iter() {
                 harvest_names_in_generic_arg(ga, out);
@@ -4893,7 +4987,7 @@ fn harvest_names_in_expr(
 
 fn harvest_names_in_path(
     path: &verum_ast::ty::Path,
-    out: &mut std::collections::HashSet<String>,
+    out: &mut Harvest,
 ) {
     let segs: Vec<String> = path
         .segments
@@ -4943,7 +5037,7 @@ fn last_path_name(path: &verum_ast::ty::Path) -> Option<String> {
 
 fn harvest_names_in_type(
     ty: &verum_ast::ty::Type,
-    out: &mut std::collections::HashSet<String>,
+    out: &mut Harvest,
 ) {
     use verum_ast::ty::TypeKind;
     match &ty.kind {
@@ -4987,7 +5081,7 @@ fn harvest_names_in_type(
 
 fn harvest_names_in_generic_arg(
     ga: &verum_ast::ty::GenericArg,
-    out: &mut std::collections::HashSet<String>,
+    out: &mut Harvest,
 ) {
     use verum_ast::ty::GenericArg;
     match ga {
@@ -5002,7 +5096,7 @@ fn harvest_names_in_generic_arg(
 fn collect_mount_names(
     tree: &verum_ast::decl::MountTree,
     prefix: &[String],
-    out: &mut std::collections::HashSet<String>,
+    out: &mut Harvest,
 ) {
     use verum_ast::decl::MountTreeKind;
     match &tree.kind {
@@ -6805,7 +6899,8 @@ mod tests {
         );
 
         // Step 2: reachability from `wanted` must include Text.new.
-        let (reached, reached_modules) = graph.reachable(&wanted);
+        let (reached, reached_modules) =
+            graph.reachable(&wanted, &HashSet::new());
         assert!(
             reached.contains("Text.new"),
             "BFS from Text/Text.new MUST reach Text.new"
@@ -6870,7 +6965,7 @@ mod tests {
         // via the prefix index.
         let mut seeds = HashSet::new();
         seeds.insert("Text".to_string());
-        let (reached, _modules) = graph.reachable(&seeds);
+        let (reached, _modules) = graph.reachable(&seeds, &HashSet::new());
         assert!(
             reached.contains("Text.new"),
             "graph reachability from seed `Text` MUST reach `Text.new`; \
