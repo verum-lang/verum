@@ -65,7 +65,6 @@
 )
 module core.net.quic.recovery.cc.cubic;
 
-mount core.*;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.net.quic.recovery.cc.{

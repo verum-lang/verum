@@ -21,7 +21,6 @@ module core.database.sqlite.native.l5_sql.parser.token_stream;
 // `SqlParseError` shape for the diagnostic layer to render.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.lexer.{

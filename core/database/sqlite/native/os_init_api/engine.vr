@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.os_init_api.engine;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.os_init_api.phase.{
     OsPhase, OsFresh, OsInitialised, OsTornDown,

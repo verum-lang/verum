@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.sql_render.normalize;
 
-mount core.*;
 mount base.{Bool, Text};
 mount collections.List;
 

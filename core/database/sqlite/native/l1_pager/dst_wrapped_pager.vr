@@ -47,7 +47,6 @@ module core.database.sqlite.native.l1_pager.dst_wrapped_pager;
 // the dst_pager_* surface to opt in to fault injection.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l1_pager.pager.{

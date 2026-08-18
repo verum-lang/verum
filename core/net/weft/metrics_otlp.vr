@@ -80,7 +80,6 @@
 )
 module core.net.weft.metrics_otlp;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
 mount core.time.{Instant, Duration};

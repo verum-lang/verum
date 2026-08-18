@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.io_methods.version;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.io_methods.method_set.{
     MethodSet, supports_wal, supports_mmap,

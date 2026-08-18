@@ -56,7 +56,6 @@
 )
 module core.collections.consistent_hash;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.collections.btree.{BTreeMap};
 mount core.hash.crypto.sha256.{Sha256};

@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.vtab_helpers.distinct;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type DistinctHint is

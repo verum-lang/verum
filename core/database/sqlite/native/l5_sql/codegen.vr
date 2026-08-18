@@ -42,7 +42,6 @@ module core.database.sqlite.native.l5_sql.codegen;
 // emitting a broken program.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 // Built-in scalar catalogue — the single name→kind→code authority. codegen

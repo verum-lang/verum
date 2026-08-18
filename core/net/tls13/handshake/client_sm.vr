@@ -39,7 +39,6 @@
 )
 module core.net.tls13.handshake.client_sm;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.hash.crypto.sha256.{Sha256};

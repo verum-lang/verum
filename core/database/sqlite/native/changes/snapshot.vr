@@ -13,7 +13,6 @@
 )
 module core.database.sqlite.native.changes.snapshot;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.changes.counter.{ChangeCounter};
 

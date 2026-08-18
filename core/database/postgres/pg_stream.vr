@@ -48,7 +48,6 @@
 )
 module core.database.postgres.pg_stream;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.net.tcp.TcpStream;

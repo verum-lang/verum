@@ -14,7 +14,6 @@
 )
 module core.sys.linux.bpf.map;
 
-mount core.*;
 mount core.sys.common.{FileDesc};
 mount core.sys.linux.bpf.error.{BpfError};
 

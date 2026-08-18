@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.access_flags;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public const SQLITE_ACCESS_EXISTS: Int    = 0;

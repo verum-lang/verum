@@ -56,7 +56,6 @@
 )
 module core.security.tuf.repository;
 
-mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount core.net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError, Headers, Version};

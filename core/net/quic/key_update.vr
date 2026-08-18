@@ -60,7 +60,6 @@
 )
 module core.net.quic.key_update;
 
-mount core.*;
 mount core.net.tls13.cipher_suite.{AeadKind};
 mount core.net.tls13.keyschedule.schedule.{TrafficSecret};
 mount core.net.quic.connection_sm.{QuicSpaceKeys};

@@ -12,7 +12,6 @@
 )
 module core.net.weft.connection;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.addr.{SocketAddr};
 mount core.time.instant.{Instant};

@@ -22,7 +22,6 @@
 
 module core.collections.graph;
 
-mount core.*;
 
 /// A directed edge from `src` to `tgt` with optional label `L`.
 public type Edge<V, L> is {

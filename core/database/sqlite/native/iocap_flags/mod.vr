@@ -29,7 +29,6 @@
 )
 module core.database.sqlite.native.iocap_flags;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public const SQLITE_IOCAP_ATOMIC: Int                = 0x00000001;

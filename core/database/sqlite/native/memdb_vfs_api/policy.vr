@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.memdb_vfs_api.policy;
 
-mount core.*;
 mount base.{Bool};
 
 public const DEFAULT_MAX_BYTES: Int64 = 9223372036854775807 as Int64;

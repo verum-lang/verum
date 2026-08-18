@@ -40,7 +40,6 @@ module core.database.sqlite.native.l1_pager.actor;
 // canonical behaviour and callable directly for tests.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l1_pager.pager.{

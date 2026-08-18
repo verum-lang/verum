@@ -31,7 +31,6 @@ module core.database.sqlite.native.l5_sql.resolver;
 // a `List<ColumnScope>` for that forward-compatibility.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{

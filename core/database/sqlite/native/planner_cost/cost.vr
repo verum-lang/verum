@@ -18,7 +18,6 @@
 )
 module core.database.sqlite.native.planner_cost.cost;
 
-mount core.*;
 mount base.{Text};
 mount core.database.sqlite.native.planner_cost.stats.{TableStats, IndexStats};
 

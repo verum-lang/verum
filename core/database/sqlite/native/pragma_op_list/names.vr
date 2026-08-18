@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.pragma_op_list.names;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 mount collections.List;
 mount core.database.sqlite.native.pragma_op_list.category.{

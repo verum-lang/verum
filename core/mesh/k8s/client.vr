@@ -13,7 +13,6 @@
 )
 module core.mesh.k8s.client;
 
-mount core.*;
 mount core.async.async_iterator.{AsyncIterator};
 mount core.async.stream.{Stream};
 mount core.async.poll.{Poll};

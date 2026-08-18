@@ -33,7 +33,6 @@ module core.database.sqlite.native.l0_vfs.clock;
 // on target.
 // =============================================================================
 
-mount core.*;
 mount core.intrinsics.runtime.time.{monotonic_nanos, realtime_nanos};
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.Timestamp;
 

@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.trace_v2_api.callback;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type CallbackSpec is {

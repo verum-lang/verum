@@ -55,7 +55,6 @@ module core.database.sqlite.native.l7_api.pragma_api;
 // per-pragma kind enum still gives the user a typo-proof name handle.
 // =============================================================================
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{

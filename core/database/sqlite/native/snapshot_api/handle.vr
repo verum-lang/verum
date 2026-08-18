@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.snapshot_api.handle;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type SnapshotHandle is {

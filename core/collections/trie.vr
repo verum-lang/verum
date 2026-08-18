@@ -67,7 +67,6 @@
 )
 module core.collections.trie;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
 

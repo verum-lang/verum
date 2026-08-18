@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.temp_path.engine;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 mount core.database.sqlite.native.temp_path.slot.{
     PathSlot, TempPathSetOutcome, SoOk, SoFrozen,

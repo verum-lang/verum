@@ -73,7 +73,6 @@ module core.database.sqlite.native.l3_btree.page_layout;
 // All the varints and u16/u32 multi-byte integers are big-endian.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l2_record.varint;

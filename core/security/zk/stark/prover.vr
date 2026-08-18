@@ -32,7 +32,6 @@
     at_tier: Tier.MultiTier([Tier.Aot, Tier.Gpu])
 )
 module core.security.zk.stark.prover;
-mount core.*;
 mount core.security.zk.stark.air.{Air, ProofParams, AirError};
 
 // =============================================================================

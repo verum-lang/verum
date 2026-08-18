@@ -45,7 +45,6 @@ public module new_reno;
 public module cubic;
 public module bbr;
 
-mount core.*;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 

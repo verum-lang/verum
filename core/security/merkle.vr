@@ -54,7 +54,6 @@
 )
 module core.security.merkle;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.hash.crypto.sha256.{Sha256};
 

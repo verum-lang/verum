@@ -29,7 +29,6 @@
 )
 module core.net.quic.crypto.labels;
 
-mount core.*;
 
 /// RFC 9001 §5.2 — initial_salt for QUIC v1 (version 0x00000001).
 /// Run through HKDF-Extract with the client Destination CID to

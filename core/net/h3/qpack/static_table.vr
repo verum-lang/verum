@@ -24,7 +24,6 @@
 )
 module core.net.h3.qpack.static_table;
 
-mount core.*;
 mount core.collections.list.{List};
 
 public type QpackStaticEntry is {

@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.result_api.engine;
 
-mount core.*;
 mount base.{Bool, Maybe};
 mount core.database.sqlite.native.result_api.payload.{
     ResultPayload, RpNull, kind_name,

@@ -22,7 +22,6 @@
 )
 module core.database.sqlite.native.test_vectors.record_encoding;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 

@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.interrupt.token;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type InterruptReason is

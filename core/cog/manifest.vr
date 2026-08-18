@@ -49,7 +49,6 @@
 )
 module core.cog.manifest;
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount base.semver.{SemVer};

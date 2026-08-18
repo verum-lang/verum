@@ -29,7 +29,6 @@
 )
 module core.database.sqlite.native.dbstat.page_stat;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 

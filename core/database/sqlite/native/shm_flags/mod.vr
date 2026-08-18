@@ -22,7 +22,6 @@
 )
 module core.database.sqlite.native.shm_flags;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public const SQLITE_SHM_UNLOCK: Int    = 1;

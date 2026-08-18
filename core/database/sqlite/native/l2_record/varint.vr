@@ -24,7 +24,6 @@ module core.database.sqlite.native.l2_record.varint;
 // would land.
 // =============================================================================
 
-mount core.*;
 mount core.encoding.varint;
 
 // Re-exports.

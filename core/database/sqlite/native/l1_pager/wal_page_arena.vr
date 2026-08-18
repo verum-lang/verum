@@ -52,7 +52,6 @@ module core.database.sqlite.native.l1_pager.wal_page_arena;
 // needs to outlive the slot.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 

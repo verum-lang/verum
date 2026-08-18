@@ -35,7 +35,6 @@
 )
 module core.net.quic.ack_ranges;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.quic.frame.{AckRange};
 

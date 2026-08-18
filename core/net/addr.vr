@@ -17,7 +17,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.addr;
-mount core.*;
 
 // =============================================================================
 // IPv4 Address

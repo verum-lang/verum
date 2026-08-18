@@ -60,7 +60,6 @@
 )
 module core.base.semver_constraint;
 
-mount core.*;
 mount collections.list.{List};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount base.semver.{SemVer, SemVerError};

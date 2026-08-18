@@ -19,7 +19,6 @@
 )
 module core.mesh.xds.client;
 
-mount core.*;
 mount core.async.stream.{Stream};
 mount core.async.async_iterator.{AsyncIterator};
 mount core.async.cancellation.{CancellationToken};

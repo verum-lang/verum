@@ -67,7 +67,6 @@
 )
 module core.signal;
 
-mount core.*;
 mount core.async.broadcast.{
     BroadcastSender, BroadcastReceiver, RecvError,
     broadcast_channel,

@@ -32,7 +32,6 @@
 )
 module core.database.sqlite.native.subprograms.program;
 
-mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 

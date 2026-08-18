@@ -25,7 +25,6 @@
 )
 module core.database.sqlite.native.export.value;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 

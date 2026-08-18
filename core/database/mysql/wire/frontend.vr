@@ -15,7 +15,6 @@
 )
 module core.database.mysql.wire.frontend;
 
-mount core.*;
 mount base.{Text};
 mount collections.List;
 mount core.database.mysql.wire.frame.{

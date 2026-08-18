@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.sql_render.expand;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 mount collections.List;
 mount core.database.sqlite.native.sql_render.literal.{

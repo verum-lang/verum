@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.complete.state;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type ScanMode is

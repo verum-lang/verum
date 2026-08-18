@@ -28,7 +28,6 @@
 )
 module core.database.sqlite.native.ext.scalar;
 
-mount core.*;
 mount base.{Text, Result, Ok, Err};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull};

@@ -53,7 +53,6 @@ module core.database.sqlite.native.l7_api.backup;
 // mid-backup has its tail picked up on the next step.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l1_pager.pager.{

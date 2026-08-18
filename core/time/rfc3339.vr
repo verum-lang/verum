@@ -58,7 +58,6 @@
 )
 module core.time.rfc3339;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.system_time.SystemTime;
 

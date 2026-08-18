@@ -15,7 +15,6 @@
 )
 module core.tracing.tracer;
 
-mount core.*;
 mount core.sync.mutex.{Mutex};
 mount core.time.instant.{Instant};
 mount core.time.system_time.{SystemTime};

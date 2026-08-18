@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.threadsafe.mode;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type TsMode is

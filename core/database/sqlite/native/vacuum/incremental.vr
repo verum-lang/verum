@@ -22,7 +22,6 @@
 )
 module core.database.sqlite.native.vacuum.incremental;
 
-mount core.*;
 mount base.{Bool, Maybe};
 mount collections.List;
 

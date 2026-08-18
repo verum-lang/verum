@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.mutex.state;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.mutex.kind.{
     MutexClass, MutexFast, MutexRecursive, is_recursive,

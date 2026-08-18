@@ -13,7 +13,6 @@
 )
 module core.net.quic.connection;
 
-mount core.*;
 mount core.net.addr.{SocketAddr};
 mount core.net.quic.error.{QuicError, ApplicationErrorCode};
 mount core.net.quic.stream.{QuicStream, StreamDirection};

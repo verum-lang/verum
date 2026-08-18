@@ -21,7 +21,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.io.process;
-mount core.*;
 
 // =============================================================================
 // Internal buffer constants

@@ -68,7 +68,6 @@
 )
 module core.net.h3.webtransport;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
 mount core.async.cancellation.{CancellationToken};

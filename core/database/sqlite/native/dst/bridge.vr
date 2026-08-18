@@ -42,7 +42,6 @@
 )
 module core.database.sqlite.native.dst.bridge;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.{List, Map};
 mount core.database.sqlite.native.dst.harness.{

@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.log.record;
 
-mount core.*;
 mount base.{Text};
 mount core.database.sqlite.native.log.level.{
     SqliteLogLevel, level_from_primary,

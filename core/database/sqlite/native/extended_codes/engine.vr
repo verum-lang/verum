@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.extended_codes.engine;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.extended_codes.state.{
     ExtendedCodeState, set_enabled, is_enabled,

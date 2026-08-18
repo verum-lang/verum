@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.fts5.posting;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 

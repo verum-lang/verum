@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.destructor_api.engine;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.destructor_api.kind.{
     BindDestructorKind, DStatic, DTransient, DCustom, will_copy, will_invoke_callback,

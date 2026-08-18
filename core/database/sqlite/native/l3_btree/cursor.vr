@@ -37,7 +37,6 @@ module core.database.sqlite.native.l3_btree.cursor;
 // state; I/O-driving methods will be added in L3.3 phase 2.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l3_btree.btree.{Btree, BtreeError};

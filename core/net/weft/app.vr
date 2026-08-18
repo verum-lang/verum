@@ -48,7 +48,6 @@
 )
 module core.net.weft.app;
 
-mount core.*;
 mount core.net.weft.handler.{Handler};
 mount core.net.weft.listener.{Server, ListenerConfig};
 mount core.net.weft.connection.{ConnectionConfig};

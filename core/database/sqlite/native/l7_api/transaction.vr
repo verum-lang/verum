@@ -47,7 +47,6 @@ module core.database.sqlite.native.l7_api.transaction;
 //  with `DbMisuse(..)` rather than corrupting tx state.
 // =============================================================================
 
-mount core.*;
 mount base.{Result, Ok, Err, Text};
 
 /// SqliteTransaction-isolation flavour that shapes the underlying BEGIN.

@@ -28,7 +28,6 @@
 )
 module core.database.sqlite.native.dbstat.index_info;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 

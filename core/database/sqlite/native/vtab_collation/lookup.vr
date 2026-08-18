@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.vtab_collation.lookup;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 mount collections.List;
 

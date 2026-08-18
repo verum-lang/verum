@@ -49,7 +49,6 @@
 )
 module core.async.stream;
 
-mount core.*;
 mount collections.*;
 mount super.poll.*;
 mount super.waker.*;

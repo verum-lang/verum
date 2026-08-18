@@ -41,7 +41,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.async.executor;
-mount core.*;
 mount collections.*;
 mount sync.*;
 mount core.intrinsics.atomic.{atomic_fence, MemoryOrder};

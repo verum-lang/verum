@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.progress.tick;
 
-mount core.*;
 mount base.{Bool};
 
 public type TickAccumulator is {

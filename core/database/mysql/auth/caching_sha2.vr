@@ -30,7 +30,6 @@
 )
 module core.database.mysql.auth.caching_sha2;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.hash.crypto.sha256.Sha256;

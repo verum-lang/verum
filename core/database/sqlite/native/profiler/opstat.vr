@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.profiler.opstat;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 

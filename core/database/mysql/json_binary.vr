@@ -63,7 +63,6 @@
 )
 module core.database.mysql.json_binary;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.{List, Map};
 mount core.database.common.error.{

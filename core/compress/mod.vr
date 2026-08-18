@@ -69,7 +69,6 @@ public module mod_brotli;
 public module mod_zstd;
 public module mod_lz4;
 
-mount core.*;
 
 // =============================================================================
 // Algorithm enum — runtime-dispatchable identifier

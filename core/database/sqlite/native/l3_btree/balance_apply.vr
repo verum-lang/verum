@@ -42,7 +42,6 @@ module core.database.sqlite.native.l3_btree.balance_apply;
 //                  freed.  Tree height -1.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l3_btree.balance.{

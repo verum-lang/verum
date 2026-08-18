@@ -31,7 +31,6 @@
 )
 module core.net.quic.recovery.pn_space;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};

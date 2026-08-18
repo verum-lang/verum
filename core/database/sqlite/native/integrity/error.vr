@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.integrity.error;
 
-mount core.*;
 mount base.{Text, Bool};
 
 public type IntegrityError is

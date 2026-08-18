@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.scanstatus_v2.fetch;
 
-mount core.*;
 mount base.{Bool, Text};
 mount core.database.sqlite.native.scanstatus_v2.flags.{
     ScanField, SQLITE_SCANSTAT_COMPLEX, field_is_numeric,

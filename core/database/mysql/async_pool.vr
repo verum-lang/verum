@@ -18,7 +18,6 @@
 )
 module core.database.mysql.async_pool;
 
-mount core.*;
 mount core.sync.mutex.{Mutex};
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;

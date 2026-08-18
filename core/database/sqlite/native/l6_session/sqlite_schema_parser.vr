@@ -33,7 +33,6 @@ module core.database.sqlite.native.l6_session.sqlite_schema_parser;
 // to populate the cache from sqlite_schema during open / reload.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.register.{

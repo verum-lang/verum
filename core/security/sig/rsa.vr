@@ -82,7 +82,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.security.sig.rsa;
-mount core.*;
 mount core.hash.crypto.sha256.{Sha256};
 mount core.hash.crypto.sha384.{Sha384};
 mount core.hash.crypto.sha512.{Sha512};

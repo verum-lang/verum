@@ -12,7 +12,6 @@
 )
 module core.database.sqlite.native.config.value;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type ConfigValue is

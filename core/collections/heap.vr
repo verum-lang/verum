@@ -28,7 +28,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.collections.heap;
-mount core.*;
 mount super.list.*;
 
 // =============================================================================

@@ -50,7 +50,6 @@
 )
 module core.net.content_negotiation;
 
-mount core.*;
 mount core.collections.list.{List};
 
 // =============================================================================

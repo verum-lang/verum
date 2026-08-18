@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.get_table_api.matrix;
 
-mount core.*;
 mount base.{Bool, Text};
 mount collections.List;
 

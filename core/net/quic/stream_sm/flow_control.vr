@@ -38,7 +38,6 @@
 )
 module core.net.quic.stream_sm.flow_control;
 
-mount core.*;
 
 public type ConnFlowControl is {
     // Remote-side budget (we're sending)

@@ -24,7 +24,6 @@
 )
 module core.net.h3.settings;
 
-mount core.*;
 mount core.collections.list.{List};
 
 public type H3Settings is {

@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.vtabs.protocol;
 
-mount core.*;
 mount base.{Text, Result, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull};

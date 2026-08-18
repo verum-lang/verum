@@ -49,7 +49,6 @@
 )
 module core.net.quic.recovery.rtt;
 
-mount core.*;
 mount core.time.duration.{Duration};
 
 public type RttEstimator is {

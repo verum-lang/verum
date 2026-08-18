@@ -29,7 +29,6 @@ module core.database.sqlite.native.l4_vdbe.ssa.jump_threading;
 // follow-up pass that walks reachability from the entry block.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.ssa.value.{

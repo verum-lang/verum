@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.triggers.store;
 
-mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.triggers.spec.{

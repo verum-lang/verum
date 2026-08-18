@@ -28,7 +28,6 @@
 )
 module core.database.sqlite.native.session.change;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{

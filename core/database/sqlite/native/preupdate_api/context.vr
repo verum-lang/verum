@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.preupdate_api.context;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.hooks_api.op.{
     UpdateOp, UoInsert, UoUpdate, UoDelete,

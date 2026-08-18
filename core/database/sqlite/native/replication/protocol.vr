@@ -27,7 +27,6 @@
 )
 module core.database.sqlite.native.replication.protocol;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.replication.role.{ReplicationRole, RoleReplica, RoleStandby};

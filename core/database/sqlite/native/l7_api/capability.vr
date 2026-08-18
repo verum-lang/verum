@@ -35,7 +35,6 @@ module core.database.sqlite.native.l7_api.capability;
 // do all the work.
 // =============================================================================
 
-mount core.*;
 mount base.Text;
 mount core.database.common.capability.{
     Capability, CanRead, CanWrite, CanDdl,

@@ -18,7 +18,6 @@
 )
 module core.database.sqlite.native.complete.engine;
 
-mount core.*;
 mount collections.List;
 mount core.database.sqlite.native.complete.state.{
     ScanState, new_state,

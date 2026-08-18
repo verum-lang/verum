@@ -41,7 +41,6 @@
 )
 module core.net.weft.h3_priority;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.h3.priority.{
     H3Priority, PriorityParseError, parse_header,

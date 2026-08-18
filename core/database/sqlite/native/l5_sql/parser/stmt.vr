@@ -25,7 +25,6 @@ module core.database.sqlite.native.l5_sql.parser.stmt;
 //  statements. Empty statements (';;') are silently skipped.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l5_sql.lexer.{

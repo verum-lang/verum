@@ -9,7 +9,6 @@
 )
 module core.net.http2.settings;
 
-mount core.*;
 mount core.net.http2.error.{Http2Error, connection_error, ErrorCode};
 
 public type SettingId is {

@@ -44,7 +44,6 @@
 )
 module core.net.tls13.sig_scheme;
 
-mount core.*;
 
 public type SignatureScheme is
     // ECDSA

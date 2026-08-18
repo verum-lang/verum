@@ -20,7 +20,6 @@
 )
 module core.database.postgres.config;
 
-mount core.*;
 mount base.{Text, Maybe, None, Some};
 
 // -----------------------------------------------------------------------------

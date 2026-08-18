@@ -48,7 +48,6 @@
 )
 module core.encoding.msgpack;
 
-mount core.*;
 mount core.collections.list.{List};
 
 // =============================================================================

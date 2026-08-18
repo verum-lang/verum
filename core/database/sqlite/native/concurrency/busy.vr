@@ -27,7 +27,6 @@
 )
 module core.database.sqlite.native.concurrency.busy;
 
-mount core.*;
 mount base.{Bool, Maybe};
 
 public type RetryDecision is

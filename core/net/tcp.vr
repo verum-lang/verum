@@ -60,7 +60,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.tcp;
-mount core.*;
 mount io.*;
 mount core.async.io_protocols.{AsyncRead, AsyncWrite, IoResult};
 mount core.async.poll.{Poll};

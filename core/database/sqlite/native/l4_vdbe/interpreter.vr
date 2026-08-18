@@ -29,7 +29,6 @@ module core.database.sqlite.native.l4_vdbe.interpreter;
 // to `Yield` until the actor IPC integration lands.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.opcode.Opcode;

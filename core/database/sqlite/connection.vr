@@ -41,7 +41,6 @@
 )
 module core.database.sqlite.connection;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};

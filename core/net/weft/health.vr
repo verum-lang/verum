@@ -42,7 +42,6 @@
 )
 module core.net.weft.health;
 
-mount core.*;
 mount core.text.builder.{TextBuilder};
 mount core.collections.list.{List};
 mount core.net.http.{Response, StatusCode};

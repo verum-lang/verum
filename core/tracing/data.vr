@@ -24,7 +24,6 @@
 )
 module core.tracing.data;
 
-mount core.*;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.time.system_time.{SystemTime};

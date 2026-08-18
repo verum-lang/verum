@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.bind_text_v2.engine;
 
-mount core.*;
 mount base.{Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.bind_text_v2.spec.{

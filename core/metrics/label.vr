@@ -13,7 +13,6 @@
 )
 module core.metrics.label;
 
-mount core.*;
 
 public type LabelValue is Text;
 

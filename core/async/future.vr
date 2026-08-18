@@ -18,7 +18,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.async.future;
-mount core.*;
 mount super.poll.*;
 mount super.waker.*;
 

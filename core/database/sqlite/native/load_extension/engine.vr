@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.load_extension.engine;
 
-mount core.*;
 mount base.{Bool, Text};
 mount collections.List;
 mount core.database.sqlite.native.load_extension.entry_point.{

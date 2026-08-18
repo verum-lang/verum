@@ -9,7 +9,6 @@
 )
 module core.net.h3.error;
 
-mount core.*;
 
 // =============================================================================
 // HTTP/3 connection + stream error codes (RFC 9114 §8.1)

@@ -25,7 +25,6 @@
 )
 module core.database.sqlite.native.fts5.helpers;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 

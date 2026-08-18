@@ -25,7 +25,6 @@
 )
 module core.database.sqlite.native.opcode_catalog.effects;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.opcode_catalog.metadata.{
     OpcodeKind,

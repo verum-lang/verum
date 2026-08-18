@@ -73,7 +73,6 @@
 )
 module core.net.weft.bufpool;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.sync.Mutex;
 mount core.sync.atomic.{AtomicInt, AtomicBool, MemoryOrdering};

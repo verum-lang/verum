@@ -40,7 +40,6 @@ module core.database.sqlite.native.l1_pager.checkpointer;
 // helper below is the policy function.
 // =============================================================================
 
-mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l1_pager.actor.{
     PagerActor, PagerRequest, PagerReply, PagerCheckpointMode,

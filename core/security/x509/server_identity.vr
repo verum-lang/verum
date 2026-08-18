@@ -52,7 +52,6 @@
 )
 module core.security.x509.server_identity;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.addr.{Ipv4Addr, Ipv6Addr};
 mount core.security.x509.certificate.{X509Certificate};

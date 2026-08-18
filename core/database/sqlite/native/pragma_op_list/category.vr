@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.pragma_op_list.category;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type PragmaCategory is

@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.vfs_api.entry;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type VfsEntry is {

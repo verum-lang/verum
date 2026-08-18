@@ -101,7 +101,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.security.ecc.p256;
-mount core.*;
 
 // =============================================================================
 // Sizes

@@ -44,7 +44,6 @@
 )
 module core.net.quic.connection_sm.dispatch;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.net.quic.frame.{QuicFrame, AckRange, EcnCounts};

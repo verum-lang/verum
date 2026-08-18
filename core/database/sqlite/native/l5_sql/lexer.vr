@@ -27,7 +27,6 @@ module core.database.sqlite.native.l5_sql.lexer;
 // audit than a regex-driven lexer.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.text.case_fold.fold_byte_ascii;

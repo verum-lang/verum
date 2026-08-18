@@ -58,7 +58,6 @@
 )
 module core.net.quic.idle_timeout;
 
-mount core.*;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 

@@ -28,7 +28,6 @@ module core.database.sqlite.native.l2_record.collation;
 // once that lands.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Text};
 mount core.base.ordering.Ordering;

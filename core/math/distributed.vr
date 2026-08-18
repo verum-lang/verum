@@ -43,7 +43,6 @@ mount core.math.tensor.{
 };
 mount core.math.nn.{Module, Linear, Parameter};
 mount core.math.gpu.{DeviceId, with_device, current_device};
-mount core.*;
 mount core.time.{Duration};
 mount core.time.instant.{Instant};
 mount core.async.channel.{Channel};

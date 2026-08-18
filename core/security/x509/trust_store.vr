@@ -49,7 +49,6 @@
 )
 module core.security.x509.trust_store;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.encoding.pem.{decode_all as pem_decode_all, PemBlock};
 mount core.security.x509.certificate.{X509Certificate, parse_certificate};

@@ -30,7 +30,6 @@
     at_tier: Tier.MultiTier([Tier.Aot, Tier.Gpu])
 )
 module core.security.zk.halo2.prover;
-mount core.*;
 mount core.security.zk.halo2.circuit.{Circuit, SynthesizeContext, CircuitError};
 mount core.security.zk.halo2.srs.{UniversalSrs, SrsError};
 

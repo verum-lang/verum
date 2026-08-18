@@ -11,7 +11,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.compress.mod_brotli;
-mount core.*;
 mount core.compress.{Algorithm, CompressError};
 
 const BROTLI_DEFAULT_LEVEL: Int = 4;

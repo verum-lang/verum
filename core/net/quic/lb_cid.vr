@@ -45,7 +45,6 @@
 )
 module core.net.quic.lb_cid;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.security.cipher.aes.{AesKey128, RoundKeys128, aes128_encrypt_block};
 mount core.sync.atomic.{AtomicInt, MemoryOrdering};

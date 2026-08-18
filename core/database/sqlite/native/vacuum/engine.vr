@@ -28,7 +28,6 @@
 )
 module core.database.sqlite.native.vacuum.engine;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount core.database.sqlite.native.vacuum.relocator.{
     Relocator, VacuumMapEntry, relocator_new,

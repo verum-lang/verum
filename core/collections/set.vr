@@ -25,7 +25,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.collections.set;
-mount core.*;
 mount super.map.*;
 
 // =============================================================================

@@ -39,7 +39,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.time.duration;
-mount core.*;
 mount core.base.coercion.{IntCoercible, SizedNumeric};
 
 // =============================================================================

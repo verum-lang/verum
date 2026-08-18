@@ -22,7 +22,6 @@
 )
 module core.database.sqlite.native.lockfile.state;
 
-mount core.*;
 mount base.{Text, Bool};
 
 public type LockState is LkNone | LkShared | LkReserved | LkPending | LkExclusive;

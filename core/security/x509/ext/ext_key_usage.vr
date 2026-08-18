@@ -26,7 +26,6 @@
 )
 module core.security.x509.ext.ext_key_usage;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.encoding.der.{DerReader, DerError};
 mount core.security.x509.oid.{Oid};

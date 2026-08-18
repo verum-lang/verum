@@ -62,7 +62,6 @@
 )
 module core.context.standard;
 
-mount core.*;
 mount core.time.{Duration};
 mount core.time.instant.{Instant};
 mount core.time.system_time.{SystemTime};

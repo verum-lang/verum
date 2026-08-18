@@ -33,7 +33,6 @@ module core.database.sqlite.native.l2_record.affinity;
 // fold so the rule matches `Varchar`, `VARCHAR`, `varchar` identically.
 // =============================================================================
 
-mount core.*;
 mount base.{Text};
 mount core.text.case_fold.fold_text_ascii;
 

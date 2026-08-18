@@ -22,7 +22,6 @@
 )
 module core.net.quic.connection_sm.keys;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.security.kdf.hkdf.{HkdfError};
 mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};

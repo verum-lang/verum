@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.scanstatus_v2.flags;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public const SQLITE_SCANSTAT_NLOOP: Int    = 0;

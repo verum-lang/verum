@@ -97,7 +97,6 @@ public module lb_cid;                  // QUIC-LB connection-ID encoding (load-b
 public module multipath;               // draft-ietf-quic-multipath multi-path extension
 public module path_mtu;                // RFC 9000 §14.3 path MTU discovery (DPLPMTUD)
 
-mount core.*;
 mount core.time.duration.{Duration};
 mount core.net.addr.{SocketAddr};
 mount core.net.tls.{Certificate, PrivateKey, TlsVersion};

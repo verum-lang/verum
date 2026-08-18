@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.distribution.features;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 

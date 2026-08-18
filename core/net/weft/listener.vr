@@ -46,7 +46,6 @@
 )
 module core.net.weft.listener;
 
-mount core.*;
 mount core.net.tcp.{TcpListener, TcpStream};
 mount core.net.addr.{SocketAddr, IpAddr};
 mount core.async.cancellation.{CancellationToken};

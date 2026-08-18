@@ -28,7 +28,6 @@
 )
 module core.net.quic.version;
 
-mount core.*;
 
 public const VERSION_NEGOTIATION: UInt32 = 0x00000000_u32;
 public const VERSION_1:           UInt32 = 0x00000001_u32;

@@ -18,7 +18,6 @@
 )
 module core.database.sqlite.native.log.engine;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 mount collections.List;
 mount core.database.sqlite.native.log.level.{SqliteLogLevel};

@@ -22,7 +22,6 @@
 )
 module core.database.sqlite.native.soft_heap.engine;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.soft_heap.limit.{
     SoftHeapLimit, limit_unset,

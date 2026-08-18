@@ -32,7 +32,6 @@
 
 module core.net.tls;
 
-mount core.*;
 mount core.io.protocols.{Read, Write};
 mount core.async.io_protocols.{AsyncRead, AsyncWrite};
 mount core.async.poll.{Poll};

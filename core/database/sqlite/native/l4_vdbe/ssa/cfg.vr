@@ -16,7 +16,6 @@ module core.database.sqlite.native.l4_vdbe.ssa.cfg;
 // complete.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.ssa.block.{

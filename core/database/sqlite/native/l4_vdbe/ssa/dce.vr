@@ -27,7 +27,6 @@ module core.database.sqlite.native.l4_vdbe.ssa.dce;
 // Cytron et al. + Briggs/Cooper "Effective Tree-Based DCE".
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.ssa.value.{

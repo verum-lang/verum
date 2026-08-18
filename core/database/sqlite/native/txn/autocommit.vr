@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.txn.autocommit;
 
-mount core.*;
 mount base.{Bool};
 
 public type AutocommitFlag is {

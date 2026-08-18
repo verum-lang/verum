@@ -25,7 +25,6 @@
 )
 module core.net.tls13.alert;
 
-mount core.*;
 
 public type AlertLevel is Warning | Fatal;
 

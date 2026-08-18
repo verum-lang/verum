@@ -18,7 +18,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.sync.rwlock;
-mount core.*;
 mount super.atomic.*;
 
 // Cross-platform futex imports for OS-level blocking

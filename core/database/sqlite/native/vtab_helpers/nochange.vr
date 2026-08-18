@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.vtab_helpers.nochange;
 
-mount core.*;
 mount base.{Bool};
 
 public type NoChangeSignal is {

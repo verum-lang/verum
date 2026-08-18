@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.alter.delta;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.alter.op.{

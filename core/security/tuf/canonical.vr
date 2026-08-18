@@ -47,7 +47,6 @@
 )
 module core.security.tuf.canonical;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount collections.List;
 mount core.encoding.json.{

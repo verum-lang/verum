@@ -75,7 +75,6 @@
 )
 module core.collections.reservoir;
 
-mount core.*;
 mount core.collections.list.{List};
 // Inlined: use core.sys.common.random_bytes(...) directly (task #11).
 

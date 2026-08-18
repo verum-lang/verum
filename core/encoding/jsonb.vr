@@ -77,7 +77,6 @@
 )
 module core.encoding.jsonb;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.encoding.json.{JsonValue, JsonError, parse as parse_json, stringify as json_stringify};
 // AOT alias-mount workaround — `from_json as value_from_json` /

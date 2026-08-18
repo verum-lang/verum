@@ -34,7 +34,6 @@
 )
 module core.database.sqlite.native.ext.loadable;
 
-mount core.*;
 mount base.{Text, Result, Ok, Err, Bool};
 
 // -----------------------------------------------------------------------------

@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.result_codes.vtab;
 
-mount core.*;
 mount base.{Text};
 
 public const SQLITE_INDEX_CONSTRAINT_EQ: Int          = 2;

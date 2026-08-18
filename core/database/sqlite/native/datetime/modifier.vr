@@ -31,7 +31,6 @@
 )
 module core.database.sqlite.native.datetime.modifier;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.datetime.instant.{

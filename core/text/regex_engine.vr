@@ -52,7 +52,6 @@
 )
 module core.text.regex_engine;
 
-mount core.*;
 
 public type RxItem is {
     kind: Int,

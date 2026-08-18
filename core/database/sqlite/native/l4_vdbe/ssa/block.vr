@@ -25,7 +25,6 @@ module core.database.sqlite.native.l4_vdbe.ssa.block;
 // predecessor edges (computed once, cached for dominator analysis).
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, IHalt, inst_terminator_targets};

@@ -40,7 +40,6 @@
 )
 module core.database.sqlite.native.l0_vfs.vfs_protocol;
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 

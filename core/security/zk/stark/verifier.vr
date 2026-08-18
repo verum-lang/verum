@@ -28,7 +28,6 @@
     at_tier: Tier.MultiTier([Tier.Aot, Tier.Interp])
 )
 module core.security.zk.stark.verifier;
-mount core.*;
 mount core.security.zk.stark.air.{Air, ProofParams};
 mount core.security.zk.stark.prover.{StarkProof};
 

@@ -20,7 +20,6 @@
 )
 module core.database.sqlite.native.vtabs.rtree.bbox;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 

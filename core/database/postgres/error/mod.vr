@@ -17,7 +17,6 @@
 )
 module core.database.postgres.error;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount core.database.common.error.{
     DbError, AdapterId, AdapterSpecific, SqlState,

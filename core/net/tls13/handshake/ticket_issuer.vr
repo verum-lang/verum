@@ -31,7 +31,6 @@
 )
 module core.net.tls13.handshake.ticket_issuer;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};

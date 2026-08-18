@@ -9,7 +9,6 @@
 )
 module core.net.tls13.error;
 
-mount core.*;
 mount core.net.tls13.alert.{AlertDescription};
 
 public type TlsError is

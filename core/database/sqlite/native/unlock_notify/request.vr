@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.unlock_notify.request;
 
-mount core.*;
 mount base.{Bool};
 
 public type RegistrationRequest is {

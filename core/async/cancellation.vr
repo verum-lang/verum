@@ -84,7 +84,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.async.cancellation;
-mount core.*;
 mount sync.atomic.{AtomicInt, AtomicBool, MemoryOrdering};
 mount sync.mutex.Mutex;
 mount base.memory.{Shared, Weak, replace};

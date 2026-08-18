@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.lockfile.region;
 
-mount core.*;
 mount base.{Bool};
 
 // SQLite places the lock byte-range at a 1 GiB-offset to keep it

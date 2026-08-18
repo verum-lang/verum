@@ -80,7 +80,6 @@
 )
 module core.net.shutdown;
 
-mount core.*;
 mount core.sync.atomic.{AtomicU64, AtomicBool, MemoryOrdering};
 mount core.sync.mutex.{Mutex};
 mount core.async.cancellation.{CancellationToken, CancellationTokenSource};

@@ -26,7 +26,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.sync.mutex;
-mount core.*;
 mount super.atomic.*;
 // Mounted rather than inherited: §4ter — the prelude carries only what
 // the LANGUAGE requires, and this is library API.

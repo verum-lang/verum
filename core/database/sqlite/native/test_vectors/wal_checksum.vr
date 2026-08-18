@@ -27,7 +27,6 @@
 )
 module core.database.sqlite.native.test_vectors.wal_checksum;
 
-mount core.*;
 mount base.{Bool, Text};
 mount collections.List;
 

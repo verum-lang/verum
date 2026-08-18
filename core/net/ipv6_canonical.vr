@@ -52,7 +52,6 @@
 )
 module core.net.ipv6_canonical;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.addr.{Ipv6Addr, AddrParseError};
 

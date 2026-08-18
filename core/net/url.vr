@@ -36,7 +36,6 @@
 )
 module core.net.url;
 
-mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount collections.List;
 

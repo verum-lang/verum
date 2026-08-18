@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.planner_cost.stats;
 
-mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 

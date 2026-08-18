@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.sync_flags;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public const SQLITE_SYNC_NORMAL: Int   = 0x00002;

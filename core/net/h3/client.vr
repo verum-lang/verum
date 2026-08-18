@@ -39,7 +39,6 @@
 )
 module core.net.h3.client;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.duration.{Duration};
 mount core.net.addr.{SocketAddr};

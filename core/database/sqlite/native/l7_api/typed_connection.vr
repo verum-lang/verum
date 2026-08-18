@@ -46,7 +46,6 @@ module core.database.sqlite.native.l7_api.typed_connection;
 // authority must be acquired at open time.
 // =============================================================================
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l6_session.connection.{
     SqliteNativeConnection, ConnectionError, ConnectionMode,

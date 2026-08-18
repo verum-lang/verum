@@ -31,7 +31,6 @@ module core.database.sqlite.native.l4_vdbe.opcode;
 // tracked in sqlite-opcodes spec as they land.
 // =============================================================================
 
-mount core.*;
 mount base.Text;
 
 // -----------------------------------------------------------------------------

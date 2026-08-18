@@ -38,7 +38,6 @@
 )
 module core.net.quic.connection_sm.tx;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.encoding.varint.{quic_encode_into};
 mount core.net.quic.connection_id.{ConnectionId};

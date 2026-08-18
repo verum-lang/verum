@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.exec.callback;
 
-mount core.*;
 mount base.{Bool};
 
 public type CallbackDecision is

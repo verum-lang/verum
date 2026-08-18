@@ -66,7 +66,6 @@
 )
 module core.database.sqlite.native.encryption.cipher;
 
-mount core.*;
 mount base.{Text, Bool, Result, Ok, Err};
 mount collections.List;
 mount core.security.cipher.aes.{AesKey256};

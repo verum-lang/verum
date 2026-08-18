@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.result_codes.function;
 
-mount core.*;
 mount base.{Bool};
 
 public const SQLITE_DETERMINISTIC: Int    = 0x000000800;

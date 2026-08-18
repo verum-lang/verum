@@ -24,7 +24,6 @@
 )
 module core.database.sqlite.native.column.value;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 

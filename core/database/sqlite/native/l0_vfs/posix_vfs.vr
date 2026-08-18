@@ -36,7 +36,6 @@ module core.database.sqlite.native.l0_vfs.posix_vfs;
 // Fully qualifies as a `SqliteFile` + `VfsProtocol` implementation.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount sys.common.{

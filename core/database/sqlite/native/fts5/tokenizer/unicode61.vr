@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.fts5.tokenizer.unicode61;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.fts5.tokenizer.core.{

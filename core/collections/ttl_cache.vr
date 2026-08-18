@@ -37,7 +37,6 @@
 )
 module core.collections.ttl_cache;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
 mount core.time.instant.{Instant};

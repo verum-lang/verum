@@ -56,7 +56,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.io.fs;
-mount core.*;
 mount collections.*;
 mount io.path.{Path, PathBuf};
 mount io.protocols.{StreamError, StreamError as IoError, IoErrorKind, IoResult, io_error_kind_from_os_code};

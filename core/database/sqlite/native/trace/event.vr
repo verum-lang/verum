@@ -20,7 +20,6 @@
 )
 module core.database.sqlite.native.trace.event;
 
-mount core.*;
 mount base.{Text, Bool};
 
 public type SqliteTraceEvent is TeStmt | TeProfile | TeRow | TeClose;

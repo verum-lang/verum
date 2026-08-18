@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.vfs_api.registry;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 mount collections.List;
 mount core.database.sqlite.native.vfs_api.entry.{

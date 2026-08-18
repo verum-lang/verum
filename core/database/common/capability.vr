@@ -25,7 +25,6 @@
 )
 module core.database.common.capability;
 
-mount core.*;
 mount base.{Result, Text};
 
 // -----------------------------------------------------------------------------

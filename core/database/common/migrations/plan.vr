@@ -38,7 +38,6 @@
 )
 module core.database.common.migrations.plan;
 
-mount core.*;
 mount base.{Text, Bool, Maybe, Result, Ok, Err};
 mount collections.List;
 mount core.database.common.migrations.migration.{Migration, clone_migration};

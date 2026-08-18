@@ -22,7 +22,6 @@
 )
 module core.database.sqlite.native.ext.window;
 
-mount core.*;
 mount base.{Text};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt};

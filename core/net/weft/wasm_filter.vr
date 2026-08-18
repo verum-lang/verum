@@ -69,7 +69,6 @@
 )
 module core.net.weft.wasm_filter;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.{Duration};
 mount core.sync.atomic.{AtomicInt, MemoryOrdering};

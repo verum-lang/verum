@@ -61,7 +61,6 @@
 )
 module core.security.webauthn.authenticate;
 
-mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.List;
 mount core.encoding.json.{JsonValue, decode};

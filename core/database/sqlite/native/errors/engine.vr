@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.errors.engine;
 
-mount core.*;
 mount base.{Text};
 mount core.database.sqlite.native.errors.code.{
     PrimaryCode, primary_numeric, extended_numeric,

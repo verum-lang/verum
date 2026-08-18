@@ -23,7 +23,6 @@
 )
 module core.intrinsics.lowlevel.mmio;
 
-mount core.*;
 
 // =============================================================================
 // VOLATILE LOAD / STORE

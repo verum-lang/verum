@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.recover.config;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public const SQLITE_RECOVER_LOST_AND_FOUND: Int   = 1;

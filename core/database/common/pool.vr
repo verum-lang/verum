@@ -23,7 +23,6 @@
 )
 module core.database.common.pool;
 
-mount core.*;
 mount base.{Result, Text, Maybe, None, Some};
 mount core.time.duration.{Duration};
 mount core.database.common.error.{DbError, AdapterId};

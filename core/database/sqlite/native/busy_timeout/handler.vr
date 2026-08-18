@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.busy_timeout.handler;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type BusyDecision is

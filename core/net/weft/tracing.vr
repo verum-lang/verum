@@ -39,7 +39,6 @@
 )
 module core.net.weft.tracing;
 
-mount core.*;
 mount core.text.builder.{TextBuilder};
 mount core.time.{Instant};
 mount core.net.http.{Response, StatusCode, Headers};

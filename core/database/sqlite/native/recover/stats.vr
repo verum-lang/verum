@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.recover.stats;
 
-mount core.*;
 mount base.{Bool};
 
 public type RecoveryStats is {

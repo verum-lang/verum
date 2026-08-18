@@ -36,7 +36,6 @@
 )
 module core.net.tls13.handshake.grease;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.tls13.handshake.extension.{Extension};
 mount core.net.tls13.cipher_suite.{CipherSuite};

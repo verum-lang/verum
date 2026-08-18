@@ -67,7 +67,6 @@
 )
 module core.security.kdf.argon2;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.encoding.base64;
 mount core.security.password_hash.{PasswordHasher, PasswordHashError};

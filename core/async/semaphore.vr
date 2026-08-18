@@ -63,7 +63,6 @@
 )
 module core.async.semaphore;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.collections.deque.{Deque};
 mount core.sync.{Shared, Mutex};

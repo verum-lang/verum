@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.version_api.identity;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type LibVersion is {

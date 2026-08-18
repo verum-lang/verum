@@ -18,7 +18,6 @@
 )
 module core.database.sqlite.native.interrupt_deadline.engine;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.interrupt_deadline.deadline.{
     Deadline, disarmed, armed_at, has_elapsed, remaining_ns,

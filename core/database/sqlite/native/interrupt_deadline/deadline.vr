@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.interrupt_deadline.deadline;
 
-mount core.*;
 mount base.{Bool};
 
 public type Deadline is {

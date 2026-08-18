@@ -49,7 +49,6 @@
 )
 module core.security.token;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.encoding.base64.{encode_url};
 mount core.encoding.hex.{encode as hex_encode};

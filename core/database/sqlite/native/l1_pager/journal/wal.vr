@@ -47,7 +47,6 @@ module core.database.sqlite.native.l1_pager.journal.wal;
 // `l1_pager/recovery.vr`.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 

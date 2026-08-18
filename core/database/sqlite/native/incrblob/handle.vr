@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.incrblob.handle;
 
-mount core.*;
 mount base.{Text, Bool};
 mount core.database.sqlite.native.incrblob.flags.{
     BlobOpenMode, BomReadOnly, BomReadWrite, permits_write,

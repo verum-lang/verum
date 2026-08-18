@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.strcmp_api.compare;
 
-mount core.*;
 mount base.{Text};
 
 fn to_upper(b: u8) -> u8 {

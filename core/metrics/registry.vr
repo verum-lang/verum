@@ -14,7 +14,6 @@
 )
 module core.metrics.registry;
 
-mount core.*;
 mount core.sync.mutex.{Mutex};
 mount core.metrics.label.{LabelSet};
 mount core.metrics.instrument.{Counter, UpDownCounter, Gauge};

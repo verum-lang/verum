@@ -30,7 +30,6 @@
 )
 module core.net.proxy.health_check;
 
-mount core.*;
 mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
 mount core.time.{Duration};
 mount core.net.proxy.upstream_pool.{Upstream};

@@ -26,7 +26,6 @@
 )
 module core.net.quic.api.client;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.duration.{Duration};
 mount core.net.addr.{SocketAddr};

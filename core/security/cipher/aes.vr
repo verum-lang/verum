@@ -74,7 +74,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.security.cipher.aes;
-mount core.*;
 
 // =============================================================================
 // Fixed sizes — FIPS 197 §5.2

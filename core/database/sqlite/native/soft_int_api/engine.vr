@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.soft_int_api.engine;
 
-mount core.*;
 mount base.{Bool};
 
 public type SoftIntEngine is {

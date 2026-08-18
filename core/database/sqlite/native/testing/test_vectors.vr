@@ -28,7 +28,6 @@
 )
 module core.database.sqlite.native.testing.test_vectors;
 
-mount core.*;
 mount base.{Text};
 mount collections.List;
 

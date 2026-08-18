@@ -26,7 +26,6 @@
 )
 module core.tracing.provider;
 
-mount core.*;
 mount base.{Text, Bool, Int, Maybe};
 mount collections.{List};
 mount core.tracing.tracer.{TracerHandle, get_tracer};

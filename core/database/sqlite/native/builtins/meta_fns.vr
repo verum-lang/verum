@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.builtins.meta_fns;
 
-mount core.*;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};
 

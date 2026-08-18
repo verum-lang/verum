@@ -18,7 +18,6 @@
 )
 module core.database.sqlite.native.explain.formatter;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.explain.vdbe_row.{

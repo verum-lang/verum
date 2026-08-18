@@ -43,7 +43,6 @@ module core.database.sqlite.native.l4_vdbe.bindings;
 // enforced by the affine `PreparedStatement` handle.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.register.{Register, Register.RNull};

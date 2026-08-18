@@ -41,7 +41,6 @@ module core.database.sqlite.native.l6_session.connection;
 // it behind a trait hierarchy once that lands.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.OpenFlags;

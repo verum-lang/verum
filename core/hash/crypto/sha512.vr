@@ -64,7 +64,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.hash.crypto.sha512;
-mount core.*;
 
 // =============================================================================
 // Constants — FIPS 180-4 §4.2.3

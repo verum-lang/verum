@@ -18,7 +18,6 @@
 )
 module core.net.tls13.record.plaintext;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.tls13.record.content_type.{ContentType};
 

@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.fts5.segment;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.fts5.posting.{

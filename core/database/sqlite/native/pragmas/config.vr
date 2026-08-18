@@ -22,7 +22,6 @@
 )
 module core.database.sqlite.native.pragmas.config;
 
-mount core.*;
 mount base.{Text, Maybe};
 
 // -----------------------------------------------------------------------------

@@ -41,7 +41,6 @@
 )
 module core.net.tls13.handshake.messages;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.tls13.handshake.codec.{
     Tls13HandshakeReader, CodecError,

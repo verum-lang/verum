@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.exec.row;
 
-mount core.*;
 mount base.{Text};
 mount collections.List;
 

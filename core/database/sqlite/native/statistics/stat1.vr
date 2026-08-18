@@ -24,7 +24,6 @@
 )
 module core.database.sqlite.native.statistics.stat1;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 

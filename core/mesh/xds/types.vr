@@ -9,7 +9,6 @@
 )
 module core.mesh.xds.types;
 
-mount core.*;
 mount core.time.duration.{Duration};
 
 // =============================================================================

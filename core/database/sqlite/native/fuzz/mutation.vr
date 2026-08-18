@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.fuzz.mutation;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 

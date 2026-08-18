@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.changes.counter;
 
-mount core.*;
 mount base.{Bool};
 
 public type ChangeCounter is {

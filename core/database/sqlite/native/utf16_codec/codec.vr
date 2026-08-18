@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.utf16_codec.codec;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 mount core.database.sqlite.native.utf16_codec.byte_order.{

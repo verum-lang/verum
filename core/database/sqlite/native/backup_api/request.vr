@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.backup_api.request;
 
-mount core.*;
 mount base.{Bool};
 
 public type BackupStepRequest is

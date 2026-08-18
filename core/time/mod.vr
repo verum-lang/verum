@@ -51,7 +51,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.time;
-mount core.*;
 
 // Re-export submodules
 public mount .duration.{Duration};

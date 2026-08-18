@@ -60,7 +60,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.security.kdf.hkdf;
-mount core.*;
 mount core.mac.hmac.{
     HmacSha256, hmac_sha256,
     HmacSha384, hmac_sha384,

@@ -12,7 +12,6 @@
 )
 module core.metrics.instrument;
 
-mount core.*;
 mount core.sync.atomic.{MemoryOrdering};
 mount core.metrics.value.{AtomicF64};
 

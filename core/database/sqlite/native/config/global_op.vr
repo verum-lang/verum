@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.config.global_op;
 
-mount core.*;
 mount base.{Text};
 
 public type GlobalConfigOp is

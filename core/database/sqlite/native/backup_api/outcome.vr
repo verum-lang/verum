@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.backup_api.outcome;
 
-mount core.*;
 mount base.{Bool, Text};
 mount core.database.sqlite.native.errors.code.{
     ExtendedCode, extended_numeric,

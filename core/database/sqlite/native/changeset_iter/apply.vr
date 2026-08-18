@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.changeset_iter.apply;
 
-mount core.*;
 mount base.{Bool, Text};
 mount core.database.sqlite.native.result_codes.changeset.{
     ConflictKind, ConflictResolution, CrOmit, CrReplace, CrAbort,

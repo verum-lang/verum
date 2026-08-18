@@ -30,7 +30,6 @@
 )
 module core.net.tls13.keyschedule.hkdf_label;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.security.kdf.hkdf.{
     hkdf_expand_sha256, hkdf_expand_sha384, HkdfError,

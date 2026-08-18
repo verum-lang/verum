@@ -65,7 +65,6 @@
 )
 module core.database.common.db_handle;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount core.time.duration.{Duration};
 mount base.memory.Shared;

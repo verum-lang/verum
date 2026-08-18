@@ -33,7 +33,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.text.text;
-mount core.*;
 
 // Allocator primitives for typed-OOM (#65, #68). See list.vr for
 // rationale on the explicit mount.

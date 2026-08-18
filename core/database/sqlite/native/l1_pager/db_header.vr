@@ -45,7 +45,6 @@ module core.database.sqlite.native.l1_pager.db_header;
 // All multi-byte integers on disk are big-endian, matching SQLite.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 

@@ -29,7 +29,6 @@
 
 module core.async.io_protocols;
 
-mount core.*;
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context};
 public mount core.io.protocols.{IoResult, IoErrorKind, StreamError};

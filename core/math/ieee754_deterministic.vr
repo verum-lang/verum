@@ -106,7 +106,6 @@
 )
 module core.math.ieee754_deterministic;
 
-mount core.*;
 
 // =============================================================================
 // Binary64 (Float / Float64) — correctly-rounded

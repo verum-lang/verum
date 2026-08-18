@@ -70,7 +70,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.udp;
-mount core.*;
 mount io.*;
 mount super.addr.*;
 

@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.limits.policy;
 
-mount core.*;
 mount base.{Text, Bool};
 mount core.database.sqlite.native.limits.dimension.{LimitDimension};
 

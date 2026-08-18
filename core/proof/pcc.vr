@@ -42,7 +42,6 @@
 )
 module core.proof.pcc;
 
-mount core.*;
 mount core.collections.map.{Map};
 
 /// A goal hash — content-addressed identifier of a verification

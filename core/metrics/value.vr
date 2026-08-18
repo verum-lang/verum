@@ -13,7 +13,6 @@
 )
 module core.metrics.value;
 
-mount core.*;
 mount core.sync.atomic.{AtomicU64, MemoryOrdering};
 
 // =============================================================================

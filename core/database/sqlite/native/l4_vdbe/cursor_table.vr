@@ -34,7 +34,6 @@ module core.database.sqlite.native.l4_vdbe.cursor_table;
 // sorter slots lazily construct their backing store on first use.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l3_btree.{

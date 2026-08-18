@@ -65,7 +65,6 @@
 )
 module core.collections.lru;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
 

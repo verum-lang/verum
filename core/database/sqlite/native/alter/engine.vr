@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.alter.engine;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount core.database.sqlite.native.alter.op.{
     AlterOp, op_name, op_target_table,

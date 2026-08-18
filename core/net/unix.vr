@@ -40,7 +40,6 @@
 )
 module core.net.unix;
 
-mount core.*;
 mount io.*;
 mount core.async.io_protocols.{AsyncRead, AsyncWrite};
 mount core.async.poll.{Poll};

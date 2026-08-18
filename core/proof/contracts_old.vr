@@ -70,7 +70,6 @@
 )
 module core.proof.contracts_old;
 
-mount core.*;
 mount core.collections.map.{Map};
 mount core.collections.set.{Set};
 

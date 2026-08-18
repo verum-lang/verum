@@ -38,7 +38,6 @@
 )
 module core.net.quic.connection_sm.path_control;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.net.quic.frame.{QuicFrame};

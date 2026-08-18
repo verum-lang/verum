@@ -45,7 +45,6 @@
 )
 module core.net.h3.qpack.decoder;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.h3.qpack.huffman as huff;
 mount core.net.h3.qpack.integer.{encode, decode};

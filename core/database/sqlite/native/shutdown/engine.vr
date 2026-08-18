@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.shutdown.engine;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.shutdown.subsystem.{

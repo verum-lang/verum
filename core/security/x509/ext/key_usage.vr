@@ -31,7 +31,6 @@
 )
 module core.security.x509.ext.key_usage;
 
-mount core.*;
 mount core.encoding.der.{DerReader, DerError, DerErrorKind};
 
 public type KeyUsage is {

@@ -26,7 +26,6 @@
 )
 module core.database.sqlite.native.iter.outcome;
 
-mount core.*;
 mount base.{Text, Bool};
 
 public type RawStepOutcome is

@@ -61,7 +61,6 @@
 )
 module core.security.transparency_log;
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount core.security.merkle.{

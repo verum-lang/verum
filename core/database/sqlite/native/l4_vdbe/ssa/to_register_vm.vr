@@ -31,7 +31,6 @@ module core.database.sqlite.native.l4_vdbe.ssa.to_register_vm;
 // optimizer in #133.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.opcode.{

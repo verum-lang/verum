@@ -18,7 +18,6 @@
 )
 module core.database.sqlite.native.walblock.result;
 
-mount core.*;
 mount base.{Bool};
 
 public type CheckpointResult is {

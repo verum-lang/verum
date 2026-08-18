@@ -26,7 +26,6 @@
 )
 module core.database.common.retry;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount core.database.common.error.DbError;
 

@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.fuzz.grammar;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.dst.seed.{DstSeed, seed_from_u64};

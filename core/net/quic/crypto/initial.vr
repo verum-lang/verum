@@ -37,7 +37,6 @@
 )
 module core.net.quic.crypto.initial;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.security.kdf.hkdf.{hkdf_extract_sha256, HkdfError};
 mount core.net.tls13.cipher_suite.{HashKind};

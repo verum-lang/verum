@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.rtree_geom.verdict;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type RtreeVerdict is

@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.dbpage_vtab_api.write_guard;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type WriteGuard is {

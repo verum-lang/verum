@@ -55,7 +55,6 @@
 )
 module core.security.jwt;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.encoding.base64.{encode_url, decode_url};
 mount core.encoding.json.{JsonValue, parse, stringify};

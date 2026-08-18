@@ -70,7 +70,6 @@
 )
 module core.security.x509.sct;
 
-mount core.*;
 mount core.collections.list.{List};
 
 public type SctVersion is V1 | Unknown(UInt8);

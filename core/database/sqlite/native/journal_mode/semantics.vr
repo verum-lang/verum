@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.journal_mode.semantics;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.journal_mode.mode.{
     JournalMode, JmDelete, JmTruncate, JmPersist, JmMemory, JmWal, JmOff,

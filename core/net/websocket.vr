@@ -78,7 +78,6 @@
 )
 module core.net.websocket;
 
-mount core.*;
 mount core.net.http.{Headers};
 mount core.hash.legacy.sha1.{Sha1};
 mount core.encoding.base64;

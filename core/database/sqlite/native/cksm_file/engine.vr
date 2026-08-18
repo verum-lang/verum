@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.cksm_file.engine;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 mount core.database.sqlite.native.cksm_file.status.{

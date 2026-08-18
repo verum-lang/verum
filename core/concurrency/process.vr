@@ -49,7 +49,6 @@
 )
 module core.concurrency.process;
 
-mount core.*;
 mount core.collections.set.{Set};
 mount core.collections.map.{Map};
 

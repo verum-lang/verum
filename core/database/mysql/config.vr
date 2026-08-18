@@ -13,7 +13,6 @@
 )
 module core.database.mysql.config;
 
-mount core.*;
 mount base.{Text, Maybe, None, Some};
 mount collections.List;
 

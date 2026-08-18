@@ -35,7 +35,6 @@ module core.database.sqlite.native.l4_vdbe.ssa.phi_insertion;
 // the difference vs full Cytron is negligible.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.ssa.value.{

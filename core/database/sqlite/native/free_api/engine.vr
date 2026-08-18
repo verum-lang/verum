@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.free_api.engine;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.free_api.ptr.{
     OpaqueHandle, null_handle, new_handle, is_null,

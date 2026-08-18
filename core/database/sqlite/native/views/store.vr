@@ -12,7 +12,6 @@
 )
 module core.database.sqlite.native.views.store;
 
-mount core.*;
 mount base.{Text, Maybe, Bool, Result, Ok, Err};
 mount collections.List;
 mount core.database.sqlite.native.views.spec.{ViewDef};

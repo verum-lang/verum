@@ -60,7 +60,6 @@
 )
 module core.collections.toposort;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
 

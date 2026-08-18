@@ -63,7 +63,6 @@
 )
 module core.net.dns;
 
-mount core.*;
 // Explicitly import comparison Ordering to avoid conflict with core.sync.atomic.Ordering
 mount core.base.ordering.{Ordering};
 mount net.addr.{IpAddr, V4, V6, Ipv4Addr, Ipv6Addr, SocketAddr, AddrParseError};

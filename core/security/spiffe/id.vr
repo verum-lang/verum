@@ -20,7 +20,6 @@
 )
 module core.security.spiffe.id;
 
-mount core.*;
 
 public type SpiffeId is {
     trust_domain: Text,

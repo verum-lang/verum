@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.close_api.engine;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.close_api.mode.{
     CloseMode, CmStrict, CmDeferred, rejects_on_busy,

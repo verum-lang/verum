@@ -30,7 +30,6 @@
 )
 module core.database.sqlite.native.replication.role;
 
-mount core.*;
 mount base.{Text, Bool};
 
 public type ReplicationRole is RolePrimary | RoleReplica | RoleStandby | RoleWitness;

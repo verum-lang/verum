@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.status.counter;
 
-mount core.*;
 mount base.{Bool};
 
 public type StatusCounter is {

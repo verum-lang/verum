@@ -49,7 +49,6 @@
 )
 module core.net.tls13.handshake.sni_resolver;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
 mount core.net.tls13.handshake.server_sm.{CertSigner};

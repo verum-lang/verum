@@ -41,7 +41,6 @@
 )
 module core.net.quic.connection_sm.coalesce;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.addr.{SocketAddr};
 

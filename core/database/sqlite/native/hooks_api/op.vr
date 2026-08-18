@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.hooks_api.op;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type UpdateOp is

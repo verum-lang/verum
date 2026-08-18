@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.prepare.flags;
 
-mount core.*;
 mount base.{Bool};
 
 public const SQLITE_PREPARE_PERSISTENT: Int = 0x01;

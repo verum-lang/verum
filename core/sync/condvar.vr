@@ -55,7 +55,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.sync.condvar;
-mount core.*;
 mount super.atomic.*;
 mount super.mutex.*;
 

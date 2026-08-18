@@ -53,7 +53,6 @@ module core.database.sqlite.native.l2_record.record;
 //  N≥13 odd | TEXT, length=(N-13)/2 | variable
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l2_record.varint;

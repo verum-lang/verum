@@ -39,7 +39,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.collections.slice;
-mount core.*;
 // Explicitly import comparison Ordering to avoid conflict with core.sync.atomic.Ordering
 mount core.base.ordering.{Ordering};
 

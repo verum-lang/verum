@@ -39,7 +39,6 @@ module core.database.sqlite.native.l4_vdbe.ssa.builder;
 // the direct-emission path.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.ssa.value.{

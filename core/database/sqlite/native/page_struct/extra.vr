@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.page_struct.extra;
 
-mount core.*;
 mount base.{Bool};
 
 public const SQLITE_CONFIG_PCACHE_HDRSZ_DEFAULT: Int = 24;

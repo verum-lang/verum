@@ -42,7 +42,6 @@ module core.database.sqlite.native.l3_btree.balance;
 // actor's Write request.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l3_btree.page_layout.{

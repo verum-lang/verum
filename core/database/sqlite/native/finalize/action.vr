@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.finalize.action;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type FinalizeAction is

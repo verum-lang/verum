@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.sorter_api.pma;
 
-mount core.*;
 mount base.{Bool};
 
 public type PmaRun is {

@@ -46,7 +46,6 @@
 )
 module core.net.weft.refined_routes;
 
-mount core.*;
 mount core.net.weft.handler.{WeftRequest};
 mount core.net.weft.error.{ExtractRejection};
 

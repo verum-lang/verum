@@ -52,7 +52,6 @@
 )
 module core.net.quic.cid_pool;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.quic.connection_id.{ConnectionId};
 

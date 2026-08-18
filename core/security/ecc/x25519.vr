@@ -94,7 +94,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.security.ecc.x25519;
-mount core.*;
 
 // =============================================================================
 // Sizes and types

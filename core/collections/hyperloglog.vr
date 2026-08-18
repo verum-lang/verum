@@ -62,7 +62,6 @@
 )
 module core.collections.hyperloglog;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.mac.hmac.{hmac_sha256};
 mount core.random.secure.{fill_secure};

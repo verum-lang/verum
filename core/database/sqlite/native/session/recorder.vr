@@ -20,7 +20,6 @@
 )
 module core.database.sqlite.native.session.recorder;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{Register};

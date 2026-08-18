@@ -32,7 +32,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.io.stdio;
-mount core.*;
 mount io.protocols.*;
 
 // =============================================================================

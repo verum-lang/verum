@@ -43,7 +43,6 @@ module core.database.postgres.copy;
 // + 32-bit endian-marked field counts; deferred to v2.
 // =============================================================================
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.database.common.error.{

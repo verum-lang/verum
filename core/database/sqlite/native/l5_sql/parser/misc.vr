@@ -30,7 +30,6 @@ module core.database.sqlite.native.l5_sql.parser.misc;
 //  analyze-stmt = ANALYZE [schema[.name]]
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.lexer.{

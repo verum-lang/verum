@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.soft_heap.pressure;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 

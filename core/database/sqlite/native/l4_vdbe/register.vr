@@ -21,7 +21,6 @@ module core.database.sqlite.native.l4_vdbe.register;
 // and a few extension hooks.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 

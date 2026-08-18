@@ -26,7 +26,6 @@
 )
 module core.database.sqlite.native.ext.registry;
 
-mount core.*;
 mount base.{Text, Maybe, Bool, Result, Ok, Err};
 mount collections.List;
 mount core.database.sqlite.native.ext.fn_flags.{FnFlags, flags_default};

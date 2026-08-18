@@ -46,7 +46,6 @@ module core.database.sqlite.native.l5_sql.plan_passes;
 // pipeline driver.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{Expr, EBinary, BinOp, BAnd};

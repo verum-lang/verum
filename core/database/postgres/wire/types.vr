@@ -16,7 +16,6 @@
 )
 module core.database.postgres.wire.types;
 
-mount core.*;
 mount base.{Maybe, None, Some, Text};
 
 // -----------------------------------------------------------------------------

@@ -56,7 +56,6 @@
 )
 module core.net.proxy.rate_limit;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
 mount core.time.instant.{Instant};

@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.distribution.manifest;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.distribution.version.{

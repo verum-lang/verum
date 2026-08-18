@@ -34,7 +34,6 @@ module core.database.sqlite.native.l0_vfs.mock_vfs;
 // production VFS (PosixVfs) handles multi-process concurrency.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.{

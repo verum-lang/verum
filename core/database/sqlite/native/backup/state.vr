@@ -29,7 +29,6 @@
 )
 module core.database.sqlite.native.backup.state;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 
 // -----------------------------------------------------------------------------

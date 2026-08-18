@@ -54,7 +54,6 @@
 )
 module core.security.x509.spki;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.encoding.der.{DerReader, DerError, DerErrorKind};
 mount core.security.x509.algorithm.{

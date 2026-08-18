@@ -67,7 +67,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.simd.bytes;
-mount core.*;
 
 // =============================================================================
 // SINGLE-BYTE SEARCH

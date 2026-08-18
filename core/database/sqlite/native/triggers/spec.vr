@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.triggers.spec;
 
-mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 

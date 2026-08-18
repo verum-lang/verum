@@ -33,7 +33,6 @@
 )
 module core.net.tls13.version;
 
-mount core.*;
 
 /// Protocol version ID as it appears on the wire.
 /// Encoded big-endian — 0x03_04 for TLS 1.3.

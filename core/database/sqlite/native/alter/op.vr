@@ -22,7 +22,6 @@
 )
 module core.database.sqlite.native.alter.op;
 
-mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 

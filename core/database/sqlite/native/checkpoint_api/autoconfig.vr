@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.checkpoint_api.autoconfig;
 
-mount core.*;
 mount base.{Bool};
 
 public const DEFAULT_AUTOCHECKPOINT_PAGES: Int = 1000;

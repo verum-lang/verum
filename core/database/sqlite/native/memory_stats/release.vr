@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.memory_stats.release;
 
-mount core.*;
 mount base.{Bool};
 
 public type RelaxationTarget is

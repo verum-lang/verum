@@ -79,7 +79,6 @@
 )
 module core.security.x509.ocsp_client;
 
-mount core.*;
 mount core.collections.{List, Map};
 mount core.encoding.der.{DerWriter, DerError};
 mount core.encoding.base64.{encode_url_no_pad as b64url_encode};

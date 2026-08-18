@@ -13,7 +13,6 @@
 )
 module core.net.http2.static_table;
 
-mount core.*;
 
 public const STATIC_TABLE_SIZE: Int = 61;
 

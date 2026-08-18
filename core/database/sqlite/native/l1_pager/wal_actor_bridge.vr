@@ -27,7 +27,6 @@ module core.database.sqlite.native.l1_pager.wal_actor_bridge;
 // `wal_actor_new(wal_pager)` for WAL-mode operation.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.{SyncFlags, sync_default};

@@ -42,7 +42,6 @@
 )
 module core.net.h3.connection;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.h3.frame.{
     H3Frame, H3FrameError, UniStreamType,

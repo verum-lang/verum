@@ -35,7 +35,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.text.format;
-mount core.*;
 // TWIN-TYPE MERGE (task #48): the alias target must be locally
 // visible (braced) for the ALIAS-VS-MARKER scope gate.
 public mount core.base.protocols.{Formatter, TextFormatter, FormatSpec, TextAlignment, Sign, FmtResult, int_to_string, float_to_string};

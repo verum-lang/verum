@@ -58,7 +58,6 @@
 )
 module core.net.weft.zero_rtt_gate;
 
-mount core.*;
 mount core.net.http.{Method, Response, StatusCode, Headers, Version};
 mount core.net.weft.handler.{WeftRequest, Handler};
 mount core.net.weft.service.{Layer};

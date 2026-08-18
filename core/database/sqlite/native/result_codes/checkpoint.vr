@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.result_codes.checkpoint;
 
-mount core.*;
 mount base.{Text};
 
 public const SQLITE_CHECKPOINT_PASSIVE: Int  = 0;

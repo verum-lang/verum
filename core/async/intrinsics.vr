@@ -23,7 +23,6 @@
 )
 module core.async.intrinsics;
 
-mount core.*;
 mount super.poll.Poll;
 mount super.waker.{Waker, Context, RawWaker, RawWakerVTable, noop_waker};
 mount super.future.Future;

@@ -24,7 +24,6 @@
 )
 module core.database.sqlite.native.rtree.query;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.rtree.bbox.{

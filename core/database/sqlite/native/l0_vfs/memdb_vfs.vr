@@ -34,7 +34,6 @@
 )
 module core.database.sqlite.native.l0_vfs.memdb_vfs;
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.{

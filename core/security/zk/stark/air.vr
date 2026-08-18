@@ -28,7 +28,6 @@
     ]),
 )
 module core.security.zk.stark.air;
-mount core.*;
 
 // =============================================================================
 // Field choice

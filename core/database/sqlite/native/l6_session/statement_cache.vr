@@ -50,7 +50,6 @@ module core.database.sqlite.native.l6_session.statement_cache;
 // itself is allocated once and freed when the last reference drops.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.VdbeProgram;

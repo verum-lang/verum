@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.txn.engine;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 mount collections.List;
 mount core.database.sqlite.native.txn.state.{

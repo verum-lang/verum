@@ -83,7 +83,6 @@
 )
 module core.encoding.bson;
 
-mount core.*;
 mount core.collections.list.{List};
 
 // =============================================================================

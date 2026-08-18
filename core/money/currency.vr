@@ -27,7 +27,6 @@
 )
 module core.money.currency;
 
-mount core.*;
 mount base.{Text, Bool};
 
 // =============================================================================

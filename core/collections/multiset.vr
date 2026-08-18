@@ -79,7 +79,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.collections.multiset;
-mount core.*;
 mount super.map.*;
 
 // =============================================================================

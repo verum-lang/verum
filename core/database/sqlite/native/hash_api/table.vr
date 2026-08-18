@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.hash_api.table;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 mount collections.List;
 mount core.database.sqlite.native.hash_api.entry.{

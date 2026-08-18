@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.context_api.auxdata;
 
-mount core.*;
 mount base.{Bool, Maybe};
 mount collections.List;
 

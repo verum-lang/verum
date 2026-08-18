@@ -31,7 +31,6 @@ module core.database.sqlite.native.l3_btree.comparator;
 // the pager.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 

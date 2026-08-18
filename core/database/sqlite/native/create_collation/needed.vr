@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.create_collation.needed;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 
 public type NeededHook is {

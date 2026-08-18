@@ -49,7 +49,6 @@
 )
 module core.net.h3.priority;
 
-mount core.*;
 mount core.collections.list.{List};
 
 // =============================================================================

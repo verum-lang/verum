@@ -41,7 +41,6 @@
 )
 module core.security.x509.algorithm;
 
-mount core.*;
 mount core.encoding.der.{DerReader, DerError, DerErrorKind, Tag, TagClass};
 mount core.security.x509.oid.{Oid};
 mount core.security.x509.oid as pkix_oid;

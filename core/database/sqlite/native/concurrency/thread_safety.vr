@@ -27,7 +27,6 @@
 )
 module core.database.sqlite.native.concurrency.thread_safety;
 
-mount core.*;
 mount base.{Text, Bool};
 
 public type ThreadSafetyMode is protocol {

@@ -35,7 +35,6 @@ module core.database.sqlite.native.l0_vfs.shm;
 // lazily as new regions are requested.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.{

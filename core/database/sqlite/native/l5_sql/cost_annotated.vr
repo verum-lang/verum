@@ -35,7 +35,6 @@ module core.database.sqlite.native.l5_sql.cost_annotated;
 // historical full-scan lowering.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{Expr, EColumn, TableRef};

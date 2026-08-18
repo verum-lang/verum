@@ -44,7 +44,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.sync.barrier;
-mount core.*;
 mount super.atomic.*;
 mount super.mutex.*;
 mount super.condvar.*;

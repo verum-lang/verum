@@ -28,7 +28,6 @@
 )
 module core.database.common.error;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 
 // -----------------------------------------------------------------------------

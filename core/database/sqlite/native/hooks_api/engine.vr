@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.hooks_api.engine;
 
-mount core.*;
 mount base.{Bool, Text};
 mount core.database.sqlite.native.hooks_api.registration.{
     HookRegistration, EngineHookKind,

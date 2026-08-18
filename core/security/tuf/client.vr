@@ -87,7 +87,6 @@
 )
 module core.security.tuf.client;
 
-mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map, Set};
 mount core.encoding.json.{JsonValue, JsonMap, decode as json_decode};

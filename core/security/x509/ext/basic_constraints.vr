@@ -29,7 +29,6 @@
 )
 module core.security.x509.ext.basic_constraints;
 
-mount core.*;
 mount core.encoding.der.{DerReader, DerError, DerErrorKind, TagClass};
 
 public type BasicConstraints is {

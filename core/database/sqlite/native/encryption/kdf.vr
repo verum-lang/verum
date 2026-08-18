@@ -27,7 +27,6 @@
 )
 module core.database.sqlite.native.encryption.kdf;
 
-mount core.*;
 mount base.{Text, Bool, Result, Ok, Err};
 mount collections.List;
 mount core.security.kdf.pbkdf2.{pbkdf2_hmac_sha256, Pbkdf2Error};

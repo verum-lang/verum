@@ -35,7 +35,6 @@ module core.database.sqlite.native.l3_btree.overflow;
 // partitions a contiguous `List<Byte>` into per-page slices.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 

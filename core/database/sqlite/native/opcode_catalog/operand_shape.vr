@@ -25,7 +25,6 @@
 )
 module core.database.sqlite.native.opcode_catalog.operand_shape;
 
-mount core.*;
 mount base.{Text, Bool};
 mount core.database.sqlite.native.opcode_catalog.metadata.{
     OpcodeKind,

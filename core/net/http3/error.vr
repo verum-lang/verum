@@ -9,7 +9,6 @@
 )
 module core.net.http3.error;
 
-mount core.*;
 
 public type Http3ErrorCode is {
     code: UInt64,

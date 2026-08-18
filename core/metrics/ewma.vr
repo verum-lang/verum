@@ -69,7 +69,6 @@
 )
 module core.metrics.ewma;
 
-mount core.*;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 

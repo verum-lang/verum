@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.bind.error;
 
-mount core.*;
 mount base.{Text, Bool};
 
 public type BindError is

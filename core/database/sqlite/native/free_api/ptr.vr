@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.free_api.ptr;
 
-mount core.*;
 mount base.{Bool};
 
 public type OpaqueHandle is {

@@ -9,7 +9,6 @@
 )
 module core.mesh.xds.error;
 
-mount core.*;
 
 public type XdsError is
     /// Control-plane refused or lost connection.

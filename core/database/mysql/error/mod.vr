@@ -11,7 +11,6 @@
 )
 module core.database.mysql.error;
 
-mount core.*;
 mount base.{Text, Maybe, None, Some};
 mount core.database.common.error.{
     DbError, AdapterId, AdapterSpecific, SqlState,

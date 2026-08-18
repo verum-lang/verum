@@ -36,7 +36,6 @@ module core.database.mysql.transaction;
 //  SQL standard exactly.
 // =============================================================================
 
-mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount core.database.common.error.{
     DbError, AdapterId, AdMysql, AdapterSpecific,

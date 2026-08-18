@@ -28,7 +28,6 @@ module core.database.sqlite.native.l0_vfs.registry;
 // at the API layer, not through a first-class dyn protocol here.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.{

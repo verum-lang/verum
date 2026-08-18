@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.db_handle.handle;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 mount collections.List;
 

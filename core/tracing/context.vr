@@ -12,7 +12,6 @@
 )
 module core.tracing.context;
 
-mount core.*;
 mount core.tracing.id.{TraceId, SpanId};
 
 // =============================================================================

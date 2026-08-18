@@ -35,7 +35,6 @@
 )
 module core.net.quic.stats;
 
-mount core.*;
 
 // =============================================================================
 // Per-connection stats

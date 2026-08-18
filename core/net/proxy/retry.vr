@@ -32,7 +32,6 @@
 )
 module core.net.proxy.retry;
 
-mount core.*;
 mount core.sync.atomic.{AtomicInt, MemoryOrdering};
 mount core.time.{Duration};
 mount core.async.timer;

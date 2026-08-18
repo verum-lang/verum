@@ -21,7 +21,6 @@
 )
 module core.tracing.sampler;
 
-mount core.*;
 mount core.tracing.id.{TraceId};
 mount core.tracing.context.{SpanContext, TraceState};
 mount core.tracing.attribute.{AttributeSet};

@@ -71,7 +71,6 @@
 )
 module core.base.semver;
 
-mount core.*;
 mount core.collections.list.{List};
 
 // =============================================================================

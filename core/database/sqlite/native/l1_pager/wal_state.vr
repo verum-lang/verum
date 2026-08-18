@@ -40,7 +40,6 @@ module core.database.sqlite.native.l1_pager.wal_state;
 // view (sqlite-native.md §4.3).
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.wal_frame_layout.file_header.WalFileHeader;

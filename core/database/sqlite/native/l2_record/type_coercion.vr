@@ -40,7 +40,6 @@ module core.database.sqlite.native.l2_record.type_coercion;
 // onto this.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l2_record.affinity.Affinity;

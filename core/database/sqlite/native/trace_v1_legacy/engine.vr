@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.trace_v1_legacy.engine;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.trace_v1_legacy.kind.{
     LegacyHookKind, LhkTrace, LhkProfile, fires_on_begin, fires_on_end,

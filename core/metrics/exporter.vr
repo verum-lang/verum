@@ -14,7 +14,6 @@
 )
 module core.metrics.exporter;
 
-mount core.*;
 mount core.time.duration.{Duration};
 mount core.metrics.registry.{Registry};
 

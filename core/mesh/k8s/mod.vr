@@ -28,7 +28,6 @@ public module gateway;
 public module httproute;
 public module tlsroute;
 
-mount core.*;
 mount core.time.duration.{Duration};
 
 public mount .config.KubeConfig;

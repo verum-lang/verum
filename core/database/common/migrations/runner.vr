@@ -51,7 +51,6 @@
 )
 module core.database.common.migrations.runner;
 
-mount core.*;
 mount base.{Text, Bool, Maybe, Result, Ok, Err};
 mount collections.List;
 mount core.database.common.error.{DbError};

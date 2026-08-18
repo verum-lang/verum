@@ -29,7 +29,6 @@ module core.database.sqlite.native.l4_vdbe.ssa.value;
 //   3. constant-folding / DCE / peephole at the SSA layer pre-emission
 // =============================================================================
 
-mount core.*;
 mount base.{Text, Maybe};
 
 // -----------------------------------------------------------------------------

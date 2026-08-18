@@ -39,7 +39,6 @@
 )
 module core.encoding.base32;
 
-mount core.*;
 mount core.collections.list.{List};
 
 public type Base32Error is

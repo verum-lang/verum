@@ -24,7 +24,6 @@
 )
 module core.database.sqlite.native.integrity.report;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.integrity.error.{

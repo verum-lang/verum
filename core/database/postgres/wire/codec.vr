@@ -49,7 +49,6 @@
 )
 module core.database.postgres.wire.codec;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.intrinsics.runtime.mem_raw.{load_byte, store_byte};

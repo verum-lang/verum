@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.soft_heap.limit;
 
-mount core.*;
 mount base.{Bool};
 
 public type SoftHeapLimit is {

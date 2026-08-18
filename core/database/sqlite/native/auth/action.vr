@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.auth.action;
 
-mount core.*;
 mount base.{Text, Bool};
 mount core.database.sqlite.native.ext.hooks.{
     AuthAction,

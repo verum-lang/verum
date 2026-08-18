@@ -62,7 +62,6 @@
 )
 module core.net.weft.service;
 
-mount core.*;
 mount core.async.future.{Future};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context};

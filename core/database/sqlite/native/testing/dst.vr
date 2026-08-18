@@ -26,7 +26,6 @@
 )
 module core.database.sqlite.native.testing.dst;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 

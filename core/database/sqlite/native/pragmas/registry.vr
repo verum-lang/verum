@@ -12,7 +12,6 @@
 )
 module core.database.sqlite.native.pragmas.registry;
 
-mount core.*;
 mount base.{Text, Maybe};
 
 // -----------------------------------------------------------------------------

@@ -13,7 +13,6 @@
 )
 module core.net.quic.error;
 
-mount core.*;
 
 // =============================================================================
 // Transport error codes — RFC 9000 §20.1

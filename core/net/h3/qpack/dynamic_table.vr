@@ -51,7 +51,6 @@
 )
 module core.net.h3.qpack.dynamic_table;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.h3.qpack.static_table.{find as static_find, find_name as static_find_name, STATIC_TABLE_SIZE};
 

@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.savepoint_ops_api.op;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type SavepointOp is

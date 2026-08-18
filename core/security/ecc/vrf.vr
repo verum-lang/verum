@@ -96,7 +96,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.security.ecc.vrf;
-mount core.*;
 mount core.security.ecc.ed25519.{Ed25519Seed, Ed25519PublicKey, fill_random};
 
 // =============================================================================

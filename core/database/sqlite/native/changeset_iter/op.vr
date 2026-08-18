@@ -18,7 +18,6 @@
 )
 module core.database.sqlite.native.changeset_iter.op;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type ChangeOp is

@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.stmt_cache.entry;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.stmt_cache.key.{CacheKey};
 

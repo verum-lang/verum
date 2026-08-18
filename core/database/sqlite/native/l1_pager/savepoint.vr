@@ -39,7 +39,6 @@ module core.database.sqlite.native.l1_pager.savepoint;
 // scan searches top-down and enforces the same semantics.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 

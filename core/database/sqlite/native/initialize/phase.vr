@@ -20,7 +20,6 @@
 )
 module core.database.sqlite.native.initialize.phase;
 
-mount core.*;
 mount base.{Bool, Text};
 mount core.database.sqlite.native.shutdown.subsystem.{
     ShutdownSubsystem, subsystem_name,

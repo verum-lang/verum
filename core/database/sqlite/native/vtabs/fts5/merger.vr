@@ -22,7 +22,6 @@
 )
 module core.database.sqlite.native.vtabs.fts5.merger;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.segment.{

@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.threadsafe.engine;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.threadsafe.mode.{
     TsMode, TsSingleThread, TsMultiThread, TsSerialized,

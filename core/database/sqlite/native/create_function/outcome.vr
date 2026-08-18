@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.create_function.outcome;
 
-mount core.*;
 mount base.{Bool, Text};
 mount core.database.sqlite.native.errors.code.{
     ExtendedCode, extended_numeric,

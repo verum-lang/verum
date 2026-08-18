@@ -30,7 +30,6 @@
 )
 module core.net.tls13.handshake.codec;
 
-mount core.*;
 mount core.collections.list.{List};
 
 // =============================================================================

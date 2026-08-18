@@ -77,7 +77,6 @@ module core.database.sqlite.native.l1_pager.wal_index;
 // `mmap(MAP_SHARED)` blob (deferred — see top of file).
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 

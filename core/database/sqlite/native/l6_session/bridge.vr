@@ -18,7 +18,6 @@ module core.database.sqlite.native.l6_session.bridge;
 // connection see each other's rows.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l3_btree.BtreeKind;

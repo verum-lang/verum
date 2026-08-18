@@ -62,7 +62,6 @@
 )
 module core.security.x509.certificate;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.encoding.der.{DerReader, DerError, DerErrorKind, DerTime as Time, TagClass};
 mount core.encoding.der as der;

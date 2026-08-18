@@ -9,7 +9,6 @@
 )
 module core.net.tls13.record.content_type;
 
-mount core.*;
 
 public type ContentType is
       Invalid           // 0  — never written; received = fatal alert

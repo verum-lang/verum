@@ -68,7 +68,6 @@
 )
 module core.database.postgres.base_backup;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{

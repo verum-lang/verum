@@ -9,7 +9,6 @@
 )
 module core.net.http3.server;
 
-mount core.*;
 mount core.net.addr.{SocketAddr};
 mount core.net.http.{Method, StatusCode};
 mount core.net.http2.hpack.{HeaderField};

@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.create_function.spec;
 
-mount core.*;
 mount base.{Bool, Text};
 mount core.database.sqlite.native.ext.fn_flags.{
     FnFlags, flags_default, flags_pure,

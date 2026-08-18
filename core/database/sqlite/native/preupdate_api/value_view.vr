@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.preupdate_api.value_view;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 mount core.database.sqlite.native.preupdate_api.context.{
     PreupdateContext,

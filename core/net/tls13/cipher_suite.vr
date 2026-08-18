@@ -32,7 +32,6 @@
 )
 module core.net.tls13.cipher_suite;
 
-mount core.*;
 mount core.collections.list.{List};
 
 public type CipherSuite is

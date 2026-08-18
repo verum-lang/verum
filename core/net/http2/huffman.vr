@@ -26,7 +26,6 @@
 )
 module core.net.http2.huffman;
 
-mount core.*;
 
 public type DecodeError is
     | Invalid

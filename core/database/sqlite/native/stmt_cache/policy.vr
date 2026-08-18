@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.stmt_cache.policy;
 
-mount core.*;
 mount base.{Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.stmt_cache.entry.{CachedStatement};

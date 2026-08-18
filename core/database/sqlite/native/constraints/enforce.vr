@@ -24,7 +24,6 @@
 )
 module core.database.sqlite.native.constraints.enforce;
 
-mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{

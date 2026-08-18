@@ -68,7 +68,6 @@
 )
 module core.async.generator;
 
-mount core.*;
 mount collections.*;
 mount super.poll.*;
 mount super.waker.*;

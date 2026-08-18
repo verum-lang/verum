@@ -62,7 +62,6 @@
 )
 module core.encoding.der;
 
-mount core.*;
 mount core.collections.list.{List};
 
 // =============================================================================

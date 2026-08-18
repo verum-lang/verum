@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.vtab_helpers.on_conflict;
 
-mount core.*;
 mount base.{Text};
 
 public type OnConflictAction is

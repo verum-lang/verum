@@ -46,7 +46,6 @@
 )
 module core.net.h3.push;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.h3.frame.{H3Frame};
 mount core.net.h3.error.{H3Error};

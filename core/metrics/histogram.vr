@@ -13,7 +13,6 @@
 )
 module core.metrics.histogram;
 
-mount core.*;
 mount core.sync.atomic.{AtomicU64, MemoryOrdering};
 mount core.metrics.value.{AtomicF64};
 

@@ -38,7 +38,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.time.system_time;
-mount core.*;
 mount time.duration.{Duration, NANOS_PER_SEC, NANOS_PER_MILLI, NANOS_PER_MICRO, MILLIS_PER_SEC};
 
 // =============================================================================

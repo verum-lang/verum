@@ -14,7 +14,6 @@
 )
 module core.database.sqlite.native.limits_api.category;
 
-mount core.*;
 mount base.{Text};
 
 public const SQLITE_LIMIT_LENGTH: Int              = 0;

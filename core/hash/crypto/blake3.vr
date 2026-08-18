@@ -105,7 +105,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.hash.crypto.blake3;
-mount core.*;
 
 // =============================================================================
 // Constants — BLAKE3 spec §2.1 / §2.4

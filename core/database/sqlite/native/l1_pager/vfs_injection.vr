@@ -29,7 +29,6 @@ module core.database.sqlite.native.l1_pager.vfs_injection;
 // arm, no special-casing in pager.vr.
 // =============================================================================
 
-mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.OpenFlags;
 mount core.database.sqlite.native.l1_pager.pager.{

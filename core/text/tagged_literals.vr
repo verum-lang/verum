@@ -17,7 +17,6 @@
 
 module core.text.tagged_literals;
 
-mount core.*;
 
 // =============================================================================
 // JSON Validation

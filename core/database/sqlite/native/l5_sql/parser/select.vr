@@ -43,7 +43,6 @@ module core.database.sqlite.native.l5_sql.parser.select;
 //  order-term = expr [COLLATE ident] [ASC|DESC] [NULLS FIRST|LAST]
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.lexer.{

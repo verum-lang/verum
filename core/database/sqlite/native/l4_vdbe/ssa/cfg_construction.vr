@@ -34,7 +34,6 @@ module core.database.sqlite.native.l4_vdbe.ssa.cfg_construction;
 // `from_register_vm.vr` AFTER this skeleton is built.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.opcode.{

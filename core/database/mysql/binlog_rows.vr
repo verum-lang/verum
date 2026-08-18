@@ -90,7 +90,6 @@
 )
 module core.database.mysql.binlog_rows;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{

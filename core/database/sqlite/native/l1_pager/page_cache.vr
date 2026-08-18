@@ -50,7 +50,6 @@ module core.database.sqlite.native.l1_pager.page_cache;
 //  * `unpin` after `pin` decrements by 1 and never goes negative.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 

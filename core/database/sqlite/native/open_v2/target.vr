@@ -13,7 +13,6 @@
 )
 module core.database.sqlite.native.open_v2.target;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type OpenTarget is

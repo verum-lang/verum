@@ -46,7 +46,6 @@ module core.database.sqlite.native.l5_sql.parser.ddl;
 //  detail until the planner consumes it.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.lexer.{

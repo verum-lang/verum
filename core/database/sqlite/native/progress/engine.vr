@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.progress.engine;
 
-mount core.*;
 mount base.{Bool, Maybe};
 mount core.database.sqlite.native.progress.handler.{
     ProgressConfig, ProgressDecision, PdContinue, PdInterrupt,

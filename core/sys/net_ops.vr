@@ -14,7 +14,6 @@ module core.sys.net_ops;
 
 // =============================================================================
 
-mount core.*;
 // Raw-intrinsic mount. The pre-migration `mount super.raw.*` pointed
 // at a `core/sys/raw.vr` file that no longer exists — declarations
 // migrated to `core/intrinsics/runtime/os.vr`. Same architectural fix

@@ -13,7 +13,6 @@
 )
 module core.database.sqlite.native.log.level;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type SqliteLogLevel is

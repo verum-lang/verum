@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.auth.dispatch;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 mount core.database.sqlite.native.ext.hooks.{

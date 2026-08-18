@@ -32,7 +32,6 @@ module core.database.sqlite.native.l4_vdbe.affinity_coerce;
 // layer (rowid is just an int64 once written).
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Maybe, None, Some};
 mount core.database.sqlite.native.l4_vdbe.register.{

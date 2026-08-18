@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.opcode_catalog.metadata;
 
-mount core.*;
 mount base.{Text, Maybe};
 mount collections.List;
 

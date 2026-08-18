@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.test_control.opcode;
 
-mount core.*;
 mount base.{Text};
 
 public const SQLITE_TESTCTRL_PRNG_SAVE: Int         = 5;

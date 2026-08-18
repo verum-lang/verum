@@ -104,7 +104,6 @@
 )
 module core.archive;
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 

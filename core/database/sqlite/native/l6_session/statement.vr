@@ -32,7 +32,6 @@ module core.database.sqlite.native.l6_session.statement;
 // new one while preserving the compiled program.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.{

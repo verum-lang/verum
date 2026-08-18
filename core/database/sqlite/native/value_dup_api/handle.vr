@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.value_dup_api.handle;
 
-mount core.*;
 mount base.{Bool};
 
 public type DupHandle is {

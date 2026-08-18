@@ -47,7 +47,6 @@ module core.database.sqlite.native.l3_btree.page_writer;
 //     `MaterializedCell.raw_bytes` references.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l3_btree.page_layout.{

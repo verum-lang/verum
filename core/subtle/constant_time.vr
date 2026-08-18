@@ -54,7 +54,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.subtle.constant_time;
-mount core.*;
 
 /// Timing-safe byte-slice equality.
 ///

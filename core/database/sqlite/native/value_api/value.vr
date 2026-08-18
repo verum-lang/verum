@@ -14,7 +14,6 @@
 )
 module core.database.sqlite.native.value_api.value;
 
-mount core.*;
 mount base.{Bool, Text};
 mount collections.List;
 

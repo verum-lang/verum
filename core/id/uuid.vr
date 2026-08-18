@@ -39,7 +39,6 @@
 )
 module core.id.uuid;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount core.sync.atomic.{AtomicInt, MemoryOrdering};
 

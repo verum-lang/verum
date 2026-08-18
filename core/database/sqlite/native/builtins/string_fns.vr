@@ -33,7 +33,6 @@
 )
 module core.database.sqlite.native.builtins.string_fns;
 
-mount core.*;
 mount base.{Text, Maybe};
 mount collections.List;
 mount core.intrinsics.runtime.text.{float_to_text};

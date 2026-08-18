@@ -44,7 +44,6 @@
 )
 module core.database.postgres.composite_registry;
 
-mount core.*;
 mount core.sync.mutex.{Mutex};
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;

@@ -35,7 +35,6 @@ module core.database.sqlite.native.l4_vdbe.cursor_btree_dispatch;
 // dispatch in release.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l3_btree.cursor.{

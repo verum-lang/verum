@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.page_struct.page;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 

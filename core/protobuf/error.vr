@@ -9,7 +9,6 @@
 )
 module core.protobuf.error;
 
-mount core.*;
 
 public type ProtobufError is
     /// Buffer ended mid-field — streamed reader should read more.

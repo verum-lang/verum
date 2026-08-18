@@ -37,7 +37,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.sync.atomic;
-mount core.*;
 
 // Import typed atomic intrinsics from stdlib.intrinsics
 mount core.intrinsics.atomic.{

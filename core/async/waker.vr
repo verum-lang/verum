@@ -34,7 +34,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.async.waker;
-mount core.*;
 
 // =============================================================================
 // RawWakerVTable — four fn slots that drive Clone / wake / wake_by_ref / drop

@@ -27,7 +27,6 @@ module core.database.sqlite.native.l3_btree.btree;
 // because it names a unique traversal position.
 // =============================================================================
 
-mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l3_btree.page_layout.{PageKind};
 

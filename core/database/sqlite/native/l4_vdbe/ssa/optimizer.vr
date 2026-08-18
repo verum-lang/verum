@@ -18,7 +18,6 @@ module core.database.sqlite.native.l4_vdbe.ssa.optimizer;
 // unreachable arms).
 // =============================================================================
 
-mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l4_vdbe.ssa.program.SsaProgram;
 mount core.database.sqlite.native.l4_vdbe.ssa.dce.{run_dce, DceReport};

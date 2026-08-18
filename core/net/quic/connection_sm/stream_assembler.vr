@@ -57,7 +57,6 @@
 )
 module core.net.quic.connection_sm.stream_assembler;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.quic.frame.{QuicFrame};
 mount core.net.quic.stream_sm.{SendStream, RecvStream, SendState, ConnFlowControl};

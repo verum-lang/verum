@@ -64,7 +64,6 @@
 )
 module core.hash.checksum.crc32c;
 
-mount core.*;
 
 // =============================================================================
 // Castagnoli reflected polynomial.

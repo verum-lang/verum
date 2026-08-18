@@ -34,7 +34,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.collections.map;
-mount core.*;
 // Allocator primitives for typed-OOM (#65, #68). See list.vr for
 // rationale — `mount core.*` doesn't surface these via the re-export
 // chain in `core/base/mod.vr` for unqualified function references.

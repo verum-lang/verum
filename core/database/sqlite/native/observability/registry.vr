@@ -26,7 +26,6 @@
 )
 module core.database.sqlite.native.observability.registry;
 
-mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.observability.metric.{

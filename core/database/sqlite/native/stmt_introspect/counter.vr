@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.stmt_introspect.counter;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type StmtCounterOp is

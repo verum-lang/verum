@@ -68,7 +68,6 @@
 )
 module core.encoding.varint;
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err};
 

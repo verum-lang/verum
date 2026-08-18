@@ -37,7 +37,6 @@ module core.database.sqlite.native.l4_vdbe.ssa.dominator;
 //
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.ssa.block.{BlockId, block_id, block_id_raw, block_id_eq};

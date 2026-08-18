@@ -59,7 +59,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.hash.crypto.sha384;
-mount core.*;
 mount core.hash.crypto.sha512.{compress_block};
 // `BLOCK_SIZE` is reached through the MODULE rather than a mount
 // alias: renaming a `const` in a mount group does not resolve

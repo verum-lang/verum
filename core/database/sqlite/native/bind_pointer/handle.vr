@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.bind_pointer.handle;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.bind_pointer.tag.{
     PointerTag, new_tag, tags_match,

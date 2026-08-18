@@ -51,7 +51,6 @@
 )
 module core.net.quic.path_mtu;
 
-mount core.*;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 

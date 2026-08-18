@@ -50,7 +50,6 @@
 )
 module core.security.webauthn.authenticator_data;
 
-mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.List;
 mount core.encoding.cbor.{CborValue, decode, encode, encode_canonical};

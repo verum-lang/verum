@@ -32,7 +32,6 @@
 )
 module core.net.quic.transport_params;
 
-mount core.*;
 mount core.time.duration.{Duration};
 mount core.collections.list.{List};
 mount core.encoding.varint.{quic_encode_into, quic_decode, VarintError};

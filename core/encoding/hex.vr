@@ -26,7 +26,6 @@
 )
 module core.encoding.hex;
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 

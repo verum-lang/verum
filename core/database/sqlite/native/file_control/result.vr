@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.file_control.result;
 
-mount core.*;
 mount base.{Bool, Text};
 mount core.database.sqlite.native.errors.code.{
     ExtendedCode, PrimaryCode, PcOk, PcNotFound, extended_of, extended_numeric,

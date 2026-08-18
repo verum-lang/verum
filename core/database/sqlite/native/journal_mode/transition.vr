@@ -20,7 +20,6 @@
 )
 module core.database.sqlite.native.journal_mode.transition;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.journal_mode.mode.{

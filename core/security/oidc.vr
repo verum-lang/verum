@@ -67,7 +67,6 @@
 )
 module core.security.oidc;
 
-mount core.*;
 // The DI context is mounted here rather than arriving ambiently: the
 // prelude published `context.standard`'s twelve names into every file
 // for convenience, which core-reference-architecture.md §4ter forbids

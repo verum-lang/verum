@@ -119,7 +119,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.security.ecc.bls12_381;
-mount core.*;
 mount core.security.ecc.ed25519.{fill_random};
 
 // =============================================================================

@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.vtab_helpers.in_iter;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 

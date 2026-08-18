@@ -55,7 +55,6 @@
 )
 module core.id.snowflake;
 
-mount core.*;
 mount core.time.system_time.{SystemTime};
 
 // =============================================================================

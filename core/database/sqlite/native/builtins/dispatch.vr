@@ -43,7 +43,6 @@
 )
 module core.database.sqlite.native.builtins.dispatch;
 
-mount core.*;
 mount base.{Int, Int64};
 mount collections.List;
 

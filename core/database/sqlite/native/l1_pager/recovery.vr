@@ -32,7 +32,6 @@ module core.database.sqlite.native.l1_pager.recovery;
 // iterate frames, apply to page cache) is driven by the pager actor.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l1_pager.journal.wal.{

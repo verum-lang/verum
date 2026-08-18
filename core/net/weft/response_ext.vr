@@ -20,7 +20,6 @@
 )
 module core.net.weft.response_ext;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.http.{Response, StatusCode, Version, Headers};
 

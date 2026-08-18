@@ -9,7 +9,6 @@
 )
 module core.sys.linux.bpf.error;
 
-mount core.*;
 
 public type BpfError is
     /// bpf() syscall failed with this errno.

@@ -47,7 +47,6 @@
 )
 module core.cog.sign;
 
-mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount collections.List;
 // Prelude is curated (core/mod.vr): serde is mounted explicitly.

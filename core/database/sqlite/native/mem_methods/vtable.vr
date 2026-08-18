@@ -27,7 +27,6 @@
 )
 module core.database.sqlite.native.mem_methods.vtable;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type MemMethodSet is {

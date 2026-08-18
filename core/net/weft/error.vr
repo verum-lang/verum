@@ -12,7 +12,6 @@
 )
 module core.net.weft.error;
 
-mount core.*;
 mount core.net.http.{Response, StatusCode};
 mount core.net.weft.response_ext.{
     resp_status, resp_ok, resp_text, resp_with_body_text,

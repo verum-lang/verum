@@ -54,7 +54,6 @@ module core.database.sqlite.native.l0_vfs.locking;
 // F_SETLK on Darwin, LockFileEx on Windows).
 // =============================================================================
 
-mount core.*;
 mount sys.common;
 mount sys.common.{FileDesc, OSError, Shared, Exclusive, try_lock_region, unlock_region};
 mount base.{Result, Ok, Err, Text, Maybe};

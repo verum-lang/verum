@@ -62,7 +62,6 @@
 )
 module core.net.h3.qpack.huffman;
 
-mount core.*;
 mount core.collections.list.{List};
 
 // =============================================================================

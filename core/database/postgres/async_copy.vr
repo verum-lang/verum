@@ -53,7 +53,6 @@
 )
 module core.database.postgres.async_copy;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{

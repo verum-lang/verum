@@ -25,7 +25,6 @@
 )
 module core.encoding.base64;
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 

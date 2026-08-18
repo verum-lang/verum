@@ -68,7 +68,6 @@
 )
 module core.database.postgres.typed_database;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount base.memory.Shared;

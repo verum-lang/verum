@@ -20,7 +20,6 @@
 )
 module core.database.sqlite.native.rbu.progress;
 
-mount core.*;
 mount base.{Bool};
 
 public type BpProgress is {

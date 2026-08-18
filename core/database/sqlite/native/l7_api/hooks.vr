@@ -69,7 +69,6 @@ module core.database.sqlite.native.l7_api.hooks;
 //  * trace — fired by L7 prepare / step / finalize.
 // =============================================================================
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.ext.hooks.{
     CommitHook, RollbackHook, UpdateHook, PreUpdateHook,

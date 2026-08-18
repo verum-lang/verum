@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.trace.payload;
 
-mount core.*;
 mount base.{Text, Bool};
 
 // -----------------------------------------------------------------------------

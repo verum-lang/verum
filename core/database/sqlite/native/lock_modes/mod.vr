@@ -24,7 +24,6 @@
 )
 module core.database.sqlite.native.lock_modes;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public const SQLITE_LOCK_NONE: Int      = 0;

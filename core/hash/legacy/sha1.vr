@@ -14,7 +14,6 @@
 )
 module core.hash.legacy.sha1;
 
-mount core.*;
 
 public const SHA1_DIGEST_SIZE: Int = 20;
 public const SHA1_BLOCK_SIZE: Int = 64;

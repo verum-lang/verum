@@ -12,7 +12,6 @@
 )
 module core.net.weft.router;
 
-mount core.*;
 mount core.text.builder.{TextBuilder};
 mount core.collections.map.{Map};
 mount core.collections.list.{List};

@@ -45,7 +45,6 @@
 )
 module core.net.http2.stream;
 
-mount core.*;
 mount core.net.http2.error.{Http2Error, ErrorCode, connection_error, stream_error};
 
 public type StreamState is

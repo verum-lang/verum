@@ -42,7 +42,6 @@ module core.database.sqlite.native.l5_sql.planner;
 // re-walking the AST.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{

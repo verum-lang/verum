@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.authorizer_api.engine;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 mount core.database.sqlite.native.authorizer_api.decision.{
     Decision, DOk, DDeny, DIgnore, blocks_prepare,

@@ -59,7 +59,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.security.aead.chacha20_poly1305;
-mount core.*;
 mount core.collections.list.{List};
 mount core.security.cipher.chacha20.{
     ChaChaKey, ChaChaNonce,

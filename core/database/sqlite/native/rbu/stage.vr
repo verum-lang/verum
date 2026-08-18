@@ -18,7 +18,6 @@
 )
 module core.database.sqlite.native.rbu.stage;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public const SQLITE_RBU_STATE_OAL: Int        = 1;

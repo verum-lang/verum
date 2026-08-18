@@ -31,7 +31,6 @@
 )
 module core.database.sqlite.native.dst.harness;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.dst.seed.{DstSeed, seed_from_u64};

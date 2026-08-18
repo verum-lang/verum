@@ -56,7 +56,6 @@
 
 module core.sys.signal;
 
-mount core.*;
 mount core.intrinsics.atomic.{atomic_store, atomic_load, MemoryOrder};
 
 // =============================================================================

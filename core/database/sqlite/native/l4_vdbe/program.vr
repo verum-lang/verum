@@ -35,7 +35,6 @@ module core.database.sqlite.native.l4_vdbe.program;
 // same prepared statement concurrently.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.opcode.Opcode;

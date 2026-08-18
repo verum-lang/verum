@@ -75,7 +75,6 @@
 )
 module core.database.mysql.decimal_codec;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.intrinsics.runtime.mem_raw.store_byte;

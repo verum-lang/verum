@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.bind_parameter_api.descriptor;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 
 public type ParamKind is

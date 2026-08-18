@@ -72,7 +72,6 @@
 )
 module core.net.tls13.handshake.zero_rtt_antireplay;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};

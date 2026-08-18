@@ -26,7 +26,6 @@
 )
 module core.database.sqlite.native.rtree.split;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 mount core.database.sqlite.native.rtree.bbox.{BoundingBox};

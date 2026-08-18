@@ -13,7 +13,6 @@
 )
 module core.database.sqlite.native.bind_pointer.tag;
 
-mount core.*;
 mount base.{Bool, Text};
 mount collections.List;
 

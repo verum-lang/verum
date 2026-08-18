@@ -126,7 +126,6 @@
 )
 module core.net.weft.io_uring_accept;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.tcp.{TcpListener, TcpStream};
 mount core.net.addr.{SocketAddr};

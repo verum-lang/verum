@@ -11,7 +11,6 @@
 )
 module core.database.mysql.wire.types;
 
-mount core.*;
 mount base.Text;
 
 // -----------------------------------------------------------------------------

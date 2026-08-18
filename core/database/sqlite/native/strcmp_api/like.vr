@@ -20,7 +20,6 @@
 )
 module core.database.sqlite.native.strcmp_api.like;
 
-mount core.*;
 mount base.{Bool, Text};
 mount collections.List;
 

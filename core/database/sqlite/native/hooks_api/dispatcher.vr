@@ -52,7 +52,6 @@ mount core.database.sqlite.native.busy_timeout.handler.{BusyDecision, BdRetry, B
 //     decision in O(1) without touching the registration.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.ext.hooks.{

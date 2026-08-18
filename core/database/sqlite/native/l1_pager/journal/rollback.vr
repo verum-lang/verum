@@ -42,7 +42,6 @@ module core.database.sqlite.native.l1_pager.journal.rollback;
 // via `JournalCommand.AppendPreimage` requests.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 

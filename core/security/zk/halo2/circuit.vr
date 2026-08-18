@@ -35,7 +35,6 @@
     ]),
 )
 module core.security.zk.halo2.circuit;
-mount core.*;
 
 // =============================================================================
 // Column types

@@ -31,7 +31,6 @@ module core.database.sqlite.native.l1_pager.wal_pager;
 // sees a stable view even while the writer keeps appending.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.{

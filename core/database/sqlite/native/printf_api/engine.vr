@@ -20,7 +20,6 @@
 )
 module core.database.sqlite.native.printf_api.engine;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 mount core.database.sqlite.native.printf_api.builder.{
     SqliteStr, new_str,

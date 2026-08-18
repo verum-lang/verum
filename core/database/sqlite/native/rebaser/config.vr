@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.rebaser.config;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 

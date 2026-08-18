@@ -55,7 +55,6 @@
 )
 module core.database.mysql.prepared;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 

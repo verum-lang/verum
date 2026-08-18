@@ -18,7 +18,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.sync.once;
-mount core.*;
 mount super.atomic.*;
 mount core.intrinsics.compiler_fence;
 mount core.intrinsics.spin_hint;

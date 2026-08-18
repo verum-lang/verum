@@ -24,7 +24,6 @@
 )
 module core.database.sqlite.native.explain.query_plan;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 

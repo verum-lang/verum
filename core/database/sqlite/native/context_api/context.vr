@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.context_api.context;
 
-mount core.*;
 mount base.{Bool, Maybe};
 mount core.database.sqlite.native.context_api.result.{
     FnResult, FrNull,

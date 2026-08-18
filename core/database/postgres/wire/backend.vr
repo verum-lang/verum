@@ -20,7 +20,6 @@
 )
 module core.database.postgres.wire.backend;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.database.common.types.{

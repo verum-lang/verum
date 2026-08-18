@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.text_encoding.detect_encoding;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 mount core.database.sqlite.native.text_encoding.kind.{

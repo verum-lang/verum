@@ -89,7 +89,6 @@
 )
 module core.net.weft.dst;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.{Instant, Duration};
 mount core.sync.atomic.{AtomicInt, AtomicBool, MemoryOrdering};

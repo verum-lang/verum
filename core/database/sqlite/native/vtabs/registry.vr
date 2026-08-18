@@ -24,7 +24,6 @@
 )
 module core.database.sqlite.native.vtabs.registry;
 
-mount core.*;
 mount base.{Text, Maybe, Result, Ok, Err};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.protocol.{

@@ -28,7 +28,6 @@
 )
 module core.net.tls13.named_group;
 
-mount core.*;
 
 public type NamedGroup is
       X25519           // 0x001D

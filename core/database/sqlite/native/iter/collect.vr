@@ -18,7 +18,6 @@
 )
 module core.database.sqlite.native.iter.collect;
 
-mount core.*;
 mount base.{Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.iter.outcome.{

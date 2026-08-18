@@ -22,7 +22,6 @@
 )
 module core.tracing.propagation;
 
-mount core.*;
 mount core.tracing.id.{TraceId, SpanId};
 mount core.tracing.context.{SpanContext, TraceFlags, TraceState};
 

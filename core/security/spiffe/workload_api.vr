@@ -28,7 +28,6 @@
 )
 module core.security.spiffe.workload_api;
 
-mount core.*;
 mount core.net.unix.{UnixStream, UnixError};
 mount core.async.cancellation.{CancellationToken, CancellationError};
 mount core.async.stream.{Stream};

@@ -19,7 +19,6 @@ module core.database.sqlite.native.l5_sql.ast;
 // the planner needs them.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 

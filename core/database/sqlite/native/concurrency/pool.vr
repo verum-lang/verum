@@ -30,7 +30,6 @@
 )
 module core.database.sqlite.native.concurrency.pool;
 
-mount core.*;
 mount base.{Bool, Maybe, Result, Ok, Err};
 mount collections.List;
 

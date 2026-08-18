@@ -70,7 +70,6 @@
 )
 module core.math.big_uint;
 
-mount core.*;
 mount core.collections.list.{List};
 
 // =============================================================================

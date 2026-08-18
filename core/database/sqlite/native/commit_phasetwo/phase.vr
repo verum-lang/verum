@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.commit_phasetwo.phase;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type CommitPhase is

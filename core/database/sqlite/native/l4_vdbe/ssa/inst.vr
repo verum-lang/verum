@@ -21,7 +21,6 @@ module core.database.sqlite.native.l4_vdbe.ssa.inst;
 // on this IR before lowering.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.ssa.value.{SsaValue, ValueId};

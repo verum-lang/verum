@@ -24,7 +24,6 @@
 )
 module core.metrics.prometheus;
 
-mount core.*;
 mount core.metrics.label.{LabelSet};
 mount core.metrics.registry.{Registry, MetricFamily, MetricEntry, MetricKind};
 mount core.metrics.instrument.{Counter, UpDownCounter, Gauge};

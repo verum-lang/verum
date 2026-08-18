@@ -64,7 +64,6 @@
 )
 module core.id.ulid;
 
-mount core.*;
 mount core.collections.list.{List};
 // Inlined: use core.sys.common.random_bytes(...) directly (task #11).
 mount core.time.system_time.{SystemTime};

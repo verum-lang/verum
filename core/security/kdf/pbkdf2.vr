@@ -40,7 +40,6 @@
 )
 module core.security.kdf.pbkdf2;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.mac.hmac.{hmac_sha256, hmac_sha384, hmac_sha512};
 

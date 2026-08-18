@@ -24,7 +24,6 @@
 )
 module core.database.sqlite.native.verify.sql_semantics;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 

@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.vtabs.rtree.node;
 
-mount core.*;
 mount base.{Maybe};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.rtree.bbox.{BBox};

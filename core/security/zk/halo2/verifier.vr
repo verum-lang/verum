@@ -23,7 +23,6 @@
     at_tier: Tier.MultiTier([Tier.Aot, Tier.Interp])
 )
 module core.security.zk.halo2.verifier;
-mount core.*;
 mount core.security.zk.halo2.prover.{Halo2Proof, VerifyingKey};
 mount core.security.zk.halo2.srs.{UniversalSrs};
 

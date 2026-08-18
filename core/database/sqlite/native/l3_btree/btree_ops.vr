@@ -40,7 +40,6 @@ module core.database.sqlite.native.l3_btree.btree_ops;
 // `WalPager`; tests inject in-memory implementations.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l3_btree.cursor.{

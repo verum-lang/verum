@@ -22,7 +22,6 @@
 )
 module core.database.sqlite.native.exec.engine;
 
-mount core.*;
 mount base.{Bool, Text};
 mount collections.List;
 mount core.database.sqlite.native.iter.outcome.{

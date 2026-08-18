@@ -56,7 +56,6 @@
 )
 module core.net.tls13.handshake.early_data;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.security.kdf.hkdf.{HkdfError};
 mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};

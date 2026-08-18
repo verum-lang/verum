@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.verify.file_format_invariants;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 

@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.next_stmt.engine;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.next_stmt.stmt_list.{
     StmtList,

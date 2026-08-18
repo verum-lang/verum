@@ -38,7 +38,6 @@
 )
 module core.net.tls13.handshake.transcript;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.hash.crypto.sha256.{Sha256};
 mount core.hash.crypto.sha384.{Sha384};

@@ -40,7 +40,6 @@
 )
 module core.net.quic.recovery.loss_detection;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};

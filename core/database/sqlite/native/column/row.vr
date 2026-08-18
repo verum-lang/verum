@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.column.row;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.column.value.{

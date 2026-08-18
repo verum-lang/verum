@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.fts5.query.parser;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.fts5.query.ast.{

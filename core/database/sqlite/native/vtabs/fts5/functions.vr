@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.vtabs.fts5.functions;
 
-mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{

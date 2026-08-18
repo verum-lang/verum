@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.backup.progress;
 
-mount core.*;
 mount base.{Text, Bool};
 mount core.database.sqlite.native.backup.state.{
     BackupEngineHandle, BackupPhase, phase_name, phase_is_terminal,

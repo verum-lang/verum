@@ -27,7 +27,6 @@ module core.database.sqlite.native.l2_record.strict;
 // of strict checking for a single column).
 // =============================================================================
 
-mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount core.text.case_fold.fold_text_ascii;
 mount core.database.sqlite.native.l2_record.record.SerialType;

@@ -18,7 +18,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.text.char;
-mount core.*;
 
 // Import intrinsics as functions
 mount core.intrinsics.runtime.text.{

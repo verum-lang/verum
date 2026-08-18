@@ -37,7 +37,6 @@ module core.database.sqlite.native.l7_api.database;
 // until the actor IPC is wired.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l1_pager.pager.{Pager};

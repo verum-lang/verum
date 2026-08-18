@@ -52,7 +52,6 @@ module core.database.sqlite.native.l6_session.sql_value;
 //
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.register.{

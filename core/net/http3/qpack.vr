@@ -21,7 +21,6 @@
 )
 module core.net.http3.qpack;
 
-mount core.*;
 mount core.net.http2.hpack.{HeaderField};
 
 // =============================================================================

@@ -29,7 +29,6 @@ module core.database.sqlite.native.l4_vdbe.ssa.program;
 // `SsaProgram`.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.program.{

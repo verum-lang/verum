@@ -20,7 +20,6 @@
 )
 module core.async.spawn_config;
 
-mount core.*;
 
 // =============================================================================
 // Recovery Strategies

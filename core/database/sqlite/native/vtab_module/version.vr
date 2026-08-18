@@ -18,7 +18,6 @@
 )
 module core.database.sqlite.native.vtab_module.version;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.vtab_module.method_set.{
     VtabModuleMethodSet, supports_savepoints,

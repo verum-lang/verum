@@ -58,7 +58,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.mac.hmac;
-mount core.*;
 mount core.hash.legacy.sha1.{Sha1,
     SHA1_BLOCK_SIZE, SHA1_DIGEST_SIZE};
 mount core.hash.crypto.sha256.{Sha256};

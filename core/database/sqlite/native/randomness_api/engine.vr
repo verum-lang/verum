@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.randomness_api.engine;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.randomness_api.request.{
     RandomnessRequest, RrFill, RrReseed, RrNoop, is_reseed, fill_size,

@@ -30,7 +30,6 @@ module core.database.sqlite.native.l4_vdbe.optimizer;
 // land with the planner work in L5.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.opcode.{Opcode, is_branch};

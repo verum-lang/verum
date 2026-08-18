@@ -35,7 +35,6 @@
 )
 module core.database.common.retry_run;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, Some, None};
 mount async.timer.sleep_ms;
 mount core.database.common.error.DbError;

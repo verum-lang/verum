@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.encryption.policy;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type EncryptionPolicy is EpEncryptAll | EpUserPagesOnly | EpNone;

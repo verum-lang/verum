@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.txn.state;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type TxnState is

@@ -40,7 +40,6 @@ module core.database.sqlite.native.hooks_api.callback_registry;
 // surface).  Safe for direct mutation through `&mut` references.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.ext.hooks.{

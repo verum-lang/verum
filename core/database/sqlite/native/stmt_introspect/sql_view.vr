@@ -19,7 +19,6 @@
 )
 module core.database.sqlite.native.stmt_introspect.sql_view;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 
 public type SqlView is {

@@ -45,7 +45,6 @@
 )
 module core.net.quic.path;
 
-mount core.*;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.net.addr.{SocketAddr};

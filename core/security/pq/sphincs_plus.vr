@@ -58,7 +58,6 @@
 )
 module core.security.pq.sphincs_plus;
 
-mount core.*;
 mount core.security.pq.ml_kem.{PqError};
 
 // =============================================================================

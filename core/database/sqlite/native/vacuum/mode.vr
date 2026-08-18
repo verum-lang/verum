@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.vacuum.mode;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 
 public type AutoVacuumMode is

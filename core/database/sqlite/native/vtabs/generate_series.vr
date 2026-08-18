@@ -24,7 +24,6 @@
 )
 module core.database.sqlite.native.vtabs.generate_series;
 
-mount core.*;
 mount base.{Text, Maybe, Result, Ok, Err};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal};

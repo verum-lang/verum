@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.planner_cost.explain;
 
-mount core.*;
 mount base.{Text, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.planner_cost.cost.{

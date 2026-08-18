@@ -19,7 +19,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.async.channel;
-mount core.*;
 mount collections.*;
 mount sync.*;
 mount super.poll.*;

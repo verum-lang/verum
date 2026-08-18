@@ -47,7 +47,6 @@ module core.database.sqlite.native.l1_pager.wal_writer;
 // the same code runs on any target.
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.posix_vfs.PosixFile;

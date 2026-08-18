@@ -27,7 +27,6 @@
 )
 module core.database.sqlite.native.backup.policy;
 
-mount core.*;
 mount base.{Bool};
 
 // -----------------------------------------------------------------------------

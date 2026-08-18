@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.release_memory_global.request;
 
-mount core.*;
 mount base.{Bool};
 
 public type SizeRequest is {

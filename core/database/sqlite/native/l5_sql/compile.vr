@@ -31,7 +31,6 @@ module core.database.sqlite.native.l5_sql.compile;
 // gaps.
 // =============================================================================
 
-mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l5_sql.lexer.{lex, SqlLexError as LexError};
 mount core.database.sqlite.native.l5_sql.ast.Statement;

@@ -34,7 +34,6 @@
 )
 module core.simd.gpu;
 
-mount core.*;
 
 // =============================================================================
 // GPU Device Management

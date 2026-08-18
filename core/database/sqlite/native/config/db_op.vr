@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.config.db_op;
 
-mount core.*;
 mount base.{Text};
 
 public type DbConfigOp is

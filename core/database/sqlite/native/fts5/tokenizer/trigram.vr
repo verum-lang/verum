@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.fts5.tokenizer.trigram;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.fts5.tokenizer.core.{

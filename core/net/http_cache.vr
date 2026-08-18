@@ -46,7 +46,6 @@
 )
 module core.net.http_cache;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.duration.{Duration};
 

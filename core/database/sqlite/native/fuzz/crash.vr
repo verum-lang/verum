@@ -18,7 +18,6 @@
 )
 module core.database.sqlite.native.fuzz.crash;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 

@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.checkpoint_api.progress;
 
-mount core.*;
 mount base.{Bool};
 
 public type CheckpointProgress is {

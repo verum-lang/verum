@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.auth.decision;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.ext.hooks.{
     AuthDecision, AdAllow, AdDeny, AdIgnore,

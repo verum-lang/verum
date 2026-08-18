@@ -53,7 +53,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.random.secure;
-mount core.*;
 // Inlined: use core.sys.common.random_bytes(...) directly (task #11).
 
 /// Fill `buf` with `buf.len()` cryptographically secure random bytes.

@@ -58,7 +58,6 @@
 )
 module core.net.h3.streaming;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.async.cancellation.{CancellationToken};
 mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};

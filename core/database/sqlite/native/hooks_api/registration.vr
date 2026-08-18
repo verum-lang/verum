@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.hooks_api.registration;
 
-mount core.*;
 mount base.{Bool, Text};
 
 // Named `EngineHookKind`/`Eh*`, NOT `HookKind`/`Hk*` (T0555 layer 5):

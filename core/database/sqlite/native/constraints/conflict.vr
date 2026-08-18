@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.constraints.conflict;
 
-mount core.*;
 mount base.{Text};
 
 public type OnConflict is

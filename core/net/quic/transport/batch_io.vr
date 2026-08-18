@@ -48,7 +48,6 @@
 )
 module core.net.quic.transport.batch_io;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.addr.{SocketAddr};
 mount core.net.quic.transport.abstraction.{

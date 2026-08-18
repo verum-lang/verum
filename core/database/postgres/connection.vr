@@ -39,7 +39,6 @@
 )
 module core.database.postgres.connection;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount base.memory.Shared;
 mount collections.List;

@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.sqlar_api.compress;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public const MIN_COMPRESS_BYTES: Int64 = 128 as Int64;

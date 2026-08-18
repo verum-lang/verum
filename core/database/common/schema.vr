@@ -48,7 +48,6 @@
 )
 module core.database.common.schema;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.database.common.error.AdapterId;

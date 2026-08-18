@@ -51,7 +51,6 @@
 )
 module core.net.tls13.cert_compress;
 
-mount core.*;
 mount core.collections.list.{List};
 
 // =============================================================================

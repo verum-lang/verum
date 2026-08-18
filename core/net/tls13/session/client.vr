@@ -51,7 +51,6 @@
 )
 module core.net.tls13.session.client;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.net.tls13.error.{TlsError};

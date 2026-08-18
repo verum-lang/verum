@@ -18,7 +18,6 @@
 )
 module core.database.sqlite.native.json_subtype.dispatch;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.json_subtype.tag.{
     JSON_SUBTYPE,

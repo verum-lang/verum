@@ -21,7 +21,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.io.protocols;
-mount core.*;
 mount core.sys.common.{OSError};
 
 // =============================================================================

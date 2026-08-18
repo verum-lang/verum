@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.ext.hooks;
 
-mount core.*;
 mount base.{Text, Result, Ok, Err, Bool};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{Register};

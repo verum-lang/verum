@@ -35,7 +35,6 @@
 )
 module core.net.h3.request;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.net.h3.qpack.decoder.{QpackHeaderField};
 

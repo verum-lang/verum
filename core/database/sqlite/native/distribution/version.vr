@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.distribution.version;
 
-mount core.*;
 mount base.{Text};
 
 public type DistributionVersion is {

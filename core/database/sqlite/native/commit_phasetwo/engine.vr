@@ -25,7 +25,6 @@
 )
 module core.database.sqlite.native.commit_phasetwo.engine;
 
-mount core.*;
 mount base.{Bool, Text};
 mount core.database.sqlite.native.commit_phasetwo.phase.{
     CommitPhase, CpIdle, CpPhaseOne, CpPhaseTwo, CpDone, CpRollback,

@@ -50,7 +50,6 @@
 )
 module core.database.common.migrations.journal;
 
-mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.common.migrations.migration.{

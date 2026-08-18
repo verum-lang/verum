@@ -30,7 +30,6 @@
 )
 module core.database.sqlite.native.profiler.report;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.profiler.session.{ProfileSession};

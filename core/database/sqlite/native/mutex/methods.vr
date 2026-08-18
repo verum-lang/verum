@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.mutex.methods;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.mutex.kind.{

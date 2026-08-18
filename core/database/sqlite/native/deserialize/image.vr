@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.deserialize.image;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 

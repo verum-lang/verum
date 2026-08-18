@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.bind_text_v2.spec;
 
-mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.text_encoding.kind.{
     TextEncoding, TeUtf8, TeUtf16Le, TeUtf16Be, is_utf16,

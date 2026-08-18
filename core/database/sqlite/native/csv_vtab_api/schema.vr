@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.csv_vtab_api.schema;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 mount core.database.sqlite.native.csv_vtab_api.options.{
     CsvVtabOptions,

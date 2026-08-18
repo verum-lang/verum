@@ -41,7 +41,6 @@
 )
 module core.net.weft.backpressure;
 
-mount core.*;
 mount core.sync.semaphore.{Semaphore};
 mount core.sync.atomic.{AtomicInt, MemoryOrdering};
 mount core.time.{Instant};

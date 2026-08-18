@@ -37,7 +37,6 @@ module core.database.sqlite.native.l3_btree.record_compare;
 // compare; text: collation dispatch; blob: byte compare).
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l2_record.record.{

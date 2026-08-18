@@ -13,7 +13,6 @@
 )
 module core.net.http3.client;
 
-mount core.*;
 mount core.net.addr.{SocketAddr};
 mount core.net.http.{Method, StatusCode, Version};
 mount core.net.http2.hpack.{HeaderField};

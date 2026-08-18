@@ -17,7 +17,6 @@
 )
 module core.database.sqlite.native.vtabs.index_info;
 
-mount core.*;
 mount base.{Text, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.protocol.{

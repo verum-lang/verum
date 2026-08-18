@@ -41,7 +41,6 @@
 )
 module core.net.quic.recovery.cc.new_reno;
 
-mount core.*;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.net.quic.recovery.cc.{

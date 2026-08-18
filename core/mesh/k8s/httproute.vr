@@ -11,7 +11,6 @@
 )
 module core.mesh.k8s.httproute;
 
-mount core.*;
 mount core.time.duration.{Duration};
 
 public type HTTPRoute is {

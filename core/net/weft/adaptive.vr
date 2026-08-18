@@ -44,7 +44,6 @@
 )
 module core.net.weft.adaptive;
 
-mount core.*;
 mount core.sync.atomic.{AtomicInt, MemoryOrdering};
 mount core.time.{Instant};
 mount core.net.http.{Response};

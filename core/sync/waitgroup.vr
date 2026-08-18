@@ -28,7 +28,6 @@
 
 module core.sync.waitgroup;
 
-mount core.*;
 
 // Raw intrinsics — centralised in core/intrinsics/runtime/sync.vr (#65).
 mount core.intrinsics.runtime.sync.{

@@ -28,7 +28,6 @@
 )
 module core.database.sqlite.native.builtins.aggregate_fns;
 
-mount core.*;
 mount base.{Text, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};

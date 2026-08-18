@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.shutdown.subsystem;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 

@@ -21,7 +21,6 @@
 )
 module core.database.sqlite.native.vtabs.fts5.index;
 
-mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{Fts5VtabToken};

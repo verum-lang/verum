@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.changeset_iter.iter_state;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type IteratorState is

@@ -46,7 +46,6 @@ module core.database.sqlite.native.l7_api.hook_registry;
 // hook type AND O(1) handle invalidation (set the slot to Maybe.None).
 // =============================================================================
 
-mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.ext.hooks.{

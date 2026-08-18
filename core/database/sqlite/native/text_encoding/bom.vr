@@ -14,7 +14,6 @@
 )
 module core.database.sqlite.native.text_encoding.bom;
 
-mount core.*;
 mount base.{Bool};
 mount collections.List;
 

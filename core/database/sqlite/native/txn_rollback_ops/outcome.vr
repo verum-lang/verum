@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.txn_rollback_ops.outcome;
 
-mount core.*;
 mount base.{Bool, Text};
 mount core.database.sqlite.native.errors.code.{
     ExtendedCode, extended_numeric,

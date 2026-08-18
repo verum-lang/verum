@@ -11,7 +11,6 @@
 )
 module core.database.sqlite.native.checkpoint_api.request;
 
-mount core.*;
 mount base.{Text};
 mount core.database.sqlite.native.result_codes.checkpoint.{
     CheckpointResultMode, CmPassive,

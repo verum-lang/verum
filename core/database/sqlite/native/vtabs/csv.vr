@@ -36,7 +36,6 @@
 )
 module core.database.sqlite.native.vtabs.csv;
 
-mount core.*;
 mount base.{Text, Bool, Maybe, Result, Ok, Err};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RText};

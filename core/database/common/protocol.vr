@@ -31,7 +31,6 @@
 )
 module core.database.common.protocol;
 
-mount core.*;
 mount base.{Result, Text};
 mount collections.List;
 mount async.stream.Stream;

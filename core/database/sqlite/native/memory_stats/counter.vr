@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.memory_stats.counter;
 
-mount core.*;
 mount base.{Bool};
 
 public type MemoryCounter is {

@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.context_api.result;
 
-mount core.*;
 mount base.{Bool, Text};
 mount collections.List;
 mount core.database.sqlite.native.errors.code.{

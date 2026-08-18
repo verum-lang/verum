@@ -18,7 +18,6 @@
 )
 module core.database.sqlite.native.load_extension.entry_point;
 
-mount core.*;
 mount base.{Bool, Maybe, Text};
 
 public type EntryPoint is {

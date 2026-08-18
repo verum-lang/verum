@@ -49,7 +49,6 @@
 )
 module core.redis.commands;
 
-mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int, Float};
 mount collections.{List, Map};
 

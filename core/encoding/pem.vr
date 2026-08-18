@@ -83,7 +83,6 @@
 )
 module core.encoding.pem;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.encoding.base64.{encode as b64_encode, decode as b64_decode};
 

@@ -18,7 +18,6 @@
 )
 module core.database.postgres.adapter;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount core.database.common.error.{DbError, AdapterId};
 mount core.database.postgres.config.PgConfig;

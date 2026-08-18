@@ -24,7 +24,6 @@
 )
 module core.database.sqlite.native.observability.exporter;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.observability.metric.{

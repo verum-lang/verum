@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.dst.seed;
 
-mount core.*;
 mount base.{Bool};
 
 public type DstSeed is {

@@ -34,7 +34,6 @@ module core.database.sqlite.native.l5_sql.parser.expr;
 // by parsing the right side at the same level.
 // =============================================================================
 
-mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.lexer.{

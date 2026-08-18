@@ -15,7 +15,6 @@
 )
 module core.database.sqlite.native.uri.decode;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 

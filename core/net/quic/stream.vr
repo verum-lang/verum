@@ -12,7 +12,6 @@
 )
 module core.net.quic.stream;
 
-mount core.*;
 mount core.net.quic.error.{QuicError, ApplicationErrorCode};
 
 type StreamHandle is UInt64;

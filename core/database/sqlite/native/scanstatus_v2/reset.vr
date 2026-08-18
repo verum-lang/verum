@@ -16,7 +16,6 @@
 )
 module core.database.sqlite.native.scanstatus_v2.reset;
 
-mount core.*;
 mount base.{Bool};
 
 public type ResetScope is

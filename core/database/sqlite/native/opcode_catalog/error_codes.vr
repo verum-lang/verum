@@ -20,7 +20,6 @@
 )
 module core.database.sqlite.native.opcode_catalog.error_codes;
 
-mount core.*;
 mount base.{Text, Maybe};
 
 // -----------------------------------------------------------------------------

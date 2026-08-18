@@ -42,7 +42,6 @@
 )
 module core.net.http;
 
-mount core.*;
 mount core.collections.map.{Map};
 mount core.collections.list.{List};
 mount core.io.protocols.{Read, Write};

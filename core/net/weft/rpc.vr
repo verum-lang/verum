@@ -57,7 +57,6 @@
 )
 module core.net.weft.rpc;
 
-mount core.*;
 mount core.text.builder.{TextBuilder};
 mount core.collections.list.{List};
 mount core.collections.map.{Map};

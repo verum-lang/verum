@@ -73,7 +73,6 @@
 )
 module core.security.cose;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.encoding.cbor.{CborValue, CborError, encode, decode, encode_canonical};
 mount core.security.ecc.ed25519.{

@@ -20,7 +20,6 @@
 )
 module core.database.sqlite.native.create_function.kind;
 
-mount core.*;
 mount base.{Bool, Text};
 
 public type FunctionKind is

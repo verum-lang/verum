@@ -35,7 +35,6 @@
 )
 module core.net.quic.crypto.retry;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.security.aead.aes_gcm.{Aes128Gcm, GcmError};
 

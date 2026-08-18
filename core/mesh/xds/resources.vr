@@ -13,7 +13,6 @@
 )
 module core.mesh.xds.resources;
 
-mount core.*;
 mount core.time.duration.{Duration};
 
 // =============================================================================

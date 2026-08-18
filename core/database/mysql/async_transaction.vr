@@ -20,7 +20,6 @@
 )
 module core.database.mysql.async_transaction;
 
-mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount core.database.common.error.{
     DbError, AdapterId, AdMysql, AdapterSpecific,

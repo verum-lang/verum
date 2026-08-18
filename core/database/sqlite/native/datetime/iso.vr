@@ -23,7 +23,6 @@
 )
 module core.database.sqlite.native.datetime.iso;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.datetime.instant.{

@@ -12,7 +12,6 @@
 )
 module core.mesh.k8s.gateway;
 
-mount core.*;
 
 public type GatewayClass is {
     name: Text,

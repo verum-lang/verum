@@ -77,7 +77,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.async.panic_fence;
-mount core.*;
 mount super.future.*;
 mount super.poll.*;
 mount super.waker.*;

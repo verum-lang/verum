@@ -50,7 +50,6 @@
 )
 module core.security.x509.chain;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.security.x509.certificate.{X509Certificate};
 mount core.security.x509.algorithm.{SignatureAlg, RsaPssHash};

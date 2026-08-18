@@ -57,7 +57,6 @@
 )
 module core.security.x509.ext;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.encoding.der.{DerReader, DerError, DerErrorKind};
 mount core.security.x509.oid.{Oid};

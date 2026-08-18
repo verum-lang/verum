@@ -37,7 +37,6 @@
 )
 module core.net.quic.connection_sm.state;
 
-mount core.*;
 
 // Phantom state markers.
 public type Initial     is ();

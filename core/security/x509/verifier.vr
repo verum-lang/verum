@@ -44,7 +44,6 @@
 )
 module core.security.x509.verifier;
 
-mount core.*;
 mount core.collections.{List, Set};
 mount core.security.x509.certificate.{X509Certificate, parse_certificate};
 mount core.security.x509.trust_store.{TrustStore};

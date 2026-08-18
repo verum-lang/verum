@@ -20,7 +20,6 @@
 )
 module core.database.sqlite.native.deserialize.engine;
 
-mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.deserialize.image.{

@@ -29,7 +29,6 @@
 )
 module core.net.http2.hpack;
 
-mount core.*;
 mount core.net.http2.static_table;
 mount core.net.http2.huffman;
 mount core.net.http2.settings.{DEFAULT_HEADER_TABLE_SIZE};

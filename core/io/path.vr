@@ -44,7 +44,6 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.io.path;
-mount core.*;
 mount collections.*;
 mount io.fs.{metadata as fs_metadata};
 

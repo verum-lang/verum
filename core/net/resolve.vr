@@ -27,7 +27,6 @@
 )
 module core.net.resolve;
 
-mount core.*;
 mount core.collections.list.{List};
 mount core.io.{IoError, IoErrorKind};
 mount core.net.addr.{SocketAddr, Ipv4Addr, Ipv6Addr};
