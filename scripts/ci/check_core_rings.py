@@ -342,7 +342,8 @@ def load_rings() -> tuple[dict[str, float], dict[float, str], set[float]]:
             if m in ring_of:
                 sys.exit(f"[fail] module '{m}' declared in two rings")
             ring_of[m] = idx
-    return ring_of, names, cohesive
+    budget = data.get("ring", {}).get("0", {}).get("inherited_budget")
+    return ring_of, names, cohesive, budget
 
 
 def ring_for(module: str, ring_of: dict[str, float]) -> float | None:
@@ -394,7 +395,7 @@ def main() -> int:
             f"the {len(root_reexports())} module(s) core/mod.vr re-exports: "
             f"{', '.join(root_reexports())}"
         )
-    ring_of, ring_names, cohesive_rings = load_rings()
+    ring_of, ring_names, cohesive_rings, inherited_budget = load_rings()
 
     edges: dict[tuple[str, str], list[str]] = defaultdict(list)
     for path in sorted(CORE.rglob("*.vr")):
@@ -510,6 +511,47 @@ def main() -> int:
                 print(f"        {s}")
             if len(sites) > 3:
                 print(f"        … {len(sites) - 3} more")
+    # RING-0 INHERITANCE RATCHET.
+    #
+    # A module's ring is resolved by LONGEST DECLARED PREFIX, so a file
+    # written into `core/base/` is ring 0 unless someone names it
+    # elsewhere.  That is convenient for the twelve modules that really
+    # are the language's vocabulary and silently wrong for anything
+    # else: on 2026-08-18 ten files had accumulated in ring 0 that way —
+    # semver parsing, glob matching, Levenshtein distance — none of them
+    # published by the prelude, all of them free to be depended on by
+    # the foundation.
+    #
+    # Forbidding inheritance outright would mean listing all forty
+    # legitimate submodules, which is bureaucracy, not architecture.  So
+    # the number is a budget: it may shrink freely, and growing it is a
+    # decision that has to be written into rings.toml, where its diff
+    # gets reviewed.
+    inherited0 = sorted(
+        m for m in present
+        if ring_for(m, ring_of) == 0.0 and m not in ring_of
+    )
+    if inherited_budget is not None:
+        if len(inherited0) > inherited_budget:
+            ok = False
+            print(
+                f"[fail] {len(inherited0)} module(s) land in ring 0 by inheriting a "
+                f"parent's entry; the budget in rings.toml is {inherited_budget}."
+            )
+            print("    Ring 0 is the language's vocabulary — what the grammar, the")
+            print("    checker and @derive name, and what the prelude publishes.")
+            print("    A new file under core/base/ is NOT that by default.")
+            print("    Either name the module's real ring in rings.toml, or raise")
+            print("    the budget there with the reason it belongs in the foundation.")
+            for m in inherited0[-8:]:
+                print(f"        {m}")
+        elif len(inherited0) < inherited_budget:
+            print(
+                f"[note] ring-0 inheritance is down to {len(inherited0)} "
+                f"(budget {inherited_budget}) — lower the budget in rings.toml "
+                f"to lock the gain in."
+            )
+
     if ok:
         print(f"[ok] ring law holds: {len(present)} modules, {len(edges)} inter-module edges, 0 violations")
         return 0

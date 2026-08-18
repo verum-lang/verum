@@ -30,6 +30,17 @@ name = "primitive"
 # `base <-> collections.list` as violations of a rule this file had
 # already exempted them from.
 cohesive = true
+# RATCHET.  A module's ring is resolved by longest declared prefix, so a
+# file written into `core/base/` (or `core/intrinsics/`) joins ring 0
+# without anyone deciding that it should.  That is how ten value
+# algorithms — semver, glob, Levenshtein, retry — ended up in the
+# language's foundation by 2026-08-18.
+#
+# `check_core_rings.py` counts the modules that reach ring 0 that way and
+# refuses a number above this budget.  It may fall freely; raising it is
+# a claim that one more module belongs in the foundation, and the diff of
+# this line is where that claim gets reviewed.
+inherited_budget = 40
 # The language's own vocabulary: what the grammar, the checker and
 # `@derive` name. This is also exactly what the prelude publishes
 # (core/mod.vr) — the prelude IS ring 0's surface, never a directory glob.
