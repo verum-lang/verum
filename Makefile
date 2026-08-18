@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: gates-source check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census check-panic-surface check-dup-emitters
+.PHONY: gates-source check-dead-module-path-calls check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census check-panic-surface check-dup-emitters
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -66,7 +66,7 @@ check-type-name-collisions: ## Gate (T0458): simple-type-name collisions in core
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
 
-gates-source: check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-dup-emitters check-bake-prepass-parity check-protocol-form ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+gates-source: check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls ## Every gate that needs only the SOURCE TREE — no build, no artefacts
 	@echo "gates-source: all source-only gates green"
 
 check-phantom-mounts: ## Gate (T0780): mounts naming a symbol the module does not export. NEEDS a built verum; ~15 min, NOT in gates-source.
@@ -75,6 +75,9 @@ check-phantom-mounts: ## Gate (T0780): mounts naming a symbol the module does no
 
 check-protocol-form: ## Gate (T0794): protocols in core/ use the grammatical `type X is protocol` form
 	python3 scripts/ci/check_protocol_form.py
+
+check-dead-module-path-calls: ## Gate (T0806): module-path calls whose callee is declared nowhere — the compiler returns nil for these instead of diagnosing them
+	python3 scripts/ci/check_dead_module_path_calls.py
 
 check-rings: ## Gate: core/ ring law — no upward edges, no cycles (core/rings.toml declares the rings)
 	python3 scripts/ci/check_core_rings.py
