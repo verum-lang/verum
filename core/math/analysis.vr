@@ -38,7 +38,21 @@ public type Sequence<T> is {
 };
 
 /// A limit captures the epsilon-delta notion of convergence.
-public type Limit<T> is protocol {
+// NAMED FOR ITS BRANCH, NOT FOR THE WORD (2026-08-18).
+//
+// `core/math/category.vr:289` declares a different `Limit` — the
+// categorical one, `Limit<C, D> extends Cone<C, D, Int>`. Two public
+// protocols under one bare name is a coin toss at every use site, and
+// arity does not break the tie: `implement Limit<IntegerPathCategory,
+// IntegerPathCategory> for TerminalCone` in math/examples.vr names two
+// parameters, plainly meaning the categorical one, and resolved to THIS
+// protocol — which is why the conformance gate reported it as missing
+// `epsilon_delta` and `limit_value`, methods its author never intended
+// to write.
+//
+// Both meanings are canonical in their own branch, so neither can claim
+// the bare word. This one is the analytic limit; it says so.
+public type AnalyticLimit<T> is protocol {
     /// The limit value of the sequence.
     fn limit_value(&self) -> T;
 
@@ -49,7 +63,7 @@ public type Limit<T> is protocol {
 };
 
 /// A convergent sequence has a well-defined limit.
-public type Convergent<T> is protocol extends Limit<T> {
+public type Convergent<T> is protocol extends AnalyticLimit<T> {
     /// The limit is unique.
     @verify(formal)
     fn limit_unique(&self, other_limit: &T) -> Bool;
@@ -298,7 +312,7 @@ axiom banach_fixed_point(f: Int, space: Int, contraction_factor: Float) -> Bool;
 // hierarchy: convergent sequences, complete spaces, smooth functions,
 // measure/probability spaces, and Hilbert/Banach spaces.
 
-/// Every convergent sequence is a limit (by `protocol extends Limit`).
+/// Every convergent sequence is a limit (by `protocol extends AnalyticLimit`).
 theorem convergent_is_limit()
     proof by auto;
 

@@ -117,8 +117,6 @@ Layout	core/math/tensor.vr
 Layout	core/mem/allocator.vr
 LemmaStatus	core/verify/kernel_soundness/theorems.vr
 LemmaStatus	core/verify/kernel_v0/soundness.vr
-Limit	core/math/analysis.vr
-Limit	core/math/category.vr
 ListOptions	core/mesh/k8s/client.vr
 ListOptions	core/storage/types.vr
 LocalHeap	core/mem/allocator.vr
