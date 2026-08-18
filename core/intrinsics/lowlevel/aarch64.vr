@@ -94,16 +94,16 @@ public fn cpu_features() -> Aarch64CpuFeatures {
 // Feature detection helpers
 fn detect_sve() -> Bool {
     @cfg(target_os = "linux") {
-        let hwcap = get_hwcap();
-        return (hwcap & (1 << 22)) != 0;
+        let caps = hwcap();
+        return (caps & (1 << 22)) != 0;
     }
     false
 }
 
 fn detect_sve2() -> Bool {
     @cfg(target_os = "linux") {
-        let hwcap2 = get_hwcap2();
-        return (hwcap2 & (1 << 1)) != 0;
+        let caps2 = hwcap2();
+        return (caps2 & (1 << 1)) != 0;
     }
     false
 }
@@ -715,22 +715,23 @@ public unsafe fn smc();
 // LINUX HWCAP ACCESS (no libc)
 // =============================================================================
 
-// Import native getauxval from sys/linux/auxv (no libc dependency)
+// WHY AN ARCHITECTURE FILE REACHES INTO `sys`.  Everything else here is
+// read from the CPU itself (`ID_AA64*` system registers), which needs no
+// operating system.  SVE is the exception: on Linux the vector-length and
+// SVE2 bits are published ONLY through the auxiliary vector, so there is
+// no register to read and the dependency is the feature's, not this
+// file's.  It is declared, narrow (two functions), and Linux-gated.
+//
+// `core.sys.linux.auxv` already exposes `hwcap()` / `hwcap2()` over the
+// same `getauxval`; this file used to import `getauxval` plus the two
+// `AT_*` constants and re-implement both wrappers privately — a second
+// copy of a two-line function, with the usual consequence that a fix to
+// one leaves the other behind.
 @cfg(target_os = "linux")
-mount core.sys.linux.auxv.{getauxval, AT_HWCAP, AT_HWCAP2};
-
-@cfg(target_os = "linux")
-fn get_hwcap() -> UInt64 {
-    getauxval(AT_HWCAP)
-}
-
-@cfg(target_os = "linux")
-fn get_hwcap2() -> UInt64 {
-    getauxval(AT_HWCAP2)
-}
+mount core.sys.linux.auxv.{hwcap, hwcap2};
 
 @cfg(not(target_os = "linux"))
-fn get_hwcap() -> UInt64 { 0 }
+fn hwcap() -> UInt64 { 0 }
 
 @cfg(not(target_os = "linux"))
-fn get_hwcap2() -> UInt64 { 0 }
+fn hwcap2() -> UInt64 { 0 }
