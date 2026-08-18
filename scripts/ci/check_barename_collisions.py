@@ -369,6 +369,77 @@ def collect(typed: bool = False) -> dict[tuple, set[str]]:
     return found
 
 
+# A free function whose name is also a METHOD name is a third collision
+# axis, and neither of the two above sees it.  `--kind functions` keys on
+# `^public fn` — column-anchored and public-only — so it counts neither
+# private helpers nor methods at all.
+#
+# The axis is not hypothetical.  `core/database/sqlite/native/alter/engine.vr`
+# declares a private `fn push(dst: &mut Text, s: &Text)` and calls it; the
+# call resolves to `Text.push(&mut self, ch: Char)` instead and reports
+# "push expects 1 argument(s), got 2" — 78 such errors across four files,
+# none of them visible to this gate (T0798).
+#
+# Measured when this mode was added: 638 public and 138 private free
+# functions carry a name that some method also carries.  Behind several of
+# them sits plain duplication — 12 declarations of `push_text` in 6 distinct
+# bodies, 6 of `append_text` in 2, 8 of `read_u32_be` in 6 — and behind
+# `is_digit`, 12 declarations in EIGHT distinct bodies, which is divergence
+# rather than copying.
+#
+# Reported, not ratcheted.  A ratchet needs a number someone can act on in
+# one commit, and this one is a research surface until the resolution defect
+# it exposes is settled; freezing it now would only make the next honest
+# measurement fail the build.  Same reasoning as `check-rings-census`.
+METHOD_DECL = re.compile(
+    r"^\s*(?:public\s+|pub\s+)?(?:pure\s+|async\s+|unsafe\s+|meta(?:\(\d+\))?\s+|cofix\s+)*"
+    r"fn\s+(\w+)\s*(?:<[^>]*>)?\s*\(\s*&?\s*(?:mut\s+)?self\b"
+)
+FREE_DECL_ANY_VIS = re.compile(
+    r"^(?:public\s+|pub\s+)?(?:pure\s+|async\s+|unsafe\s+|meta(?:\(\d+\))?\s+|cofix\s+)*"
+    r"fn\s+(\w+)\s*(?:<[^>]*>)?\s*\("
+)
+
+
+def method_axis() -> int:
+    """Census: free functions whose name is also declared as a method."""
+    methods: dict[str, set[str]] = collections.defaultdict(set)
+    free_pub: dict[str, list[str]] = collections.defaultdict(list)
+    free_priv: dict[str, list[str]] = collections.defaultdict(list)
+    for path in CORE.rglob("*.vr"):
+        rel = path.relative_to(CORE).as_posix()
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            m = METHOD_DECL.match(line)
+            if m:
+                methods[m.group(1)].add(rel)
+                continue
+            if line[:1].isspace():
+                continue
+            m = FREE_DECL_ANY_VIS.match(line)
+            if m:
+                bucket = free_pub if line.startswith(("public ", "pub ")) else free_priv
+                bucket[m.group(1)].append(f"{rel}:{lineno}")
+
+    clash_pub = {n: v for n, v in free_pub.items() if n in methods}
+    clash_priv = {n: v for n, v in free_priv.items() if n in methods}
+    print("free functions whose name is also a method name:")
+    print(f"  public:  {len(clash_pub)}")
+    print(f"  private: {len(clash_priv)}   (invisible to --kind functions)")
+    print()
+    ranked = sorted(
+        list(clash_pub.items()) + list(clash_priv.items()),
+        key=lambda kv: -len(kv[1]),
+    )[:12]
+    for name, sites in ranked:
+        print(f"  {name:<18} {len(sites):>2} free decl(s), method in {len(methods[name])} file(s)")
+        print(f"       {sites[0]}")
+    return 0
+
+
 def collisions(found, scope: str) -> dict[tuple[str, int], set[str]]:
     out = {}
     prelude = prelude_named_exports() if scope == "prelude" else set()
@@ -398,9 +469,12 @@ def main() -> int:
     ap.add_argument("--scope", choices=("all", "sqlite", "prelude"), default="all")
     ap.add_argument(
         "--kind",
-        choices=("functions", "types"),
+        choices=("functions", "types", "methods"),
         default="functions",
-        help="types: `public type` simple-name collisions across modules",
+        help=(
+            "types: `public type` simple-name collisions across modules; "
+            "methods: free functions whose name is also a method (census, never fails)"
+        ),
     )
     ap.add_argument(
         "--self-test",
@@ -416,6 +490,9 @@ def main() -> int:
 
     if getattr(args, "self_test", False):
         return self_test()
+
+    if args.kind == "methods":
+        return method_axis()
 
     if args.kind == "types":
         found = collect_types()

@@ -79,6 +79,9 @@ check-protocol-form: ## Gate (T0794): protocols in core/ use the grammatical `ty
 check-rings: ## Gate: core/ ring law — no upward edges, no cycles (core/rings.toml declares the rings)
 	python3 scripts/ci/check_core_rings.py
 
+check-barename-method-census: ## Report free functions whose name is also a method (T0798; never fails)
+	python3 scripts/ci/check_barename_collisions.py --kind methods
+
 check-rings-census: ## Report the core/ inter-module dependency graph (never fails)
 	python3 scripts/ci/check_core_rings.py --census
 
