@@ -1192,15 +1192,15 @@ fn get_local_heap() -> &mut AllocatorLocalHeap {
 @inline
 fn get_thread_id() -> UInt32 {
     @cfg(target_os = "linux") {
-        sys.linux.tls.get_tid_fast()
+        return sys.linux.tls.get_tid_fast();
     }
 
     @cfg(target_os = "macos") {
-        sys.darwin.tls.get_tid_fast().unwrap_or(0) as UInt32
+        return sys.darwin.tls.get_tid_fast().unwrap_or(0) as UInt32;
     }
 
     @cfg(target_os = "windows") {
-        sys.windows.tls.get_tid_fast().unwrap_or(0)
+        return sys.windows.tls.get_tid_fast().unwrap_or(0);
     }
 }
 

@@ -132,13 +132,13 @@ implement GpuConfig {
     /// Auto-detect best GPU backend for current platform.
     public fn auto() -> GpuConfig {
         @cfg(target_os = "macos")
-        { GpuConfig.metal() }
+        { return GpuConfig.metal(); }
 
         @cfg(target_os = "linux")
-        { GpuConfig.cuda(80) }  // Default to Ampere
+        { return GpuConfig.cuda(80); }  // Default to Ampere
 
         @cfg(target_os = "windows")
-        { GpuConfig.cuda(80) }
+        { return GpuConfig.cuda(80); }
     }
 }
 

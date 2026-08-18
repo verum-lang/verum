@@ -98,7 +98,7 @@ fn signal(sig: Int, handler: fn(Int)) -> fn(Int) {
         // For the SIG_DFL/SIG_IGN flags (handler = 0/1), the call is
         // a no-op — the user-space dispatcher already handles defaults.
         let _ = (sig, handler);
-        0 as fn(Int)
+        return 0 as fn(Int);
     }
     @cfg(target_os = "macos")
     {
@@ -109,7 +109,7 @@ fn signal(sig: Int, handler: fn(Int)) -> fn(Int) {
         // SIG_DFL) is the conservative default — handler is invoked
         // via signal_trampoline regardless.
         let _ = (sig, handler);
-        0 as fn(Int)
+        return 0 as fn(Int);
     }
 }
 
@@ -120,10 +120,10 @@ fn raise(sig: Int) -> Int {
     @cfg(target_os = "linux")
     {
         let pid = super.linux.syscall.getpid();
-        match super.linux.syscall.kill(pid, sig) {
+        return match super.linux.syscall.kill(pid, sig) {
             Result.Ok(()) => 0,
             Result.Err(_) => -1,
-        }
+        };
     }
     @cfg(target_os = "macos")
     {
@@ -131,7 +131,7 @@ fn raise(sig: Int) -> Int {
         // declaration; reuse kill via libSystem.
         // TODO: route through safe_kill when added to darwin/libsystem.
         let _ = sig;
-        0
+        return 0;
     }
 }
 
@@ -201,28 +201,28 @@ implement Signal {
                 Signal.Alarm  => 14,
                 Signal.Term   => 15,
                 Signal.Usr1   => {
-                    @cfg(target_os = "linux") { 10 }
-                    @cfg(target_os = "macos") { 30 }
+                    @cfg(target_os = "linux") { return 10; }
+                    @cfg(target_os = "macos") { return 30; }
                 },
                 Signal.Usr2   => {
-                    @cfg(target_os = "linux") { 12 }
-                    @cfg(target_os = "macos") { 31 }
+                    @cfg(target_os = "linux") { return 12; }
+                    @cfg(target_os = "macos") { return 31; }
                 },
                 Signal.Child  => {
-                    @cfg(target_os = "linux") { 17 }
-                    @cfg(target_os = "macos") { 20 }
+                    @cfg(target_os = "linux") { return 17; }
+                    @cfg(target_os = "macos") { return 20; }
                 },
                 Signal.Cont   => {
-                    @cfg(target_os = "linux") { 18 }
-                    @cfg(target_os = "macos") { 19 }
+                    @cfg(target_os = "linux") { return 18; }
+                    @cfg(target_os = "macos") { return 19; }
                 },
                 Signal.Stop   => {
-                    @cfg(target_os = "linux") { 19 }
-                    @cfg(target_os = "macos") { 17 }
+                    @cfg(target_os = "linux") { return 19; }
+                    @cfg(target_os = "macos") { return 17; }
                 },
                 Signal.Tstp   => {
-                    @cfg(target_os = "linux") { 20 }
-                    @cfg(target_os = "macos") { 18 }
+                    @cfg(target_os = "linux") { return 20; }
+                    @cfg(target_os = "macos") { return 18; }
                 },
                 Signal.Winch  => 28,
             }

@@ -89,12 +89,12 @@ fn disable_echo() -> EchoCookie {
     @cfg(any(target_os = "linux", target_os = "macos"))
     {
         let cookie = __termios_save_and_disable_echo();
-        EchoCookie { raw: cookie }
+        return EchoCookie { raw: cookie };
     }
     @cfg(target_os = "windows")
     {
         let cookie = __windows_save_and_disable_echo();
-        EchoCookie { raw: cookie }
+        return EchoCookie { raw: cookie };
     }
 }
 

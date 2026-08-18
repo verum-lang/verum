@@ -334,14 +334,14 @@ fn do_fork() -> Result<Int, Text> {
 public fn native_kill(pid: Int, sig: Int) -> Result<(), Text> {
     @cfg(any(target_os = "linux", target_os = "macos"))
     {
-        match platform_syscall.kill(pid, sig) {
+        return match platform_syscall.kill(pid, sig) {
             Result.Ok(_)  => Result.Ok(()),
             Result.Err(_) => Result.Err("kill failed".into()),
-        }
+        };
     }
     @cfg(target_os = "windows")
     {
-        Result.Err("native_kill not implemented for Windows".into())
+        return Result.Err("native_kill not implemented for Windows".into());
     }
 }
 
@@ -370,7 +370,7 @@ public fn native_fd_write_all(fd: Int, data: &[Byte]) -> Result<Int, Text> {
     }
     @cfg(target_os = "windows")
     {
-        Result.Err("native_fd_write_all not implemented for Windows".into())
+        return Result.Err("native_fd_write_all not implemented for Windows".into());
     }
 }
 
@@ -382,16 +382,16 @@ public fn native_fd_read_chunk(fd: Int, max: Int) -> Result<List<Byte>, Text> {
         let mut i: Int = 0;
         while i < max { buf.push(0); i = i + 1; }
         let r = platform_syscall.read(FileDesc.from_raw(fd as Int32), &mut buf);
-        match r {
+        return match r {
             Result.Ok(n)  => {
                 buf.truncate(n as usize);
                 Result.Ok(buf)
             }
             Result.Err(e) => Result.Err(f"read failed: {e}"),
-        }
+        };
     }
     @cfg(target_os = "windows")
     {
-        Result.Err("native_fd_read_chunk not implemented for Windows".into())
+        return Result.Err("native_fd_read_chunk not implemented for Windows".into());
     }
 }

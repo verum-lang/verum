@@ -670,10 +670,10 @@ implement TcpStream {
         };
 
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            shutdown(self.fd, how_int).map_err(|e| IoError.from_os(e))
+            return shutdown(self.fd, how_int).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            sys_shutdown(self.fd, how_int).map_err(|e| IoError.from_os(e))
+            return sys_shutdown(self.fd, how_int).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -685,10 +685,10 @@ implement TcpStream {
     public fn set_read_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
         let ms = timeout_ms.unwrap_or(0);
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_socket_timeout(self.fd, ms, true).map_err(|e| IoError.from_os(e))
+            return set_socket_timeout(self.fd, ms, true).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_socket_timeout(self.fd, ms, true).map_err(|e| IoError.from_os(e))
+            return safe_set_socket_timeout(self.fd, ms, true).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -700,10 +700,10 @@ implement TcpStream {
     public fn set_write_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
         let ms = timeout_ms.unwrap_or(0);
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_socket_timeout(self.fd, ms, false).map_err(|e| IoError.from_os(e))
+            return set_socket_timeout(self.fd, ms, false).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_socket_timeout(self.fd, ms, false).map_err(|e| IoError.from_os(e))
+            return safe_set_socket_timeout(self.fd, ms, false).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -719,10 +719,10 @@ implement TcpStream {
     /// - Disabled: Higher latency, better bandwidth utilization
     public fn set_nodelay(&self, nodelay: Bool) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_tcp_nodelay(self.fd, nodelay).map_err(|e| IoError.from_os(e))
+            return set_tcp_nodelay(self.fd, nodelay).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_tcp_nodelay(self.fd, nodelay).map_err(|e| IoError.from_os(e))
+            return safe_set_tcp_nodelay(self.fd, nodelay).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -733,10 +733,10 @@ implement TcpStream {
     /// Recommended for long-lived connections (database, message queue clients).
     public fn set_keepalive(&self, keepalive: Bool) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_keepalive(self.fd, keepalive).map_err(|e| IoError.from_os(e))
+            return set_keepalive(self.fd, keepalive).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_keepalive(self.fd, keepalive).map_err(|e| IoError.from_os(e))
+            return safe_set_keepalive(self.fd, keepalive).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -747,10 +747,10 @@ implement TcpStream {
     /// EWOULDBLOCK/EAGAIN if they would block. Use with async I/O or poll/select.
     public fn set_nonblocking(&self, nonblocking: Bool) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_nonblocking(self.fd, nonblocking).map_err(|e| IoError.from_os(e))
+            return set_nonblocking(self.fd, nonblocking).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_nonblocking(self.fd, nonblocking).map_err(|e| IoError.from_os(e))
+            return safe_set_nonblocking(self.fd, nonblocking).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -798,11 +798,11 @@ implement Read for TcpStream {
     fn read(&mut self, buf: &mut [Byte]) -> Result<Int, IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
             // Use recv with MSG_NOSIGNAL to prevent SIGPIPE on closed connection
-            recv(self.fd, buf, MSG_NOSIGNAL).map_err(|e| IoError.from_os(e))
+            return recv(self.fd, buf, MSG_NOSIGNAL).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
             // macOS uses SO_NOSIGPIPE set at socket creation time
-            sys_recv(self.fd, buf, 0).map_err(|e| IoError.from_os(e))
+            return sys_recv(self.fd, buf, 0).map_err(|e| IoError.from_os(e));
         }
     }
 }
@@ -811,10 +811,10 @@ implement Write for TcpStream {
     fn write(&mut self, buf: &[Byte]) -> Result<Int, IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
             // Use send with MSG_NOSIGNAL to prevent SIGPIPE
-            send(self.fd, buf, MSG_NOSIGNAL).map_err(|e| IoError.from_os(e))
+            return send(self.fd, buf, MSG_NOSIGNAL).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            sys_send(self.fd, buf, 0).map_err(|e| IoError.from_os(e))
+            return sys_send(self.fd, buf, 0).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -890,7 +890,7 @@ implement AsyncWrite for TcpStream {
 
         @cfg(any(target_os = "linux", target_os = "windows"))
         let result = {
-            send(self.fd, &byte_buf[..write_len], MSG_NOSIGNAL | MSG_DONTWAIT)
+            return send(self.fd, &byte_buf[..write_len], MSG_NOSIGNAL | MSG_DONTWAIT);
         };
 
         @cfg(target_os = "macos")
@@ -1340,10 +1340,10 @@ implement TcpListener {
     /// connection is pending instead of blocking.
     public fn set_nonblocking(&self, nonblocking: Bool) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_nonblocking(self.fd, nonblocking).map_err(|e| IoError.from_os(e))
+            return set_nonblocking(self.fd, nonblocking).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_nonblocking(self.fd, nonblocking).map_err(|e| IoError.from_os(e))
+            return safe_set_nonblocking(self.fd, nonblocking).map_err(|e| IoError.from_os(e));
         }
     }
 

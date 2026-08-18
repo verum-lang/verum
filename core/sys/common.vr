@@ -1760,16 +1760,16 @@ module embedded_context {
 /// Returns true if TLS is set up and context system is ready.
 public fn is_runtime_initialized() -> Bool {
     @cfg(target_os = "linux")
-    { super.linux.tls.get_current_tcb().is_ok() }
+    { return super.linux.tls.get_current_tcb().is_ok(); }
 
     @cfg(target_os = "macos")
-    { super.darwin.tls.is_tls_initialized() }
+    { return super.darwin.tls.is_tls_initialized(); }
 
     @cfg(target_os = "windows")
-    { super.windows.tls.is_tls_initialized() }
+    { return super.windows.tls.is_tls_initialized(); }
 
     @cfg(runtime = "embedded")
-    { true }  // Embedded always ready (no TLS needed)
+    { return true; }  // Embedded always ready (no TLS needed)
 }
 
 /// Initialize the V-LLSI runtime for the main thread.

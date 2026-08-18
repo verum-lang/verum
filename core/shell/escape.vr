@@ -88,9 +88,9 @@ implement Debug for ShellFlavour {
 /// Default flavour for the host platform.
 public fn default_flavour() -> ShellFlavour {
     @cfg(any(target_os = "linux", target_os = "macos"))
-    { ShellFlavour.Posix }
+    { return ShellFlavour.Posix; }
     @cfg(target_os = "windows")
-    { ShellFlavour.Cmd }
+    { return ShellFlavour.Cmd; }
 }
 
 // =============================================================================

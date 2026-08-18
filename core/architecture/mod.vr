@@ -63,7 +63,7 @@
 )
 module core.architecture;
 
-mount super.types.{
+mount .types.{
     Lifecycle,
     Foundation,
     MsfsStratum,

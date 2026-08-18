@@ -113,10 +113,10 @@ fn detect_sve_width() -> UInt32 {
     // Query SVE vector length
     @cfg(target_os = "linux") {
         // Use prctl PR_SVE_GET_VL
-        128 // Default, actual implementation uses syscall
+        return 128;  // Default, actual implementation uses syscall
     }
     @cfg(not(target_os = "linux")) {
-        0
+        return 0;
     }
 }
 

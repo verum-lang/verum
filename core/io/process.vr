@@ -97,10 +97,10 @@ implement ExitStatus {
     @inline(always)
     public fn is_exited(&self) -> Bool {
         @cfg(any(target_os = "linux", target_os = "macos"))
-        { (self.raw & 0x7F) == 0 }
+        { return (self.raw & 0x7F) == 0; }
 
         @cfg(target_os = "windows")
-        { true }
+        { return true; }
     }
 
     /// Returns true iff the process was terminated by a signal (POSIX WIFSIGNALED).
@@ -110,11 +110,11 @@ implement ExitStatus {
         @cfg(any(target_os = "linux", target_os = "macos"))
         {
             let low = self.raw & 0x7F;
-            low != 0 && low != 0x7F
+            return low != 0 && low != 0x7F;
         }
 
         @cfg(target_os = "windows")
-        { false }
+        { return false; }
     }
 
     /// Returns the signal number that terminated the process (POSIX WTERMSIG),
@@ -123,11 +123,11 @@ implement ExitStatus {
     public fn signal(&self) -> Int {
         @cfg(any(target_os = "linux", target_os = "macos"))
         {
-            if self.is_signaled() { self.raw & 0x7F } else { 0 }
+            return if self.is_signaled() { self.raw & 0x7F } else { 0 };
         }
 
         @cfg(target_os = "windows")
-        { 0 }
+        { return 0; }
     }
 
     /// Returns the WEXITSTATUS exit code. Only meaningful when
@@ -138,10 +138,10 @@ implement ExitStatus {
         // Unix: raw is waitpid status — WEXITSTATUS = (status >> 8) & 0xFF
         // Windows: raw is the exit code directly
         @cfg(any(target_os = "linux", target_os = "macos"))
-        { (self.raw >> 8) & 255 }
+        { return (self.raw >> 8) & 255; }
 
         @cfg(target_os = "windows")
-        { self.raw & 0xFFFF }
+        { return self.raw & 0xFFFF; }
     }
 }
 
@@ -354,11 +354,11 @@ implement Child {
     /// on Windows uses TerminateProcess for SIGKILL/SIGTERM, ignores others.
     public fn signal(&self, sig: Int) -> Result<(), Text> {
         @cfg(any(target_os = "linux", target_os = "macos"))
-        { native_kill(self.pid, sig) }
+        { return native_kill(self.pid, sig); }
         @cfg(target_os = "windows")
         {
             let r = __process_kill_raw_impl(self.pid, sig);
-            if r == 0 { Result.Ok(()) } else { Result.Err("TerminateProcess failed".into()) }
+            return if r == 0 { Result.Ok(()) } else { Result.Err("TerminateProcess failed".into()) };
         }
     }
 

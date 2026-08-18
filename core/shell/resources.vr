@@ -272,14 +272,14 @@ implement Drop for FileLock {
 fn __platform_flock(fd: Int, op: Int) -> Int {
     @cfg(any(target_os = "linux", target_os = "macos"))
     {
-        unsafe { core.sys.darwin.libsystem.flock(fd as Int32, op as Int32) as Int }
+        return unsafe { core.sys.darwin.libsystem.flock(fd as Int32, op as Int32) as Int };
     }
     @cfg(target_os = "windows")
     {
         // Windows: emulate via LockFileEx / UnlockFileEx — not implemented yet
         // in this layer; Windows callers should rely on directory-based
         // lock conventions instead.
-        0
+        return 0;
     }
 }
 

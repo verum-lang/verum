@@ -481,10 +481,10 @@ implement UdpSocket {
         }
 
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            send(self.fd, buf, 0).map_err(|e| IoError.from_os(e))
+            return send(self.fd, buf, 0).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            sys_send(self.fd, buf, 0).map_err(|e| IoError.from_os(e))
+            return sys_send(self.fd, buf, 0).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -499,10 +499,10 @@ implement UdpSocket {
         }
 
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            recv(self.fd, buf, 0).map_err(|e| IoError.from_os(e))
+            return recv(self.fd, buf, 0).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            sys_recv(self.fd, buf, 0).map_err(|e| IoError.from_os(e))
+            return sys_recv(self.fd, buf, 0).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -566,10 +566,10 @@ implement UdpSocket {
     /// EWOULDBLOCK/EAGAIN if they would block.
     public fn set_nonblocking(&self, nonblocking: Bool) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_nonblocking(self.fd, nonblocking).map_err(|e| IoError.from_os(e))
+            return set_nonblocking(self.fd, nonblocking).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_nonblocking(self.fd, nonblocking).map_err(|e| IoError.from_os(e))
+            return safe_set_nonblocking(self.fd, nonblocking).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -580,10 +580,10 @@ implement UdpSocket {
     /// Note: Broadcast only works on IPv4.
     public fn set_broadcast(&self, broadcast: Bool) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_broadcast(self.fd, broadcast).map_err(|e| IoError.from_os(e))
+            return set_broadcast(self.fd, broadcast).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_broadcast(self.fd, broadcast).map_err(|e| IoError.from_os(e))
+            return safe_set_broadcast(self.fd, broadcast).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -592,10 +592,10 @@ implement UdpSocket {
     /// computing DSCP must pass the combined byte.
     public fn set_ip_tos(&self, tos: UInt8) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_ip_tos(self.fd, tos as Int).map_err(|e| IoError.from_os(e))
+            return set_ip_tos(self.fd, tos as Int).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_ip_tos(self.fd, tos as Int).map_err(|e| IoError.from_os(e))
+            return safe_set_ip_tos(self.fd, tos as Int).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -604,10 +604,10 @@ implement UdpSocket {
     /// ingress processing.
     public fn set_ip_recvtos(&self, enable: Bool) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_ip_recvtos(self.fd, enable).map_err(|e| IoError.from_os(e))
+            return set_ip_recvtos(self.fd, enable).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_ip_recvtos(self.fd, enable).map_err(|e| IoError.from_os(e))
+            return safe_set_ip_recvtos(self.fd, enable).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -616,10 +616,10 @@ implement UdpSocket {
     /// other based on the socket family.
     public fn set_ipv6_tclass(&self, tc: UInt8) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_ipv6_tclass(self.fd, tc as Int).map_err(|e| IoError.from_os(e))
+            return set_ipv6_tclass(self.fd, tc as Int).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_ipv6_tclass(self.fd, tc as Int).map_err(|e| IoError.from_os(e))
+            return safe_set_ipv6_tclass(self.fd, tc as Int).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -627,10 +627,10 @@ implement UdpSocket {
     /// on inbound datagrams via recvmsg cmsg.
     public fn set_ipv6_recvtclass(&self, enable: Bool) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_ipv6_recvtclass(self.fd, enable).map_err(|e| IoError.from_os(e))
+            return set_ipv6_recvtclass(self.fd, enable).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_ipv6_recvtclass(self.fd, enable).map_err(|e| IoError.from_os(e))
+            return safe_set_ipv6_recvtclass(self.fd, enable).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -641,10 +641,10 @@ implement UdpSocket {
     /// Kernel may double the requested value.
     public fn set_send_buffer_size(&self, size: Int) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_send_buffer_size(self.fd, size).map_err(|e| IoError.from_os(e))
+            return set_send_buffer_size(self.fd, size).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_send_buffer_size(self.fd, size).map_err(|e| IoError.from_os(e))
+            return safe_set_send_buffer_size(self.fd, size).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -655,10 +655,10 @@ implement UdpSocket {
     /// Kernel may double the requested value.
     public fn set_recv_buffer_size(&self, size: Int) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_recv_buffer_size(self.fd, size).map_err(|e| IoError.from_os(e))
+            return set_recv_buffer_size(self.fd, size).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_recv_buffer_size(self.fd, size).map_err(|e| IoError.from_os(e))
+            return safe_set_recv_buffer_size(self.fd, size).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -670,10 +670,10 @@ implement UdpSocket {
     public fn set_read_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
         let ms = timeout_ms.unwrap_or(0);
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_socket_timeout(self.fd, ms, true).map_err(|e| IoError.from_os(e))
+            return set_socket_timeout(self.fd, ms, true).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_socket_timeout(self.fd, ms, true).map_err(|e| IoError.from_os(e))
+            return safe_set_socket_timeout(self.fd, ms, true).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -685,10 +685,10 @@ implement UdpSocket {
     public fn set_write_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
         let ms = timeout_ms.unwrap_or(0);
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_socket_timeout(self.fd, ms, false).map_err(|e| IoError.from_os(e))
+            return set_socket_timeout(self.fd, ms, false).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_socket_timeout(self.fd, ms, false).map_err(|e| IoError.from_os(e))
+            return safe_set_socket_timeout(self.fd, ms, false).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -751,10 +751,10 @@ implement UdpSocket {
     /// - 255: Unrestricted (global)
     public fn set_multicast_ttl_v4(&self, ttl: Int) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_multicast_ttl_v4(self.fd, ttl).map_err(|e| IoError.from_os(e))
+            return set_multicast_ttl_v4(self.fd, ttl).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_multicast_ttl_v4(self.fd, ttl).map_err(|e| IoError.from_os(e))
+            return safe_set_multicast_ttl_v4(self.fd, ttl).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -765,10 +765,10 @@ implement UdpSocket {
     /// local socket if it has joined the same multicast group.
     public fn set_multicast_loop_v4(&self, enabled: Bool) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            set_multicast_loop_v4(self.fd, enabled).map_err(|e| IoError.from_os(e))
+            return set_multicast_loop_v4(self.fd, enabled).map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_set_multicast_loop_v4(self.fd, enabled).map_err(|e| IoError.from_os(e))
+            return safe_set_multicast_loop_v4(self.fd, enabled).map_err(|e| IoError.from_os(e));
         }
     }
 

@@ -335,13 +335,13 @@ public fn fork() -> Result<Int, OSError> {
     @cfg(target_arch = "x86_64")
     {
         let r = unsafe { syscall_raw(SYS_FORK, 0, 0, 0, 0, 0, 0) };
-        if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) }
+        return if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) };
     }
     @cfg(target_arch = "aarch64")
     {
         // aarch64 has no SYS_FORK; use clone(SIGCHLD).
         let r = unsafe { syscall_raw(SYS_CLONE, FORK_FLAGS, 0, 0, 0, 0, 0) };
-        if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) }
+        return if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) };
     }
 }
 
@@ -375,7 +375,7 @@ public fn dup2(oldfd: FileDesc, newfd: FileDesc) -> Result<Int, OSError> {
         let r = unsafe {
             syscall_raw(SYS_DUP2, oldfd.as_raw(), newfd.as_raw(), 0, 0, 0, 0)
         };
-        if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) }
+        return if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) };
     }
     @cfg(target_arch = "aarch64")
     {
@@ -383,7 +383,7 @@ public fn dup2(oldfd: FileDesc, newfd: FileDesc) -> Result<Int, OSError> {
         let r = unsafe {
             syscall_raw(SYS_DUP3, oldfd.as_raw(), newfd.as_raw(), 0, 0, 0, 0)
         };
-        if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) }
+        return if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) };
     }
 }
 

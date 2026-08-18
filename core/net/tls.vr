@@ -318,17 +318,17 @@ implement SystemCerts {
     public fn load() -> List<Certificate> {
         @cfg(target_os = "linux")
         {
-            SystemCerts.load_linux()
+            return SystemCerts.load_linux();
         }
 
         @cfg(target_os = "macos")
         {
-            SystemCerts.load_macos()
+            return SystemCerts.load_macos();
         }
 
         @cfg(target_os = "windows")
         {
-            SystemCerts.load_windows()
+            return SystemCerts.load_windows();
         }
     }
 
