@@ -1,0 +1,38 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: types, cfg, conditional-compilation, platform, unit
+// @expected-error: E400
+//
+// Pin — a chain of `@cfg` BLOCKS is a chain of STATEMENTS, so it cannot be
+// a function's value.  The function falls off the end and yields `Unit`.
+//
+// This is the seam between the two roles `@cfg` already has.  Gating a
+// block of statements is correct and idiomatic; reading the predicate as a
+// `Bool` is correct and idiomatic; writing the blocks where a tail
+// expression belongs is neither, and looks like both.
+//
+// It is worth pinning because the diagnostic points at the SIGNATURE, not
+// at either block:
+//
+//     error<E400>: Type mismatch: expected 'List<Text>', found 'Unit'
+//
+// which reads as a wrong return type rather than as a missing value.  The
+// two arms below are exhaustive and mutually exclusive, so nothing about
+// the author's intent is ambiguous — the form simply does not express it.
+//
+// Measured in `core/` on 2026-08-18: 46 functions open their body with a
+// gated block.  30 say `return` inside each arm and are correct; 12 relied
+// on the block's tail and returned `Unit`.  The remaining 4 are other
+// shapes — a gated `let` with a real tail below it, and a `-> !` body that
+// diverges.  The correct forms are pinned next door in
+// `cfg_block_return_yields_value.vr`.
+
+fn separator() -> Text {
+    @cfg(target_os = "windows")      { ";" }
+    @cfg(not(target_os = "windows")) { ":" }
+}
+
+fn main() {
+    print(separator());
+}

@@ -1,0 +1,54 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: types, codegen, cfg, conditional-compilation, platform
+// @expected-stdout: via_return=real via_if=real agree=true ok
+//
+// Pin — the two forms that DO let a per-platform choice be a function's
+// value, and the requirement that they agree.
+//
+//   * `return` inside each gated arm.  Keeps the one-block-per-platform
+//     shape, which is what the arms want when they are procedures — a
+//     syscall sequence, an `@asm` barrier, a handler install.
+//   * the predicate lifted into an `if` expression.  One exit, and the
+//     right choice when the arms differ only in a value.
+//
+// Both are checked here against the same predicate so neither can drift:
+// `agree` is an oracle built from the pair, so a regression in either form
+// flips it even if the other still answers.  The companion negative pin is
+// `cfg_block_is_not_a_function_value.vr`.
+//
+// The predicates mean the same thing on every target rather than passing
+// on one machine by luck: no machine is both x86_64 and aarch64, so the
+// first arm is dead everywhere and the second is live everywhere.  That
+// keeps the expected stdout fixed across hosts while still exercising a
+// real two-arm selection.
+//
+// `via_return` also pins that a dead arm is not merely skipped but
+// DROPPED: its body names `absent_on_every_target`, which is declared
+// nowhere in this file or the library.  If exclusion ever degrades into
+// "compiled but not run", this spec stops resolving rather than silently
+// keeping its answer.
+
+fn via_return() -> Text {
+    @cfg(all(target_arch = "x86_64", target_arch = "aarch64")) {
+        return absent_on_every_target();
+    }
+    @cfg(not(all(target_arch = "x86_64", target_arch = "aarch64"))) {
+        return "real";
+    }
+}
+
+fn via_if() -> Text {
+    if @cfg(not(all(target_arch = "x86_64", target_arch = "aarch64"))) {
+        "real"
+    } else {
+        "impossible"
+    }
+}
+
+fn main() {
+    let a: Text = via_return();
+    let b: Text = via_if();
+    print(f"via_return={a} via_if={b} agree={a == b} ok");
+}
