@@ -1648,11 +1648,18 @@ fn test_mismatched_delimiter_types() {
 
 #[test]
 fn test_double_operator_recovery() {
-    // `1 ++ 2` is valid Verum: it parses as `1 + (+2)` since Verum
-    // has no `++` increment operator — two consecutive `+` tokens
-    // are binary `+` followed by unary `+`. Test that this is
-    // accepted, not rejected.
-    assert_parses(
+    // `1 ++ 2` is REJECTED, and this test asserted the opposite.
+    //
+    // It read the text as `1 + (+2)` — binary plus, then unary plus.
+    // `grammar/verum.ebnf` has no unary `+` (`unary_op` is `! - ~ & *`),
+    // so that reading never had a grammar behind it, and the `++` token
+    // was removed from the language on 2026-08-08 (T0643) as an
+    // undocumented second spelling of `+`. Two `+` in a row now leave
+    // the second one without an operand.
+    //
+    // Twin of `test_error_recovery_invalid_expression` in
+    // integration.rs, which carried the same stale claim.
+    assert_fails(
         r#"
         fn main() {
             let x = 1 ++ 2;
