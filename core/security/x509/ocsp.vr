@@ -84,7 +84,7 @@ module core.security.x509.ocsp;
 
 mount core.*;
 mount core.collections.list.{List};
-mount core.encoding.der.{DerError, Time};
+mount core.encoding.der.{DerError, DerTime as Time};
 
 // =============================================================================
 // Top-level response status (RFC 6960 §4.2.1)

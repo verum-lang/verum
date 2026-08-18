@@ -45,9 +45,9 @@
 )
 module core.verify.codegen_soundness;
 
-mount super.vbc_lowering.{kernel_vbc_lowering_preserves_semantics};
-mount super.ssa_construction.{kernel_ssa_construction_preserves_semantics};
-mount super.register_allocation.{kernel_register_allocation_preserves_semantics};
-mount super.linear_scan_regalloc.{kernel_linear_scan_regalloc_preserves_semantics};
-mount super.llvm_emission.{kernel_llvm_emission_preserves_semantics};
-mount super.machine_code_emission.{kernel_machine_code_emission_preserves_semantics};
+mount .vbc_lowering.{kernel_vbc_lowering_preserves_semantics};
+mount .ssa_construction.{kernel_ssa_construction_preserves_semantics};
+mount .register_allocation.{kernel_register_allocation_preserves_semantics};
+mount .linear_scan_regalloc.{kernel_linear_scan_regalloc_preserves_semantics};
+mount .llvm_emission.{kernel_llvm_emission_preserves_semantics};
+mount .machine_code_emission.{kernel_machine_code_emission_preserves_semantics};

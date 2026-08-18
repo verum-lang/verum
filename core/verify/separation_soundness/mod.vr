@@ -33,4 +33,4 @@
 )
 module core.verify.separation_soundness;
 
-mount super.separation_logic_alignment.{kernel_separation_logic_alignment_is_sound};
+mount .separation_logic_alignment.{kernel_separation_logic_alignment_is_sound};

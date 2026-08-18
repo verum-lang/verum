@@ -173,7 +173,13 @@ public mount .fs.remove_dir_all;
 public mount .fs.read_dir;
 public mount .fs.remove_file;
 public mount .fs.rename;
-public mount .fs.copy;
+// `.buffer.copy` (a stream copy, `copy<R: Read, W: Write>`) and `.fs.copy`
+// (a file copy, `copy(from: &Path, to: &Path)`) are different functions, and
+// re-exporting both here made `core.io.copy` mean whichever the resolver
+// reached first.  The stream one keeps the bare name, matching the module it
+// belongs to; the file copy stays addressable as `core.io.fs.copy`.  Neither
+// had an in-tree consumer through `core.io`, so nothing moves under anyone.
+// (line kept as a comment rather than deleted so the pairing stays findable)
 public mount .fs.canonicalize;
 public mount .fs.temp_dir;
 public mount .fs.current_dir;

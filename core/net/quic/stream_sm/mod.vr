@@ -38,6 +38,6 @@ public module recv;
 public module flow_control;
 
 // Re-exports
-public mount .send.{SendStream, SendState, SendError};
-public mount .recv.{RecvStream, RecvState, RecvError};
+public mount .send.{SendStream, SendState, QuicSendError as SendError};
+public mount .recv.{RecvStream, RecvState, QuicRecvError as RecvError};
 public mount .flow_control.{ConnFlowControl};

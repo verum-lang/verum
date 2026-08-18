@@ -138,7 +138,18 @@ public mount .select.join3;
 public mount .select.join4;
 public mount .select.join_all;
 public mount .select.timeout;
-public mount .select.TimeoutError;
+// `select` and `timer` each declare a `TimeoutError`, and this module used
+// to re-export BOTH under that one name — line 181 carries timer's.  Two
+// different nominal types on one name in a module's public surface means a
+// consumer's `core.async.TimeoutError` binds to whichever the resolver
+// reaches first.  `select.vr:559` even documents the clash in a comment and
+// then aliases over it anyway.
+//
+// Exported under its real name instead.  `timer.TimeoutError` keeps the bare
+// name because that is the one consumers already mount
+// (core/net/weft/connection.vr:29), and `select`'s alias stays available
+// inside `core.async.select` for anyone addressing it by full path.
+public mount .select.SelectTimeoutError;
 public mount .select.try_first;
 public mount .select.yield_now;
 public mount .select.pending_forever;
@@ -175,7 +186,7 @@ public mount .intrinsics.async_sleep_ns;
 // From timer
 public mount .timer.Sleep;
 public mount .timer.SleepUntil;
-public mount .timer.Interval;
+public mount .timer.TimerInterval;
 public mount .timer.Delay;
 public mount .timer.Timeout;
 public mount .timer.TimeoutError;
@@ -201,8 +212,8 @@ public mount .nursery.with_nursery_timeout;
 public mount .broadcast.BroadcastSender;
 public mount .broadcast.BroadcastReceiver;
 public mount .broadcast.broadcast_channel;
-public mount .broadcast.SendError;
-public mount .broadcast.RecvError;
+public mount .broadcast.BroadcastSendError;
+public mount .broadcast.BroadcastRecvError;
 public mount .broadcast.TryRecvResult;
 
 // From stream (additional re-exports)
@@ -225,7 +236,7 @@ public mount .stream.StreamRepeat;
 public mount .stream.StreamRepeatN;
 public mount .stream.StreamFromFn;
 public mount .stream.StreamUnfold;
-public mount .stream.Interval;
+public mount .stream.StreamInterval;
 public mount .stream.Map;
 public mount .stream.Filter;
 public mount .stream.FilterMap;

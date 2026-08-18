@@ -212,7 +212,6 @@ public mount core.intrinsics.{
     shared_registry_global,
     middleware_chain_empty,
     single_thread_block_on,
-    RecoveryError,
 };
 
 // Stack / arena / pool allocators (always in scope — see the module

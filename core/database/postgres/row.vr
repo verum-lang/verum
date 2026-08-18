@@ -67,7 +67,7 @@ module core.database.postgres.row;
 mount core.*;
 mount core.base.{Result, Ok, Err, Maybe, Some, None, Text, Int, Bool};
 mount core.collections.list.{List};
-mount core.database.common.types.{WireValue, WvNull, WvPresent, WireFormat, WfText, WfBinary};
+mount core.database.common.types.{WireValue, WvNull, WvPresent, WireFormat, FmtText, FmtBinary};
 mount core.database.common.error.{
     DbError, DecodeFault, AdapterSpecific, AdapterId, AdPostgres,
 };
@@ -175,7 +175,7 @@ implement PgRow {
         match &self.values[col_idx] {
             WvNull => Result.Err(null_decode_failed(col_idx, name, "bool")),
             WvPresent { bytes, format } => match format {
-                WfText => {
+                FmtText => {
                     if bytes.len() == 1 {
                         match bytes[0] {
                             b't' => Result.Ok(true),
@@ -188,7 +188,7 @@ implement PgRow {
                             f"expected 1 byte for BOOL TEXT, got {bytes.len()}"))
                     }
                 }
-                WfBinary => {
+                FmtBinary => {
                     if bytes.len() == 1 {
                         Result.Ok(bytes[0] != 0)
                     } else {
@@ -246,8 +246,8 @@ implement PgRow {
         match &self.values[col_idx] {
             WvNull => Result.Err(null_decode_failed(col_idx, name, "bytea")),
             WvPresent { bytes, format } => match format {
-                WfBinary => Result.Ok(bytes.clone()),
-                WfText => decode_bytea_hex(bytes, col_idx, name),
+                FmtBinary => Result.Ok(bytes.clone()),
+                FmtText => decode_bytea_hex(bytes, col_idx, name),
             }
         }
     }
@@ -259,8 +259,8 @@ implement PgRow {
         match &self.values[col_idx] {
             WvNull => Result.Ok(Maybe.None),
             WvPresent { bytes, format } => match format {
-                WfBinary => Result.Ok(Maybe.Some(bytes.clone())),
-                WfText => decode_bytea_hex(bytes, col_idx, name).map(Some),
+                FmtBinary => Result.Ok(Maybe.Some(bytes.clone())),
+                FmtText => decode_bytea_hex(bytes, col_idx, name).map(Some),
             }
         }
     }
@@ -313,8 +313,8 @@ implement PgRow {
         match &self.values[col_idx] {
             WvNull => Result.Err(null_decode_failed(col_idx, name, "text[]")),
             WvPresent { bytes, format } => match format {
-                WfText   => parse_text_array_text(bytes, col_idx, name),
-                WfBinary => parse_text_array_binary(bytes, col_idx, name),
+                FmtText   => parse_text_array_text(bytes, col_idx, name),
+                FmtBinary => parse_text_array_binary(bytes, col_idx, name),
             }
         }
     }
@@ -428,14 +428,14 @@ fn decode_int_value(v: &WireValue, col_idx: Int, name: &Text, oid: Int) -> Resul
     match v {
         WvNull => Result.Err(null_decode_failed(col_idx, name, "int")),
         WvPresent { bytes, format } => match format {
-            WfText => match Text.from_bytes(bytes.as_slice()) {
+            FmtText => match Text.from_bytes(bytes.as_slice()) {
                 Result.Ok(t) => match t.parse_int() {
                     Result.Ok(n) => Result.Ok(n),
                     Result.Err(e) => Result.Err(text_decode_failed(col_idx, name, "int", f"parse: {e}")),
                 },
                 Result.Err(_) => Result.Err(text_decode_failed(col_idx, name, "int", "non-UTF-8 in INT TEXT".to_text())),
             },
-            WfBinary => decode_int_binary(bytes, col_idx, name, oid),
+            FmtBinary => decode_int_binary(bytes, col_idx, name, oid),
         }
     }
 }

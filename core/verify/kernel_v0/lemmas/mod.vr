@@ -54,8 +54,8 @@
 )
 module core.verify.kernel_v0.lemmas;
 
-mount super.beta.{church_rosser_confluence};
-mount super.subst.{subst_preserves_typing};
-mount super.cartesian.{cartesian_closure_for_pi};
-mount super.eta.{function_extensionality};
-mount super.sub.{cumulative_universe_inclusion};
+mount .beta.{church_rosser_confluence};
+mount .subst.{subst_preserves_typing};
+mount .cartesian.{cartesian_closure_for_pi};
+mount .eta.{function_extensionality};
+mount .sub.{cumulative_universe_inclusion};

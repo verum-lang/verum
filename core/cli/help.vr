@@ -312,6 +312,10 @@ fn format_arg_placeholder(a: &ArgSpec) -> Text {
         Arity.Unlimited => Text.from(f"[{p}]..."),
         Arity.Range(_, _) => Text.from(f"<{p}>..."),
         Arity.Exactly(_) => Text.from(f"<{p}>..."),
+        // `Exactly` had its catch-all and `AtMost` did not, so every arity
+        // other than `AtMost(1)` fell through: E0601, `AtMost(0)` not
+        // covered.  Optional-and-repeated mirrors the `Exactly(_)` arm.
+        Arity.AtMost(_) => Text.from(f"[{p}]..."),
     }
 }
 

@@ -453,14 +453,18 @@ implement Data {
                 Maybe.Some(next) => current = next,
                 Maybe.None => {
                     // Try array index
+                    // `Text.parse_int` returns `Result<Int, ParseError>`,
+                    // not `Maybe<Int>` — matching it with Maybe's
+                    // constructors covered neither `Ok` nor `Err`, which is
+                    // what E0601 was reporting.
                     match part.parse_int() {
-                        Maybe.Some(idx) => {
+                        Result.Ok(idx) => {
                             match current.at(idx) {
                                 Maybe.Some(next) => current = next,
                                 Maybe.None => return Maybe.None,
                             }
                         }
-                        Maybe.None => return Maybe.None,
+                        Result.Err(_) => return Maybe.None,
                     }
                 }
             }

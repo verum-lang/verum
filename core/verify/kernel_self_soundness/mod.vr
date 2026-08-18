@@ -44,7 +44,7 @@
 )
 module core.verify.kernel_self_soundness;
 
-mount super.predicative_reflection.{
+mount .predicative_reflection.{
     kernel_reflection_tower_base,
     kernel_reflection_tower_stable,
     kernel_reflection_tower_omega_bounded,

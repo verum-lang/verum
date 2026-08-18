@@ -49,34 +49,34 @@
 )
 module core.verify.kernel_v0;
 
-mount super.core_term.{CoreTerm, type_universe};
+mount .core_term.{CoreTerm, type_universe};
 // Context methods (extend / lookup / lookup_shifted / depth) live in the
 // `implement Context` block of `super.context`, accessed via UFCS once
 // `Context` is in scope.  No need to mount the methods separately.
-mount super.context.{Context, empty as context_empty};
-mount super.judgment.{Judgment, Derivation, DefinitionalEquality, term_of, type_of};
+mount .context.{Context, empty as context_empty};
+mount .judgment.{Judgment, Derivation, DefinitionalEquality, term_of, type_of};
 
 // 10 kernel rules (4 proved + 6 admitted with IOUs).
-mount super.rules.k_var.{introduce_var, k_var_sound};
-mount super.rules.k_univ.{introduce_univ, k_univ_sound};
-mount super.rules.k_fwax.{ForwardAxiomWitness, introduce_fwax, k_fwax_sound};
-mount super.rules.k_pos.{is_strictly_positive, occurs_in, introduce_pos, k_pos_sound};
-mount super.rules.k_pi_form.{introduce_pi_form, k_pi_form_sound};
-mount super.rules.k_lam_intro.{introduce_lam, k_lam_intro_sound};
-mount super.rules.k_app_elim.{introduce_app, k_app_elim_sound};
-mount super.rules.k_beta.{introduce_beta, k_beta_sound};
-mount super.rules.k_eta.{introduce_eta, k_eta_sound};
-mount super.rules.k_sub.{introduce_sub, k_sub_sound};
+mount .rules.k_var.{introduce_var, k_var_sound};
+mount .rules.k_univ.{introduce_univ, k_univ_sound};
+mount .rules.k_fwax.{ForwardAxiomWitness, introduce_fwax, k_fwax_sound};
+mount .rules.k_pos.{is_strictly_positive, occurs_in, introduce_pos, k_pos_sound};
+mount .rules.k_pi_form.{introduce_pi_form, k_pi_form_sound};
+mount .rules.k_lam_intro.{introduce_lam, k_lam_intro_sound};
+mount .rules.k_app_elim.{introduce_app, k_app_elim_sound};
+mount .rules.k_beta.{introduce_beta, k_beta_sound};
+mount .rules.k_eta.{introduce_eta, k_eta_sound};
+mount .rules.k_sub.{introduce_sub, k_sub_sound};
 
 // Master soundness theorem + audit roster.
-mount super.soundness.{LemmaStatus, RuleSoundnessRecord, kernel_soundness, soundness_roster};
+mount .soundness.{LemmaStatus, RuleSoundnessRecord, kernel_soundness, soundness_roster};
 
 // IOU discharge stubs — each cites a vetted upstream proof from
 // mathlib4 / Coq stdlib / ZFC. The 6 admitted rules' soundness
 // lemmas are discharged via these citations (Phase-1 framework
 // elimination — #155).
-mount super.lemmas.beta.{church_rosser_confluence};
-mount super.lemmas.subst.{subst_preserves_typing};
-mount super.lemmas.cartesian.{cartesian_closure_for_pi};
-mount super.lemmas.eta.{function_extensionality};
-mount super.lemmas.sub.{cumulative_universe_inclusion};
+mount .lemmas.beta.{church_rosser_confluence};
+mount .lemmas.subst.{subst_preserves_typing};
+mount .lemmas.cartesian.{cartesian_closure_for_pi};
+mount .lemmas.eta.{function_extensionality};
+mount .lemmas.sub.{cumulative_universe_inclusion};

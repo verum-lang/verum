@@ -68,7 +68,7 @@ mount super.types.{
     Foundation,
     MsfsStratum,
 };
-mount super.anti_patterns.{
+mount .anti_patterns.{
     AntiPatternCode,
     Severity,
     AntiPatternViolation,
@@ -100,7 +100,7 @@ mount super.anti_patterns.{
     kernel_arch_anchoring_overextension_check,
     kernel_arch_self_reference_check,
 };
-mount super.composition.{
+mount .composition.{
     CompositionResult,
     composition_result_is_composed,
     composition_result_tag,
@@ -108,7 +108,7 @@ mount super.composition.{
     kernel_arch_composition_engine,
     kernel_arch_composition_associative,
 };
-mount super.corpus.{
+mount .corpus.{
     CorpusInvariant,
     CorpusViolation,
     CorpusReport,
@@ -120,7 +120,7 @@ mount super.corpus.{
     corpus_report_is_load_bearing,
     kernel_arch_corpus_verify,
 };
-mount super.phase.{
+mount .phase.{
     ModuleArchResult,
     ArchPhaseReport,
     CompositionStep,
@@ -134,13 +134,13 @@ mount super.phase.{
     composition_verification_is_load_bearing,
     kernel_arch_phase_orchestrator,
 };
-mount super.parse.{
+mount .parse.{
     ArchParseError,
     arch_parse_error_tag,
     arch_module_canonical_fields,
     arch_module_field_count_invariant,
 };
-mount super.mtac.{
+mount .mtac.{
     TimePoint,
     Decision,
     DecisionOption,
@@ -168,7 +168,7 @@ mount super.mtac.{
     adjunction_mirror_symmetry,
     kernel_arch_mtac_calculus,
 };
-mount super.counterfactual.{
+mount .counterfactual.{
     ArchMetric,
     MetricValue,
     InvariantStatus,
@@ -185,7 +185,7 @@ mount super.counterfactual.{
     empty_invariants_unstable_pin,
     kernel_arch_counterfactual_engine,
 };
-mount super.adjunction.{
+mount .adjunction.{
     CanonicalAdjunction,
     RefactoringDirection,
     Refactoring,
@@ -206,7 +206,7 @@ mount super.adjunction.{
     empty_chain_rejected_pin,
     kernel_arch_adjunction_analyzer,
 };
-mount super.yoneda.{
+mount .yoneda.{
     ShapeObservation,
     AgreementStatus,
     ObserverAgreement,

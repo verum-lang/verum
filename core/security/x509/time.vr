@@ -34,7 +34,7 @@
 module core.security.x509.time;
 
 mount core.*;
-mount core.encoding.der.{Time};
+mount core.encoding.der.{DerTime as Time};
 mount core.time.instant.{Instant};
 
 // =============================================================================

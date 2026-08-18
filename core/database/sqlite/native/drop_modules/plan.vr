@@ -14,9 +14,7 @@ module core.database.sqlite.native.drop_modules.plan;
 mount core.*;
 mount base.{Text};
 mount collections.List;
-mount core.database.sqlite.native.drop_modules.keep_list.{
-    KeepList, contains,
-};
+mount core.database.sqlite.native.drop_modules.keep_list.{KeepList};
 
 public type DropPlan is {
     /// Names that WILL be dropped (registry \ keep).
@@ -30,8 +28,10 @@ public fn build_plan(registry: &List<Text>, keep: &KeepList) -> DropPlan {
     let mut to_keep: List<Text> = List.new();
     let mut i: Int = 0;
     while i < registry.len() {
-        let name = registry.get(i);
-        if contains(keep, name) {
+        // `get` returns the element BY VALUE as `Maybe<T>`; the loop is
+        // bounded by `registry.len()`, so the index is in range.
+        let name = registry.get(i).unwrap();
+        if keep.contains(&name) {
             to_keep.push(name.clone());
         } else {
             to_drop.push(name.clone());

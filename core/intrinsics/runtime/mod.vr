@@ -38,44 +38,44 @@
 module core.intrinsics.runtime;
 
 /// Async runtime intrinsics: spawn, executor, futures
-public mount async_ops.*;
+public mount .async_ops.*;
 
 /// Thread-local storage intrinsics
-public mount tls.*;
+public mount .tls.*;
 
 /// Direct syscall interface
-public mount syscall.*;
+public mount .syscall.*;
 
 /// CBGR memory safety validation
-public mount cbgr.*;
+public mount .cbgr.*;
 
 /// High-resolution timing (OS-dependent)
-public mount time.*;
+public mount .time.*;
 
 /// Synchronization primitives
-public mount sync.*;
+public mount .sync.*;
 
 /// Text/string operations (allocation-dependent)
-public mount text.*;
+public mount .text.*;
 
 /// VBC tier management
-public mount tier.*;
+public mount .tier.*;
 
 /// OS kernel-boundary intrinsics — file I/O, networking, time, raw
 /// allocation, process spawn, context system, defer, args, concurrency
 /// primitives.  Migrated from `core/sys/raw.vr` (#61 Phase 1.1).
-public mount os.*;
+public mount .os.*;
 
 /// I/O engine + socket-option + async I/O intrinsics — kqueue/epoll/IOCP
 /// readiness multiplexer, setsockopt helpers, async_accept/read/write.
 /// Migrated from `core/io/engine.vr` (#63 Phase 1.3).
-public mount io.*;
+public mount .io.*;
 
 /// Raw memory operations — `Int`-pointer API for memcpy/memmove/memset/
 /// memcmp/strlen/strcmp + scalar load/store (i32/i64/byte).  Migrated
 /// from `core/mem/raw_ops.vr` (#64 Phase 1.4).
-public mount mem_raw.*;
+public mount .mem_raw.*;
 
 /// Embedded scripting engine — compile + run Verum scripts at runtime on the
 /// VBC interpreter.  Backs the ergonomic `core.script` API.
-public mount scripting.*;
+public mount .scripting.*;

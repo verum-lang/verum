@@ -76,7 +76,7 @@ mount core.async.cancellation.{CancellationToken};
 mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
 mount core.time.{Instant};
 mount core.net.http2.{
-    PREFACE, FrameHeader, FrameType, FrameFlags, Frame,
+    PREFACE, FrameHeader, FrameType, FrameFlags, Http2Frame as Frame,
     Settings, SettingId, ErrorCode, Http2Error,
     HpackEncoder, HpackDecoder, HeaderField,
     FRAME_HEADER_SIZE, MAX_FRAME_SIZE_INITIAL,

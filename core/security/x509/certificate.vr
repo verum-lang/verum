@@ -64,7 +64,7 @@ module core.security.x509.certificate;
 
 mount core.*;
 mount core.collections.list.{List};
-mount core.encoding.der.{DerReader, DerError, DerErrorKind, Time, TagClass};
+mount core.encoding.der.{DerReader, DerError, DerErrorKind, DerTime as Time, TagClass};
 mount core.encoding.der as der;
 mount core.security.x509.algorithm.{
     SignatureAlg, RsaPssParams, RsaPssHash, parse_signature_alg,
