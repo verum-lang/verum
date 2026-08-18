@@ -375,7 +375,7 @@ implement Add for TokenStream {
 
 // Implement Debug
 implement Debug for TokenStream {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn fmt_debug(&self, f: &mut Formatter) -> FmtResult {
         f.write_str("TokenStream(")?;
         for (i, tree) in self.tokens.iter().enumerate() {
             if i > 0 { f.write_str(" ")?; }

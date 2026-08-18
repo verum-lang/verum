@@ -17,9 +17,15 @@ So a bound `T: P` promises a method the type does not have, and the E405
 that catches the same mistake when the implementation is ABSENT is silenced
 by writing an empty one.
 
-Four of the twelve instances this gate ratchets are `Debug` implementations
-that provide `fmt` where core/base/protocols.vr:303 requires `fmt_debug`.
-Debug-formatting those types panics rather than failing to compile.
+The four `Debug` implementations that provided `fmt` where
+core/base/protocols.vr:303 requires `fmt_debug` are FIXED — Data, MetaSpan,
+SourceLocation and TokenStream. `Display` requires `fmt` and `Debug`
+requires `fmt_debug`, and the four had simply taken the other protocol's
+method name; the same files carry correct examples of both.
+
+The eight that remain are empty marker implementations in the
+category-theory modules, whose comments assert the laws hold by
+construction — which the protocol does not say.
 
 WHAT COUNTS AS REQUIRED
 -----------------------
@@ -73,7 +79,7 @@ SIG_ANY = re.compile(
     r"(?:(?:public|pub)\s+)?(?:async\s+|unsafe\s+|pure\s+)*\bfn\s+(\w+)\s*[<(]"
 )
 
-BASELINE = 12
+BASELINE = 8
 
 
 def shown_path(path: Path) -> str:

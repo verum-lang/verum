@@ -734,7 +734,7 @@ implement Index<Int> for Data {
 // =============================================================================
 
 implement Debug for Data {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write(self.to_json())
     }
 }

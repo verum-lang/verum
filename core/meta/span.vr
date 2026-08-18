@@ -271,7 +271,7 @@ implement Ord for MetaSpan {
 
 // Implement Debug
 implement Debug for MetaSpan {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn fmt_debug(&self, f: &mut Formatter) -> FmtResult {
         match self.location() {
             Maybe.Some(loc) => f.write_str(f"{loc.file}:{loc.line}:{loc.column}"),
             Maybe.None => f.write_str("<synthetic>"),
@@ -314,7 +314,7 @@ implement SourceLocation {
 }
 
 implement Debug for SourceLocation {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn fmt_debug(&self, f: &mut Formatter) -> FmtResult {
         f.write_str(self.display())
     }
 }
