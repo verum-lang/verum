@@ -361,12 +361,16 @@ bitwise_op      = '&' | '|' | '^' | '<<' | '>>' | '~' ;
 assign_op       = '=' | '+=' | '-=' | '*=' | '/=' | '%='
                 | '&=' | '|=' | '^=' | '<<=' | '>>=' ;
 range_op        = '..' | '..=' ;
-(* Concatenation. DECISION (grammar-audit 2026-08-01): `++` has been the
-   live List/Text concatenation operator in the parser since early
-   development (additive precedence, left-assoc) while carrying zero
-   grammar presence — the audit's canonical drift class. It is hereby
-   SPECIFIED rather than removed: stdlib and proofs use it widely.     *)
-concat_op       = '++' ;
+(* Concatenation. The 2026-08-01 audit specified `++` here rather than
+   removing it, on the premise that "stdlib and proofs use it widely".
+   The premise was false — `core/` used it zero times — and the language
+   decision of 2026-08-08 REMOVED the operator: it was a second spelling
+   of `+`, mapped to `BinOpKey::Add` by the type system and rendered as
+   `+` by refinement. The lexer no longer has the token, so `1 ++ 2`
+   lexes as `+` `+` and fails to parse (there is no unary `+` here).
+   This production outlived that decision by ten days; a grammar that
+   still names a removed operator is a source of truth pointing at
+   nothing.                                                            *)
 pipe_op         = '|>' ;
 compose_op      = '>>' | '<<' ;
 arrow_op        = '->' | '=>' ;
