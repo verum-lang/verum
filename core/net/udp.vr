@@ -386,12 +386,12 @@ implement UdpSocket {
         while pi < addr_n { sa[pi] = addr_bytes[pi]; pi = pi + 1; }
 
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            sendto(self.fd, buf, 0, &sa[0] as &unsafe Byte, addr_n as Int)
-                .map_err(|e| IoError.from_os(e))
+            return sendto(self.fd, buf, 0, &sa[0] as &unsafe Byte, addr_n as Int)
+                .map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            sys_sendto(self.fd, buf, 0, &sa[0] as &unsafe Byte, addr_n as Int)
-                .map_err(|e| IoError.from_os(e))
+            return sys_sendto(self.fd, buf, 0, &sa[0] as &unsafe Byte, addr_n as Int)
+                .map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -711,12 +711,12 @@ implement UdpSocket {
         let iface = ((ia as UInt32) << 24) | ((ib as UInt32) << 16) | ((ic as UInt32) << 8) | (id as UInt32);
 
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            join_multicast_v4(self.fd, mcast.to_be(), iface.to_be())
-                .map_err(|e| IoError.from_os(e))
+            return join_multicast_v4(self.fd, mcast.to_be(), iface.to_be())
+                .map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_join_multicast_v4(self.fd, mcast.to_be(), iface.to_be())
-                .map_err(|e| IoError.from_os(e))
+            return safe_join_multicast_v4(self.fd, mcast.to_be(), iface.to_be())
+                .map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -729,12 +729,12 @@ implement UdpSocket {
         let iface = ((ia as UInt32) << 24) | ((ib as UInt32) << 16) | ((ic as UInt32) << 8) | (id as UInt32);
 
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            leave_multicast_v4(self.fd, mcast.to_be(), iface.to_be())
-                .map_err(|e| IoError.from_os(e))
+            return leave_multicast_v4(self.fd, mcast.to_be(), iface.to_be())
+                .map_err(|e| IoError.from_os(e));
         }
         @cfg(target_os = "macos") {
-            safe_leave_multicast_v4(self.fd, mcast.to_be(), iface.to_be())
-                .map_err(|e| IoError.from_os(e))
+            return safe_leave_multicast_v4(self.fd, mcast.to_be(), iface.to_be())
+                .map_err(|e| IoError.from_os(e));
         }
     }
 

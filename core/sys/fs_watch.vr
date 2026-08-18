@@ -77,24 +77,24 @@ implement FsWatcher {
     public fn new() -> Result<FsWatcher, Text> {
         @cfg(target_os = "macos")
         {
-            match KqueueBackend.new() {
+            return match KqueueBackend.new() {
                 Result.Ok(b)  => Result.Ok(FsWatcher { inner: FsWatcherImpl.Kqueue(b) }),
                 Result.Err(e) => Result.Err(e),
-            }
+            };
         }
         @cfg(target_os = "linux")
         {
-            match InotifyBackend.new() {
+            return match InotifyBackend.new() {
                 Result.Ok(b)  => Result.Ok(FsWatcher { inner: FsWatcherImpl.Inotify(b) }),
                 Result.Err(e) => Result.Err(e),
-            }
+            };
         }
         @cfg(target_os = "windows")
         {
-            match RdcwBackend.new() {
+            return match RdcwBackend.new() {
                 Result.Ok(b)  => Result.Ok(FsWatcher { inner: FsWatcherImpl.Rdcw(b) }),
                 Result.Err(e) => Result.Err(e),
-            }
+            };
         }
     }
 

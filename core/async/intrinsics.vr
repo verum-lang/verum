@@ -67,26 +67,26 @@ implement ExecutorHandle {
         // by the Runtime.block_on() method.
         @cfg(target_os = "linux")
         {
-            match sys.linux.tls.ctx_get(0) {
+            return match sys.linux.tls.ctx_get(0) {
                 Maybe.Some(ptr) => Maybe.Some(ExecutorHandle { handle: ptr as Int }),
                 Maybe.None => Maybe.None,
-            }
+            };
         }
 
         @cfg(target_os = "macos")
         {
-            match sys.darwin.tls.ctx_get(0) {
+            return match sys.darwin.tls.ctx_get(0) {
                 Maybe.Some(ptr) => Maybe.Some(ExecutorHandle { handle: ptr as Int }),
                 Maybe.None => Maybe.None,
-            }
+            };
         }
 
         @cfg(target_os = "windows")
         {
-            match sys.windows.tls.ctx_get(0) {
+            return match sys.windows.tls.ctx_get(0) {
                 Maybe.Some(ptr) => Maybe.Some(ExecutorHandle { handle: ptr as Int }),
                 Maybe.None => Maybe.None,
-            }
+            };
         }
     }
 

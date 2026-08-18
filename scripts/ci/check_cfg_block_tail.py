@@ -62,7 +62,7 @@ FN = re.compile(
     r"[^;{]*->\s*([^{]+?)\s*\{\s*$"
 )
 
-BASELINE = 16
+BASELINE = 0
 
 
 def shown_path(path: Path) -> str:
@@ -94,6 +94,24 @@ def block_end(lines: list[str], start: int) -> int | None:
     return None
 
 
+def _opens_block(lines: list[str], k: int) -> bool:
+    """Does the `@cfg(...)` at line `k` introduce a BLOCK?
+
+    Two spellings in core/: `@cfg(x) {` on one line, and `@cfg(x)`
+    followed by a line that is just `{`.  Anything else — `const`,
+    `let`, `fn`, `type`, `mount` — is the attribute form.
+    """
+    after = lines[k].split(")", 1)[-1].strip()
+    if after.startswith("{"):
+        return True
+    for nxt in lines[k + 1:]:
+        t = nxt.strip()
+        if not t or t.startswith("//"):
+            continue
+        return t.startswith("{")
+    return False
+
+
 def offenders(lines: list[str]) -> list[tuple[int, str, str]]:
     found = []
     for i, line in enumerate(lines):
@@ -103,7 +121,18 @@ def offenders(lines: list[str]) -> list[tuple[int, str, str]]:
         end = block_end(lines, i)
         if end is None:
             continue
-        gated = [k for k in range(i + 1, end) if lines[k].lstrip().startswith("@cfg(")]
+        # A gated BLOCK, not a gated declaration.  `@cfg(...)` also
+        # attributes a `const` / `let` / `fn`, and those produce a value
+        # the normal way — the function below them can end in an
+        # ordinary tail expression and be perfectly total.  Counting
+        # them made `UdpSocket.try_clone` a finding: its last `@cfg`
+        # attributes a `let`, `block_end` then walked on to the `{` of
+        # the `Result.Ok(UdpSocket { … })` tail, and the tail-after-block
+        # test found nothing after it because that WAS the tail.
+        gated = [
+            k for k in range(i + 1, end)
+            if lines[k].lstrip().startswith("@cfg(") and _opens_block(lines, k)
+        ]
         if not gated:
             continue
         last_close = block_end(lines, gated[-1])

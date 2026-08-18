@@ -466,7 +466,7 @@ public fn os_alloc(size: Int, alignment: Int) -> Maybe<&unsafe Byte> {
 
         // Align pointer if needed
         let aligned_ptr = align_pointer(ptr, alignment);
-        Maybe.Some(aligned_ptr)
+        return Maybe.Some(aligned_ptr);
     }
 
     @cfg(target_os = "macos")
@@ -484,13 +484,13 @@ public fn os_alloc(size: Int, alignment: Int) -> Maybe<&unsafe Byte> {
         );
 
         // Use match to extract the value directly
-        match result {
+        return match result {
             Result.Ok(ptr) => {
                 let aligned_ptr = align_pointer(ptr, alignment);
                 Maybe.Some(aligned_ptr)
             }
             Result.Err(_) => Maybe.None,
-        }
+        };
     }
 
     @cfg(target_os = "windows")
@@ -507,7 +507,7 @@ public fn os_alloc(size: Int, alignment: Int) -> Maybe<&unsafe Byte> {
         }
 
         let aligned_ptr = align_pointer(ptr, alignment);
-        Maybe.Some(aligned_ptr)
+        return Maybe.Some(aligned_ptr);
     }
 }
 

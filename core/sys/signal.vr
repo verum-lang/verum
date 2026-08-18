@@ -187,7 +187,7 @@ implement Signal {
     public fn to_raw(&self) -> Int {
         @cfg(any(target_os = "linux", target_os = "macos"))
         {
-            match self {
+            return match self {
                 Signal.Hup    => 1,
                 Signal.Int    => 2,
                 Signal.Quit   => 3,
@@ -224,18 +224,18 @@ implement Signal {
                     @cfg(target_os = "macos") { return 18; }
                 },
                 Signal.Winch  => 28,
-            }
+            };
         }
 
         @cfg(target_os = "windows")
         {
             // Windows maps to console control events
-            match self {
+            return match self {
                 Signal.Int   => 0,  // CTRL_C_EVENT
                 Signal.Term  => 2,  // CTRL_CLOSE_EVENT
                 Signal.Abort => 6,  // Same as Unix for consistency
                 _            => -1, // Unsupported on Windows
-            }
+            };
         }
     }
 
@@ -243,7 +243,7 @@ implement Signal {
     public fn from_raw(signum: Int) -> Maybe<Signal> {
         @cfg(any(target_os = "linux", target_os = "macos"))
         {
-            match signum {
+            return match signum {
                 1  => Maybe.Some(Signal.Hup),
                 2  => Maybe.Some(Signal.Int),
                 3  => Maybe.Some(Signal.Quit),
@@ -257,16 +257,16 @@ implement Signal {
                 15 => Maybe.Some(Signal.Term),
                 28 => Maybe.Some(Signal.Winch),
                 _  => Maybe.None,
-            }
+            };
         }
 
         @cfg(target_os = "windows")
         {
-            match signum {
+            return match signum {
                 0 => Maybe.Some(Signal.Int),
                 2 => Maybe.Some(Signal.Term),
                 _ => Maybe.None,
-            }
+            };
         }
     }
 
