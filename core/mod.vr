@@ -562,7 +562,24 @@ public module prelude {
     public mount super.base.protocols.*;
     public mount super.base.ops.*;
     public mount super.base.error.*;
-    public mount super.base.iterator.*;
+    // ITERATOR — the model, not its 47 adapter types.
+    //
+    // `super.base.iterator.*` published `MappedIter`, `FilterIter`,
+    // `ZipIter`, `WindowsIter` and 43 more into every program. None of
+    // them is a name the LANGUAGE requires in scope: they are what
+    // `.map(…)` and `.filter(…)` RETURN, and a program that never
+    // annotates one never says them. The inclusion law above asks for
+    // the model — the protocols the checker names, the range types the
+    // grammar builds for `a..b`, and the constructors that start an
+    // iteration.
+    public mount super.base.iterator.{
+        Iterator, DoubleEndedIterator, ExactSizeIterator,
+        FusedIterator, IntoIterator,
+        Range, RangeInclusive,
+        range, range_inclusive, count_from, repeat, repeat_n, once,
+        empty, repeat_with, once_with, from_fn, unfold, successors,
+        unzip,
+    };
     public mount super.base.panic.*;
     public mount super.base.memory.*;
     public mount super.base.cell.*;
