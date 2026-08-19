@@ -104,6 +104,32 @@ private. That is the signature of a contract with no owner.
 * Probe: seven forms, expected `0 1` / `0 2` / `0 3` / `3 4` / `0 5` /
   `0 7` / `4`.
 
+## 4b. Tier coherence
+
+The contract is one contract, so both tiers must answer alike. Tier-1
+decides by the register's STATIC type and allocation size, which is the
+same information the interpreter reads from the object header:
+
+* `Shared<T>` returns the same carrier — a memcpy would fork the cell.
+* A `List` object copies through the list-clone helper, and only where
+  the size is statically known: that is the path a flat memcpy of the
+  three header slots would otherwise have taken, sharing the backing
+  store.
+* Anything else with a known size gets `malloc` + `memcpy`.
+
+Two facts have to survive for that to work, and neither did:
+
+1. `New` recorded the allocation size BEFORE `set_register`, which
+   clears it. The mechanism was inert from the day it landed.
+2. `propagate_value_type_facts` — "ONE authority for copying every
+   value-describing register fact" — carried the type name but not the
+   size, so a binding's `Mov` dropped it anyway.
+
+`VERUM_AOT_CLONE_COPY=0` restores the historic aliasing behaviour, and
+`VERUM_TRACE_CLONE=1` prints what each lowering site knows about the
+register it is copying. Both exist so a Tier-1 failure can be
+ATTRIBUTED rather than guessed at.
+
 ## 5. Forbidden patterns
 
 * A second implementation of "what does copying mean". Route through
