@@ -1964,6 +1964,84 @@ impl<'s> CompilationPipeline<'s> {
     /// * `later_modules` - Set of module names that will be compiled AFTER this module.
     ///  Used for forward reference detection to suppress warnings for cross-module
     ///  function calls that will be resolved later in the compilation sequence.
+    /// Runs the user pipeline's VALIDATION phases over the stdlib's own
+    /// files (T0692).
+    ///
+    /// A user compile validates contexts, FFI boundaries, Send/Sync and
+    /// the safety gate. The bake ran NONE of them — measured in T0640,
+    /// which counted zero calls to each from the bake path — so the
+    /// standard library was never held to rules the language enforces
+    /// on everyone else. That is not a small asymmetry: `core/` is the
+    /// largest body of Verum in existence and the one every program
+    /// links.
+    ///
+    /// These four are pure AST walks whose findings are warnings, so
+    /// running them is measurement first and enforcement later. The
+    /// safety gate can FAIL a build, and is therefore reported here
+    /// rather than propagated: a bake that stops because the library
+    /// trips a gate nobody has ever run over it would be a regression
+    /// in the tool, not a finding about the library. Turning that
+    /// report into a hard failure is the next step, once the count is
+    /// known and driven to zero.
+    ///
+    /// FIRST MEASUREMENT (2026-08-19, full bake): 590 modules, 2558
+    /// files, zero findings — no FFI-boundary errors, no safety-gate
+    /// rejections, no context or Send/Sync diagnostics.
+    ///
+    /// What that zero does and does not mean, stated because a silent
+    /// pass and an unrun phase look identical:
+    ///
+    /// * context validation and Send/Sync DO run on the default
+    ///   configuration (`[context] enabled = true`), so their zero is
+    ///   evidence.
+    /// * `phase_safety_gate` returns early when every `[safety]` flag
+    ///   is permissive, which is the default. Its zero says the
+    ///   library trips nothing under the shipped policy, NOT that it
+    ///   would survive a strict one — measuring that needs a bake with
+    ///   the flags raised, and is the next step.
+    ///
+    /// `VERUM_BAKE_VALIDATION=off` skips them; `=report` prints the
+    /// per-module counts the numbers above come from.
+    fn run_user_validation_phases(&mut self, ast_modules: &[&verum_ast::Module]) {
+        if std::env::var("VERUM_BAKE_VALIDATION").as_deref() == Ok("off") {
+            return;
+        }
+        let mut ffi_failures = 0usize;
+        let mut safety_failures = 0usize;
+        // Context and Send/Sync validation report through the session
+        // rather than a return value, so counting only the two Results
+        // would have reported a clean library while saying nothing
+        // about two of the four phases.
+        let errors_before = self.session.error_count();
+        for ast_module in ast_modules {
+            self.phase_context_validation(ast_module);
+            self.phase_send_sync_validation(ast_module);
+            if let Err(e) = self.phase_ffi_validation(ast_module) {
+                ffi_failures += 1;
+                tracing::warn!("stdlib FFI validation: {}", e);
+            }
+            if let Err(e) = self.phase_safety_gate(ast_module) {
+                safety_failures += 1;
+                tracing::warn!("stdlib safety gate: {}", e);
+            }
+        }
+        // A silent pass and an unrun phase look identical from the
+        // outside, and three defects on this task were found only
+        // because somebody checked which one they had. The report says
+        // how many files were actually walked, so "no findings" can be
+        // told apart from "no phases".
+        if std::env::var("VERUM_BAKE_VALIDATION").as_deref() == Ok("report") {
+            eprintln!(
+                "[bake-validation] files={} ffi_failures={} safety_failures={} \
+                 session_errors_added={}",
+                ast_modules.len(),
+                ffi_failures,
+                safety_failures,
+                self.session.error_count().saturating_sub(errors_before),
+            );
+        }
+    }
+
     fn compile_core_module_from_ast(
         &mut self,
         module: &StdlibModule,
@@ -2055,6 +2133,10 @@ impl<'s> CompilationPipeline<'s> {
         // and FFI struct-layout pre-generation. `check_bake_prepass_parity`
         // has listed both as GAPs since T0362/T0640.
         codegen.run_unit_declaration_prepasses(ast_modules);
+
+        // Pass 1a.7 (T0692): the VALIDATION phases a user compile runs
+        // and the bake does not.
+        self.run_user_validation_phases(ast_modules);
 
         // Pass 1b: Collect all other declarations from ALL files
         let lint_diagnostics = IntrinsicDiagnostics::new(&self.session.options().lint_config);
