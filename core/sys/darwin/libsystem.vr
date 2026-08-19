@@ -87,6 +87,16 @@ extern {
     /// generic-arg slot at the FFI boundary.
     fn fcntl(fd: Int32, cmd: Int32, arg: Int) -> Int32;
 
+    /// Advisory file lock. C: `int flock(int fd, int operation)` —
+    /// operation is LOCK_SH / LOCK_EX / LOCK_UN, optionally OR'd with
+    /// LOCK_NB. Returns 0 on success, -1 with errno set.
+    ///
+    /// Called by `core/shell/resources.vr`'s FileLock and never
+    /// declared: a call through a module path that names nothing
+    /// returns nil (T0806), so the lock silently did nothing and the
+    /// mutual exclusion it promises was not there.
+    fn flock(fd: Int32, operation: Int32) -> Int32;
+
     /// Synchronize file to disk. C: `int fsync(int fd)`. T0.4.2 fix.
     fn fsync(fd: Int32) -> Int32;
 

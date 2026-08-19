@@ -270,9 +270,30 @@ implement Drop for FileLock {
 }
 
 fn __platform_flock(fd: Int, op: Int) -> Int {
-    @cfg(any(target_os = "linux", target_os = "macos"))
+    // ONE ARM PER PLATFORM.  This used to be a single
+    // `any(linux, macos)` arm calling `core.sys.darwin.libsystem` — the
+    // DARWIN module — on Linux too, where libSystem does not exist. It
+    // survived because a call through a module path that names nothing
+    // returns nil rather than failing (T0806), so the lock quietly did
+    // nothing on both platforms: `flock` was not declared in libsystem
+    // either until this change.
+    @cfg(target_os = "macos")
     {
         return unsafe { core.sys.darwin.libsystem.flock(fd as Int32, op as Int32) as Int };
+    }
+
+    @cfg(target_os = "linux")
+    {
+        // `flock(2)`. Syscall number differs per arch, like the
+        // `sched_yield` pair in core/runtime/thread.vr.
+        @cfg(target_arch = "x86_64")
+        {
+            return unsafe { core.sys.linux.syscall.syscall_raw(73, fd, op, 0, 0, 0, 0) };
+        }
+        @cfg(target_arch = "aarch64")
+        {
+            return unsafe { core.sys.linux.syscall.syscall_raw(32, fd, op, 0, 0, 0, 0) };
+        }
     }
     @cfg(target_os = "windows")
     {
