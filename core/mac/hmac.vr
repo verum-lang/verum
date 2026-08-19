@@ -70,6 +70,9 @@ mount core.hash.crypto.sha512.{Sha512};
 mount core.hash.crypto.sha256;
 mount core.hash.crypto.sha384;
 mount core.hash.crypto.sha512;
+// Reached through ambient visibility rather than a request
+// until now (T0780 census).
+mount core.collections.list.{List};
 
 // =============================================================================
 // HMAC constants — RFC 2104

@@ -25,6 +25,11 @@
 // =============================================================================
 
 @derive(Clone)
+// `Hasher` and `Primitive` are declared in this module's sibling files
+// and were reaching this one through ambient visibility rather than a
+// request (T0780 census).
+mount core.action.{Hasher, Primitive};
+
 public type Articulation is {
     framework: Text,
     citation:  Text,

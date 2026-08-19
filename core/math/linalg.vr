@@ -44,6 +44,9 @@ mount core.base.coercion.{IntCoercible, TensorLike, Indexable};
 mount super.ieee754.{is_nan, copysign};
 mount super.elementary.{hypot};
 mount super.algebra.{Semiring, Ring, CommutativeRing, Field, StarRing, Normed, RealField};
+// Reached through ambient visibility rather than a request
+// until now (T0780 census).
+mount core.collections.list.{List};
 
 // =============================================================================
 // Scalar requirements — the algebra tower

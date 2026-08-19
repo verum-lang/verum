@@ -46,6 +46,9 @@ mount core.net.url.{Url, UrlError};
 mount core.net.h3.{H3Connection, H3Settings, H3Request, H3Response, H3Error, StreamWrite};
 mount core.net.h3.connection.{H3Role};
 mount core.security.x509.{TrustStore, TrustError};
+// Reached through ambient visibility rather than a request
+// until now (T0780 census).
+mount core.net.h3.{ReadBatch};
 
 // =============================================================================
 // Options
