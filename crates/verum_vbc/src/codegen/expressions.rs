@@ -27042,6 +27042,29 @@ impl VbcCodegen {
     /// For variable references, looks up the type name from `variable_type_names`.
     /// For inline record literals, extracts the type name directly.
     /// Used by `compile_binary` to set `protocol_id` in CmpG for custom Eq dispatch.
+    /// The nominal name of a primitive discriminator, or `None` when
+    /// the discriminator does not name a type (`Unknown`).
+    ///
+    /// `VarTypeKind` is what instruction selection reads; this is the
+    /// same fact spelled as the name the method tables are keyed by, so
+    /// `Int.cmp` / `Text.len` / `Float.abs` resolve for a receiver whose
+    /// only recorded type is its discriminator.
+    fn primitive_type_name(kind: crate::codegen::context::VarTypeKind) -> Option<&'static str> {
+        use crate::codegen::context::VarTypeKind as K;
+        Some(match kind {
+            K::Int => "Int",
+            K::Float => "Float",
+            K::Bool => "Bool",
+            K::Byte => "Byte",
+            K::Char => "Char",
+            K::Text => "Text",
+            K::Unit => "()",
+            K::Int32 => "Int32",
+            K::UInt64 => "UInt64",
+            K::Unknown => return None,
+        })
+    }
+
     pub fn infer_expr_type_name(&self, expr: &Expr) -> Option<String> {
         use verum_ast::expr::ExprKind;
         use verum_ast::ty::PathSegment;
@@ -27102,6 +27125,32 @@ impl VbcCodegen {
                                 self.ctx.variable_type_names.get(&*ident.name).cloned()
                             {
                                 return Some(n);
+                            }
+                            // A PRIMITIVE HAS A TYPE NAME TOO.
+                            //
+                            // `variable_type_names` only holds NOMINAL
+                            // names, so `let a: Int = 1` left this arm
+                            // answering None — and every consumer that
+                            // needs a receiver's type name gave up. The
+                            // visible cost: `f"{a.cmp(b)}"` could not
+                            // find `Int.cmp`, so it never learned the
+                            // result is an `Ordering`, so the f-string
+                            // fell through to the Debug-style formatter
+                            // and printed `Less` where the language's
+                            // own `implement Display for Ordering` says
+                            // `<`. With the annotation
+                            // (`let ord: Ordering = a.cmp(b)`) the same
+                            // program printed `<` — one program, one
+                            // type, two renderings.
+                            //
+                            // The discriminator the codegen already
+                            // keeps for instruction selection is
+                            // exactly this fact; it just was not being
+                            // spelled as a name.
+                            if let Some(n) =
+                                Self::primitive_type_name(self.ctx.get_variable_type(&ident.name))
+                            {
+                                return Some(n.to_string());
                             }
                             // Static-mut bindings carry their declared type in
                             // `static_mut_type_names` (populated at the

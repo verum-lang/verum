@@ -1,0 +1,75 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, display, format, dispatch
+// @timeout: 15000
+// @expected-exit: 0
+//
+// `{}` MEANS Display — for a primitive receiver too (T0692 blocker).
+//
+// `core/base/ordering.vr` declares `implement Display for Ordering`
+// rendering `<`, `=`, `>`. Whether an f-string honoured it used to
+// depend on whether the codegen happened to know the value's type NAME:
+//
+//     let ord: Ordering = a.cmp(b);   f"{ord}"  ->  "<"    (annotated)
+//     let ord = a.cmp(b);             f"{ord}"  ->  "Less" (inferred)
+//     f"{a.cmp(b)}"                             ->  "Less" (inline)
+//
+// One program, one type, two renderings — decided by whether the author
+// had written an annotation they did not otherwise need.
+//
+// The cause: a PRIMITIVE receiver had no type NAME. `Int` is tracked as
+// an instruction-selection discriminator, not as a nominal name, so
+// `a.cmp(b)` could not find `Int.cmp`, never learned its result is an
+// `Ordering`, and fell through to the Debug-style formatter that prints
+// variant names.
+//
+// SCOPE OF THIS SPEC. The `mount` below is load-bearing and says so:
+// the archive's symbol closure only carries `Ordering.fmt` when the
+// program names the type, because reachability is computed from the
+// source text before inference has run. With the name present, all
+// three spellings agree; without it, all three fall back TOGETHER —
+// which is still a strict improvement over the split this pins against,
+// but the closure gap is its own defect and belongs to T0692's
+// remainder.
+
+mount core.base.ordering.{Ordering};
+
+type Wrapped is { inner: Int };
+
+implement Display for Wrapped {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("W")
+    }
+}
+
+fn main() {
+    let a: Int = 1;
+    let b: Int = 2;
+
+    // The three spellings must agree — that is the whole rule.
+    let annotated: Ordering = a.cmp(b);
+    let inferred = a.cmp(b);
+    assert_eq(f"{annotated}", "<");
+    assert_eq(f"{inferred}", "<");
+    assert_eq(f"{a.cmp(b)}", "<");
+
+    // All three variants render through the impl, not just one.
+    assert_eq(f"{b.cmp(a)}", ">");
+    assert_eq(f"{a.cmp(a)}", "=");
+
+    // Another primitive receiver reaches the same impl. `Float` is
+    // deliberately absent here: it implements PartialOrd and NOT Ord,
+    // because NaN has no total order, so `Float.cmp` does not exist.
+    // (That the compiler currently ACCEPTS `f1.cmp(f2)` and returns a
+    // fallback is a separate defect — T0833.)
+    let t1: Text = "a";
+    let t2: Text = "b";
+    assert_eq(f"{t1.cmp(t2)}", "<");
+
+    // A user type's own Display is honoured the same way.
+    let w = Wrapped { inner: 7 };
+    assert_eq(f"{w}", "W");
+
+    print("display-is-what-brace-means ok");
+}
