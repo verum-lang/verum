@@ -2348,82 +2348,191 @@ pub(in super::super) fn handle_map_contains(
     }
 }
 
-/// Clone (0x78) - Clone a value (deep copy for heap objects).
+/// What it MEANS to copy a value — the single answer.
 ///
-/// For primitives and for pointers that do NOT point at a tracked heap
-/// object (e.g. raw buffers returned by the `alloc` intrinsic), this is a
-/// straight Value copy. Attempting to deep-copy a raw byte buffer would
-/// read the user's payload as an `ObjectHeader` and allocate a bogus
-/// replacement object from whatever bytes happen to be there — that was
-/// the root of the stdlib `Text { ptr, … }` literal producing a struct
-/// whose `ptr` field pointed to a freshly-allocated "Clone" of the raw
-/// buffer instead of the buffer itself.
+/// A program can ask for a copy two ways: the `Clone` opcode codegen
+/// emits for a value-semantic bind (`let b = a`), and the `.clone()`
+/// a program writes by hand. They used to be answered by two separate
+/// implementations, and each was wrong where the other was right —
+/// the opcode gave a record a fresh object but left a `List` sharing
+/// its backing store, while `.clone()` copied a `List`'s spine and
+/// handed a record straight back. Which spelling you used decided
+/// whether a later write stayed private. Both now route here.
+///
+/// The contract is ONE LEVEL DEEP, and that depth is not a compromise
+/// — it is the same ownership depth reading an element hands out. A
+/// copy owns its own object and its own backing store; the values
+/// inside are copied bit-wise, so a nested heap element stays shared
+/// exactly as `xs[0]` would have shared it.
+///
+/// Four kinds answer differently, each for a reason of its own:
+///
+/// * `Shared<T>` bumps its refcount and returns the SAME carrier
+///   (SHARED-CLONE-IDENTITY-1, T0107). Forking the cell would give
+///   the copy a private inner value, and every later write through
+///   it would be lost to the original.
+/// * Containers copy their SPINE — the header slots plus a fresh
+///   backing array (T0499). Copying only the header would leave two
+///   lists writing into one store.
+/// * `Text` and other immutable values return themselves. Sharing
+///   what cannot be written is unobservable, and a copy would be
+///   pure allocation.
+/// * A pointer that is not a tracked heap object — a raw buffer from
+///   `alloc`, a CBGR cell — returns itself. Its bytes are not an
+///   `ObjectHeader`, so reading one there would fabricate an object
+///   out of the user's payload.
+pub(crate) fn value_copy(
+    state: &mut InterpreterState,
+    value: Value,
+) -> InterpreterResult<Value> {
+    if !value.is_ptr() || value.is_nil() {
+        // Primitives are their own copy.
+        return Ok(value);
+    }
+    let src_ptr = value.as_ptr::<u8>();
+    if src_ptr.is_null() || !state.heap.contains(src_ptr as *const heap::ObjectHeader) {
+        // Raw buffer or foreign pointer — see the contract above.
+        return Ok(value);
+    }
+
+    // SAFETY: `contains` verified `src_ptr` is the head of a tracked
+    // heap object whose first `OBJECT_HEADER_SIZE` bytes are a real
+    // `ObjectHeader`.
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(src_ptr) };
+    let type_id = header.type_id;
+    let data_size = header.size as usize;
+
+    // A `Heap<T>` CBGR cell's out-of-bounds header can read as SHARED;
+    // the live-allocation membership test tells them apart.
+    let is_cbgr_cell = state.cbgr_allocations.contains(
+        &(src_ptr as usize)
+            .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize),
+    );
+    if is_cbgr_cell {
+        return Ok(value);
+    }
+
+    if type_id == TypeId::SHARED {
+        let rc_ptr = unsafe { src_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+        // SAFETY: slot 0 of a validated SHARED object is the refcount.
+        unsafe {
+            let refcount = (*rc_ptr).as_i64();
+            *rc_ptr = Value::from_i64(refcount + 1);
+        }
+        return Ok(value);
+    }
+
+    // Immutable values: sharing them is unobservable.
+    if type_id == TypeId::TEXT {
+        return Ok(value);
+    }
+
+    let slots = |i: usize| -> i64 {
+        // SAFETY: caller-verified tracked object; slot `i` is within
+        // the header slots each container layout declares below.
+        unsafe { (*((src_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value).add(i))).as_i64() }
+    };
+
+    match type_id {
+        // [len, cap, backing] — copy `len` live elements.
+        TypeId::LIST => {
+            let len = slots(0).max(0) as usize;
+            let cap = slots(1).max(len as i64).max(1) as usize;
+            copy_container_spine(state, src_ptr, TypeId::LIST, TypeId::LIST, 3, 2, cap, len)
+        }
+        // [count, cap, entries, tombstones] — `cap * 2` (key, value)
+        // slots whose hash POSITIONS must survive, so the whole region
+        // copies.
+        TypeId::MAP | TypeId::SET => {
+            let cap = slots(1).max(1) as usize;
+            copy_container_spine(state, src_ptr, type_id, TypeId::UNIT, 4, 2, cap * 2, cap * 2)
+        }
+        // [data, head, len, cap] — a ring; head/len index into the
+        // buffer, so the whole `cap` ring copies verbatim.
+        TypeId::DEQUE => {
+            let cap = slots(3).max(1) as usize;
+            copy_container_spine(state, src_ptr, TypeId::DEQUE, TypeId::UNIT, 4, 0, cap, cap)
+        }
+        // Records, variants, tuples: a fresh object carrying the same
+        // slots.
+        _ => {
+            let new_obj = state.heap.alloc(type_id, data_size)?;
+            state.record_allocation();
+            let src_data = unsafe { src_ptr.add(heap::OBJECT_HEADER_SIZE) };
+            let dst_data = new_obj.data_ptr();
+            // SAFETY: `data_size` bytes are the source object's own
+            // payload; the destination was allocated at that size.
+            unsafe {
+                std::ptr::copy_nonoverlapping(src_data, dst_data, data_size);
+            }
+            Ok(Value::from_ptr(new_obj.as_ptr() as *mut u8))
+        }
+    }
+}
+
+/// Copies a container's header slots and gives the copy a backing
+/// array of its own.
+///
+/// `header_slots` is the object's own slot count, `backing_slot` the
+/// slot holding the backing pointer, `backing_alloc` the element
+/// count to allocate and `copy_slots` the live prefix to copy — the
+/// tail is unit-filled so no uninitialized slot ever leaks stale heap
+/// bytes.
+pub(crate) fn copy_container_spine(
+    state: &mut InterpreterState,
+    src_obj: *const u8,
+    type_id: TypeId,
+    backing_type: TypeId,
+    header_slots: usize,
+    backing_slot: usize,
+    backing_alloc: usize,
+    copy_slots: usize,
+) -> InterpreterResult<Value> {
+    let src_data = unsafe { src_obj.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+    let obj = state
+        .heap
+        .alloc(type_id, header_slots * std::mem::size_of::<Value>())?;
+    state.record_allocation();
+    let new_data =
+        unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+    let backing = state.heap.alloc_array(backing_type, backing_alloc.max(1))?;
+    state.record_allocation();
+    // SAFETY: fresh allocations of the exact sizes above; the source is
+    // a validated container object; backing arrays are header-carrying
+    // heap arrays whose elements start at +OBJECT_HEADER_SIZE.
+    unsafe {
+        for i in 0..header_slots {
+            *new_data.add(i) = *src_data.add(i);
+        }
+        *new_data.add(backing_slot) = Value::from_ptr(backing.as_ptr() as *mut u8);
+        let src_backing = (*src_data.add(backing_slot)).as_ptr::<u8>();
+        let dst_elems =
+            (backing.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value;
+        if !src_backing.is_null() && copy_slots > 0 {
+            let src_elems = src_backing.add(heap::OBJECT_HEADER_SIZE) as *const Value;
+            std::ptr::copy_nonoverlapping(src_elems, dst_elems, copy_slots);
+        }
+        for i in copy_slots..backing_alloc.max(1) {
+            *dst_elems.add(i) = Value::unit();
+        }
+    }
+    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+}
+
+/// Clone (0x78) — codegen's value-semantic bind/move.
+///
+/// Emitted where a binding, a field initializer or an argument must
+/// take a value of its own rather than a second name for someone
+/// else's. What "a value of its own" means is `value_copy`'s to
+/// decide — this handler only names the registers.
 pub(in super::super) fn handle_clone(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let value = state.get_reg(src);
-
-    if value.is_ptr() && !value.is_nil() {
-        let src_ptr = value.as_ptr::<u8>();
-        if !src_ptr.is_null() && state.heap.contains(src_ptr as *const heap::ObjectHeader) {
-            // SAFETY: `contains` verified `src_ptr` is the head of a
-            // tracked heap object whose first `OBJECT_HEADER_SIZE` bytes
-            // are a real `ObjectHeader`.
-            let header = unsafe { heap::ObjectHeader::ref_or_stub(src_ptr) };
-            let type_id = header.type_id;
-            let data_size = header.size as usize;
-
-            // SHARED-CLONE-IDENTITY-1 (T0107): a `Shared<T>` carrier clones by
-            // refcount-bump + handle-copy — NEVER deep-copy.  `Instruction::Clone`
-            // (0x78) is codegen's value-semantic bind/move, emitted (among other
-            // sites) when a `Shared<T>` payload is extracted out of an enum
-            // variant; deep-copying the carrier forks the cell (fresh refcount +
-            // copied inner Value) so any later `&mut`-write or stateful hop
-            // through the clone is lost to the original — the root of the tracing
-            // `end() -> processor -> exporter` delivery drop.  Mirrors the
-            // `Shared.clone` method arm in `method_dispatch.rs` (repr
-            // `[ObjectHeader][refcount:i64 @ slot0][inner:Value @ slot1]`), and
-            // is the write-side twin of the GetF/SetF `shared_carrier_inner`
-            // auto-deref: one SHARED identity contract across read, write, clone.
-            // Guard against a `Heap<T>` CBGR cell whose out-of-bounds header may
-            // read as SHARED — the same live-allocation membership test the
-            // method-dispatch SHARED arm uses.
-            let is_cbgr_cell = state.cbgr_allocations.contains(
-                &(src_ptr as usize)
-                    .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize),
-            );
-            if !is_cbgr_cell && type_id == TypeId::SHARED {
-                let rc_ptr = unsafe { src_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                unsafe {
-                    let refcount = (*rc_ptr).as_i64();
-                    *rc_ptr = Value::from_i64(refcount + 1);
-                }
-                state.set_reg(dst, value); // handle-copy: same carrier pointer
-                return Ok(DispatchResult::Continue);
-            }
-
-            // Allocate a new object with same type and size
-            let new_obj = state.heap.alloc(type_id, data_size)?;
-            state.record_allocation();
-
-            // Copy the data portion (not the header — alloc already set up a fresh header)
-            let src_data = unsafe { src_ptr.add(heap::OBJECT_HEADER_SIZE) };
-            let dst_data = new_obj.data_ptr();
-            unsafe {
-                std::ptr::copy_nonoverlapping(src_data, dst_data, data_size);
-            }
-
-            state.set_reg(dst, Value::from_ptr(new_obj.as_ptr() as *mut u8));
-        } else {
-            // Raw pointer (opaque buffer) or null — just copy the pointer
-            state.set_reg(dst, value);
-        }
-    } else {
-        // Primitive value — just copy the NaN-boxed value
-        state.set_reg(dst, value);
-    }
+    let copy = value_copy(state, value)?;
+    state.set_reg(dst, copy);
     Ok(DispatchResult::Continue)
 }
 
@@ -2835,4 +2944,126 @@ pub(in super::super) fn handle_pop(
     let value = state.arg_stack.pop().unwrap_or_default();
     state.set_reg(dst, value);
     Ok(DispatchResult::Continue)
+}
+
+#[cfg(test)]
+mod value_copy_contract {
+    //! The copy contract, pinned at the one place that carries it.
+    //!
+    //! These four cases are the ones that used to be answered
+    //! differently depending on whether a program wrote `let b = a`
+    //! (the `Clone` opcode) or `a.clone()` (the method): each spelling
+    //! got one of them right and the other wrong.
+
+    use super::*;
+    use crate::module::VbcModule;
+    use std::sync::Arc;
+
+    fn state() -> InterpreterState {
+        InterpreterState::new(Arc::new(VbcModule::default()))
+    }
+
+    /// A record copy owns its own object: writing through the copy
+    /// leaves the source's slots alone.
+    #[test]
+    fn record_copy_is_a_separate_object() {
+        let mut st = state();
+        let obj = st
+            .heap
+            .alloc(TypeId(9001), std::mem::size_of::<Value>())
+            .expect("alloc");
+        let src = Value::from_ptr(obj.as_ptr() as *mut u8);
+        let slot = |v: Value| unsafe {
+            v.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE) as *mut Value
+        };
+        unsafe { *slot(src) = Value::from_i64(1) };
+
+        let copy = value_copy(&mut st, src).expect("copy");
+        assert_ne!(
+            copy.as_ptr::<u8>(),
+            src.as_ptr::<u8>(),
+            "a record copy must be its own object"
+        );
+        unsafe { *slot(copy) = Value::from_i64(2) };
+        assert_eq!(
+            unsafe { (*slot(src)).as_i64() },
+            1,
+            "writing through the copy must not reach the source"
+        );
+    }
+
+    /// A `Shared<T>` copy is the SAME carrier with one more owner —
+    /// forking it would lose every later write to the other handle.
+    #[test]
+    fn shared_copy_bumps_the_refcount_and_keeps_the_carrier() {
+        let mut st = state();
+        let obj = st
+            .heap
+            .alloc(TypeId::SHARED, 2 * std::mem::size_of::<Value>())
+            .expect("alloc");
+        let src = Value::from_ptr(obj.as_ptr() as *mut u8);
+        let rc = unsafe { src.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+        unsafe { *rc = Value::from_i64(1) };
+
+        let copy = value_copy(&mut st, src).expect("copy");
+        assert_eq!(
+            copy.as_ptr::<u8>(),
+            src.as_ptr::<u8>(),
+            "Shared must clone by handle, not by forking the cell"
+        );
+        assert_eq!(unsafe { (*rc).as_i64() }, 2, "the new owner must be counted");
+    }
+
+    /// A container copy gets a backing store of its own; copying only
+    /// the header would leave two lists writing into one array.
+    #[test]
+    fn list_copy_gets_its_own_backing_store() {
+        let mut st = state();
+        let backing = st.heap.alloc_array(TypeId::LIST, 4).expect("backing");
+        let obj = st
+            .heap
+            .alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())
+            .expect("alloc");
+        let src = Value::from_ptr(obj.as_ptr() as *mut u8);
+        let head = unsafe { src.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+        unsafe {
+            *head = Value::from_i64(2); // len
+            *head.add(1) = Value::from_i64(4); // cap
+            *head.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8);
+        }
+
+        let copy = value_copy(&mut st, src).expect("copy");
+        let copy_head =
+            unsafe { copy.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE) as *const Value };
+        assert_ne!(
+            unsafe { (*copy_head.add(2)).as_ptr::<u8>() },
+            backing.as_ptr() as *mut u8,
+            "a list copy must not share the source's backing store"
+        );
+        assert_eq!(
+            unsafe { (*copy_head).as_i64() },
+            2,
+            "the copy carries the source's length"
+        );
+    }
+
+    /// A pointer the heap does not know — a raw buffer from `alloc` —
+    /// is returned as itself: reading an `ObjectHeader` there would
+    /// fabricate an object out of the user's payload.
+    #[test]
+    fn untracked_pointer_copies_as_itself() {
+        let mut st = state();
+        let mut payload = [0u8; 32];
+        let raw = Value::from_ptr(payload.as_mut_ptr());
+        let copy = value_copy(&mut st, raw).expect("copy");
+        assert_eq!(copy.as_ptr::<u8>(), raw.as_ptr::<u8>());
+    }
+
+    /// Primitives are their own copy.
+    #[test]
+    fn primitive_copies_as_itself() {
+        let mut st = state();
+        let copy = value_copy(&mut st, Value::from_i64(42)).expect("copy");
+        assert_eq!(copy.as_i64(), 42);
+    }
 }

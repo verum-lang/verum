@@ -4921,53 +4921,6 @@ pub(super) fn realtime_nanos_shared() -> i64 {
 /// `copy_slots` says how many backing Values are live (List copies
 /// `len`; Map/Set copy `cap*2` — hash positions must be preserved;
 /// Deque copies the whole ring).
-fn clone_container_spine(
-    state: &mut InterpreterState,
-    src_obj: *const u8,
-    type_id: TypeId,
-    backing_type: TypeId,
-    header_slots: usize,
-    backing_slot: usize,
-    backing_alloc: usize,
-    copy_slots: usize,
-) -> InterpreterResult<Value> {
-    let src_data =
-        unsafe { src_obj.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-    let obj = state
-        .heap
-        .alloc(type_id, header_slots * std::mem::size_of::<Value>())?;
-    state.record_allocation();
-    let new_data = unsafe {
-        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
-    let backing = state.heap.alloc_array(backing_type, backing_alloc.max(1))?;
-    state.record_allocation();
-    // SAFETY: fresh allocations of the exact sizes above; the source is
-    // a validated container object; backing arrays are header-carrying
-    // heap arrays whose elements start at +OBJECT_HEADER_SIZE.
-    unsafe {
-        for i in 0..header_slots {
-            *new_data.add(i) = *src_data.add(i);
-        }
-        *new_data.add(backing_slot) =
-            Value::from_ptr(backing.as_ptr() as *mut u8);
-        let src_backing = (*src_data.add(backing_slot)).as_ptr::<u8>();
-        let dst_elems = (backing.as_ptr() as *mut u8)
-            .add(heap::OBJECT_HEADER_SIZE) as *mut Value;
-        if !src_backing.is_null() && copy_slots > 0 {
-            let src_elems =
-                src_backing.add(heap::OBJECT_HEADER_SIZE) as *const Value;
-            std::ptr::copy_nonoverlapping(src_elems, dst_elems, copy_slots);
-        }
-        // Zero-fill the allocated tail beyond the copied prefix so
-        // uninitialized slots never leak stale heap bytes.
-        for i in copy_slots..backing_alloc.max(1) {
-            *dst_elems.add(i) = Value::unit();
-        }
-    }
-    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
-}
-
 pub(super) fn dispatch_primitive_method(
     state: &mut InterpreterState,
     receiver: &Value,
@@ -5487,93 +5440,16 @@ pub(super) fn dispatch_primitive_method(
                 let actual_value = unsafe { *(ptr_addr as *const Value) };
                 return Ok(Some(actual_value));
             }
-            // **SHARED-STRONGCOUNT-1 (universal-clone leg)**: a
-            // `Shared<T>` runtime object cloning through this
-            // catch-all MUST bump its strong count — the identity
-            // return below otherwise silently aliased the pointer and
-            // the paired binding-drop decrement unbalanced the count.
-            // This arm runs BEFORE handle_call_method's dedicated
-            // Shared block (dispatch_primitive_method is consulted
-            // first with the dereffed receiver), so the bump belongs
-            // here too.
+            // Every heap shape — `Shared<T>`, the containers, records
+            // — answers through the single value-copy contract, the
+            // same one the `Clone` opcode routes to. Before they were
+            // unified this arm copied container spines but returned a
+            // record unchanged, so `rec.clone()` handed back an alias
+            // while `let b = rec` (opcode path) did not.
             let p = receiver.as_ptr::<u8>();
-            if !p.is_null()
-                && (ptr_addr).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+            if !p.is_null() && ptr_addr.is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
             {
-                // SAFETY: alignment verified; heap objects begin with
-                // an ObjectHeader.
-                let header = unsafe { heap::ObjectHeader::ref_or_stub(p) };
-                if header.type_id == TypeId::SHARED {
-                    let rc_ptr =
-                        unsafe { p.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                    // SAFETY: slot 0 of a validated SHARED object is
-                    // the refcount Value.
-                    unsafe {
-                        let rc = (*rc_ptr).as_i64();
-                        *rc_ptr = Value::from_i64(rc + 1);
-                    }
-                    return Ok(Some(*receiver));
-                }
-                // BUILTIN-LIST spine clone (T0499): `.clone()` on the
-                // runtime List fell through to the identity return
-                // below, so the "clone" ALIASED the spine — every
-                // later element write through either binding mutated
-                // both (`Matrix.clone()` → `self.data.clone()` gave
-                // two matrices sharing one backing store; scaling the
-                // copy corrupted the original). Copy the
-                // [len, cap, backing] triple and the live element
-                // Values into a fresh backing. Element Values are
-                // copied bit-wise — heap elements stay shared, the
-                // same ownership depth an element read hands out.
-                if header.type_id == TypeId::LIST {
-                    // [len, cap, backing]: copy `len` live elements.
-                    let data_ptr =
-                        unsafe { p.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-                    let len = unsafe { (*data_ptr).as_i64().max(0) } as usize;
-                    let cap = unsafe { (*data_ptr.add(1)).as_i64() }
-                        .max(len as i64)
-                        .max(1) as usize;
-                    let cloned = clone_container_spine(
-                        state, p, TypeId::LIST, TypeId::LIST, 3, 2, cap, len,
-                    )?;
-                    return Ok(Some(cloned));
-                }
-                // Map/Set: [count, cap, entries, tombstones] — the
-                // entries array is `cap * 2` (key, value) slots whose
-                // hash POSITIONS must be preserved, so the whole
-                // region copies.
-                if header.type_id == TypeId::MAP
-                    || header.type_id == TypeId::SET
-                {
-                    let data_ptr =
-                        unsafe { p.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-                    let cap =
-                        unsafe { (*data_ptr.add(1)).as_i64().max(1) } as usize;
-                    let cloned = clone_container_spine(
-                        state,
-                        p,
-                        header.type_id,
-                        TypeId::UNIT,
-                        4,
-                        2,
-                        cap * 2,
-                        cap * 2,
-                    )?;
-                    return Ok(Some(cloned));
-                }
-                // Deque: [data, head, len, cap] — a ring; head/len are
-                // positions into the buffer, so the whole `cap` ring
-                // copies verbatim.
-                if header.type_id == TypeId::DEQUE {
-                    let data_ptr =
-                        unsafe { p.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-                    let cap =
-                        unsafe { (*data_ptr.add(3)).as_i64().max(1) } as usize;
-                    let cloned = clone_container_spine(
-                        state, p, TypeId::DEQUE, TypeId::UNIT, 4, 0, cap, cap,
-                    )?;
-                    return Ok(Some(cloned));
-                }
+                return Ok(Some(super::memory_collections::value_copy(state, *receiver)?));
             }
         }
         // All primitives are Copy — clone returns the value itself

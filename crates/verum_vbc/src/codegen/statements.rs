@@ -3,6 +3,7 @@
 //! Transforms Verum AST statements into VBC instructions.
 
 use super::error::CodegenOptionExt;
+use super::context::VarTypeKind;
 use super::{CodegenError, CodegenResult, VbcCodegen};
 use crate::instruction::{Instruction, Reg};
 
@@ -356,6 +357,69 @@ impl VbcCodegen {
     }
 
     /// Compiles a let binding.
+    /// Does `let <pat> = <expr>` duplicate a value that keeps living
+    /// under its own name — i.e. is the initializer a PLACE?
+    ///
+    /// A place is a variable: after `let b = a`, `a` is still there and
+    /// still owns its record, so `b` must get one of its own. Everything
+    /// else an initializer can be — a literal, a call result, an
+    /// arithmetic expression, a freshly built record — is a temporary
+    /// nobody else can name, and copying it would be pure cost.
+    ///
+    /// Two kinds of variable are excluded, both because copying them
+    /// would change what the program means rather than preserve it:
+    ///
+    /// * A REFERENCE (`let s = r` where `r: &Row`). Copying a reference
+    ///   yields a reference to the same object — that IS its value
+    ///   semantics. Deep-copying the pointee would silently turn an
+    ///   alias into a snapshot. `reference_bindings` carries this fact.
+    /// * A RAW POINTER, for the reason `compile_record` states at its
+    ///   own `Clone` site: the bytes behind it are not an `ObjectHeader`,
+    ///   so a deep copy would read the user's payload as one.
+    pub(super) fn binds_a_copy_of_a_place(&self, init: &verum_ast::Expr, reg: Reg) -> bool {
+        let verum_ast::ExprKind::Path(path) = &init.kind else {
+            return false;
+        };
+        let [verum_ast::ty::PathSegment::Name(ident)] = path.segments.as_slice() else {
+            // A qualified path (`Maybe.None`, `Color.Red`, `module.CONST`)
+            // names a constructor or an item, not a local place.
+            return false;
+        };
+        self.copies_from_named_place(ident.name.as_str(), reg)
+    }
+
+    /// The same question asked about a NAME rather than an expression —
+    /// record shorthand (`Point { x, y }`) names its source without an
+    /// expression node to inspect.
+    pub(super) fn copies_from_named_place(&self, name: &str, reg: Reg) -> bool {
+        if self.ctx.lookup_var(name).is_none()
+            || self.ctx.reference_bindings.contains(name)
+            || self.ctx.is_raw_pointer(reg)
+        {
+            return false;
+        }
+        // A value that is not a heap object copies as itself, so the
+        // opcode would be a no-op the interpreter still has to fetch
+        // and the AOT still has to lower. `let` on a number is by far
+        // the commonest binding in any program; skipping it where the
+        // discriminator is statically known keeps the bytecode the
+        // size it was.
+        !matches!(
+            self.ctx.get_variable_type(name),
+            VarTypeKind::Int
+                | VarTypeKind::Float
+                | VarTypeKind::Bool
+                | VarTypeKind::Byte
+                | VarTypeKind::Char
+                | VarTypeKind::Unit
+                | VarTypeKind::Int32
+                | VarTypeKind::UInt64
+                // Text is a heap object, but an immutable one: sharing
+                // it is unobservable, so a copy is pure allocation.
+                | VarTypeKind::Text
+        )
+    }
+
     fn compile_let(
         &mut self,
         pattern: &verum_ast::Pattern,
@@ -1257,9 +1321,69 @@ impl VbcCodegen {
             init_reg = Some(owned_reg);
         }
 
-        // Bind pattern
+        // A `let` that binds a REFERENCE joins `reference_bindings`, the
+        // set the deref lowering and the copy decision below both read.
+        // Until now only PARAMETERS entered it, so a function's own
+        // `let r = &row` was indistinguishable from a value binding.
+        if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
+            let declared_ref = ty.is_some_and(|t| {
+                matches!(
+                    t.kind,
+                    verum_ast::ty::TypeKind::Reference { .. }
+                        | verum_ast::ty::TypeKind::CheckedReference { .. }
+                        | verum_ast::ty::TypeKind::UnsafeReference { .. }
+                        | verum_ast::ty::TypeKind::GenRef { .. }
+                )
+            });
+            let initialized_from_ref = value.is_some_and(|v| match &v.kind {
+                verum_ast::ExprKind::Unary { op: verum_ast::UnOp::Ref, .. } => true,
+                // `let s = r` propagates r's reference-ness to s.
+                verum_ast::ExprKind::Path(path) => matches!(
+                    path.segments.as_slice(),
+                    [verum_ast::ty::PathSegment::Name(id)]
+                        if self.ctx.reference_bindings.contains(id.name.as_str())
+                ),
+                _ => false,
+            });
+            if declared_ref || initialized_from_ref {
+                self.ctx.reference_bindings.insert(name.name.to_string());
+            }
+        }
+
+        // Bind pattern.
+        //
+        // VALUE SEMANTICS AT THE BINDING (T0832).  `let b = a` must give
+        // `b` its own record, not a second name for `a`'s. Records are
+        // heap objects, so the register holds a pointer and a bare `Mov`
+        // aliases them: measured, `let mut a = z; let b = z; a.c0 = 11`
+        // reported `a=11 b=11`, and the same sharing reached
+        // `Mat3 { r0: z, r1: z, r2: z }`, where one write landed in all
+        // three rows — and, on glibc, corrupted the heap.
+        //
+        // The distinction that decides it is PLACE vs VALUE. Binding
+        // from a place — a variable, a field of one, an element —
+        // duplicates something that keeps existing under its own name,
+        // so it copies. Binding from a temporary (a literal, a call
+        // result, an arithmetic expression) takes sole ownership of a
+        // value nobody else can name, so a copy would be pure cost.
+        //
+        // `Instruction::Clone` is exactly this operation and already
+        // carries the exceptions: `Shared<T>` clones by refcount bump
+        // rather than forking the cell (T0107), and a non-heap value
+        // copies as itself.
         if let Some(reg) = init_reg {
-            self.compile_pattern_bind(pattern, reg)?;
+            let bound = match value {
+                Some(expr) if self.binds_a_copy_of_a_place(expr, reg) => {
+                    let owned = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Clone {
+                        dst: owned,
+                        src: reg,
+                    });
+                    owned
+                }
+                _ => reg,
+            };
+            self.compile_pattern_bind(pattern, bound)?;
         }
 
         // Late initialization: mark variable as uninitialized when no initializer

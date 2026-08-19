@@ -4870,6 +4870,56 @@ pub fn lower_instruction<'ctx>(
             // never pass under AOT while the interpreter (whose Clone
             // handler allocates) was correct.  Primitives and
             // unknown-size objects keep the historic pass-through.
+            // TIER COHERENCE (T0832): the copy contract is `value_copy`
+            // in the interpreter, and these two shapes are the ones a
+            // flat memcpy gets WRONG rather than merely slow:
+            //
+            // * `Shared<T>` must bump its refcount and stay the same
+            //   carrier (SHARED-CLONE-IDENTITY-1). A memcpy forks the
+            //   cell — the copy gets a private inner value and its own
+            //   refcount, so every later write through it is lost to
+            //   the original, and both sides free what they think they
+            //   own alone.
+            // * A `List` object is a [len, cap, backing] header. A
+            //   memcpy of those 3 slots hands the copy the SAME
+            //   backing store, so writes through either land in one
+            //   array — the very defect T0499 fixed on the `.clone()`
+            //   path, still live here.
+            //
+            // Both are decided by the register's static type, which is
+            // exactly what the interpreter reads from the object header.
+            let static_type = ctx.get_obj_register_type(src.0).map(str::to_string);
+            match static_type.as_deref() {
+                Some(tn) if tn == "Shared" || tn.starts_with("Shared<") => {
+                    ctx.set_register(dst.0, value);
+                    return Ok(());
+                }
+                Some(tn) if tn == "List" || tn.starts_with("List<") => {
+                    let module = ctx.get_module();
+                    let src_ptr = as_ptr(ctx, value, "clone_list_src")?;
+                    let clone_ty = ctx
+                        .types()
+                        .ptr_type()
+                        .fn_type(&[ctx.types().ptr_type().into()], false);
+                    let clone_fn = super::error::get_or_declare_function(
+                        module,
+                        "verum_list_clone",
+                        clone_ty,
+                    );
+                    let cloned = ctx
+                        .builder()
+                        .build_call(clone_fn, &[src_ptr.into()], "clone_list")
+                        .or_llvm_err()?
+                        .basic_value_or("verum_list_clone returned void")?;
+                    ctx.set_register(dst.0, cloned);
+                    if let Some(size) = ctx.get_obj_alloc_size(src.0) {
+                        ctx.set_obj_alloc_size(dst.0, size);
+                    }
+                    ctx.set_obj_register_type(dst.0, tn.to_string());
+                    return Ok(());
+                }
+                _ => {}
+            }
             if let Some(size) = ctx.get_obj_alloc_size(src.0) {
                 let i64_type = ctx.types().i64_type();
                 let module = ctx.get_module();

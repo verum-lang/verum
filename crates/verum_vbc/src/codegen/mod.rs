@@ -17127,6 +17127,64 @@ impl VbcCodegen {
             }
         }
 
+        // VALUE SEMANTICS AT THE PARAMETER (T0832).
+        //
+        // A by-value parameter is a NEW variable initialized from the
+        // argument, so writing through it must not reach the caller's
+        // object. Registers hold pointers, so without a copy the callee
+        // writes into the caller's record — measured, `fn takes(mut h:
+        // Holder) { h.r = 3 }` left the caller's `h.r` at 3.
+        //
+        // Only `mut` parameters need it, and that is not a shortcut:
+        // an immutable binding cannot write through itself or lend a
+        // `&mut`, so no program can observe whether it shares. A callee
+        // that passes the value on to another `mut` parameter copies
+        // there in turn, so the chain stays honest. Reference params are
+        // excluded for the reason references exist.
+        //
+        // The copy sits in the PROLOGUE rather than at the call site
+        // because here the declaration is known exactly, including
+        // through dynamic dispatch, where the call site cannot see
+        // which body it will reach.
+        for (i, ((param_name, is_mut), param)) in params_with_mutability
+            .iter()
+            .zip(func.params.iter())
+            .enumerate()
+        {
+            if !*is_mut || self.ctx.reference_bindings.contains(param_name) {
+                continue;
+            }
+            let by_value_record = matches!(
+                &param.kind,
+                verum_ast::FunctionParamKind::Regular { ty, .. }
+                    if !matches!(
+                        ty.kind,
+                        verum_ast::ty::TypeKind::Reference { .. }
+                            | verum_ast::ty::TypeKind::CheckedReference { .. }
+                            | verum_ast::ty::TypeKind::UnsafeReference { .. }
+                            | verum_ast::ty::TypeKind::GenRef { .. }
+                            | verum_ast::ty::TypeKind::Pointer { .. }
+                    )
+                    && !matches!(
+                        self.type_kind_to_var_type(&ty.kind),
+                        context::VarTypeKind::Int
+                            | context::VarTypeKind::Float
+                            | context::VarTypeKind::Bool
+                            | context::VarTypeKind::Byte
+                            | context::VarTypeKind::Char
+                            | context::VarTypeKind::Unit
+                            | context::VarTypeKind::Int32
+                            | context::VarTypeKind::UInt64
+                            | context::VarTypeKind::Text
+                    )
+            );
+            if by_value_record {
+                // Param i occupies register i (`alloc_parameters`).
+                let reg = Reg(i as u16);
+                self.ctx.emit(Instruction::Clone { dst: reg, src: reg });
+            }
+        }
+
         for ((param_name, _), param) in params_with_mutability.iter().zip(func.params.iter()) {
             if let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind {
                 let var_type = self.type_kind_to_var_type(&ty.kind);

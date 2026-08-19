@@ -3734,17 +3734,31 @@ impl VbcCodegen {
                         info.is_initialized = true;
                     }
 
+                    // `dst = src` duplicates a value that keeps living
+                    // under its own name, exactly as `let dst = src`
+                    // does, and copies for the same reason (T0832).
+                    let stored = if self.binds_a_copy_of_a_place(value, value_reg) {
+                        let owned = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::Clone {
+                            dst: owned,
+                            src: value_reg,
+                        });
+                        owned
+                    } else {
+                        value_reg
+                    };
+
                     if var_is_cell {
                         // Cell-wrapped mutable capture: store through SetF
                         self.ctx.emit(Instruction::SetF {
                             obj: target_reg,
                             field_idx: 0,
-                            value: value_reg,
+                            value: stored,
                         });
                     } else {
                         self.ctx.emit(Instruction::Mov {
                             dst: target_reg,
-                            src: value_reg,
+                            src: stored,
                         });
                     }
                     self.ctx.free_temp(value_reg);
@@ -13386,6 +13400,40 @@ impl VbcCodegen {
                 if *arg_val != dst {
                     self.ctx.emit(Instruction::Mov { dst, src: *arg_val });
                     self.ctx.free_temp(*arg_val);
+                }
+            }
+
+            // A CONTAINER OWNS WHAT IT HOLDS (T0832).
+            //
+            // `xs.push(item)` stores a value into `xs`; `item` goes on
+            // living under its own name, so the two must not be the same
+            // object. Measured before this: `xs.push(item); item.v = 7`
+            // reported `xs[0].v == 7`.
+            //
+            // These methods are handled here rather than by the callee
+            // prologue that covers user functions, because they are
+            // intercepted by the runtime and have no Verum body to carry
+            // a prologue. The list is the take-ownership surface: every
+            // one of them stores its argument rather than reading it.
+            if matches!(
+                method.name.as_str(),
+                "push"
+                    | "push_back"
+                    | "push_front"
+                    | "append"
+                    | "insert"
+                    | "add"
+                    | "enqueue"
+                    | "send"
+            ) {
+                for (i, arg) in args.iter().enumerate() {
+                    let reg = Reg(first.0 + i as u16);
+                    if self.binds_a_copy_of_a_place(arg, reg) {
+                        self.ctx.emit(Instruction::Clone {
+                            dst: reg,
+                            src: reg,
+                        });
+                    }
                 }
             }
             first
@@ -23448,11 +23496,53 @@ impl VbcCodegen {
                 self.emit_field_refinement_assert(value_reg, &type_name, &field.name.name);
 
                 let field_idx = self.resolve_field_index(Some(&type_name), &field.name.name);
+
+                // A FIELD INITIALIZED FROM A PLACE TAKES A COPY (T0832).
+                //
+                // The paragraph above used to argue that `Mat3 { r0: z,
+                // r1: z, r2: z }` was safe because "each field is a
+                // fresh Value slot in the parent record". The slot is
+                // fresh; what it holds is not. All three slots held one
+                // pointer, so `m.r0.c0 = 7` wrote through all three rows
+                // AND through `z` — measured, `pair.b.v + zero.v` came
+                // back 14 where the language says 0.
+                //
+                // The Clone was removed here for a real reason: it made
+                // `Waker { raw: raw }` read back as Unit, because the
+                // old opcode deep-copied whatever the register held,
+                // including raw FFI buffers whose bytes are not an
+                // `ObjectHeader`. That reason is now handled where it
+                // belongs — `value_copy` returns untracked pointers as
+                // themselves — so the copy is safe to make again.
+                //
+                // Only PLACES copy: a field initialized from a literal,
+                // a call or a nested literal already owns its value.
+                let is_place = match &field.value {
+                    Some(expr) => self.binds_a_copy_of_a_place(expr, value_reg),
+                    // Shorthand (`Point { x, y }`) names its source
+                    // without an expression node.
+                    None => self
+                        .copies_from_named_place(field.name.name.as_str(), value_reg),
+                };
+                let stored = if is_place {
+                    let owned = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Clone {
+                        dst: owned,
+                        src: value_reg,
+                    });
+                    owned
+                } else {
+                    value_reg
+                };
+
                 self.ctx.emit(Instruction::SetF {
                     obj: result,
                     field_idx,
-                    value: value_reg,
+                    value: stored,
                 });
+                if stored != value_reg {
+                    self.ctx.free_temp(stored);
+                }
                 if field.value.is_some() {
                     self.ctx.free_temp(value_reg);
                 }

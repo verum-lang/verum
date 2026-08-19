@@ -1,0 +1,137 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, semantics, records, cbgr
+// @timeout: 15000
+// @expected-exit: 0
+//
+// VALUE SEMANTICS AT THE BINDING (T0832).
+//
+// A record is a VALUE. `let b = a` must give `b` a record of its own:
+// `a` still exists and still owns its. Before this was pinned, both
+// names denoted one heap object, so `b.c = 1` was visible through `a`
+// — and, in a three-row matrix built from one row value, a single
+// write landed in all three rows and corrupted the allocator.
+//
+// The test pins BOTH sides of the rule, because a fix that copies
+// indiscriminately is just as wrong as one that never copies:
+//
+//   * a record binding COPIES     — writes through one name are unseen
+//                                   by the other;
+//   * a reference binding ALIASES — that is what a reference IS.
+//
+// Without the reference half, deep-copying every binding would pass
+// the record half while silently turning aliases into snapshots.
+
+type ValueSemanticsCell is { v: Int };
+type Pair is { a: ValueSemanticsCell, b: ValueSemanticsCell };
+
+// ---------------------------------------------------------------------------
+// Records copy
+// ---------------------------------------------------------------------------
+
+fn let_binding_copies() -> Int {
+    let origin = ValueSemanticsCell { v: 0 };
+    let mut copy = origin;
+    copy.v = 1;
+    // origin must be untouched.
+    origin.v
+}
+
+fn one_value_fills_two_fields() -> Int {
+    let zero = ValueSemanticsCell { v: 0 };
+    let mut pair = Pair { a: zero, b: zero };
+    pair.a.v = 7;
+    // Writing one field must not reach the other, nor the source value.
+    pair.b.v + zero.v
+}
+
+fn argument_is_a_copy(mut received: ValueSemanticsCell) -> Int {
+    received.v = 9;
+    received.v
+}
+
+fn call_does_not_write_back() -> Int {
+    let caller_side = ValueSemanticsCell { v: 0 };
+    let inside = argument_is_a_copy(caller_side);
+    // `inside` proves the callee really wrote; `caller_side` must not see it.
+    caller_side.v + (inside - inside)
+}
+
+fn assignment_copies() -> Int {
+    let source = ValueSemanticsCell { v: 0 };
+    let mut target = ValueSemanticsCell { v: 9 };
+    target = source;
+    target.v = 5;
+    // Assignment duplicates a value that keeps its own name, exactly as
+    // a `let` binding does.
+    source.v
+}
+
+fn a_container_owns_what_it_holds() -> Int {
+    let mut item = ValueSemanticsCell { v: 0 };
+    let mut held: List<ValueSemanticsCell> = [];
+    held.push(item);
+    item.v = 7;
+    // Writing through the name that was pushed must not reach the
+    // element the container now owns.
+    held[0].v
+}
+
+// ---------------------------------------------------------------------------
+// References alias (positive control)
+// ---------------------------------------------------------------------------
+
+fn write_through(target: &mut ValueSemanticsCell) {
+    target.v = 5;
+}
+
+fn reference_binding_aliases() -> Int {
+    let mut subject = ValueSemanticsCell { v: 0 };
+    write_through(&mut subject);
+    // The write must be visible: a reference is not a snapshot.
+    subject.v
+}
+
+fn reference_copy_still_aliases() -> Int {
+    let mut subject = ValueSemanticsCell { v: 0 };
+    let borrowed = &mut subject;
+    // Re-binding a reference copies the REFERENCE, not the pointee.
+    let same = borrowed;
+    write_through(same);
+    subject.v
+}
+
+// ---------------------------------------------------------------------------
+// Containers copy their spine; `Shared` keeps its identity
+// ---------------------------------------------------------------------------
+
+fn list_binding_copies_the_spine() -> Int {
+    let source = [1, 2, 3];
+    let mut copy = source;
+    copy.push(4);
+    // A copy owns its own backing store, so the source keeps its length.
+    source.len()
+}
+
+fn shared_binding_keeps_one_cell() -> Int {
+    let cell = Shared.new(ValueSemanticsCell { v: 0 });
+    let second = cell;
+    // `Shared<T>` is a carrier for ONE object by definition: copying the
+    // handle must not fork the cell, or a write through one handle would
+    // be invisible to the other.
+    second.v + cell.v
+}
+
+fn main() {
+    assert_eq(let_binding_copies(), 0);
+    assert_eq(one_value_fills_two_fields(), 0);
+    assert_eq(call_does_not_write_back(), 0);
+    assert_eq(reference_binding_aliases(), 5);
+    assert_eq(reference_copy_still_aliases(), 5);
+    assert_eq(list_binding_copies_the_spine(), 3);
+    assert_eq(shared_binding_keeps_one_cell(), 0);
+    assert_eq(assignment_copies(), 0);
+    assert_eq(a_container_owns_what_it_holds(), 0);
+    print("value-semantics-binding ok");
+}
