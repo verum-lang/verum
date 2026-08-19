@@ -71,7 +71,54 @@ impl TypeChecker {
         if filter != "1" && !module.contains(filter.as_ref()) {
             return;
         }
-        eprintln!("[ambient] {}\t{}", module, name);
+        // Name the OWNER too. Migration is `mount <owner>.{<name>};`,
+        // so a report that only names the symbol leaves the mechanical
+        // half of the work undone.
+        //
+        // The owner comes from the stdlib metadata, which records each
+        // type's declaring module — NOT from scanning `type_defs` for a
+        // `<module>.<name>` key. Archive-loaded types are registered
+        // flat only, so that scan answered `<unknown>` for 1573 of 1990
+        // uses and matched service keys (`__struct_fields_*`) for some
+        // of the rest.
+        let owner = match &self.core_metadata {
+            Maybe::Some(m) => match m.types.get(&verum_common::Text::from(name)) {
+                Some(td) => {
+                    let declared = match &td.origin_module_path {
+                        Maybe::Some(p) if !p.as_str().is_empty() => p.as_str(),
+                        _ => td.module_path.as_str(),
+                    };
+                    if declared.is_empty() {
+                        "<unknown>".to_string()
+                    } else {
+                        declared.to_string()
+                    }
+                }
+                None => "<not-in-metadata>".to_string(),
+            },
+            Maybe::None => "<no-metadata>".to_string(),
+        };
+        eprintln!("[ambient] {}\t{}\t{}", module, name, owner);
+    }
+
+    /// Is ambient visibility an ERROR for the file being checked?
+    ///
+    /// `VERUM_STRICT_VISIBILITY` turns the report above into a hard
+    /// diagnostic, so a module can be brought onto explicit `mount`s
+    /// one at a time and STAY there. Set it to `1` for everything, or
+    /// to a module-path substring to hold just that module to the rule
+    /// — the same filter shape as the report.
+    ///
+    /// This is how the acceptance gets reached incrementally: ~1400
+    /// uses across five core/ files reach names their file never
+    /// requested, which is far too many to fix in one change, and
+    /// exactly the shape a ratchet handles.
+    fn strict_visibility_applies(&self, module: &str) -> bool {
+        match std::env::var("VERUM_STRICT_VISIBILITY") {
+            Ok(v) if v == "1" => true,
+            Ok(v) if !v.is_empty() => module.contains(v.as_str()),
+            _ => false,
+        }
     }
 
     pub(crate) fn resolve_type_name(&mut self, name: &str, span: Span) -> Result<Type> {
