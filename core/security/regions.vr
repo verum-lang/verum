@@ -49,6 +49,10 @@ module core.security.regions;
 // =============================================================================
 
 /// A region — abstract memory lifetime named by a unique id.
+// Reached through ambient visibility rather than a request
+// until now (T0780 census).
+mount core.collections.list.{List};
+
 public type Lifetime is { name: Text };
 
 public fn region(name: Text) -> Lifetime {

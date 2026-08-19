@@ -22,6 +22,9 @@
 module core.net.http3.qpack;
 
 mount core.net.http2.hpack.{HeaderField};
+// Reached through ambient visibility rather than a request
+// until now (T0780 census).
+mount core.collections.list.{List};
 
 // =============================================================================
 // Errors

@@ -44,6 +44,9 @@ module core.random.deterministic;
 mount super.constants.{PI, E};
 mount super.elementary.{sqrt, log, cos, sin, exp, abs, floor};
 mount super.linalg.{Vector};
+// Reached through ambient visibility rather than a request
+// until now (T0780 census).
+mount core.collections.list.{List};
 
 // =============================================================================
 // Random Key (Functional PRNG State)

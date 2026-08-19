@@ -24,6 +24,17 @@ mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;
 mount super.super.style.color.Color;
+// Reached through ambient visibility rather than a request
+// until now (T0780 census).
+mount core.collections.list.{List};
+mount core.term.layout.rect.{Margin, Rect};
+mount core.term.render.buffer.{Buffer};
+mount core.term.render.cell.{RenderCell};
+mount core.term.style.color.{Color, Hsl, Lab, Rgb};
+mount core.term.style.modifier.{Modifier};
+mount core.term.style.style.{Style};
+mount core.term.widget.block.{Alignment, BorderChars, BorderType, Borders};
+mount core.term.widget.paragraph.{Paragraph, TextSpan};
 
 // =============================================================================
 // Notification Level

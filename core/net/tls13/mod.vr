@@ -92,6 +92,20 @@ public module session;
 public module cert_compress;
 
 // Re-exports
+// Names this file USES (as opposed to re-exports) and had been
+// reaching through ambient visibility rather than a request
+// (T0780 census).
+mount core.collections.list.{List};
+mount core.hash.crypto.sha256.{Sha256};
+mount core.hash.crypto.sha384.{Sha384};
+mount core.net.tls13.handshake.client_sm.{Connected, PostHandshakeOutcome, Tls13ClientConfig, WaitCert, WaitCertOrCr, WaitCertVerify, WaitEncryptedExtensions, WaitFinished, WaitServerHello};
+mount core.net.tls13.handshake.codec.{CodecError, Tls13HandshakeReader};
+mount core.net.tls13.handshake.extension.{EarlyDataIndication, Extension, KeyShareEntry, ServerName};
+mount core.net.tls13.handshake.messages.{CertificateEntry, CertificateMessage, CertificateRequest, CertificateVerify, ClientHello, EncryptedExtensions, Finished, KeyUpdate, KeyUpdateRequest, NewSessionTicket, ServerHello};
+mount core.net.tls13.handshake.resumption.{ClientSession};
+mount core.net.tls13.handshake.server_sm.{ServerConnected, ServerSm};
+mount core.security.x509.credential.{Certificate};
+
 public mount .version.{ProtocolVersion, TLS_1_3, LEGACY_VERSION_TLS_1_2,
                         DOWNGRADE_SENTINEL_TLS12, DOWNGRADE_SENTINEL_TLS11};
 public mount .cipher_suite.{CipherSuite, HashKind, AeadKind};

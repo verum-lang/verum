@@ -81,6 +81,9 @@ module core.net.websocket;
 mount core.net.http.{Headers};
 mount core.hash.legacy.sha1.{Sha1};
 mount core.encoding.base64;
+// Reached through ambient visibility rather than a request
+// until now (T0780 census).
+mount core.collections.list.{List};
 
 // =============================================================================
 // Opcodes

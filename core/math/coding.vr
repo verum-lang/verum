@@ -53,6 +53,10 @@ module core.math.coding;
 // =============================================================================
 
 /// Parity mask 1: coordinates {1,3,5,7} (LSB of the coordinate index).
+// Reached through ambient visibility rather than a request
+// until now (T0780 census).
+mount core.collections.list.{List};
+
 public const HAMMING7_H1: Int = 0b1010101;
 /// Parity mask 2: coordinates {2,3,6,7} (middle bit of the coordinate index).
 public const HAMMING7_H2: Int = 0b1100110;

@@ -24,6 +24,7 @@ runs over an unchanged tree report the same number.
 """
 
 import os
+import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
@@ -129,8 +130,56 @@ def report_for(verum, path):
     return rows
 
 
+def apply_mounts(path, lines):
+    """Inserts the missing `mount` statements into a file.
+
+    They go after the file's last top-level mount when it has one — that
+    is where a reader looks for its imports. A file with no mounts gets
+    them immediately before its first declaration, which is the same
+    place for a file that has not needed any yet.
+    """
+    s = open(path, encoding="utf-8").read()
+    fresh = [ln for ln in lines if ln not in s]
+    if not fresh:
+        return 0
+    note = (
+        "// Reached through ambient visibility rather than a request\n"
+        "// until now (T0780 census).\n"
+    )
+    block = note + "\n".join(fresh) + "\n"
+
+    existing = list(re.finditer(r"(?m)^(?:public )?mount [^\n]*;\n", s))
+    if existing:
+        at = existing[-1].end()
+    else:
+        first_decl = re.search(r"(?m)^(?:public )?(?:type|fn|const|implement) ", s)
+        if not first_decl:
+            return 0
+        at = first_decl.start()
+        block += "\n"
+    open(path, "w", encoding="utf-8").write(s[:at] + block + s[at:])
+    return len(fresh)
+
+
 def main():
     args = sys.argv[1:]
+    if args and args[0] == "--apply":
+        verum = args[2] if len(args) > 2 else "verum"
+        rows = report_for(verum, args[1])
+        needed = defaultdict(set)
+        for consumer, name, owner in rows:
+            if owner in PRELUDE_OWNERS or owner.startswith("<"):
+                continue
+            if owner == consumer or looks_like_a_type_parameter(name):
+                continue
+            needed[owner].add(name)
+        lines = [
+            f"mount {owner}.{{{', '.join(sorted(needed[owner]))}}};"
+            for owner in sorted(needed)
+        ]
+        n = apply_mounts(args[1], lines) if lines else 0
+        print(f"{args[1]}: {n} mount statement(s) added")
+        return 0
     if args and args[0] == "--mounts":
         verum = args[2] if len(args) > 2 else "verum"
         rows = report_for(verum, args[1])

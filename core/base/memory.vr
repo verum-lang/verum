@@ -37,6 +37,9 @@ mount super.super.mem.allocator.{
 // layout would silently corrupt every validity check.  Import the
 // canonical value from `core.mem.header`.
 mount super.super.mem.header.{AllocationHeader, HEADER_SIZE};
+// Reached through ambient visibility rather than a request
+// until now (T0780 census).
+mount core.action.{Hasher};
 mount core.intrinsics.atomic.{
     MemoryOrder,
     ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,
