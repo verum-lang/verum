@@ -1,0 +1,62 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, name-resolution, stdlib, shadowing
+// @timeout: 15000
+// @expected-exit: 0
+//
+// A DECLARATION OWNS ITS NAME (T0780).
+//
+// Every public stdlib symbol is visible bare, without any mount. That
+// alone is a design question; what makes it a defect is that the
+// library's symbols could out-rank a file's OWN declarations:
+//
+//   * `type Cell is { v: Int }` — the library's nine-modules-down
+//     `Cell<T>` set the arity behind its back, so `Cell { v: 3 }`
+//     typed as `Cell<_>` while `fn f(c: Cell)` meant the declared
+//     type: `expected 'Cell', found 'Cell<_>'`, on a file that never
+//     referenced the library's type.
+//   * `fn identity(x: Int) -> Int` — CALLING it worked, because a call
+//     site disambiguates by argument count. Passing it as a VALUE
+//     carried no arguments to count, so the bare slot answered with
+//     `core.shell.transducer.identity<A>()` and the program got a
+//     `Transducer` where it asked for an `Int`.
+//
+// The names below are deliberately ones the standard library also
+// declares. That is the whole point: a file must be able to use an
+// ordinary word without knowing what nine levels of library use it for.
+
+type Cell is { v: Int };
+
+fn identity(x: Int) -> Int { x }
+fn square(x: Int) -> Int { x * x }
+
+fn apply(x: Int, f: fn(Int) -> Int) -> Int { f(x) }
+fn take_cell(c: Cell) -> Int { c.v }
+
+// Returning a function is the same question in a different position:
+// the return type states the signature the bare name must satisfy.
+fn select(op: Int) -> fn(Int) -> Int {
+    if op == 0 { square } else { identity }
+}
+
+fn main() {
+    // The declared type, used through a signature that names it.
+    let c = Cell { v: 3 };
+    assert_eq(take_cell(c), 3);
+
+    // Called directly — this always worked; it is the control.
+    assert_eq(identity(5), 5);
+
+    // Passed as a value — the case that returned a library Transducer.
+    assert_eq(apply(5, identity), 5);
+    assert_eq(apply(5, square), 25);
+
+    // Returned as a value.
+    let chosen = select(1);
+    assert_eq(chosen(5), 5);
+    let squarer = select(0);
+    assert_eq(squarer(5), 25);
+
+    print("declaration-owns-its-name ok");
+}

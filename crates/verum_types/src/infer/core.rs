@@ -1275,7 +1275,30 @@ impl TypeChecker {
         // is the generic RECORD literal (`Edge { src, tgt, label }` arriving
         // with `L` unsubstituted), so restricting it to records keeps the fix
         // and leaves every sum type resolving exactly as before.
-        if !type_desc.generic_params.is_empty()
+        // A DECLARATION OWNS ITS NAME (T0780).
+        //
+        // How many parameters a type has is a fact of its DECLARATION,
+        // not of the simple name it happens to share. This write is
+        // keyed by simple name and used to run unconditionally, so a
+        // file declaring `type Cell is { v: Int }` — no parameters —
+        // had the library's nine-levels-down `Cell<T>` set its arity to
+        // one behind its back. The literal `Cell { v: 3 }` then typed
+        // as `Cell<_>` while `fn f(c: Cell)` still meant the declared
+        // type, and the file failed with `expected 'Cell', found
+        // 'Cell<_>'` — a program correct in its own terms, rejected
+        // because of a name it never referenced.
+        //
+        // The type DEFINITION below is already guarded this way (it
+        // only registers when nothing holds the name). Arity is the
+        // same fact about the same type and needs the same guard: the
+        // comment further up is right that the presence of a type and
+        // the presence of its params are two facts, but neither of them
+        // is the library's to state about someone else's declaration.
+        let declared_here = self
+            .current_module_declared_types
+            .contains(name.as_str());
+        if !declared_here
+            && !type_desc.generic_params.is_empty()
             && matches!(
                 type_desc.kind,
                 crate::core_metadata::TypeDescriptorKind::Record { .. }

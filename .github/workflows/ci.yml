@@ -222,6 +222,24 @@ jobs:
           --test intrinsic_key_resolution_gate
           --test global_type_table_consistency_tests
 
+      # The workspace unit-test job runs with DEFAULT features, and
+      # `codegen` is not one of them (verum_vbc/Cargo.toml) — so every
+      # inline test under `src/codegen/**` was never executed by CI.
+      # Measured 2026-08-19: 1354 tests without the feature, 2071 with
+      # it. 717 inline tests, including a canary that calls itself
+      # "module compiles and links", had never run.
+      #
+      # `codegen::test_params` is skipped and only that: those 139 tests
+      # compile core/ files and 25 of them fail on the standing stdlib
+      # debt (T0766 — `List.from_elem`, `Text.new`, missing field
+      # layouts), which predates this job. The other 1932 gate from now
+      # on. Narrowing the skip is how that debt gets drained.
+      - name: Inline codegen tests (feature-gated, never ran before)
+        timeout-minutes: 60
+        run: >
+          cargo test --locked -p verum_vbc --lib --features codegen
+          -- --skip codegen::test_params
+
   integration:
     name: Integration tests (tests/ gate, pure tier)
     runs-on: ubuntu-latest

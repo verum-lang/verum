@@ -761,6 +761,30 @@ pub struct CodegenContext {
     /// losing to `core.math.checked.saturating_add(Int64,Int64)` when the
     /// argument was a typed `Int`).
     pub explicit_mount_names: HashSet<String>,
+
+    /// Arity a bare name is expected to have when it is compiled as a
+    /// FUNCTION VALUE — set for the duration of an argument whose
+    /// parameter is declared `fn(A, B) -> R` (T0780).
+    ///
+    /// A call site disambiguates by argument count: `identity(5)` finds
+    /// the one-parameter `identity` even though the stdlib declares a
+    /// zero-parameter one nine modules down. Passing the same name as a
+    /// VALUE — `apply(5, identity)` — carries no arguments to count, so
+    /// the bare slot answered, and the library's unrelated `identity`
+    /// came back. The parameter's declared signature is the missing
+    /// count, and it is exactly as authoritative as the argument list.
+    pub expected_fn_value_arity: Option<usize>,
+
+    /// Arity of the enclosing function's RETURN type when that type is
+    /// itself a function (`fn select(op: Int) -> fn(Int) -> Int`).
+    ///
+    /// Read for the same reason as `expected_fn_value_arity`: a bare
+    /// name in return position is a function VALUE, and the signature
+    /// it must satisfy is declared right there. Taken from the AST
+    /// rather than from a type NAME, because a function type has no
+    /// name to extract — `extract_type_name_from_ast` has no arm for
+    /// `TypeKind::Function` and never did.
+    pub current_return_fn_arity: Option<usize>,
     /// Context alias map: alias → context type name (e.g., "db" → "Database").
     /// Populated from `using [db: Database]` or `using [Database as db]`.
     pub context_aliases: HashMap<String, String>,
@@ -1565,6 +1589,8 @@ impl CodegenContext {
             required_contexts: HashSet::new(),
             declared_context_types: HashSet::new(),
             explicit_mount_names: HashSet::new(),
+            expected_fn_value_arity: None,
+            current_return_fn_arity: None,
             context_aliases: HashMap::new(),
             active_pattern_cache: HashMap::new(),
             thread_local_vars: HashMap::new(),
@@ -1590,6 +1616,8 @@ impl CodegenContext {
             byte_array_vars: HashSet::new(),
             required_contexts: HashSet::new(),
             explicit_mount_names: HashSet::new(),
+            expected_fn_value_arity: None,
+            current_return_fn_arity: None,
             context_aliases: HashMap::new(),
             active_pattern_cache: HashMap::new(),
             thread_local_vars: HashMap::new(),

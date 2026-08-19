@@ -1841,6 +1841,37 @@ impl VbcCodegen {
     /// - Module paths: `module::item` → resolve module and item
     /// - Type paths: `Type::method` → resolve type and associated item
     /// - Self/super/crate: special resolution
+    /// How many parameters does a function TYPE declare?
+    ///
+    /// `"fn(Int) -> Int"` → 1, `"fn(Int, Text) -> Bool"` → 2,
+    /// `"fn() -> Int"` → 0. Anything that is not a function type — a
+    /// record name, a generic parameter standing in for one — answers
+    /// `None`, and the caller falls through to its usual resolution.
+    ///
+    /// Nested function types are counted at the TOP level only:
+    /// `fn(fn(Int) -> Int) -> Int` takes one parameter, and the inner
+    /// comma-free shape must not be mistaken for a second.
+    fn function_type_arity(type_name: &str) -> Option<usize> {
+        let rest = type_name.strip_prefix("fn")?.trim_start();
+        let inner = rest.strip_prefix('(')?;
+        let mut depth = 0usize;
+        let mut commas = 0usize;
+        let mut saw_content = false;
+        for ch in inner.chars() {
+            match ch {
+                '(' | '<' | '[' => depth += 1,
+                ')' if depth == 0 => {
+                    return Some(if saw_content { commas + 1 } else { 0 });
+                }
+                ')' | '>' | ']' => depth = depth.saturating_sub(1),
+                ',' if depth == 0 => commas += 1,
+                c if !c.is_whitespace() => saw_content = true,
+                _ => {}
+            }
+        }
+        None
+    }
+
     fn compile_path(&mut self, path: &Path) -> CodegenResult<Option<Reg>> {
         // Simple case: single identifier (local variable or function)
         if path.segments.len() == 1 {
@@ -2020,7 +2051,42 @@ impl VbcCodegen {
                             .map(|pp| format!("{}${}", pp, name))
                             .find_map(|mangled| self.ctx.lookup_function(&mangled).cloned())
                     });
-                let func_info_opt = lexical_fnref.or(expected_prefixed_info).or_else(|| self.ctx.lookup_function_in_scope(name).cloned()).or_else(|| {
+                let func_info_opt = lexical_fnref.or(expected_prefixed_info).or_else(|| {
+                    // The usual resolution answers first. Only when its
+                    // answer CANNOT be the value being asked for — the
+                    // parameter is declared `fn(A) -> R` and the bare
+                    // slot holds something of a different arity — does
+                    // the expected signature pick a different overload
+                    // (T0780).
+                    //
+                    // Order matters and was measured: preferring
+                    // `name#arity` outright made the library's
+                    // `core.math.tensor.square` win over a file's own
+                    // `fn square(x: Int)`, because both have one
+                    // parameter and the composite key had been claimed
+                    // by whichever registered first. A file's own
+                    // declaration is not an overload candidate to be
+                    // ranked — it is the answer, and only a genuine
+                    // arity mismatch sends resolution looking further.
+                    let primary = self.ctx.lookup_function_in_scope(name).cloned();
+                    // The expected signature comes from a parameter
+                    // (`apply(5, identity)`) or from the enclosing
+                    // function's RETURN type (`fn select(op: Int) ->
+                    // fn(Int) -> Int { … identity }`). Both state the
+                    // same fact about the value being named.
+                    let expected_arity = self
+                        .ctx
+                        .expected_fn_value_arity
+                        .or(self.ctx.current_return_fn_arity);
+                    match (&primary, expected_arity) {
+                        (Some(info), Some(arity)) if info.param_count != arity => self
+                            .ctx
+                            .lookup_function(&format!("{}#{}", name, arity))
+                            .cloned()
+                            .or(primary),
+                        _ => primary,
+                    }
+                }).or_else(|| {
                     let is_const_shaped = !name.is_empty()
                         && name.chars().all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
                         && name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
@@ -7439,9 +7505,21 @@ impl VbcCodegen {
                                 self.ctx.push_disambig_context(Some(base))
                             })
                     };
+                    // A parameter declared `fn(A, B) -> R` states how
+                    // many parameters the value it receives must have.
+                    // Carry that count for the duration of the argument
+                    // so a bare name resolves to the overload that fits
+                    // (T0780).
+                    let saved_arity = self.ctx.expected_fn_value_arity.take();
+                    self.ctx.expected_fn_value_arity = func_info
+                        .param_type_names
+                        .get(i)
+                        .and_then(|t| Self::function_type_arity(t));
+
                     let arg_val = self
                         .compile_expr(arg)?
                         .or_internal("call arg has no value")?;
+                    self.ctx.expected_fn_value_arity = saved_arity;
                     if let Some(saved) = saved {
                         self.ctx.pop_disambig_context(saved);
                     }
@@ -42306,5 +42384,47 @@ mod tests {
             assert_eq!(resolve_stdlib_constant_value("O_WRONLY", target), 1);
             assert_eq!(resolve_stdlib_constant_value("SEEK_END", target), 2);
         }
+    }
+}
+
+#[cfg(test)]
+mod function_type_arity_tests {
+    //! `fn(A, B) -> R` states a count; these pin how it is read.
+
+    use super::VbcCodegen;
+
+    #[test]
+    fn counts_top_level_parameters() {
+        assert_eq!(VbcCodegen::function_type_arity("fn() -> Int"), Some(0));
+        assert_eq!(VbcCodegen::function_type_arity("fn(Int) -> Int"), Some(1));
+        assert_eq!(
+            VbcCodegen::function_type_arity("fn(Int, Text) -> Bool"),
+            Some(2)
+        );
+    }
+
+    /// A function type nested in a parameter is ONE parameter, however
+    /// many its own signature declares.
+    #[test]
+    fn nested_function_types_count_once() {
+        assert_eq!(
+            VbcCodegen::function_type_arity("fn(fn(Int, Int) -> Int) -> Int"),
+            Some(1)
+        );
+        assert_eq!(
+            VbcCodegen::function_type_arity("fn(Map<Text, Int>, List<Int>) -> Int"),
+            Some(2)
+        );
+    }
+
+    /// Anything that is not a function type declines to answer, so the
+    /// caller keeps its usual resolution.
+    #[test]
+    fn non_function_types_decline() {
+        assert_eq!(VbcCodegen::function_type_arity("Int"), None);
+        assert_eq!(VbcCodegen::function_type_arity("Transducer<A, A>"), None);
+        assert_eq!(VbcCodegen::function_type_arity(""), None);
+        // Unterminated — a truncated type name must not be read as an arity.
+        assert_eq!(VbcCodegen::function_type_arity("fn(Int"), None);
     }
 }

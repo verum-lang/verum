@@ -17127,6 +17127,17 @@ impl VbcCodegen {
             }
         }
 
+        // A function whose RETURN type is itself a function states the
+        // signature every bare name in return position must satisfy
+        // (T0780).
+        self.ctx.current_return_fn_arity = match &func.return_type {
+            verum_common::Maybe::Some(ty) => match &ty.kind {
+                verum_ast::ty::TypeKind::Function { params, .. } => Some(params.len()),
+                _ => None,
+            },
+            verum_common::Maybe::None => None,
+        };
+
         // VALUE SEMANTICS AT THE PARAMETER (T0832).
         //
         // A by-value parameter is a NEW variable initialized from the
