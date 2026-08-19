@@ -24806,6 +24806,30 @@ impl VbcCodegen {
         else {
             return None;
         };
+        // A CBGR REFERENCE IS NOT A RAW POINTER (T0831).
+        //
+        // This function gates the lowering that turns `&(*p).field` into
+        // a raw field ADDRESS. That is right for `p: *mut T` and for the
+        // tier-2 `&unsafe` forms, which already ARE addresses. It was
+        // also accepting an ordinary `&mut T` parameter, so
+        // `&mut (*h).row` on `h: &mut Holder` lowered to an address,
+        // was marked a raw pointer, and reached a `&mut Row` parameter —
+        // and the callee's write never touched the caller's field.
+        // Measured: `row_set(&mut (*h).row, 9)` left the original at 0
+        // while the same write through an owned receiver worked.
+        //
+        // The distinction cannot be made from the type NAME: by the time
+        // it reaches here it is "Holder", not "&mut Holder" — verified
+        // with a trace before this fix, which is why stripping `&mut `
+        // from the name did nothing. `reference_bindings` carries the
+        // fact that survives: it holds the bindings whose DECLARED type
+        // is a reference, recorded per function at compile entry.
+        if let ExprKind::Path(path) = &raw_ptr.kind
+            && let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.last()
+            && self.ctx.reference_bindings.contains(ident.name.as_str())
+        {
+            return None;
+        }
         let type_name = self
             .infer_expr_type_name(raw_ptr)
             .or_else(|| self.extract_expr_type_name(raw_ptr))
