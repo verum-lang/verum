@@ -5624,6 +5624,7 @@ dependencies = [
  "anyhow",
  "tracing",
  "tracing-subscriber",
+ "verum_common",
  "verum_compiler",
 ]
 
