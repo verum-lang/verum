@@ -41,10 +41,20 @@ impl TypeChecker {
     /// Names the file declares are excluded because a declaration owns
     /// its name; mounted names are excluded because a `mount` IS the
     /// request. What remains is ambient.
-    fn report_ambient_use(&self, name: &str) {
+    fn report_ambient_use(&self, name: &str, resolved: &Type) {
         let Some(filter) = std::env::var_os("VERUM_REPORT_AMBIENT") else {
             return;
         };
+        // A TYPE PARAMETER is not an ambient symbol. Declarations
+        // register their own parameters (`K`, `V`, `T`, `Rhs`) into the
+        // same table while their body is being checked, and clean them
+        // up afterwards; a parameter resolves to a fresh type VARIABLE,
+        // which is what tells it apart from a nominal type. Counting
+        // them made `K`/`V`/`T` the top three "ambient" names — 1892 of
+        // 5352 in the first measurement — and buried the real ones.
+        if matches!(resolved, Type::Var(_)) {
+            return;
+        }
         if self.current_module_declared_types.contains(name)
             || self
                 .imported_names
@@ -150,7 +160,7 @@ impl TypeChecker {
 
         // Step 1: Try current module first (fast path)
         if let Maybe::Some(ty) = self.ctx.lookup_type(name) {
-            self.report_ambient_use(name);
+            self.report_ambient_use(name, &ty);
             if std::env::var("VERUM_TRACE_MOUNT_AUTH")
                 .is_ok_and(|v| v == "1" || v == name)
             {
@@ -190,7 +200,7 @@ impl TypeChecker {
             self.ensure_stdlib_type_loaded(&next, &mut pending);
         }
         if let Maybe::Some(ty) = self.ctx.lookup_type(name) {
-            self.report_ambient_use(name);
+            self.report_ambient_use(name, &ty);
             return Ok(ty.clone());
         }
 
