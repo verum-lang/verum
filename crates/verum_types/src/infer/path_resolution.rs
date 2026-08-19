@@ -25,6 +25,45 @@ impl TypeChecker {
     /// 2. Use NameResolver to find the type across modules
     /// 3. Load type from module registry
     /// 4. Verify visibility (types must be accessible)
+    /// Reports a name that resolved WITHOUT anyone asking for it
+    /// (T0780).
+    ///
+    /// Every public stdlib symbol is visible bare, without a `mount`.
+    /// This prints one line per use where the resolving file neither
+    /// DECLARED the name nor MOUNTED it — the exact dependency that
+    /// has to shrink before visibility can be made to follow `mount`.
+    ///
+    /// `VERUM_REPORT_AMBIENT=1` reports everything; setting it to a
+    /// module-path substring reports only that module, the way
+    /// `VERUM_DUMP_VBC` filters by function name. Aggregate the output
+    /// with `sort | uniq -c`.
+    ///
+    /// Names the file declares are excluded because a declaration owns
+    /// its name; mounted names are excluded because a `mount` IS the
+    /// request. What remains is ambient.
+    fn report_ambient_use(&self, name: &str) {
+        let Some(filter) = std::env::var_os("VERUM_REPORT_AMBIENT") else {
+            return;
+        };
+        if self.current_module_declared_types.contains(name)
+            || self
+                .imported_names
+                .contains_key(&verum_common::Text::from(name))
+        {
+            return;
+        }
+        let module = if self.current_module_path.as_str().is_empty() {
+            "<user>"
+        } else {
+            self.current_module_path.as_str()
+        };
+        let filter = filter.to_string_lossy();
+        if filter != "1" && !module.contains(filter.as_ref()) {
+            return;
+        }
+        eprintln!("[ambient] {}\t{}", module, name);
+    }
+
     pub(crate) fn resolve_type_name(&mut self, name: &str, span: Span) -> Result<Type> {
         // CRITICAL FIX: Resolve "Self" to the concrete type from current_self_type.
         // When inside an implement block, Self should resolve to the implementing type
@@ -111,6 +150,7 @@ impl TypeChecker {
 
         // Step 1: Try current module first (fast path)
         if let Maybe::Some(ty) = self.ctx.lookup_type(name) {
+            self.report_ambient_use(name);
             if std::env::var("VERUM_TRACE_MOUNT_AUTH")
                 .is_ok_and(|v| v == "1" || v == name)
             {
@@ -150,6 +190,7 @@ impl TypeChecker {
             self.ensure_stdlib_type_loaded(&next, &mut pending);
         }
         if let Maybe::Some(ty) = self.ctx.lookup_type(name) {
+            self.report_ambient_use(name);
             return Ok(ty.clone());
         }
 
