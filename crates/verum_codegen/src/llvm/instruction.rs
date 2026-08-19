@@ -4293,10 +4293,6 @@ pub fn lower_instruction<'ctx>(
                     runtime.lower_new_object(ctx.builder(), ctx.get_module(), *field_count)?;
                 // CLONE-AOT-ALIAS-1: record the static allocation size
                 // so a later `Clone` of this register can real-copy.
-                ctx.set_obj_alloc_size(
-                    dst.0,
-                    RuntimeLowering::OBJECT_HEADER_SIZE + (*field_count as u64) * 8,
-                );
 
                 // AOT-XMODULE-VALUESEM-1: stamp the header UNCONDITIONALLY —
                 // type_id (u32 @0, interp ObjectHeader layout) + size
@@ -4336,6 +4332,29 @@ pub fn lower_instruction<'ctx>(
                 }
 
                 ctx.set_register(dst.0, obj_ptr.into());
+                // CLONE-AOT-ALIAS-1: the size mark goes AFTER
+                // `set_register`, which clears it — as its own comment
+                // says: "allocation-size marks are re-set by the
+                // allocation/propagation sites AFTER this call".
+                //
+                // This site set it BEFORE, so the mark was erased the
+                // moment the register was written and no `Clone` ever
+                // saw a size. The mechanism named in that comment has
+                // been inert since it was introduced: `let b = a` on a
+                // record aliased at Tier-1 while the interpreter copied.
+                // Every other size-marking site in this file already
+                // orders it this way.
+                // A/B switch for the repair above: VERUM_AOT_CLONE_COPY=0
+                // restores the historic (inert) behaviour, so a Tier-1
+                // failure can be attributed to real copies rather than
+                // guessed at. Default is on — the copy is the correct
+                // semantics.
+                if std::env::var("VERUM_AOT_CLONE_COPY").as_deref() != Ok("0") {
+                    ctx.set_obj_alloc_size(
+                        dst.0,
+                        RuntimeLowering::OBJECT_HEADER_SIZE + (*field_count as u64) * 8,
+                    );
+                }
                 // Track the allocated type for GetF field metadata lookup
                 // TypeId 517 = Range — mark for IterNew/IterNext dispatch
                 if *type_id == 517 {
@@ -4858,6 +4877,20 @@ pub fn lower_instruction<'ctx>(
 
         Instruction::Clone { dst, src } => {
             let value = ctx.get_register(src.0)?;
+            // VERUM_TRACE_CLONE=1 reports what this site knows about the
+            // register it is copying. A `Clone` that finds no static type
+            // and no allocation size lowers to a register copy — an ALIAS
+            // — and the tier silently disagrees with the interpreter.
+            if std::env::var_os("VERUM_TRACE_CLONE").is_some() {
+                eprintln!(
+                    "[clone-aot] src=r{} dst=r{} static_type={:?} alloc_size={:?} struct={}",
+                    src.0,
+                    dst.0,
+                    ctx.get_obj_register_type(src.0),
+                    ctx.get_obj_alloc_size(src.0),
+                    ctx.is_struct_register(src.0),
+                );
+            }
             // **CLONE-AOT-ALIAS-1** — for heap objects whose allocation
             // size is statically known (`New` / `MakeVariant*` in the
             // same function; see `set_obj_alloc_size`), emit a REAL
@@ -4894,7 +4927,16 @@ pub fn lower_instruction<'ctx>(
                     ctx.set_register(dst.0, value);
                     return Ok(());
                 }
-                Some(tn) if tn == "List" || tn.starts_with("List<") => {
+                // Only where a memcpy would otherwise have run: that is
+                // the path this replaces. Where the size is unknown the
+                // opcode has always been a register copy, and turning
+                // that into a runtime call reaches a pointer whose
+                // shape this site cannot verify — measured as a
+                // SIGSEGV on `let ys = xs` for a list literal.
+                Some(tn)
+                    if (tn == "List" || tn.starts_with("List<"))
+                        && ctx.get_obj_alloc_size(src.0).is_some() =>
+                {
                     let module = ctx.get_module();
                     let src_ptr = as_ptr(ctx, value, "clone_list_src")?;
                     let clone_ty = ctx
@@ -38649,6 +38691,17 @@ fn propagate_value_type_facts<'ctx>(
     }
     if let Some(type_name) = ctx.get_obj_register_type(src.0).map(|s| s.to_string()) {
         ctx.set_obj_register_type(dst.0, type_name);
+    }
+    // How big the object is is a value-describing fact like the rest,
+    // and it was the one missing from this authority. `Clone` real-
+    // copies only where the size is statically known, so a record that
+    // reached the copy through a MOV — which is every `let b = a`,
+    // since the binding moves the constructor's register — silently
+    // fell back to aliasing at Tier-1 while Tier-0 copied. Measured:
+    // `let origin = Point {…}; let mut moved = origin; moved.x = 10`
+    // printed `10 10` under AOT and `1 10` under the interpreter.
+    if let Some(size) = ctx.get_obj_alloc_size(src.0) {
+        ctx.set_obj_alloc_size(dst.0, size);
     }
     if let Some(inner) = ctx.get_maybe_inner_type(src.0).map(|s| s.to_string()) {
         ctx.set_maybe_inner_type(dst.0, inner);
