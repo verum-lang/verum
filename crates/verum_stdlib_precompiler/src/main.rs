@@ -12,6 +12,16 @@
 //! `<workspace>/target/precompiled-stdlib/runtime.{vbca,core_metadata}`
 //! and exits with status 0 on success.
 
+/// The bake is the heaviest step this toolchain runs (~8 GB peak), and
+/// on macOS there is no working outer limit — `ulimit -v` reports
+/// `setrlimit failed: invalid argument` and leaves the process
+/// unlimited. Without a ceiling of its own, a runaway bake takes the
+/// machine down with it, which has happened repeatedly. See
+/// `verum_common::memory_budget`.
+#[global_allocator]
+static ALLOC: verum_common::memory_budget::BudgetedAllocator =
+    verum_common::memory_budget::BudgetedAllocator::new();
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 

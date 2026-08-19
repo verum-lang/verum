@@ -11,6 +11,15 @@ extern crate verum_llvm_sys;
 
 // Main entry point for the Verum language compiler
 
+/// A compile that runs away takes the developer's machine with it:
+/// `ulimit -v` does not work on macOS, so nothing outside the process
+/// will stop it. The ceiling is generous enough that no ordinary build
+/// can reach it, and a build that does gets a message naming its own
+/// size instead of a frozen desktop. See `verum_common::memory_budget`.
+#[global_allocator]
+static ALLOC: verum_common::memory_budget::BudgetedAllocator =
+    verum_common::memory_budget::BudgetedAllocator::new();
+
 use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 use std::path::PathBuf;

@@ -167,6 +167,7 @@ pub mod conversions; // Type conversions (std ↔ verum)
 pub mod formatting; // Centralized formatting utilities
 pub mod mls; // Multi-Level Security classification lattice (#282 Phase 2a)
 pub mod promotion; // Unified reference promotion system
+pub mod memory_budget; // Self-imposed memory ceiling (ulimit -v does not work on macOS)
 pub mod semantic_types; // Complete semantic types with full API
 pub mod shared; // Thread-safe reference counting (Shared<T>, Weak<T>)
 pub mod span;
