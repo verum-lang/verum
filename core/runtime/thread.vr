@@ -359,7 +359,14 @@ implement Thread {
 
         @cfg(target_os = "macos")
         {
-            sys.darwin.thread.park();
+            // `sys.darwin.thread` has no `park` — it never did. What it
+            // has is `futex_wait`, documented in place as "compatible
+            // with sys/linux/thread.futex_wait signature", which is
+            // exactly what the Linux arm above calls. Naming a function
+            // that does not exist is not a compile error today (T0806):
+            // the call returns nil, so parking on macOS returned
+            // immediately and every caller spun.
+            sys.darwin.thread.futex_wait(&PARK_FLAG, 0, Maybe.None);
         }
     }
 
@@ -372,7 +379,11 @@ implement Thread {
 
         @cfg(target_os = "macos")
         {
-            sys.darwin.thread.unpark(thread_id.id);
+            // Same pair as `park` above: `unpark` does not exist,
+            // `futex_wake` does, and it is the twin of the Linux arm.
+            // The thread id is not a parameter of the futex protocol —
+            // the wake is addressed by the flag both sides share.
+            sys.darwin.thread.futex_wake(&PARK_FLAG, 1);
         }
     }
 }

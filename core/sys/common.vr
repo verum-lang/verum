@@ -659,7 +659,7 @@ public fn pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int, OSEr
         let mut bytes_read: UInt32 = 0 as UInt32;
         let ok = unsafe {
             super.windows.kernel32.ReadFile(
-                super.windows.kernel32.Handle(fd.0),
+                super.windows.ntdll.Handle(fd.0),
                 buf.as_mut_ptr() as &unsafe mut Byte,
                 buf.len() as UInt32,
                 &mut bytes_read,
@@ -692,7 +692,7 @@ public fn pwrite(fd: FileDesc, buf: &[Byte], offset: Int) -> Result<Int, OSError
         let mut bytes_written: UInt32 = 0 as UInt32;
         let ok = unsafe {
             super.windows.kernel32.WriteFile(
-                super.windows.kernel32.Handle(fd.0),
+                super.windows.ntdll.Handle(fd.0),
                 buf.as_ptr() as &unsafe Byte,
                 buf.len() as UInt32,
                 &mut bytes_written,
@@ -743,7 +743,7 @@ public fn full_fsync(fd: FileDesc) -> Result<(), OSError> {
         // of Darwin's F_FULLFSYNC.
         let ok = unsafe {
             super.windows.kernel32.FlushFileBuffers(
-                super.windows.kernel32.Handle(fd.0),
+                super.windows.ntdll.Handle(fd.0),
             )
         };
         // Win32 BOOL: 0 = FALSE. T0.4.5 — see ReadFile site above.
@@ -789,7 +789,7 @@ public fn data_only_fsync(fd: FileDesc) -> Result<(), OSError> {
     {
         let ok = unsafe {
             super.windows.kernel32.FlushFileBuffers(
-                super.windows.kernel32.Handle(fd.0),
+                super.windows.ntdll.Handle(fd.0),
             )
         };
         if ok == 0 {
@@ -956,7 +956,7 @@ public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: In
             Unlock => {
                 let ok = unsafe {
                     super.windows.kernel32.UnlockFileEx(
-                        super.windows.kernel32.Handle(fd.0),
+                        super.windows.ntdll.Handle(fd.0),
                         0 as UInt32,
                         bytes_low,
                         bytes_high,
@@ -981,7 +981,7 @@ public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: In
                 }
                 let ok = unsafe {
                     super.windows.kernel32.LockFileEx(
-                        super.windows.kernel32.Handle(fd.0),
+                        super.windows.ntdll.Handle(fd.0),
                         flags,
                         0 as UInt32,
                         bytes_low,
@@ -1074,7 +1074,7 @@ public fn file_size(fd: FileDesc) -> Result<Int, OSError> {
         let mut size_out: Int64 = 0 as Int64;
         let ok = unsafe {
             super.windows.kernel32.GetFileSizeEx(
-                super.windows.kernel32.Handle(fd.0),
+                super.windows.ntdll.Handle(fd.0),
                 &mut size_out,
             )
         };
@@ -1106,7 +1106,7 @@ public fn truncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
         // kernel32 calls, no emulation layer above.
         let ok_seek = unsafe {
             super.windows.kernel32.SetFilePointerEx(
-                super.windows.kernel32.Handle(fd.0),
+                super.windows.ntdll.Handle(fd.0),
                 length as Int64,
                 0 as &unsafe Int64,
                 0 as UInt32, // FILE_BEGIN
@@ -1118,7 +1118,7 @@ public fn truncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
         }
         let ok_eof = unsafe {
             super.windows.kernel32.SetEndOfFile(
-                super.windows.kernel32.Handle(fd.0),
+                super.windows.ntdll.Handle(fd.0),
             )
         };
         if ok_eof == 0 {

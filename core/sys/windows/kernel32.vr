@@ -343,6 +343,25 @@ public fn ReadFile(
     overlapped: &mut Overlapped,
 ) -> Int32;
 
+/// Truncate or extend a file to the current file pointer. C:
+/// `BOOL SetEndOfFile(HANDLE);` — BOOL is `int`, non-zero means success,
+/// same convention as `ReadFile` / `WriteFile` below.
+///
+/// Called by `sys/common.vr`'s truncate path. It was called before this
+/// declaration existed: a call through a module path that names nothing
+/// is not an error today (T0806), so on Windows the truncate silently
+/// returned nil and the `== 0` test read it as failure-or-success by
+/// accident.
+@extern("kernel32.dll")
+public fn SetEndOfFile(file: Handle) -> Int32;
+
+/// File attributes of a path, wide-char form. C:
+/// `DWORD GetFileAttributesW(LPCWSTR);` — returns
+/// `INVALID_FILE_ATTRIBUTES` (0xFFFFFFFF) on failure, which is exactly
+/// what the caller in `sys/common.vr` compares against.
+@extern("kernel32.dll")
+public fn GetFileAttributesW(file_name: &unsafe UInt16) -> UInt32;
+
 /// Write to a file. C: `BOOL WriteFile(HANDLE, LPCVOID, DWORD, LPDWORD,
 /// LPOVERLAPPED);` — same BOOL convention as `ReadFile`.
 @extern("kernel32.dll")
