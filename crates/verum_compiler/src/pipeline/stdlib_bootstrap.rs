@@ -2049,6 +2049,13 @@ impl<'s> CompilationPipeline<'s> {
             codegen.collect_blanket_impls(ast_module);
         }
 
+        // Pass 1a.6 (T0692): the two declaration pre-passes the single-
+        // file path gets from `collect_all_declarations` and the bake
+        // did not — type-name claiming (with its stale-layout eviction)
+        // and FFI struct-layout pre-generation. `check_bake_prepass_parity`
+        // has listed both as GAPs since T0362/T0640.
+        codegen.run_unit_declaration_prepasses(ast_modules);
+
         // Pass 1b: Collect all other declarations from ALL files
         let lint_diagnostics = IntrinsicDiagnostics::new(&self.session.options().lint_config);
         for ast_module in ast_modules {

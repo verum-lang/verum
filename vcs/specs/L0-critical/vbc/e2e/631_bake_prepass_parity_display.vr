@@ -1,0 +1,54 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, display, bake, dispatch
+// @timeout: 15000
+// @expected-exit: 0
+//
+// ONE RENDERING PER TYPE, WHATEVER THE RECEIVER (T0692 acceptance).
+//
+// The stdlib bake skipped two declaration pre-passes the single-file
+// compile path runs — `claim_user_type_name` (with its stale-layout
+// eviction) and `pregenerate_ffi_struct_layouts`. Enabling them had
+// been blocked since 2026-07-25 by a measurement, not by a doubt: with
+// them on, `Maybe<Ordering>` rendered
+//
+//     Int    Some(Less)      <- unchanged
+//     Int8   Some(>)
+//     Int64  Some(=)
+//     Float  Some(<)
+//     Text   Some(<)
+//
+// One program, one type, two renderings. The contract question had to
+// be answered first — `{}` means Display — and Int's divergence had a
+// cause of its own: a primitive receiver carried no type NAME, so
+// `a.partial_cmp(b)` could not find `Int.partial_cmp` and never learned
+// its result is a `Maybe<Ordering>`.
+//
+// This spec pins the acceptance: every one of the five receivers
+// renders through `implement Display for Ordering` (`<`, `=`, `>`),
+// so the pre-passes can stay on.
+
+fn main() {
+    let a_int: Int = 1;
+    let b_int: Int = 2;
+    assert_eq(f"{a_int.partial_cmp(b_int)}", "Some(<)");
+
+    let a8: Int8 = 3;
+    let b8: Int8 = 1;
+    assert_eq(f"{a8.partial_cmp(b8)}", "Some(>)");
+
+    let a64: Int64 = 5;
+    let b64: Int64 = 5;
+    assert_eq(f"{a64.partial_cmp(b64)}", "Some(=)");
+
+    let af: Float = 1.0;
+    let bf: Float = 2.0;
+    assert_eq(f"{af.partial_cmp(bf)}", "Some(<)");
+
+    let at: Text = "a";
+    let bt: Text = "b";
+    assert_eq(f"{at.partial_cmp(bt)}", "Some(<)");
+
+    print("bake-prepass-parity-display ok");
+}

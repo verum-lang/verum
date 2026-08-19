@@ -63,18 +63,22 @@ COVERAGE = {
         "not call this helper by name.",
     ),
     "pregenerate_ffi_struct_layouts": (
-        "GAP",
-        "T0362/T0640: the bake never runs this, so forward-declared record "
-        "types in extern signatures do not resolve to StructPtr in the "
-        "archive. A naive fix (calling it from the bootstrap) BAKES CLEAN but "
-        "changes Display dispatch — see T0640.",
+        "bootstrap",
+        "Pass 1a.6 in compile_core_module_from_ast calls "
+        "run_unit_declaration_prepasses over every file of the module "
+        "(T0692, f1c27ff62 + this commit). Was a GAP under T0362/T0640: the "
+        "naive enable shifted Ordering Display rendering for Int8/Int64/"
+        "Float/Text but not Int. That split had its own cause — a primitive "
+        "receiver carried no type NAME, so `f\"{a.cmp(b)}\"` never learned "
+        "its result is an Ordering — and with it fixed all five render "
+        "identically.",
     ),
     "claim_user_type_name": (
-        "GAP",
-        "T0640: same unreachable call-site pattern; OWN-DECL-LAYOUT-EVICT-1 "
-        "(T0125) is therefore inert for the bake. Candidate cause of T0408. "
-        "A naive bootstrap-side call bakes clean but shifts Ordering Display "
-        "dispatch inconsistently — see T0640.",
+        "bootstrap",
+        "Same Pass 1a.6 (T0692). OWN-DECL-LAYOUT-EVICT-1 (T0125) is "
+        "therefore live for the bake: a stdlib declaration now claims the "
+        "simple type key and evicts a stale archive layout, as the "
+        "single-file path has always done.",
     ),
 }
 

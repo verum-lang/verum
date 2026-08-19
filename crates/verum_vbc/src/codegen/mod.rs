@@ -7021,6 +7021,49 @@ impl VbcCodegen {
     ///
     /// Items are filtered based on @cfg attributes to prevent cross-platform
     /// conflicts (e.g., Linux imports being processed when targeting macOS).
+    /// The declaration pre-passes a compilation unit needs before its
+    /// items are collected, for a unit made of MANY files.
+    ///
+    /// `collect_all_declarations` performs these for a single-file unit
+    /// and then walks that file's items. The stdlib bake compiles one
+    /// module from many files, so it drives the pre-passes over all of
+    /// them first and the item walk afterwards — but it only ever ran
+    /// SOME of them, and the gate that measures this
+    /// (`check_bake_prepass_parity`) has listed the other two as GAPs
+    /// since T0362/T0640:
+    ///
+    /// * `claim_user_type_name` — a declaration claims the simple type
+    ///   key even when an archive type already holds it, evicting the
+    ///   stale layout (OWN-DECL-LAYOUT-EVICT-1, T0125). Inert for the
+    ///   bake meant stdlib-internal record literals could read another
+    ///   module's layout.
+    /// * `pregenerate_ffi_struct_layouts` — forward-declared record
+    ///   types in extern signatures resolve to StructPtr (T0362).
+    ///
+    /// Enabling them was blocked, not by the passes, but by an
+    /// unanswered contract question: doing so shifted `Ordering`
+    /// rendering for Int8/Int64/Float/Text and NOT for Int, so one
+    /// program rendered one type two ways. That question is answered —
+    /// `{}` means Display — and Int's divergence had its own cause
+    /// (a primitive receiver had no type NAME), fixed separately.
+    pub fn run_unit_declaration_prepasses(&mut self, files: &[&Module]) {
+        for module in files {
+            let module_key = format!("file:{:?}", module.file_id);
+            for item in module.items.iter() {
+                if !self.should_compile_item(item) {
+                    continue;
+                }
+                if let ItemKind::Type(type_decl) = &item.kind {
+                    let type_name = type_decl.name.name.to_string();
+                    self.claim_user_type_name(&module_key, &type_name);
+                }
+            }
+        }
+        for module in files {
+            self.pregenerate_ffi_struct_layouts(module);
+        }
+    }
+
     pub fn collect_all_declarations(&mut self, module: &Module) -> CodegenResult<()> {
         // Pre-allocate TypeIds for user-defined types before collecting declarations
         for item in module.items.iter() {
