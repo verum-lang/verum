@@ -2025,6 +2025,7 @@ impl<'s> CompilationPipeline<'s> {
         // a different carrier, and that carrier has a different phase.
         let verify = mode == "verify";
         let mut contract_failures = 0usize;
+        let mut meta_failures = 0usize;
         let mut ffi_failures = 0usize;
         let mut safety_failures = 0usize;
         let mut strict_findings = 0usize;
@@ -2034,6 +2035,32 @@ impl<'s> CompilationPipeline<'s> {
         // about two of the four phases.
         let errors_before = self.session.error_count();
         for ast_module in ast_modules {
+            // META EVALUATION — the last of T0640's six absent phases.
+            // A zero-parameter `meta fn` is EVALUATED at compile time,
+            // and the phase reports the ones that fail. core/ declares
+            // 22 of them and the bake had never run a single one, so
+            // nothing would have noticed if one stopped evaluating.
+            //
+            // The library passes: 590 modules, 0 failures. That zero is
+            // CONTROLLED, not assumed — a `meta fn` returning `1 / 0`
+            // was added to core/ on purpose and the count went to 1,
+            // then back to 0 when it was removed.
+            //
+            // The first control missed, and the miss is worth keeping:
+            // pointing a `@intrinsic("no_such_thing")` at the phase
+            // changed nothing, because an unresolved intrinsic is not
+            // in `is_reportable_meta_error`'s list — intrinsics resolve
+            // later, by design. A control has to break the thing the
+            // instrument actually measures.
+            if verify
+                && let Err(e) = self.phase_meta_evaluation(
+                    ast_module,
+                    &verum_common::Text::from(module_name),
+                )
+            {
+                meta_failures += 1;
+                tracing::warn!("stdlib meta evaluation: {}", e);
+            }
             self.phase_context_validation(ast_module);
             self.phase_send_sync_validation(ast_module);
             if let Err(e) = self.phase_ffi_validation(ast_module) {
@@ -2123,7 +2150,8 @@ impl<'s> CompilationPipeline<'s> {
             // 590 modules they were in.
             eprintln!(
                 "[bake-validation] module={} files={} ffi_failures={} safety_failures={} \
-                 session_errors_added={} strict_findings={} contract_failures={}",
+                 session_errors_added={} strict_findings={} contract_failures={} \
+                 meta_failures={}",
                 module_name,
                 ast_modules.len(),
                 ffi_failures,
@@ -2131,6 +2159,7 @@ impl<'s> CompilationPipeline<'s> {
                 self.session.error_count().saturating_sub(errors_before),
                 strict_findings,
                 contract_failures,
+                meta_failures,
             );
         }
     }
