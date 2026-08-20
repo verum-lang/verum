@@ -2002,12 +2002,29 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// `VERUM_BAKE_VALIDATION=off` skips them; `=report` prints the
     /// per-module counts the numbers above come from.
-    fn run_user_validation_phases(&mut self, ast_modules: &[&verum_ast::Module]) {
+    fn run_user_validation_phases(
+        &mut self,
+        module_name: &str,
+        ast_modules: &[&verum_ast::Module],
+    ) {
         if std::env::var("VERUM_BAKE_VALIDATION").as_deref() == Ok("off") {
             return;
         }
         let mode = std::env::var("VERUM_BAKE_VALIDATION").unwrap_or_default();
         let strict = mode == "strict";
+        // `=verify` adds CONTRACT verification — the phase that reads
+        // `@verify(formal)`. It is its own mode because it is the
+        // expensive one (an SMT context, and an AST clone per module),
+        // and because its subject is real: core/ carries 546 such
+        // annotations across 51 files that nothing has ever checked.
+        //
+        // Note which phase this is. `phase_verify` — the refinement one
+        // — was tried first and reported zero over 577 modules, because
+        // it collects functions with refinement TYPES and core/ has
+        // none. Its zero was honest and empty. The annotations live on
+        // a different carrier, and that carrier has a different phase.
+        let verify = mode == "verify";
+        let mut contract_failures = 0usize;
         let mut ffi_failures = 0usize;
         let mut safety_failures = 0usize;
         let mut strict_findings = 0usize;
@@ -2064,15 +2081,56 @@ impl<'s> CompilationPipeline<'s> {
         // because somebody checked which one they had. The report says
         // how many files were actually walked, so "no findings" can be
         // told apart from "no phases".
-        if mode == "report" || strict {
+        if verify {
+            let owned: Vec<verum_ast::Module> =
+                ast_modules.iter().map(|m| (*m).clone()).collect();
+            let phase = crate::phases::contract_verification::ContractVerificationPhase::new();
+            let input = crate::phases::PhaseInput {
+                data: crate::phases::PhaseData::AstModules(owned.into()),
+                context: crate::phases::PhaseContext {
+                    profile: crate::phases::LanguageProfile::Application,
+                    target_tier: crate::phases::ExecutionTier::Interpreter,
+                    verify_mode: crate::phases::VerifyMode::Proof,
+                    opt_level: crate::phases::OptimizationLevel::O0,
+                },
+            };
+            // The trait is `CompilationPhase`; `Phase` does not exist,
+            // and getting that wrong costs a full rebuild to discover.
+            use crate::phases::CompilationPhase;
+            if let Err(diags) = phase.execute(input) {
+                contract_failures += diags.len();
+                // The MESSAGES, not just the count. The first run
+                // reported five failures in `core.cog` — a module that
+                // declares no `@verify`, `@contract`, `@requires` or
+                // `@ensures` at all — so the number said nothing about
+                // what the phase actually objected to. A count without
+                // its text is the same defect as a count without its
+                // address, one level down.
+                for d in diags.iter().take(3) {
+                    eprintln!(
+                        "[bake-validation]   {}: {}",
+                        module_name,
+                        d.message()
+                    );
+                }
+            }
+        }
+
+        if mode == "report" || strict || verify {
+            // The module NAME, because a count without an address is
+            // not actionable: the first contract-verification run
+            // reported five failures and left no way to say which of
+            // 590 modules they were in.
             eprintln!(
-                "[bake-validation] files={} ffi_failures={} safety_failures={} \
-                 session_errors_added={} strict_findings={}",
+                "[bake-validation] module={} files={} ffi_failures={} safety_failures={} \
+                 session_errors_added={} strict_findings={} contract_failures={}",
+                module_name,
                 ast_modules.len(),
                 ffi_failures,
                 safety_failures,
                 self.session.error_count().saturating_sub(errors_before),
                 strict_findings,
+                contract_failures,
             );
         }
     }
@@ -2171,7 +2229,7 @@ impl<'s> CompilationPipeline<'s> {
 
         // Pass 1a.7 (T0692): the VALIDATION phases a user compile runs
         // and the bake does not.
-        self.run_user_validation_phases(ast_modules);
+        self.run_user_validation_phases(&module.name, ast_modules);
 
         // Pass 1b: Collect all other declarations from ALL files
         let lint_diagnostics = IntrinsicDiagnostics::new(&self.session.options().lint_config);

@@ -3386,6 +3386,23 @@ impl<'ctx> Translator<'ctx> {
                 Ok(Dynamic::from_ast(&var))
             }
 
+            // Z3 HAS a string theory, and this translator already uses
+            // it elsewhere (`pattern_quantifiers.rs`) — but `create_var`
+            // did not, so any type invariant over a record with a `Text`
+            // field failed to translate at all:
+            //
+            //     Error verifying type invariant for 'CogArchive':
+            //     Failed to create variable 'it': unsupported type: Text
+            //
+            // Measured on the first-ever verification run over core/.
+            // `Text` is the most common field type in the library, so
+            // the gap was not an edge case: it silently excluded most
+            // records from invariant checking.
+            TypeKind::Text => {
+                let var = z3::ast::String::new_const(name);
+                Ok(Dynamic::from_ast(&var))
+            }
+
             TypeKind::Refined { base, .. } => {
                 // Create variable for the base type
                 self.create_var(name, base)
@@ -3401,6 +3418,10 @@ impl<'ctx> Translator<'ctx> {
                         }
                         "Bool" => {
                             let var = Bool::new_const(name);
+                            Ok(Dynamic::from_ast(&var))
+                        }
+                        "Text" | "String" => {
+                            let var = z3::ast::String::new_const(name);
                             Ok(Dynamic::from_ast(&var))
                         }
                         "Float" => {
