@@ -7047,6 +7047,14 @@ impl VbcCodegen {
     /// `{}` means Display — and Int's divergence had its own cause
     /// (a primitive receiver had no type NAME), fixed separately.
     pub fn run_unit_declaration_prepasses(&mut self, files: &[&Module]) {
+        // The order is the one `collect_all_declarations` established
+        // for a single file, applied ACROSS the unit: every file's
+        // types are claimed before any file's aliases are read, and
+        // every file's aliases before any file's blankets. A pre-pass
+        // that ran per-file would let file 1 be collected against a
+        // world where file 5's declarations do not exist yet — which is
+        // exactly the multi-file hazard the bake's Pass 1a.5 was added
+        // for (T0625).
         for module in files {
             let module_key = format!("file:{:?}", module.file_id);
             for item in module.items.iter() {
@@ -7060,50 +7068,27 @@ impl VbcCodegen {
             }
         }
         for module in files {
+            self.register_declared_type_aliases(module);
+        }
+        for module in files {
+            self.collect_blanket_impls(module);
+        }
+        for module in files {
             self.pregenerate_ffi_struct_layouts(module);
         }
     }
 
-    /// Collects all declarations from an AST module without compiling.
+    /// Records `alias name → base type name` for every alias or
+    /// transparent-marker type this file declares, and remembers the
+    /// concrete ones so an imported same-named alias cannot shadow
+    /// them.
     ///
-    /// This is used for two-pass compilation where all declarations from
-    /// multiple files need to be registered before compiling any function bodies.
-    /// This ensures type constructors (like None, Some) are available when
-    /// compiling functions in any file.
-    ///
-    /// Items are filtered based on @cfg attributes to prevent cross-platform
-    /// conflicts (e.g., Linux imports being processed when targeting macOS).
-    pub fn collect_all_declarations(&mut self, module: &Module) -> CodegenResult<()> {
-        // Pre-allocate TypeIds for user-defined types before collecting declarations
-        for item in module.items.iter() {
-            if !self.should_compile_item(item) {
-                continue;
-            }
-            if let ItemKind::Type(type_decl) = &item.kind {
-                let type_name = type_decl.name.name.to_string();
-                // RECORD-LITERAL-SETF-IDX-0: a local declaration claims the
-                // simple key even when an archive/stdlib type already holds
-                // it (fresh id + stale-layout eviction; per-module idempotent).
-                let module_key = format!("file:{:?}", module.file_id);
-                self.claim_user_type_name(&module_key, &type_name);
-            }
-        }
-
-        // **Type-alias pre-registration** (companion to the verum_types
-        // alias-vs-marker fix). Records `alias name → base type name` in
-        // `type_aliases` for every alias/transparent-marker type decl in
-        // this module, GLOBALLY here in the declaration pre-pass: the
-        // map persists across this module's compile and is published to
-        // the bootstrap's global alias registry (mirroring the D2b
-        // type-layout registry) so a later module that `mount`s the alias
-        // and uses it as a namespace (`IoError.from_os` where
-        // `type IoError is StreamError;`) resolves the path head through
-        // `resolve_type_alias` → `StreamError.from_os` instead of failing
-        // ("undefined variable: IoError") and dropping to a lenient
-        // panic-stub. Runs AFTER the TypeId pre-alloc loop so same-module
-        // alias targets are already in `type_name_to_id`.
-        // ALIAS-VS-MARKER scope (#41): local visibility for the alias
-        // decisions below, from this module's own AST.
+    /// Split out of `collect_all_declarations` so a multi-file unit can
+    /// run it across every file before collecting any of them; the
+    /// single-file path calls it in the same position it always did.
+    fn register_declared_type_aliases(&mut self, module: &Module) {
+        // ALIAS-VS-MARKER scope (#41): the alias decisions below are
+        // made against THIS file's own visible type names.
         self.alias_scope = Some(verum_ast::decl::locally_visible_type_names(
             module.items.as_slice(),
         ));
@@ -7118,9 +7103,6 @@ impl VbcCodegen {
                             .entry(type_decl.name.name.to_string())
                             .or_insert(target);
                     }
-                    // A concrete type declared by THIS module — record it
-                    // so an imported cross-module alias of the same name
-                    // cannot shadow it in `resolve_type_alias`.
                     None => {
                         self.local_concrete_types
                             .insert(type_decl.name.name.to_string());
@@ -7128,57 +7110,72 @@ impl VbcCodegen {
                 }
             }
         }
+    }
 
-        // **Blanket-impl pre-pass** (closes task #11).
+    /// Collects all declarations from an AST module without compiling.
+    ///
+    /// This is used for two-pass compilation where all declarations from
+    /// multiple files need to be registered before compiling any function bodies.
+    /// This ensures type constructors (like None, Some) are available when
+    /// compiling functions in any file.
+    ///
+    /// Items are filtered based on @cfg attributes to prevent cross-platform
+    /// conflicts (e.g., Linux imports being processed when targeting macOS).
+    pub fn collect_all_declarations(&mut self, module: &Module) -> CodegenResult<()> {
+        // ONE compilation unit, made of one file.
         //
-        // Stdlib declaration order in `core/async/future.vr` puts
-        // `implement<F: Future> FutureExt for F {}` at line 257 — AFTER
-        // every concrete `implement Future for ReadyFuture / PendingFuture
-        // / Lazy / MapFuture / AndThenFuture` at lines 65-169.  Single-
-        // pass collection means concrete impls call
-        // `generate_default_protocol_methods("Future", "ReadyFuture", …)`
-        // with `self.blanket_impls = [Future→IntoFuture]` (line 47's
-        // blanket is observable), MISSING `Future→FutureExt` (line 257
-        // not yet visited).  Result: FutureExt's default-method bodies
-        // (`block` / `map` / `and_then`) never monomorphise onto
-        // ReadyFuture and runtime `ready(v).block()` panics with
-        // "method 'ReadyFuture.block' not found".
-        //
-        // Pre-pass populates `self.blanket_impls` from a single linear
-        // scan over `module.items`, identifying blanket impls (those
-        // where `for_type` IS a generic param of the impl) and recording
-        // their `(base_protocol, derived_protocol, explicit_methods)`
-        // tuple.  Subsequent `collect_declarations` walk's blanket-impl
-        // observation at mod.rs:5593 short-circuits via the
-        // `already_present` check, so per-blanket-impl bookkeeping
-        // remains O(unique blanket impls), not O(occurrences).
-        //
-        // The pre-pass NEVER calls `generate_default_protocol_methods`
-        // itself — it only seeds `self.blanket_impls`.  This is the
-        // critical invariant that avoids the Poll-suite regression of
-        // the prior reverted attempt: the protocol-registry guard at
-        // line 1455 (skip empty `default_methods` AND `super_protocols`
-        // entries) stays intact; default-method materialisation runs
-        // exactly once per (concrete impl × derived protocol) pair
-        // during the main pass.  Poll-implementers' Default-for-Poll<T>
-        // impls (poll.vr line 168) are NOT blanket — `for_type = Poll<T>`
-        // is a generic type, not a bare param — so `for_type_generic_param_name`
-        // returns `None` and the pre-pass skips them, preserving the
-        // original collection order for the Poll dispatch path.
-        self.collect_blanket_impls(module);
+        // The bake compiles a module from MANY files and used to drive
+        // its own sequence of pre-passes (Pass 1a / 1a.5 / 1a.6) beside
+        // this one; the two drifted, and `check_bake_prepass_parity`
+        // exists because that drift caused three separate correctness
+        // defects. Both paths now describe a unit and hand it to the
+        // same collector — the only difference left is how many files
+        // are in it.
+        self.collect_unit_declarations(&[module])
+    }
 
-        // Pass 1.6 (#32): generate FFI struct layouts for record types
-        // referenced in this module's extern signatures BEFORE the
-        // collect_declarations walk builds those signatures — the multi-file
-        // (stdlib-precompile) counterpart of the same pre-pass in
-        // compile_module. Without this the baked archive carries `CType::Ptr`
-        // for `&mut <record>` OUT-params (e.g. `mach_timebase_info`).
-        self.pregenerate_ffi_struct_layouts(module);
-
-        for item in module.items.iter() {
-            if self.should_compile_item(item) {
-                self.collect_declarations(item)?;
+    /// Collects every declaration a compilation UNIT contributes.
+    ///
+    /// A unit is one or more parsed files compiled together: a user's
+    /// single file, or the many files of one stdlib module. The
+    /// pre-passes run across the WHOLE unit before any of its items are
+    /// collected, because a declaration in the last file has to be
+    /// visible while the first file is collected — the multi-file
+    /// hazard behind T0625.
+    ///
+    /// Items are filtered by `@cfg` throughout, so a `mount` for the
+    /// wrong target never pulls its file's declarations into the build.
+    pub fn collect_unit_declarations(&mut self, files: &[&Module]) -> CodegenResult<()> {
+        // Protocols first: a blanket impl monomorphises onto a concrete
+        // implementor at the moment that implementor is collected, so
+        // the protocol has to exist by then.
+        for module in files {
+            self.collect_protocol_definitions(module);
+        }
+        self.run_unit_declaration_prepasses(files);
+        for module in files {
+            // Each file is collected under ITS OWN module path, taken
+            // from its `module X.Y.Z;` declaration. Without this, a
+            // stdlib file's functions register under the enclosing
+            // codegen's module name — `"main"` for a user compile —
+            // and lose the provenance that cross-module paths like
+            // `super.darwin.tls.ctx_get` resolve through.
+            let previous_scope = self.ctx.current_source_module.take();
+            if let Some(name) =
+                Self::resolve_full_module_path(module, &self.config.module_name)
+            {
+                self.ctx.current_source_module = Some(name);
             }
+            let result = (|| -> CodegenResult<()> {
+                for item in module.items.iter() {
+                    if self.should_compile_item(item) {
+                        self.collect_declarations(item)?;
+                    }
+                }
+                Ok(())
+            })();
+            self.ctx.current_source_module = previous_scope;
+            result?;
         }
         Ok(())
     }

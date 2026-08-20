@@ -2228,55 +2228,27 @@ impl<'s> CompilationPipeline<'s> {
         codegen.register_runtime_io_functions();
 
         // Three-pass compilation within the module (cross-file two-phase collection)
-        // Pass 1a: Collect ALL protocol definitions from ALL files first
-        // This ensures protocols like Eq, Ord are available when processing
-        // impl blocks that implement them, regardless of file order.
-        for ast_module in ast_modules {
-            codegen.collect_protocol_definitions(ast_module);
-        }
-
-        // Pass 1a.5 (T0625): collect this module's blanket impls from ALL its
-        // files BEFORE any concrete impl is collected in Pass 1b.  Blanket
-        // bodies monomorphise onto a concrete implementor at the moment that
-        // implementor is collected, so a blanket recorded later never reaches
-        // it.  Module files are sorted alphabetically, which puts
-        // `core/base/primitives.vr` (`implement Ord for Int`) ahead of
-        // `core/base/protocols.vr` (`implement<T: Ord> PartialOrd for T`) —
-        // so `Int.partial_cmp` was never emitted and panicked "method not
-        // found" at runtime.  The single-module path gets this same pre-pass
-        // from `collect_all_declarations`, which this bootstrap never calls.
-        for ast_module in ast_modules {
-            codegen.collect_blanket_impls(ast_module);
-        }
-
-        // Pass 1a.6 (T0692): the two declaration pre-passes the single-
-        // file path gets from `collect_all_declarations` and the bake
-        // did not — type-name claiming (with its stale-layout eviction)
-        // and FFI struct-layout pre-generation. `check_bake_prepass_parity`
-        // has listed both as GAPs since T0362/T0640.
-        codegen.run_unit_declaration_prepasses(ast_modules);
+        // ONE collector, the same one a user compile uses (T0692).
+        //
+        // This drove its own sequence — Pass 1a (protocols), 1a.5
+        // (blankets), 1a.6 (claim + FFI layouts), 1b (the rest) — beside
+        // `collect_all_declarations`, and the two drifted: three
+        // correctness defects traced to a pre-pass present on one side
+        // and missing on the other, which is why
+        // `check_bake_prepass_parity` exists at all. The difference
+        // that mattered was never the passes, it was that a MODULE is
+        // many files and a user compile is one; that difference now
+        // lives in the argument.
+        codegen.collect_unit_declarations(ast_modules).map_err(|e| {
+            anyhow::anyhow!("collecting declarations for {}: {}", module.name, e)
+        })?;
 
         // Pass 1a.7 (T0692): the VALIDATION phases a user compile runs
         // and the bake does not.
         self.run_user_validation_phases(&module.name, ast_modules);
 
-        // Pass 1b: Collect all other declarations from ALL files
+        // Used by the later passes' warning paths.
         let lint_diagnostics = IntrinsicDiagnostics::new(&self.session.options().lint_config);
-        for ast_module in ast_modules {
-            if let Err(e) = codegen.collect_non_protocol_declarations(ast_module) {
-                let diag = lint_diagnostics.codegen_warning(&module.name, &e.to_string(), None);
-                let level = self
-                    .session
-                    .options()
-                    .lint_config
-                    .level_for(IntrinsicLint::MissingImplementation);
-                if level.is_error() {
-                    self.stdlib_errors.push(diag);
-                } else if level.should_emit() {
-                    self.stdlib_warnings.push(diag);
-                }
-            }
-        }
 
         // After all declarations collected, resolve pending imports
         // This handles cross-file imports within the same module
