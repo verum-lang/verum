@@ -7064,6 +7064,15 @@ impl VbcCodegen {
         }
     }
 
+    /// Collects all declarations from an AST module without compiling.
+    ///
+    /// This is used for two-pass compilation where all declarations from
+    /// multiple files need to be registered before compiling any function bodies.
+    /// This ensures type constructors (like None, Some) are available when
+    /// compiling functions in any file.
+    ///
+    /// Items are filtered based on @cfg attributes to prevent cross-platform
+    /// conflicts (e.g., Linux imports being processed when targeting macOS).
     pub fn collect_all_declarations(&mut self, module: &Module) -> CodegenResult<()> {
         // Pre-allocate TypeIds for user-defined types before collecting declarations
         for item in module.items.iter() {

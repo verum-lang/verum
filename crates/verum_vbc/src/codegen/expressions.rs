@@ -27065,6 +27065,9 @@ impl VbcCodegen {
         })
     }
 
+    /// For variable references, looks up the type name from `variable_type_names`.
+    /// For inline record literals, extracts the type name directly.
+    /// Used by `compile_binary` to set `protocol_id` in CmpG for custom Eq dispatch.
     pub fn infer_expr_type_name(&self, expr: &Expr) -> Option<String> {
         use verum_ast::expr::ExprKind;
         use verum_ast::ty::PathSegment;

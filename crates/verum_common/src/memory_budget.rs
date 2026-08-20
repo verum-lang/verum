@@ -168,13 +168,13 @@ fn report_and_exit(live: usize, ceiling: usize) -> ! {
 
     let mut buf = [0u8; 512];
     let mut at = 0usize;
-    let mut put = |bytes: &[u8], buf: &mut [u8; 512], at: &mut usize| {
+    let put = |bytes: &[u8], buf: &mut [u8; 512], at: &mut usize| {
         let room = buf.len().saturating_sub(*at);
         let n = bytes.len().min(room);
         buf[*at..*at + n].copy_from_slice(&bytes[..n]);
         *at += n;
     };
-    let mut put_num = |mut v: usize, buf: &mut [u8; 512], at: &mut usize| {
+    let put_num = |mut v: usize, buf: &mut [u8; 512], at: &mut usize| {
         let mut digits = [0u8; 20];
         let mut n = 0;
         loop {
