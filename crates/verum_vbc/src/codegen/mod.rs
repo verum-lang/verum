@@ -6811,40 +6811,15 @@ impl VbcCodegen {
         // This ensures protocols with default methods are registered before impl blocks
         // that implement them are processed. Without this, protocol default methods
         // wouldn't be available when generating impl block methods.
-        self.collect_protocol_definitions(module);
-
-        // Pass 1.5: Pre-allocate TypeIds for all user-defined types.
-        // This ensures forward references in field types resolve correctly
-        // (e.g., CompileResult.ast: Maybe<Module> needs Module's TypeId).
-        for item in module.items.iter() {
-            if !self.should_compile_item(item) {
-                continue;
-            }
-            if let ItemKind::Type(type_decl) = &item.kind {
-                let type_name = type_decl.name.name.to_string();
-                // RECORD-LITERAL-SETF-IDX-0: a local declaration claims the
-                // simple key even when an archive/stdlib type already holds
-                // it (fresh id + stale-layout eviction; per-module idempotent).
-                let module_key = format!("file:{:?}", module.file_id);
-                self.claim_user_type_name(&module_key, &type_name);
-            }
-        }
-
-        // Mark all types in this module as user-defined (for variant disambiguation)
-        self.mark_user_defined_types(module);
-
-        // Pass 1.6 (#32): generate FFI struct layouts for record types
-        // referenced in extern signatures, so forward-declared structs
-        // (extern block precedes the struct decl) resolve to StructPtr.
-        self.pregenerate_ffi_struct_layouts(module);
-
-        // Pass 2: Collect all function declarations
-        // Filter items based on @cfg attributes to prevent cross-platform conflicts
-        for item in module.items.iter() {
-            if self.should_compile_item(item) {
-                self.collect_declarations(item)?;
-            }
-        }
+        // ONE collector (T0692). This entry used to run its own
+        // subset — protocols and the per-item walk, but not the type
+        // claim, the alias registration, the blanket pre-pass or the
+        // FFI layouts — so which declarations a module got depended on
+        // which of the three `compile_*` entries reached it. The
+        // pre-passes are not optional: skipping the claim leaves a
+        // stale archive layout in place (T0125), skipping the layouts
+        // loses StructPtr for forward-declared externs (T0362).
+        self.collect_unit_declarations(&[module])?;
 
         // Compile pending default protocol methods.
         // These were registered during declaration collection but their bodies need to be
@@ -6903,35 +6878,13 @@ impl VbcCodegen {
         self.scope_to_own_module(module);
 
         // Pass 1: Collect protocol definitions first (for default method inheritance)
-        self.collect_protocol_definitions(module);
-
-        // Pass 1.5: Pre-allocate TypeIds for all user-defined types.
-        for item in module.items.iter() {
-            if !self.should_compile_item(item) {
-                continue;
-            }
-            if let ItemKind::Type(type_decl) = &item.kind {
-                let type_name = type_decl.name.name.to_string();
-                // RECORD-LITERAL-SETF-IDX-0: a local declaration claims the
-                // simple key even when an archive/stdlib type already holds
-                // it (fresh id + stale-layout eviction; per-module idempotent).
-                let module_key = format!("file:{:?}", module.file_id);
-                self.claim_user_type_name(&module_key, &type_name);
-            }
-        }
-
-        // Mark all types in this module as user-defined (for variant disambiguation)
-        self.mark_user_defined_types(module);
-
-        // Pass 1.6 (#32): see compile_module — forward-declared FFI structs.
-        self.pregenerate_ffi_struct_layouts(module);
-
-        // Pass 2: Collect all function declarations
-        for item in module.items.iter() {
-            if self.should_compile_item(item) {
-                self.collect_declarations(item)?;
-            }
-        }
+        // ONE collector (T0692) — see `compile_module`. The subset
+        // this entry ran differed again: it claimed type names and
+        // pre-generated FFI layouts but skipped the alias registration
+        // and the blanket pre-pass, so a module compiled through here
+        // saw a different world than the same module compiled through
+        // the bake.
+        self.collect_unit_declarations(&[module])?;
 
         // Compile pending default protocol methods.
         self.compile_pending_default_methods()?;
@@ -6961,36 +6914,13 @@ impl VbcCodegen {
     /// functions from previously compiled modules available.
     pub fn compile_additional_module(&mut self, module: &Module) -> CodegenResult<VbcModule> {
         // Pass 1: Collect protocol definitions first (for default method inheritance)
-        self.collect_protocol_definitions(module);
-
-        // Pass 1.5: Pre-allocate TypeIds for all user-defined types.
-        // This ensures type references in function return types resolve correctly
-        // (e.g., CharIndices, ByteIter, Lines in text.vr need TypeIds before
-        // ast_type_to_type_ref is called for function descriptors).
-        for item in module.items.iter() {
-            if !self.should_compile_item(item) {
-                continue;
-            }
-            if let ItemKind::Type(type_decl) = &item.kind {
-                let type_name = type_decl.name.name.to_string();
-                // RECORD-LITERAL-SETF-IDX-0: a local declaration claims the
-                // simple key even when an archive/stdlib type already holds
-                // it (fresh id + stale-layout eviction; per-module idempotent).
-                let module_key = format!("file:{:?}", module.file_id);
-                self.claim_user_type_name(&module_key, &type_name);
-            }
-        }
-
-        // Pass 1.6 (#32): see compile_module — forward-declared FFI structs.
-        self.pregenerate_ffi_struct_layouts(module);
-
-        // Pass 2: Collect all function declarations (adds to existing)
-        // Filter items based on @cfg attributes to prevent cross-platform conflicts
-        for item in module.items.iter() {
-            if self.should_compile_item(item) {
-                self.collect_declarations(item)?;
-            }
-        }
+        // ONE collector (T0692) — see `compile_module`. The subset
+        // this entry ran differed again: it claimed type names and
+        // pre-generated FFI layouts but skipped the alias registration
+        // and the blanket pre-pass, so a module compiled through here
+        // saw a different world than the same module compiled through
+        // the bake.
+        self.collect_unit_declarations(&[module])?;
 
         // Compile pending default protocol methods.
         // These were registered during declaration collection but their bodies need to be
