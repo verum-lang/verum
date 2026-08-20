@@ -3448,10 +3448,50 @@ impl<'ctx> Translator<'ctx> {
                 self.create_tensor_var(name, element, shape)
             }
 
-            _ => Err(TranslationError::UnsupportedType(Text::from(format!(
-                "{:?}",
-                ty.kind
-            )))),
+            // A TYPE THE TRANSLATOR CANNOT MODEL IS OPAQUE, NOT ABSENT.
+            //
+            // Refusing here fails the WHOLE invariant, including the
+            // parts that are perfectly expressible: a record with one
+            // `List<T>` field could not have any of its other fields
+            // checked. Measured, `List<…>` is the field type of 1122
+            // declarations in core/ and `Map<…>` of 82 — so the refusal
+            // excluded most of the library's records from invariant
+            // checking, silently, because nothing ran the phase.
+            //
+            // An UNINTERPRETED sort, not an `Int`. The sibling
+            // `type_to_z3_var` substitutes `Int` for anything it does
+            // not know, which is worse than refusing: `xs.len() > 0`
+            // over a list-shaped `Int` translates to arithmetic that
+            // means nothing, and the solver can then "prove" it. An
+            // opaque sort admits no operations, so a claim about such a
+            // value comes back UNKNOWN — the verifier says it cannot
+            // tell, which is the truth.
+            other => {
+                let sort_name = format!("Verum!{}", Self::type_kind_tag(other));
+                let sort = Sort::uninterpreted(Symbol::String(sort_name));
+                let var = z3::ast::Datatype::new_const(name, &sort);
+                Ok(Dynamic::from_ast(&var))
+            }
+        }
+    }
+
+    /// A short, stable tag naming a type's SHAPE for an uninterpreted
+    /// sort.
+    ///
+    /// Two values of the same shape share a sort — two `List` fields
+    /// are both `Verum!List` — so the solver knows they are the same
+    /// KIND of opaque thing without being told anything about it.
+    fn type_kind_tag(kind: &TypeKind) -> &'static str {
+        match kind {
+            TypeKind::Unit => "Unit",
+            TypeKind::Never => "Never",
+            TypeKind::Char => "Char",
+            TypeKind::Generic { .. } => "Generic",
+            TypeKind::Tuple(_) => "Tuple",
+            TypeKind::Function { .. } => "Function",
+            TypeKind::Reference { .. } => "Reference",
+            TypeKind::Pointer { .. } => "Pointer",
+            _ => "Opaque",
         }
     }
 
@@ -5008,5 +5048,34 @@ mod trigger_diagnostic_tests {
         let msg = diag.summary();
         assert!(msg.as_str().contains("a"));
         assert!(msg.as_str().contains("b"));
+    }
+
+    /// A type the translator cannot model gets an OPAQUE sort, and two
+    /// values of the same shape share it.
+    ///
+    /// The tag is what makes the sort meaningful: without it every
+    /// unmodellable value would land in one sort and the solver could
+    /// equate a list with a function. With it, `Verum!Generic` and
+    /// `Verum!Function` are distinct, and the solver knows only that —
+    /// which is exactly what is true.
+    #[test]
+    fn unmodellable_kinds_get_distinct_opaque_tags() {
+        use verum_ast::ty::TypeKind;
+
+        assert_eq!(Translator::type_kind_tag(&TypeKind::Unit), "Unit");
+        assert_eq!(Translator::type_kind_tag(&TypeKind::Char), "Char");
+        assert_eq!(Translator::type_kind_tag(&TypeKind::Never), "Never");
+
+        // Distinctness is the property that matters: a tag table where
+        // two shapes collide would let the solver conflate them.
+        let tags = [
+            Translator::type_kind_tag(&TypeKind::Unit),
+            Translator::type_kind_tag(&TypeKind::Never),
+            Translator::type_kind_tag(&TypeKind::Char),
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for t in tags {
+            assert!(seen.insert(t), "tag `{}` used for two kinds", t);
+        }
     }
 }
