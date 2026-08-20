@@ -521,6 +521,19 @@ pub(crate) struct FieldRefinementInfo {
     base_var_type: context::VarTypeKind,
 }
 
+/// Whether a body that fails to compile stops the unit or leaves a
+/// panic-stub behind. See [`VbcCodegen::compile_unit_items`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemFailurePolicy {
+    /// Report the first failure and compile nothing further — what a
+    /// user compiling their own file wants.
+    Strict,
+    /// Emit a panic-stub for the failing body and keep going, then
+    /// report the first failure. What the stdlib bake needs: one
+    /// unbuildable body must not cost the archive every other one.
+    StubAndContinue,
+}
+
 impl VbcCodegen {
     /// Simple display name of a TypeRef base (archive import leg of
     /// REFINE-FIELD-DYNAMIC-BYPASS-1): enough for CmpF/CmpI selection.
@@ -6827,15 +6840,10 @@ impl VbcCodegen {
         self.compile_pending_default_methods()?;
 
         // Pass 3: Compile function bodies
-        for item in module.items.iter() {
-            if self.should_compile_item(item) {
-                self.compile_item(item)?;
-            }
-        }
-
-        // Compile any pending constants (struct literals, etc.)
-        self.compile_pending_constants()?;
-        self.compile_pending_tls_inits()?;
+        // Pending constants and TLS initialisers are part of compiling a
+        // unit's items, so they happen inside — calling them again here
+        // would be a second pass over a list the first one drained.
+        self.compile_unit_items(&[module], ItemFailurePolicy::Strict)?;
 
         // Build the VBC module
         self.build_module()
@@ -7062,6 +7070,59 @@ impl VbcCodegen {
         // same collector — the only difference left is how many files
         // are in it.
         self.collect_unit_declarations(&[module])
+    }
+
+    /// What a failing item does to the rest of the unit.
+    ///
+    /// This is the ONLY difference between how the bake compiles a
+    /// stdlib module and how a user compile handles a file, so it is
+    /// spelled as a policy rather than as two functions.
+    ///
+    /// The bake needs `StubAndContinue`: one unbuildable body in a
+    /// 2500-file library must not cost the archive every other body,
+    /// and the stub carries a panic so the failure is loud at runtime
+    /// rather than silent. A user compiling their own file wants the
+    /// opposite — the first error, immediately, about their code.
+    pub fn compile_unit_items(
+        &mut self,
+        files: &[&Module],
+        policy: ItemFailurePolicy,
+    ) -> CodegenResult<()> {
+        let mut first_error: Option<CodegenError> = None;
+        for module in files {
+            let previous_scope = self.ctx.current_source_module.take();
+            if let Some(name) =
+                Self::resolve_full_module_path(module, &self.config.module_name)
+            {
+                self.ctx.current_source_module = Some(name);
+            }
+            let outcome: CodegenResult<()> = (|| {
+                for item in module.items.iter() {
+                    if !self.should_compile_item(item) {
+                        continue;
+                    }
+                    match policy {
+                        ItemFailurePolicy::Strict => self.compile_item(item)?,
+                        ItemFailurePolicy::StubAndContinue => {
+                            if let Err(e) = self.compile_item_lenient(item)
+                                && first_error.is_none()
+                            {
+                                first_error = Some(e);
+                            }
+                        }
+                    }
+                }
+                self.compile_pending_constants()?;
+                self.compile_pending_tls_inits()?;
+                Ok(())
+            })();
+            self.ctx.current_source_module = previous_scope;
+            outcome?;
+        }
+        match first_error {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
     /// Collects every declaration a compilation UNIT contributes.
@@ -7703,53 +7764,7 @@ impl VbcCodegen {
     /// registrations happen during item processing; per-file flush
     /// keeps the bookkeeping symmetric with the old path).
     pub fn compile_items_into_state(&mut self, module: &Module) -> CodegenResult<()> {
-        // Mirror `compile_function_bodies`'s per-file source-module
-        // scoping: every file gets its own `current_source_module`
-        // before `compile_item` runs, then restores the previous
-        // value at the end.  Without this, qualified-name registration
-        // in `register_function` falls back to `config.module_name`
-        // (the *parent* stdlib module name), and inherent methods
-        // declared in `core/text/text.vr` would land under
-        // `core.text.text.method_name` (correct file path) only when
-        // the AST's `module text;` decl is recovered — which itself
-        // depends on this scoping being active.
-        //
-        // **Per-item lenient compilation**: uses `compile_item_lenient`
-        // so a single failing item (typically a forward-ref to a
-        // module compiled later) doesn't drop the rest of the file's
-        // bodies on the floor.  The lenient helper emits a panic-stub
-        // for the failed function so its slot in `self.functions`
-        // remains populated under the FunctionId allocated during
-        // signature registration — load-bearing for archive
-        // dispatch: `register_module_filtered` walks the archive
-        // entry's `functions` table to pull descriptors into the
-        // user-side codegen ctx, and a missing slot translates into
-        // "undefined function: <name>" at user-code codegen.
-        let prev = self.ctx.current_source_module.take();
-        if let Some(name) =
-            Self::resolve_full_module_path(module, &self.config.module_name)
-        {
-            self.ctx.current_source_module = Some(name);
-        }
-        let result: CodegenResult<()> = (|| {
-            let mut first_strict_err: Option<CodegenError> = None;
-            for item in module.items.iter() {
-                if self.should_compile_item(item)
-                    && let Err(e) = self.compile_item_lenient(item)
-                    && first_strict_err.is_none()
-                {
-                    first_strict_err = Some(e);
-                }
-            }
-            self.compile_pending_constants()?;
-            self.compile_pending_tls_inits()?;
-            match first_strict_err {
-                Some(e) => Err(e),
-                None => Ok(()),
-            }
-        })();
-        self.ctx.current_source_module = prev;
-        result
+        self.compile_unit_items(&[module], ItemFailurePolicy::StubAndContinue)
     }
 
     /// Emit a single coherent `VbcModule` from the codegen's
