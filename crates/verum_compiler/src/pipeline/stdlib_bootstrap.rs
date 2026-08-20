@@ -2006,8 +2006,11 @@ impl<'s> CompilationPipeline<'s> {
         if std::env::var("VERUM_BAKE_VALIDATION").as_deref() == Ok("off") {
             return;
         }
+        let mode = std::env::var("VERUM_BAKE_VALIDATION").unwrap_or_default();
+        let strict = mode == "strict";
         let mut ffi_failures = 0usize;
         let mut safety_failures = 0usize;
+        let mut strict_findings = 0usize;
         // Context and Send/Sync validation report through the session
         // rather than a return value, so counting only the two Results
         // would have reported a clean library while saying nothing
@@ -2024,20 +2027,52 @@ impl<'s> CompilationPipeline<'s> {
                 safety_failures += 1;
                 tracing::warn!("stdlib safety gate: {}", e);
             }
+            // `=strict` asks the question the default configuration
+            // cannot: what does the gate say when every `[safety]` flag
+            // is raised? The shipped policy is permissive, so
+            // `phase_safety_gate` returns before walking anything and
+            // its zero carries no information. This measures the
+            // library against the strictest policy the gate can express
+            // WITHOUT changing what any build enforces.
+            if strict {
+                // The policy asks what is FAIR to ask of a standard
+                // library, not what is strictest. `unsafe`, `extern`
+                // and FFI are the library's JOB — it is the layer that
+                // owns the syscall boundary — so forbidding them would
+                // measure nothing but that fact. What can honestly be
+                // demanded is that those boundaries be DECLARED:
+                // `ffi_boundary = "strict"` rejects FFI carrying no
+                // safety annotation, and `capability_required` asks
+                // every I/O-touching function to say so.
+                let policy = crate::phases::safety_gate::SafetyPolicy {
+                    unsafe_allowed: true,
+                    ffi: true,
+                    ffi_boundary: verum_common::Text::from("strict"),
+                    capability_required: true,
+                    mls_level: verum_common::Text::from("public"),
+                    forbid_stdlib_extern: false,
+                };
+                strict_findings += crate::phases::safety_gate::check_safety(
+                    std::slice::from_ref(*ast_module),
+                    policy,
+                )
+                .len();
+            }
         }
         // A silent pass and an unrun phase look identical from the
         // outside, and three defects on this task were found only
         // because somebody checked which one they had. The report says
         // how many files were actually walked, so "no findings" can be
         // told apart from "no phases".
-        if std::env::var("VERUM_BAKE_VALIDATION").as_deref() == Ok("report") {
+        if mode == "report" || strict {
             eprintln!(
                 "[bake-validation] files={} ffi_failures={} safety_failures={} \
-                 session_errors_added={}",
+                 session_errors_added={} strict_findings={}",
                 ast_modules.len(),
                 ffi_failures,
                 safety_failures,
                 self.session.error_count().saturating_sub(errors_before),
+                strict_findings,
             );
         }
     }

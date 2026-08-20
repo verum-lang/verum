@@ -439,6 +439,50 @@ fn check_mls_classification(
 }
 
 /// Gate checks at function declaration level (not body): `unsafe fn`
+/// The ABI a function declares, in EITHER spelling.
+///
+/// Verum writes an FFI declaration two ways, and only one of them
+/// reaches `FunctionDecl::extern_abi`:
+///
+/// ```text
+/// extern "C" fn getpid() -> Int;        // sets extern_abi
+/// @extern("libSystem.B.dylib")          // an ATTRIBUTE; extern_abi stays None
+/// fn getpid() -> Int;
+/// ```
+///
+/// The safety gate read only the field, so it was blind to the form
+/// this standard library actually uses: measured, `core/` holds 173
+/// `@extern(...)` declarations and ZERO `extern "C"` ones. Running the
+/// gate over the whole library under the strictest FFI policy it can
+/// express therefore reported zero findings — not because the library
+/// satisfied the rule, but because the rule never looked at it.
+///
+/// A safety rule is about the DECLARATION, not about which syntax
+/// spelled it.
+fn declared_abi(func: &verum_ast::FunctionDecl) -> Option<String> {
+    if let verum_common::Maybe::Some(abi) = &func.extern_abi {
+        return Some(abi.as_str().to_string());
+    }
+    func.attributes
+        .iter()
+        .find(|a| a.name.as_str() == "extern")
+        .map(|a| {
+            a.args
+                .as_ref()
+                .and_then(|args| args.first())
+                .and_then(|arg| match &arg.kind {
+                    verum_ast::ExprKind::Literal(lit) => match &lit.kind {
+                        verum_ast::LiteralKind::Text(t) => Some(t.as_str().to_string()),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                // `@extern` with no readable argument still declares an
+                // FFI boundary; name it rather than dropping the case.
+                .unwrap_or_else(|| "C".to_string())
+        })
+}
+
 /// modifier and `extern` / FFI declarations.
 fn check_function_decl(
     func: &verum_ast::decl::FunctionDecl,
@@ -463,7 +507,7 @@ fn check_function_decl(
         );
     }
     if !policy.ffi {
-        if let verum_common::Maybe::Some(abi) = &func.extern_abi {
+        if let Some(abi) = declared_abi(func) {
             out.push(
                 DiagnosticBuilder::error()
                     .message(format!(
@@ -496,7 +540,7 @@ fn check_function_decl(
         // consulted it, so `[safety].ffi_boundary = "lenient"`
         // had no observable effect (and "strict" was the documented
         // default but unenforced).
-        if let verum_common::Maybe::Some(abi) = &func.extern_abi {
+        if let Some(abi) = declared_abi(func) {
             if !func.is_unsafe {
                 out.push(
                     DiagnosticBuilder::warning()
