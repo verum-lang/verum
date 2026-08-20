@@ -3130,81 +3130,21 @@ impl<'ctx> Translator<'ctx> {
 
     /// Create a Z3 constant with the appropriate type.
     ///
-    /// This is used to create bound variables for quantifiers with the
-    /// correct Z3 sort based on the Verum type annotation.
+    /// Used for quantifier-bound variables. Delegates to
+    /// [`Self::create_var`]: "what Z3 sort does this Verum type get"
+    /// is ONE question, and it used to have two answers that differed
+    /// where it mattered most.
+    ///
+    /// This copy matched the integer family (`i32`, `u64`, `usize`, …)
+    /// that the other missed, and substituted `Int` for everything it
+    /// did not recognise — so a quantifier over a list bound an
+    /// integer, and arithmetic on it typechecked into nonsense a
+    /// solver could then satisfy. The other refused outright, failing
+    /// invariants it could otherwise have checked in part. Neither
+    /// behaviour was right; the merged one keeps the wide family
+    /// matching and gives unmodellable types an opaque sort.
     fn create_typed_const(&self, name: &str, ty: &Type) -> Result<Dynamic, TranslationError> {
-        match &ty.kind {
-            TypeKind::Int => {
-                let const_var = Int::new_const(name);
-                Ok(Dynamic::from_ast(&const_var))
-            }
-            TypeKind::Bool => {
-                let const_var = Bool::new_const(name);
-                Ok(Dynamic::from_ast(&const_var))
-            }
-            TypeKind::Float => {
-                if self.config.precise_floats {
-                    let const_var = match self.config.float_precision {
-                        FloatPrecision::Float32 => Float::new_const_float32(name),
-                        FloatPrecision::Float64 => Float::new_const_double(name),
-                    };
-                    Ok(Dynamic::from_ast(&const_var))
-                } else {
-                    let const_var = Real::new_const(name);
-                    Ok(Dynamic::from_ast(&const_var))
-                }
-            }
-            TypeKind::Refined { base, .. } => {
-                // For refined types, use the base type for the Z3 constant
-                self.create_typed_const(name, base)
-            }
-            TypeKind::Path(path) => {
-                if let Some(ident) = path.as_ident() {
-                    match ident.as_str() {
-                        "Int" | "i32" | "i64" | "isize" | "u32" | "u64" | "usize" => {
-                            let const_var = Int::new_const(name);
-                            Ok(Dynamic::from_ast(&const_var))
-                        }
-                        "Bool" | "bool" => {
-                            let const_var = Bool::new_const(name);
-                            Ok(Dynamic::from_ast(&const_var))
-                        }
-                        "Float" | "f32" | "f64" => {
-                            if self.config.precise_floats {
-                                let const_var = match self.config.float_precision {
-                                    FloatPrecision::Float32 => Float::new_const_float32(name),
-                                    FloatPrecision::Float64 => Float::new_const_double(name),
-                                };
-                                Ok(Dynamic::from_ast(&const_var))
-                            } else {
-                                let const_var = Real::new_const(name);
-                                Ok(Dynamic::from_ast(&const_var))
-                            }
-                        }
-                        "Text" | "String" => {
-                            let const_var = Z3String::new_const(name);
-                            Ok(Dynamic::from_ast(&const_var))
-                        }
-                        type_name => {
-                            // For unknown types, default to Int (can be extended)
-                            // In a full implementation, we'd look up the type in a type environment
-                            let const_var = Int::new_const(name);
-                            Ok(Dynamic::from_ast(&const_var))
-                        }
-                    }
-                } else {
-                    // Complex path - default to Int
-                    let const_var = Int::new_const(name);
-                    Ok(Dynamic::from_ast(&const_var))
-                }
-            }
-            _ => {
-                // For unsupported types, create an uninterpreted constant
-                // This allows verification to proceed with symbolic reasoning
-                let const_var = Int::new_const(name);
-                Ok(Dynamic::from_ast(&const_var))
-            }
-        }
+        self.create_var(name, ty)
     }
 
     /// Generate instantiation patterns for quantifier MBQI.
@@ -3409,35 +3349,46 @@ impl<'ctx> Translator<'ctx> {
             }
 
             TypeKind::Path(path) => {
-                // Try to resolve named types
-                if let Some(ident) = path.as_ident() {
-                    match ident.as_str() {
-                        "Int" => {
-                            let var = Int::new_const(name);
-                            Ok(Dynamic::from_ast(&var))
-                        }
-                        "Bool" => {
-                            let var = Bool::new_const(name);
-                            Ok(Dynamic::from_ast(&var))
-                        }
-                        "Text" | "String" => {
-                            let var = z3::ast::String::new_const(name);
-                            Ok(Dynamic::from_ast(&var))
-                        }
-                        "Float" => {
-                            let var = Real::new_const(name);
-                            Ok(Dynamic::from_ast(&var))
-                        }
-                        _ => Err(TranslationError::UnsupportedType(Text::from(format!(
-                            "named type: {}",
-                            ident.as_str()
-                        )))),
+                // The integer and float FAMILIES, not a hand-written
+                // list of four names. `Int` was matched literally here
+                // while the sibling matched `i32 | i64 | isize | u32 |
+                // u64 | usize` too — the same question answered two
+                // ways, which is what merging these removes.
+                // `well_known_types` is the authority both now consult.
+                let Some(ident) = path.as_ident() else {
+                    let sort = Sort::uninterpreted(Symbol::String("Verum!Path".to_string()));
+                    let var = z3::ast::Datatype::new_const(name, &sort);
+                    return Ok(Dynamic::from_ast(&var));
+                };
+                let tn = ident.as_str();
+                if verum_common::well_known_types::type_names::is_integer_type(tn) {
+                    let var = Int::new_const(name);
+                    return Ok(Dynamic::from_ast(&var));
+                }
+                if verum_common::well_known_types::type_names::is_float_type(tn) {
+                    let var = Real::new_const(name);
+                    return Ok(Dynamic::from_ast(&var));
+                }
+                match tn {
+                    "Bool" | "bool" => {
+                        let var = Bool::new_const(name);
+                        Ok(Dynamic::from_ast(&var))
                     }
-                } else {
-                    Err(TranslationError::UnsupportedType(Text::from(format!(
-                        "path: {:?}",
-                        path
-                    ))))
+                    "Text" | "String" | "str" => {
+                        let var = z3::ast::String::new_const(name);
+                        Ok(Dynamic::from_ast(&var))
+                    }
+                    // A NAMED type the translator does not model — a
+                    // user record, an enum, `List<T>` reaching here
+                    // through its head — is opaque under its own name,
+                    // so two variables of the same named type share a
+                    // sort and different types never collide.
+                    other => {
+                        let sort =
+                            Sort::uninterpreted(Symbol::String(format!("Verum!{}", other)));
+                        let var = z3::ast::Datatype::new_const(name, &sort);
+                        Ok(Dynamic::from_ast(&var))
+                    }
                 }
             }
 
