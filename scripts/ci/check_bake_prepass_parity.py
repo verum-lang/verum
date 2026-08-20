@@ -56,11 +56,16 @@ COVERAGE = {
         "every file of the module, plus global_blanket_impl_registry for the "
         "cross-module half (T0625, e29d52eaa).",
     ),
-    "declared_alias_target_name": (
+    "register_declared_type_aliases": (
         "bootstrap",
-        "Phase 2.9 does the equivalent work inline via "
-        "VbcCodegen::detect_variant_form_alias over all parsed modules; it does "
-        "not call this helper by name.",
+        "Runs from `run_unit_declaration_prepasses`, which the shared "
+        "collector calls for every file of the unit — so both paths get it "
+        "by construction (T0692).",
+    ),
+    "collect_protocol_definitions": (
+        "bootstrap",
+        "The shared collector runs it across the whole unit before any item "
+        "is collected; the bake's Pass 1a did the same thing and is gone.",
     ),
     "pregenerate_ffi_struct_layouts": (
         "bootstrap",
@@ -84,9 +89,19 @@ COVERAGE = {
 
 
 def prepasses_in_collect_all() -> set[str]:
-    """Names of `self.<method>(` calls inside `collect_all_declarations`."""
+    """Names of `self.<method>(` calls inside the shared collector.
+
+    Reads `collect_unit_declarations` — the ONE entry both compile paths
+    use since T0692. It used to read `collect_all_declarations`, which
+    was the single-file path's own sequence; the bake had a second one
+    beside it, and this gate existed to keep the two comparable. They
+    are now the same function, so the question this gate asks has
+    changed shape: not "does the bake mirror each pass" but "does the
+    bake still call only the shared entry" — which `bake_drives_shared_collector`
+    checks below.
+    """
     src = CODEGEN.read_text(encoding="utf-8")
-    start = src.index("pub fn collect_all_declarations")
+    start = src.index("pub fn collect_unit_declarations")
     # The function ends at the next top-level `    }` followed by a blank line
     # and another `    ///` or `    pub fn` / `    fn` at the same indent.
     tail = src[start:]
@@ -97,7 +112,46 @@ def prepasses_in_collect_all() -> set[str]:
             end = m.end()
             break
     body = tail[:end]
-    return {m.group(1) for m in re.finditer(r"self\.([a-z_][a-z0-9_]*)\(", body)}
+    calls = {m.group(1) for m in re.finditer(r"self\.([a-z_][a-z0-9_]*)\(", body)}
+
+    # `run_unit_declaration_prepasses` is a grouping, not a pass: expand
+    # it so the individual passes stay individually classified. Without
+    # this, wrapping a pass in the helper would hide it from the gate.
+    if "run_unit_declaration_prepasses" in calls:
+        calls.discard("run_unit_declaration_prepasses")
+        helper_start = src.index("pub fn run_unit_declaration_prepasses")
+        helper_tail = src[helper_start:]
+        helper_end = len(helper_tail)
+        for m in re.finditer(r"\n    \}\n", helper_tail):
+            after = helper_tail[m.end() : m.end() + 400]
+            if re.match(r"\s*(///|#\[|pub fn |fn )", after):
+                helper_end = m.end()
+                break
+        calls |= {
+            m.group(1)
+            for m in re.finditer(
+                r"self\.([a-z_][a-z0-9_]*)\(", helper_tail[:helper_end]
+            )
+        }
+    return calls
+
+
+def bake_drives_shared_collector() -> list[str]:
+    """Complaints if the bake collects declarations on its own again.
+
+    The defect this whole gate is about is a SECOND collection sequence
+    living in the bootstrap. Now that one exists, the cheapest way to
+    keep it one is to name the calls that would start a second: any
+    `collect_*` on the codegen from the bootstrap other than the shared
+    entry.
+    """
+    src = BOOTSTRAP.read_text(encoding="utf-8")
+    allowed = {"collect_unit_declarations"}
+    found = {
+        m.group(1)
+        for m in re.finditer(r"codegen\.(collect_[a-z_]+)\(", src)
+    }
+    return sorted(found - allowed)
 
 
 def main() -> int:
@@ -110,6 +164,17 @@ def main() -> int:
 
     prepasses = found - NOT_A_PREPASS
     failures: list[str] = []
+
+    # The stronger property, and the one that actually prevents the
+    # defect: the bake must not start a collection sequence of its own.
+    for stray in bake_drives_shared_collector():
+        failures.append(
+            f"the bake calls `codegen.{stray}(...)` directly.\n"
+            f"    Declaration collection has ONE entry — "
+            f"`collect_unit_declarations(files)` — precisely so the bake's "
+            f"sequence cannot drift from the user path's again (T0692).\n"
+            f"    Pass the files to that instead."
+        )
 
     unclassified = sorted(prepasses - COVERAGE.keys())
     for name in unclassified:
