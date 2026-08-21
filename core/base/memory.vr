@@ -23,7 +23,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1")
+    lifecycle: Lifecycle.Definition
 )
 module core.base.memory;
 mount super.super.mem.allocator.{
@@ -38,8 +38,12 @@ mount super.super.mem.allocator.{
 // canonical value from `core.mem.header`.
 mount super.super.mem.header.{AllocationHeader, HEADER_SIZE};
 // Reached through ambient visibility rather than a request
-// until now (T0780 census).
-mount core.action.{Hasher};
+// until now (T0780 census). `Hasher` is DECLARED in the sibling
+// core/base/protocols.vr — the census first pointed this mount at
+// core.action, which declares no Hasher at all: the name resolved
+// ambiently while the ring gate read the spelled path as an upward
+// edge base(r0) -> action(r3).
+mount core.base.protocols.{Hasher};
 mount core.intrinsics.atomic.{
     MemoryOrder,
     ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,

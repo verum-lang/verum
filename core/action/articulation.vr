@@ -25,10 +25,13 @@
 // =============================================================================
 
 @derive(Clone)
-// `Hasher` and `Primitive` are declared in this module's sibling files
-// and were reaching this one through ambient visibility rather than a
-// request (T0780 census).
-mount core.action.{Hasher, Primitive};
+// `Primitive` is declared in this module's sibling file and was
+// reaching this one through ambient visibility rather than a request
+// (T0780 census). `Hasher` is NOT an action sibling — it is the
+// hashing protocol from core/base/protocols.vr, and the census had
+// mounted it under a path that declares no such name.
+mount core.action.{Primitive};
+mount core.base.protocols.{Hasher};
 
 public type Articulation is {
     framework: Text,
