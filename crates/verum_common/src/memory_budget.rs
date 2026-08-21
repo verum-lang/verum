@@ -114,8 +114,9 @@ fn ceiling_bytes() -> usize {
 fn read_env_usize(name: &std::ffi::CStr) -> Option<usize> {
     // SAFETY: `getenv` returns a pointer into the process environment,
     // valid until the environment is modified; it is read immediately
-    // and never retained. Nothing here allocates.
-    let raw = unsafe { libc_getenv(name.as_ptr()) };
+    // and never retained. Nothing here allocates. The value is walked
+    // as bytes, so the canonical `*mut c_char` is viewed as `*const u8`.
+    let raw = unsafe { libc_getenv(name.as_ptr()) }.cast_const().cast::<u8>();
     if raw.is_null() {
         return None;
     }
@@ -212,7 +213,7 @@ fn report_and_exit(live: usize, ceiling: usize) -> ! {
     unsafe {
         let mut written = 0usize;
         while written < at {
-            let n = libc_write(2, buf.as_ptr().add(written), at - written);
+            let n = libc_write(2, buf.as_ptr().add(written).cast(), at - written);
             if n <= 0 {
                 break;
             }
@@ -225,13 +226,18 @@ fn report_and_exit(live: usize, ceiling: usize) -> ! {
 // The two syscalls this needs, declared directly rather than pulling in
 // a dependency for them. Both are in libSystem/libc on every platform
 // this compiler is hosted on.
+// Signatures match libc's canonical prototypes exactly — rustc's
+// `suspicious_runtime_symbol_definitions` lint checks declarations of
+// runtime symbols the standard library itself uses (`write`) against
+// those prototypes, and a `*const u8` where libc says `*const c_void`
+// is a hard error under `-D warnings`.
 unsafe extern "C" {
     #[link_name = "write"]
-    fn libc_write(fd: i32, buf: *const u8, count: usize) -> isize;
+    fn libc_write(fd: i32, buf: *const std::ffi::c_void, count: usize) -> isize;
     #[link_name = "_exit"]
     fn libc_exit(code: i32) -> !;
     #[link_name = "getenv"]
-    fn libc_getenv(name: *const std::ffi::c_char) -> *const u8;
+    fn libc_getenv(name: *const std::ffi::c_char) -> *mut std::ffi::c_char;
 }
 
 /// A `System` allocator that counts, and refuses to help the process
