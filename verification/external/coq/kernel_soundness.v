@@ -10,8 +10,13 @@
 (* discharge = replace with a `Definition`.                       *)
 (* ============================================================== *)
 
-From Stdlib Require Import Strings.String.
-From Stdlib Require Import Lists.List.
+(* `From Coq` is the one spelling BOTH deployed provers take:  *)
+(* apt's coq 8.x knows only the `Coq` root, and Rocq >= 9 keeps *)
+(* it as a deprecated alias of `Stdlib` (warning, not error).   *)
+(* Emitting `From Stdlib` compiled only against Rocq 9 and      *)
+(* hard-failed the CI replay's coqc at line one.                *)
+From Coq Require Import Strings.String.
+From Coq Require Import Lists.List.
 Import ListNotations.
 Open Scope string_scope.
 
