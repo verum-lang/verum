@@ -224,6 +224,46 @@ pub fn build_export_index(
                 }
             }
 
+            // EXPORT-INDEX ORACLE.  `VERUM_TRACE_EXPORTS=<substring>`
+            // prints what this file actually contributed, keyed by the
+            // path a `mount` will look up.  The question it answers is
+            // "why is a public declaration not importable" — and the
+            // answer is nearly always that the file contributing the
+            // name is keyed under a DIFFERENT path than the one the
+            // mount spells, or that its declaration form is not in the
+            // match above (which ends in a silent `_ => {}`).
+            if let Ok(want) = std::env::var("VERUM_TRACE_EXPORTS")
+                && submodule_path.contains(want.as_str())
+            {
+                let mut names: Vec<&str> = exports.iter().map(String::as_str).collect();
+                names.sort_unstable();
+                eprintln!(
+                    "[exports] {} <- {} : {} name(s) {:?}",
+                    submodule_path,
+                    file_path.display(),
+                    names.len(),
+                    names
+                );
+                let forms: Vec<&str> = ast_module
+                    .items
+                    .iter()
+                    .map(|i| match &i.kind {
+                        verum_ast::ItemKind::Function(_) => "fn",
+                        verum_ast::ItemKind::Type(_) => "type",
+                        verum_ast::ItemKind::Protocol(_) => "protocol",
+                        verum_ast::ItemKind::Axiom(_) => "axiom",
+                        verum_ast::ItemKind::Theorem(_) => "theorem",
+                        verum_ast::ItemKind::Lemma(_) => "lemma",
+                        verum_ast::ItemKind::Impl(_) => "impl",
+                        verum_ast::ItemKind::Mount(_) => "mount",
+                        verum_ast::ItemKind::Const(_) => "const",
+                        verum_ast::ItemKind::Static(_) => "static",
+                        _ => "other",
+                    })
+                    .collect();
+                eprintln!("[exports]   items in AST: {:?}", forms);
+            }
+
             // Also add exports to the parent module for mod.vr files
             // This allows imports like `.memory.Heap` to work when memory/mod.vr exports Heap
             if file_path.file_name().map_or(false, |n| n == "mod.vr") {
