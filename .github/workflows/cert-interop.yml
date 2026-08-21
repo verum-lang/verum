@@ -30,8 +30,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
 
       - name: Fetch prebuilt LLVM
         uses: ./.github/actions/fetch-llvm

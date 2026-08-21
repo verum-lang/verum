@@ -129,7 +129,6 @@ jobs:
       - name: Install Rust toolchain (pinned via rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
           components: rustfmt, clippy, rust-src
 
       - name: Fetch prebuilt LLVM
@@ -202,8 +201,6 @@ jobs:
 
       - name: Install Rust toolchain (pinned via rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
 
       - name: Fetch prebuilt LLVM
         uses: ./.github/actions/fetch-llvm
@@ -265,8 +262,6 @@ jobs:
 
       - name: Install Rust toolchain (pinned via rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
 
       - name: Fetch prebuilt LLVM
         uses: ./.github/actions/fetch-llvm
@@ -375,8 +370,6 @@ jobs:
 
       - name: Install Rust toolchain (pinned via rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
 
       - name: Fetch prebuilt LLVM
         uses: ./.github/actions/fetch-llvm
@@ -422,8 +415,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
 
       - name: Fetch prebuilt LLVM
         uses: ./.github/actions/fetch-llvm
@@ -485,8 +476,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
 
       - name: Fetch prebuilt LLVM
         uses: ./.github/actions/fetch-llvm
@@ -529,8 +518,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
 
       - name: Fetch prebuilt LLVM
         uses: ./.github/actions/fetch-llvm
@@ -580,7 +567,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
           components: rustfmt, clippy
 
       - name: Fetch prebuilt LLVM
@@ -630,8 +616,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
 
       - name: Fetch prebuilt LLVM
         uses: ./.github/actions/fetch-llvm
