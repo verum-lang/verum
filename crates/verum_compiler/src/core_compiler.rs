@@ -220,6 +220,19 @@ pub fn build_export_index(
                             exports.insert(axiom_decl.name.name.to_string());
                         }
                     }
+                    // Proof declarations are callable the same way axioms
+                    // are — `public theorem msfs_lemma_3_4_outputs_in_s_s_global`
+                    // was mounted by two corpus files and reported E401
+                    // ("phantom") while sitting in plain sight at its
+                    // declaration, because these arms were missing and the
+                    // silent `_ => {}` swallowed the form.
+                    verum_ast::ItemKind::Theorem(proof_decl)
+                    | verum_ast::ItemKind::Lemma(proof_decl)
+                    | verum_ast::ItemKind::Corollary(proof_decl) => {
+                        if matches!(proof_decl.visibility, verum_ast::Visibility::Public) {
+                            exports.insert(proof_decl.name.name.to_string());
+                        }
+                    }
                     _ => {}
                 }
             }
