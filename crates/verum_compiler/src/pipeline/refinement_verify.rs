@@ -846,6 +846,7 @@ mod refinement_binder_sort_pins {
     use verum_ast::expr::{BinOp, Expr, ExprKind};
     use verum_ast::{Ident, Literal, Span};
     use verum_common::{Heap, List};
+    use z3::ast::Ast;
 
     fn lit_float(v: f64) -> Expr {
         Expr::literal(Literal::float(v, Span::dummy()))
@@ -937,15 +938,24 @@ mod refinement_binder_sort_pins {
 
     /// The premise of the three-arm equality downcast and of the `binder_tied`
     /// guard: `create_var` produces exactly Int, Bool or Real for a scalar
-    /// base, and REFUSES anything else rather than inventing a sort.
+    /// base, and NEVER hands a scalar sort to a type it does not model.
     ///
     /// Both halves are load-bearing. If a fourth scalar sort ever appears, the
     /// three arms stop being exhaustive over binders and that binder silently
-    /// stops being tied to its return value. If the refusal ever became a
-    /// fallback — say to Int — the original defect returns wholesale, since an
+    /// stops being tied to its return value. If an unmodelled type ever got a
+    /// scalar sort — say Int — the original defect returns wholesale, since an
     /// Int binder against a Real value is exactly what was mistranslating.
+    ///
+    /// An unmodelled type gets an OPAQUE sort rather than a refusal: refusing
+    /// failed the whole invariant, including the parts that were perfectly
+    /// expressible, and `List<…>` alone is the field type of 1122 declarations
+    /// in core/. Opaqueness keeps the safety the refusal was protecting —
+    /// nothing can be arithmetically "proven" about a value the solver knows
+    /// nothing about — while letting the rest of the record be checked. What
+    /// this test pins is that distinction, not the refusal that once carried
+    /// it.
     #[test]
-    fn create_var_covers_the_three_downcast_sorts_and_refuses_the_rest() {
+    fn create_var_covers_the_three_downcast_sorts_and_never_invents_a_scalar() {
         use verum_ast::ty::{Path, Type, TypeKind};
         use verum_smt::translate::Translator;
 
@@ -964,16 +974,42 @@ mod refinement_binder_sort_pins {
              handles; a fourth would silently stop being tied to its return value"
         );
 
-        // A named type the translator has no sort for. The binder path must
-        // report this, not substitute Int.
-        let named = of(TypeKind::Path(Path::single(Ident::new(
-            "Text",
-            Span::dummy(),
-        ))));
+        // A named type the translator has no sort for. It must come back
+        // OPAQUE — not as one of the three scalars, and above all not as Int.
+        let named = |n: &str| {
+            of(TypeKind::Path(Path::single(Ident::new(n, Span::dummy()))))
+        };
+        let opaque = tr
+            .create_var("b", &named("UserRecord"))
+            .expect("an unmodelled named type is opaque, not a translation failure");
         assert!(
-            tr.create_var("b", &named).is_err(),
-            "an unsortable base must be REFUSED, not given a fallback sort — a \
-             fallback to Int is precisely the defect this change removed"
+            opaque.as_int().is_none()
+                && opaque.as_bool().is_none()
+                && opaque.as_real().is_none(),
+            "an unmodelled type must NOT be given a scalar sort — a fallback to \
+             Int is precisely the defect this pin exists for: `xs.len() > 0` \
+             over a list-shaped Int translates to arithmetic that means nothing \
+             and the solver can then 'prove' it"
+        );
+
+        // Opaque is not a single bucket: two DIFFERENT unmodelled types must
+        // not share a sort, or the solver may equate values that have nothing
+        // to do with each other.
+        let other = tr.create_var("b", &named("OtherRecord")).expect("also opaque");
+        assert_ne!(
+            opaque.get_sort(),
+            other.get_sort(),
+            "two distinct unmodelled types must get distinct opaque sorts"
+        );
+
+        // ...and two variables of the SAME unmodelled type must share one, or
+        // `a == b` over that type cannot even be stated.
+        let same = tr.create_var("c", &named("UserRecord")).expect("also opaque");
+        assert_eq!(
+            opaque.get_sort(),
+            same.get_sort(),
+            "two variables of one unmodelled type must share a sort, so that \
+             equality between them is expressible at all"
         );
     }
 

@@ -3357,8 +3357,11 @@ impl<'ctx> Translator<'ctx> {
                 // `well_known_types` is the authority both now consult.
                 let Some(ident) = path.as_ident() else {
                     let sort = Sort::uninterpreted(Symbol::String("Verum!Path".to_string()));
-                    let var = z3::ast::Datatype::new_const(name, &sort);
-                    return Ok(Dynamic::from_ast(&var));
+                    // Dynamic::new_const, NOT Datatype::new_const: the
+                    // latter asserts the sort's kind is Datatype and
+                    // panics on an uninterpreted sort the moment the
+                    // arm is actually reached.
+                    return Ok(Dynamic::new_const(name, &sort));
                 };
                 let tn = ident.as_str();
                 if verum_common::well_known_types::type_names::is_integer_type(tn) {
@@ -3386,8 +3389,10 @@ impl<'ctx> Translator<'ctx> {
                     other => {
                         let sort =
                             Sort::uninterpreted(Symbol::String(format!("Verum!{}", other)));
-                        let var = z3::ast::Datatype::new_const(name, &sort);
-                        Ok(Dynamic::from_ast(&var))
+                        // Dynamic::new_const — Datatype::new_const
+                        // asserts SortKind::Datatype and panics on an
+                        // uninterpreted sort.
+                        Ok(Dynamic::new_const(name, &sort))
                     }
                 }
             }
