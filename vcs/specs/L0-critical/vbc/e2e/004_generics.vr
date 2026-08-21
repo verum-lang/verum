@@ -84,11 +84,16 @@ fn test_pair_same_type() {
 // Generic with protocol constraints
 // =============================================================================
 
-fn max_of<T: Ord>(a: T, b: T) -> T {
+// `PartialOrd`, not `Ord` — the body asks for `>`, and that is exactly
+// what PartialOrd provides. `Ord` additionally promises a TOTAL order,
+// which Float cannot give (NaN compares false against everything, see
+// 633), so the stronger bound would exclude the float cases below for
+// no reason the body needs.
+fn max_of<T: PartialOrd>(a: T, b: T) -> T {
     if a > b { a } else { b }
 }
 
-fn min_of<T: Ord>(a: T, b: T) -> T {
+fn min_of<T: PartialOrd>(a: T, b: T) -> T {
     if a < b { a } else { b }
 }
 

@@ -2099,6 +2099,96 @@ impl ProtocolChecker {
         self.protocols.insert("Eq".into(), eq);
         self.derivable.insert("Eq".into());
 
+        // PartialEq / PartialOrd — the honest halves.
+        //
+        // `core/base/protocols.vr` declares `Eq extends PartialEq` and
+        // `Ord extends Eq`, with PartialEq's doc naming floating point
+        // as the reason the split exists: `Eq` promises `a == a` and
+        // `Ord` promises a total order, and NaN supplies neither. Float
+        // gets these two and not those (T0833), so the registry has to
+        // KNOW them — an impl of an unregistered protocol has nothing
+        // to attach to.
+        let partial_eq = Protocol {
+            name: "PartialEq".into(),
+            kind: ProtocolKind::Constraint,
+            type_params: List::new(),
+            defining_crate: Maybe::Some("stdlib".into()),
+            methods: {
+                let mut methods = Map::new();
+                let bool_binop = Type::function(
+                    List::from(vec![
+                        Type::Var(crate::ty::TypeVar::with_id(0)),
+                        Type::Var(crate::ty::TypeVar::with_id(0)),
+                    ]),
+                    Type::Bool,
+                );
+                methods.insert(
+                    "eq".into(),
+                    ProtocolMethod::simple("eq".into(), bool_binop.clone(), false),
+                );
+                methods.insert(
+                    "ne".into(),
+                    ProtocolMethod::simple("ne".into(), bool_binop, true),
+                );
+                methods
+            },
+            associated_types: Map::new(),
+            associated_consts: Map::new(),
+            super_protocols: List::new(),
+            specialization_info: Maybe::None,
+            span: Span::default(),
+        };
+        self.protocols.insert("PartialEq".into(), partial_eq);
+        self.derivable.insert("PartialEq".into());
+
+        let partial_ord = Protocol {
+            name: "PartialOrd".into(),
+            kind: ProtocolKind::Constraint,
+            type_params: List::new(),
+            defining_crate: Maybe::Some("stdlib".into()),
+            methods: {
+                let mut methods = Map::new();
+                // `partial_cmp` returns `Maybe<Ordering>` — `None` is
+                // the answer for a pair that does not compare, which is
+                // the whole difference from `Ord::cmp`.
+                let partial_cmp_ty = Type::function(
+                    List::from(vec![
+                        Type::Var(crate::ty::TypeVar::with_id(0)),
+                        Type::Var(crate::ty::TypeVar::with_id(0)),
+                    ]),
+                    Type::Named {
+                        path: Path::single(Ident::new(
+                            WKT::Maybe.as_str(),
+                            Span::default(),
+                        )),
+                        args: List::from(vec![Type::Named {
+                            path: Path::single(Ident::new(
+                                WKT::Ordering.as_str(),
+                                Span::default(),
+                            )),
+                            args: List::new(),
+                        }]),
+                    },
+                );
+                methods.insert(
+                    "partial_cmp".into(),
+                    ProtocolMethod::simple("partial_cmp".into(), partial_cmp_ty, false),
+                );
+                methods
+            },
+            associated_types: Map::new(),
+            associated_consts: Map::new(),
+            super_protocols: List::from(vec![ProtocolBound {
+                protocol: Path::single(Ident::new("PartialEq", Span::default())),
+                args: List::new(),
+                is_negative: false,
+            }]),
+            specialization_info: Maybe::None,
+            span: Span::default(),
+        };
+        self.protocols.insert("PartialOrd".into(), partial_ord);
+        self.derivable.insert("PartialOrd".into());
+
         // Ord protocol (requires Eq)
         // Ordering type is a variant: Less | Equal | Greater
         let ordering_type = Type::Variant({
@@ -3273,13 +3363,45 @@ impl ProtocolChecker {
             }
         };
 
-        // Register Eq for primitive types (including Unit - all units are equal)
-        for ty in &[Type::Int, Type::Float, Type::Bool, Type::Char, Type::Unit] {
+        // Register Eq for the types whose equality is REFLEXIVE.
+        //
+        // Float is absent for the same reason it is absent from Ord
+        // and Hash below: NaN. `Eq` is documented in
+        // `core/base/protocols.vr` as the promise that `a == a` always
+        // holds, with `PartialEq` provided for the floating-point case
+        // — and `core` implements `PartialEq for Float`, whose body has
+        // always carried the comment `NaN != NaN by IEEE 754`. Claiming
+        // Eq here contradicted both (T0833). Float still compares with
+        // `==`, through PartialEq, which is what `==` needs.
+        for ty in &[Type::Int, Type::Bool, Type::Char, Type::Unit] {
             let _ = self.register_impl(make_impl(ty.clone(), "Eq"));
         }
+        // ...and PartialEq for everything that can be compared at all,
+        // Float included: `==` is available, reflexivity is not.
+        for ty in &[Type::Int, Type::Float, Type::Bool, Type::Char, Type::Unit] {
+            let _ = self.register_impl(make_impl(ty.clone(), "PartialEq"));
+        }
 
-        // Register Ord for numeric, char, and unit types
+        // PartialOrd for the ordered ones. Float is HERE and not in
+        // Ord: `partial_cmp` can answer `None`, `cmp` cannot.
         for ty in &[Type::Int, Type::Float, Type::Char, Type::Unit] {
+            let _ = self.register_impl(make_impl(ty.clone(), "PartialOrd"));
+        }
+
+        // Register Ord for the types that HAVE a total order.
+        //
+        // Float is deliberately absent, for the same reason Hash is
+        // withheld from it below: NaN. `Ord` promises a total order,
+        // and NaN compares false against everything including itself,
+        // so no total order over Float exists. Claiming one here made
+        // `f.cmp(g)` type-check and answer through an interpreter
+        // intercept that returned `Equal` for NaN — a silent, wrong
+        // ORDER rather than an error (T0833).
+        //
+        // `PartialOrd` is what Float has (core/base/primitives.vr),
+        // and `Float.total_cmp` is the explicit IEEE 754 totalOrder
+        // for callers that need to sort.
+        for ty in &[Type::Int, Type::Char, Type::Unit] {
             let _ = self.register_impl(make_impl(ty.clone(), "Ord"));
         }
 

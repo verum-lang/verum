@@ -1275,15 +1275,36 @@ implement Float {
         self + scaled
     }
 
-    /// Total comparison (orders NaN after all values).
-    public fn total_cmp(self, other: Float) -> Int {
-        if self < other { -1 }
-        else if self > other { 1 }
-        else if self == other { 0 }
-        else if other.is_nan() {
-            if self.is_nan() { 0 } else { -1 }
-        }
-        else { 1 }
+    /// IEEE 754 `totalOrder`: a TOTAL order over every bit pattern,
+    /// including the ones `<` cannot compare.
+    ///
+    /// `Float` has no `Ord`, and cannot: NaN compares false against
+    /// every value including itself, so `cmp` has no answer to give.
+    /// `partial_cmp` says so honestly by returning `None`. This is the
+    /// other honest answer — a real total order, at the price of
+    /// distinguishing things `==` calls equal:
+    ///
+    ///     -NaN < -inf < ... < -0.0 < +0.0 < ... < +inf < +NaN
+    ///
+    /// Use it to SORT floats. `xs.sort_by(|a, b| a.total_cmp(b))`
+    /// terminates and gives one well-defined order whatever the data
+    /// contains; `xs.sort()` is rejected, because `Ord` would be a lie.
+    ///
+    /// Implemented on the bit pattern, which is what makes it total:
+    /// flipping the sign-magnitude encoding into a two's-complement
+    /// one makes integer order agree with float order everywhere.
+    public fn total_cmp(self, other: Float) -> Ordering {
+        let mut left: Int = self.to_bits();
+        let mut right: Int = other.to_bits();
+        // Floats are sign-magnitude: among negatives, a LARGER bit
+        // pattern means a SMALLER number. Flipping every magnitude bit
+        // of a negative turns that around, so integer order and float
+        // order agree across the whole range — and the sign bit alone
+        // is not enough, which is why the mask covers all 63.
+        let magnitude: Int = 0x7FFFFFFFFFFFFFFF;
+        if left < 0 { left = left ^ magnitude; }
+        if right < 0 { right = right ^ magnitude; }
+        left.cmp(&right)
     }
 
     /// Reciprocal: 1.0 / self.
@@ -1320,10 +1341,16 @@ implement Float {
 }
 
 // Float protocol implementations
-implement Eq for Float {
+// `PartialEq`, not `Eq`: `Eq` promises REFLEXIVITY — that `a == a`
+// always holds — and NaN breaks it, by IEEE 754 and by design. This
+// impl always knew (the comment below said so) while the declaration
+// claimed the opposite; `PartialEq` exists in `core/base/protocols.vr`
+// for exactly this case, and its doc names floating point as the
+// reason (T0833).
+implement PartialEq for Float {
     @inline(always)
     public fn eq(&self, other: &Float) -> Bool {
-        // Note: NaN != NaN by IEEE 754
+        // NaN != NaN by IEEE 754 — which is why this is PartialEq.
         eq(*self, *other)
     }
 }
@@ -4089,15 +4116,36 @@ implement Float32 {
         (s + scaled) as Float32
     }
 
-    /// Total comparison (orders NaN after all values).
-    public fn total_cmp(self, other: Float32) -> Int {
-        if self < other { -1 }
-        else if self > other { 1 }
-        else if self == other { 0 }
-        else if other.is_nan() {
-            if self.is_nan() { 0 } else { -1 }
-        }
-        else { 1 }
+    /// IEEE 754 `totalOrder`: a TOTAL order over every bit pattern,
+    /// including the ones `<` cannot compare.
+    ///
+    /// `Float32` has no `Ord`, and cannot: NaN compares false against
+    /// every value including itself, so `cmp` has no answer to give.
+    /// `partial_cmp` says so honestly by returning `None`. This is the
+    /// other honest answer — a real total order, at the price of
+    /// distinguishing things `==` calls equal:
+    ///
+    ///     -NaN < -inf < ... < -0.0 < +0.0 < ... < +inf < +NaN
+    ///
+    /// Use it to SORT floats. `xs.sort_by(|a, b| a.total_cmp(b))`
+    /// terminates and gives one well-defined order whatever the data
+    /// contains; `xs.sort()` is rejected, because `Ord` would be a lie.
+    ///
+    /// Implemented on the bit pattern, which is what makes it total:
+    /// flipping the sign-magnitude encoding into a two's-complement
+    /// one makes integer order agree with float order everywhere.
+    public fn total_cmp(self, other: Float32) -> Ordering {
+        let mut left: Int = (self.to_bits() as Int) << 32;
+        let mut right: Int = (other.to_bits() as Int) << 32;
+        // Floats are sign-magnitude: among negatives, a LARGER bit
+        // pattern means a SMALLER number. Flipping every magnitude bit
+        // of a negative turns that around, so integer order and float
+        // order agree across the whole range — and the sign bit alone
+        // is not enough, which is why the mask covers all 63.
+        let magnitude: Int = 0x7FFFFFFFFFFFFFFF;
+        if left < 0 { left = left ^ magnitude; }
+        if right < 0 { right = right ^ magnitude; }
+        left.cmp(&right)
     }
 
     /// Reciprocal: 1.0 / self.
@@ -4276,15 +4324,36 @@ implement Float64 {
         (s + scaled) as Float64
     }
 
-    /// Total comparison (orders NaN after all values).
-    public fn total_cmp(self, other: Float64) -> Int {
-        if self < other { -1 }
-        else if self > other { 1 }
-        else if self == other { 0 }
-        else if other.is_nan() {
-            if self.is_nan() { 0 } else { -1 }
-        }
-        else { 1 }
+    /// IEEE 754 `totalOrder`: a TOTAL order over every bit pattern,
+    /// including the ones `<` cannot compare.
+    ///
+    /// `Float64` has no `Ord`, and cannot: NaN compares false against
+    /// every value including itself, so `cmp` has no answer to give.
+    /// `partial_cmp` says so honestly by returning `None`. This is the
+    /// other honest answer — a real total order, at the price of
+    /// distinguishing things `==` calls equal:
+    ///
+    ///     -NaN < -inf < ... < -0.0 < +0.0 < ... < +inf < +NaN
+    ///
+    /// Use it to SORT floats. `xs.sort_by(|a, b| a.total_cmp(b))`
+    /// terminates and gives one well-defined order whatever the data
+    /// contains; `xs.sort()` is rejected, because `Ord` would be a lie.
+    ///
+    /// Implemented on the bit pattern, which is what makes it total:
+    /// flipping the sign-magnitude encoding into a two's-complement
+    /// one makes integer order agree with float order everywhere.
+    public fn total_cmp(self, other: Float64) -> Ordering {
+        let mut left: Int = self.to_bits() as Int;
+        let mut right: Int = other.to_bits() as Int;
+        // Floats are sign-magnitude: among negatives, a LARGER bit
+        // pattern means a SMALLER number. Flipping every magnitude bit
+        // of a negative turns that around, so integer order and float
+        // order agree across the whole range — and the sign bit alone
+        // is not enough, which is why the mask covers all 63.
+        let magnitude: Int = 0x7FFFFFFFFFFFFFFF;
+        if left < 0 { left = left ^ magnitude; }
+        if right < 0 { right = right ^ magnitude; }
+        left.cmp(&right)
     }
 
     /// Reciprocal: 1.0 / self.
@@ -4591,9 +4660,15 @@ implement Clone for USize {
 implement Copy for USize {}
 
 // --- Float32 ---
-implement Eq for Float32 {
+// `PartialEq`, not `Eq`: `Eq` promises REFLEXIVITY — that `a == a`
+// always holds — and NaN breaks it, by IEEE 754 and by design. This
+// impl always knew (the comment below said so) while the declaration
+// claimed the opposite; `PartialEq` exists in `core/base/protocols.vr`
+// for exactly this case, and its doc names floating point as the
+// reason (T0833).
+implement PartialEq for Float32 {
     public fn eq(&self, other: &Float32) -> Bool {
-        // Note: NaN != NaN by IEEE 754
+        // NaN != NaN by IEEE 754 — which is why this is PartialEq.
         eq(*self, *other)
     }
 }
@@ -4647,9 +4722,15 @@ implement Rem for Float64 {
     public fn rem(self, rhs: Float64) -> Float64 { rem(self, rhs) }
 }
 
-implement Eq for Float64 {
+// `PartialEq`, not `Eq`: `Eq` promises REFLEXIVITY — that `a == a`
+// always holds — and NaN breaks it, by IEEE 754 and by design. This
+// impl always knew (the comment below said so) while the declaration
+// claimed the opposite; `PartialEq` exists in `core/base/protocols.vr`
+// for exactly this case, and its doc names floating point as the
+// reason (T0833).
+implement PartialEq for Float64 {
     public fn eq(&self, other: &Float64) -> Bool {
-        // Note: NaN != NaN by IEEE 754
+        // NaN != NaN by IEEE 754 — which is why this is PartialEq.
         eq(*self, *other)
     }
 }

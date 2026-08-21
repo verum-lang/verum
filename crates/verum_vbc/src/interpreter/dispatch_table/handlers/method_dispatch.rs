@@ -6317,19 +6317,27 @@ pub(super) fn dispatch_primitive_method(
                 let other = resolve_arg_value(state, other_val).as_f64();
                 Value::from_bool(v >= other)
             }
+            // FLOAT HAS NO TOTAL ORDER (T0833).
+            //
+            // This arm used to answer `cmp` by treating NaN as EQUAL to
+            // everything, which silently produced a wrong ORDER: a
+            // program sorting `[1.0, NaN, 0.0]` got an arbitrary result
+            // and no indication anything was wrong. `Ord` is no longer
+            // claimed for Float in the type checker, so a direct
+            // `f.cmp(g)` is now rejected at check time; this arm covers
+            // what still reaches the interpreter — a generic body with
+            // an unchecked `where T: Ord` — and says so instead of
+            // inventing an answer.
             "cmp" => {
-                let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_f64();
-                let ord = if v.is_nan() || other.is_nan() {
-                    std::cmp::Ordering::Equal
-                } else if v < other {
-                    std::cmp::Ordering::Less
-                } else if v > other {
-                    std::cmp::Ordering::Greater
-                } else {
-                    std::cmp::Ordering::Equal
-                };
-                return Ok(Some(make_ordering(state, ord)?));
+                return Err(InterpreterError::Panic {
+                    message: "Float has no total order: NaN compares false \
+                              against every value including itself, so `cmp` \
+                              cannot answer. Use `partial_cmp`, which returns \
+                              `Maybe<Ordering>` and is `None` for NaN, or \
+                              `total_cmp` for the IEEE 754 total order that \
+                              places NaN after all numbers."
+                        .to_string(),
+                });
             }
             _ => return Ok(None),
         };

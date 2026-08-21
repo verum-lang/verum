@@ -138,11 +138,22 @@ fn invented(wanted: &'static str, got: Value) {
 
 /// The operand as an `f64`.  Floats pass through, ints widen — both are
 /// defined coercions.  Anything else is [`invented`].
+///
+/// `is_float()` is deliberately FALSE for a NaN — the NaN-box tag
+/// prefix collides with a real NaN's bit pattern, so `Value` bridges
+/// the two with `is_nan_float()`.  Reading only `is_float()` here sent
+/// every NaN down the `invented` arm and returned **0.0**: measured,
+/// `(0.0/0.0).to_bits()` answered `0` instead of
+/// `0x7FF8_0000_0000_0000`, so every intrinsic that reaches a float
+/// through this coercion — the whole extended-arith and extended-math
+/// surface — silently computed on ZERO where the program had a NaN.
+/// `as_f64()` decodes the tagged form correctly; only the predicate
+/// was blind (T0833).
 #[inline]
 #[track_caller]
 pub(crate) fn f64_or_zero(v: Value) -> f64 {
     COERCIONS.fetch_add(1, Ordering::Relaxed);
-    if v.is_float() {
+    if v.is_float() || v.is_nan_float() {
         v.as_f64()
     } else if v.is_int() {
         v.as_i64() as f64
@@ -160,7 +171,9 @@ pub(crate) fn i64_or_zero(v: Value) -> i64 {
     COERCIONS.fetch_add(1, Ordering::Relaxed);
     if v.is_int() {
         v.as_i64()
-    } else if v.is_float() {
+    } else if v.is_float() || v.is_nan_float() {
+        // NaN truncates to 0 either way; routing it here rather than
+        // through `invented` keeps that counter meaning what it says.
         v.as_f64() as i64
     } else {
         invented("i64", v);

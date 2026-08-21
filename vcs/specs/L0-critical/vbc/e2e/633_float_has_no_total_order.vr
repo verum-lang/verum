@@ -1,0 +1,74 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, ord, float, nan, dispatch
+// @timeout: 15000
+// @expected-exit: 0
+//
+// FLOAT HAS NO TOTAL ORDER — AND SAYS SO (T0833).
+//
+// `Ord` promises a total order. Float cannot supply one: NaN compares
+// false against every value including itself. The type checker used to
+// claim `Ord` for Float anyway, and the interpreter answered `cmp` by
+// treating NaN as EQUAL to everything:
+//
+//     let nan = 0.0 / 0.0;
+//     nan.cmp(1.0)   ->  Equal
+//
+// So a program could order NaN — silently, with a wrong ORDER rather
+// than an error. Note the shape of the bug: not a crash, not a
+// diagnostic, just an answer that is wrong. Sorting `[1.0, NaN, 0.0]`
+// returned SOMETHING, and nothing anywhere said it was meaningless.
+//
+// Float has `PartialOrd`, which answers honestly with `None`, and
+// `total_cmp`, which is the IEEE 754 `totalOrder` — a real total order
+// over bit patterns, at the price of separating values `==` calls
+// equal. This pins all three: the refusal, the honest `None`, and the
+// order that DOES exist.
+//
+// `f.cmp(g)` is now a CHECK-TIME error, so it cannot appear in this
+// file at all — a spec that must not compile is 633's sibling in
+// `vcs/specs/L0-critical/errors/`.
+
+fn main() {
+    let one: Float = 1.0;
+    let two: Float = 2.0;
+    let zero: Float = 0.0;
+    let nan = zero / zero;
+
+    // PartialOrd answers, and answers `None` where there is no answer.
+    match one.partial_cmp(two) {
+        Maybe.Some(o) => assert_eq(f"{o}", "<"),
+        Maybe.None => panic("1.0 vs 2.0 is comparable"),
+    }
+    match nan.partial_cmp(one) {
+        Maybe.Some(_) => panic("NaN must not compare"),
+        Maybe.None => print("nan is incomparable — correct"),
+    }
+
+    // total_cmp is a TOTAL order: every pair has an answer, including
+    // the pairs `<` cannot rank.
+    assert_eq(f"{one.total_cmp(two)}", "<");
+    assert_eq(f"{two.total_cmp(one)}", ">");
+    assert_eq(f"{one.total_cmp(one)}", "=");
+
+    // NaN sorts after every number, and is equal only to itself.
+    assert_eq(f"{nan.total_cmp(one)}", ">");
+    assert_eq(f"{one.total_cmp(nan)}", "<");
+    assert_eq(f"{nan.total_cmp(nan)}", "=");
+
+    // Infinities are ordinary values under this order.
+    let inf = Float.infinity();
+    assert_eq(f"{inf.total_cmp(nan)}", "<");
+    assert_eq(f"{two.total_cmp(inf)}", "<");
+
+    // The price of totality, stated rather than hidden: IEEE 754 ranks
+    // -0.0 BELOW +0.0, though `==` calls them equal. A total order over
+    // bit patterns cannot do otherwise, and a caller sorting data needs
+    // to know which one they get.
+    let neg_zero: Float = -0.0;
+    assert(zero == neg_zero);
+    assert_eq(f"{neg_zero.total_cmp(zero)}", "<");
+
+    print("float-has-no-total-order ok");
+}
