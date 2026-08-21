@@ -74,7 +74,7 @@ use serde::{Deserialize, Serialize};
 /// over the same variables are conservatively rejected — this
 /// matches the algorithm Coq / Lean / Agda use for
 /// non-cumulative-with-variables level comparison.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum Level {
     /// `Type@n` for a concrete non-negative `n`.
     Concrete(u32),
@@ -89,6 +89,41 @@ pub enum Level {
     /// `max(l1, l2)`.  Normalisation flattens nested `Max`,
     /// dedupes summands, and pulls out common `Succ` prefixes.
     Max(Box<Level>, Box<Level>),
+}
+
+/// Certificate-schema evolution: before universe polymorphism
+/// (FV-19) a level serialized as a bare number — `{"Universe": 0}` —
+/// and the canonical `.vproof` library plus any externally held
+/// certificate still speaks that form. Deserialization accepts BOTH
+/// spellings (a bare non-negative integer means `Concrete`);
+/// serialization emits only the structured form. Accept old, emit
+/// new — the schema moves without invalidating a single certificate.
+impl<'de> serde::Deserialize<'de> for Level {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        enum Structured {
+            Concrete(u32),
+            Var(String),
+            Succ(Box<Level>),
+            Max(Box<Level>, Box<Level>),
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Bare(u32),
+            Structured(Structured),
+        }
+        Ok(match Repr::deserialize(deserializer)? {
+            Repr::Bare(n) => Level::Concrete(n),
+            Repr::Structured(Structured::Concrete(n)) => Level::Concrete(n),
+            Repr::Structured(Structured::Var(v)) => Level::Var(v),
+            Repr::Structured(Structured::Succ(l)) => Level::Succ(l),
+            Repr::Structured(Structured::Max(a, b)) => Level::Max(a, b),
+        })
+    }
 }
 
 impl Level {
@@ -1551,6 +1586,29 @@ impl Certificate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn level_deserializes_both_certificate_spellings() {
+        // Schema evolution pin: the pre-FV-19 bare-number spelling and
+        // the structured spelling BOTH deserialize; serialization emits
+        // only the structured form. The canonical .vproof library holds
+        // 13 certificates in the old spelling — this pin is what keeps
+        // them (and every externally held certificate) valid.
+        let old: Term = serde_json::from_str(r#"{"Universe": 0}"#)
+            .expect("bare-number level must stay deserializable");
+        assert_eq!(old, Term::Universe(Level::Concrete(0)));
+        let new: Term = serde_json::from_str(r#"{"Universe": {"Concrete": 0}}"#)
+            .expect("structured level deserializes");
+        assert_eq!(old, new);
+        let sym: Level = serde_json::from_str(r#"{"Succ": {"Var": "u"}}"#)
+            .expect("symbolic levels deserialize");
+        assert_eq!(sym, Level::Succ(Box::new(Level::Var("u".into()))));
+        assert_eq!(
+            serde_json::to_string(&Level::Concrete(0)).unwrap(),
+            r#"{"Concrete":0}"#,
+            "emission stays structured — accept old, emit new"
+        );
+    }
 
     #[test]
     fn t_universe_lives_in_next_level() {
