@@ -152,11 +152,25 @@ pub enum VerifyStrategy {
 }
 
 /// The Diakrisis ν-invariant ordinal assigned to a verification
-/// strategy (Table). Each strategy gets a *distinct* ordinal
-/// so the monotone ladder `0 < 1 < 2 < ω < ω+1 < ω·2 < ω·2+1 <
-/// ω·2+2 < ω·3+1` is strictly ordered (strict-monotonicity
-/// claim). Earlier coarse buckets (`FiniteBelowOmega`, `OmegaTwice`)
-/// are gone; pattern-match exhaustively against the nine variants.
+/// strategy (Table). Each strategy gets a *distinct* ordinal so the
+/// monotone ladder
+///
+/// ```text
+/// 0 < 1 < 2 < 3 < ω < ω+1 < ω·2 < ω·2+1 < ω·2+2 < ω·2+3
+///   < ω·2+4 < ω·2+5 < ω·3+1
+/// ```
+///
+/// is strictly ordered (strict-monotonicity claim). Earlier coarse
+/// buckets (`FiniteBelowOmega`, `OmegaTwice`) are gone; pattern-match
+/// exhaustively rather than through a wildcard, so a new rung is a
+/// compile error at every site that ranks strategies.
+///
+/// The count is deliberately NOT written out here. It was, and it said
+/// "nine" while the enum carried thirteen — a doc comment that states
+/// a number nothing checks drifts the moment a variant lands, and then
+/// reads as authority. `ALL` below is the enumeration, and
+/// `nu_ordinal_ladder_is_strictly_monotone` checks that it is complete
+/// and ordered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NuOrdinal {
     /// ν = 0 — runtime-only.
@@ -1479,6 +1493,33 @@ mod meta_drift_pins {
             assert_eq!(s.rank(), s.nu_ordinal().rank(),
                 "{:?}: VerifyStrategy::rank() = {} but nu_ordinal().rank() = {}",
                 s, s.rank(), s.nu_ordinal().rank());
+        }
+    }
+
+    /// `NuOrdinal::ALL` is the ladder itself: ranks ascend by exactly
+    /// one from zero, and every rendering is distinct.
+    ///
+    /// This is what the type's doc comment points at instead of writing
+    /// out a count. A comment saying "the nine variants" sat above a
+    /// thirteen-variant enum until an outside audit noticed — a number
+    /// no test reads is a claim that rots silently and then gets cited
+    /// as authority.
+    #[test]
+    fn nu_ordinal_ladder_is_strictly_monotone() {
+        let ranks: Vec<u8> = NuOrdinal::ALL.iter().map(|o| o.meta().rank).collect();
+        let expected: Vec<u8> = (0..NuOrdinal::ALL.len() as u8).collect();
+        assert_eq!(
+            ranks, expected,
+            "NuOrdinal::ALL must be listed in strict rank order with no gaps"
+        );
+
+        let mut seen = std::collections::HashSet::new();
+        for o in NuOrdinal::ALL {
+            assert!(
+                seen.insert(o.meta().as_str),
+                "two ordinals render as `{}` — the ladder must be legible",
+                o.meta().as_str
+            );
         }
     }
 

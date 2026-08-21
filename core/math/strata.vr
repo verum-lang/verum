@@ -8,18 +8,34 @@
 //
 
 // MSFS organises the universe of mathematical foundations into four
-// nested strata:
+// strata. They are NOT a nesting:
 //
 
-//  L_Fnd ⊋ L_Cls ⊋ L_Cls_top ⊋ L_Abs
-//  │ │ │ │
-//  (R1)–(R5) (M1)–(M5) (Max-1)–(Max-4) (F_S) ∧ (Π_4) ∧ (Π_3-max)
+//  L_Fnd ──Cls──▶ L_Cls ⊋ L_Cls_top ──Gen──▶ L_Abs = ∅
+//  │              │       │                  │
+//  (R1)–(R5)      (M1)–(M5)  (Max-1)–(Max-4)  (F_S) ∧ (Π_4) ∧ (Π_3-max)
 //
 
-// Each inclusion is *proper* (Proposition 2.2 (iii)): the strict
-// nesting is witnessed by foundations occupying one stratum and not
-// the next. The bottom stratum L_Abs is *empty* — the "Absolute
-// Foundation No-Go Theorem" (AFN-T) Theorem 5.1.
+// Read the arrows and the one ⊋ literally, because they mean different
+// things (Proposition 2.2 (ii)-(iii)):
+//
+
+//  * `Cls` and `Gen` are META-OPERATIONS, not inclusions. L_Fnd and
+//    L_Cls are cut out by condition packages of DIFFERENT TYPE —
+//    (R1)–(R5) are first-order conditions on a formal system,
+//    (M1)–(M5) are 2-categorical conditions on a classifier — so
+//    neither contains the other. One object can inhabit both by
+//    carrying both structures: Univalent Foundations is in L_Cls while
+//    its underlying HoTT is in L_Fnd (Prop 2.2 (ii)). Membership is a
+//    SET of strata, `Stratum(X) ⊆ {L_Fnd, L_Cls, L_Cls_top, L_Abs}`.
+//  * The sole inclusion is `L_Cls_top ⊊ L_Cls`, and it is strict:
+//    (Max-1)–(Max-4) strengthen (M1)–(M5), and Theorem 4.2 exhibits
+//    ≥3 pairwise non-2-equivalent members of `L_Cls \ L_Cls_top`
+//    (∞-cosmoi, Univalent Foundations, the cohesive framework), each
+//    violating (Max-1) (Prop 2.2 (iii)).
+//  * `L_Abs` is EMPTY — the "Absolute Foundation No-Go Theorem"
+//    (AFN-T) Theorem 5.1, recorded as Prop 2.2 (iv). Emptiness is why
+//    the last arrow ends nowhere; it is not a fourth inclusion.
 //
 
 // This module installs the four strata as a sum type plus the
@@ -70,10 +86,12 @@ public type MathObject is protocol {
 // =============================================================================
 
 /// MSFS Definition 2.1. The four formal strata of the moduli space
-/// `𝔐` of formal systems. Each variant tags an inhabitant of the
-/// corresponding stratum; the ladder is ordered by *strict*
-/// inclusion `L_Fnd ⊋ L_Cls ⊋ L_Cls_top ⊋ L_Abs`, with the bottom
-/// stratum being empty by AFN-T (Theorem 5.1).
+/// `𝔐` of formal systems. Each variant tags one stratum an object may
+/// inhabit — a TAG, not a rung: an object can carry more than one,
+/// since L_Fnd and L_Cls are cut out by condition packages of
+/// different type (Prop 2.2 (ii)). The only inclusion among the four
+/// is `L_Cls_top ⊊ L_Cls` (Prop 2.2 (iii)), and `L_Abs` is empty by
+/// AFN-T (Theorem 5.1).
 ///
 
 /// The variants are intentionally light on parameters: the (R)/(M)
@@ -126,24 +144,24 @@ public axiom msfs_strata_class_definable(s: Stratum) -> Bool
 // =============================================================================
 //
 
-// MSFS Proposition 2.2 (iii) asserts three STRICT inclusions:
+// MSFS Proposition 2.2 (iii) asserts ONE strict inclusion:
 //
 
-//  L_Fnd ⊋ L_Cls ⊋ L_Cls_top ⊋ L_Abs
+//  L_Cls_top ⊊ L_Cls
 //
 
 // "Strict" means: ∃ object inhabiting the OUTER stratum that does NOT
 // inhabit the INNER stratum. This carrier protocol abstracts that
 // inhabit-but-not-inhabit pair into a single witness type indexed by
-// outer/inner stratum names. Concrete witnesses (AffineLogic + !,
-// ∞-cosmoi, vacuous-via-emptiness) supply the implementations; the
-// strict-inclusion axioms below are parameterised on this carrier so
-// the kernel re-checks the witness's two flags at every citation site.
+// outer/inner stratum names. The ∞-cosmoi witness below supplies the
+// implementation; the strict-inclusion axiom is parameterised on this
+// carrier so the kernel re-checks the witness's two flags at every
+// citation site.
 //
 
-// Pre-M1.D-2 the three inclusion axioms were `() -> Bool ensures true`
-// — they recorded the *fact* of strictness without any propositional
-// content. The carrier-parameterised form makes the kernel see the
+// Pre-M1.D-2 the inclusion axiom was `() -> Bool ensures true` — it
+// recorded the *fact* of strictness without any propositional content.
+// The carrier-parameterised form makes the kernel see the
 // strict-inclusion claim as the conjunction of its two component flags.
 
 /// Witness of a strict inclusion `S_outer ⊋ S_inner` between MSFS
@@ -153,9 +171,9 @@ public axiom msfs_strata_class_definable(s: Stratum) -> Bool
 ///
 
 /// The strata themselves are tagged by the `Stratum` enum (informally;
-/// the protocol surfaces only the boolean flags). Concrete instances
-/// for each of the three strict inclusions of Proposition 2.2 (iii)
-/// live downstream — for now the protocol is the kernel-visible
+/// the protocol surfaces only the boolean flags). Proposition 2.2 (iii)
+/// gives ONE strict inclusion, `L_Cls_top ⊊ L_Cls`, so there is one
+/// witness to instantiate — the protocol is the kernel-visible
 /// projection that downstream `apply` chains can dispatch against.
 public type StrictInclusionWitness is protocol {
     /// Exhibitor identifier — the named object that inhabits the
@@ -175,46 +193,40 @@ public type StrictInclusionWitness is protocol {
     fn exhibitor_not_in_inner_stratum(self) -> Bool;
 };
 
-/// MSFS Proposition 2.2 (iii) — `L_Fnd ⊋ L_Cls` (M1.D-2 promotion).
+/// MSFS Proposition 2.2 (iii) — `L_Cls_top ⊊ L_Cls`, the SOLE
+/// inclusion among the four strata.
 ///
 
-/// The inclusion is *strict*: there exist Rich foundations that are *not*
-/// classifiers (in particular, they fail (M3) accessibility). The
-/// canonical witness is AffineLogic + ! (in L_Fnd by satisfying R1-R5
-/// but failing M3 accessibility — its classification map fails the
-/// κ-accessibility requirement). Pre-M1.D-2 was a `() -> Bool ensures
-/// true` placeholder; now witness-parameterised.
-@framework(msfs, "MSFS Proposition 2.2 (iii) — L_Fnd ⊋ L_Cls (strict, witness-parameterised)")
-public axiom msfs_proper_inclusion_fnd_cls(w: &StrictInclusionWitness) -> Bool
-    requires w.outer_stratum_tag().eq("L_Fnd")
-          && w.inner_stratum_tag().eq("L_Cls")
-    ensures  w.exhibitor_in_outer_stratum()
-          && w.exhibitor_not_in_inner_stratum();
-
-/// MSFS Proposition 2.2 (iii) — `L_Cls ⊋ L_Cls_top` (M1.D-2 promotion).
+/// Inclusion holds because (Max-1)–(Max-4) strengthen (M1)–(M5).
+/// Strictness is witnessed by ∞-cosmoi: it satisfies (M1)–(M5) but
+/// fails (Max-1), its classification image being a strict sub-stack of
+/// `M_stack`. Theorem 4.2 supplies two more inhabitants of the
+/// complement — Univalent Foundations and the cohesive framework —
+/// pairwise non-2-equivalent, which is what makes the gap structural
+/// rather than incidental.
 ///
 
-/// The strictness is witnessed by ∞-cosmoi: it satisfies (M1)–(M5)
-/// but fails Max-1 (its classification image is a strict sub-stack of
-/// `M_stack`). Pre-M1.D-2 was a `() -> Bool ensures true` placeholder;
-/// now witness-parameterised.
-@framework(msfs, "MSFS Proposition 2.2 (iii) — L_Cls ⊋ L_Cls_top (∞-cosmoi witness, parameterised)")
+/// TWO SIBLING AXIOMS WERE REMOVED HERE, and their absence is the
+/// point. This file used to assert `L_Fnd ⊋ L_Cls` and
+/// `L_Cls_top ⊋ L_Abs` as further instances of Proposition 2.2 (iii).
+/// Neither is in the paper, and the first is FALSE:
+///
+///   * `L_Fnd ⊋ L_Cls` contradicts Prop 2.2 (ii). The two strata are
+///     cut out by condition packages of different type — first-order
+///     (R1)–(R5) on a formal system versus 2-categorical (M1)–(M5) on
+///     a classifier — and an object may satisfy both at once. The
+///     paper's own example: Univalent Foundations lies in `L_Cls`
+///     while its underlying HoTT lies in `L_Fnd`. `Cls` is a
+///     meta-operation from one stratum to the other, not a containment
+///     between them.
+///   * `L_Cls_top ⊋ L_Abs` is vacuous, not strict: `L_Abs = ∅` by
+///     Theorem 5.1, and emptiness is stated on its own below
+///     (Prop 2.2 (iv)). Dressing it as an inclusion asserted, in the
+///     shape of a witness, something the theorem already settles.
+@framework(msfs, "MSFS Proposition 2.2 (iii) — L_Cls_top ⊊ L_Cls (∞-cosmoi witness, parameterised)")
 public axiom msfs_proper_inclusion_cls_clsmax(w: &StrictInclusionWitness) -> Bool
     requires w.outer_stratum_tag().eq("L_Cls")
           && w.inner_stratum_tag().eq("L_Cls_top")
-    ensures  w.exhibitor_in_outer_stratum()
-          && w.exhibitor_not_in_inner_stratum();
-
-/// MSFS Proposition 2.2 (iii) — `L_Cls_top ⊋ L_Abs`. Strictly
-/// degenerate — `L_Cls_top` contains universal articulations
-/// (Diakrisis 103.T witness); `L_Abs == ∅` by AFN-T (Theorem 5.1).
-/// Pre-M1.D-2 was a `() -> Bool ensures true` placeholder; now
-/// witness-parameterised. The "not-in-inner" component is
-/// automatically witnessed by L_Abs's emptiness (Proposition 2.2 (iv)).
-@framework(msfs, "MSFS Proposition 2.2 (iii) — L_Cls_top ⊋ L_Abs (vacuously by AFN-T, parameterised)")
-public axiom msfs_proper_inclusion_clsmax_abs(w: &StrictInclusionWitness) -> Bool
-    requires w.outer_stratum_tag().eq("L_Cls_top")
-          && w.inner_stratum_tag().eq("L_Abs")
     ensures  w.exhibitor_in_outer_stratum()
           && w.exhibitor_not_in_inner_stratum();
 
@@ -294,24 +306,6 @@ implement StrictInclusionWitness for ConcreteStrictInclusionWitness {
     fn exhibitor_not_in_inner_stratum(self) -> Bool { self.field_exhibitor_not_in_inner_stratum }
 }
 
-/// **AffineLogic + ! witness — L_Fnd ⊋ L_Cls (M3.B).**
-///
-
-/// AffineLogic + ! satisfies (R1)–(R5) (Rich-foundation conditions —
-/// it's a presentable category with model-theoretic structure)
-/// but fails (M3) accessibility (its classification image is
-/// ω-accessible but not κ-accessible for the κ required by Definition
-/// 3.1's M-conditions). Witnesses the strict inclusion L_Fnd ⊋ L_Cls.
-public fn affine_logic_no_m3_witness() -> ConcreteStrictInclusionWitness {
-    ConcreteStrictInclusionWitness {
-        field_exhibitor_identifier: "AffineLogic + !",
-        field_outer_stratum_tag: "L_Fnd",
-        field_inner_stratum_tag: "L_Cls",
-        field_exhibitor_in_outer_stratum: true,
-        field_exhibitor_not_in_inner_stratum: true,
-    }
-}
-
 /// **∞-cosmoi witness — L_Cls ⊋ L_Cls_top (M3.B).**
 ///
 
@@ -330,21 +324,3 @@ public fn infty_cosmoi_no_max1_witness() -> ConcreteStrictInclusionWitness {
     }
 }
 
-/// **Vacuous-via-emptiness witness — L_Cls_top ⊋ L_Abs (M3.B).**
-///
-
-/// Strict inclusion L_Cls_top ⊋ L_Abs is *vacuously* true via MSFS
-/// Proposition 2.2 (iv) (`L_Abs == ∅`). The exhibitor here is the
-/// Diakrisis canonical-primitive system itself — Diakrisis 106.T
-/// places it in L_Cls_top, and L_Abs is empty, so any L_Cls_top
-/// inhabitant trivially fails L_Abs membership. Witnesses the strict
-/// inclusion L_Cls_top ⊋ L_Abs through the vacuous direction.
-public fn vacuous_via_emptiness_witness() -> ConcreteStrictInclusionWitness {
-    ConcreteStrictInclusionWitness {
-        field_exhibitor_identifier: "Diakrisis canonical-primitive (vacuous via L_Abs == ∅)",
-        field_outer_stratum_tag: "L_Cls_top",
-        field_inner_stratum_tag: "L_Abs",
-        field_exhibitor_in_outer_stratum: true,
-        field_exhibitor_not_in_inner_stratum: true,
-    }
-}
