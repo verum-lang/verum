@@ -12,6 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # vtest depends on verum_compiler -> verum_codegen -> verum_tblgen,
+      # whose build.rs requires llvm-config.
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
       - name: Install Verum toolchain
         run: |
           # Same toolchain step as the rest of CI.
@@ -30,6 +34,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y wrk jq bc
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
       - name: Build the rig binaries
         run: |
           cargo build --release -p vtest

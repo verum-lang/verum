@@ -218,7 +218,20 @@ jobs:
       - name: external-prover-replay (tri-prover, --strict)
         run: |
           cd core
-          ../target/release/verum audit --external-prover-replay --strict
+          # --strict makes an UNAVAILABLE backend fatal. That is right
+          # when the runner has all three provers, and exactly wrong
+          # when the Isabelle mirrors are down — the install step above
+          # deliberately degrades to "skipped, loudly" in that case,
+          # and a red caused by a mirror outage teaches nothing. So:
+          # strict when Isabelle is reachable, loud degradation when
+          # not; Lean + Coq hard errors stay fatal either way.
+          if command -v isabelle >/dev/null 2>&1; then
+            STRICT=--strict
+          else
+            STRICT=""
+            echo "::warning::Isabelle unavailable on this runner — replay runs without --strict (Lean + Coq still gate hard errors)"
+          fi
+          ../target/release/verum audit --external-prover-replay $STRICT
 
       - name: Upload audit reports
         if: always()

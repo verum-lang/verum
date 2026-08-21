@@ -56,6 +56,13 @@ jobs:
       - name: Install Rust toolchain (pinned via rust-toolchain.toml)
         run: rustup toolchain install
 
+      # verum_codegen builds verum_tblgen, whose build.rs requires
+      # llvm-config. Every run of this workflow since it landed died
+      # here (masked first by the toolchain-install failure): the
+      # fetch step the ci.yml jobs carry was never mirrored in.
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: cross-format-recheck

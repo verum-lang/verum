@@ -64,6 +64,10 @@ jobs:
             ~/.cargo/git
             target
           key: quic-interop-${{ hashFiles('Cargo.lock') }}
+      # verum_cli builds verum_codegen -> verum_tblgen, whose build.rs
+      # requires llvm-config — same wiring as every ci.yml job.
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
       - name: Build warp binaries
         run: cargo build --release -p verum_cli
       - name: Clone interop-runner-containers
