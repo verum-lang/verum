@@ -1,6 +1,11 @@
 // =============================================================================
 // frame.vr - Frame (draw context) and Terminal (double-buffered backend)
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.render.frame;
 
 mount core.io.{IoResult, StreamError, IoErrorKind};

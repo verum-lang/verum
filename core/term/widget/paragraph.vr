@@ -1,6 +1,11 @@
 // =============================================================================
 // paragraph.vr - Paragraph widget (text display with wrapping)
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.paragraph;
 
 mount super.protocol.{Widget, Styled};

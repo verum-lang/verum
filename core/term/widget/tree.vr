@@ -1,6 +1,11 @@
 // =============================================================================
 // tree.vr - Tree view widget with expand/collapse
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.tree;
 
 mount super.protocol.{StatefulWidget, Styled};

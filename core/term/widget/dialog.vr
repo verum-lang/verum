@@ -1,6 +1,11 @@
 // =============================================================================
 // dialog.vr - Centered modal dialog widget with state
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.dialog;
 
 mount super.protocol.{StatefulWidget, Styled};

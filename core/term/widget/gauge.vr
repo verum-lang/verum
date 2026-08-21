@@ -1,6 +1,11 @@
 // =============================================================================
 // gauge.vr - Progress bar / gauge widget with Unicode sub-cell precision
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.gauge;
 
 mount super.protocol.{Widget, Styled};

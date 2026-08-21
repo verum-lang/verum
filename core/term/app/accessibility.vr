@@ -1,6 +1,11 @@
 // =============================================================================
 // accessibility.vr - OSC 133 semantic zones and screen reader hints
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.app.accessibility;
 
 mount core.io.IoResult;

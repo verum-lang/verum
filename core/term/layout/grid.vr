@@ -24,6 +24,11 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 8
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.layout.grid;
 
 mount super.rect.Rect;

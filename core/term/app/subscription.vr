@@ -20,6 +20,11 @@
 
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.app.subscription;
 
 mount core.time.{Duration, Instant};

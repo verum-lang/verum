@@ -1,6 +1,11 @@
 // =============================================================================
 // menu.vr - Menu widget with keyboard navigation
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.menu;
 
 mount super.protocol.{StatefulWidget, Styled};

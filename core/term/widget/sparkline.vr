@@ -1,6 +1,11 @@
 // =============================================================================
 // sparkline.vr - Sparkline widget (compact bar chart using Unicode blocks)
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.sparkline;
 
 mount super.protocol.{Widget, Styled};

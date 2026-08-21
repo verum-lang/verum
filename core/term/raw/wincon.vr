@@ -16,6 +16,11 @@
 // =============================================================================
 
 @cfg(target_os = "windows")
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.raw.wincon;
 
 mount core.sys.windows.ntdll.{Handle};

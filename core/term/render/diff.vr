@@ -8,6 +8,11 @@
 // - Synchronized output (Mode 2026)
 // - Adaptive color downscaling via ColorProfile
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.render.diff;
 
 mount core.io.{Write, IoResult};

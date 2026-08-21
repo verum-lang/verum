@@ -1,6 +1,11 @@
 // =============================================================================
 // scrollbar.vr - Scrollbar as a StatefulWidget (vertical/horizontal)
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.scrollbar;
 
 mount super.protocol.StatefulWidget;

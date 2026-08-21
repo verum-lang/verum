@@ -21,6 +21,11 @@
 // the runtime interprets. This keeps `update` pure and deterministic.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.app.command;
 
 mount core.time.Duration;

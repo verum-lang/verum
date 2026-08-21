@@ -1,6 +1,11 @@
 // =============================================================================
 // table.vr - Table widget with headers, rows, footer, and selection
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.table;
 
 mount super.protocol.{Widget, StatefulWidget, Styled};

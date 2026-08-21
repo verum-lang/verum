@@ -16,6 +16,11 @@
 // =============================================================================
 
 @cfg(not(target_os = "windows"))
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.raw.termios;
 
 mount core.sys.{FileDesc, OSError};

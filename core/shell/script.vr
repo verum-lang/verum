@@ -20,6 +20,11 @@
 
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.shell.script;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};

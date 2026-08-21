@@ -1,6 +1,11 @@
 // =============================================================================
 // prompt.vr - High-level interactive prompts
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.app.prompt;
 
 mount core.io.{IoResult, StreamError, IoErrorKind};

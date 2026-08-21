@@ -6,6 +6,11 @@
 // so emoji with skin tones, ZWJ-joined families, regional flag pairs, and
 // Indic/Arabic combining sequences all occupy the correct number of columns.
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.render.cell;
 
 mount super.super.style.{Style, Color, Modifier};

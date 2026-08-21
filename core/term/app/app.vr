@@ -20,6 +20,11 @@
 //  * `run(model)` — synchronous entry (block_on the async runtime).
 //  * `run_async(model)` — async entry, for integration with user futures.
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.app.app;
 
 mount core.time.{Duration, Instant};

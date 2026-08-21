@@ -4,6 +4,11 @@
 // Defines the Backend protocol that abstracts over different terminal
 // implementations (ANSI, Windows Console, etc.)
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.render.backend;
 
 mount core.io.{Write, IoResult};

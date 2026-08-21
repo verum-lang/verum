@@ -1,6 +1,11 @@
 // =============================================================================
 // barchart.vr - Bar chart widget with grouped bars, labels, and values
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.barchart;
 
 mount super.protocol.{Widget, Styled};

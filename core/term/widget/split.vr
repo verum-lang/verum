@@ -27,6 +27,11 @@
 // honoured. Resize operations clamp to these bounds so the layout never
 // collapses a pane.
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.split;
 
 mount super.protocol.Styled;

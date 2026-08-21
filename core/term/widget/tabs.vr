@@ -1,6 +1,11 @@
 // =============================================================================
 // tabs.vr - Horizontal tab bar widget
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.tabs;
 
 mount super.protocol.{Widget, Styled};

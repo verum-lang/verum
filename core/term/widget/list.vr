@@ -1,6 +1,11 @@
 // =============================================================================
 // list.vr - Selectable list widget
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.list;
 
 mount super.protocol.{Widget, StatefulWidget, Styled};

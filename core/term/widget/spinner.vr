@@ -1,6 +1,11 @@
 // =============================================================================
 // spinner.vr - Animated spinner as a StatefulWidget with frame sets
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.spinner;
 
 mount super.protocol.{StatefulWidget, Styled};

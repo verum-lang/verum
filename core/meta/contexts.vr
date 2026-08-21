@@ -97,6 +97,11 @@
 
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.meta.contexts;
 
 mount core.{Result, Text, List, Maybe, Byte, Map};

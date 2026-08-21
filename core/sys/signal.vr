@@ -54,6 +54,11 @@
 
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.sys.signal;
 
 mount core.intrinsics.atomic.{atomic_store, atomic_load, MemoryOrder};

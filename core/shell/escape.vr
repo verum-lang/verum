@@ -33,6 +33,11 @@
 
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.shell.escape;
 
 mount core.{Maybe, Result, List, Text, Byte, Char, Bool, Int};

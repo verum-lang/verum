@@ -1,6 +1,11 @@
 // =============================================================================
 // canvas.vr - Braille / half-block / block pixel canvas widget
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.canvas;
 
 mount super.protocol.{Widget, Styled};

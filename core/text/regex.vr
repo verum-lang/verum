@@ -49,6 +49,11 @@
 // last-repetition semantics. See core/text/regex_engine.vr.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.text.regex;
 
 mount super.regex_engine.{

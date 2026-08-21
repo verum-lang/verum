@@ -11,6 +11,11 @@
 
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.base.panic;
 
 // Import intrinsics. `unreachable` is renamed to avoid shadowing

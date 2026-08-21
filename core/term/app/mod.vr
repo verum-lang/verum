@@ -5,6 +5,11 @@
 // Integrates with the native async runtime (core.async) for Commands and
 // Subscriptions; structured cancellation on Quit.
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.app;
 
 // Sub-modules

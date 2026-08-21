@@ -1,6 +1,11 @@
 // =============================================================================
 // block.vr - Block widget (borders, title, padding)
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.block;
 
 mount super.protocol.{Widget, Styled};

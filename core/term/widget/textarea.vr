@@ -22,6 +22,11 @@
 // matters for long files. A gap buffer could further optimise per-line
 // edits; that is an orthogonal refinement and is left to a future sweep.
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.textarea;
 
 mount super.protocol.{StatefulWidget, Styled};

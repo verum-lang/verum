@@ -43,6 +43,11 @@
 
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.meta.token;
 
 mount core.{Result, Maybe, Text, List, Iterator};

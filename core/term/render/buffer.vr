@@ -1,6 +1,11 @@
 // =============================================================================
 // buffer.vr - 2D cell buffer for terminal rendering
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.render.buffer;
 
 mount super.cell.{RenderCell, grapheme_width, char_display_width};

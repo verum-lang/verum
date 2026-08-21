@@ -13,6 +13,11 @@
 // The widget is generic over item type `T`; the caller provides a label
 // function so any domain type can be rendered without newtype wrappers.
 // =============================================================================
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
 module core.term.widget.dropdown;
 
 mount super.protocol.{StatefulWidget, Styled};
