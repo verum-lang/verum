@@ -6425,8 +6425,16 @@ struct FormattedCallHarvest {
     /// `f"{f"{x.cmp(y)}"}"` nests, and a flag would clear on the way
     /// out of the inner one while still inside the outer.
     depth: usize,
-    /// Simple names of the calls found in format position.
+    /// Simple names of the calls found directly in format position.
     names: HashSet<String>,
+    /// Variables that appear in format position: `f"{o}"`.
+    formatted_vars: HashSet<String>,
+    /// What each `let` binds its variable to — the call names in the
+    /// initialiser, and the variables the initialiser reads.  A
+    /// variable in format position formats whatever its initialiser
+    /// produced, so `let o = a.cmp(b); print(f"{o}")` must reach
+    /// `Ordering` exactly as the inline spelling does.
+    bindings: HashMap<String, (HashSet<String>, HashSet<String>)>,
 }
 
 impl FormattedCallHarvest {
@@ -6438,11 +6446,137 @@ impl FormattedCallHarvest {
     fn formats_its_arguments(name: &str) -> bool {
         matches!(name, "print" | "eprint" | "panic" | "assert_msg")
     }
+
+    /// The call names and variable reads an initialiser expression
+    /// contains, at any depth: `let o = wrap(a.cmp(b))` binds `o` to
+    /// both `wrap` and `cmp`, and either could be the one that decides
+    /// the formatted type.
+    fn scan_initialiser(expr: &verum_ast::Expr) -> (HashSet<String>, HashSet<String>) {
+        struct Scan {
+            calls: HashSet<String>,
+            vars: HashSet<String>,
+        }
+        impl verum_ast::visitor::Visitor for Scan {
+            fn visit_expr(&mut self, expr: &verum_ast::Expr) {
+                use verum_ast::expr::ExprKind;
+                match &expr.kind {
+                    ExprKind::MethodCall { method, .. } => {
+                        self.calls.insert(method.name.to_string());
+                    }
+                    ExprKind::Call { func, .. } => {
+                        if let ExprKind::Path(path) = &func.kind {
+                            self.calls.insert(path.last_segment_name().to_string());
+                        }
+                    }
+                    ExprKind::Path(path) if path.is_single() => {
+                        self.vars.insert(path.last_segment_name().to_string());
+                    }
+                    _ => {}
+                }
+                verum_ast::visitor::walk_expr(self, expr);
+            }
+        }
+        let mut scan = Scan {
+            calls: HashSet::new(),
+            vars: HashSet::new(),
+        };
+        verum_ast::visitor::Visitor::visit_expr(&mut scan, expr);
+        (scan.calls, scan.vars)
+    }
+
+    /// Record that every identifier `pattern` binds holds (part of)
+    /// what `source` produced.  One rule for every binding position —
+    /// `let`, `let..else`, a match arm binding its scrutinee, a `for`
+    /// pattern binding an element of its iterable.  Destructuring
+    /// binds each identifier to ALL of the source's calls: the harvest
+    /// cannot know which component came from which call, and the cost
+    /// of the over-approximation is only ever loading a Display impl
+    /// that goes unused, never printing the wrong thing.
+    fn bind_pattern(&mut self, pattern: &verum_ast::pattern::Pattern, source: &verum_ast::Expr) {
+        struct BindingIdents(Vec<String>);
+        impl verum_ast::visitor::Visitor for BindingIdents {
+            fn visit_pattern(&mut self, pattern: &verum_ast::pattern::Pattern) {
+                if let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind {
+                    self.0.push(name.name.to_string());
+                }
+                verum_ast::visitor::walk_pattern(self, pattern);
+            }
+        }
+        let mut idents = BindingIdents(Vec::new());
+        verum_ast::visitor::Visitor::visit_pattern(&mut idents, pattern);
+        if idents.0.is_empty() {
+            return;
+        }
+        let (calls, vars) = Self::scan_initialiser(source);
+        for name in idents.0 {
+            let entry = self
+                .bindings
+                .entry(name)
+                .or_insert_with(|| (HashSet::new(), HashSet::new()));
+            entry.0.extend(calls.iter().cloned());
+            entry.1.extend(vars.iter().cloned());
+        }
+    }
+
+    /// Everything the module formats, following bindings to a
+    /// fixpoint: `let o = a.cmp(b); let p = o; print(f"{p}")` must
+    /// reach `cmp` through two hops.
+    fn into_names(mut self) -> HashSet<String> {
+        let mut pending: Vec<String> = self.formatted_vars.iter().cloned().collect();
+        let mut seen: HashSet<String> = self.formatted_vars.clone();
+        while let Some(var) = pending.pop() {
+            let Some((calls, vars)) = self.bindings.get(&var) else {
+                continue;
+            };
+            let calls: Vec<String> = calls.iter().cloned().collect();
+            let vars: Vec<String> = vars.iter().cloned().collect();
+            self.names.extend(calls);
+            for next in vars {
+                if seen.insert(next.clone()) {
+                    pending.push(next);
+                }
+            }
+        }
+        self.names
+    }
 }
 
 impl verum_ast::visitor::Visitor for FormattedCallHarvest {
+    fn visit_stmt(&mut self, stmt: &verum_ast::Stmt) {
+        use verum_ast::stmt::StmtKind;
+        // `let` and `let ... else` bind the same way; both are records
+        // of "this variable holds what that expression produced".
+        let bound = match &stmt.kind {
+            StmtKind::Let { pattern, value, .. } => match value {
+                verum_common::Maybe::Some(v) => Some((pattern, v)),
+                verum_common::Maybe::None => None,
+            },
+            StmtKind::LetElse { pattern, value, .. } => Some((pattern, value)),
+            _ => None,
+        };
+        if let Some((pattern, value)) = bound {
+            self.bind_pattern(pattern, value);
+        }
+        verum_ast::visitor::walk_stmt(self, stmt);
+    }
+
     fn visit_expr(&mut self, expr: &verum_ast::Expr) {
         use verum_ast::expr::ExprKind;
+        // The two remaining binding positions: a match arm binds its
+        // scrutinee's result, a `for` pattern binds an element of its
+        // iterable.  `match a.cmp(b) { r => print(f"{r}") }` formats
+        // an Ordering exactly as the let-bound spelling does.
+        match &expr.kind {
+            ExprKind::Match { expr: scrutinee, arms } => {
+                for arm in arms.iter() {
+                    self.bind_pattern(&arm.pattern, scrutinee);
+                }
+            }
+            ExprKind::For { pattern, iter, .. } => {
+                self.bind_pattern(pattern, iter);
+            }
+            _ => {}
+        }
         let opens_format_position = match &expr.kind {
             ExprKind::InterpolatedString { .. } => true,
             ExprKind::Call { func, .. } => match &func.kind {
@@ -6460,6 +6594,13 @@ impl verum_ast::visitor::Visitor for FormattedCallHarvest {
                     if let ExprKind::Path(path) = &func.kind {
                         self.names.insert(path.last_segment_name().to_string());
                     }
+                }
+                // A bare variable in format position formats whatever
+                // its binding produced — resolved after the walk, since
+                // the `let` may come later in a nested scope.
+                ExprKind::Path(path) if path.is_single() => {
+                    self.formatted_vars
+                        .insert(path.last_segment_name().to_string());
                 }
                 _ => {}
             }
@@ -6482,11 +6623,13 @@ fn formatted_call_names(user_module: &verum_ast::Module) -> HashSet<String> {
     let mut harvest = FormattedCallHarvest {
         depth: 0,
         names: HashSet::new(),
+        formatted_vars: HashSet::new(),
+        bindings: HashMap::new(),
     };
     for item in user_module.items.iter() {
         harvest.visit_item(item);
     }
-    harvest.names
+    harvest.into_names()
 }
 
 
@@ -7435,6 +7578,87 @@ mod formatted_call_harvest_tests {
         // symbol-closure cost at all.
         let names = formatted_call_names(&module_of("fn main() { print(\"hello\"); }"));
         assert!(names.is_empty(), "expected no names, got {:?}", names);
+    }
+
+    #[test]
+    fn a_variable_in_format_position_inherits_its_binding() {
+        // `let o = a.cmp(b); print(f"{o}")` must reach `Ordering`
+        // exactly as `print(f"{a.cmp(b)}")` does — the inline spelling
+        // and the bound one are the same program.
+        let names = formatted_call_names(&module_of(
+            "fn main() { let a: Int = 1; let o = a.cmp(a); print(f\"{o}\"); }",
+        ));
+        assert!(
+            names.contains("cmp"),
+            "a formatted variable must carry the call that bound it, got {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn binding_chains_are_followed_to_a_fixpoint() {
+        let names = formatted_call_names(&module_of(
+            "fn main() { let a: Int = 1; let o = a.cmp(a); let p = o; let q = p; \
+             print(f\"{q}\"); }",
+        ));
+        assert!(
+            names.contains("cmp"),
+            "a chain of bindings must be followed, got {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn a_destructured_binding_carries_the_initialiser_calls() {
+        // Destructuring cannot know which component came from which
+        // call, so every bound name carries all of them — the cost is
+        // a Display impl loaded and unused, never a wrong print.
+        let names = formatted_call_names(&module_of(
+            "fn main() { let a: Int = 1; let (o, n) = (a.cmp(a), 2); print(f\"{o}\"); }",
+        ));
+        assert!(
+            names.contains("cmp"),
+            "a tuple-destructured formatted variable must carry the calls, got {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn a_match_arm_binding_carries_the_scrutinee_calls() {
+        let names = formatted_call_names(&module_of(
+            "fn main() { let a: Int = 1; match a.cmp(a) { r => print(f\"{r}\") } }",
+        ));
+        assert!(
+            names.contains("cmp"),
+            "a match arm binds its scrutinee's result, got {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn a_for_pattern_carries_the_iterable_calls() {
+        let names = formatted_call_names(&module_of(
+            "fn main() { let a: Int = 1; for o in [a.cmp(a)] { print(f\"{o}\"); } }",
+        ));
+        assert!(
+            names.contains("cmp"),
+            "a for pattern binds an element of its iterable, got {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn a_binding_that_is_never_formatted_stays_out() {
+        // The narrowing has to survive bindings: tracking them must not
+        // turn into "every call in the program".
+        let names = formatted_call_names(&module_of(
+            "fn main() { let a: Int = 1; let unused = a.cmp(a); print(\"x\"); }",
+        ));
+        assert!(
+            !names.contains("cmp"),
+            "an unformatted binding must not be seeded, got {:?}",
+            names
+        );
     }
 
     #[test]
