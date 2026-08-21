@@ -41,7 +41,11 @@ jobs:
   in-process-gates:
     name: In-process audit gates
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The verum CLI release build alone measures ~65 min on this
+    # runner (see the replay job's timings); a 30-minute budget could
+    # NEVER fit it, so this job has timeout-cancelled on every run
+    # since it landed — reading as a cascade-cancel, never as itself.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -97,7 +101,9 @@ jobs:
   differential-lean:
     name: Differential Lean checker
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Same impossible budget as in-process-gates: the build step alone
+    # exceeds 30 minutes on this runner.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
