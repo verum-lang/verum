@@ -36,7 +36,7 @@
 @arch_module(
     foundation:    Foundation.ZfcTwoInacc,
     stratum:       MsfsStratum.LCls,
-    lifecycle:     Lifecycle.Theorem("v0.1"),
+    lifecycle:     Lifecycle.Definition,
     declarations: ShapeDeclarations {
         purpose: Maybe.Some(Purpose {
             role: "Sigstore subsystem facade — types + Rekor v2 + Fulcio + keyless verify",

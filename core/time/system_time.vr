@@ -35,7 +35,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1")
+    lifecycle: Lifecycle.Definition
 )
 module core.time.system_time;
 mount time.duration.{Duration, NANOS_PER_SEC, NANOS_PER_MILLI, NANOS_PER_MICRO, MILLIS_PER_SEC};

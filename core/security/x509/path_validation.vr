@@ -70,7 +70,7 @@
 @arch_module(
     foundation:    Foundation.ZfcTwoInacc,
     stratum:       MsfsStratum.LCls,
-    lifecycle:     Lifecycle.Theorem("v0.1"),
+    lifecycle:     Lifecycle.Definition,
     declarations: ShapeDeclarations {
         purpose: Maybe.Some(Purpose {
             role: "RFC 5280 §6.1 by-the-book X.509 path validation: state machine + policy tree + full name constraints",

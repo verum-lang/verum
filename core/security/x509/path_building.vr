@@ -43,7 +43,7 @@
 @arch_module(
     foundation:    Foundation.ZfcTwoInacc,
     stratum:       MsfsStratum.LCls,
-    lifecycle:     Lifecycle.Theorem("v0.1"),
+    lifecycle:     Lifecycle.Definition,
     declarations: ShapeDeclarations {
         purpose: Maybe.Some(Purpose {
             role: "RFC 5280 §6.1 X.509 path building: DFS issuer-search with AKI/SKI matching",

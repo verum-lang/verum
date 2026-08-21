@@ -46,7 +46,7 @@
 @arch_module(
     foundation:    Foundation.ZfcTwoInacc,
     stratum:       MsfsStratum.LCls,
-    lifecycle:     Lifecycle.Theorem("v0.1"),
+    lifecycle:     Lifecycle.Definition,
     declarations: ShapeDeclarations {
         purpose: Maybe.Some(Purpose {
             role: "Rekor v2 transparency log client: submit + fetch + SET verify + inclusion proof",

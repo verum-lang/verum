@@ -71,7 +71,7 @@
 @arch_module(
     foundation:    Foundation.ZfcTwoInacc,
     stratum:       MsfsStratum.LCls,
-    lifecycle:     Lifecycle.Theorem("v0.1"),
+    lifecycle:     Lifecycle.Definition,
     declarations: ShapeDeclarations {
         purpose: Maybe.Some(Purpose {
             role: "TUF spec §5 full client update workflow with rollback / freeze / mix-and-match / fast-forward detection",

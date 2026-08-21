@@ -59,7 +59,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LCls,
-    lifecycle: Lifecycle.Theorem("v0.1")
+    lifecycle: Lifecycle.Definition
 )
 module core.security.permission;
 // Mounted rather than inherited: §4ter — the prelude carries only what

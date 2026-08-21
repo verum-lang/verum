@@ -51,7 +51,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum:    MsfsStratum.LFnd,
-    lifecycle:  Lifecycle.Theorem("v1.0"),
+    lifecycle:  Lifecycle.Definition,
     declarations: ShapeDeclarations {
         purpose: Maybe.Some(Purpose {
             role: "Argon2id password hashing — OWASP-tuned PHC string round-trip",
