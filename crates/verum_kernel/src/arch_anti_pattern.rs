@@ -278,7 +278,21 @@ impl AntiPatternCode {
     /// `https://verum.lang/docs/ats-v/ap-NNN` where `NNN` is the
     /// ordinal from [`Self::meta`].
     pub fn docs_url(&self) -> String {
-        format!("https://verum.lang/docs/ats-v/ap-{:03}", self.meta().ordinal)
+        // The band decides the page, the ordinal the anchor — these are
+        // the real published routes (docs/architecture-types/
+        // anti-patterns/*.md front-matter slugs + `{#ap-NNN}` heading
+        // anchors). The old `/docs/ats-v/ap-NNN` spelling named a page
+        // that never existed, so every diagnostic ended in a dead link.
+        let m = self.meta();
+        let page = match m.band {
+            AntiPatternBand::Core => "classical",
+            AntiPatternBand::Base | AntiPatternBand::CveAh => "articulation",
+            AntiPatternBand::Mtac => "mtac",
+        };
+        format!(
+            "https://verum.lang/docs/architecture-types/anti-patterns/{page}#ap-{:03}",
+            m.ordinal
+        )
     }
 
     /// Which roadmap section introduced this pattern. Stable for
@@ -2859,14 +2873,18 @@ mod tests {
             .map(|c| c.docs_url())
             .collect();
         assert_eq!(urls.len(), 40);
- // Spot-check format.
+ // Spot-check format — one per published page.
         assert_eq!(
             AntiPatternCode::CapabilityEscalation.docs_url(),
-            "https://verum.lang/docs/ats-v/ap-001"
+            "https://verum.lang/docs/architecture-types/anti-patterns/classical#ap-001"
+        );
+        assert_eq!(
+            AntiPatternCode::AbsoluteBoundaryAttempt.docs_url(),
+            "https://verum.lang/docs/architecture-types/anti-patterns/articulation#ap-011"
         );
         assert_eq!(
             AntiPatternCode::YonedaInequivalentRefactor.docs_url(),
-            "https://verum.lang/docs/ats-v/ap-032"
+            "https://verum.lang/docs/architecture-types/anti-patterns/mtac#ap-032"
         );
     }
 
@@ -3708,14 +3726,25 @@ mod tests {
     }
 
     #[test]
-    fn docs_url_format_matches_ordinal() {
-        // Pin: docs_url() format hasn't drifted from
-        // `https://verum.lang/docs/ats-v/ap-NNN` with NNN = ordinal.
+    fn docs_url_names_the_published_page_for_the_band() {
+        // Pin: every diagnostic's docs link points at the page that
+        // actually publishes the pattern — band → slug, ordinal →
+        // `#ap-NNN` anchor. The prior pin froze `/docs/ats-v/ap-NNN`,
+        // a route that never existed on the site: it pinned the dead
+        // link, not the destination.
         for pattern in AntiPatternCode::full_list() {
             let m = pattern.meta();
+            let page = match m.band {
+                AntiPatternBand::Core => "classical",
+                AntiPatternBand::Base | AntiPatternBand::CveAh => "articulation",
+                AntiPatternBand::Mtac => "mtac",
+            };
             assert_eq!(
                 pattern.docs_url(),
-                format!("https://verum.lang/docs/ats-v/ap-{:03}", m.ordinal),
+                format!(
+                    "https://verum.lang/docs/architecture-types/anti-patterns/{page}#ap-{:03}",
+                    m.ordinal
+                ),
                 "docs_url() drift on {:?}",
                 pattern,
             );
