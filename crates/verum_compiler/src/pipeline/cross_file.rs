@@ -1259,6 +1259,34 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Phase 2: Lexing and parsing
+    /// EVERY CHECK THAT READS A MODULE'S DECLARATIONS RUNS HERE
+    /// (T0834).
+    ///
+    /// A declaration ABOUT a module — `@arch_module(...)` today — is
+    /// checked the moment the module exists, and this is the one place
+    /// that says so. Both parse paths call it: `phase_parse`, which the
+    /// twelve compile entries share, and `check_project`, which parses
+    /// project files with its own `VerumParser` loop.
+    ///
+    /// It exists because the alternative failed in the most complete
+    /// way available. `phase_ats_v` was reachable only through
+    /// `validate_module`, and nothing calls `validate_module` except
+    /// the test harness `run_for_test` — so the entire 32-anti-pattern
+    /// architectural layer was inert on `check`, `build` and `run`.
+    /// Measured: a module declaring `stratum: MsfsStratum.LAbs` — the
+    /// one value the ontology forbids, AP-011 AbsoluteBoundaryAttempt —
+    /// passed `verum check` in silence, and so did
+    /// `MsfsStratum.NoSuchStratum`, which the kernel's own parser
+    /// rejects outright.
+    ///
+    /// So: add the NEXT such check here, not at a call site. The
+    /// sibling phases are invoked from four to fourteen places each,
+    /// and that spread is precisely how this one came to be invoked
+    /// from none.
+    pub(crate) fn on_module_parsed(&self, module: &Module) -> Result<()> {
+        self.phase_ats_v(module)
+    }
+
     pub fn phase_parse(&mut self, file_id: FileId) -> Result<Module> {
         debug!("Parsing file {:?}", file_id);
 
@@ -1374,6 +1402,8 @@ impl<'s> CompilationPipeline<'s> {
                 Err(e) => debug!("Failed to serialise AST: {}", e),
             }
         }
+
+        self.on_module_parsed(&module)?;
 
         // Cache the module (session still uses its own caching mechanism)
         self.session.cache_module(file_id, module.clone());

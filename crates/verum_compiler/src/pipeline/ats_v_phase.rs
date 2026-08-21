@@ -45,6 +45,29 @@ impl<'s> CompilationPipeline<'s> {
     pub(super) fn phase_ats_v(&self, module: &Module) -> Result<()> {
         let mut total_violations = 0usize;
 
+        // ATS-V REACH ORACLE.  `VERUM_TRACE_ATSV=1` reports what this
+        // phase can SEE — the count of module-level and per-item
+        // attributes, by name.  Named for the question it answers:
+        // "did the declaration reach the checker at all", which is
+        // distinct from "did the checker accept it". The phase was
+        // silent for both reasons at different times (T0834).
+        if std::env::var_os("VERUM_TRACE_ATSV").is_some() {
+            let mod_attrs: Vec<&str> =
+                module.attributes.iter().map(|a| a.name.as_str()).collect();
+            eprintln!(
+                "[ats-v] module attrs: {:?}; items: {}",
+                mod_attrs,
+                module.items.len()
+            );
+            for item in &module.items {
+                let names: Vec<&str> =
+                    item.attributes.iter().map(|a| a.name.as_str()).collect();
+                if !names.is_empty() {
+                    eprintln!("[ats-v]   item {} attrs: {:?}", item_display_name(item), names);
+                }
+            }
+        }
+
         // Aggregate every `@framework(corpus, "...")` annotation
         // across the module — both at the module level and on
         // each item — so AP-026 FoundationContentMismatch fires

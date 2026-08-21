@@ -725,6 +725,13 @@ impl<'s> CompilationPipeline<'s> {
                     let cfg_evaluator = self.session.cfg_evaluator();
                     module.items = cfg_evaluator.filter_items(&module.items);
 
+                    // Declaration-level checks — see `on_module_parsed`
+                    // for why they live behind one carrier. This loop
+                    // parses with its own `VerumParser` rather than
+                    // through `phase_parse`, which is how it came to
+                    // miss the architectural phase entirely (T0834).
+                    self.on_module_parsed(&module)?;
+
                     // Implicit prelude — user compiles only; stdlib
                     // bootstrap defines the prelude itself.
                     if matches!(self.build_mode, crate::pipeline::BuildMode::Normal) {
