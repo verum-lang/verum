@@ -208,6 +208,9 @@ pub fn parse_arch_module(args: &[Expr]) -> Result<Shape, ArchParseError> {
             "declarations" => {
                 shape.declarations = Some(parse_declarations(value)?);
             }
+            "cve_closure" => {
+                shape.cve_closure = parse_cve_closure(value)?;
+            }
             other => {
                 return Err(ArchParseError::UnknownField {
                     name: other.to_string(),
@@ -968,6 +971,42 @@ fn parse_self_reference(expr: &Expr) -> Result<SelfReferenceWitness, ArchParseEr
     })
 }
 
+/// Parse `cve_closure: CveClosure { constructive, verifiable_strategy,
+/// executable }` — the record spelling of the CVE triple that the
+/// shape reference documents as the full surface.  The flat fields
+/// (`cve_closure_C` / `cve_closure_V_strategy` / `cve_closure_E`)
+/// remain the other legal spelling; both feed the same struct.
+fn parse_cve_closure(expr: &Expr) -> Result<CveClosure, ArchParseError> {
+    let mut closure = CveClosure {
+        constructive: None,
+        verifiable_strategy: None,
+        executable: None,
+    };
+    for (name, value) in record_fields(expr, "CveClosure")? {
+        match name {
+            "constructive" => {
+                closure.constructive =
+                    parse_maybe(value, "constructive", |e| parse_text_value(e, "constructive"))?;
+            }
+            "verifiable_strategy" => {
+                closure.verifiable_strategy =
+                    parse_maybe(value, "verifiable_strategy", parse_verify_strategy)?;
+            }
+            "executable" => {
+                closure.executable =
+                    parse_maybe(value, "executable", |e| parse_text_value(e, "executable"))?;
+            }
+            other => {
+                return Err(ArchParseError::UnknownField {
+                    name: other.to_string(),
+                    suggestion: None,
+                });
+            }
+        }
+    }
+    Ok(closure)
+}
+
 /// Parse `declarations: ShapeDeclarations { ... }` — the optional
 /// CVE-architecture spec declarations (§14.6 purpose, §1.5 substrate,
 /// §4.5 anchoring, §2.3.0 executability sense, §16 self-reference).
@@ -1556,6 +1595,35 @@ mod tests {
         assert_eq!(decls.anchoring, Some(FormalAnchoring::CurryHowardLawvere));
         assert_eq!(decls.e_sense, Some(ExecutabilitySense::StructuralReadiness));
         assert_eq!(decls.self_reference, None);
+    }
+
+    #[test]
+    fn parse_cve_closure_record_spelling_matches_the_documented_surface() {
+        // The shape reference documents `cve_closure: CveClosure { ... }`
+        // as the full surface; a user copying that example must not die
+        // with UnknownField("cve_closure") while the flat spellings
+        // (cve_closure_C / _V_strategy / _E) keep working beside it.
+        let some = |inner: Expr| method_call(name_path_expr("Maybe"), "Some", vec![inner]);
+        let record = record_expr(
+            "CveClosure",
+            vec![
+                ("constructive", some(string_lit("explicit_ctor"))),
+                (
+                    "verifiable_strategy",
+                    some(dotted_path_expr(&["VerifyStrategy", "Certified"])),
+                ),
+                ("executable", some(string_lit("verum extract"))),
+            ],
+        );
+        let shape = parse_arch_module(&[named_arg("cve_closure", record)])
+            .expect("the documented record spelling must parse");
+        assert_eq!(shape.cve_closure.constructive.as_deref(), Some("explicit_ctor"));
+        assert_eq!(
+            shape.cve_closure.verifiable_strategy,
+            Some(VerifyStrategy::Certified)
+        );
+        assert_eq!(shape.cve_closure.executable.as_deref(), Some("verum extract"));
+        assert!(shape.cve_closure.is_fully_closed());
     }
 
     #[test]
