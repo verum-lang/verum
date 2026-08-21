@@ -22,8 +22,8 @@
 
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
-    stratum: MsfsStratum.LApp,
-    lifecycle: Lifecycle.Theorem("v0.1")
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
 )
 module core.net.resolve;
 
