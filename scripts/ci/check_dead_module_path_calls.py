@@ -84,7 +84,7 @@ DECL = re.compile(r"\bfn\s+([a-z_][a-z0-9_]*)")
 ALWAYS_MODULE_ROOTS = {"core", "super", "cog"}
 
 # Known count at the time the gate landed; the gate ratchets DOWNWARD only.
-BASELINE = 8
+BASELINE = 7
 
 
 def module_roots(text: str) -> set[str]:
