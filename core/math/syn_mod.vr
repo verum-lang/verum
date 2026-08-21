@@ -81,7 +81,10 @@ module core.math.syn_mod;
 mount core.math.rich_s.conditions.{RichS, LambekScottAdjunction};
 mount core.math.frameworks.msfs.key_symbols.{InfinityNCat};
 mount core.math.s_definable.class_s_s.{SSMembership};
-mount core.math.s_definable.lemma_3_4.{FormallySDefinable};
+// FormallySDefinable is a class_s_s carrier (lemma_3_4 only
+// re-exports it); mounting the DECLARING module keeps this
+// file out of the lemma_3_4 <-> syn_mod cycle (AP-003).
+mount core.math.s_definable.class_s_s.{FormallySDefinable};
 mount core.math.accessible.{
     RegularCardinal,
     KappaAccessibleInfCategory,

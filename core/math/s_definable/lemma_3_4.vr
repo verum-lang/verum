@@ -67,24 +67,18 @@ mount core.math.syn_mod.{
 // =============================================================================
 // Carrier protocol — formal S-definability witness
 // =============================================================================
+//
 
-/// Witness that a `MathObject` is *formally S-definable* — i.e.
-/// there exists a sub-theory F ⊆ S and a formula φ_X in F such
-/// that φ_X presents X as an object of Syn(F).
-///
-
-/// MSFS §3.4 introduces this notion as a precondition for Lemma
-/// 3.4. The protocol records the existence of (F, φ_X); the
-/// concrete formula and sub-theory are opaque at this layer.
-public type FormallySDefinable is protocol {
-    /// Witness that the object has a sub-theory F ⊆ S and a
-    /// formula φ_X presenting it.
-    fn has_phi_x_witness(self) -> Bool;
-
-    /// The categorical level n at which the presentation lives —
-    /// matches the ambient `n_S` of the Rich-S `S`.
-    fn level(self) -> Int;
-};
+// `FormallySDefinable` is DECLARED in the sibling carrier module
+// `class_s_s` and re-exported here. It used to be declared in this
+// file, which put shared vocabulary inside a theorem file and closed
+// a dependency cycle the moment ATS-V could see it: this file's
+// Lemma 3.4 proof delegates to `core.math.syn_mod`, and syn_mod
+// needs `FormallySDefinable` — AP-003 DependencyCycle on both
+// modules. The carrier lives with its fellow carriers; every
+// existing `mount ...lemma_3_4.{FormallySDefinable}` keeps working
+// through this re-export.
+public mount core.math.s_definable.class_s_s.{FormallySDefinable};
 
 // =============================================================================
 // Lemma 3.4

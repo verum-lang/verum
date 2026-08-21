@@ -329,3 +329,30 @@ public type RefinedSSMembership is {
 @framework(msfs, "MSFS §3 — refinement-typed: closure_depth >= 0 by construction (K-Refine)")
 public theorem msfs_refined_ss_depth_nonneg(m: &RefinedSSMembership)
     ensures m.closure_depth >= 0;
+
+// =============================================================================
+// Carrier protocol — formal S-definability witness
+// =============================================================================
+
+/// Witness that a `MathObject` is *formally S-definable* — i.e.
+/// there exists a sub-theory F ⊆ S and a formula φ_X in F such
+/// that φ_X presents X as an object of Syn(F).
+///
+
+/// MSFS §3.4 introduces this notion as a precondition for Lemma
+/// 3.4. The protocol records the existence of (F, φ_X); the
+/// concrete formula and sub-theory are opaque at this layer.
+/// Declared HERE, with the other S-definability carriers, rather
+/// than in `lemma_3_4` — vocabulary inside a theorem file closed a
+/// dependency cycle with `syn_mod` (AP-003) the moment the
+/// architectural phase went live; `lemma_3_4` re-exports it, so
+/// both mount spellings resolve.
+public type FormallySDefinable is protocol {
+    /// Witness that the object has a sub-theory F ⊆ S and a
+    /// formula φ_X presenting it.
+    fn has_phi_x_witness(self) -> Bool;
+
+    /// The categorical level n at which the presentation lives —
+    /// matches the ambient `n_S` of the Rich-S `S`.
+    fn level(self) -> Int;
+};
