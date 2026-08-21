@@ -2693,6 +2693,9 @@ impl VbcCodegen {
                         id: type_id,
                         name: StringId(self.ctx.intern_string_raw(&ctx_name)),
                         kind: crate::types::TypeKind::Protocol,
+                        // TYPE-ORIGIN-MODULE (T0555, sibling sweep) — see
+                        // the TypeDeclBody::Protocol arm.
+                        origin_module: self.current_origin_module_sid(),
                         ..Default::default()
                     };
                     for method in ctx_decl.methods.iter() {
@@ -7206,7 +7209,21 @@ impl VbcCodegen {
         mount_cost::report(source_path, t0.elapsed());
     }
 
-    /// Recursively resolves mount declarations up to a bounded depth.
+    /// Recursively resolves mount declarations to a FIXPOINT.
+    ///
+    /// The `resolved_files` visited set is the ONLY terminator: every
+    /// file is parsed at most once, so the recursion is bounded by the
+    /// number of reachable files and cycles cannot loop. There used to
+    /// be a `MAX_DEPTH = 4` cap here as well — redundant as a cycle
+    /// guard, and wrong as a closure rule: a module's dependency
+    /// surface is defined by what its mounts REACH, not by how many
+    /// hops away it happens to sit. The cap went unnoticed for as long
+    /// as `mount core.*` sat in 1194 files putting everything at depth
+    /// 1; the moment T0828 removed the globs, real chains (list →
+    /// … → executor → waker) crossed four hops, the waker record's
+    /// layout was never registered, and positional field emission on
+    /// `RUNTIME_WAKER_VTABLE` died FIELD-GUESS-HARD-1 — the
+    /// depth-limited-transitive-closure class T0566 already named.
     fn resolve_mounts_recursive(
         &mut self,
         module: &Module,
@@ -7215,10 +7232,6 @@ impl VbcCodegen {
         resolved_files: &mut std::collections::HashSet<String>,
         depth: u32,
     ) {
-        const MAX_DEPTH: u32 = 4;
-        if depth > MAX_DEPTH {
-            return;
-        }
 
         // Collect all files to parse (avoid borrow issues with recursive calls)
         let mut to_parse: Vec<String> = Vec::new();
@@ -9189,11 +9202,24 @@ impl VbcCodegen {
             // All 5 proof-item kinds MUST be listed explicitly here — relying on
             // the catch-all `_ => {}` arm would silently ignore new proof kinds
             // added to ItemKind in the future.
-            ItemKind::Theorem(_)
-            | ItemKind::Lemma(_)
-            | ItemKind::Corollary(_)
-            | ItemKind::Tactic(_) => {
-                // Proofs are verified in the verification phase, not executed.
+            ItemKind::Theorem(thm) | ItemKind::Lemma(thm) | ItemKind::Corollary(thm) => {
+                // Proofs are verified in the verification phase, not
+                // executed — but their NAMES are mounted and cited
+                // exactly like axiom names, so they get the same
+                // erased witness (PROOF-IRRELEVANCE-ERASURE-1): a
+                // theorem is a proposition and its runtime witness is
+                // `true`. With a pure skip here, a `public theorem`
+                // was absent from every module surface and mounting
+                // it died E401 "phantom" at its own declaration.
+                self.register_erased_proof_witness(
+                    &thm.name.name,
+                    &thm.params,
+                    Some("Bool".to_string()),
+                )?;
+            }
+            ItemKind::Tactic(_) => {
+                // Tactics run inside the prover, never at runtime, and
+                // are not mountable by name — erased with no witness.
             }
             // **PROOF-IRRELEVANCE-ERASURE-1.** An axiom's TRUTH lives in
             // the verification phase (SMT/kernel discharge) — but its
@@ -13919,6 +13945,26 @@ impl VbcCodegen {
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Protocol,
+                    // TYPE-ORIGIN-MODULE (T0555, sibling sweep): the E401
+                    // audit found the stamp on the Sum/Record/Alias decl
+                    // arms and missing on every protocol arm. An unstamped
+                    // descriptor claims the ENTRY (directory) module, so
+                    // `public type X is protocol` declared in a file
+                    // submodule vanished from that submodule's surface and
+                    // every `mount m.{X}` died E401 (measured: 9 of 10
+                    // E401s in the MSFS corpus).
+                    //
+                    // DELIBERATELY NOT applied to the Newtype/Unit/
+                    // transparent-wrapper arms: stamping them flips those
+                    // types from entry-owned to file-owned across the whole
+                    // baked library at once, and the glob-import surface
+                    // consumers are not reconciled to that ownership —
+                    // measured: core/script/engine.vr's `mount
+                    // ...scripting.*` lost every free-fn binding the moment
+                    // the RawScript* wrappers joined the file surface.
+                    // Extending the stamp to those arms starts with the
+                    // consumers, not here.
+                    origin_module: self.current_origin_module_sid(),
                     ..Default::default()
                 };
 
@@ -18192,10 +18238,29 @@ impl VbcCodegen {
         &mut self,
         ax: &verum_ast::decl::AxiomDecl,
     ) -> CodegenResult<()> {
-        let name = ax.name.name.to_string();
-        let param_count = ax.params.len();
-        let params_with_mutability: Vec<(String, bool)> = ax
-            .params
+        let return_type_name = match &ax.return_type {
+            verum_common::Maybe::Some(ty) => self.extract_type_name(ty),
+            verum_common::Maybe::None => None,
+        };
+        self.register_erased_proof_witness(&ax.name.name, &ax.params, return_type_name)
+    }
+
+    /// The shared half of PROOF-IRRELEVANCE-ERASURE-1: register `name`
+    /// as a callable whose body returns the erased witness (`true` for
+    /// Bool propositions, `nil` otherwise). Axioms and theorems share
+    /// it — a `public theorem` is mounted and cited by name exactly as
+    /// an axiom is, and with only a pure skip its name was absent from
+    /// every module surface: the tenth measured corpus E401 was a
+    /// theorem reported as a phantom while sitting at its declaration.
+    fn register_erased_proof_witness(
+        &mut self,
+        decl_name: &verum_common::Text,
+        params: &verum_common::List<verum_ast::decl::FunctionParam>,
+        return_type_name: Option<String>,
+    ) -> CodegenResult<()> {
+        let name = decl_name.to_string();
+        let param_count = params.len();
+        let params_with_mutability: Vec<(String, bool)> = params
             .iter()
             .enumerate()
             .map(|(i, p)| {
@@ -18203,10 +18268,6 @@ impl VbcCodegen {
                     .unwrap_or_else(|| (format!("_arg{}", i), false))
             })
             .collect();
-        let return_type_name = match &ax.return_type {
-            verum_common::Maybe::Some(ty) => self.extract_type_name(ty),
-            verum_common::Maybe::None => None,
-        };
 
         let id = FunctionId(self.next_func_id);
         self.next_func_id = self.next_func_id.saturating_add(1);
