@@ -280,6 +280,55 @@ no meta from stdlib), only function bodies are touched — and only the
 ~50-200 functions main() actually transitively calls. Total cold-start
 deserialisation work: **~5-15 ms wall-clock**.
 
+### What decides the closure — and the fact only the metadata carries
+
+Which of the archive's ~44000 symbols a program needs is decided by a
+BFS over the baked symbol graph, seeded from the names the program's
+source text mentions and following every `Call` / `TailCall` / `CallM`
+edge observed in archive bytecode. Nothing is hardcoded: a cross-module
+dependency surfaces because an edge exists.
+
+The seeds come from source TEXT, which is all that exists at that point
+— the closure is computed before inference has run. That leaves one
+class of fact outside the graph's reach: **a call's RESULT type**.
+
+    print(f"{a.cmp(b)}")
+
+names `cmp`. It does not name `Ordering`, which is what `cmp` returns
+and whose `implement Display for Ordering` decides whether the f-string
+renders `<` or the variant name `Less`. The graph cannot supply the
+missing name either — archive `TypeId`s are assigned per module and are
+not comparable across them, so reading the type off the bytecode is
+inert.
+
+`FunctionDescriptor.return_type` in the core-metadata sidecar records
+it BY NAME, and that is the channel the loader uses. It is applied
+narrowly, and both narrowings are paid for by measurement on a
+hello-world's archive load:
+
+* **Only calls in FORMAT POSITION seed it** — inside an interpolation,
+  or inside a `print` argument. Those are the results that reach
+  `Display`. Seeding from every reached function instead put the load
+  at **1336 ms against 67 ms**: simple names like `new`, `len` and
+  `get` match hundreds of stdlib functions, so the closure swallowed
+  their result types and everything those reached in turn.
+* **Only types that HAVE a `Display` impl are pulled** — the presence
+  of `<Type>.fmt` in the graph. Display is the entire reason a
+  formatted result needs its type.
+
+The scan runs over the metadata rather than over the reached set,
+because a method call enters the closure as a BARE seed (`cmp`), so
+`Int.cmp` never appears as a reached QUALIFIED name at all.
+
+A program that formats only literals harvests no names and pays
+nothing: measured at 41 ms against the 67 ms baseline, i.e. inside the
+noise. `VERUM_SEED_RESULT_TYPES=0` disables the seeding — it is how
+both halves of every number above were taken, and spec 632 fails under
+it, which is the positive control that the seeding is what carries the
+behaviour. `VERUM_TRACE_LOADCOST=1` prints the per-phase breakdown of
+an archive load; `VERUM_TRACE_CODEGEN_PATH=1` names the calls found in
+format position and the types they pulled in.
+
 ### Parallelism guarantees
 
 The sectioned format is designed so every step parallelises along

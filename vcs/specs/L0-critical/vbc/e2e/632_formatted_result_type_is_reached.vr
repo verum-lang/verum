@@ -1,0 +1,56 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, display, format, archive, closure
+// @timeout: 15000
+// @expected-exit: 0
+//
+// A CALL'S RESULT TYPE IS REACHED BY THE CALL (T0692).
+//
+// This file never writes the word `Ordering`. It has no `mount`, no
+// annotation, no constructor — nothing in its TEXT names the type whose
+// `Display` impl decides what the assertions below compare against.
+//
+// That is the whole point. The embedded stdlib archive is loaded
+// lazily: a symbol closure decides which of ~44000 baked symbols this
+// program needs, and it is computed from the source text, before
+// inference has run. `a.cmp(b)` names `cmp`; it does not name the
+// `Ordering` that `cmp` returns. So `implement Display for Ordering`
+// stayed out of the archive and `f"{a.cmp(b)}"` printed the variant
+// name `Less` where the impl says `<`.
+//
+// The fact the closure was missing is recorded in the baked metadata:
+// `FunctionDescriptor.return_type`, by NAME. The loader seeds it for
+// exactly the calls that stand in FORMAT POSITION — inside an
+// interpolation, or inside a `print` argument — because those are the
+// results that reach `Display`, and seeding more than that cost a
+// hello-world's archive load 1336 ms against 67 ms.
+//
+// 630 pins that the three spellings of a formatted call agree with each
+// other. This pins that they agree WITHOUT the program naming the type.
+
+fn main() {
+    let a: Int = 1;
+    let b: Int = 2;
+
+    // Inline: the type exists only as the call's result.
+    assert_eq(f"{a.cmp(b)}", "<");
+    assert_eq(f"{b.cmp(a)}", ">");
+    assert_eq(f"{a.cmp(a)}", "=");
+
+    // Bound without an annotation: still never named.
+    let inferred = a.cmp(b);
+    assert_eq(f"{inferred}", "<");
+
+    // A second receiver type reaches the same impl through the same
+    // channel — the seeding is keyed on the call, not on `Int`.
+    let t1: Text = "a";
+    let t2: Text = "b";
+    assert_eq(f"{t1.cmp(t2)}", "<");
+
+    // Nested interpolation must not lose the outer format position:
+    // a flag would clear on the way out of the inner one.
+    assert_eq(f"{f"{a.cmp(b)}"}", "<");
+
+    print("formatted-result-type-is-reached ok");
+}

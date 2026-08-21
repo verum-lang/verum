@@ -112,6 +112,18 @@ surface T0708 (bounded-var dispatch E404 `_`), qualified-keyed
 `metadata.types` (T0691 stone), bake-vs-user pipeline unification
 T0692.
 
+A descriptor field can also be the ONLY carrier of a fact: the lazy
+symbol closure is computed from source TEXT, before inference, so
+`f"{a.cmp(b)}"` reached `Int.cmp` but not the `Ordering` it returns —
+and `implement Display for Ordering` stayed out of the archive, making
+the f-string print the variant name `Less` where the impl says `<`.
+`FunctionDescriptor.return_type` is what closes it, because it records
+the type BY NAME; archive TypeIds are assigned per module and are not
+comparable across them, which is why two attempts to read the type off
+the bytecode were inert. Seeded only for calls in FORMAT POSITION
+(spec 632): seeding from every reached function instead cost a
+hello-world's archive load 1336 ms against 67 ms.
+
 **R3. Type-system authorities.** One projection reducer instead of
 three — T0707 (Item<Range>-argless residual, base/iterator 54 E400).
 Mount-scope candidate discipline for multi-source names T0710

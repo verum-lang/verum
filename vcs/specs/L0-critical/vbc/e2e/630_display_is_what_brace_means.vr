@@ -24,16 +24,10 @@
 // `Ordering`, and fell through to the Debug-style formatter that prints
 // variant names.
 //
-// SCOPE OF THIS SPEC. The `mount` below is load-bearing and says so:
-// the archive's symbol closure only carries `Ordering.fmt` when the
-// program names the type, because reachability is computed from the
-// source text before inference has run. With the name present, all
-// three spellings agree; without it, all three fall back TOGETHER —
-// which is still a strict improvement over the split this pins against,
-// but the closure gap is its own defect and belongs to T0692's
-// remainder.
-
-mount core.base.ordering.{Ordering};
+// This spec names `Ordering` in an annotation, so the archive's symbol
+// closure carries `Ordering.fmt` on the strength of the source text
+// alone. The harder case — a program that never names the type at all —
+// is 632, and it needs the closure to learn the type from the CALL.
 
 type Wrapped is { inner: Int };
 

@@ -1516,6 +1516,15 @@ impl SymbolGraph {
     /// `HashSet<u32>` and the per-step name allocation the previous
     /// `HashSet<String>` form paid is gone.  Names are materialised
     /// once, at the end, for the caller.
+    /// Does the archive carry a symbol with this exact name?
+    ///
+    /// Used to ask "does this type have a `Display` impl" before
+    /// pulling it into the closure: reaching for a `<Type>.fmt` that
+    /// does not exist costs a BFS seed that can never match.
+    pub(crate) fn has_symbol(&self, name: &str) -> bool {
+        self.baked.function_index(name).is_some()
+    }
+
     pub(crate) fn reachable(
         &self,
         seeds: &HashSet<String>,
@@ -2607,6 +2616,7 @@ impl ArchiveCtxCache {
         for name in to_add {
             wanted.insert(name.to_string());
         }
+
         // **Transitive-closure reachability** (replaces the prior
         // architecture's 5 hardcoded force-loads for tasks #23 / #24 /
         // #26). Build the archive-wide symbol graph once (cached on
@@ -2629,6 +2639,101 @@ impl ArchiveCtxCache {
                 reached_module_idxs.len(),
             );
         }
+        // A CALL'S RESULT TYPE IS REACHED BY THE CALL (T0692).
+        //
+        // `f"{a.cmp(b)}"` needs `Ordering.fmt`, but nothing in the
+        // program's TEXT names `Ordering` — the type arrives as
+        // `Int.cmp`'s result, and reachability is computed from source
+        // text before inference has run. So the closure left the impl
+        // out and the f-string printed the variant name `Less` where
+        // `implement Display for Ordering` says `<`.
+        //
+        // The missing fact lives in the baked metadata as
+        // `FunctionDescriptor.return_type`, recorded BY NAME — which is
+        // what the graph cannot supply, since archive TypeIds are
+        // assigned per module and are not comparable across them.
+        //
+        // Narrowed twice over, both narrowings paid for by measurement
+        // on a hello-world's archive load:
+        //
+        //  * Only the calls the program puts in FORMAT POSITION are
+        //    seeds (`formatted_call_names`). Seeding from every reached
+        //    function instead put the load at 1336 ms against 67 ms.
+        //  * Only types that HAVE a `Display` impl are pulled — the
+        //    presence of `<Type>.fmt` in the graph. Display is the
+        //    entire reason a formatted result needs its type.
+        //
+        // A program that formats only literals harvests no names and
+        // reaches none of this. `VERUM_SEED_RESULT_TYPES=0` disables
+        // the seeding, which is how the two numbers above were taken.
+        let trace = std::env::var_os("VERUM_TRACE_CODEGEN_PATH").is_some();
+        let formatted = if std::env::var("VERUM_SEED_RESULT_TYPES").as_deref() == Ok("0") {
+            HashSet::new()
+        } else {
+            formatted_call_names(user_module)
+        };
+        if trace {
+            let mut names: Vec<&str> = formatted.iter().map(String::as_str).collect();
+            names.sort_unstable();
+            eprintln!("[formatted] {} names in format position: {:?}", names.len(), names);
+        }
+        let mut display_types: HashSet<String> = HashSet::new();
+        if !formatted.is_empty()
+            && let Some(metadata) = crate::embedded_stdlib_metadata::get_runtime_metadata()
+        {
+            // Scanned over the metadata rather than over
+            // `reached_qualified`: `a.cmp(b)` enters the closure as the
+            // BARE method seed `cmp`, so `Int.cmp` never appears as a
+            // reached QUALIFIED name — a scan of the reached set finds
+            // nothing (measured: 8 reached names, none of them a `cmp`).
+            for (qualified, desc) in metadata.functions.iter() {
+                let qualified = qualified.as_str();
+                let simple = qualified.rsplit('.').next().unwrap_or(qualified);
+                if !formatted.contains(simple) {
+                    continue;
+                }
+                // The return type is a rendered type EXPRESSION
+                // (`Maybe<Ordering>`, `List<Text>`), so every
+                // capitalised component is a candidate, not just the
+                // head — `Maybe<Ordering>` formats through `Ordering`.
+                for part in desc
+                    .return_type
+                    .as_str()
+                    .split(|c: char| !c.is_alphanumeric() && c != '_')
+                {
+                    if part.len() > 1
+                        && part.starts_with(char::is_uppercase)
+                        && !wanted.contains(part)
+                        && !display_types.contains(part)
+                        && graph.has_symbol(&format!("{}.fmt", part))
+                    {
+                        if trace {
+                            eprintln!("[formatted] {} returns {} (has Display)", qualified, part);
+                        }
+                        display_types.insert(part.to_string());
+                    }
+                }
+            }
+        }
+        if !display_types.is_empty() {
+            let extra: HashSet<String> = display_types
+                .iter()
+                .map(|t| format!("{}.fmt", t))
+                .chain(display_types.iter().cloned())
+                .collect();
+            let (more_qualified, more_modules) =
+                loadcost::timed("bfs_display", || graph.reachable(&extra, &HashSet::new()));
+            for name in more_qualified {
+                wanted.insert(name);
+            }
+            for idx in more_modules {
+                if let Some(entry) = archive.index.get(idx as usize) {
+                    wanted_module_prefixes.insert(entry.name.clone());
+                }
+            }
+            wanted.extend(display_types);
+        }
+
         for idx in &reached_module_idxs {
             if let Some(entry) = archive.index.get(*idx as usize) {
                 wanted_module_prefixes.insert(entry.name.clone());
@@ -6294,6 +6399,97 @@ fn register_module_filtered(
     (func_id_remap, registered_ids)
 }
 
+/// WHAT THE PROGRAM ACTUALLY FORMATS (T0692).
+///
+/// `f"{a.cmp(b)}"` needs `Ordering.fmt`, but the program's text never
+/// names `Ordering` — the type arrives as `Int.cmp`'s result, and
+/// reachability is computed from source text, before inference.  The
+/// missing fact lives in the baked metadata as
+/// `FunctionDescriptor.return_type`, so the closure can recover it —
+/// but only if it knows WHICH calls' results get formatted.
+///
+/// That question is answered here, syntactically and exactly: a call
+/// standing inside an interpolation (or inside a `print` argument) is
+/// a call whose result reaches `Display`.  Every other call's result
+/// type is irrelevant to formatting, and pulling it in costs real
+/// time — seeding from every reached function instead put a
+/// hello-world's archive load at 1336 ms against 67 ms, because the
+/// extra types dragged their defining modules through decode,
+/// registration and the keep-set fixpoint.
+///
+/// Built on `verum_ast::visitor::Visitor`, whose `walk_expr` covers
+/// all 73 expression forms: a hand-rolled recursion would silently
+/// miss the interpolation nested in a closure in a match arm.
+struct FormattedCallHarvest {
+    /// Depth of enclosing format positions.  A counter, not a flag —
+    /// `f"{f"{x.cmp(y)}"}"` nests, and a flag would clear on the way
+    /// out of the inner one while still inside the outer.
+    depth: usize,
+    /// Simple names of the calls found in format position.
+    names: HashSet<String>,
+}
+
+impl FormattedCallHarvest {
+    /// Functions whose arguments are formatted for output.  `print`
+    /// is the one that matters in practice; the others are here
+    /// because they format too, and a caller that reads
+    /// `f"{...}"`-only behaviour out of `print("...")` would be
+    /// reading a coincidence.
+    fn formats_its_arguments(name: &str) -> bool {
+        matches!(name, "print" | "eprint" | "panic" | "assert_msg")
+    }
+}
+
+impl verum_ast::visitor::Visitor for FormattedCallHarvest {
+    fn visit_expr(&mut self, expr: &verum_ast::Expr) {
+        use verum_ast::expr::ExprKind;
+        let opens_format_position = match &expr.kind {
+            ExprKind::InterpolatedString { .. } => true,
+            ExprKind::Call { func, .. } => match &func.kind {
+                ExprKind::Path(path) => Self::formats_its_arguments(path.last_segment_name()),
+                _ => false,
+            },
+            _ => false,
+        };
+        if self.depth > 0 {
+            match &expr.kind {
+                ExprKind::MethodCall { method, .. } => {
+                    self.names.insert(method.name.to_string());
+                }
+                ExprKind::Call { func, .. } => {
+                    if let ExprKind::Path(path) = &func.kind {
+                        self.names.insert(path.last_segment_name().to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+        if opens_format_position {
+            self.depth += 1;
+            verum_ast::visitor::walk_expr(self, expr);
+            self.depth -= 1;
+        } else {
+            verum_ast::visitor::walk_expr(self, expr);
+        }
+    }
+}
+
+/// Collect the simple names of every call whose result the module
+/// formats.  Empty for a program that prints only literals — which is
+/// the point: such a program pays nothing for this.
+fn formatted_call_names(user_module: &verum_ast::Module) -> HashSet<String> {
+    use verum_ast::visitor::Visitor;
+    let mut harvest = FormattedCallHarvest {
+        depth: 0,
+        names: HashSet::new(),
+    };
+    for item in user_module.items.iter() {
+        harvest.visit_item(item);
+    }
+    harvest.names
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -7207,5 +7403,63 @@ mod tests {
                 missing.len()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod formatted_call_harvest_tests {
+    use super::formatted_call_names;
+
+    /// Parse a source string into a module the way the compiler does.
+    fn module_of(src: &str) -> verum_ast::Module {
+        verum_fast_parser::VerumParser::new()
+            .parse_module_str(src, verum_common::FileId::new(0))
+            .expect("probe must parse")
+    }
+
+    #[test]
+    fn call_inside_an_interpolation_is_harvested() {
+        let names = formatted_call_names(&module_of(
+            "fn main() { let a: Int = 1; print(f\"{a.cmp(a)}\"); }",
+        ));
+        assert!(
+            names.contains("cmp"),
+            "the call whose result gets formatted must be harvested, got {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn a_program_that_formats_only_literals_harvests_nothing() {
+        // The whole point of the narrowing: such a program pays no
+        // symbol-closure cost at all.
+        let names = formatted_call_names(&module_of("fn main() { print(\"hello\"); }"));
+        assert!(names.is_empty(), "expected no names, got {:?}", names);
+    }
+
+    #[test]
+    fn a_call_outside_format_position_is_not_harvested() {
+        let names = formatted_call_names(&module_of(
+            "fn main() { let a: Int = 1; let _b = a.cmp(a); print(\"x\"); }",
+        ));
+        assert!(
+            !names.contains("cmp"),
+            "a result that is never formatted must not be seeded, got {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn nesting_does_not_lose_the_outer_format_position() {
+        // A flag instead of a counter clears here on the way out of
+        // the inner interpolation, dropping `hi`.
+        let names = formatted_call_names(&module_of(
+            "fn main() { let a: Int = 1; print(f\"{f\"{a.lo()}\"}{a.hi()}\"); }",
+        ));
+        assert!(
+            names.contains("lo") && names.contains("hi"),
+            "both nested and trailing calls must be harvested, got {:?}",
+            names
+        );
     }
 }
