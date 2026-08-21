@@ -47,8 +47,13 @@ impl SoundnessBackend for CoqBackend {
          (* discharge = replace with a `Definition`.                       *)\n\
          (* ============================================================== *)\n\
          \n\
-         From Stdlib Require Import Strings.String.\n\
-         From Stdlib Require Import Lists.List.\n\
+         (* `From Coq` is the one spelling BOTH deployed provers take:  *)\n\
+         (* apt's coq 8.x knows only the `Coq` root, and Rocq >= 9 keeps *)\n\
+         (* it as a deprecated alias of `Stdlib` (warning, not error).   *)\n\
+         (* Emitting `From Stdlib` compiled only against Rocq 9 and      *)\n\
+         (* hard-failed the CI replay's coqc at line one.                *)\n\
+         From Coq Require Import Strings.String.\n\
+         From Coq Require Import Lists.List.\n\
          Import ListNotations.\n\
          Open Scope string_scope."
             .to_string()

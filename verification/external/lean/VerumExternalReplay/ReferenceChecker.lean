@@ -95,10 +95,10 @@ partial def Level.lexCompare (a b : Level) : Ordering :=
     | .var _      => 1
     | .succ _     => 2
     | .max _ _    => 3
-  match Nat.compare (rank a) (rank b) with
+  match compare (rank a) (rank b) with
   | .eq =>
     match a, b with
-    | .concrete x, .concrete y => Nat.compare x y
+    | .concrete x, .concrete y => compare x y
     | .var x,      .var y      => compare x y
     | .succ x,     .succ y     => Level.lexCompare x y
     | .max xa xb,  .max ya yb  =>
@@ -129,27 +129,30 @@ partial def Level.flattenMax (l : Level) : List Level :=
 /-- Sort + dedupe summands using structural ordering.  Implements the
     canonical-form invariant for `max`. -/
 partial def Level.sortDedupe (xs : List Level) : List Level :=
-  let sorted := xs.toArray.qsort (fun a b => Level.lexCompare a b == .ord.lt) |>.toList
+  let sorted := xs.toArray.qsort (fun a b => Level.lexCompare a b == .lt) |>.toList
   -- Dedupe consecutive equals (we just sorted, so equals cluster).
   sorted.foldr (fun x acc =>
     match acc with
     | []      => [x]
     | h :: _  => if x == h then acc else x :: acc) []
 
-/-- Normalise a level to canonical form.  Idempotent. -/
-partial def Level.normalize (l : Level) : Level :=
-  match l with
-  | .concrete _  => l
-  | .var _       => l
-  | .succ inner =>
-    let n := Level.normalize inner
-    match n with
-    | .concrete k => .concrete (k + 1)
-    | other       => .succ other
-  | .max a b =>
-    let aN := Level.normalize a
-    let bN := Level.normalize b
-    Level.maxCanonical aN bN
+/-- Reassemble a `max` from a concrete summand (if any) and a list
+    of symbolic summands. -/
+partial def Level.assembleMax (concrete : Option Nat) (symbolic : List Level) : Level :=
+  -- Drop a concrete-zero summand when at least one symbolic summand exists
+  -- (`max(0, x) = x`).
+  let concreteToKeep :=
+    match concrete with
+    | some 0 => if symbolic.isEmpty then some 0 else none
+    | other  => other
+  let all : List Level :=
+    (match concreteToKeep with
+     | some n => [.concrete n]
+     | none   => []) ++ symbolic
+  match all with
+  | []      => .concrete 0
+  | [x]     => x
+  | x :: rest => rest.foldr (fun y acc => .max y acc) x
 
 /-- Build the canonical form of `max(a, b)` assuming both are
     already individually normalised. -/
@@ -175,33 +178,27 @@ partial def Level.maxCanonical (a b : Level) : Level :=
     if common > 0 then
       let strippedConcrete := concreteMax.map (fun n => n - common)
       let strippedSymbolic := symbolicSorted.map (fun s => Level.stripSucc s common)
-      let inner := Level.assembleMax strippedConcrete strippedSymbolic
-      let mut acc := inner
-      for _ in [0:common] do
-        acc := .succ acc
-      acc
+      Nat.repeat Level.succ common
+        (Level.assembleMax strippedConcrete strippedSymbolic)
     else
       Level.assembleMax concreteMax symbolicSorted
   else
     Level.assembleMax concreteMax symbolicSorted
 
-/-- Reassemble a `max` from a concrete summand (if any) and a list
-    of symbolic summands. -/
-partial def Level.assembleMax (concrete : Option Nat) (symbolic : List Level) : Level :=
-  -- Drop a concrete-zero summand when at least one symbolic summand exists
-  -- (`max(0, x) = x`).
-  let concreteToKeep :=
-    match concrete with
-    | some 0 => if symbolic.isEmpty then some 0 else none
-    | other  => other
-  let all : List Level :=
-    (match concreteToKeep with
-     | some n => [.concrete n]
-     | none   => []) ++ symbolic
-  match all with
-  | []      => .concrete 0
-  | [x]     => x
-  | x :: rest => rest.foldr (fun y acc => .max y acc) x
+/-- Normalise a level to canonical form.  Idempotent. -/
+partial def Level.normalize (l : Level) : Level :=
+  match l with
+  | .concrete _  => l
+  | .var _       => l
+  | .succ inner =>
+    let n := Level.normalize inner
+    match n with
+    | .concrete k => .concrete (k + 1)
+    | other       => .succ other
+  | .max a b =>
+    let aN := Level.normalize a
+    let bN := Level.normalize b
+    Level.maxCanonical aN bN
 
 /-- Definitional equality on levels — normalise both sides and
     compare structurally. -/
@@ -220,10 +217,7 @@ partial def Level.shiftedBy (l : Level) (by_ : Nat) : Level :=
   else match l with
     | .concrete n => .concrete (n + by_)
     | other =>
-      let mut acc := other
-      for _ in [0:by_] do
-        acc := .succ acc
-      Level.normalize acc
+      Level.normalize (Nat.repeat Level.succ by_ other)
 
 -- =============================================================================
 -- Term-level operations
@@ -503,38 +497,38 @@ def expectInferError (Γ : Ctx) (t : Term) (matchErr : CheckError → Bool) : Bo
   | _        => false
 
 -- Helper: build a concrete-level Universe term.
-def universe (n : Nat) : Term := .universe (.concrete n)
+def univ (n : Nat) : Term := .universe (.concrete n)
 
 -- Helper: build a level-variable Universe term.
-def universeVar (name : String) : Term := .universe (.var name)
+def univVar (name : String) : Term := .universe (.var name)
 
-#eval! expectInfer [] (universe 0) (universe 1)
+#eval! expectInfer [] (univ 0) (univ 1)
   -- T-Univ — true
 
 #eval! expectInferError [] (.var 0) (fun e => match e with | .unbound_variable 0 => true | _ => false)
   -- T-Var unbound — true
 
-#eval! expectInfer [universe 0] (.var 0) (universe 0)
+#eval! expectInfer [univ 0] (.var 0) (univ 0)
   -- T-Var with hypothesis — true
 
-#eval! expectInfer [] (.pi (universe 2) (universe 5)) (universe 6)
+#eval! expectInfer [] (.pi (univ 2) (univ 5)) (univ 6)
   -- T-Pi-Form max(3, 6) = 6 — true
 
 #eval! expectInfer []
-        (.lam (universe 0) (.var 0))
-        (.pi (universe 0) (universe 0))
+        (.lam (univ 0) (.var 0))
+        (.pi (univ 0) (univ 0))
   -- T-Lam-Intro identity at Universe(0) — true
 
 #eval! expectInferError []
-        (.app (universe 0) (universe 0))
+        (.app (univ 0) (univ 0))
         (fun e => match e with | .not_a_function _ => true | _ => false)
   -- T-App-Elim rejects non-function — true
 
-#eval! expectInfer [] (universe 1000) (universe 1001)
+#eval! expectInfer [] (univ 1000) (univ 1001)
   -- universe successor (Nat-unbounded on Lean side) — true
 
 #eval! (
-  let id := Term.lam (universe 0) (.var 0)
+  let id := Term.lam (univ 0) (.var 0)
   match verifyCertificate id id with
   | .error (.claimed_type_not_a_type _ _) => true
   | _                                      => false)
@@ -565,23 +559,23 @@ def universeVar (name : String) : Term := .universe (.var name)
   -- common-succ factoring — true
 
 #eval! expectInfer []
-        (universeVar "u")
+        (univVar "u")
         (.universe (.succ (.var "u")))
   -- T-Univ on a level variable: Universe(u) : Universe(succ(u)) — true
 
 #eval! expectInfer []
-        (.pi (universeVar "u") (universeVar "v"))
+        (.pi (univVar "u") (univVar "v"))
         (.universe (.succ (Level.maxCanonical (.var "u") (.var "v"))))
   -- T-Pi-Form on polymorphic levels: Π(_:Type@u). Type@v : Type@succ(max(u,v)) — true
 
 #eval! expectInfer []
-        (.lam (universeVar "u") (.lam (.var 0) (.var 0)))
-        (.pi (universeVar "u") (.pi (.var 0) (.var 1)))
+        (.lam (univVar "u") (.lam (.var 0) (.var 0)))
+        (.pi (univVar "u") (.pi (.var 0) (.var 1)))
   -- Polymorphic identity at Type@u — true
 
 #eval! (
-  let term := Term.lam (universeVar "u") (.lam (.var 0) (.var 0))
-  let claim := Term.pi (universeVar "u") (.pi (.var 0) (.var 1))
+  let term := Term.lam (univVar "u") (.lam (.var 0) (.var 0))
+  let claim := Term.pi (univVar "u") (.pi (.var 0) (.var 1))
   match verifyCertificate term claim with
   | .ok _ => true
   | _     => false)
@@ -589,8 +583,8 @@ def universeVar (name : String) : Term := .universe (.var name)
 
 #eval! (
   -- Distinct universe variables in term vs claim → TypeMismatch.
-  let term := Term.lam (universeVar "u") (.lam (.var 0) (.var 0))
-  let claim := Term.pi (universeVar "v") (.pi (.var 0) (.var 1))
+  let term := Term.lam (univVar "u") (.lam (.var 0) (.var 0))
+  let claim := Term.pi (univVar "v") (.pi (.var 0) (.var 1))
   match verifyCertificate term claim with
   | .error (.type_mismatch _ _) => true
   | _                            => false)
@@ -601,52 +595,52 @@ def universeVar (name : String) : Term := .universe (.var name)
 -- =============================================================================
 
 #eval! expectInfer []
-        (.sigma (universe 0) (universe 0))
-        (universe 1)
+        (.sigma (univ 0) (univ 0))
+        (univ 1)
   -- T-Sigma-Form at concrete universe — true
 
 #eval! expectInfer []
-        (.sigma (universe 2) (universe 5))
-        (universe 6)
+        (.sigma (univ 2) (univ 5))
+        (univ 6)
   -- T-Sigma-Form takes max universe — true
 
 #eval! expectInfer []
-        (.sigma (universeVar "u") (universeVar "v"))
+        (.sigma (univVar "u") (univVar "v"))
         (.universe (.succ (Level.maxCanonical (.var "u") (.var "v"))))
   -- T-Sigma-Form polymorphic — true
 
 #eval! expectInfer []
-        (.pair (universe 0) (universe 0))
-        (.sigma (universe 1) (universe 1))
+        (.pair (univ 0) (univ 0))
+        (.sigma (univ 1) (univ 1))
   -- T-Pair-Intro non-dependent — true
 
-#eval! defEq (.fst (.pair (universe 0) (universe 1))) (universe 0)
+#eval! defEq (.fst (.pair (univ 0) (univ 1))) (univ 0)
   -- β-projection: fst(pair(a, b)) ≡ a — true
 
-#eval! defEq (.snd (.pair (universe 0) (universe 1))) (universe 1)
+#eval! defEq (.snd (.pair (univ 0) (univ 1))) (univ 1)
   -- β-projection: snd(pair(a, b)) ≡ b — true
 
 #eval! expectInferError []
-        (.fst (universe 0))
+        (.fst (univ 0))
         (fun e => match e with | .not_a_sigma _ => true | _ => false)
   -- T-Fst-Elim rejects non-Σ — true
 
 #eval! expectInferError []
-        (.snd (universe 0))
+        (.snd (univ 0))
         (fun e => match e with | .not_a_sigma _ => true | _ => false)
   -- T-Snd-Elim rejects non-Σ — true
 
 #eval! (
-  let term := Term.pair (universe 0) (universe 0)
-  let claim := Term.sigma (universe 1) (universe 1)
+  let term := Term.pair (univ 0) (univ 0)
+  let claim := Term.sigma (univ 1) (univ 1)
   match verifyCertificate term claim with
   | .ok _ => true
   | _     => false)
   -- Pair certificate at non-dependent Σ verifies — true
 
 #eval! expectInfer []
-        (.sigma (universe 0) (.sigma (universe 0) (universe 0)))
-        (universe 1)
+        (.sigma (univ 0) (.sigma (univ 0) (univ 0)))
+        (univ 1)
   -- Nested Σ — true
 
 end VerumKernel.Tests
