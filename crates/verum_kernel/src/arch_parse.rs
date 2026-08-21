@@ -205,6 +205,9 @@ pub fn parse_arch_module(args: &[Expr]) -> Result<Shape, ArchParseError> {
             "strict" => {
                 shape.strict = parse_bool(value)?;
             }
+            "declarations" => {
+                shape.declarations = Some(parse_declarations(value)?);
+            }
             other => {
                 return Err(ArchParseError::UnknownField {
                     name: other.to_string(),
@@ -253,6 +256,7 @@ fn suggest_field(input: &str) -> Option<String> {
         "cve_closure_E",
         "composes_with",
         "strict",
+        "declarations",
     ];
     canonical
         .iter()
@@ -747,6 +751,268 @@ fn parse_verify_strategy(expr: &Expr) -> Result<VerifyStrategy, ArchParseError> 
 }
 
 // =============================================================================
+// declarations: ShapeDeclarations { ... } — CVE-architecture spec declarations
+// =============================================================================
+
+/// Split a call-shaped expression into (dotted callee path, first arg).
+/// `Maybe.Some(x)` parses as a method call on the path `Maybe`, while
+/// `Some(x)` is a plain call — the same two spellings of one concept
+/// that `parse_lifecycle` already collapses, factored here so every
+/// declarations field treats them identically.
+fn callee_view<'e>(expr: &'e Expr, field: &str) -> Option<(String, Option<&'e Expr>)> {
+    match &expr.kind {
+        ExprKind::Call { func, args, .. } => Some((
+            parse_path_string(func, field).ok()?,
+            args.iter().next(),
+        )),
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => Some((
+            format!(
+                "{}.{}",
+                parse_path_string(receiver, field).ok()?,
+                method.name.as_str()
+            ),
+            args.iter().next(),
+        )),
+        _ => None,
+    }
+}
+
+/// `Maybe.Some(inner)` / `Some(inner)` → `Some(parse_inner(inner))`;
+/// `Maybe.None` / `None` → `None`.  The declarations fields are all
+/// optional, and this is the only shape optionality takes.
+fn parse_maybe<T>(
+    expr: &Expr,
+    field: &'static str,
+    parse_inner: impl FnOnce(&Expr) -> Result<T, ArchParseError>,
+) -> Result<Option<T>, ArchParseError> {
+    if let Ok(path) = parse_path_string(expr, field)
+        && path.split('.').next_back() == Some("None")
+    {
+        return Ok(None);
+    }
+    if let Some((callee, arg)) = callee_view(expr, field)
+        && callee.split('.').next_back() == Some("Some")
+    {
+        let inner = arg.ok_or(ArchParseError::InvalidValue {
+            field: field.to_string(),
+            expected: "`Maybe.Some(value)` carrying a value",
+        })?;
+        return Ok(Some(parse_inner(inner)?));
+    }
+    Err(ArchParseError::InvalidValue {
+        field: field.to_string(),
+        expected: "`Maybe.Some(...)` or `Maybe.None`",
+    })
+}
+
+/// A unit variant of a serde-derived enum, resolved by its last path
+/// segment THROUGH the enum's own serde name table.  The enum is the
+/// list: a variant added in `arch.rs` is parseable here with no second
+/// string table to drift out of sync.
+fn parse_unit_variant<T: serde::de::DeserializeOwned>(
+    expr: &Expr,
+    kind: &'static str,
+) -> Result<T, ArchParseError> {
+    use serde::de::IntoDeserializer;
+    let path = parse_path_string(expr, kind)?;
+    let last = path.split('.').next_back().unwrap_or(&path);
+    T::deserialize(last.into_deserializer()).map_err(|_: serde::de::value::Error| {
+        ArchParseError::UnknownVariant {
+            kind,
+            value: last.to_string(),
+        }
+    })
+}
+
+/// A text value: a string literal, or the same literal spelled
+/// `"...".to_text()` — both appear in the corpus and mean one thing.
+fn parse_text_value(expr: &Expr, field: &'static str) -> Result<String, ArchParseError> {
+    if let ExprKind::MethodCall {
+        receiver, method, ..
+    } = &expr.kind
+        && method.name.as_str() == "to_text"
+    {
+        return parse_path_string(receiver, field);
+    }
+    parse_path_string(expr, field)
+}
+
+/// The record fields of an `X { ... }` literal whose type's last path
+/// segment is `expected_type`, as (name, value) pairs.  Shorthand
+/// fields (`{ x }`) are rejected: a declarations record names what it
+/// declares.
+fn record_fields<'e>(
+    expr: &'e Expr,
+    expected_type: &'static str,
+) -> Result<Vec<(&'e str, &'e Expr)>, ArchParseError> {
+    let ExprKind::Record { path, fields, .. } = &expr.kind else {
+        return Err(ArchParseError::InvalidValue {
+            field: expected_type.to_string(),
+            expected: "record literal `Type { field: value, ... }`",
+        });
+    };
+    let type_name = path
+        .segments
+        .iter()
+        .filter_map(|s| match s {
+            verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
+            _ => None,
+        })
+        .next_back()
+        .unwrap_or("");
+    if type_name != expected_type {
+        return Err(ArchParseError::UnknownVariant {
+            kind: "record type",
+            value: type_name.to_string(),
+        });
+    }
+    fields
+        .iter()
+        .map(|init| match &init.value {
+            verum_common::Maybe::Some(v) => Ok((init.name.name.as_str(), v)),
+            verum_common::Maybe::None => Err(ArchParseError::InvalidValue {
+                field: init.name.name.as_str().to_string(),
+                expected: "explicit `field: value` (no shorthand in declarations)",
+            }),
+        })
+        .collect()
+}
+
+/// Parse `Purpose { role, k_min, v_min, e_min }` (spec §14.6).
+fn parse_purpose(expr: &Expr) -> Result<Purpose, ArchParseError> {
+    let mut role: Option<String> = None;
+    let mut k_min: Option<CveThresholdK> = None;
+    let mut v_min: Option<CveThresholdV> = None;
+    let mut e_min: Option<CveThresholdE> = None;
+    for (name, value) in record_fields(expr, "Purpose")? {
+        match name {
+            "role" => role = Some(parse_text_value(value, "role")?),
+            "k_min" => k_min = Some(parse_unit_variant(value, "CveThresholdK")?),
+            "v_min" => v_min = Some(parse_unit_variant(value, "CveThresholdV")?),
+            "e_min" => e_min = Some(parse_unit_variant(value, "CveThresholdE")?),
+            other => {
+                return Err(ArchParseError::UnknownField {
+                    name: other.to_string(),
+                    suggestion: None,
+                });
+            }
+        }
+    }
+    let missing = |field: &'static str| ArchParseError::MissingRequired { field };
+    Ok(Purpose {
+        role: role.ok_or(missing("role"))?,
+        k_min: k_min.ok_or(missing("k_min"))?,
+        v_min: v_min.ok_or(missing("v_min"))?,
+        e_min: e_min.ok_or(missing("e_min"))?,
+    })
+}
+
+/// Parse a fixpoint-class value in the surface AP-040 itself suggests:
+/// `fixpoint_class_banach()` / `_tarski()` / `_adamek()` /
+/// `_custom_fixpoint("citation")` — the in-language smart constructors
+/// from `core/architecture/types.vr`, mapped to their kernel twins.
+fn parse_fixpoint_class(expr: &Expr) -> Result<FixpointClass, ArchParseError> {
+    let Some((callee, arg)) = callee_view(expr, "fixpoint_class") else {
+        return Err(ArchParseError::InvalidValue {
+            field: "fixpoint_class".to_string(),
+            expected: "fixpoint_class_banach() / _tarski() / _adamek() / _custom_fixpoint(\"citation\")",
+        });
+    };
+    let last = callee.split('.').next_back().unwrap_or(&callee);
+    match last.trim_start_matches("fixpoint_class_") {
+        "banach" => Ok(FixpointClass::banach()),
+        "tarski" => Ok(FixpointClass::tarski()),
+        "adamek" => Ok(FixpointClass::adamek()),
+        "custom_fixpoint" => {
+            let citation = arg.ok_or(ArchParseError::MissingRequired { field: "citation" })?;
+            Ok(FixpointClass::custom_fixpoint(parse_text_value(
+                citation, "citation",
+            )?))
+        }
+        other => Err(ArchParseError::UnknownVariant {
+            kind: "FixpointClass",
+            value: other.to_string(),
+        }),
+    }
+}
+
+/// Parse `SelfReferenceWitness { operator, fixed_point, fixpoint_class }`
+/// (spec §16 — the AP-040 discharge witness).
+fn parse_self_reference(expr: &Expr) -> Result<SelfReferenceWitness, ArchParseError> {
+    let mut operator: Option<String> = None;
+    let mut fixed_point: Option<String> = None;
+    let mut fixpoint_class: Option<FixpointClass> = None;
+    for (name, value) in record_fields(expr, "SelfReferenceWitness")? {
+        match name {
+            "operator" => operator = Some(parse_text_value(value, "operator")?),
+            "fixed_point" => fixed_point = Some(parse_text_value(value, "fixed_point")?),
+            "fixpoint_class" => fixpoint_class = Some(parse_fixpoint_class(value)?),
+            other => {
+                return Err(ArchParseError::UnknownField {
+                    name: other.to_string(),
+                    suggestion: None,
+                });
+            }
+        }
+    }
+    let missing = |field: &'static str| ArchParseError::MissingRequired { field };
+    Ok(SelfReferenceWitness {
+        operator: operator.ok_or(missing("operator"))?,
+        fixed_point: fixed_point.ok_or(missing("fixed_point"))?,
+        fixpoint_class: fixpoint_class.ok_or(missing("fixpoint_class"))?,
+    })
+}
+
+/// Parse `declarations: ShapeDeclarations { ... }` — the optional
+/// CVE-architecture spec declarations (§14.6 purpose, §1.5 substrate,
+/// §4.5 anchoring, §2.3.0 executability sense, §16 self-reference).
+///
+/// `Shape.declarations` has carried this data since the CVE-AH band
+/// landed, the anti-pattern auto-fixes tell authors to WRITE the
+/// field, and 74 core/ headers do — but the parser never learned it,
+/// so every one of those headers died with `UnknownField` the moment
+/// the ATS-V phase ran on a user path (T0834).
+fn parse_declarations(expr: &Expr) -> Result<ShapeDeclarations, ArchParseError> {
+    let mut decls = ShapeDeclarations::empty();
+    for (name, value) in record_fields(expr, "ShapeDeclarations")? {
+        match name {
+            "purpose" => decls.purpose = parse_maybe(value, "purpose", parse_purpose)?,
+            "substrate" => {
+                decls.substrate = parse_maybe(value, "substrate", |e| {
+                    parse_unit_variant(e, "CognitiveSubstrate")
+                })?;
+            }
+            "anchoring" => {
+                decls.anchoring = parse_maybe(value, "anchoring", |e| {
+                    parse_unit_variant(e, "FormalAnchoring")
+                })?;
+            }
+            "e_sense" => {
+                decls.e_sense = parse_maybe(value, "e_sense", |e| {
+                    parse_unit_variant(e, "ExecutabilitySense")
+                })?;
+            }
+            "self_reference" => {
+                decls.self_reference =
+                    parse_maybe(value, "self_reference", parse_self_reference)?;
+            }
+            other => {
+                return Err(ArchParseError::UnknownField {
+                    name: other.to_string(),
+                    suggestion: None,
+                });
+            }
+        }
+    }
+    Ok(decls)
+}
+
+// =============================================================================
 // @bridge_tier(from: Tier, to: Tier) — auxiliary typed attribute
 // =============================================================================
 
@@ -1166,6 +1432,201 @@ mod tests {
             }) => assert_eq!(value, "BogusFoundation"),
             other => panic!("expected UnknownVariant, got {:?}", other),
         }
+    }
+
+    fn string_lit(s: &str) -> Expr {
+        Expr::new(
+            ExprKind::Literal(Literal::new(
+                LiteralKind::Text(StringLit::Regular(s.into())),
+                span(),
+            )),
+            span(),
+        )
+    }
+
+    fn method_call(receiver: Expr, method: &str, args: Vec<Expr>) -> Expr {
+        Expr::new(
+            ExprKind::MethodCall {
+                receiver: Heap::new(receiver),
+                method: Ident::new(method, span()),
+                type_args: List::new(),
+                args: List::from(args),
+            },
+            span(),
+        )
+    }
+
+    fn record_expr(type_name: &str, fields: Vec<(&str, Expr)>) -> Expr {
+        let inits = fields
+            .into_iter()
+            .map(|(name, value)| verum_ast::expr::FieldInit {
+                attributes: List::new(),
+                name: Ident::new(name, span()),
+                value: verum_common::Maybe::Some(value),
+                span: span(),
+            })
+            .collect::<Vec<_>>();
+        Expr::new(
+            ExprKind::Record {
+                path: Path::new(
+                    List::from(vec![PathSegment::Name(Ident::new(type_name, span()))]),
+                    span(),
+                ),
+                fields: List::from(inits),
+                base: verum_common::Maybe::None,
+            },
+            span(),
+        )
+    }
+
+    /// The exact shape 74 core/ headers write: this is the corpus
+    /// surface, in miniature, and the parser must take ALL of it.
+    fn corpus_declarations_expr() -> Expr {
+        let some = |inner: Expr| method_call(name_path_expr("Maybe"), "Some", vec![inner]);
+        record_expr(
+            "ShapeDeclarations",
+            vec![
+                (
+                    "purpose",
+                    some(record_expr(
+                        "Purpose",
+                        vec![
+                            // The corpus spells the role both bare and
+                            // with `.to_text()`; use the wrapped form
+                            // here so the harder spelling is the one
+                            // pinned.
+                            (
+                                "role",
+                                method_call(string_lit("cache protocol"), "to_text", vec![]),
+                            ),
+                            ("k_min", dotted_path_expr(&["CveThresholdK", "FullWitness"])),
+                            (
+                                "v_min",
+                                dotted_path_expr(&["CveThresholdV", "NamedCertification"]),
+                            ),
+                            (
+                                "e_min",
+                                dotted_path_expr(&["CveThresholdE", "StructurallyReady"]),
+                            ),
+                        ],
+                    )),
+                ),
+                (
+                    "substrate",
+                    some(dotted_path_expr(&[
+                        "CognitiveSubstrate",
+                        "AnalyticDecompositional",
+                    ])),
+                ),
+                (
+                    "anchoring",
+                    some(dotted_path_expr(&["FormalAnchoring", "CurryHowardLawvere"])),
+                ),
+                (
+                    "e_sense",
+                    some(dotted_path_expr(&[
+                        "ExecutabilitySense",
+                        "StructuralReadiness",
+                    ])),
+                ),
+                (
+                    "self_reference",
+                    dotted_path_expr(&["Maybe", "None"]),
+                ),
+            ],
+        )
+    }
+
+    #[test]
+    fn parse_declarations_takes_the_corpus_surface() {
+        let args = vec![named_arg("declarations", corpus_declarations_expr())];
+        let shape = parse_arch_module(&args).expect(
+            "the declarations field the auto-fixes promote and 74 core/ headers write must parse",
+        );
+        let decls = shape.declarations.expect("declarations carried onto Shape");
+        let purpose = decls.purpose.expect("purpose");
+        assert_eq!(purpose.role, "cache protocol");
+        assert_eq!(purpose.k_min, CveThresholdK::FullWitness);
+        assert_eq!(purpose.v_min, CveThresholdV::NamedCertification);
+        assert_eq!(purpose.e_min, CveThresholdE::StructurallyReady);
+        assert_eq!(
+            decls.substrate,
+            Some(CognitiveSubstrate::AnalyticDecompositional)
+        );
+        assert_eq!(decls.anchoring, Some(FormalAnchoring::CurryHowardLawvere));
+        assert_eq!(decls.e_sense, Some(ExecutabilitySense::StructuralReadiness));
+        assert_eq!(decls.self_reference, None);
+    }
+
+    #[test]
+    fn parse_declarations_rejects_unknown_record_field() {
+        let expr = record_expr("ShapeDeclarations", vec![("porpoise", string_lit("x"))]);
+        let err = parse_arch_module(&[named_arg("declarations", expr)]).unwrap_err();
+        assert!(
+            matches!(err, ArchParseError::UnknownField { ref name, .. } if name == "porpoise"),
+            "unknown declaration fields stay errors, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn parse_declarations_rejects_unknown_variant() {
+        let expr = record_expr(
+            "ShapeDeclarations",
+            vec![(
+                "substrate",
+                method_call(
+                    name_path_expr("Maybe"),
+                    "Some",
+                    vec![dotted_path_expr(&["CognitiveSubstrate", "Nonexistent"])],
+                ),
+            )],
+        );
+        let err = parse_arch_module(&[named_arg("declarations", expr)]).unwrap_err();
+        assert!(
+            matches!(err, ArchParseError::UnknownVariant { kind, ref value } if kind == "CognitiveSubstrate" && value == "Nonexistent"),
+            "an unknown enum variant is an error, not a default, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn parse_declarations_takes_a_self_reference_witness() {
+        let expr = record_expr(
+            "ShapeDeclarations",
+            vec![(
+                "self_reference",
+                method_call(
+                    name_path_expr("Maybe"),
+                    "Some",
+                    vec![record_expr(
+                        "SelfReferenceWitness",
+                        vec![
+                            ("operator", string_lit("core.meta.op")),
+                            ("fixed_point", string_lit("core.meta.fix")),
+                            (
+                                "fixpoint_class",
+                                Expr::new(
+                                    ExprKind::Call {
+                                        func: Heap::new(name_path_expr("fixpoint_class_banach")),
+                                        type_args: List::new(),
+                                        args: List::new(),
+                                    },
+                                    span(),
+                                ),
+                            ),
+                        ],
+                    )],
+                ),
+            )],
+        );
+        let shape = parse_arch_module(&[named_arg("declarations", expr)])
+            .expect("the AP-040 discharge surface must parse");
+        let witness = shape
+            .declarations
+            .and_then(|d| d.self_reference)
+            .expect("witness carried");
+        assert_eq!(witness.operator, "core.meta.op");
+        assert_eq!(witness.fixed_point, "core.meta.fix");
+        assert_eq!(witness.fixpoint_class, FixpointClass::banach());
     }
 
     #[test]
