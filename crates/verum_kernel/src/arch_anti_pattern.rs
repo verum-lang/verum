@@ -895,20 +895,25 @@ pub fn check_cve_incomplete(shape: &Shape) -> Option<AntiPatternViolation> {
 // Stratum admissibility — separate from main 10 anti-patterns
 // =============================================================================
 
-/// Separate check: `MsfsStratum::LAbs` is NOT a runtime-enforced
-/// anti-pattern (it's structurally impossible per AFN-T α).
-/// Checking it here as a sanity net: any cog that somehow ends
-/// up declaring `LAbs` is flagged. Reuses MsfsStratum's
+/// THE stratum-admissibility rule: a cog declaring `LAbs` violates
+/// AFN-T α (MSFS Theorem 5.1 — `L_Abs` is empty) and is flagged as
+/// AP-011 `AbsoluteBoundaryAttempt`, the code whose own doc reads
+/// "stratum = LAbs (AFN-T α violation)".  Reuses MsfsStratum's
 /// `is_admissible()` predicate.
+///
+/// This is the ONLY place the rule lives — the composition path
+/// (`arch_composition::compose_shapes` rule 4) calls this function
+/// rather than restating it.  It used to emit AP-005 FoundationDrift
+/// "for now", which contradicted the code's own catalog entry, the
+/// in-language twin (`core/architecture/types.vr` — "Any cog claiming
+/// LAbs triggers AP-011"), and the kernel↔.vr alignment roster all at
+/// once (T0834).
 pub fn check_stratum_admissible(shape: &Shape) -> Option<AntiPatternViolation> {
     if shape.stratum.is_admissible() {
         return None;
     }
- // Re-use AP-005 FoundationDrift code for now since it shares the
- // semantic class "structurally impossible cross-stratum
- // composition"; future evolution may give LAbs its own code.
     Some(AntiPatternViolation {
-        code: AntiPatternCode::FoundationDrift,
+        code: AntiPatternCode::AbsoluteBoundaryAttempt,
         severity: Severity::Error,
         summary: format!("Inadmissible MSFS stratum: {}", shape.stratum.tag()),
         human_message: "MSFS Theorem 5.1 (AFN-T α) proves L_Abs is empty. \
@@ -2716,11 +2721,18 @@ mod tests {
     }
 
     #[test]
-    fn stratum_admissible_rejects_l_abs() {
+    fn stratum_admissible_rejects_l_abs_as_ap_011() {
         let mut shape = Shape::default_for_unannotated();
         shape.stratum = MsfsStratum::LAbs;
-        let v = check_stratum_admissible(&shape);
-        assert!(v.is_some());
+        let v = check_stratum_admissible(&shape).expect("LAbs must be flagged");
+        // The CODE is part of the contract: AP-011 is the catalog
+        // entry whose own doc reads "stratum = LAbs (AFN-T α
+        // violation)", and the in-language twin
+        // (core/architecture/types.vr) promises exactly this code.
+        // This pin exists because the check shipped emitting AP-005
+        // FoundationDrift "for now" and nothing noticed (T0834).
+        assert_eq!(v.code, AntiPatternCode::AbsoluteBoundaryAttempt);
+        assert_eq!(v.severity, Severity::Error);
     }
 
     #[test]

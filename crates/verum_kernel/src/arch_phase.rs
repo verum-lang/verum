@@ -462,11 +462,14 @@ mod tests {
         let report = run_arch_phase(&[("escape_attempt".to_string(), &args)]);
         assert!(!report.is_load_bearing());
         assert!(report.total_violations() >= 1);
- // Anti-pattern catalog has both stratum_admissible (uses
- // FoundationDrift code as proxy) AND
- // AbsoluteBoundaryAttempt — at least one fires.
+        // Declaring LAbs is diagnosed as AP-011 AbsoluteBoundaryAttempt
+        // — the specific code is the contract (T0834 acceptance).
         let by_code = report.violations_by_code();
-        assert!(!by_code.is_empty());
+        assert!(
+            by_code.contains_key("ATS-V-AP-011"),
+            "LAbs must surface as AP-011, got {:?}",
+            by_code,
+        );
     }
 
     #[test]

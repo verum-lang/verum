@@ -167,20 +167,14 @@ pub fn compose(a: &Shape, b: &Shape) -> CompositionResult {
         }
     }
 
-    // Rule 4: stratum admissibility.  Both must be admissible AND
-    // the meet must NOT be LAbs.
-    if !a.stratum.is_admissible() || !b.stratum.is_admissible() {
-        violations.push(AntiPatternViolation {
-            code: AntiPatternCode::AbsoluteBoundaryAttempt,
-            severity: Severity::Error,
-            summary: "Composition involves inadmissible MSFS stratum (LAbs)".to_string(),
-            human_message: "MSFS Theorem 5.1 (AFN-T α) proves L_Abs is empty. \
-                            Neither side of a composition may declare stratum = LAbs."
-                .to_string(),
-            auto_fix_suggestion: Some(
-                "Choose stratum from {LFnd, LCls, LClsTop} on both sides.".into(),
-            ),
-        });
+    // Rule 4: stratum admissibility — both sides must be admissible.
+    // THE rule lives in `check_stratum_admissible` (AP-011); this is
+    // its composition surface, one violation per inadmissible side,
+    // never a restatement of the rule.
+    for side in [a, b] {
+        if let Some(v) = crate::arch_anti_pattern::check_stratum_admissible(side) {
+            violations.push(v);
+        }
     }
 
     if !violations.is_empty() {
