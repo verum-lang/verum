@@ -1055,22 +1055,27 @@ fn pin_red_team_closure_axioms_present() {
 #[test]
 fn pin_mod_re_exports_full_surface() {
     let vr = read_vr("mod.vr");
+    // Sibling-relative spelling (`mount .types.{`) is the correct
+    // one: `mount super.types.{...}` resolved to `core.types` — a
+    // real directory that declares none of the ATS-V surface — and
+    // was fixed to the dot-form in T0805.  This pin once asserted the
+    // `super.` spelling, i.e. the bug.
     let expected_modules = [
-        "super.types",
-        "super.anti_patterns",
-        "super.composition",
-        "super.corpus",
-        "super.phase",
-        "super.parse",
-        "super.mtac",
-        "super.counterfactual",
-        "super.adjunction",
-        "super.yoneda",
+        "types",
+        "anti_patterns",
+        "composition",
+        "corpus",
+        "phase",
+        "parse",
+        "mtac",
+        "counterfactual",
+        "adjunction",
+        "yoneda",
     ];
     for m in &expected_modules {
         assert!(
-            vr.contains(m),
-            "core/architecture/mod.vr does not re-export {} — full ATS-V surface must be visible from `core.architecture.mod`",
+            vr.contains(&format!("mount .{m}.{{")),
+            "core/architecture/mod.vr does not re-export sibling module `{}` — full ATS-V surface must be visible from `core.architecture.mod`",
             m,
         );
     }
