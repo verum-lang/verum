@@ -368,6 +368,16 @@ impl CorpusBackend for CoqCorpusBackend {
             content.push_str(&format!("(* @verify({}) *)\n", strat));
         }
         content.push('\n');
+        // The translator renders Verum Int as Coq `Z`, and the first
+        // full roundtrip matrix (T0838) measured every non-trivial
+        // theorem dying at line one with "The reference Z was not
+        // found": the statement used the integers and the file never
+        // imported them. `From Coq` spelling per the replay emitter —
+        // native for coq 8.x, deprecated-alias on Rocq >= 9.
+        content.push_str(
+            "From Coq Require Import ZArith.\n\
+             Open Scope Z_scope.\n\n",
+        );
         // Statement-level export — type structure varies by whether
         // the AST translator (#140 / MSFS-L4.7) successfully rendered
         // the proposition into Coq syntax:
