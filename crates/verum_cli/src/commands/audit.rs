@@ -5269,7 +5269,23 @@ fn audit_cross_format_roundtrip_inner(
                 "checker_backend": backend_label,
                 "roundtrips": rows,
             });
-            println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+            let rendered = serde_json::to_string_pretty(&payload).unwrap();
+            println!("{rendered}");
+            // The bundle (`--bundle` run_gate) reads this gate's report
+            // from <report_dir>/cross-format-roundtrip.json. The JSON
+            // branch used to print the payload and write NOTHING — the
+            // bundle then stubbed the gate as report_readable=false on
+            // every run since the bundle landed. Emit to both surfaces:
+            // stdout for CI logs, the file for the bundle.
+            let summary_path = report_dir.join("cross-format-roundtrip.json");
+            let _ = std::fs::create_dir_all(&report_dir);
+            if let Err(e) = std::fs::write(&summary_path, &rendered) {
+                eprintln!(
+                    "warning: could not write {} ({e}) — the bundle will \
+                     record report_readable=false for this gate",
+                    summary_path.display()
+                );
+            }
         }
     }
 
