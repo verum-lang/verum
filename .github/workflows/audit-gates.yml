@@ -113,16 +113,28 @@ jobs:
             | sh -s -- -y --default-toolchain leanprover/lean4:v4.29.1
           echo "$HOME/.elan/bin" >> $GITHUB_PATH
 
-      - name: Cache cargo + Lake
+      - name: Cache cargo
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-            verification/external/lean/.lake
-          key: cargo-lean-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'verification/external/lean/lakefile.toml') }}
-          restore-keys: cargo-lean-${{ runner.os }}-
+          key: cargo-audit-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-audit-${{ runner.os }}-
+
+      # The .lake cache is keyed on the Lean SOURCES, separately from
+      # cargo: bundled together and keyed only on Cargo.lock+lakefile,
+      # a .lake built in the era when ReferenceChecker.lean did not
+      # compile kept being restored, and lake failed the build against
+      # stale artefacts while the same command built clean from scratch
+      # (measured on 0cfff93ee — local green, CI "build failed"). No
+      # restore-keys: a source change means a cold, honest lake build.
+      - name: Cache Lake build
+        uses: actions/cache@v4
+        with:
+          path: verification/external/lean/.lake
+          key: lake-${{ runner.os }}-${{ hashFiles('verification/external/lean/lean-toolchain', 'verification/external/lean/lakefile.toml', 'verification/external/lean/**/*.lean') }}
 
       - name: Fetch prebuilt LLVM
         uses: ./.github/actions/fetch-llvm
@@ -204,16 +216,28 @@ jobs:
         if: steps.cache-isabelle.outputs.cache-hit == 'true' || steps.install-isabelle.outputs.available == 'true'
         run: echo "/opt/Isabelle2025-2/bin" >> $GITHUB_PATH
 
-      - name: Cache cargo + Lake
+      - name: Cache cargo
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-            verification/external/lean/.lake
-          key: cargo-lean-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'verification/external/lean/lakefile.toml') }}
-          restore-keys: cargo-lean-${{ runner.os }}-
+          key: cargo-audit-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-audit-${{ runner.os }}-
+
+      # The .lake cache is keyed on the Lean SOURCES, separately from
+      # cargo: bundled together and keyed only on Cargo.lock+lakefile,
+      # a .lake built in the era when ReferenceChecker.lean did not
+      # compile kept being restored, and lake failed the build against
+      # stale artefacts while the same command built clean from scratch
+      # (measured on 0cfff93ee — local green, CI "build failed"). No
+      # restore-keys: a source change means a cold, honest lake build.
+      - name: Cache Lake build
+        uses: actions/cache@v4
+        with:
+          path: verification/external/lean/.lake
+          key: lake-${{ runner.os }}-${{ hashFiles('verification/external/lean/lean-toolchain', 'verification/external/lean/lakefile.toml', 'verification/external/lean/**/*.lean') }}
 
       - name: Fetch prebuilt LLVM
         uses: ./.github/actions/fetch-llvm
