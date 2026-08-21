@@ -72,10 +72,9 @@ jobs:
       # #![feature(pattern)]); let rustup pick it up, just make sure the
       # cross target's std is present.
       - name: Install Rust toolchain (nightly per rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
-        with:
-          targets: ${{ matrix.triple }}
-          components: rustfmt, clippy, rust-src
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.triple }}
 
       # MSVC env (cl/link/LIB/INCLUDE) is needed by cc/cmake build scripts
       # (z3-sys bundled) and by lld-link for the CRT import libs.
