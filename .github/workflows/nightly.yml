@@ -40,7 +40,32 @@ jobs:
 
       - name: Run VCS L0+L1+L2+L3 full
         working-directory: vcs
-        run: make test PARALLEL=4
+        # The vtest RUNNER process (not a test child) has died SIGSEGV
+        # ~50 min into this sweep (T0837). It does not reproduce on
+        # darwin at either scale (full sweep clean, RSS peak 4.7 GB),
+        # so the crash must be caught where it lives: cores on, and
+        # the autopsy step below turns a corpse into a backtrace.
+        run: |
+          ulimit -c unlimited
+          sudo sysctl -w kernel.core_pattern="$PWD/core.%e.%p" >/dev/null
+          make test PARALLEL=4
+
+      - name: Backtrace any core dump (T0837)
+        if: failure()
+        working-directory: vcs
+        run: |
+          shopt -s nullglob
+          cores=(core.*)
+          if [ ${#cores[@]} -eq 0 ]; then
+            echo "no core files — the failure was not a runner crash"
+            exit 0
+          fi
+          sudo apt-get install -y gdb >/dev/null 2>&1 || true
+          for c in "${cores[@]}"; do
+            echo "=== backtrace for $c ==="
+            gdb -batch -ex "thread apply all bt" \
+              ../target/release/vtest "$c" 2>&1 | tail -80
+          done
 
       - name: Cross-tier differential (all combos)
         working-directory: vcs
