@@ -334,6 +334,16 @@ pub struct Translator<'ctx> {
     /// reflection-axiom's declaration and the call-site's
     /// declaration as distinct (conflicting) symbols.
     callee_signatures: std::cell::RefCell<std::collections::HashMap<String, (Vec<String>, String)>>,
+    /// Record type → field → (sort, named type when the field's own
+    /// type is opaque). Lets a field access translate to the SAME
+    /// projection symbol, at the SAME sort, that the reflection
+    /// translator emits — see `field_projection`.
+    record_fields: std::cell::RefCell<
+        std::collections::HashMap<String, std::collections::HashMap<String, (String, Option<String>)>>,
+    >,
+    /// Value name → its named type. Populated from the declared
+    /// parameter types of the obligation under proof.
+    value_types: std::cell::RefCell<std::collections::HashMap<String, String>>,
 
     /// Variant-type registry — variant type name → constructor
     /// names. Used by the quantifier translator to emit
@@ -379,6 +389,8 @@ impl<'ctx> Translator<'ctx> {
             length_constants: std::cell::RefCell::new(std::collections::BTreeSet::new()),
             pending_axioms: std::cell::RefCell::new(Vec::new()),
             callee_signatures: std::cell::RefCell::new(std::collections::HashMap::new()),
+            record_fields: std::cell::RefCell::new(std::collections::HashMap::new()),
+            value_types: std::cell::RefCell::new(std::collections::HashMap::new()),
             variant_registry: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
@@ -392,6 +404,8 @@ impl<'ctx> Translator<'ctx> {
             length_constants: std::cell::RefCell::new(std::collections::BTreeSet::new()),
             pending_axioms: std::cell::RefCell::new(Vec::new()),
             callee_signatures: std::cell::RefCell::new(std::collections::HashMap::new()),
+            record_fields: std::cell::RefCell::new(std::collections::HashMap::new()),
+            value_types: std::cell::RefCell::new(std::collections::HashMap::new()),
             variant_registry: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
@@ -446,6 +460,20 @@ impl<'ctx> Translator<'ctx> {
         for (k, v) in src.iter() {
             dst.insert(k.clone(), v.clone());
         }
+        // Record layouts and value types travel too: a quantifier
+        // body may project a field of a bound or captured value.
+        {
+            let rs = other.record_fields.borrow();
+            let mut rd = self.record_fields.borrow_mut();
+            for (k, v) in rs.iter() {
+                rd.insert(k.clone(), v.clone());
+            }
+            let vs = other.value_types.borrow();
+            let mut vd = self.value_types.borrow_mut();
+            for (k, v) in vs.iter() {
+                vd.insert(k.clone(), v.clone());
+            }
+        }
         // Propagate variant registry too — the quantifier bound
         // variable might be typed as a variant.
         let vs = other.variant_registry.borrow();
@@ -453,6 +481,95 @@ impl<'ctx> Translator<'ctx> {
         for (k, v) in vs.iter() {
             vd.insert(k.clone(), v.clone());
         }
+    }
+
+    /// Register a record type's field layout.
+    ///
+    /// Without it a field access has no way to know the field's sort
+    /// and every field became an `Int` constant — which is why a
+    /// `Bool` field could not be used as a proposition at all
+    /// ("expected boolean expression"), and why the goal side and the
+    /// reflection side named the same field differently and never met.
+    pub fn register_record_type(
+        &self,
+        type_name: &str,
+        fields: std::collections::HashMap<String, (String, Option<String>)>,
+    ) {
+        self.record_fields
+            .borrow_mut()
+            .insert(type_name.to_string(), fields);
+    }
+
+    /// Register the named type of a value in scope (a parameter of the
+    /// obligation under proof).
+    pub fn register_value_type(&self, value: &str, type_name: &str) {
+        self.value_types
+            .borrow_mut()
+            .insert(value.to_string(), type_name.to_string());
+    }
+
+    /// The named type of a member-bearing expression: a registered
+    /// value carries its declared type, a field carries the record's
+    /// field type.
+    fn member_type_name(&self, expr: &Expr) -> Option<String> {
+        match &expr.kind {
+            ExprKind::Path(p) => {
+                let id = p.as_ident()?;
+                self.value_types.borrow().get(id.as_str()).cloned()
+            }
+            ExprKind::Field { expr: obj, field } => {
+                let t = self.member_type_name(obj)?;
+                self.record_fields
+                    .borrow()
+                    .get(&t)?
+                    .get(field.as_str())?
+                    .1
+                    .clone()
+            }
+            ExprKind::Paren(inner) => self.member_type_name(inner),
+            _ => None,
+        }
+    }
+
+    /// Translate `recv.field` as an application of the canonical
+    /// projection symbol, when the receiver's record layout is known.
+    ///
+    /// The symbol name and sorts are byte-identical to what
+    /// `expr_to_smtlib` emits for the same access, so a reflected
+    /// definition and a goal mentioning the same field meet on one
+    /// symbol instead of two.
+    fn field_projection(&self, recv: &Expr, field_name: &str) -> Option<Dynamic> {
+        let type_name = self.member_type_name(recv)?;
+        let (field_sort, _) = self
+            .record_fields
+            .borrow()
+            .get(&type_name)?
+            .get(field_name)?
+            .clone();
+        let recv_dyn = self.translate_expr(recv).ok()?;
+        // The domain is the receiver's ACTUAL sort, not the sort its
+        // declared type would suggest. Assuming the latter is how this
+        // produced an ill-typed application: `FuncDecl::apply` returns
+        // a null AST for one, and the z3 wrapper unwraps it — an
+        // abort, from inside a translator whose whole contract is to
+        // refuse rather than to guess. Taking the sort from the value
+        // makes the application well-typed by construction; the type
+        // NAME still comes from the layout, so the symbol matches the
+        // one the reflection side emits.
+        let recv_sort = recv_dyn.get_sort();
+        let ret_sort = match field_sort.as_str() {
+            "Bool" => Sort::bool(),
+            "Int" => Sort::int(),
+            "Real" => Sort::real(),
+            "String" => Sort::string(),
+            other => Sort::uninterpreted(Symbol::String(other.to_string())),
+        };
+        let decl = FuncDecl::new(
+            Symbol::String(crate::solver_symbols::projection(&type_name, field_name)),
+            &[&recv_sort],
+            &ret_sort,
+        );
+        Some(decl.apply(&[&recv_dyn]))
     }
 
     /// Register a variant type on the translator so quantifier
@@ -1086,7 +1203,19 @@ impl<'ctx> Translator<'ctx> {
                             let int_var = Int::new_const(key.as_str());
                             return Ok(Dynamic::from_ast(&int_var));
                         }
-                        // Regular record-field access.
+                        // Regular record-field access. When the
+                        // receiver's layout is registered, this is a
+                        // projection at the field's DECLARED sort,
+                        // named exactly as the reflection translator
+                        // names it. The legacy Int constant below is
+                        // the fallback for a receiver whose type the
+                        // obligation never declared — it cannot know
+                        // the sort, and guessing Int there is what
+                        // made a Bool field unusable as a proposition.
+                        if let Some(projected) = self.field_projection(receiver_stripped, field_name)
+                        {
+                            return Ok(projected);
+                        }
                         let key = format!(
                             "field_{}__{}",
                             verum_ast::pretty::format_expr(receiver_stripped),
@@ -3420,7 +3549,9 @@ impl<'ctx> Translator<'ctx> {
                     // sort and different types never collide.
                     other => {
                         let sort =
-                            Sort::uninterpreted(Symbol::String(format!("Verum!{}", other)));
+                            Sort::uninterpreted(Symbol::String(
+                                crate::solver_symbols::opaque_sort(other),
+                            ));
                         // Dynamic::new_const — Datatype::new_const
                         // asserts SortKind::Datatype and panics on an
                         // uninterpreted sort.
@@ -3455,7 +3586,7 @@ impl<'ctx> Translator<'ctx> {
             // value comes back UNKNOWN — the verifier says it cannot
             // tell, which is the truth.
             other => {
-                let sort_name = format!("Verum!{}", Self::type_kind_tag(other));
+                let sort_name = crate::solver_symbols::opaque_sort(Self::type_kind_tag(other));
                 let sort = Sort::uninterpreted(Symbol::String(sort_name));
                 // Dynamic::new_const, NOT Datatype::new_const: the sort is
                 // uninterpreted, and z3's Datatype constructor asserts its

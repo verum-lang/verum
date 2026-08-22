@@ -412,7 +412,7 @@ impl RefinementReflectionRegistry {
             }
             // Member-projection symbols and opaque-sort names are
             // declared by the entry's own `aux_decls` — never open.
-            if tok.starts_with("Verum!") {
+            if crate::solver_symbols::is_solver_symbol(tok) {
                 continue;
             }
             return Some(tok.to_string());

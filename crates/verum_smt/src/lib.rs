@@ -130,6 +130,7 @@ pub mod expr_to_smtlib; // Expr → SMT-LIB2 translator for reflection
 /// to be closed in-kernel before falling through to Z3.
 pub mod industrial_fast_path;
 pub mod proof_carrying_code;
+pub mod solver_symbols; // the names Verum values carry inside a solver
 pub mod refinement_reflection; // Liquid-style: user fns as SMT axioms // PCC: serializable proof bundles attached to VBC
 // Cross-target proof-replay framework (SmtCertificate →
 // Coq/Lean/Agda/Dedukti/Metamath tactic chains). Trait +

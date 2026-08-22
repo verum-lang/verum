@@ -1438,6 +1438,25 @@ pub fn verify_proof_body_with_aliases_and_graph(
     let proof_start = Instant::now();
     let theorem_name = theorem.name.name.clone();
 
+    // Declared parameter types, so a goal that projects a field of a
+    // parameter can resolve the receiver's record layout. Without
+    // this the translator has no type for `w` in `w.flag` and falls
+    // back to an Int constant — which a Bool field cannot be.
+    for p in &theorem.params {
+        if let FunctionParamKind::Regular { pattern, ty, .. } = &p.kind {
+            if let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind {
+                if let (_, Some(type_name)) =
+                    verum_smt::expr_to_smtlib::type_to_sort_and_name(ty)
+                {
+                    engine.register_value_type(
+                        name.name.clone(),
+                        Text::from(type_name.as_str()),
+                    );
+                }
+            }
+        }
+    }
+
     // Extract the proof body; axioms (no proof) are accepted elsewhere
     let proof_body = match &theorem.proof {
         Maybe::Some(body) => body,

@@ -450,10 +450,10 @@ pub fn expr_to_smtlib_env(
                     description: format!("unknown field {}.{}", tn, field.name.as_str()),
                 })?;
             let recv = expr_to_smtlib_env(obj, env, aux)?;
-            let tsort = format!("Verum!{}", tn);
+            let tsort = crate::solver_symbols::opaque_sort(&tn);
             note_sort(aux, &tsort);
             note_sort(aux, &fsort);
-            let proj = format!("Verum!proj!{}!{}", tn, field.name.as_str());
+            let proj = crate::solver_symbols::projection(&tn, field.name.as_str());
             note_decl(
                 aux,
                 format!("(declare-fun {} ({}) {})", proj, tsort, fsort),
@@ -499,13 +499,13 @@ pub fn expr_to_smtlib_env(
                 });
             }
             let recv = expr_to_smtlib_env(receiver, env, aux)?;
-            let tsort = format!("Verum!{}", tn);
+            let tsort = crate::solver_symbols::opaque_sort(&tn);
             note_sort(aux, &tsort);
             note_sort(aux, &sig.ret_sort);
             for s in &sig.arg_sorts {
                 note_sort(aux, s);
             }
-            let m = format!("Verum!method!{}!{}", tn, method.name.as_str());
+            let m = crate::solver_symbols::method(&tn, method.name.as_str());
             let mut decl_args = vec![tsort];
             decl_args.extend(sig.arg_sorts.iter().cloned());
             note_decl(
@@ -609,14 +609,17 @@ pub fn type_to_sort_and_name(ty: &verum_ast::ty::Type) -> (String, Option<String
             match tn {
                 "Bool" | "bool" => ("Bool".to_string(), None),
                 "Text" | "String" | "str" => ("String".to_string(), None),
-                other => (format!("Verum!{}", other), Some(other.to_string())),
+                other => (
+                    crate::solver_symbols::opaque_sort(other),
+                    Some(other.to_string()),
+                ),
             }
         }
         // Everything else is opaque under its SHAPE tag — the same
         // authority (`translate::type_kind_tag`) the Z3-AST side's
         // catch-all consults, so both spell the same sort.
         other => (
-            format!("Verum!{}", crate::translate::type_kind_tag(other)),
+            crate::solver_symbols::opaque_sort(crate::translate::type_kind_tag(other)),
             None,
         ),
     }

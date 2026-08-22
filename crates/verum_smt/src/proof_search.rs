@@ -2356,6 +2356,13 @@ pub struct ProofSearchEngine {
     /// unfold user-defined functions during proof search.
     /// See `crate::refinement_reflection`.
     reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry,
+    /// Record layouts, pushed into every translator this engine builds.
+    record_layouts: std::collections::HashMap<
+        Text,
+        std::collections::HashMap<String, (String, Option<String>)>,
+    >,
+    /// Declared types of values in scope, same lifetime as the layouts.
+    value_type_bindings: std::collections::HashMap<Text, Text>,
 
     /// Callee signatures for functions that aren't in the
     /// reflection registry but still need a sort-correct
@@ -2436,6 +2443,8 @@ impl ProofSearchEngine {
             current_depth: 0,
             incomplete_proofs: List::new(),
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
+            record_layouts: std::collections::HashMap::new(),
+            value_type_bindings: std::collections::HashMap::new(),
             callee_signatures: std::collections::HashMap::new(),
             module_axioms: Vec::new(),
             variant_map: std::collections::HashMap::new(),
@@ -2455,6 +2464,8 @@ impl ProofSearchEngine {
             current_depth: 0,
             incomplete_proofs: List::new(),
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
+            record_layouts: std::collections::HashMap::new(),
+            value_type_bindings: std::collections::HashMap::new(),
             callee_signatures: std::collections::HashMap::new(),
             module_axioms: Vec::new(),
             variant_map: std::collections::HashMap::new(),
@@ -2511,6 +2522,23 @@ impl ProofSearchEngine {
         ret_sort: Text,
     ) {
         self.callee_signatures.insert(name, (param_sorts, ret_sort));
+    }
+
+    /// Register a record type's field layout, so a goal that projects
+    /// a field translates at the field's declared sort and under the
+    /// same symbol the reflection side uses.
+    pub fn register_record_type(
+        &mut self,
+        type_name: Text,
+        fields: std::collections::HashMap<String, (String, Option<String>)>,
+    ) {
+        self.record_layouts.insert(type_name, fields);
+    }
+
+    /// Register the declared type of a value in scope, so member
+    /// access on it can be resolved.
+    pub fn register_value_type(&mut self, value: Text, type_name: Text) {
+        self.value_type_bindings.insert(value, type_name);
     }
 
     /// Register a module-level axiom expression that will be
@@ -4988,6 +5016,16 @@ impl ProofSearchEngine {
                 param_sorts,
                 r.as_str().to_string(),
             );
+        }
+
+        // Record layouts and value types: without them a field
+        // access has no sort and every field became an Int constant,
+        // so a Bool field could not even be stated as a goal.
+        for (type_name, fields) in &self.record_layouts {
+            translator.register_record_type(type_name.as_str(), fields.clone());
+        }
+        for (value, type_name) in &self.value_type_bindings {
+            translator.register_value_type(value.as_str(), type_name.as_str());
         }
 
         // Push the variant registry into the translator so

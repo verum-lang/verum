@@ -1,0 +1,95 @@
+//! The names Verum values carry inside a solver.
+//!
+//! Two translators put Verum expressions in front of a solver, and
+//! they must agree on every symbol they both can emit:
+//!
+//! * [`crate::translate`] builds Z3 AST for the GOAL under proof;
+//! * [`crate::expr_to_smtlib`] builds SMT-LIB text for the DEFINITIONS
+//!   reflected out of pure functions.
+//!
+//! A goal mentioning `w.flag` and a reflected body mentioning `w.flag`
+//! only meet if both spell that projection the same way, at the same
+//! sort. When each translator carried its own `format!`, they did not:
+//! the goal side named every field `field_w__flag` at sort `Int` while
+//! the reflection side named it `Verum!proj!W!flag` at the field's
+//! declared sort. Neither was "wrong" in isolation — they simply
+//! described different symbols, so a definition could never reach the
+//! goal that needed it, and a `Bool` field could not be a proposition
+//! at all.
+//!
+//! This module is the single authority for those names. Two spellings
+//! of one concept is not a style question here; it is the difference
+//! between a proof that closes and one that cannot.
+
+/// The uninterpreted sort standing for a named Verum type the solver
+/// does not model — a user record, a protocol, a container reaching
+/// the translator through its head.
+///
+/// Opaque **under its own name**, so two values of one type share a
+/// sort and two different types never collide. The alternative that
+/// was in the code — substituting `Int` — is worse than refusing:
+/// over a list-shaped `Int`, `xs.len() > 0` is arithmetic that means
+/// nothing, and a solver will happily "prove" it.
+pub fn opaque_sort(type_name: &str) -> String {
+    format!("Verum!{}", type_name)
+}
+
+/// The projection symbol for a record field: `w.flag` becomes an
+/// application of `projection("W", "flag")` to the receiver.
+///
+/// The solver learns nothing about the field's VALUE — only that one
+/// receiver projects to one value. That is exactly what a reflected
+/// body and a hypothesis about the same receiver need in order to
+/// meet.
+pub fn projection(type_name: &str, field: &str) -> String {
+    format!("Verum!proj!{}!{}", type_name, field)
+}
+
+/// The symbol for a protocol or inherent method call:
+/// `c.cond().holds()` becomes nested applications of
+/// `method("Candidate", "cond")` and `method("CondFS", "holds")`.
+pub fn method(type_name: &str, method_name: &str) -> String {
+    format!("Verum!method!{}!{}", type_name, method_name)
+}
+
+/// True for a symbol this module minted. The reflection registry's
+/// closure pass uses it: a projection is declared by the entry that
+/// uses it, so it is never an "undeclared symbol" that would poison
+/// the module's SMT block.
+pub fn is_solver_symbol(token: &str) -> bool {
+    token.starts_with("Verum!")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shapes are pinned because two translators depend on them
+    /// byte for byte. A change here is a change to both.
+    #[test]
+    fn symbol_shapes_are_pinned() {
+        assert_eq!(opaque_sort("Witness"), "Verum!Witness");
+        assert_eq!(projection("Witness", "flag"), "Verum!proj!Witness!flag");
+        assert_eq!(method("Candidate", "cond"), "Verum!method!Candidate!cond");
+    }
+
+    /// Everything this module mints is recognisable as ours, and
+    /// ordinary Verum identifiers are not.
+    #[test]
+    fn minted_symbols_are_recognisable() {
+        assert!(is_solver_symbol(&opaque_sort("T")));
+        assert!(is_solver_symbol(&projection("T", "f")));
+        assert!(is_solver_symbol(&method("T", "m")));
+        assert!(!is_solver_symbol("is_sorted"));
+        assert!(!is_solver_symbol("path_Color.Red"));
+    }
+
+    /// Distinct members never collide: the separator is not a
+    /// character a Verum identifier may contain, so `proj!T!a_b` and
+    /// `proj!T_a!b` stay distinct.
+    #[test]
+    fn distinct_members_get_distinct_symbols() {
+        assert_ne!(projection("T", "a_b"), projection("T_a", "b"));
+        assert_ne!(projection("T", "f"), method("T", "f"));
+    }
+}

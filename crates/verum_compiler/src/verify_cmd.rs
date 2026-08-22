@@ -529,6 +529,7 @@ impl<'s> VerifyCommand<'s> {
                 &module_hints,
                 &reflection_registry,
                 &callee_signatures_for_module,
+                &reflection_env.record_fields,
                 &variant_axioms,
                 &variant_registry,
             );
@@ -570,6 +571,10 @@ impl<'s> VerifyCommand<'s> {
         module_hints: &verum_smt::proof_search::HintsDatabase,
         reflection_registry: &verum_smt::refinement_reflection::RefinementReflectionRegistry,
         callee_signatures_for_module: &[(Text, Vec<Text>, Text)],
+        record_layouts: &std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, (String, Option<String>)>,
+        >,
         variant_axioms: &[Expr],
         variant_registry: &[(Text, Vec<Text>)],
     ) -> VerificationResult {
@@ -622,6 +627,16 @@ impl<'s> VerifyCommand<'s> {
         // fail with "exists body must be a boolean expression".
         for (name, ps, r) in callee_signatures_for_module {
             proof_engine.register_callee_signature(name.clone(), ps.clone(), r.clone());
+        }
+
+        // Record layouts, from the same module scan the reflection
+        // env uses. A goal that projects a record field needs the
+        // field's declared sort; without it every field translated as
+        // an Int constant, so a `Bool` field could not be stated as a
+        // proposition at all, and the goal side named the field
+        // differently from the reflection side so the two never met.
+        for (type_name, fields) in record_layouts.iter() {
+            proof_engine.register_record_type(Text::from(type_name.as_str()), fields.clone());
         }
 
         // Register variant-disjointness axioms (computed once per
