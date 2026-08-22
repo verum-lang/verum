@@ -1524,6 +1524,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // degraded to a const-zero stub (unresolved target — typically an
             // un-monomorphized generic protocol dispatch).  Warning by default;
             // hard error under VERUM_STRICT_MONO=1.
+            super::error::write_degrade_report(&self.config.module_name);
             super::error::check_no_unresolved_generic_calls()?;
             // The reachable-name set is per-lowering-run state — clear
             // it so a later lower_module in the same process starts

@@ -43,6 +43,7 @@ pub mod dap;
 pub mod deps;
 pub mod arch;
 pub mod diagnose;
+pub mod diff_tiers;
 pub mod doc;
 /// `verum doc-render` subcommand — auto-paper generator. Walks
 /// every `.vr` file, projects @theorem / @lemma / @corollary /

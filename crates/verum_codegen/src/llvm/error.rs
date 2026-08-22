@@ -724,6 +724,35 @@ pub fn record_unresolved_generic_call(caller: &str, detail: String) {
 }
 
 /// Drain the unresolved-generic-call registry.
+/// Append this lowering run's degrade counts to the JSON-lines file
+/// named by `VERUM_DEGRADE_REPORT` (one object per module). The
+/// semantic-debt ratchet (confirmed direction «идея 7», 2026-08-22)
+/// reads these: every RTS fallback / const-zero degrade is a place
+/// static resolution gave up, and the budget for them only goes DOWN.
+pub fn write_degrade_report(module_name: &str) {
+    let Ok(path) = std::env::var("VERUM_DEGRADE_REPORT") else {
+        return;
+    };
+    let (total, reachable) = match unresolved_generic_call_registry().lock() {
+        Ok(g) => (g.len(), g.iter().filter(|c| c.reachable).count()),
+        Err(_) => return,
+    };
+    let line = format!(
+        "{{\"module\":\"{}\",\"unresolved_generic_calls\":{},\"reachable\":{}}}\n",
+        module_name.replace('"', "'"),
+        total,
+        reachable,
+    );
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
 pub fn take_unresolved_generic_calls() -> Vec<UnresolvedGenericCall> {
     if let Ok(mut g) = unresolved_generic_call_registry().lock() {
         std::mem::take(&mut *g)

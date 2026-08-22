@@ -694,6 +694,18 @@ enum Commands {
         all: bool,
     },
 
+    /// Judge tier identity: run a program under BOTH tiers
+    /// (interpreter and AOT) and refuse to call different answers
+    /// anything but a defect. Exit 3 on divergence.
+    #[command(name = "diff-tiers", display_order = 607)]
+    DiffTiers {
+        /// The `.vr` program to judge.
+        file: std::path::PathBuf,
+        /// Machine-readable report (append-only schema).
+        #[clap(long)]
+        json: bool,
+    },
+
     /// Inspect / export / clean crash reports
     #[command(display_order = 601)]
     #[clap(subcommand)]
@@ -3534,6 +3546,8 @@ fn run_command(cli: Cli) -> Result<()> {
             commands::doc::execute(open, document_private_items, no_deps, format.as_str())
         }
         Commands::Clean { all } => commands::clean::execute(all),
+        Commands::DiffTiers { file, json } => commands::diff_tiers::execute(&file, json)
+            .map_err(|e| CliError::Custom(e.to_string())),
         Commands::Diagnose(cmd) => commands::diagnose::execute(cmd),
         Commands::Cache(cmd) => commands::cache::execute(cmd),
         Commands::Doctor(args) => commands::doctor::execute(args),
