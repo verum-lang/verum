@@ -1230,36 +1230,82 @@ fn verify_proof_steps_accumulating_ctx(
 
             // ---- Tactic: bare tactic application ----
             ProofStepKind::Tactic(tactic_expr) => {
-                // A standalone tactic step operates on whatever the current
-                // "ambient" goal is. Since structured proofs thread goals
-                // implicitly, we create a trivial goal and execute the tactic
-                // for its side-effects on the hypothesis context.
-                //
-                // Soundness: this step can neither close nor corrupt the
-                // theorem's goal — the primary goal is discharged
-                // independently by the conclusion tactic / implicit `Auto`
-                // closer in `verify_structured_proof`, and an `admit`/`sorry`
-                // written here is surfaced through the AST-level
-                // `ProofStructure::contains_unsafe` walk, not through this
-                // execution.
                 let tactic = convert_tactic(tactic_expr);
-                let trivial_goal = ProofGoal::with_hypotheses(
-                    Expr::new(
-                        ExprKind::Literal(verum_ast::Literal::bool(true, step.span)),
-                        step.span,
-                    ),
-                    hypotheses.clone(),
-                );
 
-                // Execute the tactic; we don't require it to close the goal
-                // (it may just transform hypotheses or simplify).
-                let _ = engine.execute_tactic(&tactic, &trivial_goal);
-
-                verified.push(VerifiedStep {
-                    description: Text::from(format!("tactic {:?}", tactic_expr)),
-                    tactic_used: format!("{:?}", tactic_expr).into(),
-                    duration: step_start.elapsed(),
-                });
+                // A bare `apply lemma(args…);` step is natural-deduction
+                // forward reasoning: instantiate the lemma, discharge its
+                // premises against the current hypotheses, and add its
+                // CONCLUSION to the hypothesis set — i.e. it is `have
+                // <instantiated conclusion> by apply`. Before this arm
+                // did that, the step executed against a placeholder
+                // `true` goal and its result was DISCARDED (`let _ =`),
+                // so an applied axiom contributed nothing and the
+                // ensures goal failed with the axiom's ensures VERBATIM
+                // in hand (T0842 trace, d1_repro).
+                let apply_parts = match &tactic {
+                    ProofTactic::Apply { lemma } => {
+                        Some((lemma.clone(), List::<Text>::new()))
+                    }
+                    ProofTactic::ApplyWith { lemma, args } => {
+                        Some((lemma.clone(), args.clone()))
+                    }
+                    _ => None,
+                };
+                if let Some((lemma, args)) = apply_parts {
+                    let (premises, conclusion) = engine
+                        .instantiate_lemma(&lemma, &args)
+                        .map_err(|e| ProofVerificationError::StepFailed {
+                            step: format!("apply {}", lemma).into(),
+                            reason: format!("{}", e).into(),
+                        })?;
+                    // Each premise is an obligation HERE, against the
+                    // hypotheses accumulated so far.
+                    let premise_goals: List<ProofGoal> = premises
+                        .iter()
+                        .map(|p| ProofGoal::with_hypotheses(p.clone(), hypotheses.clone()))
+                        .collect();
+                    discharge_subgoals(
+                        engine,
+                        smt_ctx,
+                        &premise_goals,
+                        &format!("apply {} premises", lemma),
+                    )?;
+                    // The instantiated conclusion is now a fact.
+                    hypotheses.push(conclusion.clone());
+                    verified.push(VerifiedStep {
+                        description: Text::from(format!(
+                            "apply {} ⟹ {}",
+                            lemma,
+                            format_expr(&conclusion)
+                        )),
+                        tactic_used: format!("{:?}", tactic_expr).into(),
+                        duration: step_start.elapsed(),
+                    });
+                } else {
+                    // Other standalone tactics operate on whatever the
+                    // ambient goal is. Structured proofs thread goals
+                    // implicitly, so execute against a trivial goal;
+                    // soundness: this can neither close nor corrupt the
+                    // theorem's goal — the primary goal is discharged
+                    // independently by the conclusion tactic / implicit
+                    // `Auto` closer in `verify_structured_proof`, and an
+                    // `admit`/`sorry` written here is surfaced through
+                    // the AST-level `ProofStructure::contains_unsafe`
+                    // walk, not through this execution.
+                    let trivial_goal = ProofGoal::with_hypotheses(
+                        Expr::new(
+                            ExprKind::Literal(verum_ast::Literal::bool(true, step.span)),
+                            step.span,
+                        ),
+                        hypotheses.clone(),
+                    );
+                    let _ = engine.execute_tactic(&tactic, &trivial_goal);
+                    verified.push(VerifiedStep {
+                        description: Text::from(format!("tactic {:?}", tactic_expr)),
+                        tactic_used: format!("{:?}", tactic_expr).into(),
+                        duration: step_start.elapsed(),
+                    });
+                }
             }
         }
     }
@@ -2736,16 +2782,40 @@ pub fn register_module_lemmas(
     use verum_ast::ItemKind;
     use verum_smt::proof_search::LemmaHint;
 
+    let param_names = |params: &List<verum_ast::decl::FunctionParam>| -> List<Text> {
+        params
+            .iter()
+            .filter_map(|p| match &p.kind {
+                FunctionParamKind::Regular { pattern, .. } => match &pattern.kind {
+                    verum_ast::pattern::PatternKind::Ident { name, .. } => {
+                        Some(name.name.clone())
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
+    };
+
     for item in &module.items {
-        let (name, proposition) = match &item.kind {
-            ItemKind::Theorem(t) | ItemKind::Lemma(t) | ItemKind::Corollary(t) => {
-                (t.name.name.clone(), t.proposition.as_ref().clone())
-            }
-            ItemKind::Axiom(a) => (a.name.name.clone(), a.proposition.as_ref().clone()),
+        let (name, proposition, params) = match &item.kind {
+            ItemKind::Theorem(t) | ItemKind::Lemma(t) | ItemKind::Corollary(t) => (
+                t.name.name.clone(),
+                t.proposition.as_ref().clone(),
+                param_names(&t.params),
+            ),
+            ItemKind::Axiom(a) => (
+                a.name.name.clone(),
+                a.proposition.as_ref().clone(),
+                param_names(&a.params),
+            ),
             _ => continue,
         };
 
         let hint = LemmaHint {
+            // Declaration-order parameter names: the authority for
+            // positional instantiation of `apply lemma(args…)`.
+            params,
             name: name.clone(),
             priority: 500,
             lemma: Heap::new(proposition),

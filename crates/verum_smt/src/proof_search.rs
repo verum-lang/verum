@@ -37,6 +37,58 @@ use verum_common::{Heap, List, Map, Maybe, Text};
 use crate::context::Context;
 use crate::option_to_maybe;
 use crate::translate::Translator;
+
+/// Compact one-line rendering of an expression for `VERUM_TRACE_PROOFS`
+/// lines (T0842). Diagnostic-only: favours readability over
+/// completeness — an unrenderable node prints as `?`.
+pub(crate) fn render_expr_for_trace(e: &Expr) -> String {
+    match &e.kind {
+        ExprKind::Literal(l) => format!("{:?}", l.kind),
+        ExprKind::Path(p) => p
+            .as_ident()
+            .map(|i| i.as_str().to_string())
+            .unwrap_or_else(|| "?path".to_string()),
+        ExprKind::Binary { op, left, right } => format!(
+            "({} {} {})",
+            render_expr_for_trace(left),
+            op.as_str(),
+            render_expr_for_trace(right)
+        ),
+        ExprKind::Unary { op, expr } => {
+            format!("({:?} {})", op, render_expr_for_trace(expr))
+        }
+        ExprKind::Call { func, args, .. } => format!(
+            "{}({})",
+            render_expr_for_trace(func),
+            args.iter()
+                .map(render_expr_for_trace)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => format!(
+            "{}.{}({})",
+            render_expr_for_trace(receiver),
+            method.name.as_str(),
+            args.iter()
+                .map(render_expr_for_trace)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        ExprKind::Field { expr, field } => {
+            format!("{}.{}", render_expr_for_trace(expr), field.name.as_str())
+        }
+        ExprKind::Paren(inner) => format!("({})", render_expr_for_trace(inner)),
+        ExprKind::Forall { body, .. } => {
+            format!("forall …. {}", render_expr_for_trace(body))
+        }
+        _ => "?".to_string(),
+    }
+}
 use crate::verify::{ProofResult, VerificationCost, VerificationError, VerificationResult};
 
 // ==================== Hints Database ====================
@@ -530,6 +582,7 @@ impl HintsDatabase {
         self.register_lemma(
             "_ + _ = _".into(),
             LemmaHint {
+                params: List::new(),
                 name: "plus_comm".into(),
                 priority: 100,
                 lemma: Heap::new(Self::create_arithmetic_lemma("a + b = b + a")),
@@ -538,6 +591,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "plus_comm".into(),
             LemmaHint {
+                params: List::new(),
                 name: "plus_comm".into(),
                 priority: 100,
                 lemma: Heap::new(Self::create_arithmetic_lemma("a + b = b + a")),
@@ -547,6 +601,7 @@ impl HintsDatabase {
         self.register_lemma(
             "_ * _ = _".into(),
             LemmaHint {
+                params: List::new(),
                 name: "mult_comm".into(),
                 priority: 100,
                 lemma: Heap::new(Self::create_arithmetic_lemma("a * b = b * a")),
@@ -555,6 +610,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "mult_comm".into(),
             LemmaHint {
+                params: List::new(),
                 name: "mult_comm".into(),
                 priority: 100,
                 lemma: Heap::new(Self::create_arithmetic_lemma("a * b = b * a")),
@@ -565,6 +621,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "plus_assoc".into(),
             LemmaHint {
+                params: List::new(),
                 name: "plus_assoc".into(),
                 priority: 95,
                 lemma: Heap::new(Self::create_arithmetic_lemma("(a + b) + c = a + (b + c)")),
@@ -574,6 +631,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "mult_assoc".into(),
             LemmaHint {
+                params: List::new(),
                 name: "mult_assoc".into(),
                 priority: 95,
                 lemma: Heap::new(Self::create_arithmetic_lemma("(a * b) * c = a * (b * c)")),
@@ -584,6 +642,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "plus_zero".into(),
             LemmaHint {
+                params: List::new(),
                 name: "plus_zero".into(),
                 priority: 110,
                 lemma: Heap::new(Self::create_arithmetic_lemma("a + 0 = a")),
@@ -593,6 +652,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "mult_one".into(),
             LemmaHint {
+                params: List::new(),
                 name: "mult_one".into(),
                 priority: 110,
                 lemma: Heap::new(Self::create_arithmetic_lemma("a * 1 = a")),
@@ -602,6 +662,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "mult_zero".into(),
             LemmaHint {
+                params: List::new(),
                 name: "mult_zero".into(),
                 priority: 110,
                 lemma: Heap::new(Self::create_arithmetic_lemma("a * 0 = 0")),
@@ -612,6 +673,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "mult_dist_plus".into(),
             LemmaHint {
+                params: List::new(),
                 name: "mult_dist_plus".into(),
                 priority: 90,
                 lemma: Heap::new(Self::create_arithmetic_lemma("a * (b + c) = a * b + a * c")),
@@ -624,6 +686,7 @@ impl HintsDatabase {
         self.register_lemma(
             "!(_ && _)".into(),
             LemmaHint {
+                params: List::new(),
                 name: "demorgan_and".into(),
                 priority: 105,
                 lemma: Heap::new(Self::create_boolean_lemma("!(a && b) = !a || !b")),
@@ -632,6 +695,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "demorgan_and".into(),
             LemmaHint {
+                params: List::new(),
                 name: "demorgan_and".into(),
                 priority: 105,
                 lemma: Heap::new(Self::create_boolean_lemma("!(a && b) = !a || !b")),
@@ -641,6 +705,7 @@ impl HintsDatabase {
         self.register_lemma(
             "!(_ || _)".into(),
             LemmaHint {
+                params: List::new(),
                 name: "demorgan_or".into(),
                 priority: 105,
                 lemma: Heap::new(Self::create_boolean_lemma("!(a || b) = !a && !b")),
@@ -649,6 +714,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "demorgan_or".into(),
             LemmaHint {
+                params: List::new(),
                 name: "demorgan_or".into(),
                 priority: 105,
                 lemma: Heap::new(Self::create_boolean_lemma("!(a || b) = !a && !b")),
@@ -659,6 +725,7 @@ impl HintsDatabase {
         self.register_lemma(
             "_ && _ = _".into(),
             LemmaHint {
+                params: List::new(),
                 name: "and_properties".into(),
                 priority: 90,
                 lemma: Heap::new(Self::create_boolean_lemma("a && b = b && a")),
@@ -668,6 +735,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "and_comm".into(),
             LemmaHint {
+                params: List::new(),
                 name: "and_comm".into(),
                 priority: 100,
                 lemma: Heap::new(Self::create_boolean_lemma("a && b = b && a")),
@@ -677,6 +745,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "or_comm".into(),
             LemmaHint {
+                params: List::new(),
                 name: "or_comm".into(),
                 priority: 100,
                 lemma: Heap::new(Self::create_boolean_lemma("a || b = b || a")),
@@ -686,6 +755,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "and_true".into(),
             LemmaHint {
+                params: List::new(),
                 name: "and_true".into(),
                 priority: 110,
                 lemma: Heap::new(Self::create_boolean_lemma("a && true = a")),
@@ -695,6 +765,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "or_false".into(),
             LemmaHint {
+                params: List::new(),
                 name: "or_false".into(),
                 priority: 110,
                 lemma: Heap::new(Self::create_boolean_lemma("a || false = a")),
@@ -704,6 +775,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "double_negation".into(),
             LemmaHint {
+                params: List::new(),
                 name: "double_negation".into(),
                 priority: 120,
                 lemma: Heap::new(Self::create_boolean_lemma("!!a = a")),
@@ -715,6 +787,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "modus_ponens".into(),
             LemmaHint {
+                params: List::new(),
                 name: "modus_ponens".into(),
                 priority: 150,
                 lemma: Heap::new(Self::create_implication_lemma("a && (a => b) => b")),
@@ -724,6 +797,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "implication_trans".into(),
             LemmaHint {
+                params: List::new(),
                 name: "implication_trans".into(),
                 priority: 130,
                 lemma: Heap::new(Self::create_implication_lemma(
@@ -737,6 +811,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "eq_refl".into(),
             LemmaHint {
+                params: List::new(),
                 name: "eq_refl".into(),
                 priority: 200,
                 lemma: Heap::new(Self::create_equality_lemma("a = a")),
@@ -746,6 +821,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "eq_symm".into(),
             LemmaHint {
+                params: List::new(),
                 name: "eq_symm".into(),
                 priority: 140,
                 lemma: Heap::new(Self::create_equality_lemma("a = b => b = a")),
@@ -755,6 +831,7 @@ impl HintsDatabase {
         self.register_named_lemma(
             "eq_trans".into(),
             LemmaHint {
+                params: List::new(),
                 name: "eq_trans".into(),
                 priority: 140,
                 lemma: Heap::new(Self::create_equality_lemma("(a = b) && (b = c) => (a = c)")),
@@ -1637,6 +1714,13 @@ pub struct LemmaHint {
     pub priority: u32,
     /// The lemma expression
     pub lemma: Heap<Expr>,
+    /// Declared parameter names, in DECLARATION order — the authority
+    /// for positional instantiation of `apply lemma(a, b)`. The
+    /// lemma expression's free variables cannot serve: their
+    /// occurrence order inside the proposition need not match the
+    /// declaration order. Empty for hints registered without a decl
+    /// (stdlib pattern hints).
+    pub params: List<Text>,
 }
 
 /// Tactic hint for goal transformation
@@ -3005,7 +3089,36 @@ impl ProofSearchEngine {
     ///
     /// Execute a tactic to transform a proof goal into zero or more subgoals.
     /// Returns empty list if the goal is fully discharged, or a list of remaining subgoals.
+    ///
+    /// T0842: under `VERUM_TRACE_PROOFS` every execution reports the
+    /// tactic, the goal it faced, and its outcome — an unproved goal
+    /// must be explainable from the trace alone.
     pub fn execute_tactic(
+        &mut self,
+        tactic: &ProofTactic,
+        goal: &ProofGoal,
+    ) -> Result<List<ProofGoal>, ProofError> {
+        let result = self.execute_tactic_inner(tactic, goal);
+        if std::env::var_os("VERUM_TRACE_PROOFS").is_some() {
+            match &result {
+                Ok(subgoals) => eprintln!(
+                    "[proof-trace] tactic {:?} on `{}` -> OK, {} subgoal(s)",
+                    tactic,
+                    render_expr_for_trace(&goal.goal),
+                    subgoals.len(),
+                ),
+                Err(e) => eprintln!(
+                    "[proof-trace] tactic {:?} on `{}` -> ERR {:?}",
+                    tactic,
+                    render_expr_for_trace(&goal.goal),
+                    e,
+                ),
+            }
+        }
+        result
+    }
+
+    fn execute_tactic_inner(
         &mut self,
         tactic: &ProofTactic,
         goal: &ProofGoal,
@@ -5197,76 +5310,126 @@ impl ProofSearchEngine {
     /// `apply lemma_name with [arg1, arg2]` substitutes the first N forall-bound
     /// variables with the given arguments, then checks if the instantiated conclusion
     /// matches the current goal.
+    /// Resolve a lemma by name and instantiate it POSITIONALLY with
+    /// `args`: the substitution targets the lemma's DECLARED
+    /// parameters (`LemmaHint::params`, declaration order), falling
+    /// back to its forall-bound variables for pattern-style hints.
+    /// Returns the instantiated `(premises, conclusion)`.
+    ///
+    /// The ONE carrier for apply-style instantiation: `try_apply_with`
+    /// (goal-directed apply) and the structured-proof bare-`apply`
+    /// step (hypothesis-accumulating apply) both go through here.
+    pub fn instantiate_lemma(
+        &self,
+        lemma_name: &Text,
+        args: &List<Text>,
+    ) -> Result<(List<Expr>, Expr), ProofError> {
+        let trace = std::env::var_os("VERUM_TRACE_PROOFS").is_some();
+        // Look up the lemma by name (both key spellings).
+        let lemma_key = format!("@name:{}", lemma_name).into();
+        let hint = match self.hints.lemmas.get(&lemma_key) {
+            Maybe::Some(hints) if !hints.is_empty() => hints[0].clone(),
+            _ => match self.hints.lemmas.get(lemma_name) {
+                Maybe::Some(hints) if !hints.is_empty() => hints[0].clone(),
+                _ => {
+                    if trace {
+                        eprintln!(
+                            "[proof-trace] instantiate_lemma `{}`: NOT FOUND in hints database",
+                            lemma_name,
+                        );
+                    }
+                    return Err(ProofError::TacticFailed(
+                        format!("apply: lemma '{}' not found in hints database", lemma_name)
+                            .into(),
+                    ));
+                }
+            },
+        };
+        let lemma_expr = hint.lemma.clone();
+
+        let (premises, conclusion) = Self::extract_lemma_structure(&lemma_expr);
+
+        // Substitution targets: declared parameters first (the decl
+        // order is the calling convention), forall-bound variables as
+        // the fallback for undeclared pattern hints.
+        let targets: List<Text> = if hint.params.is_empty() {
+            Self::collect_forall_vars(&lemma_expr)
+        } else {
+            hint.params.clone()
+        };
+        let mut subst = std::collections::HashMap::new();
+        for (i, arg) in args.iter().enumerate() {
+            if i < targets.len() {
+                subst.insert(targets[i].clone(), arg.clone());
+            }
+        }
+
+        let instantiated_conclusion = Self::substitute_in_expr(&conclusion, &subst);
+        let instantiated_premises: List<Expr> = premises
+            .iter()
+            .map(|p| Self::substitute_in_expr(p, &subst))
+            .collect();
+
+        if trace {
+            eprintln!(
+                "[proof-trace] instantiate_lemma `{}` args={:?} targets={:?}: premises={} conclusion=`{}`",
+                lemma_name,
+                args.iter().map(|a| a.as_str()).collect::<Vec<_>>(),
+                targets.iter().map(|v| v.as_str()).collect::<Vec<_>>(),
+                instantiated_premises.len(),
+                render_expr_for_trace(&instantiated_conclusion),
+            );
+        }
+        Ok((instantiated_premises, instantiated_conclusion))
+    }
+
     fn try_apply_with(
         &mut self,
         lemma_name: &Text,
         args: &List<Text>,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        // Look up the lemma by name
-        let lemma_key = format!("@name:{}", lemma_name).into();
-        let lemma_expr = if let Maybe::Some(lemma_hints) = self.hints.lemmas.get(&lemma_key) {
-            if lemma_hints.is_empty() {
-                return Err(ProofError::TacticFailed(
-                    format!("apply_with: lemma '{}' not found", lemma_name).into(),
-                ));
-            }
-            lemma_hints[0].lemma.clone()
-        } else {
-            // Try direct lookup
-            if let Maybe::Some(lemma_hints) = self.hints.lemmas.get(lemma_name) {
-                if lemma_hints.is_empty() {
-                    return Err(ProofError::TacticFailed(
-                        format!("apply_with: lemma '{}' not found", lemma_name).into(),
-                    ));
-                }
-                lemma_hints[0].lemma.clone()
-            } else {
-                return Err(ProofError::TacticFailed(
-                    format!(
-                        "apply_with: lemma '{}' not found in hints database",
-                        lemma_name
-                    )
-                    .into(),
-                ));
-            }
-        };
-
-        // Extract premises and conclusion, substituting args for forall-bound variables
-        let (premises, conclusion) = Self::extract_lemma_structure(&lemma_expr);
-
-        // Collect forall-bound variables from the lemma
-        let forall_vars = Self::collect_forall_vars(&lemma_expr);
-
-        // Build substitution map from args
-        let mut subst = std::collections::HashMap::new();
-        for (i, arg) in args.iter().enumerate() {
-            if i < forall_vars.len() {
-                subst.insert(forall_vars[i].clone(), arg.clone());
-            }
+        // T0842: an unproved goal must be explainable. Every decision
+        // point of the apply pipeline reports under this filter.
+        let trace = std::env::var_os("VERUM_TRACE_PROOFS").is_some();
+        if trace {
+            eprintln!(
+                "[proof-trace] apply_with lemma=`{}` args={:?} goal=`{}`",
+                lemma_name,
+                args.iter().map(|a| a.as_str()).collect::<Vec<_>>(),
+                render_expr_for_trace(&goal.goal),
+            );
         }
-
-        // Apply substitution to conclusion and try to unify with goal
-        let instantiated_conclusion = Self::substitute_in_expr(&conclusion, &subst);
+        let (premises, instantiated_conclusion) = self.instantiate_lemma(lemma_name, args)?;
 
         // Check if instantiated conclusion matches goal
-        if self
-            .try_unify(&instantiated_conclusion, &goal.goal)
-            .is_err()
-        {
+        if let Err(e) = self.try_unify(&instantiated_conclusion, &goal.goal) {
+            if trace {
+                eprintln!(
+                    "[proof-trace] apply_with UNIFY FAILED: `{}` vs goal `{}`: {:?}",
+                    render_expr_for_trace(&instantiated_conclusion),
+                    render_expr_for_trace(&goal.goal),
+                    e,
+                );
+            }
             return Err(ProofError::TacticFailed(
                 "apply_with: instantiated lemma conclusion does not unify with goal"
                     .to_string()
                     .into(),
             ));
         }
+        if trace {
+            eprintln!(
+                "[proof-trace] apply_with unified; emitting {} premise subgoal(s)",
+                premises.len(),
+            );
+        }
 
-        // Generate subgoals for each premise (also instantiated)
+        // Generate subgoals for each premise (already instantiated)
         let mut subgoals = List::new();
         for premise in &premises {
-            let instantiated_premise = Self::substitute_in_expr(premise, &subst);
             let mut new_goal = goal.clone();
-            new_goal.goal = instantiated_premise;
+            new_goal.goal = premise.clone();
             new_goal.label = Maybe::Some(format!("apply_{}_{}", lemma_name, subgoals.len()).into());
             subgoals.push(new_goal);
         }

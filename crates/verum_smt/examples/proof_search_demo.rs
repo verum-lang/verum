@@ -6,6 +6,7 @@
 //! Run with: cargo run --example proof_search_demo
 
 use std::time::Duration;
+use verum_common::List;
 use verum_ast::{
     expr::{BinOp, Expr, ExprKind},
     literal::{IntLit, Literal, LiteralKind},
@@ -34,6 +35,7 @@ fn main() {
 
     // Add custom hint
     let custom_lemma = LemmaHint {
+        params: List::new(),
         name: "custom_monotonicity".into(),
         priority: 150,
         lemma: Heap::new(create_placeholder_lemma()),
