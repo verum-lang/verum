@@ -94,7 +94,21 @@ load-bearing weight:
   their schemas freeze under «accept old, emit new».
 - **(D) Verify diagnostics name the goal.** E0319 prints the
   goal, its position, and the nearest missing fact — a proof
-  debt one can act on.
+  debt one can act on. Two open (D) items, both found by the
+  first mf-corpus verify (2026-08-22): (D1) *predicate goals
+  over record witnesses await their reducer* — an applied
+  axiom's ensures matching the goal verbatim still leaves the
+  goal unproved (the green class today is primitive
+  refinements, e.g. Int bounds); prime suspects per the code
+  map: requires-hypotheses not asserted into the context as
+  uninterpreted applications after the apply peel, or the goal
+  form gate before try_apply — diagnosis in progress by
+  instrumented replay, and corpora deliberately do NOT work
+  around it with field-level goal forms (a workaround would
+  mask the hypothesis-channel bug from the lint); (D2) *the
+  prover does not explain itself* — proof_search has zero
+  tracing today; minimal tracing lands with the E0319 work so
+  a future «unproved» always names its break point.
 - **(E) Strictness profiles as a gated ladder** declared in
   `verum.toml`: `research` (verify mandatory) →
   `load-bearing` (full L4 bundle mandatory). Semver-like: the
