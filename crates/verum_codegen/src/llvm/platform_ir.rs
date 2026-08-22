@@ -2005,6 +2005,17 @@ impl<'ctx> PlatformIR<'ctx> {
         if let Some(init_fn) = module.get_function("verum_runtime_init") {
             builder.build_call(init_fn, &[], "").or_llvm_err()?;
         }
+        // Static initializers run HERE — after the runtime is up, never
+        // via `llvm.global_ctors`. A dyld-time initializer executes before
+        // `verum_runtime_init` and before the CBGR/TLS bootstrap, so an
+        // initializer that allocates (`Shared.new`) crashes inside dyld's
+        // `findAndRunAllInitializers` (T0837 darwin autopsy). The
+        // interpreter twin (`Interpreter::run_main`) runs the same list
+        // as its first act with the runtime fully constructed; this call
+        // is the Tier-1 image of that ordering.
+        if let Some(static_init) = module.get_function("__verum_static_init") {
+            builder.build_call(static_init, &[], "").or_llvm_err()?;
+        }
 
         // Call verum_main() if it exists (weak symbol)
         let verum_main = module.get_function("verum_main");
@@ -2020,6 +2031,13 @@ impl<'ctx> PlatformIR<'ctx> {
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i32_type.const_zero().into());
+            // Static finalizers before runtime teardown — the mirror of
+            // `__verum_static_init` above, and for the same reason: a
+            // finalizer needs a live runtime, which `llvm.global_dtors`
+            // (image teardown) cannot guarantee.
+            if let Some(static_fini) = module.get_function("__verum_static_fini") {
+                builder.build_call(static_fini, &[], "").or_llvm_err()?;
+            }
             // Cleanup
             if let Some(cleanup_fn) = module.get_function("verum_runtime_cleanup") {
                 builder.build_call(cleanup_fn, &[], "").or_llvm_err()?;

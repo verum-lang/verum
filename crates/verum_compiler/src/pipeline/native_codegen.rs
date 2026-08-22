@@ -853,7 +853,7 @@ impl<'s> CompilationPipeline<'s> {
         // fixups). Disabled by default to prevent non-deterministic
         // SIGSEGV during normal builds.
         let emit_ir = self.session.options().emit_ir || std::env::var("VERUM_DUMP_IR").is_ok();
-        if emit_ir && !lowering.has_arity_collisions() && lowering.skip_body_count() == 0 {
+        if emit_ir && !lowering.has_arity_collisions() {
             let llvm_ir = lowering.get_ir();
             std::fs::write(&ir_path, llvm_ir.as_str().as_bytes())
                 .with_context(|| format!("Failed to write LLVM IR to {}", ir_path.display()))?;
@@ -995,20 +995,19 @@ impl<'s> CompilationPipeline<'s> {
             // elimination) which is safe — it only removes
             // unreachable functions without traversing instruction
             // operands.
-            let has_ir_issues = lowering.has_arity_collisions() || lowering.skip_body_count() > 0;
+            let has_ir_issues = lowering.has_arity_collisions();
 
             // #45: VERUM_STRICT_SIGNATURES=1 (CI) refuses to ship a
-            // module with signature drift.  Arity-collided / skip-body
-            // functions are forward-declared without bodies — the binary
-            // links but the calls resolve to garbage at runtime, and the
-            // degraded tiered pass pipeline masks the drift.  Strict mode
-            // makes the drift a build error so CI catches the class.
+            // module with signature drift.  Arity-collided functions are
+            // forward-declared without bodies — the binary links but the
+            // calls resolve to garbage at runtime, and the degraded
+            // tiered pass pipeline masks the drift.  Strict mode makes
+            // the drift a build error so CI catches the class.
             if has_ir_issues && std::env::var("VERUM_STRICT_SIGNATURES").is_ok() {
                 return Err(anyhow::anyhow!(
                     "signature drift under VERUM_STRICT_SIGNATURES: \
-                     arity_collisions={}, skip_body_functions={}",
+                     arity_collisions={}",
                     lowering.has_arity_collisions(),
-                    lowering.skip_body_count(),
                 ));
             }
 
@@ -1019,17 +1018,16 @@ impl<'s> CompilationPipeline<'s> {
             // selection.
 
             // Conservative degradation: a module carrying arity
-            // collisions or skip-body stubs contains forward-declared
-            // bodies whose instruction lists the function-level passes
-            // must not walk — drop to the always-inline,globaldce
-            // pipeline the pre-flip default used. Deterministic from
-            // the module inputs, so the object cache stays coherent.
+            // collisions contains forward-declared bodies whose
+            // instruction lists the function-level passes must not
+            // walk — drop to the always-inline,globaldce pipeline the
+            // pre-flip default used. Deterministic from the module
+            // inputs, so the object cache stays coherent.
             let passes: String = if has_ir_issues && passes.contains("default<") {
                 tracing::info!(
-                    "  IR issues detected (arity_collisions={}, skip_body={}) — \
+                    "  IR issues detected (arity_collisions={}) — \
                      degrading '{}' to 'always-inline,globaldce' (#94)",
                     lowering.has_arity_collisions(),
-                    lowering.skip_body_count(),
                     passes,
                 );
                 "always-inline,globaldce".to_string()
@@ -1041,10 +1039,9 @@ impl<'s> CompilationPipeline<'s> {
             info!("  Running LLVM passes: {}", passes);
             if std::env::var("VERUM_TRACE_PASSES").is_ok() {
                 eprintln!(
-                    "[verum-passes] running: {} (arity_collisions={}, skip_body={})",
+                    "[verum-passes] running: {} (arity_collisions={})",
                     passes,
                     lowering.has_arity_collisions(),
-                    lowering.skip_body_count(),
                 );
             }
             // **#98 diagnostic**: VERUM_SKIP_ORPHAN_SWEEP=1 disables the

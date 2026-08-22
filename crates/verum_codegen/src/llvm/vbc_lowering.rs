@@ -568,11 +568,6 @@ pub struct VbcToLlvmLowering<'ctx> {
     /// True if any function declarations were arity-suffixed due to name collisions.
     /// When set, IR printing is skipped to avoid LLVM crashes on bitcast wrappers.
     has_arity_collisions: bool,
-    /// Function IDs whose bodies should NOT be lowered because their LLVM function
-    /// has a mismatched signature (from arity collision — the original-named function
-    /// was created for a different arity). These are stdlib functions whose body
-    /// would produce invalid IR if lowered into the wrong-arity LLVM function.
-    skip_body_func_ids: std::collections::HashSet<u32>,
 
     /// DWARF debug info builder (created when config.debug_info is true).
     dibuilder: Option<DebugInfoBuilder<'ctx>>,
@@ -859,7 +854,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             stats: LoweringStats::default(),
             func_name_index: None,
             has_arity_collisions: false,
-            skip_body_func_ids: std::collections::HashSet::new(),
             dibuilder,
             di_compile_unit,
             di_file,
@@ -1041,6 +1035,25 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         }
 
         // Phase 2: Lower function bodies.
+        //
+        // Architectural note (Этап Б): `@device(gpu)` functions
+        // (`is_gpu_only = true`) intentionally lower in BOTH pipelines
+        // for the duration of the hybrid AOT migration:
+        //   * LLVM body  → CPU fallback path used when no GPU device
+        //                  is available at runtime, OR while the host
+        //                  stub generator (Шаг 3 of Этап Б) is not
+        //                  yet wired up.  Without this, a GPU build
+        //                  on a CPU-only host or a build before the
+        //                  MLIR→host-stub linker lands has undefined
+        //                  references at link time.
+        //   * MLIR body  → native GPU compile (linalg/tensor/gpu
+        //                  dialects) → PTX / SPIR-V / Metal artifacts.
+        // Phase 7.5 (hybrid linker) routes runtime calls to whichever
+        // implementation the device-detection layer selects.  Once
+        // Шаг 3 lands, the LLVM body of `is_gpu_only` functions will
+        // collapse to a thin `verum_gpu_launch_kernel(name, args)`
+        // host stub; until then we keep the full LLVM lowering as
+        // the safe fallback.
         // Track which LLVM functions have already been lowered to handle
         // name collisions where multiple VBC functions map to the same LLVM
         // function (e.g., stdlib and user both define `execute_with_retry`).
@@ -1681,11 +1694,12 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             }
         }
 
-        // Phase 3.7: Set internal linkage on all defined functions except verum_main.
-        // Must be done AFTER remove_invalid_functions — Internal declarations
-        // without bodies are invalid LLVM IR. Only verum_main needs External
-        // linkage (called by C runtime entry point). All other functions are
-        // module-internal and can be removed by GlobalDCE if unreferenced.
+        // Phase 3.7: Set internal linkage on all defined functions except
+        // verum_main — Internal DECLARATIONS (no body) are invalid LLVM IR,
+        // so only functions with bodies are demoted below. Only verum_main
+        // needs External linkage (called by the C runtime entry point). All
+        // other functions are module-internal and can be removed by
+        // GlobalDCE if unreferenced.
         {
             let mut func = self.module.get_first_function();
             while let Some(f) = func {
@@ -1810,53 +1824,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Phase 4: Module verification deferred to after GlobalDCE (pipeline.rs).
         // Dead functions from text.vr may have invalid IR that would crash the
         // verifier. GlobalDCE removes them first, then pipeline.rs verifies.
-
-        Ok(())
-    }
-
-    /// Lower a list of pre-decoded VBC functions.
-    ///
-    /// Use this when you have already decoded the VBC functions.
-    pub fn lower_functions(
-        &mut self,
-        vbc_module: &VbcModule,
-        functions: &[VbcFunction],
-    ) -> Result<()> {
-        // Phase 1: Forward declare all functions
-        self.declare_functions(vbc_module)?;
-
-        // Phase 2: Lower function bodies
-        //
-        // Architectural note (Этап Б): `@device(gpu)` functions
-        // (`is_gpu_only = true`) intentionally lower in BOTH pipelines
-        // for the duration of the hybrid AOT migration:
-        //   * LLVM body  → CPU fallback path used when no GPU device
-        //                  is available at runtime, OR while the host
-        //                  stub generator (Шаг 3 of Этап Б) is not
-        //                  yet wired up.  Without this, a GPU build
-        //                  on a CPU-only host or a build before the
-        //                  MLIR→host-stub linker lands has undefined
-        //                  references at link time.
-        //   * MLIR body  → native GPU compile (linalg/tensor/gpu
-        //                  dialects) → PTX / SPIR-V / Metal artifacts.
-        // Phase 7.5 (hybrid linker) routes runtime calls to whichever
-        // implementation the device-detection layer selects.  Once
-        // Шаг 3 lands, the LLVM body of `is_gpu_only` functions will
-        // collapse to a thin `verum_gpu_launch_kernel(name, args)`
-        // host stub; until then we keep the full LLVM lowering as
-        // the safe fallback.
-        for func in functions {
-            self.lower_vbc_function(vbc_module, func)?;
-        }
-
-        // Phase 3: Emit global constructors/destructors
-        self.emit_global_ctors_dtors(vbc_module)?;
-
-        // Phase 3.5: Per-function verification
-        self.remove_invalid_functions();
-
-        // Phase 4: Verify the module
-        self.verify()?;
 
         Ok(())
     }
@@ -2767,9 +2734,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // for the Unit return slot — perfectly valid in interpreter
         // (which reads zero from un-populated regs) but tripping
         // SSA-mode's `InvalidRegister(reg)` Err in AOT.  The
-        // historical workaround was the `skip_body_func_ids` path
-        // (vbc_lowering.rs:3957) which strips the entire body and
-        // emits `ret <zero>` — defeating ALL of the function's perf
+        // historical workaround was a `skip_body_func_ids` path
+        // (since removed) which stripped the entire body and
+        // emitted `ret <zero>` — defeating ALL of the function's perf
         // (it never runs, callers see zero).  Worse, having ANY
         // skip-body function in the module forced the LLVM pipeline
         // to drop from `default<O2>` to `always-inline,globaldce`
@@ -4708,80 +4675,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         declare_fn!("free", ctx.void_type(), &[ptr_type.into()], false);
     }
 
-    fn remove_invalid_functions(&mut self) {
-        // Replace bodies of arity-collided functions with a single
-        // `unreachable` instruction. These functions have mismatched
-        // LLVM signatures from VBC overloading fixups — their original
-        // lowered IR contains instructions with null Type operands
-        // that crash LLVM passes (TypeFinder, SelectionDAG, SinkCast,
-        // InterleavedAccess, etc.). Replacing the body with
-        // `unreachable` gives LLVM a valid (if trivially dead)
-        // function body that all passes can safely handle.
-        //
-
-        // We can't delete these functions because other code may
-        // reference them as call targets — the linker resolves them
-        // to C runtime stubs.
-        let ctx = self.context;
-        let mut replaced = 0usize;
-
-        // Iterate all functions in the module.
-        let mut func = self.module.get_first_function();
-        while let Some(f) = func {
-            let next = f.get_next_function();
-
-            // Only touch functions that have bodies AND are in the
-            // skip set or marked as arity-collided.
-            let fn_name = f.get_name().to_string_lossy().to_string();
-            let is_skip_body = self
-                .skip_body_func_ids
-                .iter()
-                .any(|&id| self.functions.get(&id).map(|fv| *fv == f).unwrap_or(false));
-
-            if is_skip_body && f.count_basic_blocks() > 0 {
-                // Remove all existing basic blocks — their instructions
-                // contain null Type references that crash LLVM codegen.
-                while let Some(bb) = f.get_first_basic_block() {
-                    unsafe {
-                        bb.delete().ok();
-                    }
-                }
-                // Replace with a trivial return stub. `unreachable`
-                // causes LLVM to emit a trap instruction which still
-                // runs InterleavedAccess/SelectionDAG passes. A plain
-                // `ret` is the safest — it generates no machine
-                // instructions that touch memory.
-                let entry = ctx.append_basic_block(f, "entry");
-                let builder = ctx.create_builder();
-                builder.position_at_end(entry);
-                let ret_ty = f.get_type().get_return_type();
-                if let Some(ty) = ret_ty {
-                    // Non-void function: return a zero value.
-                    let zero = ty.const_zero();
-                    let _ = builder.build_return(Some(&zero));
-                } else {
-                    // Void function: return void.
-                    let _ = builder.build_return(None);
-                }
-
-                tracing::debug!(
-                    "Replaced body of {} with unreachable (arity collision stub)",
-                    fn_name
-                );
-                replaced += 1;
-            }
-
-            func = next;
-        }
-
-        if replaced > 0 {
-            tracing::info!(
-                "Replaced {} arity-collided function bodies with unreachable stubs",
-                replaced
-            );
-        }
-    }
-
     /// Remove compiled stdlib functions that use @cfg(target_os=...) dispatch.
     ///
     /// When compiled .vr code uses @cfg to dispatch to platform-specific modules,
@@ -4832,10 +4725,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // optimization.
         //
 
-        // This also skips verification for modules where
-        // `skip_body_func_ids` is non-empty, as those functions have
-        // mismatched signatures that would fail verification.
-        if self.has_arity_collisions || !self.skip_body_func_ids.is_empty() {
+        if self.has_arity_collisions {
             // **VERUM_FORCE_VERIFY=1** — diagnostic override.  Forces LLVM
             // module verification even when we know the IR has issues.
             // Used to locate the EXACT invalid IR that prevents `default<O2>`
@@ -4844,19 +4734,17 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             if std::env::var("VERUM_FORCE_VERIFY").is_ok() {
                 if let Err(e) = self.module.verify() {
                     eprintln!(
-                        "[verum-verify] LLVM verifier reports invalid IR (arity_collisions={}, skip_body={}):\n{}",
+                        "[verum-verify] LLVM verifier reports invalid IR (arity_collisions={}):\n{}",
                         self.has_arity_collisions,
-                        self.skip_body_func_ids.len(),
                         e
                     );
                     return Err(LlvmLoweringError::VerificationFailed(e.to_string().into()));
                 }
-                eprintln!("[verum-verify] LLVM module verified clean despite arity_collisions/skip_body flags");
+                eprintln!("[verum-verify] LLVM module verified clean despite arity_collisions flag");
             }
             tracing::debug!(
-                "Skipping LLVM module verification (arity collisions = {}, skip bodies = {})",
+                "Skipping LLVM module verification (arity collisions = {})",
                 self.has_arity_collisions,
-                self.skip_body_func_ids.len()
             );
             return Ok(());
         }
@@ -4870,12 +4758,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
     /// Check if any function declarations had arity collisions.
     pub fn has_arity_collisions(&self) -> bool {
         self.has_arity_collisions
-    }
-
-    /// Count of functions whose bodies were not lowered due to
-    /// signature mismatch (arity collision).
-    pub fn skip_body_count(&self) -> usize {
-        self.skip_body_func_ids.len()
     }
 
     pub fn get_ir(&self) -> Text {
@@ -4896,9 +4778,20 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Emit global constructors and destructors from VBC module metadata.
     ///
-    /// Static variable initializers are wrapped in a single `__verum_static_init` function
-    /// that calls each init function in order. This function is registered as a global
-    /// constructor so it runs before main().
+    /// Static variable initializers are wrapped in a single
+    /// `__verum_static_init` function that calls each init function in
+    /// order; destructors likewise into `__verum_static_fini`.
+    ///
+    /// Neither is registered in `llvm.global_ctors`/`llvm.global_dtors`.
+    /// dyld runs those at image load — BEFORE `verum_runtime_init` and the
+    /// CBGR/TLS bootstrap — so an initializer that allocates (`Shared.new`
+    /// in a `@thread_local static` init) crashed inside
+    /// `dyld4::Loader::findAndRunAllInitializers` (T0837 darwin autopsy).
+    /// Instead the emitted `main` (platform_ir::emit_main_entry) calls
+    /// `__verum_static_init` right after `verum_runtime_init` and
+    /// `__verum_static_fini` right before `verum_runtime_cleanup`,
+    /// mirroring the interpreter (`run_main` runs `global_ctors` as its
+    /// first act, with the runtime fully constructed).
     fn emit_global_ctors_dtors(&mut self, vbc_module: &VbcModule) -> Result<()> {
         if vbc_module.global_ctors.is_empty() && vbc_module.global_dtors.is_empty() {
             return Ok(());
@@ -4936,13 +4829,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             builder
                 .build_return(None)
                 .map_err(|e| LlvmLoweringError::BuilderError(format!("global ctor return: {}", e).into()))?;
-
-            super::symbols::add_global_ctor(
-                &self.module,
-                init_fn,
-                super::symbols::DEFAULT_CTOR_DTOR_PRIORITY,
-            )
-            .map_err(|e| LlvmLoweringError::BuilderError(format!("emit global ctor: {}", e).into()))?;
         }
 
         // Emit global destructors (same pattern)
@@ -4969,13 +4855,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             builder
                 .build_return(None)
                 .map_err(|e| LlvmLoweringError::BuilderError(format!("global dtor return: {}", e).into()))?;
-
-            super::symbols::add_global_dtor(
-                &self.module,
-                dtor_fn,
-                super::symbols::DEFAULT_CTOR_DTOR_PRIORITY,
-            )
-            .map_err(|e| LlvmLoweringError::BuilderError(format!("emit global dtor: {}", e).into()))?;
         }
 
         Ok(())

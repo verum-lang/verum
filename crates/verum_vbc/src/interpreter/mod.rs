@@ -401,8 +401,9 @@ impl Interpreter {
     /// Executes the main function (function 0) if it exists.
     ///
     /// Runs `module.global_ctors` in priority order before `main`, matching
-    /// the AOT path (which emits an LLVM `@llvm.global_ctors` array whose
-    /// entries are invoked by the C runtime prior to `main`). This is
+    /// the AOT path (whose emitted `main` calls `__verum_static_init` right
+    /// after `verum_runtime_init` — NOT via `llvm.global_ctors`, which dyld
+    /// runs before the runtime exists; T0837 darwin autopsy). This is
     /// required for `@thread_local static` initializers (which compile to
     /// `__tls_init_<NAME>` synthetic functions via
     /// `codegen::compile_pending_tls_inits`) to populate their TLS slots
