@@ -67,6 +67,17 @@ pub struct PlaybookApp {
     /// the working directory, a blank sheet — instead of a bare
     /// buffer the newcomer must already understand.
     gallery: Option<GalleryState>,
+    /// VBC lens (T0858 slice 3): disassembly of the
+    /// notebook-as-module, from the same artifact path the
+    /// interpreter runs.
+    vbc_lens_text: String,
+    /// Tiers lens: verdict lines from the LAST `diff-tiers` judgment.
+    tiers_lens_lines: Vec<String>,
+    /// In-flight tier judgment — result channel, its temp source
+    /// file (kept alive until the child reads it), start time.
+    tiers_rx: Option<std::sync::mpsc::Receiver<Vec<String>>>,
+    tiers_tmp: Option<tempfile::NamedTempFile>,
+    tiers_started: Option<Instant>,
     /// Arch-lens content (T0858 slice 2): rendered lines mirrored
     /// from `verum arch query --json` over the notebook-as-module
     /// (the accepted state law: cells concatenate into one growing
@@ -135,6 +146,11 @@ impl PlaybookApp {
             status_message: None,
             show_help_overlay: false,
             gallery: None,
+            vbc_lens_text: String::new(),
+            tiers_lens_lines: Vec::new(),
+            tiers_rx: None,
+            tiers_tmp: None,
+            tiers_started: None,
             arch_lens_lines: Vec::new(),
             editor: EditorState::new(),
             layout_config: LayoutConfig::default(),
@@ -172,6 +188,7 @@ impl PlaybookApp {
 
     /// Poll for background execution results. Called each UI tick.
     pub fn poll_execution(&mut self) {
+        self.poll_tiers_judge();
         let rx = match &self.pending_rx {
             Some(r) => r,
             None => return,
@@ -297,6 +314,19 @@ impl PlaybookApp {
             return;
         }
 
+        // The Tiers lens answers only on demand: `t` with the lens on
+        // screen starts the judgment (it builds BOTH tiers — an
+        // expensive question deserves an explicit ask).
+        if self.mode == AppMode::Normal
+            && key.code == KeyCode::Char('t')
+            && key.modifiers.is_empty()
+            && self.layout_config.show_sidebar
+            && self.sidebar_tab == SidebarTab::Tiers
+        {
+            self.start_tiers_judge();
+            return;
+        }
+
         // Global: Ctrl+C cancels running execution
         if key.code == KeyCode::Char('c')
             && key.modifiers.contains(KeyModifiers::CONTROL)
@@ -389,14 +419,14 @@ impl PlaybookApp {
             }
             KeyAction::ExecuteCell => {
                 self.execute_current_cell();
-                self.refresh_arch_lens_if_active();
+                self.refresh_lenses_if_active();
             }
             KeyAction::ExecuteAllCells => {
                 self.commit_edit();
                 if let Err(e) = self.session.execute_all() {
                     self.status_message = Some(format!("Error: {}", e));
                 }
-                self.refresh_arch_lens_if_active();
+                self.refresh_lenses_if_active();
             }
             KeyAction::ExecuteFromCurrent => {
                 self.commit_edit();
@@ -441,11 +471,11 @@ impl PlaybookApp {
             }
             KeyAction::SidebarNextTab => {
                 self.sidebar_tab = self.sidebar_tab.next();
-                self.refresh_arch_lens_if_active();
+                self.refresh_lenses_if_active();
             }
             KeyAction::SidebarPrevTab => {
                 self.sidebar_tab = self.sidebar_tab.prev();
-                self.refresh_arch_lens_if_active();
+                self.refresh_lenses_if_active();
             }
             KeyAction::Save => self.save(),
             KeyAction::Undo => {
@@ -493,7 +523,7 @@ impl PlaybookApp {
             KeyAction::ExitEdit => self.exit_edit_mode(),
             KeyAction::ExecuteCell => {
                 self.execute_current_cell();
-                self.refresh_arch_lens_if_active();
+                self.refresh_lenses_if_active();
             }
             KeyAction::Save => {
                 self.commit_edit();
@@ -1635,22 +1665,126 @@ impl PlaybookApp {
     /// mirror the answer into lens lines. Subprocess on purpose: the
     /// lens speaks the same vocabulary as agents and the CLI — one
     /// derivation, three transports (accepted T0858 design).
-    /// The lens mirrors the notebook, so it refreshes exactly when
-    /// its subject may have changed WHILE it is on screen: landing on
-    /// the tab, and executing cells with the tab open. No manual
-    /// refresh key exists to forget.
-    fn refresh_arch_lens_if_active(&mut self) {
-        if self.layout_config.show_sidebar && self.sidebar_tab == SidebarTab::Arch {
-            self.refresh_arch_lens();
+    /// A cheap lens mirrors the notebook, so it refreshes exactly
+    /// when its subject may have changed WHILE it is on screen:
+    /// landing on the tab, and executing cells with the tab open. No
+    /// manual refresh key exists to forget. (The Tiers lens is NOT
+    /// here on purpose — it is expensive and runs only on demand.)
+    fn refresh_lenses_if_active(&mut self) {
+        if !self.layout_config.show_sidebar {
+            return;
+        }
+        match self.sidebar_tab {
+            SidebarTab::Arch => self.refresh_arch_lens(),
+            SidebarTab::Vbc => self.refresh_vbc_lens(),
+            _ => {}
         }
     }
 
-    fn refresh_arch_lens(&mut self) {
+    /// Compile the notebook-as-module through the SAME pipeline the
+    /// interpreter uses and disassemble the resulting `VbcModule` —
+    /// the lens shows the artifact, not a re-derivation. A fresh
+    /// pipeline on purpose: the growing module carries its own
+    /// bindings, and the live incremental parser must not be
+    /// disturbed by an out-of-band compile.
+    fn refresh_vbc_lens(&mut self) {
+        let source = self.notebook_module_source();
+        if source.trim().is_empty() {
+            self.vbc_lens_text = String::new();
+            return;
+        }
+        let mut pipeline = crate::execution::ExecutionPipeline::new();
+        self.vbc_lens_text = match pipeline.compile(&source, 1) {
+            Ok(compiled) => verum_vbc::disassemble::disassemble_module(&compiled.module),
+            Err(e) => format!("; compile failed:
+; {e}"),
+        };
+    }
+
+    /// Start a background `verum diff-tiers --json` over the growing
+    /// module. One judgment at a time; the result lands in the lens
+    /// via `poll_execution`.
+    fn start_tiers_judge(&mut self) {
+        use std::io::Write as _;
+        if self.tiers_rx.is_some() {
+            self.status_message = Some("Tier judgment already running".to_string());
+            return;
+        }
+        let source = self.notebook_module_source();
+        if source.trim().is_empty() {
+            self.tiers_lens_lines = vec!["(empty notebook — nothing to judge)".to_string()];
+            return;
+        }
+        let tmp = match tempfile::Builder::new().suffix(".vr").tempfile() {
+            Ok(mut t) => match t.write_all(source.as_bytes()) {
+                Ok(()) => t,
+                Err(e) => {
+                    self.tiers_lens_lines = vec![format!("judge failed: {e}")];
+                    return;
+                }
+            },
+            Err(e) => {
+                self.tiers_lens_lines = vec![format!("judge failed: {e}")];
+                return;
+            }
+        };
+        let path = tmp.path().to_path_buf();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let lines = run_tiers_judge(&path);
+            let _ = tx.send(lines);
+        });
+        self.tiers_tmp = Some(tmp);
+        self.tiers_rx = Some(rx);
+        self.tiers_started = Some(Instant::now());
+        self.tiers_lens_lines = vec!["judging… (builds both tiers)".to_string()];
+    }
+
+    /// Poll the in-flight tier judgment; called from the UI tick.
+    fn poll_tiers_judge(&mut self) {
+        let Some(rx) = &self.tiers_rx else { return };
+        match rx.try_recv() {
+            Ok(mut lines) => {
+                if let Some(started) = self.tiers_started.take() {
+                    lines.push(format!(
+                        "# cost: {:.1}s",
+                        started.elapsed().as_secs_f64()
+                    ));
+                }
+                self.tiers_lens_lines = lines;
+                self.tiers_rx = None;
+                self.tiers_tmp = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                if let Some(started) = self.tiers_started {
+                    self.tiers_lens_lines = vec![format!(
+                        "judging… ({:.0}s — builds both tiers)",
+                        started.elapsed().as_secs_f64()
+                    )];
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.tiers_lens_lines = vec!["judge thread crashed".to_string()];
+                self.tiers_rx = None;
+                self.tiers_tmp = None;
+                self.tiers_started = None;
+            }
+        }
+    }
+
+    /// The growing module: every code cell in order (the accepted
+    /// state law — state lives in the QUESTION).
+    fn notebook_module_source(&self) -> String {
         let mut source = String::new();
         for cell in self.session.cells.iter().filter(|c| c.is_code()) {
             source.push_str(cell.source.as_str());
             source.push('\n');
         }
+        source
+    }
+
+    fn refresh_arch_lens(&mut self) {
+        let source = self.notebook_module_source();
         self.arch_lens_lines = match arch_query_subprocess(&source) {
             Ok(lines) => lines,
             Err(e) => vec![format!("query failed: {e}")],
@@ -1764,7 +1898,9 @@ impl PlaybookApp {
             .functions(&funcs)
             .outline(&outline)
             .stats(stats)
-            .arch_lines(&self.arch_lens_lines);
+            .arch_lines(&self.arch_lens_lines)
+            .vbc_text(&self.vbc_lens_text)
+            .tiers_lines(&self.tiers_lens_lines);
 
         frame.render_widget(sidebar, area);
     }
@@ -2508,6 +2644,59 @@ fn arch_query_subprocess(source: &str) -> anyhow::Result<Vec<String>> {
         }
     }
     Ok(lines)
+}
+
+/// Run `verum diff-tiers --json` on `path` and flatten the report
+/// into lens lines. Free function: it runs on the judge thread and
+/// touches no app state.
+fn run_tiers_judge(path: &std::path::Path) -> Vec<String> {
+    let exe = match std::env::current_exe() {
+        Ok(e) => e,
+        Err(e) => return vec![format!("judge failed: {e}")],
+    };
+    let out = match std::process::Command::new(exe)
+        .args(["diff-tiers", "--json"])
+        .arg(path)
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => return vec![format!("judge failed: {e}")],
+    };
+    let report: serde_json::Value = match serde_json::from_slice(&out.stdout) {
+        Ok(v) => v,
+        Err(_) => {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return vec![format!(
+                "judge failed: {}",
+                err.lines().next().unwrap_or("no JSON report")
+            )];
+        }
+    };
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "# verdict: {}",
+        report["verdict"].as_str().unwrap_or("?")
+    ));
+    for tier in ["tier0", "tier1"] {
+        lines.push(String::new());
+        lines.push(format!(
+            "# {tier} (exit {})",
+            report[tier]["exit"].as_str().unwrap_or("?")
+        ));
+        for l in report[tier]["stdout"]
+            .as_str()
+            .unwrap_or("")
+            .lines()
+            .take(12)
+        {
+            lines.push(l.to_string());
+        }
+    }
+    if let Some(line) = report["first_divergence_line"].as_u64() {
+        lines.push(String::new());
+        lines.push(format!("DIVERGENT at program-output line {line}"));
+    }
+    lines
 }
 
 /// One choice on the launch gallery.

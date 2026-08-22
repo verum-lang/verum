@@ -15,6 +15,14 @@ pub enum SidebarTab {
     /// judgment — mirrored verbatim from `verum arch query` (the one
     /// vocabulary; zero second derivations).
     Arch,
+    /// The VBC lens (T0858 slice 3): the bytecode of the
+    /// notebook-as-module, disassembled from the SAME `VbcModule`
+    /// artifact the interpreter runs — no second derivation.
+    Vbc,
+    /// The Tiers lens (T0858 slice 3): the diff-tiers verdict on
+    /// demand — an expensive question, asked only when the reader
+    /// presses for it (the price-badge discipline).
+    Tiers,
     DevTools,
 }
 
@@ -23,7 +31,9 @@ impl SidebarTab {
         match self {
             Self::Variables => Self::Outline,
             Self::Outline => Self::Arch,
-            Self::Arch => Self::DevTools,
+            Self::Arch => Self::Vbc,
+            Self::Vbc => Self::Tiers,
+            Self::Tiers => Self::DevTools,
             Self::DevTools => Self::Variables,
         }
     }
@@ -32,7 +42,9 @@ impl SidebarTab {
             Self::Variables => Self::DevTools,
             Self::Outline => Self::Variables,
             Self::Arch => Self::Outline,
-            Self::DevTools => Self::Arch,
+            Self::Vbc => Self::Arch,
+            Self::Tiers => Self::Vbc,
+            Self::DevTools => Self::Tiers,
         }
     }
     pub fn index(self) -> usize {
@@ -40,7 +52,9 @@ impl SidebarTab {
             Self::Variables => 0,
             Self::Outline => 1,
             Self::Arch => 2,
-            Self::DevTools => 3,
+            Self::Vbc => 3,
+            Self::Tiers => 4,
+            Self::DevTools => 5,
         }
     }
 }
@@ -100,6 +114,10 @@ pub struct SidebarWidget<'a> {
     /// entry via the `verum arch query` subprocess — the widget only
     /// paints; it derives nothing).
     arch_lines: &'a [String],
+    /// Pre-rendered VBC disassembly of the notebook-as-module.
+    vbc_text: &'a str,
+    /// Pre-rendered Tiers-lens lines (verdict or progress).
+    tiers_lines: &'a [String],
 }
 
 impl<'a> SidebarWidget<'a> {
@@ -111,6 +129,8 @@ impl<'a> SidebarWidget<'a> {
             outline: &[],
             stats: ExecStats::default(),
             arch_lines: &[],
+            vbc_text: "",
+            tiers_lines: &[],
         }
     }
 
@@ -136,6 +156,14 @@ impl<'a> SidebarWidget<'a> {
     }
     pub fn arch_lines(mut self, lines: &'a [String]) -> Self {
         self.arch_lines = lines;
+        self
+    }
+    pub fn vbc_text(mut self, text: &'a str) -> Self {
+        self.vbc_text = text;
+        self
+    }
+    pub fn tiers_lines(mut self, lines: &'a [String]) -> Self {
+        self.tiers_lines = lines;
         self
     }
     pub fn cell_info(self, _count: usize, _selected: usize) -> Self {
@@ -444,6 +472,8 @@ impl<'a> Widget for SidebarWidget<'a> {
             SidebarTab::Variables => " Variables ",
             SidebarTab::Outline => " Cells ",
             SidebarTab::Arch => " Arch ",
+            SidebarTab::Vbc => " VBC ",
+            SidebarTab::Tiers => " Tiers ",
             SidebarTab::DevTools => " Session ",
         };
 
@@ -464,7 +494,7 @@ impl<'a> Widget for SidebarWidget<'a> {
         }
 
         // Tab bar — rename to meaningful labels
-        let tabs = Tabs::new(vec!["Vars", "Cells", "Session"])
+        let tabs = Tabs::new(vec!["Vars", "Cells", "Arch", "VBC", "Tiers", "Session"])
             .select(self.tab.index())
             .style(Style::default().fg(Color::DarkGray))
             .highlight_style(
@@ -486,6 +516,8 @@ impl<'a> Widget for SidebarWidget<'a> {
             SidebarTab::Variables => self.render_variables(content, buf),
             SidebarTab::Outline => self.render_outline(content, buf),
             SidebarTab::Arch => self.render_arch(content, buf),
+            SidebarTab::Vbc => self.render_vbc(content, buf),
+            SidebarTab::Tiers => self.render_tiers(content, buf),
             SidebarTab::DevTools => self.render_devtools(content, buf),
         }
     }
@@ -510,6 +542,65 @@ impl SidebarWidget<'_> {
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
             } else if raw.starts_with("DEAD RIGHT") {
                 Style::default().fg(Color::Yellow)
+            } else if raw.starts_with('#') {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            lines.push(Line::from(Span::styled(format!("  {raw}"), style)));
+        }
+        Paragraph::new(lines).render(area, buf);
+    }
+
+    /// Paint the VBC lens: the disassembly text as-is. Comment lines
+    /// (`;`) dim, section headers cyan, code plain — the reader's eye
+    /// finds functions without the widget inventing structure.
+    fn render_vbc(&self, area: Rect, buf: &mut Buffer) {
+        let mut lines: Vec<Line> = Vec::new();
+        if self.vbc_text.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  (run a cell — the lens follows the notebook)",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+        }
+        for raw in self.vbc_text.lines() {
+            let style = if raw.starts_with("; ===") {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else if raw.starts_with(';') {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            lines.push(Line::from(Span::styled(raw.to_string(), style)));
+        }
+        Paragraph::new(lines).render(area, buf);
+    }
+
+    /// Paint the Tiers lens: pre-rendered verdict lines. The verdict
+    /// word carries the colour — identical green, DIVERGENT red.
+    fn render_tiers(&self, area: Rect, buf: &mut Buffer) {
+        let mut lines: Vec<Line> = Vec::new();
+        if self.tiers_lines.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  (press t to judge — builds BOTH tiers, takes seconds)",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+        }
+        for raw in self.tiers_lines {
+            let style = if raw.contains("DIVERGENT") {
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+            } else if raw.contains("identical") {
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
             } else if raw.starts_with('#') {
                 Style::default()
                     .fg(Color::Cyan)
