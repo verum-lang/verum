@@ -64,8 +64,11 @@ pub fn execute(options: PlaybookOptions) -> Result<()> {
             PlaybookApp::from_file(path).map_err(|e| CliError::custom(e.to_string()))?
         }
         None => {
-            ui::info("Creating new playbook");
-            PlaybookApp::new()
+            // Empty launch opens the GALLERY — tours, recent books,
+            // blank sheet — not a bare buffer (Playground Reborn §3).
+            let mut app = PlaybookApp::new();
+            app.open_gallery();
+            app
         }
     };
 

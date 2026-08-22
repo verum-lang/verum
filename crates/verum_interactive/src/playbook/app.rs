@@ -62,6 +62,11 @@ pub struct PlaybookApp {
     /// `?` toggles it; any key closes it. The one-line contextual
     /// hint stays in the footer — this is the COMPLETE map.
     show_help_overlay: bool,
+    /// The launch gallery (Playground Reborn §3, «вход»): an empty
+    /// `verum play` opens a chooser — guided tours, recent books in
+    /// the working directory, a blank sheet — instead of a bare
+    /// buffer the newcomer must already understand.
+    gallery: Option<GalleryState>,
     /// Arch-lens content (T0858 slice 2): rendered lines mirrored
     /// from `verum arch query --json` over the notebook-as-module
     /// (the accepted state law: cells concatenate into one growing
@@ -129,6 +134,7 @@ impl PlaybookApp {
             should_quit: false,
             status_message: None,
             show_help_overlay: false,
+            gallery: None,
             arch_lens_lines: Vec::new(),
             editor: EditorState::new(),
             layout_config: LayoutConfig::default(),
@@ -281,6 +287,13 @@ impl PlaybookApp {
         // close from is worse than no map.
         if self.show_help_overlay {
             self.show_help_overlay = false;
+            return;
+        }
+
+        // The gallery swallows navigation until a choice is made —
+        // it IS the first screen, not a dialog over one.
+        if self.gallery.is_some() {
+            self.handle_gallery_key(key);
             return;
         }
 
@@ -1325,6 +1338,10 @@ impl PlaybookApp {
     // ── Rendering ───────────────────────────────────────────────────────
 
     pub fn render(&self, frame: &mut Frame) {
+        if let Some(gallery) = &self.gallery {
+            self.render_gallery(frame, gallery);
+            return;
+        }
         let config = if self.layout_config.editor_fullscreen {
             LayoutConfig::fullscreen()
         } else {
@@ -1345,6 +1362,150 @@ impl PlaybookApp {
         if self.show_help_overlay {
             self.render_help_overlay(frame);
         }
+    }
+
+    /// Open the launch gallery: guided tours from
+    /// `builtin_tutorials()`, the working directory's recent books
+    /// (newest first), and a blank sheet.
+    pub fn open_gallery(&mut self) {
+        let mut items: Vec<GalleryItem> = vec![GalleryItem::BlankSheet];
+        for (index, t) in builtin_tutorials().iter().enumerate() {
+            items.push(GalleryItem::Tour {
+                index,
+                title: t.title.clone(),
+                description: t.description.clone(),
+                minutes: t.estimated_minutes,
+            });
+        }
+        let mut books: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(".")
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let path = e.path();
+                if path.extension().and_then(|x| x.to_str()) == Some("vrbook") {
+                    let modified = e.metadata().ok()?.modified().ok()?;
+                    Some((modified, path))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        books.sort_by(|a, b| b.0.cmp(&a.0));
+        for (_, path) in books.into_iter().take(5) {
+            items.push(GalleryItem::RecentBook { path });
+        }
+        self.gallery = Some(GalleryState { items, selected: 0 });
+    }
+
+    fn handle_gallery_key(&mut self, key: crossterm::event::KeyEvent) {
+        let Some(gallery) = &mut self.gallery else { return };
+        let len = gallery.items.len();
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                gallery.selected = gallery.selected.checked_sub(1).unwrap_or(len - 1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                gallery.selected = (gallery.selected + 1) % len;
+            }
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Esc => self.gallery = None,
+            KeyCode::Enter => {
+                let choice = gallery.items[gallery.selected].clone();
+                self.gallery = None;
+                match choice {
+                    GalleryItem::BlankSheet => {}
+                    GalleryItem::Tour { index, .. } => {
+                        self.start_tutorial_by_index(index);
+                    }
+                    GalleryItem::RecentBook { path } => self.open_book(path),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Load a book into THIS app in place (the gallery's open path —
+    /// `from_file` builds a fresh app, which would discard settings
+    /// already applied by CLI flags).
+    fn open_book(&mut self, path: PathBuf) {
+        self.file_path = Some(path.clone());
+        match super::persistence::load_playbook(&path) {
+            Ok((cells, settings)) => {
+                self.session = SessionState::with_cells(cells);
+                if let Some(s) = settings {
+                    self.auto_save_interval_secs = s.auto_save_interval_secs;
+                    self.layout_config.show_sidebar = s.show_sidebar;
+                    self.session.execution_timeout_ms = s.execution_timeout_ms;
+                }
+                self.status_message = Some(format!("Loaded: {}", path.display()));
+            }
+            Err(e) => self.status_message = Some(format!("Error loading: {}", e)),
+        }
+        self.sync_editor_from_cell();
+    }
+
+    fn render_gallery(&self, frame: &mut Frame, gallery: &GalleryState) {
+        use ratatui::widgets::Clear;
+        let area = frame.area();
+        frame.render_widget(Clear, area);
+        let mut lines: Vec<Line> = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  VERUM PLAYGROUND",
+                Style::default().fg(Color::Cyan).bold(),
+            )),
+            Line::from(Span::styled(
+                "  choose where to begin",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+        ];
+        let mut last_section = "";
+        for (i, item) in gallery.items.iter().enumerate() {
+            let section = match item {
+                GalleryItem::BlankSheet => "START",
+                GalleryItem::Tour { .. } => "GUIDED TOURS",
+                GalleryItem::RecentBook { .. } => "RECENT BOOKS",
+            };
+            if section != last_section {
+                lines.push(Line::from(Span::styled(
+                    format!("  {section}"),
+                    Style::default().fg(Color::DarkGray).bold(),
+                )));
+                last_section = section;
+            }
+            let selected = i == gallery.selected;
+            let marker = if selected { "▸ " } else { "  " };
+            let style = if selected {
+                Style::default().fg(Color::White).bold()
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            let text = match item {
+                GalleryItem::BlankSheet => "blank sheet — an empty notebook".to_string(),
+                GalleryItem::Tour {
+                    title,
+                    description,
+                    minutes,
+                    ..
+                } => format!("{title} — {description} (~{minutes} min)"),
+                GalleryItem::RecentBook { path } => {
+                    format!("{}", path.display())
+                }
+            };
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(marker, Style::default().fg(Color::Cyan)),
+                Span::styled(text, style),
+            ]));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  ↑/↓ select   Enter open   Esc blank sheet   q quit",
+            Style::default().fg(Color::DarkGray),
+        )));
+        frame.render_widget(Paragraph::new(lines), area);
     }
 
     /// The COMPLETE key map, centered over everything (`?` opens,
@@ -1679,17 +1840,20 @@ impl PlaybookApp {
     }
 
     fn render_help(&self, frame: &mut Frame, area: Rect) {
+        // The visible map of next actions: 3-5 contextual keys, and
+        // always the door to the full map — a wall of ten hints
+        // teaches nothing (Playground Reborn §3, visible action map).
         let help = match self.mode {
             AppMode::Normal => match self.keybindings.mode() {
                 KeybindingMode::Vim => {
-                    " j/k:nav i:edit x:run X:all o:new D:del K/J:move Tab:sidebar-tab Ctrl+B:sidebar /:search :cmd q:quit"
+                    " j/k:nav  i:edit  x:run  o:new cell  ?:all keys"
                 }
                 KeybindingMode::Standard => {
-                    " Arrows:nav Enter:edit F5:run F9:all Ins:new Del:del Tab:sidebar-tab Ctrl+B:sidebar Ctrl+S:save Ctrl+F:fs"
+                    " ↑/↓:nav  Enter:edit  F5:run  Ins:new cell  ?:all keys"
                 }
             },
             AppMode::Edit => {
-                " Esc:exit  F5/Ctrl+R:run  Ctrl+c/x/v  Ctrl+z:undo  Ctrl+s:save  Tab:indent"
+                " Esc:done  Ctrl+R:run  Ctrl+Z:undo  Ctrl+S:save"
             }
             AppMode::Command => {
                 " Esc:cancel  Enter:exec  Commands: w q wq e clear run set split merge help"
@@ -2344,4 +2508,24 @@ fn arch_query_subprocess(source: &str) -> anyhow::Result<Vec<String>> {
         }
     }
     Ok(lines)
+}
+
+/// One choice on the launch gallery.
+#[derive(Clone)]
+enum GalleryItem {
+    BlankSheet,
+    Tour {
+        index: usize,
+        title: String,
+        description: String,
+        minutes: u32,
+    },
+    RecentBook {
+        path: PathBuf,
+    },
+}
+
+struct GalleryState {
+    items: Vec<GalleryItem>,
+    selected: usize,
 }

@@ -155,6 +155,7 @@ impl Keybindings {
             KeyCode::Char('y') if ctrl => KeyAction::Redo,
             KeyCode::Char('q') if ctrl => KeyAction::Quit,
             KeyCode::F(1) => KeyAction::ShowHelp,
+            KeyCode::Char('?') => KeyAction::ShowHelp,
             KeyCode::F(2) => KeyAction::EnterCommand,
             _ => KeyAction::None,
         }
