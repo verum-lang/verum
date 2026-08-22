@@ -47,7 +47,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 /// starts swapping to death.
 pub const DEFAULT_CEILING_GB: usize = 24;
 
-const BYTES_PER_GB: usize = 1024 * 1024 * 1024;
+pub const BYTES_PER_GB: usize = 1024 * 1024 * 1024;
 const BYTES_PER_MB: usize = 1024 * 1024;
 
 /// Exit status when the ceiling stops the process.
@@ -311,64 +311,5 @@ unsafe impl GlobalAlloc for BudgetedAllocator {
             }
         }
         new_ptr
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    //! The accounting is what the ceiling is made of, so it is what
-    //! gets pinned. The abort itself is deliberately not exercised:
-    //! a test that aborts the process takes the test runner with it.
-    //!
-    //! The allocator has to be INSTALLED for any of this to be
-    //! measurable — the counters only move for allocations that go
-    //! through it, and a library crate installs none. The first version
-    //! of these tests asserted against an uninstalled allocator and
-    //! failed, which is the honest outcome: without this line the
-    //! module under test is not the module doing the work.
-
-    use super::*;
-
-    #[global_allocator]
-    static TEST_ALLOC: BudgetedAllocator = BudgetedAllocator::new();
-
-    /// An allocation is counted, and giving it back un-counts it.
-    #[test]
-    fn live_bytes_follow_allocation_and_release() {
-        let before = live_bytes();
-        let block = vec![0u8; 4 * 1024 * 1024];
-        let during = live_bytes();
-        assert!(
-            during >= before + block.len(),
-            "4 MiB allocated but live went {} -> {}",
-            before,
-            during
-        );
-        drop(block);
-        assert!(
-            live_bytes() < during,
-            "release did not reduce the live count"
-        );
-    }
-
-    /// The peak never goes down — that is what makes it the number
-    /// worth printing when something dies.
-    #[test]
-    fn peak_is_monotonic() {
-        let first = peak_bytes();
-        drop(vec![0u8; 8 * 1024 * 1024]);
-        let after = peak_bytes();
-        assert!(after >= first, "peak fell from {} to {}", first, after);
-    }
-
-    /// The default is a real number of bytes, not a placeholder — a
-    /// zero default would silently disable the seatbelt everywhere.
-    #[test]
-    fn default_ceiling_is_a_usable_size() {
-        assert!(DEFAULT_CEILING_GB >= 8, "ceiling below the bake's own peak");
-        assert!(
-            DEFAULT_CEILING_GB * BYTES_PER_GB > 0,
-            "ceiling overflows to zero"
-        );
     }
 }
