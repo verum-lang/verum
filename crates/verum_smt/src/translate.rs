@@ -109,6 +109,30 @@ pub struct TranslationConfig {
     pub float_precision: FloatPrecision,
 }
 
+/// A short, stable tag naming a type's SHAPE for an uninterpreted
+/// sort (`Verum!<tag>`). Two values of the same shape share a sort —
+/// two `List` fields are both `Verum!List` — so the solver knows they
+/// are the same KIND of opaque thing without being told anything
+/// about it.
+///
+/// Module-level because it is the shared authority for BOTH
+/// translators: `create_var` (Z3-AST side) and
+/// `expr_to_smtlib::type_to_sort_and_name` (reflection side) must
+/// spell the same sort for the same type or their symbols conflict.
+pub(crate) fn type_kind_tag(kind: &TypeKind) -> &'static str {
+    match kind {
+        TypeKind::Unit => "Unit",
+        TypeKind::Never => "Never",
+        TypeKind::Char => "Char",
+        TypeKind::Generic { .. } => "Generic",
+        TypeKind::Tuple(_) => "Tuple",
+        TypeKind::Function { .. } => "Function",
+        TypeKind::Reference { .. } => "Reference",
+        TypeKind::Pointer { .. } => "Pointer",
+        _ => "Opaque",
+    }
+}
+
 impl Default for TranslationConfig {
     fn default() -> Self {
         Self {
@@ -3348,6 +3372,14 @@ impl<'ctx> Translator<'ctx> {
                 self.create_var(name, base)
             }
 
+            // A reference carries its referent's facts: `p: &T` in a
+            // theorem parameter or refinement binder is a value of T
+            // for the solver's purposes. Without this arm every
+            // `&T` fell to the catch-all and ALL ref-typed parameters
+            // shared one `Verum!Reference` sort — distinct types
+            // colliding, the exact property the opaque design forbids.
+            TypeKind::Reference { inner, .. } => self.create_var(name, inner),
+
             TypeKind::Path(path) => {
                 // The integer and float FAMILIES, not a hand-written
                 // list of four names. `Int` was matched literally here
@@ -3440,17 +3472,7 @@ impl<'ctx> Translator<'ctx> {
     /// are both `Verum!List` — so the solver knows they are the same
     /// KIND of opaque thing without being told anything about it.
     fn type_kind_tag(kind: &TypeKind) -> &'static str {
-        match kind {
-            TypeKind::Unit => "Unit",
-            TypeKind::Never => "Never",
-            TypeKind::Char => "Char",
-            TypeKind::Generic { .. } => "Generic",
-            TypeKind::Tuple(_) => "Tuple",
-            TypeKind::Function { .. } => "Function",
-            TypeKind::Reference { .. } => "Reference",
-            TypeKind::Pointer { .. } => "Pointer",
-            _ => "Opaque",
-        }
+        type_kind_tag(kind)
     }
 
     /// Create a Z3 variable for a tensor type using Array theory.

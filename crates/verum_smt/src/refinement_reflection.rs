@@ -62,6 +62,12 @@ pub struct ReflectedFunction {
     pub return_sort: Text,
     /// SMT-LIB sorts of the parameters, in order.
     pub parameter_sorts: List<Text>,
+    /// Auxiliary `declare-sort` / `declare-fun` lines this entry's
+    /// body or signature depends on — opaque type sorts
+    /// (`(declare-sort Verum!T 0)`) and member-projection symbols
+    /// (`(declare-fun Verum!proj!T!f (Verum!T) Int)`). Emitted,
+    /// deduplicated, before every function declaration in the block.
+    pub aux_decls: List<Text>,
 }
 
 impl ReflectedFunction {
@@ -264,6 +270,26 @@ impl RefinementReflectionRegistry {
             out.push_str(" Int)\n");
         }
 
+        // Auxiliary declarations the live entries depend on — opaque
+        // type sorts and member-projection symbols — deduplicated
+        // across entries, `declare-sort` lines strictly before the
+        // `declare-fun` lines that use them (lexicographic order
+        // would emit uses first: "(declare-fun" < "(declare-sort").
+        let mut aux: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for n in &names {
+            for d in self.by_name[*n].aux_decls.iter() {
+                aux.insert(d.as_str());
+            }
+        }
+        for d in aux.iter().filter(|d| d.starts_with("(declare-sort")) {
+            out.push_str(d);
+            out.push('\n');
+        }
+        for d in aux.iter().filter(|d| !d.starts_with("(declare-sort")) {
+            out.push_str(d);
+            out.push('\n');
+        }
+
         for n in &names {
             out.push_str(self.by_name[*n].to_smtlib_decl().as_str());
             out.push('\n');
@@ -291,6 +317,20 @@ impl RefinementReflectionRegistry {
             .filter(|n| !dropped.contains(n.as_str()))
             .collect();
         names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        // Same aux emission as `to_smtlib_block`: sorts before the
+        // projection symbols that use them, deduplicated.
+        let mut aux: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for n in &names {
+            for d in self.by_name[*n].aux_decls.iter() {
+                aux.insert(d.as_str());
+            }
+        }
+        for d in aux.iter().filter(|d| d.starts_with("(declare-sort")) {
+            sink(d);
+        }
+        for d in aux.iter().filter(|d| !d.starts_with("(declare-sort")) {
+            sink(d);
+        }
         for n in &names {
             sink(self.by_name[*n].to_smtlib_decl().as_str());
         }
@@ -368,6 +408,11 @@ impl RefinementReflectionRegistry {
                 continue;
             }
             if live.contains(tok) {
+                continue;
+            }
+            // Member-projection symbols and opaque-sort names are
+            // declared by the entry's own `aux_decls` — never open.
+            if tok.starts_with("Verum!") {
                 continue;
             }
             return Some(tok.to_string());
@@ -464,6 +509,7 @@ mod tests {
             body_smtlib: Text::from("(* 2 n)"),
             return_sort: Text::from("Int"),
             parameter_sorts: List::from_iter([Text::from("Int")]),
+            aux_decls: List::new(),
         }
     }
 
@@ -474,6 +520,7 @@ mod tests {
             body_smtlib: Text::from("(+ a b)"),
             return_sort: Text::from("Int"),
             parameter_sorts: List::from_iter([Text::from("Int"), Text::from("Int")]),
+            aux_decls: List::new(),
         }
     }
 
@@ -484,6 +531,7 @@ mod tests {
             body_smtlib: Text::from("0"),
             return_sort: Text::from("Int"),
             parameter_sorts: List::new(),
+            aux_decls: List::new(),
         }
     }
 
@@ -625,6 +673,7 @@ mod tests {
             body_smtlib: Text::from("(helper_unreflected x)"),
             return_sort: Text::from("Int"),
             parameter_sorts: List::from_iter([Text::from("Int")]),
+            aux_decls: List::new(),
         }
     }
 
@@ -669,6 +718,7 @@ mod tests {
             body_smtlib: Text::from(body),
             return_sort: Text::from("Int"),
             parameter_sorts: List::from_iter([Text::from("Int")]),
+            aux_decls: List::new(),
         };
         reg.register(mk("chain_a", "(chain_b x)")).unwrap();
         reg.register(mk("chain_b", "(helper_unreflected x)")).unwrap();
@@ -692,6 +742,7 @@ mod tests {
             body_smtlib: Text::from("(ite (= n 0) 1 (* n (fact (- n 1))))"),
             return_sort: Text::from("Int"),
             parameter_sorts: List::from_iter([Text::from("Int")]),
+            aux_decls: List::new(),
         };
         reg.register(fact).unwrap();
         assert!(reg.open_entry_drops().is_empty());

@@ -292,9 +292,16 @@ impl<'s> VerifyCommand<'s> {
         // to Bool sort (and not the Int-default that breaks
         // `exists p: Nat. is_prime(p)`-style goals).
         let mut callee_signatures_for_module: Vec<(Text, Vec<Text>, Text)> = Vec::new();
+        // Module type facts for member-bearing bodies (T0843) — the
+        // same env the pipeline-side reflection scan builds.
+        let reflection_env =
+            verum_smt::expr_to_smtlib::ReflectionTypeEnv::from_module(&module);
         for item in &module.items {
             if let ItemKind::Function(fd) = &item.kind {
-                if let Some(rf) = verum_smt::expr_to_smtlib::try_reflect_function(fd) {
+                if let Some(rf) = verum_smt::expr_to_smtlib::try_reflect_function_with_env(
+                    fd,
+                    &reflection_env,
+                ) {
                     let _ = reflection_registry.register(rf);
                 }
                 let param_sorts: Vec<Text> = fd

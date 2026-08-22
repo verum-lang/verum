@@ -118,13 +118,18 @@ impl<'s> CompilationPipeline<'s> {
         // statement bodies, unsupported operators, closures, etc.)
         // are silently skipped — no incorrect axiom is ever emitted.
         {
-            use verum_smt::expr_to_smtlib::try_reflect_function;
+            use verum_smt::expr_to_smtlib::{ReflectionTypeEnv, try_reflect_function_with_env};
             use verum_smt::refinement_reflection::RefinementReflectionRegistry;
 
+            // Module type facts (record fields, protocol/impl method
+            // signatures) let predicate bodies over record witnesses
+            // and protocol receivers reflect as projection symbols
+            // instead of being refused outright (T0843).
+            let reflection_env = ReflectionTypeEnv::from_module(module);
             let mut registry = RefinementReflectionRegistry::new();
             for item in &module.items {
                 if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
-                    if let Some(rf) = try_reflect_function(func_decl) {
+                    if let Some(rf) = try_reflect_function_with_env(func_decl, &reflection_env) {
                         let _ = registry.register(rf);
                     }
                 }

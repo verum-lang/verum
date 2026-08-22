@@ -14,6 +14,7 @@ fn double_def() -> ReflectedFunction {
         body_smtlib: Text::from("(* 2 n)"),
         return_sort: Text::from("Int"),
         parameter_sorts: List::from_iter([Text::from("Int")]),
+        aux_decls: List::new(),
     }
 }
 
@@ -24,6 +25,7 @@ fn add_def() -> ReflectedFunction {
         body_smtlib: Text::from("(+ a b)"),
         return_sort: Text::from("Int"),
         parameter_sorts: List::from_iter([Text::from("Int"), Text::from("Int")]),
+        aux_decls: List::new(),
     }
 }
 
