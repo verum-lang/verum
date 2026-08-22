@@ -14515,6 +14515,96 @@ impl TypeChecker {
     /// - &Maybe<T> expands to &(Some(T) | None)
     ///
     /// If the type is not a registered generic variant type, returns it unchanged.
+    /// ONE carrier for positional generic-argument substitution over a
+    /// variant's payloads (T0862). Four sources of parameter identity,
+    /// tried in order, all feeding one substitution map:
+    ///   1. the `__type_params_<Name>` registration (source-driven types);
+    ///   2. the unifier's alias param-name list (metadata aliases like
+    ///      `IoResult<T>` — registered by the alias loader, NEVER as
+    ///      `__type_params_`);
+    ///   3. free `Type::Var`s of the payloads, in id order;
+    ///   4. bare-`Named` placeholder names (`T`, `R`) in first-occurrence
+    ///      order (metadata-eager rigid placeholders).
+    ///
+    /// Before this carrier existed the machinery lived as THREE copies —
+    /// and the alias-chain copy was truncated (stages 3-4 missing, stage
+    /// 2 nowhere), so `match read_to_string(p) { Ok(t) => ... }` bound
+    /// `t` to the FORMAL `T` of `Result<T, StreamError>`: "no method
+    /// `lines` found for type `T`" on the first IO script a newcomer
+    /// writes (dog-food find #2).
+    fn substitute_variant_args_positionally(
+        &self,
+        variants: &indexmap::IndexMap<verum_common::Text, Type>,
+        args: &verum_common::List<Type>,
+        type_name: &str,
+    ) -> Type {
+        if args.is_empty() {
+            return Type::Variant(variants.clone());
+        }
+        let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
+            indexmap::IndexMap::new();
+        // Stage 1: __type_params_<Name> (name + template-var pairs).
+        let type_params_key = format!("__type_params_{}", type_name);
+        if let Option::Some(Type::Record(params_map)) =
+            self.ctx.lookup_type(type_params_key.as_str())
+        {
+            for (i, (param_name, param_type)) in params_map.iter().enumerate() {
+                if let Some(arg) = args.get(i) {
+                    subst.insert(param_name.clone(), arg.clone());
+                    if let Type::Var(tv) = param_type {
+                        let var_key: verum_common::Text = format!("T{}", tv.id()).into();
+                        subst.insert(var_key, arg.clone());
+                    }
+                }
+            }
+        }
+        // Stage 2: alias param names from the unifier registry.
+        if let Some(param_names) = self.unifier.alias_param_names(type_name) {
+            for (i, name) in param_names.iter().enumerate() {
+                if let Some(arg) = args.get(i) {
+                    if !subst.contains_key(name) {
+                        subst.insert(name.clone(), arg.clone());
+                    }
+                }
+            }
+        }
+        // Stage 3: free TypeVars of the payloads, id order.
+        let variant_type_ref = Type::Variant(variants.clone());
+        let free_vars = variant_type_ref.free_vars();
+        let mut free_vars_sorted: Vec<TypeVar> = free_vars.into_iter().collect();
+        free_vars_sorted.sort_by_key(|tv| tv.id());
+        for (i, tv) in free_vars_sorted.iter().enumerate() {
+            if let Some(arg) = args.get(i) {
+                let var_key: verum_common::Text = format!("T{}", tv.id()).into();
+                if !subst.contains_key(&var_key) {
+                    subst.insert(var_key, arg.clone());
+                }
+            }
+        }
+        // Stage 4: bare-Named placeholder names, first-occurrence order.
+        let mut named_params_ordered: Vec<verum_common::Text> = Vec::new();
+        for payload_ty in variants.values() {
+            Self::collect_bare_named_param_names(payload_ty, &mut named_params_ordered);
+        }
+        for (i, name) in named_params_ordered.iter().enumerate() {
+            if let Some(arg) = args.get(i) {
+                if !subst.contains_key(name) {
+                    subst.insert(name.clone(), arg.clone());
+                }
+            }
+        }
+        if subst.is_empty() {
+            Type::Variant(variants.clone())
+        } else {
+            let mut substituted_variants = indexmap::IndexMap::new();
+            for (tag, payload_ty) in variants.iter() {
+                substituted_variants
+                    .insert(tag.clone(), self.substitute_type_params(payload_ty, &subst));
+            }
+            Type::Variant(substituted_variants)
+        }
+    }
+
     pub(crate) fn expand_generic_to_variant(&self, ty: &Type) -> Type {
         self.expand_generic_to_variant_impl(ty, 0)
     }
@@ -14528,80 +14618,9 @@ impl TypeChecker {
                 // STDLIB-AGNOSTIC: Look up all generic types from context
                 if let Option::Some(def_ty) = self.ctx.lookup_type(name.as_str()) {
                     if let Type::Variant(variants) = def_ty {
-                        // For generic variant types, substitute type arguments
-                        if !args.is_empty() {
-                            let type_params_key = format!("__type_params_{}", name);
-                            // Get both parameter names and their associated TypeVars
-                            let params_map_opt = match self
-                                .ctx
-                                .lookup_type(type_params_key.as_str())
-                            {
-                                Option::Some(Type::Record(params_map)) => Option::Some(params_map),
-                                _ => Option::None,
-                            };
-                            let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
-                                indexmap::IndexMap::new();
-                            if let Option::Some(params_map) = params_map_opt {
-                                for (i, (param_name, param_type)) in params_map.iter().enumerate() {
-                                    if let Some(arg) = args.get(i) {
-                                        subst.insert(param_name.clone(), arg.clone());
-                                        if let Type::Var(tv) = param_type {
-                                            let var_key: verum_common::Text =
-                                                format!("T{}", tv.id()).into();
-                                            subst.insert(var_key, arg.clone());
-                                        }
-                                    }
-                                }
-                            }
-                            // Always extract free TypeVars + bare-Named param names
-                            // for positional substitution.  Mirror of the same
-                            // robust-substitution discipline applied to the
-                            // `Type::Named` branch below (task #14 / iterator §D).
-                            let variant_type_ref = Type::Variant(variants.clone());
-                            let free_vars = variant_type_ref.free_vars();
-                            let mut free_vars_sorted: Vec<TypeVar> =
-                                free_vars.into_iter().collect();
-                            free_vars_sorted.sort_by_key(|tv| tv.id());
-                            for (i, tv) in free_vars_sorted.iter().enumerate() {
-                                if let Some(arg) = args.get(i) {
-                                    let var_key: verum_common::Text =
-                                        format!("T{}", tv.id()).into();
-                                    if !subst.contains_key(&var_key) {
-                                        subst.insert(var_key, arg.clone());
-                                    }
-                                }
-                            }
-                            // Bare-Named param name collection — uniform with the
-                            // Named-branch helper.  Inlined here because the helper
-                            // is declared as a local `fn` in the Named branch.
-                            let mut named_params_ordered: Vec<verum_common::Text> =
-                                Vec::new();
-                            for payload_ty in variants.values() {
-                                Self::collect_bare_named_param_names(
-                                    payload_ty,
-                                    &mut named_params_ordered,
-                                );
-                            }
-                            for (i, name) in named_params_ordered.iter().enumerate() {
-                                if let Some(arg) = args.get(i) {
-                                    if !subst.contains_key(name) {
-                                        subst.insert(name.clone(), arg.clone());
-                                    }
-                                }
-                            }
-                            if subst.is_empty() {
-                                Type::Variant(variants.clone())
-                            } else {
-                                let mut substituted_variants = indexmap::IndexMap::new();
-                                for (tag, payload_ty) in variants.iter() {
-                                    let subst_ty = self.substitute_type_params(payload_ty, &subst);
-                                    substituted_variants.insert(tag.clone(), subst_ty);
-                                }
-                                Type::Variant(substituted_variants)
-                            }
-                        } else {
-                            Type::Variant(variants.clone())
-                        }
+                        self.substitute_variant_args_positionally(
+                            &variants, args, name.as_str(),
+                        )
                     } else {
                         // STDLIB-AGNOSTIC: Check inductive_constructors for variant types
                         // stored as Type::Generic rather than Type::Variant
@@ -14629,97 +14648,9 @@ impl TypeChecker {
                 {
                     if let Option::Some(def_ty) = self.ctx.lookup_type(type_name) {
                         if let Type::Variant(variants) = def_ty {
-                            // For generic variant types, substitute type arguments
-                            if !args.is_empty() {
-                                let type_params_key = format!("__type_params_{}", type_name);
-                                // Get both parameter names and their associated TypeVars
-                                let params_map_opt =
-                                    match self.ctx.lookup_type(type_params_key.as_str()) {
-                                        Option::Some(Type::Record(params_map)) => {
-                                            Option::Some(params_map)
-                                        }
-                                        _ => Option::None,
-                                    };
-                                let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
-                                    indexmap::IndexMap::new();
-                                if let Option::Some(params_map) = params_map_opt {
-                                    for (i, (param_name, param_type)) in
-                                        params_map.iter().enumerate()
-                                    {
-                                        if let Some(arg) = args.get(i) {
-                                            subst.insert(param_name.clone(), arg.clone());
-                                            if let Type::Var(tv) = param_type {
-                                                let var_key: verum_common::Text =
-                                                    format!("T{}", tv.id()).into();
-                                                subst.insert(var_key, arg.clone());
-                                            }
-                                        }
-                                    }
-                                }
-                                // Always extract free TypeVars + bare-Named param names
-                                // from the variant definition.  This makes substitution
-                                // robust even when `__type_params_<Name>` is not
-                                // registered (the case for variant types loaded purely
-                                // via metadata's eager path — e.g. `ReduceResult<R>` in
-                                // `core/base/iterator.vr`).
-                                //
-                                // **Architectural rule** (closes iterator §D / task #14):
-                                // every variant payload carries its own generic-param
-                                // bindings — either as `Type::Var(tv)` (source-driven
-                                // path) OR as `Type::Named { path: "R", args: [] }`
-                                // (metadata-eager path with rigid Named placeholders).
-                                // Positional substitution must work uniformly across
-                                // BOTH shapes so user code like `let r:
-                                // ReduceResult<Int> = Reduced(99)` round-trips
-                                // correctly regardless of registration path.
-                                let variant_type_ref = Type::Variant(variants.clone());
-                                let free_vars = variant_type_ref.free_vars();
-                                let mut free_vars_sorted: Vec<TypeVar> =
-                                    free_vars.into_iter().collect();
-                                free_vars_sorted.sort_by_key(|tv| tv.id());
-                                for (i, tv) in free_vars_sorted.iter().enumerate() {
-                                    if let Some(arg) = args.get(i) {
-                                        let var_key: verum_common::Text =
-                                            format!("T{}", tv.id()).into();
-                                        if !subst.contains_key(&var_key) {
-                                            subst.insert(var_key, arg.clone());
-                                        }
-                                    }
-                                }
-                                // Extract bare-Named param names (e.g. "R" in
-                                // `Named { path: "R", args: [] }`) in first-occurrence
-                                // order across variant payloads.  Positional binding
-                                // to the user's concrete args list.
-                                let mut named_params_ordered: Vec<verum_common::Text> =
-                                    Vec::new();
-                                for payload_ty in variants.values() {
-                                    Self::collect_bare_named_param_names(
-                                        payload_ty,
-                                        &mut named_params_ordered,
-                                    );
-                                }
-                                for (i, name) in named_params_ordered.iter().enumerate() {
-                                    if let Some(arg) = args.get(i) {
-                                        if !subst.contains_key(name) {
-                                            subst.insert(name.clone(), arg.clone());
-                                        }
-                                    }
-                                }
-                                if subst.is_empty() {
-                                    Type::Variant(variants.clone())
-                                } else {
-                                    let mut substituted_variants =
-                                        indexmap::IndexMap::new();
-                                    for (tag, payload_ty) in variants.iter() {
-                                        let subst_ty =
-                                            self.substitute_type_params(payload_ty, &subst);
-                                        substituted_variants.insert(tag.clone(), subst_ty);
-                                    }
-                                    Type::Variant(substituted_variants)
-                                }
-                            } else {
-                                Type::Variant(variants.clone())
-                            }
+                            self.substitute_variant_args_positionally(
+                                &variants, args, type_name,
+                            )
                         } else {
                             // The lookup resolved to a non-Variant type. Check if it's a
                             // self-referential placeholder (type alias stores Named{self} in type_defs).
@@ -14824,63 +14755,15 @@ impl TypeChecker {
                                 let resolved = def_ty.clone();
                                 let recursed =
                                     self.expand_generic_to_variant_impl(&resolved, depth + 1);
-                                if matches!(&recursed, Type::Variant(_)) {
-                                    // Found a variant through chain. Substitute actual type args if available.
-                                    if !args.is_empty() {
-                                        let type_params_key =
-                                            format!("__type_params_{}", type_name);
-                                        if let Option::Some(Type::Record(params_map)) =
-                                            self.ctx.lookup_type(type_params_key.as_str())
-                                        {
-                                            let mut subst: indexmap::IndexMap<
-                                                verum_common::Text,
-                                                Type,
-                                            > = indexmap::IndexMap::new();
-                                            for (i, (param_name, param_type)) in
-                                                params_map.iter().enumerate()
-                                            {
-                                                if let Some(arg) = args.get(i) {
-                                                    subst.insert(param_name.clone(), arg.clone());
-                                                    if let Type::Var(tv) = param_type {
-                                                        let var_key: verum_common::Text =
-                                                            format!("T{}", tv.id()).into();
-                                                        subst.insert(var_key, arg.clone());
-                                                    }
-                                                }
-                                            }
-                                            let variant_type_ref = recursed.clone();
-                                            let free_vars = variant_type_ref.free_vars();
-                                            let mut free_vars_sorted: Vec<TypeVar> =
-                                                free_vars.into_iter().collect();
-                                            free_vars_sorted.sort_by_key(|tv| tv.id());
-                                            for (i, tv) in free_vars_sorted.iter().enumerate() {
-                                                if let Some(arg) = args.get(i) {
-                                                    let var_key: verum_common::Text =
-                                                        format!("T{}", tv.id()).into();
-                                                    if !subst.contains_key(&var_key) {
-                                                        subst.insert(var_key, arg.clone());
-                                                    }
-                                                }
-                                            }
-                                            if let Type::Variant(variants) = &recursed {
-                                                let mut substituted_variants =
-                                                    indexmap::IndexMap::new();
-                                                for (tag, payload_ty) in variants.iter() {
-                                                    let subst_ty = self
-                                                        .substitute_type_params(payload_ty, &subst);
-                                                    substituted_variants
-                                                        .insert(tag.clone(), subst_ty);
-                                                }
-                                                Type::Variant(substituted_variants)
-                                            } else {
-                                                recursed
-                                            }
-                                        } else {
-                                            recursed
-                                        }
-                                    } else {
-                                        recursed
-                                    }
+                                if let Type::Variant(variants) = &recursed {
+                                    // Found a variant through the alias chain —
+                                    // substitute the INSTANCE args through the one
+                                    // carrier (this branch was the truncated copy:
+                                    // no bare-Named stage, no alias-param stage, so
+                                    // IoResult<Text> kept the formal `T` — T0862).
+                                    self.substitute_variant_args_positionally(
+                                        variants, args, type_name,
+                                    )
                                 } else {
                                     // Not a variant - return original type with actual args preserved
                                     ty.clone()

@@ -620,6 +620,13 @@ impl Unifier {
     /// Register type parameter names for a generic type alias.
     /// E.g., for `type IoResult<T> is Result<T, StreamError>`, register ["T"].
     /// This enables try_expand_alias to substitute type arguments for generic aliases.
+    /// The declared parameter names of a registered generic alias
+    /// (`IoResult` → `["T"]`), for positional substitution at sites
+    /// that never see a `__type_params_` registration (T0862).
+    pub fn alias_param_names(&self, alias_name: &str) -> Option<&List<Text>> {
+        self.type_alias_params.get(&Text::from(alias_name))
+    }
+
     pub fn register_type_alias_params(&mut self, alias_name: Text, params: List<Text>) {
         self.type_alias_params.insert(alias_name, params);
     }

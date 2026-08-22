@@ -1,0 +1,40 @@
+// =============================================================================
+// match_alias_scrutinee_binding.vr — a match over an ALIASED Result
+// binds its payload concretely (T0862)
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: inference, alias, match, stdlib, metadata
+// @description: `read_to_string` returns `IoResult<Text>` — an alias of
+//               `Result<Text, StreamError>`. Matching Ok(t) must bind
+//               t: Text WITHOUT an annotation. Pre-fix the alias
+//               expansion in `expand_generic_to_variant`'s chain
+//               branch lost the positional argument (the payload
+//               stayed the formal `T`), so `t.lines()` failed with
+//               "no method `lines` found for type `T`" — and the
+//               hint helpfully suggested `ones`. The first IO script
+//               every newcomer writes hit this (dog-food find #2).
+// =============================================================================
+
+mount core.io.file.read_to_string;
+
+fn first_line_length(path: &Text) -> Int {
+    let t = match read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            return 0 - 1;
+        }
+    };
+    // The binding must be Text here — .lines() only exists if the
+    // alias expansion substituted the payload.
+    for line in t.lines() {
+        return line.len();
+    }
+    0
+}
+
+fn main() {
+    let n = first_line_length(&"/nonexistent/definitely-missing.txt");
+    print(f"{n}");
+}
