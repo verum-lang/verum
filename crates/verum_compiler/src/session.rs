@@ -226,6 +226,13 @@ pub struct Session {
     /// architecture will close this by extracting all Shapes in a
     /// pre-pass.
     arch_shape_registry: Shared<RwLock<std::collections::BTreeMap<String, verum_kernel::arch::Shape>>>,
+    /// Cross-module function summaries (T0848): qualified fn name →
+    /// solved capability row.
+    arch_fn_summary_registry:
+        Shared<RwLock<std::collections::BTreeMap<String, verum_kernel::arch_rows::Row>>>,
+    /// Protocol max-Shapes (T0848 §5b): protocol name → CITED row.
+    arch_protocol_max_shape_registry:
+        Shared<RwLock<std::collections::BTreeMap<String, verum_kernel::arch_rows::Row>>>,
 }
 
 impl Session {
@@ -263,6 +270,9 @@ impl Session {
             script_permission_policy: Shared::new(RwLock::new(None)),
             aot_permission_policy: Shared::new(RwLock::new(None)),
             arch_shape_registry: Shared::new(RwLock::new(std::collections::BTreeMap::new())),
+            arch_fn_summary_registry: Shared::new(RwLock::new(std::collections::BTreeMap::new())),
+            arch_protocol_max_shape_registry:
+                Shared::new(RwLock::new(std::collections::BTreeMap::new())),
         }
     }
 
@@ -273,6 +283,46 @@ impl Session {
     /// AP-004/005/009 production-level checks.
     pub fn register_arch_shape(&self, module_name: String, shape: verum_kernel::arch::Shape) {
         self.arch_shape_registry.write().insert(module_name, shape);
+    }
+
+    /// Register one solved function summary under its QUALIFIED name
+    /// (`module.path.fn`). Later modules resolve mounted calls here.
+    pub fn register_arch_fn_summary(
+        &self,
+        qualified: String,
+        row: verum_kernel::arch_rows::Row,
+    ) {
+        self.arch_fn_summary_registry.write().insert(qualified, row);
+    }
+
+    /// Look up a mounted callee's summary by qualified name.
+    pub fn lookup_arch_fn_summary(
+        &self,
+        qualified: &str,
+    ) -> Option<verum_kernel::arch_rows::Row> {
+        self.arch_fn_summary_registry.read().get(qualified).cloned()
+    }
+
+    /// Register a protocol's declared `@max_shape` row (Cited).
+    pub fn register_arch_protocol_max_shape(
+        &self,
+        protocol: String,
+        row: verum_kernel::arch_rows::Row,
+    ) {
+        self.arch_protocol_max_shape_registry
+            .write()
+            .insert(protocol, row);
+    }
+
+    /// Look up a protocol's declared max-Shape.
+    pub fn lookup_arch_protocol_max_shape(
+        &self,
+        protocol: &str,
+    ) -> Option<verum_kernel::arch_rows::Row> {
+        self.arch_protocol_max_shape_registry
+            .read()
+            .get(protocol)
+            .cloned()
     }
 
     /// Resolve every entry in `composes_with` to its `(peer_name,
@@ -924,6 +974,9 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
             script_permission_policy: Shared::new(RwLock::new(None)),
             aot_permission_policy: Shared::new(RwLock::new(None)),
             arch_shape_registry: Shared::new(RwLock::new(std::collections::BTreeMap::new())),
+            arch_fn_summary_registry: Shared::new(RwLock::new(std::collections::BTreeMap::new())),
+            arch_protocol_max_shape_registry:
+                Shared::new(RwLock::new(std::collections::BTreeMap::new())),
         }
     }
 

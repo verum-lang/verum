@@ -110,3 +110,66 @@ fn f() { core.net.tcp.connect("h", 1); }
     assert!(report.escalations.is_none());
     assert!(report.inferred.iter().any(|a| a.atom.contains("Network")));
 }
+
+/// §5b bounded polymorphism at the trait seam: a call through a
+/// PROTOCOL-typed parameter with a declared @max_shape contributes
+/// the CITED row and keeps the summary CLOSED — no row variable, no
+/// silent widening, and the provenance names the protocol.
+#[test]
+fn protocol_max_shape_bounds_the_seam() {
+    let src = r#"
+module fixtures.seam;
+
+@max_shape(requires: [Capability.Network(NetProtocol.Tcp, NetDirection.Outbound)])
+type Dialer is protocol {
+    fn dial(&self) -> Int;
+};
+
+public fn use_dialer(d: Dialer) -> Int {
+    d(0)
+}
+"#;
+    let report =
+        verum_compiler::arch_query::arch_query_source(src).expect("parses");
+    let f = report
+        .functions
+        .iter()
+        .find(|f| f.function == "use_dialer")
+        .expect("summary");
+    assert!(
+        f.open_over.is_empty(),
+        "protocol-typed param must NOT open the row (bounded seam); got {:?}",
+        f.open_over
+    );
+    assert!(
+        f.atoms
+            .iter()
+            .any(|a| a.atom.contains("Network") && a.evidence.contains("Dialer")),
+        "the seam contributes the protocol's CITED max-shape; got {:?}",
+        f.atoms
+    );
+}
+
+/// Unresolved MOUNTED callee (no session, single file) is SURFACED
+/// as a qualified unresolved edge — never guessed, never dropped.
+#[test]
+fn mounted_callee_without_registry_is_surfaced() {
+    let src = r#"
+module fixtures.consumer;
+mount fixtures.provider.{net_helper};
+
+public fn entry() {
+    net_helper();
+}
+"#;
+    let report =
+        verum_compiler::arch_query::arch_query_source(src).expect("parses");
+    assert!(
+        report
+            .unresolved_calls
+            .iter()
+            .any(|e| e.contains("fixtures.provider.net_helper")),
+        "the mounted callee must surface QUALIFIED in unresolved; got {:?}",
+        report.unresolved_calls
+    );
+}

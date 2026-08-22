@@ -83,7 +83,34 @@ impl<'s> CompilationPipeline<'s> {
         // caller's surface TRANSITIVELY, where the previous flat walk
         // saw only direct primitive calls. The module surface feeds
         // the same AP-001 plumbing as before.
-        let module_summaries = infer_module_summaries(module);
+        // Local protocol max-Shapes register FIRST (a protocol and
+        // its consumer may share the module), then extraction runs
+        // with SESSION-backed resolvers: mounted callees resolve to
+        // earlier modules' solved summaries — the surface is
+        // transitive ACROSS module boundaries, in compilation order.
+        for (proto, row) in collect_protocol_max_shapes(module) {
+            self.session.register_arch_protocol_max_shape(proto, row);
+        }
+        let session = &self.session;
+        let resolvers = ExtractionResolvers {
+            imports: &|q: &str| session.lookup_arch_fn_summary(q),
+            protocol_max_shape: &|n: &str| session.lookup_arch_protocol_max_shape(n),
+        };
+        let module_summaries = infer_module_summaries_with(module, &resolvers);
+        // Install THIS module's summaries for everyone after us.
+        let module_prefix = module
+            .items
+            .iter()
+            .find_map(|i| match &i.kind {
+                verum_ast::decl::ItemKind::Module(m) => Some(m.name.name.to_string()),
+                _ => None,
+            });
+        if let Some(prefix) = &module_prefix {
+            for (fn_name, row) in &module_summaries.summaries {
+                self.session
+                    .register_arch_fn_summary(format!("{prefix}.{fn_name}"), row.clone());
+            }
+        }
         let inferred_used_capabilities: Vec<verum_kernel::arch::Capability> = module_summaries
             .module_surface()
             .facts()
@@ -727,16 +754,48 @@ struct BodyFacts {
 ///   * Everything else stays untracked in v1 — cross-module summary
 ///     consumption is the next slice and lands as CITED module
 ///     interfaces, never as a silent widening.
-pub(crate) fn extract_module_facts(module: &Module) -> ModuleFacts {
+/// Resolvers the extraction consults for CROSS-BOUNDARY facts:
+/// mounted callees (qualified name → the callee module's solved row)
+/// and protocol max-Shapes (protocol name → its Cited row). Both are
+/// plain closures so `arch query` on a single file runs with empty
+/// resolvers while the pipeline passes session-backed ones — one
+/// extraction, two harnesses, no divergence.
+pub(crate) struct ExtractionResolvers<'r> {
+    /// Qualified mounted callee → solved summary row.
+    pub imports: &'r dyn Fn(&str) -> Option<verum_kernel::arch_rows::Row>,
+    /// Protocol name → declared `@max_shape` row (Cited).
+    pub protocol_max_shape: &'r dyn Fn(&str) -> Option<verum_kernel::arch_rows::Row>,
+}
+
+impl Default for ExtractionResolvers<'static> {
+    fn default() -> Self {
+        ExtractionResolvers {
+            imports: &|_| None,
+            protocol_max_shape: &|_| None,
+        }
+    }
+}
+
+pub(crate) fn extract_module_facts(
+    module: &Module,
+    resolvers: &ExtractionResolvers<'_>,
+) -> ModuleFacts {
     use verum_ast::decl::{FunctionBody, FunctionParamKind, ItemKind};
 
     let mut facts = ModuleFacts::default();
+
+    // Mount map: bare name → qualified path, from every
+    // `mount a.b.{x, y as z}` in the module. Globs are skipped —
+    // their name set is unknowable here, and the no-silent-⊤ law
+    // forbids guessing (a glob-mounted callee stays an unresolved
+    // edge the report surfaces).
+    let mount_map = build_mount_map(module);
 
     // Pass 1: the module-local function name set (free fns + impl
     // methods under their bare method name — local calls inside an
     // impl body use the bare name; qualified `Type.method` calls
     // also record under the qualified key).
-    let mut collect_fn =
+    let collect_fn =
         |name: String, fn_decl: &verum_ast::decl::FunctionDecl, facts: &mut ModuleFacts| {
             let mut body_facts = BodyFacts::default();
             if let Maybe::Some(body) = &fn_decl.body {
@@ -745,40 +804,73 @@ pub(crate) fn extract_module_facts(module: &Module) -> ModuleFacts {
                     FunctionBody::Expr(expr) => walk_expr_for_facts(expr, &mut body_facts),
                 }
             }
-            // Function-typed parameter names of THIS fn.
-            let fn_typed_params: Vec<String> = fn_decl
-                .params
-                .iter()
-                .filter_map(|p| match &p.kind {
-                    FunctionParamKind::Regular { pattern, ty, .. } => {
-                        let is_fn_type = matches!(
-                            ty.kind,
-                            verum_ast::ty::TypeKind::Function { .. }
-                        );
-                        if !is_fn_type {
-                            return None;
-                        }
-                        pattern_bound_name(pattern)
+            let mut own = verum_kernel::arch_rows::Row::computed(
+                body_facts.atoms.iter().cloned(),
+            );
+            // Parameters, classified: a FUNCTION-typed parameter the
+            // body invokes/hands on opens the summary (row variable,
+            // Rule G); a PROTOCOL-typed parameter with a declared
+            // max-Shape contributes that CITED row instead — bounded
+            // polymorphism at the trait seam (§5b symmetry), and the
+            // summary stays closed over it.
+            let mut mixed_params: Vec<String> = Vec::new();
+            for p in fn_decl.params.iter() {
+                let FunctionParamKind::Regular { pattern, ty, .. } = &p.kind else {
+                    continue;
+                };
+                let Some(pname) = pattern_bound_name(pattern) else {
+                    continue;
+                };
+                let used = body_facts.bare_calls.contains(&pname)
+                    || body_facts.bare_args.contains(&pname);
+                if !used {
+                    continue;
+                }
+                match &ty.kind {
+                    verum_ast::ty::TypeKind::Function { .. } => {
+                        mixed_params.push(pname);
                     }
-                    _ => None,
-                })
-                .collect();
-            let mixed_params: Vec<String> = fn_typed_params
-                .into_iter()
-                .filter(|p| {
-                    body_facts.bare_calls.contains(p) || body_facts.bare_args.contains(p)
-                })
-                .collect();
+                    verum_ast::ty::TypeKind::Path(path) => {
+                        let tname = path
+                            .segments
+                            .iter()
+                            .filter_map(|s| match s {
+                                verum_ast::ty::PathSegment::Name(id) => {
+                                    Some(id.name.as_str())
+                                }
+                                _ => None,
+                            })
+                            .next_back()
+                            .unwrap_or("");
+                        if let Some(max) = (resolvers.protocol_max_shape)(tname) {
+                            own.join(&max);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // Mounted callees: resolve bare → qualified through the
+            // mount map, then qualified → summary through the imports
+            // resolver. Resolved rows join OWN (their provenance is
+            // whatever the callee's summary carries); unresolved
+            // qualified names go to callees so the solver SURFACES
+            // them instead of anyone guessing.
+            let mut callees: Vec<String> = Vec::new();
+            for bare in body_facts.bare_calls.iter() {
+                if let Some(qualified) = mount_map.get(bare) {
+                    match (resolvers.imports)(qualified) {
+                        Some(row) => own.join(&row),
+                        None => callees.push(qualified.clone()),
+                    }
+                } else {
+                    callees.push(bare.clone());
+                }
+            }
             facts.functions.insert(
                 name,
                 FnFacts {
-                    own: verum_kernel::arch_rows::Row::computed(
-                        body_facts.atoms.iter().cloned(),
-                    ),
-                    // Callee classification happens in pass 2 once the
-                    // full local name set is known; stash bare calls
-                    // in callees for now and filter below.
-                    callees: body_facts.bare_calls.into_iter().collect(),
+                    own,
+                    callees,
                     mixed_params,
                 },
             );
@@ -808,12 +900,123 @@ pub(crate) fn extract_module_facts(module: &Module) -> ModuleFacts {
     for fn_facts in facts.functions.values_mut() {
         let mixed: std::collections::HashSet<&String> =
             fn_facts.mixed_params.iter().collect();
-        fn_facts
-            .callees
-            .retain(|c| local_names.contains(c) && !mixed.contains(c));
+        fn_facts.callees.retain(|c| {
+            // Keep: local edges (the graph) and UNRESOLVED mounted
+            // callees (qualified, dotted — the solver returns them as
+            // unresolved so the report surfaces them). Drop: bare
+            // names that are neither local nor mounted (locals of
+            // closures, builtins) and calls through mixed params
+            // (polymorphism, not edges).
+            (local_names.contains(c) || c.contains('.')) && !mixed.contains(c)
+        });
     }
 
     facts
+}
+
+/// Bare name → qualified path for every non-glob mount of the module.
+fn build_mount_map(module: &Module) -> std::collections::BTreeMap<String, String> {
+    use verum_ast::decl::{ItemKind, MountTreeKind};
+    fn path_to_string(p: &verum_ast::ty::Path) -> String {
+        p.segments
+            .iter()
+            .filter_map(|s| match s {
+                verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+    fn walk_tree(
+        tree: &verum_ast::decl::MountTree,
+        prefix: Option<&str>,
+        out: &mut std::collections::BTreeMap<String, String>,
+    ) {
+        match &tree.kind {
+            MountTreeKind::Path(p) => {
+                let full = match prefix {
+                    Some(pre) => format!("{pre}.{}", path_to_string(p)),
+                    None => path_to_string(p),
+                };
+                let bare = match &tree.alias {
+                    Maybe::Some(a) => a.name.to_string(),
+                    Maybe::None => full
+                        .rsplit('.')
+                        .next()
+                        .unwrap_or(&full)
+                        .to_string(),
+                };
+                out.insert(bare, full);
+            }
+            MountTreeKind::Nested { prefix: p, trees } => {
+                let pre = match prefix {
+                    Some(outer) => format!("{outer}.{}", path_to_string(p)),
+                    None => path_to_string(p),
+                };
+                for t in trees.iter() {
+                    walk_tree(t, Some(&pre), out);
+                }
+            }
+            // Globs and file-relative mounts: name set unknowable
+            // here — deliberately unmapped (no-silent-⊤).
+            _ => {}
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    for item in &module.items {
+        if let ItemKind::Mount(m) = &item.kind {
+            walk_tree(&m.tree, None, &mut out);
+        }
+    }
+    out
+}
+
+/// Collect `@max_shape(requires: [...])`-style declarations on the
+/// module's PROTOCOL types: protocol name → its Cited row. The pin
+/// grammar is the same capability list the `@arch_module` parser
+/// reads, reused verbatim (one parser, two sites).
+pub(crate) fn collect_protocol_max_shapes(
+    module: &Module,
+) -> std::collections::BTreeMap<String, verum_kernel::arch_rows::Row> {
+    use verum_ast::decl::ItemKind;
+    let mut out = std::collections::BTreeMap::new();
+    for item in &module.items {
+        // `type P is protocol {...}` may arrive as ItemKind::Type OR
+        // the standalone ItemKind::Protocol — one collector, both
+        // spellings.
+        // The attribute rides on the DECL (TypeDecl.attributes), not
+        // on the item — the parser attaches type-level attributes to
+        // the declaration node.
+        let (proto_name, decl_attrs): (String, Option<&List<verum_ast::attr::Attribute>>) =
+            match &item.kind {
+                ItemKind::Type(t) => (t.name.name.to_string(), Some(&t.attributes)),
+                // Standalone ProtocolDecl carries no decl-attr list —
+                // its attributes live on the item.
+                ItemKind::Protocol(pd) => (pd.name.name.to_string(), None),
+                _ => continue,
+            };
+        for attr in decl_attrs
+            .into_iter()
+            .flat_map(|l| l.iter())
+            .chain(item.attributes.iter())
+        {
+            if attr.name.as_str() != "max_shape" {
+                continue;
+            }
+            let args = match &attr.args {
+                Maybe::Some(a) => a.as_slice(),
+                Maybe::None => &[],
+            };
+            if let Ok(shape) = verum_kernel::arch_parse::parse_arch_module(args) {
+                let row = verum_kernel::arch_rows::Row::cited(
+                    shape.requires.iter().chain(shape.exposes.iter()).cloned(),
+                    &format!("protocol {proto_name} @max_shape"),
+                );
+                out.insert(proto_name.clone(), row);
+            }
+        }
+    }
+    out
 }
 
 /// The single bound name of an irrefutable parameter pattern, when it
@@ -955,7 +1158,25 @@ fn walk_expr_for_facts(expr: &verum_ast::expr::Expr, sink: &mut BodyFacts) {
 /// its caller's surface through the summary join), where the flat
 /// walk saw only direct calls.
 pub(crate) fn infer_module_summaries(module: &Module) -> ModuleSummaries {
-    extract_module_facts(module).solve()
+    // Single-module harness: local protocol max-Shapes resolve; the
+    // import resolver is empty (mounted callees surface as
+    // unresolved). The PIPELINE harness threads session-backed
+    // resolvers through `infer_module_summaries_with`.
+    let local_protocols = collect_protocol_max_shapes(module);
+    let resolvers = ExtractionResolvers {
+        imports: &|_| None,
+        protocol_max_shape: &|name| local_protocols.get(name).cloned(),
+    };
+    extract_module_facts(module, &resolvers).solve()
+}
+
+/// Pipeline harness: resolvers backed by the compilation session's
+/// cross-module registries.
+pub(crate) fn infer_module_summaries_with(
+    module: &Module,
+    resolvers: &ExtractionResolvers<'_>,
+) -> ModuleSummaries {
+    extract_module_facts(module, resolvers).solve()
 }
 
 // ============================================================================
