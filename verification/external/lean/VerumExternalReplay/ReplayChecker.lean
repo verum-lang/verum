@@ -47,11 +47,32 @@ def jsonPair? (j : Json) : Except String (Json × Json) :=
 -- Walk the Lean `Json` AST and reconstruct a `Term`.  Tries each
 -- variant key in order; the first present key determines the
 -- variant.  Pure function, returns Except.
+/-- Level decoding, both certificate spellings: the pre-FV-19 wire
+    wrote a bare number (`{"Universe": 0}`); the structured wire
+    writes the Level constructors. Mirrors the Rust side's
+    `Level::deserialize` compat exactly — accept old, accept new. -/
+partial def levelFromJson (j : Json) : Except String Level :=
+  if let .ok n := Json.getNat? j then
+    Except.ok (Level.concrete n)
+  else if let .ok v := j.getObjVal? "Concrete" then do
+    let n ← Json.getNat? v; Except.ok (Level.concrete n)
+  else if let .ok v := j.getObjVal? "Var" then do
+    let s ← Json.getStr? v; Except.ok (Level.var s)
+  else if let .ok v := j.getObjVal? "Succ" then do
+    let l ← levelFromJson v; Except.ok (Level.succ l)
+  else if let .ok v := j.getObjVal? "Max" then do
+    let (a, b) ← jsonPair? v
+    let a' ← levelFromJson a
+    let b' ← levelFromJson b
+    Except.ok (Level.max a' b')
+  else
+    Except.error s!"unrecognised Level encoding: {j.compress}"
+
 partial def termFromJson (j : Json) : Except String Term :=
   if let .ok v := j.getObjVal? "Var" then do
     let n ← Json.getNat? v; Except.ok (Term.var n)
   else if let .ok v := j.getObjVal? "Universe" then do
-    let n ← Json.getNat? v; Except.ok (Term.universe n)
+    let l ← levelFromJson v; Except.ok (Term.universe l)
   else if let .ok v := j.getObjVal? "Pi" then do
     let (a, b) ← jsonPair? v
     let a' ← termFromJson a
@@ -107,6 +128,7 @@ def runOne (cert : BatteryCert) : Json :=
       | .unbound_variable _        => "UnboundVariable"
       | .not_a_type _              => "NotAType"
       | .not_a_function _          => "NotAFunction"
+      | .not_a_sigma _             => "NotASigma"
       | .domain_mismatch _ _       => "DomainMismatch"
       | .type_mismatch _ _         => "TypeMismatch"
       | .universe_overflow _       => "UniverseOverflow"
