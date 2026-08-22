@@ -798,7 +798,8 @@ impl<'s> CompilationPipeline<'s> {
             .with_runtime_bridge(runtime_bridge)
             .with_inline_depth(inline_depth)
             .with_futures_enabled(rt.futures)
-            .with_nurseries_enabled(rt.nurseries);
+            .with_nurseries_enabled(rt.nurseries)
+            .with_shape_manifest(self.session.arch_shape_manifest_json());
 
         // Cross-compilation: the module's own triple is what every
         // per-platform decision in verum_codegen reads back through

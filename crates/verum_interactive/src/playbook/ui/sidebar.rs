@@ -10,6 +10,11 @@ pub enum SidebarTab {
     #[default]
     Variables,
     Outline,
+    /// The Arch lens (T0858 slice 2): the notebook-as-module's
+    /// inferred capability surface, its pin, and the two-direction
+    /// judgment — mirrored verbatim from `verum arch query` (the one
+    /// vocabulary; zero second derivations).
+    Arch,
     DevTools,
 }
 
@@ -17,7 +22,8 @@ impl SidebarTab {
     pub fn next(self) -> Self {
         match self {
             Self::Variables => Self::Outline,
-            Self::Outline => Self::DevTools,
+            Self::Outline => Self::Arch,
+            Self::Arch => Self::DevTools,
             Self::DevTools => Self::Variables,
         }
     }
@@ -25,14 +31,16 @@ impl SidebarTab {
         match self {
             Self::Variables => Self::DevTools,
             Self::Outline => Self::Variables,
-            Self::DevTools => Self::Outline,
+            Self::Arch => Self::Outline,
+            Self::DevTools => Self::Arch,
         }
     }
     pub fn index(self) -> usize {
         match self {
             Self::Variables => 0,
             Self::Outline => 1,
-            Self::DevTools => 2,
+            Self::Arch => 2,
+            Self::DevTools => 3,
         }
     }
 }
@@ -88,6 +96,10 @@ pub struct SidebarWidget<'a> {
     functions: &'a [FuncInfo],
     outline: &'a [OutlineEntry],
     stats: ExecStats,
+    /// Pre-rendered Arch-lens lines (computed by the app on lens
+    /// entry via the `verum arch query` subprocess — the widget only
+    /// paints; it derives nothing).
+    arch_lines: &'a [String],
 }
 
 impl<'a> SidebarWidget<'a> {
@@ -98,6 +110,7 @@ impl<'a> SidebarWidget<'a> {
             functions: &[],
             outline: &[],
             stats: ExecStats::default(),
+            arch_lines: &[],
         }
     }
 
@@ -119,6 +132,10 @@ impl<'a> SidebarWidget<'a> {
     }
     pub fn stats(mut self, stats: ExecStats) -> Self {
         self.stats = stats;
+        self
+    }
+    pub fn arch_lines(mut self, lines: &'a [String]) -> Self {
+        self.arch_lines = lines;
         self
     }
     pub fn cell_info(self, _count: usize, _selected: usize) -> Self {
@@ -426,6 +443,7 @@ impl<'a> Widget for SidebarWidget<'a> {
         let tab_label = match self.tab {
             SidebarTab::Variables => " Variables ",
             SidebarTab::Outline => " Cells ",
+            SidebarTab::Arch => " Arch ",
             SidebarTab::DevTools => " Session ",
         };
 

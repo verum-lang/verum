@@ -314,6 +314,46 @@ impl Session {
             .insert(protocol, row);
     }
 
+    /// Snapshot the Shape manifest for embedding into a binary
+    /// (T0854): every registered module pin plus the joined inferred
+    /// surface of all solved function summaries. JSON is append-only
+    /// (schema_version leads).
+    pub fn arch_shape_manifest_json(&self) -> String {
+        // COMPACT by design: the manifest is the artifact's aggregate
+        // surface (union of pinned atoms + union of inferred rows),
+        // not a per-module dump — a stdlib-linking binary carries
+        // thousands of pinned modules, and a megabyte manifest both
+        // bloats every binary and (as measured) melts the const-array
+        // emitter. Per-module detail stays a SOURCE question
+        // (`verum arch query`); the binary answers "what may this
+        // artifact do" in atoms.
+        let shapes = self.arch_shape_registry.read();
+        let summaries = self.arch_fn_summary_registry.read();
+        let mut surface = verum_kernel::arch_rows::Row::empty();
+        for row in summaries.values() {
+            surface.join(row);
+        }
+        let mut pinned: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        for shape in shapes.values() {
+            for c in shape.requires.iter().chain(shape.exposes.iter()) {
+                pinned.insert(format!("{c:?}"));
+            }
+        }
+        let inferred: Vec<String> = surface
+            .facts()
+            .map(|f| format!("{:?}", f.atom))
+            .collect();
+        format!(
+            "{{\"schema_version\":1,\"tool_version\":{},\"pinned_modules\":{},\"pinned_surface\":{},\"inferred_surface\":{}}}",
+            serde_json::to_string(env!("CARGO_PKG_VERSION")).unwrap(),
+            shapes.len(),
+            serde_json::to_string(&pinned.iter().collect::<Vec<_>>())
+                .unwrap_or_else(|_| "[]".into()),
+            serde_json::to_string(&inferred).unwrap_or_else(|_| "[]".into()),
+        )
+    }
+
     /// Look up a protocol's declared max-Shape.
     pub fn lookup_arch_protocol_max_shape(
         &self,

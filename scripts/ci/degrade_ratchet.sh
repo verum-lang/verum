@@ -19,6 +19,10 @@ BUDGET="$(cat "$BUDGET_FILE")"
 # surface through AOT. Extend deliberately; every addition re-baselines.
 PROBES=(
   "vcs/specs/L0-critical/vbc/e2e/aot/1097_arena_allocator.vr"
+  "vcs/specs/L0-critical/vbc/e2e/aot/1000_comprehensive_for_in.vr"
+  "vcs/specs/L0-critical/vbc/e2e/aot/1002_production_patterns.vr"
+  "vcs/specs/L0-critical/vbc/e2e/aot/1005_heap_method_dispatch.vr"
+  "vcs/specs/L0-critical/vbc/e2e/aot/1011_higher_order_composition.vr"
 )
 
 REPORT="$(mktemp)"

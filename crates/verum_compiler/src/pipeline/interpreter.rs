@@ -694,6 +694,20 @@ impl<'s> CompilationPipeline<'s> {
             .record_phase_metrics("Stdlib Loading", stdlib_time, 0);
         drop(_bc_stdlib);
 
+        // Phase 0.4: ATS-V over the entry module (T0854). The native
+        // path used to skip the architectural phase entirely, so a
+        // `verum build` produced a binary whose Shape manifest was
+        // EMPTY — the session registries the manifest snapshots were
+        // never populated on this path. The judged scope here is the
+        // modules of THIS compilation (baked stdlib modules carry
+        // their pins in the bake, not in this session — a named v1
+        // boundary of the embedded manifest, not a silent one).
+        {
+            let _bc_atsv = verum_error::breadcrumb::enter("compiler.phase.ats_v", "");
+            let r = self.phase_ats_v(&module);
+            self.session.collect_phase_error("ats_v", r)?;
+        }
+
         // Phase 0.5: Load sibling project modules (enables cross-file mount imports)
         let _bc_proj = verum_error::breadcrumb::enter("compiler.phase.project_modules", "");
         let t0 = Instant::now();

@@ -261,6 +261,10 @@ pub struct LoweringConfig {
     /// `Instruction::Spawn` at codegen time with a manifest-citing
     /// diagnostic — Tier 1 mirror of the Tier 0 dispatch rejection.
     pub futures_enabled: bool,
+    /// JSON Shape manifest to embed into the binary (T0854): the
+    /// module's capability surface, discoverable by `verum inspect`
+    /// without sources. Empty = no manifest global emitted.
+    pub shape_manifest_json: Text,
     /// Manifest-driven `[runtime].nurseries` (#262-AOT, task #281).
     /// Default `true`. When `false`, the lowering rejects every
     /// `Instruction::NurseryInit` at codegen time. Once
@@ -287,6 +291,7 @@ impl Default for LoweringConfig {
             runtime_bridge: super::platform_ir::RuntimeBridgeValues::default(),
             inline_depth: 3,
             futures_enabled: true,
+            shape_manifest_json: Text::new(),
             nurseries_enabled: true,
         }
     }
@@ -302,6 +307,11 @@ impl LoweringConfig {
     }
 
     /// Set the target triple.
+    pub fn with_shape_manifest(mut self, json: impl Into<Text>) -> Self {
+        self.shape_manifest_json = json.into();
+        self
+    }
+
     pub fn with_target(mut self, triple: impl Into<Text>) -> Self {
         self.target_triple = Some(triple.into());
         self
@@ -1525,6 +1535,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // un-monomorphized generic protocol dispatch).  Warning by default;
             // hard error under VERUM_STRICT_MONO=1.
             super::error::write_degrade_report(&self.config.module_name);
+            self.emit_shape_manifest_global();
             super::error::check_no_unresolved_generic_calls()?;
             // The reachable-name set is per-lowering-run state — clear
             // it so a later lower_module in the same process starts
@@ -1854,6 +1865,60 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
     }
 
     /// Forward declare all functions in the module.
+    /// Embed the Shape manifest into the binary (T0854): a global
+    /// byte array `MAGIC ++ u32-le length ++ json`, placed in a
+    /// dedicated section. `verum inspect` finds it by scanning for
+    /// the MAGIC, which survives any object format and stripping of
+    /// symbol names; the section is a courtesy for object-aware
+    /// tools. Marked used so LTO/GC cannot drop an unreferenced
+    /// global — an artifact that silently vanishes under -O is a
+    /// manifest that lies by absence.
+    fn emit_shape_manifest_global(&self) {
+        let json = self.config.shape_manifest_json.as_str();
+        if json.is_empty() {
+            return;
+        }
+        const MAGIC: &[u8] = b"VERUM_SHAPE_MANIFEST_v1\0";
+        let mut bytes = Vec::with_capacity(MAGIC.len() + 4 + json.len());
+        bytes.extend_from_slice(MAGIC);
+        bytes.extend_from_slice(&(json.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(json.as_bytes());
+
+        let arr = self.context.const_string(&bytes, false);
+        let global = self.module.add_global(
+            arr.get_type(),
+            None,
+            "verum_shape_manifest",
+        );
+        global.set_initializer(&arr);
+        global.set_constant(true);
+        // Section spelling differs per object format; Mach-O wants
+        // "segment,section". The target triple decides.
+        let triple = self.module.get_triple();
+        let triple_s = triple.as_str().to_string_lossy().to_string();
+        let section = if triple_s.contains("apple") || triple_s.contains("darwin") {
+            "__DATA,__verum_shape"
+        } else {
+            ".verum_shape"
+        };
+        global.set_section(Some(section));
+
+        // llvm.used — the promise the doc comment makes, kept: an
+        // unreferenced internal constant is exactly what globaldce
+        // and -dead_strip exist to remove, and the first e2e proved
+        // it (magic absent from the linked binary while the lowering
+        // demonstrably ran). llvm.used is the ONE sanctioned keep.
+        let ptr_ty = self.context.ptr_type(AddressSpace::default());
+        let used = self.module.add_global(
+            ptr_ty.const_array(&[global.as_pointer_value()]).get_type(),
+            None,
+            "llvm.used",
+        );
+        used.set_linkage(verum_llvm::module::Linkage::Appending);
+        used.set_initializer(&ptr_ty.const_array(&[global.as_pointer_value()]));
+        used.set_section(Some("llvm.metadata"));
+    }
+
     fn declare_functions(&mut self, vbc_module: &VbcModule) -> Result<()> {
         use verum_vbc::types::TypeId;
         use verum_vbc::types::TypeRef;
