@@ -741,12 +741,18 @@ impl VbcCodegen {
                 }
             }
             if let Some(type_name) = type_name_from_annotation {
+                if std::env::var("VERUM_TRACE_LETTYPE").is_ok() {
+                    eprintln!("[lettype] {var_name}: annotation -> {type_name:?}");
+                }
                 self.ctx
                     .variable_type_names
                     .insert(var_name.clone(), type_name);
             } else if let Some(expr) = value {
                 let extracted = self.extract_expr_type_name(expr)
                     .or_else(|| self.infer_expr_type_name(expr));
+                if std::env::var("VERUM_TRACE_LETTYPE").is_ok() {
+                    eprintln!("[lettype] {var_name}: derived -> {extracted:?}");
+                }
                 if let Some(type_name) = extracted {
                     self.ctx
                         .variable_type_names

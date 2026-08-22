@@ -986,6 +986,25 @@ impl<'s> CompilationPipeline<'s> {
                 | "Duration" | "Instant"
                 // Number wrappers
                 | "Maybe" | "Result"
+                // Primitive receivers (`implement Int` and family in
+                // core/base/primitives.vr + Float32/Ordering). These were
+                // MISSING from the set, so every `x.checked_add(y)` /
+                // `x.cmp(y)` compiled INSIDE the bake (before the base
+                // module's real registration) could not resolve
+                // "Int.checked_add" and its return type: the scrutinee of
+                // `match self.used.checked_add(mask)` derived None, the
+                // match binding went untyped, and the baked body carried a
+                // BARE CallM — which Tier 0 dispatches by NaN-box tag but
+                // AOT cannot dispatch at all (the checked_add
+                // tier-divergence in GenerationalArena.alloc, and the wide
+                // bare-CallM surface across baked bodies). The predicate
+                // recognised `implement Int` (dedicated TypeKind arm
+                // above) and then rejected it HERE — a closed set treated
+                // as complete while a whole family was absent.
+                | "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128"
+                | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128"
+                | "ISize" | "USize" | "Byte" | "Float" | "Float32"
+                | "Bool" | "Char" | "Ordering"
             )
         }
 

@@ -20196,25 +20196,48 @@ fn lower_call_method<'ctx>(
                         ctx.function_name().as_str()
                     );
                 }
-                return build_runtime_type_switch(ctx, receiver, *args, dst, &entries);
+                return build_runtime_type_switch(
+                    ctx,
+                    receiver,
+                    *args,
+                    dst,
+                    &entries,
+                    method_name_str.as_str(),
+                );
             }
-            // No candidate anywhere in the module: keep the recorded
-            // const-zero degrade (surfaces in the codegen-warn summary
-            // and hard-errors under VERUM_STRICT_MONO).
+            // No candidate anywhere in the module. This used to degrade
+            // to a CONST-ZERO STUB — the register held 0 and execution
+            // continued, which is the wrong-VALUE (not crashing) failure
+            // mode the runtime-type-switch's old default arm shared.
+            // Same soundness rule as there now: never fabricate a
+            // result. The site still registers in the codegen-warn
+            // summary (and hard-errors under VERUM_STRICT_MONO), and at
+            // runtime the call aborts with the method's name instead of
+            // computing garbage. The register is still set (to 0) so the
+            // following — unreachable — IR stays well-formed.
             let cur_fn = ctx.function_name().as_str().to_string();
             super::error::record_unresolved_generic_call(
                 &cur_fn,
                 format!(
-                    "CallM method '{}' unresolved at codegen — degraded to a const-zero stub",
+                    "CallM method '{}' unresolved at codegen — lowered to a runtime abort",
                     method_name_str
                 ),
             );
             if std::env::var_os("VERUM_AOT_TRACE_CALLM").is_some() {
                 eprintln!(
-                    "[callm]   UNRESOLVED -> const-zero: method={:?} in fn {}",
+                    "[callm]   UNRESOLVED -> runtime abort: method={:?} in fn {}",
                     method_name_str, cur_fn
                 );
             }
+            let abort_msg = format!(
+                "AOT dispatch fault: method '{}' has no compiled candidate in \
+                 this module — the static resolver could not name the call and \
+                 no `Type.{}` body exists to switch over (compiler defect: \
+                 type-carry / missing monomorphisation). Refusing to fabricate \
+                 a result.",
+                method_name_str, method_name_str
+            );
+            emit_runtime_abort(ctx, &abort_msg, "callm_unresolved_msg")?;
             ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
             return Ok(());
         }
@@ -33986,16 +34009,26 @@ fn lower_try_end<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>) -> Result<()> {
 /// object-header type_id, switch over every `(type_id, "Type.method")`
 /// candidate, call the matching compiled body (receiver + args, with
 /// int↔ptr coercion per the target's signature), and PHI-merge the
-/// i64-coerced results.  Default arm yields 0 (same value the old
-/// const-zero stub produced — but now ONLY for receivers whose runtime
-/// type has no candidate, instead of for every call site the static
-/// resolver couldn't name).
+/// i64-coerced results.
+///
+/// **The default arms ABORT — they never fabricate a value.** They used
+/// to yield 0, and that 0 was the root of the checked_add
+/// tier-divergence class: a scalar receiver whose static type the
+/// resolver lost fell through the pointer-plausibility guard, the
+/// fabricated 0 read as `Maybe.None`, and the program computed a
+/// DIFFERENT ANSWER than Tier 0 — silently. A dispatch this function
+/// cannot perform is a compiler defect (type-carry) by construction:
+/// Tier 0 dispatches the same call by NaN-box value tag, AOT registers
+/// are untagged, so guessing here would be exactly the suffix-heuristic
+/// dispatch the design invariants forbid. Wrong programs fail loudly;
+/// they never answer wrongly.
 fn build_runtime_type_switch<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     receiver: Reg,
     args: verum_vbc::RegRange,
     dst: Reg,
     entries: &[(u32, String)],
+    method_name: &str,
 ) -> Result<()> {
     let i64_type = ctx.types().i64_type();
     let ptr_type = ctx.types().ptr_type();
@@ -34009,8 +34042,10 @@ fn build_runtime_type_switch<'ctx>(
     // dereferenced as a pointer — fault addr = the value (1e9 for
     // `Duration.secs(1) <`). Mirror the tag check with a pointer-
     // plausibility test: non-null, 8-aligned, above the platform heap
-    // floor. Implausible receivers take the DEFAULT arm — the same
-    // contract as an unmatched type id ("primitive receiver").
+    // floor. Implausible receivers take the guard-default arm, which
+    // ABORTS with the method's name (see the function doc) — a scalar
+    // that reaches runtime dispatch has no tag to dispatch on, and the
+    // old fabricated-0 contract was the checked_add tier-divergence.
     let recv_i64 = as_i64(ctx, receiver_val, "rts_recv_i64")?;
     let current_fn0 = ctx.function();
     let llvm_cx0 = ctx.llvm_context();
@@ -34085,20 +34120,29 @@ fn build_runtime_type_switch<'ctx>(
         .build_switch(type_id_val, default_bb, &cases)
         .or_llvm_err()?;
 
+    // Both default arms abort. See the function doc: a dispatch this
+    // switch cannot perform is a type-carry compiler defect, and the
+    // only sound behaviours are "dispatch correctly" or "fail loudly".
+    // The message names the method so the failing call is identifiable
+    // from the abort alone.
+    let abort_msg = format!(
+        "AOT dispatch fault: no runtime candidate for method '{}' — the \
+         receiver's static type was lost at compile time and its value \
+         carries no matchable type header (compiler defect: type-carry). \
+         Tier 0 dispatches this call by value tag; refusing to fabricate \
+         a result here.",
+        method_name
+    );
     ctx.builder().position_at_end(default_bb);
-    ctx.builder()
-        .build_unconditional_branch(merge_bb)
-        .or_llvm_err()?;
+    emit_runtime_abort(ctx, &abort_msg, "rts_unresolved_msg")?;
+    ctx.builder().build_unreachable().or_llvm_err()?;
     let mut incoming: Vec<(BasicValueEnum<'ctx>, _)> = Vec::new();
-    incoming.push((i64_type.const_zero().into(), default_bb));
 
-    // RTS-SCALAR-GUARD: implausible-pointer receivers join the merge
-    // through the same zero-result contract as an unmatched type id.
+    // RTS-SCALAR-GUARD: implausible-pointer receivers cannot be
+    // dispatched either — same abort, not a fabricated zero.
     ctx.builder().position_at_end(guard_default_bb);
-    ctx.builder()
-        .build_unconditional_branch(merge_bb)
-        .or_llvm_err()?;
-    incoming.push((i64_type.const_zero().into(), guard_default_bb));
+    emit_runtime_abort(ctx, &abort_msg, "rts_unresolved_msg")?;
+    ctx.builder().build_unreachable().or_llvm_err()?;
 
     for (bb, fname) in &case_blocks {
         ctx.builder().position_at_end(*bb);

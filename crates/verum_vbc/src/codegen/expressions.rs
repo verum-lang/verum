@@ -25410,14 +25410,74 @@ impl VbcCodegen {
         use verum_ast::expr::ExprKind;
         use verum_ast::ty::PathSegment;
 
+        let trace = std::env::var("VERUM_TRACE_LETTYPE").is_ok();
+        if trace {
+            eprintln!("[via-pattern] scrutinee={scrutinee_type:?}");
+        }
         let scrutinee_type = scrutinee_type?;
-        // Body must be a single-binder reference (e.g. `p`).
-        let binder = match &body.kind {
-            ExprKind::Path(path) if path.segments.len() == 1 => match &path.segments[0] {
-                PathSegment::Name(id) => id.name.to_string(),
-                _ => return None,
-            },
-            _ => return None,
+        let path_binder = |e: &Expr| -> Option<String> {
+            match &e.kind {
+                ExprKind::Path(path) if path.segments.len() == 1 => {
+                    match &path.segments[0] {
+                        PathSegment::Name(id) => Some(id.name.to_string()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        };
+        // The body must reference a pattern binder in a TYPE-PRESERVING
+        // way: either the bare binder itself (`v`), or a closed numeric
+        // operation over it — `v & (!mask)`, `v + 1`, `v * scale` —
+        // whose result type equals the binder's numeric payload type.
+        // The arena's own growth path is exactly the second shape
+        // (`Maybe.Some(v) => v & (!mask)`), and before this arm existed
+        // it derived None: the match binding went untyped, the follow-up
+        // `.checked_add(...)` lost its static target, and the AOT
+        // runtime-type-switch fabricated 0 for the scalar receiver —
+        // the checked_add tier-divergence root. Comparisons and logical
+        // ops are deliberately excluded (they yield Bool, not the
+        // payload type).
+        let (binder, requires_numeric) = match &body.kind {
+            _ if path_binder(body).is_some() => (path_binder(body).unwrap(), false),
+            ExprKind::Binary { op, left, right } => {
+                use verum_ast::expr::BinOp;
+                let closed = matches!(
+                    op,
+                    BinOp::Add
+                        | BinOp::Sub
+                        | BinOp::Mul
+                        | BinOp::Div
+                        | BinOp::Rem
+                        | BinOp::Pow
+                        | BinOp::BitAnd
+                        | BinOp::BitOr
+                        | BinOp::BitXor
+                        | BinOp::Shl
+                        | BinOp::Shr
+                );
+                if !closed {
+                    if trace {
+                        eprintln!("[via-pattern]   body op is not type-preserving");
+                    }
+                    return None;
+                }
+                match path_binder(left).or_else(|| path_binder(right)) {
+                    Some(b) => (b, true),
+                    None => {
+                        if trace {
+                            eprintln!("[via-pattern]   no binder operand in body");
+                        }
+                        return None;
+                    }
+                }
+            }
+            _ => {
+                if trace {
+                    eprintln!("[via-pattern]   body is not a single binder");
+                }
+                return None;
+            }
         };
         // Pattern must be `Variant(binder)` — a single-binder tuple variant.
         let (variant_name, position) = match &pattern.kind {
@@ -25455,7 +25515,7 @@ impl VbcCodegen {
             .next()
             .unwrap_or(&variant_name)
             .to_string();
-        let info = self
+        let info = match self
             .ctx
             .lookup_function_in_scope(&variant_name)
             .or_else(|| {
@@ -25469,7 +25529,18 @@ impl VbcCodegen {
                 let base = crate::codegen::VbcCodegen::strip_generic_args(scrutinee_type);
                 self.ctx
                     .lookup_function(&format!("{}.{}", base, simple_variant))
-            })?;
+            }) {
+            Some(i) => i,
+            None => {
+                if trace {
+                    eprintln!(
+                        "[via-pattern]   no ctor info for variant={variant_name:?} \
+                         simple={simple_variant:?} inner={inner_types:?}"
+                    );
+                }
+                return None;
+            }
+        };
         let is_generic_param = |s: &str| -> bool {
             s.len() <= 2 && s.chars().all(|c| c.is_uppercase() || c.is_numeric())
         };
@@ -25478,15 +25549,37 @@ impl VbcCodegen {
             .as_ref()
             .and_then(|pt| pt.get(position).cloned())
             .filter(|t| !is_generic_param(t));
+        // For the operation-over-binder body shape the payload type is
+        // only preserved when it is numeric (closed ops); a non-numeric
+        // payload under `&`/`+` means operator overloading we cannot
+        // see from here — answer "unknown" rather than guess.
+        let numeric_guard = |t: String| -> Option<String> {
+            if !requires_numeric {
+                return Some(t);
+            }
+            let base = crate::codegen::VbcCodegen::strip_generic_args(&t).to_string();
+            if verum_common::well_known_types::type_names::is_numeric_type(&base) {
+                Some(t)
+            } else {
+                None
+            }
+        };
         if let Some(t) = declared {
-            return Some(t);
+            return numeric_guard(t);
         }
         let tag = info.variant_tag? as usize;
-        if info.param_count <= 1 && tag < inner_types.len() {
+        let out = if info.param_count <= 1 && tag < inner_types.len() {
             inner_types.get(tag).cloned()
         } else {
             inner_types.get(position).cloned()
+        };
+        if trace {
+            eprintln!(
+                "[via-pattern]   variant={variant_name:?} tag={tag} pos={position} \
+                 inner={inner_types:?} -> {out:?}"
+            );
         }
+        out.and_then(numeric_guard)
     }
 
     /// associated constant access (`MapFlags.PRIVATE_ANON`).
@@ -26232,7 +26325,27 @@ impl VbcCodegen {
                                     .ctx
                                     .variable_type_names
                                     .get(&*var_ident.name)
-                                    .cloned(),
+                                    .cloned()
+                                    // A PRIMITIVE RECEIVER HAS A TYPE NAME TOO —
+                                    // the same fallback the infer sibling's Path
+                                    // arm carries (`a.cmp(b)` / Ordering-Display
+                                    // note). The name map only holds NOMINAL
+                                    // names, so `let used = 0;
+                                    // used.checked_add(mask)` resolved None here,
+                                    // the match SCRUTINEE went untyped, the
+                                    // pattern binder got no payload type, and the
+                                    // AOT static resolver lost the follow-up call
+                                    // (runtime type-switch → scalar receiver →
+                                    // fabricated 0: the checked_add tier-
+                                    // divergence micro-repro). The register-kind
+                                    // discriminator the codegen already keeps IS
+                                    // this fact — spell it as a name.
+                                    .or_else(|| {
+                                        Self::primitive_type_name(
+                                            self.ctx.get_variable_type(&var_ident.name),
+                                        )
+                                        .map(|s| s.to_string())
+                                    }),
                                 PathSegment::SelfValue => {
                                     self.ctx.variable_type_names.get("self").cloned()
                                 }
@@ -26324,6 +26437,26 @@ impl VbcCodegen {
                                     ),
                                 );
                             }
+                            // Archive-loaded FunctionInfo splits the declared
+                            // return type into base ("Maybe") +
+                            // `return_type_inner` (["Int"]) — the URL-8
+                            // read-site composition the STATIC arm already
+                            // performs. Instance methods load through the
+                            // same archive path, so without this the
+                            // scrutinee of `match recv.checked_add(n)` was
+                            // typed bare "Maybe" and the pattern binder had
+                            // no payload type to give the binding.
+                            if let Some(ref inner) = func_info.return_type_inner
+                                && !inner.is_empty()
+                                && inner.iter().all(|s| !s.trim().is_empty())
+                                && !after_self.contains('<')
+                            {
+                                return Some(format!(
+                                    "{}<{}>",
+                                    after_self,
+                                    inner.join(", ")
+                                ));
+                            }
                             return Some(after_self);
                         }
                     }
@@ -26375,6 +26508,20 @@ impl VbcCodegen {
                                         &args,
                                     ),
                                 );
+                            }
+                            // URL-8 read-site composition for field/chained
+                            // receivers too — `self.used.checked_add(n)` is
+                            // the arena's own shape.
+                            if let Some(ref inner) = func_info.return_type_inner
+                                && !inner.is_empty()
+                                && inner.iter().all(|s| !s.trim().is_empty())
+                                && !after_self.contains('<')
+                            {
+                                return Some(format!(
+                                    "{}<{}>",
+                                    after_self,
+                                    inner.join(", ")
+                                ));
                             }
                             return Some(after_self);
                         }

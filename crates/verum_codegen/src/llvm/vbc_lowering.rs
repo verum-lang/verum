@@ -1106,6 +1106,30 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             }
         }
 
+        // Diagnostic tap: VERUM_TRACE_FNTABLE=<substr> prints every
+        // descriptor whose name contains <substr> as the lowering sees
+        // it — id, name, arity, body length, and the shape of the first
+        // instructions. The question it answers: does a wrong-looking
+        // emitted function come from a wrong DESCRIPTOR or from wrong
+        // LOWERING of a right one.
+        if let Ok(filter) = std::env::var("VERUM_TRACE_FNTABLE") {
+            for fd in &vbc_module.functions {
+                let name = vbc_module.strings.get(fd.name).unwrap_or("<?>");
+                if !name.contains(&filter) {
+                    continue;
+                }
+                let body = fd.instructions.as_ref();
+                eprintln!(
+                    "[fntable] id={} name={:?} params={} instrs={} first3={:?}",
+                    fd.id.0,
+                    name,
+                    fd.params.len(),
+                    body.map_or(0, |i| i.len()),
+                    body.map(|i| i.iter().take(3).collect::<Vec<_>>()),
+                );
+            }
+        }
+
         let mut skipped_unreachable = 0usize;
         for (_idx, func_desc) in vbc_module.functions.iter().enumerate() {
             // T0682 — do not build IR for code that cannot run. The
