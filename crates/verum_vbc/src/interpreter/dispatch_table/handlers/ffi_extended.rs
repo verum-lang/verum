@@ -3990,10 +3990,22 @@ unsafe {
                 cbgr_user_allocate(state, raw_size, raw_align)
             };
             if ptr == 0 {
-                // Model `AllocError::OutOfMemory` as returning a nil Value
-                // so pattern-match `Err(e) => ...` fires. The tuple shape
-                // matching below is only materialised on success.
-                state.set_reg(dst, Value::nil());
+                // Out of memory is an `Err`, not a bare nil. The old
+                // comment here claimed a nil makes `Err(e) => ...` fire
+                // — it does not: a nil is not a Result variant, so the
+                // caller's match read it AS one, which is the same
+                // category of lie the Tier-1 arm told with its raw
+                // pointer (T0844). The realloc handler below was
+                // already fixed to a real variant under T0463; this is
+                // its sibling. Payload stays nil — constructing the
+                // precise AllocError needs the module's type tables,
+                // which this handler does not consult (ledger row).
+                let err_val = super::method_dispatch::make_result_variant(
+                    state,
+                    verum_common::well_known_types::result_error_tag(),
+                    Value::nil(),
+                )?;
+                state.set_reg(dst, err_val);
                 return Ok(DispatchResult::Continue);
             }
             // Report the generation/epoch the header actually carries —

@@ -32813,36 +32813,172 @@ fn lower_ffi_extended<'ctx>(
         // helpers which own the actual page/slot machinery; this mirrors
         // how the slice ops at 0x06-0x09 call `verum_cbgr_allocate`.
         Some(SystemSubOpcode::CbgrAlloc) | Some(SystemSubOpcode::CbgrAllocZeroed) => {
+            // The FULL .vr contract, at Tier 1 exactly as at Tier 0:
+            //
+            //   cbgr_alloc(size, align)
+            //       -> Result<(&unsafe Byte, UInt32, UInt16), AllocError>
+            //
+            // The previous arm returned the raw pointer with a comment
+            // reasoning that "the stdlib allocator wrapper handles the
+            // packaging on top" — describing a world that no longer
+            // existed: this intrinsic IS the replacement for that
+            // wrapper, so nothing packaged anything, and every caller
+            // that matched on the Result (Shared.new, Heap.new — every
+            // allocation in the language) read the raw pointer AS a
+            // variant. GetVariantData then dereferenced offset 24
+            // INSIDE the fresh block, the "payload" unpacked to
+            // garbage, and ptr_write faulted — the single crashing
+            // frame behind 34 darwin autopsies (T0844).
+            //
+            // Both allocating sub-ops share the arm because the
+            // allocator zeroes every block: "zeroed" is not a second
+            // allocator, it is the only one.
             if operands.len() < 3 {
                 return Ok(());
             }
             let dst = op_reg(operands, 0);
             let size_reg = op_reg(operands, 1);
-            let _align_reg = op_reg(operands, 2);
+            let align_reg = op_reg(operands, 2);
             let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
             let module = ctx.get_module();
-            let alloc_name = if matches!(sub_opcode, Some(SystemSubOpcode::CbgrAllocZeroed)) {
-                "verum_cbgr_allocate_zeroed"
-            } else {
-                "verum_cbgr_allocate"
-            };
+            let builder = ctx.builder();
+            let runtime = RuntimeLowering::new(ctx.llvm_context());
+
             let size_val = as_i64(ctx, ctx.get_register(size_reg)?, "cbgr_alloc_size")?;
-            let alloc_fn = module.get_function(alloc_name).unwrap_or_else(|| {
-                let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
-                module.add_function(alloc_name, fn_ty, None)
-            });
-            let ptr = ctx
-                .builder()
-                .build_call(alloc_fn, &[size_val.into()], "cbgr_alloc_ptr")
+            let align_val = as_i64(ctx, ctx.get_register(align_reg)?, "cbgr_alloc_align")?;
+
+            let current_fn = builder
+                .get_insert_block()
+                .and_then(|b| b.get_parent())
+                .or_internal("cbgr_alloc: no insert block/function")?;
+            let alloc_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_go");
+            let err_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_err");
+            let ok_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_ok");
+            let done_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_done");
+
+            // Validation mirrors the Tier-0 handler bit for bit:
+            // 0 < size <= MAX_ALLOCATION_SIZE, 0 < align <= 4096,
+            // align a power of two.
+            let zero = i64_ty.const_zero();
+            let max_alloc =
+                i64_ty.const_int(verum_common::layout::MAX_ALLOCATION_SIZE as u64, false);
+            let size_pos = builder
+                .build_int_compare(IntPredicate::SGT, size_val, zero, "size_pos")
+                .or_llvm_err()?;
+            let size_max = builder
+                .build_int_compare(IntPredicate::SLE, size_val, max_alloc, "size_le_max")
+                .or_llvm_err()?;
+            let align_pos = builder
+                .build_int_compare(IntPredicate::SGT, align_val, zero, "align_pos")
+                .or_llvm_err()?;
+            let align_max = builder
+                .build_int_compare(
+                    IntPredicate::SLE,
+                    align_val,
+                    i64_ty.const_int(4096, false),
+                    "align_le_max",
+                )
+                .or_llvm_err()?;
+            let align_m1 = builder
+                .build_int_sub(align_val, i64_ty.const_int(1, false), "align_m1")
+                .or_llvm_err()?;
+            let and = builder
+                .build_and(align_val, align_m1, "align_and")
+                .or_llvm_err()?;
+            let pow2 = builder
+                .build_int_compare(IntPredicate::EQ, and, zero, "align_pow2")
+                .or_llvm_err()?;
+            let v1 = builder.build_and(size_pos, size_max, "v1").or_llvm_err()?;
+            let v2 = builder.build_and(align_pos, align_max, "v2").or_llvm_err()?;
+            let v3 = builder.build_and(v1, v2, "v3").or_llvm_err()?;
+            let valid = builder.build_and(v3, pow2, "valid").or_llvm_err()?;
+            builder
+                .build_conditional_branch(valid, alloc_bb, err_bb)
+                .or_llvm_err()?;
+
+            // Err — both for rejected arguments and for OOM, matching
+            // the Tier-0 handler. Payload is nil (0): constructing the
+            // precise AllocError variant needs the module's type
+            // tables, which neither tier consults here. (Both tiers
+            // share this wart; it is on the audit ledger.)
+            builder.position_at_end(err_bb);
+            let err_variant = runtime.lower_make_variant(
+                builder,
+                module,
+                verum_common::well_known_types::result_error_tag(),
+                1,
+            )?;
+            runtime.lower_set_variant_data(builder, err_variant, 0, i64_ty.const_zero())?;
+            let err_int = builder
+                .build_ptr_to_int(err_variant, i64_ty, "cbgr_err_int")
+                .or_llvm_err()?;
+            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
+            let err_end_bb = builder
+                .get_insert_block()
+                .or_internal("cbgr_alloc: err block vanished")?;
+
+            // Allocate through the ONE aligned body.
+            builder.position_at_end(alloc_bb);
+            let ptr_ty = ctx.types().ptr_type();
+            let alloc_fn = module
+                .get_function("verum_cbgr_allocate_aligned")
+                .unwrap_or_else(|| {
+                    let fn_ty = ptr_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
+                    module.add_function("verum_cbgr_allocate_aligned", fn_ty, None)
+                });
+            let ptr = builder
+                .build_call(alloc_fn, &[size_val.into(), align_val.into()], "cbgr_alloc_ptr")
                 .or_llvm_err()?
-                    .basic_value_or("cbgr_alloc returned no value")?;
-            // Return the pointer in dst. User Verum code expects a Result
-            // tuple `(ptr, gen, epoch)`, but the AOT path currently does
-            // not materialise the tuple — the stdlib allocator wrapper
-            // handles the packaging on top. For now the raw pointer
-            // suffices for the slice/fat-ref code paths that reach here.
-            ctx.set_register(dst, ptr);
+                .basic_value_or("cbgr_alloc returned no value")?
+                .into_pointer_value();
+            let is_null = builder
+                .build_is_null(ptr, "cbgr_alloc_oom")
+                .or_llvm_err()?;
+            builder
+                .build_conditional_branch(is_null, err_bb, ok_bb)
+                .or_llvm_err()?;
+
+            // Ok((ptr, gen, epoch)) — gen and epoch READ BACK from the
+            // header the allocator wrote, so tuple and header cannot
+            // drift.
+            builder.position_at_end(ok_bb);
+            let (generation, epoch) = runtime.lower_header_gen_epoch(builder, ptr)?;
+            let ptr_int = builder
+                .build_ptr_to_int(ptr, i64_ty, "cbgr_user_int")
+                .or_llvm_err()?;
+            let tuple_ptr = runtime.lower_pack_typed(
+                builder,
+                module,
+                &[ptr_int, generation, epoch],
+                verum_vbc::types::TypeId::TUPLE.0,
+            )?;
+            let tuple_int = builder
+                .build_ptr_to_int(tuple_ptr, i64_ty, "cbgr_tuple_int")
+                .or_llvm_err()?;
+            let ok_variant = runtime.lower_make_variant(
+                builder,
+                module,
+                verum_common::well_known_types::result_success_tag(),
+                1,
+            )?;
+            runtime.lower_set_variant_data(builder, ok_variant, 0, tuple_int)?;
+            let ok_int = builder
+                .build_ptr_to_int(ok_variant, i64_ty, "cbgr_ok_int")
+                .or_llvm_err()?;
+            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
+            let ok_end_bb = builder
+                .get_insert_block()
+                .or_internal("cbgr_alloc: ok block vanished")?;
+
+            builder.position_at_end(done_bb);
+            let result = builder
+                .build_phi(i64_ty, "cbgr_alloc_result")
+                .or_llvm_err()?;
+            result.add_incoming(&[(&err_int, err_end_bb), (&ok_int, ok_end_bb)]);
+            let result_val = result.as_basic_value().into_int_value();
+            ctx.set_register(dst, result_val.into());
+            ctx.mark_variant_register(dst);
+            ctx.set_obj_alloc_size(dst, RuntimeLowering::OBJECT_HEADER_SIZE + 8 + 8);
             Ok(())
         }
         Some(SystemSubOpcode::CbgrDealloc) => {
@@ -32880,32 +33016,170 @@ fn lower_ffi_extended<'ctx>(
         // sub-ops did not exist at all.
         // ================================================================
         Some(SystemSubOpcode::CbgrRealloc) => {
-            // Format: dst, ptr, old_size, new_size, align — old_size/align
-            // are carried for the VBC contract; the runtime reads the real
-            // old size from the AllocationHeader.
-            if operands.len() < 4 {
+            // Same contract, same construction, same reasons as the
+            // CbgrAlloc arm above: Result<(ptr, gen, epoch), AllocError>,
+            // built at Tier 1 exactly as the Tier-0 handler builds it
+            // (which was itself repaired under T0463 after a bare nil
+            // desynced the caller's match). The previous arm returned
+            // the raw pointer AND read only (ptr, new_size), silently
+            // dropping both old_size and align.
+            if operands.len() < 5 {
                 return Ok(());
             }
             let dst = op_reg(operands, 0);
             let ptr_reg = op_reg(operands, 1);
+            let old_size_reg = op_reg(operands, 2);
             let new_size_reg = op_reg(operands, 3);
-            let module = ctx.get_module();
+            let align_reg = op_reg(operands, 4);
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
-            let realloc_fn = module.get_function("verum_cbgr_realloc").unwrap_or_else(|| {
-                let fn_ty = ptr_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false);
-                module.add_function("verum_cbgr_realloc", fn_ty, None)
-            });
-            let ptr_val = as_ptr(ctx, ctx.get_register(ptr_reg)?, "cbgr_realloc_ptr")?;
-            let new_size = as_i64(ctx, ctx.get_register(new_size_reg)?, "cbgr_realloc_size")?;
-            let new_ptr = ctx
-                .builder()
-                .build_call(realloc_fn, &[ptr_val.into(), new_size.into()], "cbgr_realloc")
+            let module = ctx.get_module();
+            let builder = ctx.builder();
+            let runtime = RuntimeLowering::new(ctx.llvm_context());
+
+            let old_ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "cbgr_realloc_old")?;
+            let old_size = as_i64(ctx, ctx.get_register(old_size_reg)?, "cbgr_realloc_oldsz")?;
+            let new_size = as_i64(ctx, ctx.get_register(new_size_reg)?, "cbgr_realloc_newsz")?;
+            let align_val = as_i64(ctx, ctx.get_register(align_reg)?, "cbgr_realloc_align")?;
+
+            let current_fn = builder
+                .get_insert_block()
+                .and_then(|b| b.get_parent())
+                .or_internal("cbgr_realloc: no insert block/function")?;
+            let go_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_go");
+            let err_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_err");
+            let ok_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_ok");
+            let done_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_done");
+
+            let zero = i64_ty.const_zero();
+            let max_alloc =
+                i64_ty.const_int(verum_common::layout::MAX_ALLOCATION_SIZE as u64, false);
+            let size_pos = builder
+                .build_int_compare(IntPredicate::SGT, new_size, zero, "re_size_pos")
+                .or_llvm_err()?;
+            let size_max = builder
+                .build_int_compare(IntPredicate::SLE, new_size, max_alloc, "re_size_max")
+                .or_llvm_err()?;
+            let align_pos = builder
+                .build_int_compare(IntPredicate::SGT, align_val, zero, "re_align_pos")
+                .or_llvm_err()?;
+            let align_max = builder
+                .build_int_compare(
+                    IntPredicate::SLE,
+                    align_val,
+                    i64_ty.const_int(4096, false),
+                    "re_align_max",
+                )
+                .or_llvm_err()?;
+            let v1 = builder.build_and(size_pos, size_max, "re_v1").or_llvm_err()?;
+            let v2 = builder.build_and(align_pos, align_max, "re_v2").or_llvm_err()?;
+            let valid = builder.build_and(v1, v2, "re_valid").or_llvm_err()?;
+            builder
+                .build_conditional_branch(valid, go_bb, err_bb)
+                .or_llvm_err()?;
+
+            builder.position_at_end(err_bb);
+            let err_variant = runtime.lower_make_variant(
+                builder,
+                module,
+                verum_common::well_known_types::result_error_tag(),
+                1,
+            )?;
+            runtime.lower_set_variant_data(builder, err_variant, 0, i64_ty.const_zero())?;
+            let err_int = builder
+                .build_ptr_to_int(err_variant, i64_ty, "cbgr_re_err_int")
+                .or_llvm_err()?;
+            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
+            let err_end_bb = builder
+                .get_insert_block()
+                .or_internal("cbgr_realloc: err block vanished")?;
+
+            builder.position_at_end(go_bb);
+            let alloc_fn = module
+                .get_function("verum_cbgr_allocate_aligned")
+                .unwrap_or_else(|| {
+                    let fn_ty = ptr_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
+                    module.add_function("verum_cbgr_allocate_aligned", fn_ty, None)
+                });
+            let new_ptr = builder
+                .build_call(alloc_fn, &[new_size.into(), align_val.into()], "cbgr_re_new")
                 .or_llvm_err()?
-                .basic_value_or("cbgr_realloc returned no value")?;
-            // Raw-pointer return convention, matching the CbgrAlloc arm —
-            // the stdlib allocator wrapper packages the Result on top.
-            ctx.set_register(dst, new_ptr);
+                .basic_value_or("cbgr_realloc alloc returned no value")?
+                .into_pointer_value();
+            let is_null = builder
+                .build_is_null(new_ptr, "cbgr_re_oom")
+                .or_llvm_err()?;
+            builder
+                .build_conditional_branch(is_null, err_bb, ok_bb)
+                .or_llvm_err()?;
+
+            builder.position_at_end(ok_bb);
+            // copy min(old_size, new_size) then release the old block.
+            let old_lt = builder
+                .build_int_compare(IntPredicate::SLT, old_size, new_size, "re_old_lt")
+                .or_llvm_err()?;
+            let copy_len = builder
+                .build_select(old_lt, old_size, new_size, "re_copy_len")
+                .or_llvm_err()?
+                .into_int_value();
+            let memcpy_fn = module.get_function("memcpy").unwrap_or_else(|| {
+                let fn_ty = ptr_ty
+                    .fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
+                module.add_function("memcpy", fn_ty, None)
+            });
+            builder
+                .build_call(
+                    memcpy_fn,
+                    &[new_ptr.into(), old_ptr.into(), copy_len.into()],
+                    "",
+                )
+                .or_llvm_err()?;
+            let dealloc_fn = module
+                .get_function("verum_cbgr_deallocate")
+                .unwrap_or_else(|| {
+                    let fn_ty = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
+                    module.add_function("verum_cbgr_deallocate", fn_ty, None)
+                });
+            builder
+                .build_call(dealloc_fn, &[old_ptr.into()], "")
+                .or_llvm_err()?;
+            let (generation, epoch) = runtime.lower_header_gen_epoch(builder, new_ptr)?;
+            let ptr_int = builder
+                .build_ptr_to_int(new_ptr, i64_ty, "cbgr_re_user_int")
+                .or_llvm_err()?;
+            let tuple_ptr = runtime.lower_pack_typed(
+                builder,
+                module,
+                &[ptr_int, generation, epoch],
+                verum_vbc::types::TypeId::TUPLE.0,
+            )?;
+            let tuple_int = builder
+                .build_ptr_to_int(tuple_ptr, i64_ty, "cbgr_re_tuple_int")
+                .or_llvm_err()?;
+            let ok_variant = runtime.lower_make_variant(
+                builder,
+                module,
+                verum_common::well_known_types::result_success_tag(),
+                1,
+            )?;
+            runtime.lower_set_variant_data(builder, ok_variant, 0, tuple_int)?;
+            let ok_int = builder
+                .build_ptr_to_int(ok_variant, i64_ty, "cbgr_re_ok_int")
+                .or_llvm_err()?;
+            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
+            let ok_end_bb = builder
+                .get_insert_block()
+                .or_internal("cbgr_realloc: ok block vanished")?;
+
+            builder.position_at_end(done_bb);
+            let result = builder
+                .build_phi(i64_ty, "cbgr_re_result")
+                .or_llvm_err()?;
+            result.add_incoming(&[(&err_int, err_end_bb), (&ok_int, ok_end_bb)]);
+            let result_val = result.as_basic_value().into_int_value();
+            ctx.set_register(dst, result_val.into());
+            ctx.mark_variant_register(dst);
+            ctx.set_obj_alloc_size(dst, RuntimeLowering::OBJECT_HEADER_SIZE + 8 + 8);
             Ok(())
         }
 

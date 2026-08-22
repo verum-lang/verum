@@ -15401,7 +15401,19 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// a GEP. Kept for the same reason as `AOT_HDR_GENERATION_OFFSET`
     /// — the seven offsets are one layout mirror (T0132).
     #[allow(dead_code)]
-    const AOT_HDR_NEXT_FREE_OFFSET: u64 = 24;
+    /// Byte offset of `header - base` within the header (u32).
+    ///
+    /// An aligned allocation places the header inside the alignment
+    /// slack, so the header address is NOT the malloc base. This word
+    /// is how `verum_cbgr_deallocate` finds the base to free — the
+    /// same role `verum_common::layout::ALLOCATION_HEADER_RESERVED_OFFSET`
+    /// plays in the Tier-0 model. (The slot previously held a declared
+    /// but never-referenced `next_free` freelist pointer.)
+    const AOT_HDR_BASE_OFF_OFFSET: u64 = 24;
+    /// Byte offset of the allocation's TOTAL size within the header
+    /// (u32): header + user data + alignment slack. `free` needs the
+    /// full extent, and `size@4` only records the USER size.
+    const AOT_HDR_TOTAL_OFFSET: u64 = 28;
 
     /// Emit all CBGR LLVM IR functions.
     fn emit_verum_cbgr_functions(&self, module: &Module<'ctx>) -> Result<()> {
@@ -15443,6 +15455,64 @@ impl<'ctx> RuntimeLowering<'ctx> {
         })
     }
 
+    /// Read `(generation, epoch)` from the CBGR header of `user_ptr`,
+    /// both zero-extended to i64.
+    ///
+    /// This is the Tier-1 half of the allocation contract: the tuple
+    /// the .vr `cbgr_alloc` promises is `(ptr, gen, epoch)`, and the
+    /// values must be READ BACK from the header the allocator wrote —
+    /// the same read-back discipline the Tier-0 model uses — so the
+    /// tuple and the header cannot drift.
+    pub fn lower_header_gen_epoch(
+        &self,
+        builder: &Builder<'ctx>,
+        user_ptr: PointerValue<'ctx>,
+    ) -> Result<(IntValue<'ctx>, IntValue<'ctx>)> {
+        let i8_type = self.context.i8_type();
+        let i16_type = self.context.i16_type();
+        let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
+        let header = self.emit_cbgr_get_header(builder, user_ptr)?;
+        // SAFETY: fixed offsets inside the 32-byte header preceding
+        // every CBGR user pointer.
+        let gen_slot = unsafe {
+            builder
+                .build_gep(
+                    i8_type,
+                    header,
+                    &[i64_type.const_int(Self::AOT_HDR_GENERATION_OFFSET, false)],
+                    "hdr_gen_ptr",
+                )
+                .or_llvm_err()?
+        };
+        let gen32 = builder
+            .build_load(i32_type, gen_slot, "hdr_gen")
+            .or_llvm_err()?
+            .into_int_value();
+        let generation = builder
+            .build_int_z_extend(gen32, i64_type, "gen64")
+            .or_llvm_err()?;
+        // SAFETY: as above.
+        let epoch_slot = unsafe {
+            builder
+                .build_gep(
+                    i8_type,
+                    header,
+                    &[i64_type.const_int(Self::AOT_HDR_EPOCH_OFFSET, false)],
+                    "hdr_epoch_ptr",
+                )
+                .or_llvm_err()?
+        };
+        let epoch16 = builder
+            .build_load(i16_type, epoch_slot, "hdr_epoch")
+            .or_llvm_err()?
+            .into_int_value();
+        let epoch = builder
+            .build_int_z_extend(epoch16, i64_type, "epoch64")
+            .or_llvm_err()?;
+        Ok((generation, epoch))
+    }
+
     /// Helper: align_up(size, 32) = (size + 31) & ~31
     fn emit_align_up(
         &self,
@@ -15458,59 +15528,89 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(builder.build_and(added, mask, "aligned").or_llvm_err()?)
     }
 
-    /// verum_cbgr_allocate(size: i64) -> i8*
-    /// Allocates header + aligned user data, initializes header fields.
-    fn emit_cbgr_allocate(&self, module: &Module<'ctx>) -> Result<()> {
-        let name = "verum_cbgr_allocate";
+    /// The ONE Tier-1 allocation body:
+    /// `verum_cbgr_allocate_aligned(size: i64, align: i64) -> i8*`.
+    ///
+    /// Layout of a successful allocation:
+    ///
+    /// ```text
+    /// base                    header          user
+    /// |---- alignment slack ---|-- 32 bytes --|-- align32(size) --|
+    /// ```
+    ///
+    /// * `user` is aligned to `max(align, 32)`; the header always sits
+    ///   immediately below it, so `user - 32` reaches it regardless of
+    ///   the requested alignment.
+    /// * `header.base_off = header - base` and `header.total` record
+    ///   what `verum_cbgr_deallocate` must free. Before these existed
+    ///   the allocator could not honour `align` at all: the previous
+    ///   body ignored the caller's alignment entirely (the .vr contract
+    ///   takes `align`; the emitted function silently dropped it).
+    /// * `header.epoch` is read from `global_epoch` at allocation time.
+    ///   The previous body stored 0 with a comment reasoning that the
+    ///   global "starts at 0, so this is correct initially" — true on
+    ///   the first allocation and false after the first epoch advance,
+    ///   which is exactly the kind of initially-true claim that rots.
+    ///
+    /// The whole block is zeroed, so `verum_cbgr_allocate_zeroed` is an
+    /// alias of the same body rather than a second allocator. (It used
+    /// to be a phantom: the 0xA1 lowering called it, and no emitter
+    /// ever gave it a body.)
+    fn emit_cbgr_allocate_aligned(&self, module: &Module<'ctx>) -> Result<()> {
+        let name = "verum_cbgr_allocate_aligned";
         if let Some(f) = module.get_function(name) {
             if f.count_basic_blocks() > 0 {
                 return Ok(());
             }
         }
-
         let i8_type = self.context.i8_type();
         let i16_type = self.context.i16_type();
         let i32_type = self.context.i32_type();
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+        let fn_type = ptr_type.fn_type(&[i64_type.into(), i64_type.into()], false);
         let func = module
             .get_function(name)
             .unwrap_or_else(|| module.add_function(name, fn_type, None));
         func.set_linkage(verum_llvm::module::Linkage::Internal);
-
         let entry = self.context.append_basic_block(func, "entry");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
 
         let size = func
             .get_nth_param(0)
-            .or_internal("missing param 0")?
+            .or_internal("missing size param")?
+            .into_int_value();
+        let align_req = func
+            .get_nth_param(1)
+            .or_internal("missing align param")?
             .into_int_value();
 
-        // total_size = 32 + align_up(size, 32)
-        let aligned = self.emit_align_up(&builder, size)?;
+        // align = max(align_req, 32): the header model needs 32-byte
+        // granularity, and every smaller request is satisfied by it.
+        let thirty_two = i64_type.const_int(32, false);
+        let lt32 = builder
+            .build_int_compare(verum_llvm::IntPredicate::ULT, align_req, thirty_two, "lt32")
+            .or_llvm_err()?;
+        let align = builder
+            .build_select(lt32, thirty_two, align_req, "align")
+            .or_llvm_err()?
+            .into_int_value();
+
         let header_size = i64_type.const_int(Self::ALLOC_HEADER_SIZE, false);
+        let aligned_size = self.emit_align_up(&builder, size)?;
+        // total = header + user + slack. `align` bytes of slack always
+        // suffice to place an aligned `user` with the header below it.
+        let with_hdr = builder
+            .build_int_add(aligned_size, header_size, "with_hdr")
+            .or_llvm_err()?;
         let total_size = builder
-            .build_int_add(header_size, aligned, "total")
+            .build_int_add(with_hdr, align, "total")
             .or_llvm_err()?;
 
-        // raw = verum_alloc(total_size)
-        //
-        // **Architectural rule (CLAUDE.md no-libc invariant)**: emit
-        // IR routes ALL heap allocations through `verum_alloc` (the
-        // CBGR-aware bump allocator emitted in `platform_ir.rs::
-        // emit_allocator`).  The legacy comment that claimed
-        // "verum_alloc is static in verum_platform.c and cannot be
-        // called from LLVM IR" is obsolete — `emit_allocator` now
-        // emits `verum_alloc` directly into the LLVM module with
-        // external linkage, callable from any other site in the
-        // same module.  Pre-fix this site called libc `malloc`,
-        // which silently violated the no-libc invariant for every
-        // CBGR-allocated object (List, Map, Text, etc.).
         let alloc_fn = self.get_or_declare_fn(
             module,
-            "verum_alloc",
+            "verum_checked_malloc",
             ptr_type.fn_type(&[i64_type.into()], false),
         );
         let raw = builder
@@ -15518,25 +15618,18 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?
             .basic_value_or("call returned void")?
             .into_pointer_value();
-
-        // null check
         let is_null = builder.build_is_null(raw, "is_null").or_llvm_err()?;
         let init_bb = self.context.append_basic_block(func, "init");
         let null_bb = self.context.append_basic_block(func, "null_ret");
         builder
             .build_conditional_branch(is_null, null_bb, init_bb)
             .or_llvm_err()?;
-
-        // null return
         builder.position_at_end(null_bb);
         builder
             .build_return(Some(&ptr_type.const_null()))
             .or_llvm_err()?;
 
-        // init header
         builder.position_at_end(init_bb);
-
-        // memset to zero
         let memset_fn = self.get_or_declare_fn(
             module,
             "memset",
@@ -15550,66 +15643,162 @@ impl<'ctx> RuntimeLowering<'ctx> {
             )
             .or_llvm_err()?;
 
-        // header->generation = GEN_INITIAL (offset 0, i32 atomic)
-        let gen_ptr = raw; // offset 0
-        builder
-            .build_store(gen_ptr, i32_type.const_int(Self::GEN_INITIAL, false))
+        // user = align_up(raw + 32, align); header = user - 32.
+        let raw_int = builder
+            .build_ptr_to_int(raw, i64_type, "raw_int")
+            .or_llvm_err()?;
+        let user0 = builder
+            .build_int_add(raw_int, header_size, "user0")
+            .or_llvm_err()?;
+        let align_m1 = builder
+            .build_int_sub(align, i64_type.const_int(1, false), "align_m1")
+            .or_llvm_err()?;
+        let bumped = builder
+            .build_int_add(user0, align_m1, "bumped")
+            .or_llvm_err()?;
+        let mask = builder.build_not(align_m1, "align_mask").or_llvm_err()?;
+        let user_int = builder.build_and(bumped, mask, "user_int").or_llvm_err()?;
+        let header_int = builder
+            .build_int_sub(user_int, header_size, "header_int")
+            .or_llvm_err()?;
+        let header = builder
+            .build_int_to_ptr(header_int, ptr_type, "header")
             .or_llvm_err()?;
 
-        // header->size = (uint32_t)size (offset 4)
-        // SAFETY: GEP into the CBGR header to access the epoch field at a fixed offset; the header layout is defined by the allocator
-        let size_ptr = unsafe {
-            builder
-                .build_gep(i8_type, raw, &[i64_type.const_int(Self::AOT_HDR_SIZE_OFFSET, false)], "size_ptr")
-                .or_llvm_err()?
+        let store_u32 = |off: u64, val: IntValue<'ctx>, what: &str| -> Result<()> {
+            // SAFETY: fixed offset inside the 32-byte header this
+            // function just carved out of its own allocation.
+            let slot = unsafe {
+                builder
+                    .build_gep(i8_type, header, &[i64_type.const_int(off, false)], what)
+                    .or_llvm_err()?
+            };
+            builder.build_store(slot, val).or_llvm_err()?;
+            Ok(())
         };
+
+        store_u32(
+            Self::AOT_HDR_GENERATION_OFFSET,
+            i32_type.const_int(Self::GEN_INITIAL, false),
+            "gen_ptr",
+        )?;
         let size_u32 = builder
             .build_int_truncate(size, i32_type, "size32")
             .or_llvm_err()?;
-        builder.build_store(size_ptr, size_u32).or_llvm_err()?;
+        store_u32(Self::AOT_HDR_SIZE_OFFSET, size_u32, "size_ptr")?;
 
-        // header->epoch = global_epoch & 0xFFFF (offset 8, i16)
-        // For simplicity, store 0 (same as memset). The C version reads global_epoch
-        // but since we memset to 0 and global_epoch starts at 0, this is correct initially.
-        // header->epoch already 0 from memset
-
-        // header->capabilities = CAP_FULL (offset 10, i16)
-        // SAFETY: GEP at offset 10 within a struct of known layout; the offset is within the allocation
-        let cap_ptr = unsafe {
+        // epoch: the CURRENT global epoch, not "0 because the global
+        // starts at 0".
+        let global_epoch = module.get_global("global_epoch").unwrap_or_else(|| {
+            let g = module.add_global(i64_type, None, "global_epoch");
+            g.set_initializer(&i64_type.const_zero());
+            g
+        });
+        let epoch64 = builder
+            .build_load(i64_type, global_epoch.as_pointer_value(), "epoch64")
+            .or_llvm_err()?
+            .into_int_value();
+        let epoch16 = builder
+            .build_int_truncate(epoch64, i16_type, "epoch16")
+            .or_llvm_err()?;
+        // SAFETY: fixed in-header offset, as above.
+        let epoch_slot = unsafe {
             builder
-                .build_gep(i8_type, raw, &[i64_type.const_int(Self::AOT_HDR_CAPABILITIES_OFFSET, false)], "cap_ptr")
+                .build_gep(
+                    i8_type,
+                    header,
+                    &[i64_type.const_int(Self::AOT_HDR_EPOCH_OFFSET, false)],
+                    "epoch_ptr",
+                )
+                .or_llvm_err()?
+        };
+        builder.build_store(epoch_slot, epoch16).or_llvm_err()?;
+
+        // SAFETY: fixed in-header offset, as above.
+        let cap_slot = unsafe {
+            builder
+                .build_gep(
+                    i8_type,
+                    header,
+                    &[i64_type.const_int(Self::AOT_HDR_CAPABILITIES_OFFSET, false)],
+                    "cap_ptr",
+                )
                 .or_llvm_err()?
         };
         builder
-            .build_store(cap_ptr, i16_type.const_int(Self::CAP_FULL, false))
+            .build_store(cap_slot, i16_type.const_int(Self::CAP_FULL, false))
             .or_llvm_err()?;
+        store_u32(
+            Self::AOT_HDR_REF_COUNT_OFFSET,
+            i32_type.const_int(1, false),
+            "rc_ptr",
+        )?;
 
-        // header->ref_count = 1 (offset 12, i32)
-        // SAFETY: GEP into the CBGR header to access the reference count at a fixed offset; the header is valid for all managed allocations
-        let rc_ptr = unsafe {
-            builder
-                .build_gep(i8_type, raw, &[i64_type.const_int(Self::AOT_HDR_REF_COUNT_OFFSET, false)], "rc_ptr")
-                .or_llvm_err()?
-        };
-        builder
-            .build_store(rc_ptr, i32_type.const_int(1, false))
+        let base_off64 = builder
+            .build_int_sub(header_int, raw_int, "base_off64")
             .or_llvm_err()?;
+        let base_off = builder
+            .build_int_truncate(base_off64, i32_type, "base_off32")
+            .or_llvm_err()?;
+        store_u32(Self::AOT_HDR_BASE_OFF_OFFSET, base_off, "base_off_ptr")?;
+        let total_u32 = builder
+            .build_int_truncate(total_size, i32_type, "total32")
+            .or_llvm_err()?;
+        store_u32(Self::AOT_HDR_TOTAL_OFFSET, total_u32, "total_ptr")?;
 
-        // header->flags = 0 (already from memset)
-        // header->next_free = NULL (already from memset)
-
-        // Return user pointer = raw + 32
-        // SAFETY: GEP into the CBGR header to access the allocation size field; the header layout is a compile-time constant
-        let user_ptr = unsafe {
-            builder
-                .build_gep(i8_type, raw, &[header_size], "user_ptr")
-                .or_llvm_err()?
-        };
+        let user_ptr = builder
+            .build_int_to_ptr(user_int, ptr_type, "user_ptr")
+            .or_llvm_err()?;
         builder.build_return(Some(&user_ptr)).or_llvm_err()?;
         Ok(())
     }
 
-    /// verum_cbgr_deallocate(ptr: i8*) -> void
+    /// Thin entry points over [`Self::emit_cbgr_allocate_aligned`].
+    ///
+    /// `verum_cbgr_allocate(size)` keeps the historical one-argument
+    /// surface for the slice / list / fat-ref lowerings whose
+    /// alignment never exceeds 32. `verum_cbgr_allocate_zeroed` is the
+    /// same body by construction — the allocator zeroes the whole
+    /// block — and emitting it here retires a phantom: the 0xA1
+    /// lowering has always called it, and nothing ever defined it.
+    fn emit_cbgr_allocate(&self, module: &Module<'ctx>) -> Result<()> {
+        self.emit_cbgr_allocate_aligned(module)?;
+        let i64_type = self.context.i64_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let aligned_fn = module
+            .get_function("verum_cbgr_allocate_aligned")
+            .or_internal("aligned allocator emitted above")?;
+        for name in ["verum_cbgr_allocate", "verum_cbgr_allocate_zeroed"] {
+            if let Some(f) = module.get_function(name) {
+                if f.count_basic_blocks() > 0 {
+                    continue;
+                }
+            }
+            let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+            let func = module
+                .get_function(name)
+                .unwrap_or_else(|| module.add_function(name, fn_type, None));
+            func.set_linkage(verum_llvm::module::Linkage::Internal);
+            let entry = self.context.append_basic_block(func, "entry");
+            let builder = self.context.create_builder();
+            builder.position_at_end(entry);
+            let size = func
+                .get_nth_param(0)
+                .or_internal("missing size param")?
+                .into_int_value();
+            let out = builder
+                .build_call(
+                    aligned_fn,
+                    &[size.into(), i64_type.const_int(32, false).into()],
+                    "ptr",
+                )
+                .or_llvm_err()?
+                .basic_value_or("call returned void")?;
+            builder.build_return(Some(&out)).or_llvm_err()?;
+        }
+        Ok(())
+    }
+
     fn emit_cbgr_deallocate(&self, module: &Module<'ctx>) -> Result<()> {
         let name = "verum_cbgr_deallocate";
         if let Some(f) = module.get_function(name) {
@@ -15732,25 +15921,50 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_gep(
                     i8_type,
                     header,
-                    &[i64_type.const_int(4, false)],
-                    "hdr_size_ptr",
+                    &[i64_type.const_int(Self::AOT_HDR_TOTAL_OFFSET, false)],
+                    "hdr_total_ptr",
                 )
                 .or_llvm_err()?
         };
-        let hdr_size = builder
-            .build_load(i32_type, size_ptr, "hdr_size")
+        // The header records the TOTAL extent (header + user + slack)
+        // and the header's offset from the malloc base. Recomputing the
+        // extent from `size@4` — the previous body — was only correct
+        // while allocations carried no alignment slack; with `align`
+        // honoured, base != header and total != 32 + align32(size).
+        let total_u32 = builder
+            .build_load(i32_type, size_ptr, "hdr_total")
             .or_llvm_err()?
             .into_int_value();
-        let hdr_size64 = builder
-            .build_int_z_extend(hdr_size, i64_type, "sz64")
-            .or_llvm_err()?;
-        let aligned = self.emit_align_up(&builder, hdr_size64)?;
         let total = builder
-            .build_int_add(
-                aligned,
-                i64_type.const_int(Self::ALLOC_HEADER_SIZE, false),
-                "total",
-            )
+            .build_int_z_extend(total_u32, i64_type, "total")
+            .or_llvm_err()?;
+        // SAFETY: fixed in-header offset; the header precedes every
+        // CBGR user pointer by construction.
+        let base_off_ptr = unsafe {
+            builder
+                .build_gep(
+                    i8_type,
+                    header,
+                    &[i64_type.const_int(Self::AOT_HDR_BASE_OFF_OFFSET, false)],
+                    "hdr_base_off_ptr",
+                )
+                .or_llvm_err()?
+        };
+        let base_off_u32 = builder
+            .build_load(i32_type, base_off_ptr, "hdr_base_off")
+            .or_llvm_err()?
+            .into_int_value();
+        let base_off = builder
+            .build_int_z_extend(base_off_u32, i64_type, "base_off64")
+            .or_llvm_err()?;
+        let header_int = builder
+            .build_ptr_to_int(header, i64_type, "header_int")
+            .or_llvm_err()?;
+        let base_int = builder
+            .build_int_sub(header_int, base_off, "base_int")
+            .or_llvm_err()?;
+        let base = builder
+            .build_int_to_ptr(base_int, ptr_type, "base")
             .or_llvm_err()?;
 
         // verum_dealloc(header, total_size)
@@ -15767,7 +15981,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
         );
         builder
-            .build_call(free_fn, &[header.into(), total.into()], "")
+            .build_call(free_fn, &[base.into(), total.into()], "")
             .or_llvm_err()?;
         builder.build_return(None).or_llvm_err()?;
         Ok(())
