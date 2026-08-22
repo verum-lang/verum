@@ -46,6 +46,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::adjoint_functor::SaftPreconditions;
+use crate::arch_anti_pattern::AntiPatternCode;
+use crate::arch_probe::ProbeOutcome;
 use crate::cross_format_gate::ExportFormat;
 use crate::infinity_topos::GiraudAxioms;
 use crate::pronk_fractions::PronkAxioms;
@@ -132,6 +134,176 @@ fn decision(holds: bool, reason: impl Into<String>) -> Option<IntrinsicValue> {
 // =============================================================================
 // Dispatch
 // =============================================================================
+
+/// What a `kernel_arch_*` discharge intrinsic claims, and therefore
+/// what it must execute before it may answer.
+enum ArchClaim {
+    /// The named anti-patterns are enforced. Discharged by running
+    /// each one's canonical counterexample through the live driver.
+    Patterns(&'static [AntiPatternCode]),
+    /// The whole catalogue is enforced — every roster code, each
+    /// separately falsifiable.
+    WholeRoster,
+    /// A piece of the architectural algebra behaves. Discharged by
+    /// executing the real implementation on a canonical input pair.
+    Structural(fn() -> ProbeOutcome),
+}
+
+/// The claim table: which property each architectural discharge name
+/// asserts.
+///
+/// This table is the SINGLE authority for the `kernel_arch_*` family:
+/// `arch_claim` resolves a discharge against it and
+/// `available_intrinsics` derives the family's names from it. The
+/// eight AP-033..AP-040 endpoints went missing precisely because a
+/// hand-maintained registry list sat beside the dispatch as a second
+/// source of truth; deriving one from the other ends that class.
+///
+/// A name absent from this table has no evidence to offer and is not
+/// dischargeable — `dispatch_intrinsic` returns `None`, which the
+/// audit reports as unrecognised rather than as a pass.
+const ARCH_CLAIMS: &[(&str, ArchClaim)] = {
+    use AntiPatternCode as C;
+    use ArchClaim::{Patterns, Structural, WholeRoster};
+    &[
+        // -- capability discipline -------------------------------
+        ("kernel_arch_capability_discipline", Patterns(&[C::CapabilityEscalation, C::CapabilityLeak])),
+        // AT-6 closure reuses the escalation code.
+        ("kernel_arch_capability_ontology_check", Patterns(&[C::CapabilityEscalation])),
+        // -- boundaries ------------------------------------------
+        ("kernel_arch_boundary_check", Patterns(&[C::InvariantViolation, C::DanglingMessageType, C::UnauthenticatedCrossing])),
+        // -- composition -----------------------------------------
+        ("kernel_arch_composition_check", Patterns(&[C::DependencyCycle, C::TierMixing, C::FoundationDrift])),
+        ("kernel_arch_composition_engine", Structural(crate::arch_probe::composition_algebra_holds)),
+        ("kernel_arch_composition_associative", Structural(crate::arch_probe::composition_is_associative)),
+        // -- lifecycle -------------------------------------------
+        ("kernel_arch_lifecycle_check", Patterns(&[C::LifecycleRegression, C::TransitiveLifecycleRegression])),
+        // -- foundations -----------------------------------------
+        ("kernel_arch_foundation_consistency", Patterns(&[C::FoundationDrift])),
+        // -- CVE closure -----------------------------------------
+        ("kernel_arch_cve_closure", Patterns(&[C::CveIncomplete])),
+        // AT-2 closure: a Theorem must carry its CVE triple.
+        ("kernel_arch_theorem_cve_required", Patterns(&[C::CveIncomplete])),
+        // AT-5 closure reuses the declaration-drift code.
+        ("kernel_arch_consumes_format_check", Patterns(&[C::DeclarationDrift])),
+        // -- the catalogue and the end-to-end witness -------------
+        ("kernel_arch_anti_pattern_check", WholeRoster),
+        ("kernel_arch_soundness_v0", WholeRoster),
+        // The phase driver's job is to reach the catalogue at all;
+        // the catalogue's enforcement is what it can attest to.
+        ("kernel_arch_phase_orchestrator", WholeRoster),
+        // -- modal-temporal calculus -----------------------------
+        ("kernel_arch_mtac_calculus", Patterns(&[
+            C::TemporalInconsistency,
+            C::CounterfactualBrittleness,
+            C::MissedAdjoint,
+            C::UniversalPropertyViolation,
+            C::PhantomEvolution,
+            C::YonedaInequivalentRefactor,
+        ])),
+        ("kernel_arch_counterfactual_engine", Patterns(&[C::CounterfactualBrittleness])),
+        ("kernel_arch_adjunction_analyzer", Patterns(&[C::MissedAdjoint])),
+        // -- Yoneda ----------------------------------------------
+        ("kernel_arch_yoneda_equivalence", Structural(crate::arch_probe::yoneda_equivalence_holds)),
+        // AT-4 closure reuses the inequivalent-refactor code.
+        ("kernel_arch_yoneda_canonical_roster_complete", Patterns(&[C::YonedaInequivalentRefactor])),
+        // -- corpus ----------------------------------------------
+        ("kernel_arch_corpus_verify", Structural(crate::arch_probe::corpus_invariants_hold)),
+        // -- CVE articulation hygiene (AP-033..AP-040) -----------
+        //
+        // These eight names are cited by
+        // `core/architecture/anti_patterns.vr` and were ABSENT from
+        // the dispatch, so the discharge audit reported them as
+        // unrecognised — all eight it flagged. Their checks existed
+        // and ran all along; only the kernel-side endpoint was
+        // missing, because the endpoint list was maintained by hand
+        // beside the dispatch instead of being derived from it.
+        ("kernel_arch_retracted_citation_check", Patterns(&[C::RetractedCitationUse])),
+        ("kernel_arch_hypothesis_plan_check", Patterns(&[C::HypothesisWithoutMaturationPlan])),
+        ("kernel_arch_interpretation_in_mature_check", Patterns(&[C::InterpretationInMatureCorpus])),
+        ("kernel_arch_observer_impersonation_check", Patterns(&[C::ObserverImpersonation])),
+        ("kernel_arch_boundless_audit_check", Patterns(&[C::BoundlessAudit])),
+        ("kernel_arch_implicit_substrate_check", Patterns(&[C::ImplicitSubstrate])),
+        ("kernel_arch_anchoring_overextension_check", Patterns(&[C::AnchoringOverextension])),
+        ("kernel_arch_self_reference_check", Patterns(&[C::SelfReferenceWithoutOperator])),
+    ]
+};
+
+/// Resolve what an architectural discharge name claims.
+fn arch_claim(name: &str) -> Option<&'static ArchClaim> {
+    ARCH_CLAIMS
+        .iter()
+        .find(|(claim_name, _)| *claim_name == name)
+        .map(|(_, claim)| claim)
+}
+
+/// Discharge an architectural intrinsic by EXECUTING what it claims.
+///
+/// The verdict's `holds` is the conjunction of the executed probes,
+/// and its reason names every probe that did not discharge — so a
+/// rejection points at the specific check that is missing, unwired,
+/// vacuous or indiscriminate rather than at the intrinsic as a whole.
+fn arch_discharge(name: &str) -> Option<IntrinsicValue> {
+    use crate::arch_probe::{run_all_probes, run_probe};
+
+    let outcomes: Vec<(String, ProbeOutcome)> = match arch_claim(name)? {
+        ArchClaim::Patterns(codes) => codes
+            .iter()
+            .map(|&code| {
+                let outcome = run_probe(code).unwrap_or(ProbeOutcome::CheckerSilent);
+                (outcome.rationale(code), outcome)
+            })
+            .collect(),
+        ArchClaim::WholeRoster => run_all_probes()
+            .into_iter()
+            .map(|(code, outcome)| (outcome.rationale(code), outcome))
+            .collect(),
+        ArchClaim::Structural(run) => {
+            let outcome = run();
+            let label = format!(
+                "{} — structural claim {}",
+                name,
+                if outcome.is_discharged() {
+                    "DISCHARGED by executing the real implementation on a canonical \
+                     accepting/rejecting pair"
+                } else {
+                    "NOT discharged: the implementation accepted what it must reject, \
+                     or rejected what it must accept"
+                },
+            );
+            vec![(label, outcome)]
+        }
+    };
+
+    let failed: Vec<&str> = outcomes
+        .iter()
+        .filter(|(_, o)| !o.is_discharged())
+        .map(|(why, _)| why.as_str())
+        .collect();
+
+    if failed.is_empty() {
+        decision(
+            true,
+            format!(
+                "{}: discharged by execution — {} probe(s) ran against the live checkers, \
+                 each with its counterexample caught and the clean baseline untouched",
+                name,
+                outcomes.len(),
+            ),
+        )
+    } else {
+        decision(
+            false,
+            format!(
+                "{}: NOT discharged — {} of {} probe(s) failed:\n{}",
+                name,
+                failed.len(),
+                outcomes.len(),
+                failed.join("\n"),
+            ),
+        )
+    }
+}
 
 /// Dispatch a kernel intrinsic by string name. Returns `None` when
 /// the name is not in the dispatch table OR the argument shape
@@ -664,126 +836,22 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
                 ))
         }
 
- // ATS-V architectural-type discharge intrinsics — .
- // Each arm consults the `arch` + `arch_anti_pattern` modules
- // and surfaces a stable Decision verdict. Per spec §32.2,
- // these intrinsics provide structured machine-readable
- // dispatch that ATS-V phase consumes during architectural
- // type checking.
+        // ATS-V architectural-type discharge intrinsics.
         //
-        // Arms with no per-call payload return a sanity-true verdict
-        // confirming the intrinsic is wired; full dispatch with
-        // structured Shape/Context arguments lands when the ATS-V
-        // phase is implemented (the registry surface establishes the
-        // dispatch endpoint independently of phase wiring).
-        "kernel_arch_capability_discipline" => decision(true, "ATS-V capability discipline — composes AP-001 CapabilityEscalation \
-                     (cog uses an undeclared capability) and AP-002 CapabilityLeak \
-                     (linear/affine capability escapes its declared scope). \
-                     Implementation: crates/verum_kernel/src/arch_anti_pattern.rs."),
-        "kernel_arch_boundary_check" => decision(true, "ATS-V boundary type check — verifies messages crossing a boundary \
-                     conform to declared messages_in/messages_out, capability handoffs \
-                     match capability_handoff, and BoundaryInvariants hold. Detects \
-                     AP-012 InvariantViolation, AP-013 DanglingMessageType, AP-014 \
-                     UnauthenticatedCrossing."),
-        "kernel_arch_composition_check" => decision(true, "ATS-V composition algebra check — A ⊗ B is well-formed iff \
-                     capability flow is valid (B.requires ⊆ A.exposes), foundations \
-                     compatible, tiers compatible, both strata admissible, composition \
-                     graph acyclic. Composition is associative + decidable. Detects \
-                     AP-003 DependencyCycle, AP-004 TierMixing, AP-005 FoundationDrift."),
-        "kernel_arch_lifecycle_check" => decision(true, "ATS-V lifecycle integrity check — AP-009 LifecycleRegression. A \
-                     higher-rank cog (Theorem) citing a strictly-lower-rank one \
-                     (Hypothesis, Interpretation, Retracted) is a defect. The check is \
-                     transitive (AP-024 catches multi-hop chains)."),
-        "kernel_arch_foundation_consistency" => decision(true, "ATS-V foundation consistency check — AP-005 FoundationDrift. \
-                     Composing two cogs whose foundations differ without an explicit \
-                     functor-bridge is a defect. Canonical inclusions (no bridge \
-                     required): Mltt → Cic, Hott → Cubical."),
-        "kernel_arch_anti_pattern_check" => decision(true, "ATS-V anti-pattern catalog check — walks the full canonical \
-                     32-pattern roster (ATS-V-AP-001..032) over a Shape and aggregates \
-                     structured violations. Each violation surfaces \
-                     VerificationVerdict::Rejected with the stable RFC code in the \
-                     diagnostic metadata."),
-        "kernel_arch_cve_closure" => decision(true, "ATS-V CVE-closure check — AP-010 CveIncomplete. Each public \
-                     artefact in strict mode must declare all three CVE axes: \
-                     Constructive witness, Verifiable strategy (from the @verify \
-                     ladder), Executable artefact. Missing any axis with strict=true \
-                     raises this pattern."),
-        "kernel_arch_soundness_v0" => decision(true, "ATS-V end-to-end soundness witness — composes the 7 base \
-                     dispatch intrinsics into a single discharge. Soundness statement: \
-                     when `verum check` accepts a cog, capability discipline, \
-                     composition correctness, foundation consistency, CVE closure, \
-                     lifecycle integrity, and absence of the 32 canonical anti-patterns \
-                     all hold simultaneously."),
-        // ATS-V architectural-type discharge intrinsics — Verum-side
-        // core/architecture/ kernel-discharge surface for the
-        // Modal-Temporal Architectural Calculus (mtac), counterfactual
-        // engine, adjunction analyzer, and Yoneda-equivalence checker.
-        "kernel_arch_mtac_calculus" => decision(true, "ATS-V MTAC primitives (TimePoint / Decision / Observer / \
-                     ModalAssertion / ArchProposition / ArchEvolution / \
-                     CounterfactualPair / AdjunctionWitness). Adds 6 modal-temporal \
-                     anti-patterns AP-027..032. See \
-                     crates/verum_kernel/src/arch_mtac.rs."),
-        "kernel_arch_counterfactual_engine" => decision(true, "ATS-V counterfactual reasoning engine — non-destructive evaluation \
-                     of CounterfactualPair against base/alt Shapes; 4-arm InvariantStatus \
-                     soundness contract (HoldsBoth / HoldsBaseOnly / HoldsAltOnly / \
-                     HoldsNeither). Empty stability invariants → unstable. See \
-                     crates/verum_kernel/src/arch_counterfactual.rs."),
-        "kernel_arch_adjunction_analyzer" => decision(true, "ATS-V adjunction analyzer — refactoring as adjoint pair (F, G) per \
-                     spec §20.6. 4 canonical adjunctions (Inline⊣Extract / \
-                     Specialise⊣Generalise / Decompose⊣Compose / Strengthen⊣Weaken). \
-                     See crates/verum_kernel/src/arch_adjunction.rs."),
-        "kernel_arch_yoneda_equivalence" => decision(true, "ATS-V Yoneda-equivalence checker — two architectures are equivalent \
-                     iff every canonical Observer (EndUser / PeerCog / Stakeholder / \
-                     Auditor / Adversary) projects the same observation. See \
-                     crates/verum_kernel/src/arch_yoneda.rs."),
-
-        // ----- Composition / corpus / phase / parse engine surface -----
-        "kernel_arch_composition_engine" => decision(true, "ATS-V composition algebra — A ⊗ B is well-formed iff capability flow \
-                     is valid (B.requires ⊆ A.exposes), foundations compatible (equality \
-                     or canonical inclusion), tiers compatible, both strata admissible, \
-                     and the composition graph stays acyclic. Composition is associative \
-                     and decidable. See crates/verum_kernel/src/arch_composition.rs."),
-        "kernel_arch_composition_associative" => decision(true, "ATS-V composition associativity — (A ⊗ B) ⊗ C ≡ A ⊗ (B ⊗ C) \
-                     whenever the triple is pairwise compatible. Witness: kernel \
-                     proptest harness in crates/verum_kernel/src/arch_composition.rs."),
-        "kernel_arch_corpus_verify" => decision(true, "ATS-V corpus-level invariants — four baseline cross-cog checks: \
-                     NoCircularDependencies, FoundationConsistency, NoLAbsClaim, \
-                     CapabilityClosure. See crates/verum_kernel/src/arch_corpus.rs."),
-        "kernel_arch_phase_orchestrator" => decision(true, "ATS-V phase orchestrator — Phase 6.5 driver, walks every module \
-                     (no early exit), parses @arch_module(...) attributes, runs the \
-                     full 32-anti-pattern catalog, aggregates violations into \
-                     ArchPhaseReport. See crates/verum_kernel/src/arch_phase.rs."),
-
-        // ----- Red-team closure axioms (AT-1..AT-5) -----
+        // These arms used to answer `decision(true, "<prose>")` — a
+        // sanity stamp minted before the ATS-V phase existed, saying
+        // that the intrinsic was WIRED rather than that the property
+        // HELD. The phase has been live since T0834, so the stamps
+        // were reporting verdicts the kernel never computed: the one
+        // failure mode a proof kernel may not have.
         //
-        // Two-layer discharge architecture: this dispatcher is the
-        // **registry-attestation surface** — it answers "is this
-        // intrinsic admissible as a kernel discharge?" by returning
-        // `holds: true` (yes, the intrinsic exists, the kernel
-        // honours the bridge).  The **actual per-Shape check**
-        // happens through the phase orchestrator
-        // `arch_phase::run_arch_phase_one_with` → `check_all_anti_patterns`
-        // → the matching `check_*` function (e.g. `check_capability_ontology_v`).
-        //
-        // This separation is intentional: IntrinsicValue is a flat
-        // typed enum (Bool / Int / Text / Decision / Unit), not a
-        // carrier for the structured `arch::Shape` value the check
-        // functions consume.  Callers never invoke the dispatcher
-        // with a Shape; they invoke it with the intrinsic name to
-        // assert the bridge exists.
-        "kernel_arch_capability_ontology_check" => decision(true, "ATS-V capability-ontology completeness check — closes attack-vector \
-                     AT-1.  Registry-attestation surface: actual per-Shape check runs \
-                     through arch_phase::run_arch_phase_one_with (see \
-                     check_capability_ontology_v in arch_anti_pattern.rs)."),
-        "kernel_arch_yoneda_canonical_roster_complete" => decision(true, "ATS-V Yoneda canonical-roster completeness — closes attack-vector \
-                     AT-3.  Registry-attestation surface; actual per-Shape check is \
-                     check_yoneda_canonical_roster_complete_v in arch_anti_pattern.rs."),
-        "kernel_arch_theorem_cve_required" => decision(true, "ATS-V theorem-CVE coupling — closes attack-vector AT-2.  \
-                     Registry-attestation surface; actual per-Shape check is \
-                     check_theorem_cve_required_v in arch_anti_pattern.rs."),
-        "kernel_arch_consumes_format_check" => decision(true, "ATS-V consumes-format validation — closes attack-vector AT-5.  \
-                     Registry-attestation surface; actual per-Shape check is \
-                     check_consumes_format_v in arch_anti_pattern.rs."),
+        // Every `kernel_arch_*` name now discharges by EXECUTION —
+        // `arch_discharge` looks up what the name claims and runs that
+        // claim against the live checkers (see `arch_probe`). One
+        // carrier and one claim table replace 42 hand-written stamps
+        // and their 42 copies of catalogue prose, which can no longer
+        // drift from the checks they describe.
+        name if name.starts_with("kernel_arch_") => arch_discharge(name),
 
         _ => None,
     }
@@ -796,8 +864,23 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
 /// Returns the list of every dispatchable kernel-intrinsic name.
 /// Used by `verum audit --kernel-intrinsics` and by the compiler's
 /// elaborator to validate `apply kernel_*(...)` invocations.
+/// Names the kernel can dispatch.
+///
+/// The `kernel_arch_*` family is NOT listed here: it is derived from
+/// [`ARCH_CLAIMS`], the single authority for what each architectural
+/// discharge claims. Listing those names by hand beside the dispatch
+/// is what let eight endpoints go missing while their checks ran.
 pub fn available_intrinsics() -> &'static [&'static str] {
-    &[
+    static ALL: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
+        let mut names: Vec<&'static str> = BASE_INTRINSICS.to_vec();
+        names.extend(ARCH_CLAIMS.iter().map(|(name, _)| *name));
+        names
+    });
+    &ALL
+}
+
+/// Every non-architectural intrinsic name.
+const BASE_INTRINSICS: &[&str] = &[
         "kernel_yoneda_embedding",
         "kernel_yoneda_embedding_bare",
         "kernel_identity_is_equivalence",
@@ -878,36 +961,15 @@ pub fn available_intrinsics() -> &'static [&'static str] {
         // crates/verum_kernel/tests/k_arch_v_alignment.rs asserts
         // every Verum-side bridge has a kernel-side counterpart and
         // vice versa.
-        "kernel_arch_capability_discipline",
-        "kernel_arch_boundary_check",
-        "kernel_arch_composition_check",
-        "kernel_arch_lifecycle_check",
-        "kernel_arch_foundation_consistency",
-        "kernel_arch_anti_pattern_check",
-        "kernel_arch_cve_closure",
-        "kernel_arch_soundness_v0",
         // ATS-V architectural-type discharge intrinsics for the
         // Verum-side core/architecture/ MTAC + counterfactual +
         // adjunction + yoneda kernel-discharge cogs.
-        "kernel_arch_mtac_calculus",
-        "kernel_arch_counterfactual_engine",
-        "kernel_arch_adjunction_analyzer",
-        "kernel_arch_yoneda_equivalence",
         // Composition / corpus / phase / parse engine intrinsics —
         // surface the operational ATS-V layer (A ⊗ B, cross-cog
         // invariants, Phase 6.5 orchestrator).
-        "kernel_arch_composition_engine",
-        "kernel_arch_composition_associative",
-        "kernel_arch_corpus_verify",
-        "kernel_arch_phase_orchestrator",
         // Red-team closure intrinsics (AT-1..AT-5) — defeat known
         // attack vectors against the ATS-V declarative surface.
-        "kernel_arch_capability_ontology_check",
-        "kernel_arch_yoneda_canonical_roster_complete",
-        "kernel_arch_theorem_cve_required",
-        "kernel_arch_consumes_format_check",
-    ]
-}
+];
 
 /// Returns true iff the given name is an available kernel intrinsic.
 ///
@@ -1223,42 +1285,94 @@ mod tests {
         );
     }
 
+    /// Every `@kernel_discharge("name")` citation under `root`,
+    /// deduplicated. Reading the library is the point: the dispatch
+    /// surface exists to serve these citations, and any list of them
+    /// maintained by hand drifts away from what the library actually
+    /// says.
+    fn cited_kernel_discharges(root: &std::path::Path) -> std::collections::BTreeSet<String> {
+        fn walk(dir: &std::path::Path, out: &mut std::collections::BTreeSet<String>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|e| e == "vr") {
+                    let Ok(text) = std::fs::read_to_string(&path) else {
+                        continue;
+                    };
+                    for line in text.lines() {
+                        // A citation inside a comment is prose about
+                        // the mechanism, not a use of it — the
+                        // soundness docs spell the shape as
+                        // `kernel_<rule>_strict`, which is a pattern
+                        // and not a name any kernel could dispatch.
+                        let code = match line.find("//") {
+                            Some(at) => &line[..at],
+                            None => line,
+                        };
+                        let mut rest = code;
+                        while let Some(at) = rest.find("@kernel_discharge(\"") {
+                            rest = &rest[at + "@kernel_discharge(\"".len()..];
+                            if let Some(end) = rest.find('"') {
+                                out.insert(rest[..end].to_string());
+                                rest = &rest[end..];
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut out = std::collections::BTreeSet::new();
+        walk(root, &mut out);
+        out
+    }
+
     #[test]
     fn available_intrinsics_covers_all_bridges() {
         let names = available_intrinsics();
-        // 22 from core/proof/kernel_bridge.vr + 5 HoTT coherence
-        // dispatchers from core/math/hott.vr + 6 codegen-attestation
-        // dispatchers from core/verify/codegen_soundness/ + 11
-        // kernel_v0 rule soundness IOUs from core/verify/kernel_v0/ +
-        // 1 separation-logic alignment dispatcher from
-        // core/verify/separation_soundness/ + 4 reflection-tower
-        // dispatchers from core/verify/kernel_self_soundness/
-        // (REF^0 base subsumes the former rank-1 meta-soundness
-        // axiom; REF^≥1 / REF^ω / REF^Abs complete the tower) +
-        // 8 ATS-V architectural-type registry intrinsics
-        // (capability_discipline / boundary_check / composition_check
-        // / lifecycle_check / foundation_consistency /
-        // anti_pattern_check / cve_closure / soundness_v0) + 4 ATS-V
-        // surface intrinsics for Verum-side core/architecture/ cogs
-        // (mtac_calculus / counterfactual_engine /
-        // adjunction_analyzer / yoneda_equivalence) + 4 ATS-V
-        // operational-engine intrinsics for the Verum-side
-        // composition / corpus / phase / parse cogs
-        // (composition_engine / composition_associative /
-        // corpus_verify / phase_orchestrator) + 4 ATS-V red-team
-        // closure intrinsics defeating attack vectors AT-1..AT-5
-        // (capability_ontology_check / yoneda_canonical_roster_complete
-        // / theorem_cve_required / consumes_format_check).
-        // Adding a new bridge axiom must update both the bridge
-        // surface and this count.
-        assert_eq!(
+        // The property is "every discharge the library cites has a
+        // dispatcher", and it is now READ FROM THE LIBRARY rather
+        // than pinned as a count.
+        //
+        // The count this assertion used to carry (with a comment
+        // enumerating the families by hand) was a third source of
+        // truth beside the dispatch and the registry, and it could
+        // only ever detect that SOME number changed — never which
+        // citation lost its verifier. Eight `@kernel_discharge`
+        // endpoints in core/architecture/ sat unrecognised while this
+        // test was green, because the count they were missing from
+        // matched the list they were missing from.
+        let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
+        let cited = cited_kernel_discharges(std::path::Path::new(core_root));
+        assert!(
+            !cited.is_empty(),
+            "no @kernel_discharge citations found under {core_root} — the scan is \
+             looking in the wrong place, and a scan that finds nothing proves nothing"
+        );
+        let orphaned: Vec<&String> = cited.iter().filter(|c| !is_known_intrinsic(c)).collect();
+        assert!(
+            orphaned.is_empty(),
+            "these @kernel_discharge citations in core/ have no dispatcher — the \
+             axiom claims a kernel verdict nothing computes: {orphaned:?}"
+        );
+        assert!(
+            names.len() >= cited.len(),
+            "the dispatch surface ({}) cannot be smaller than the set of citations \
+             it must serve ({})",
             names.len(),
-            69,
-            "Every kernel_* axiom in core/proof/kernel_bridge.vr + \
-             core/math/hott.vr + core/verify/codegen_soundness/ + \
-             core/verify/kernel_v0/ + core/verify/separation_soundness/ + \
-             core/verify/kernel_self_soundness/ + \
-             core/architecture/ must have a dispatcher"
+            cited.len(),
+        );
+        // Legacy shape check retained: the bridge axioms are the
+        // `_strict` family and must resolve through the same surface.
+        assert!(
+            is_known_intrinsic("kernel_grothendieck_construction_strict"),
+            "the `_strict` bridge spelling must resolve — {} names available",
+            names.len(),
         );
         // Check uniqueness.
         let mut seen = std::collections::HashSet::new();
