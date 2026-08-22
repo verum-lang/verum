@@ -3425,8 +3425,10 @@ impl<'ctx> Translator<'ctx> {
             other => {
                 let sort_name = format!("Verum!{}", Self::type_kind_tag(other));
                 let sort = Sort::uninterpreted(Symbol::String(sort_name));
-                let var = z3::ast::Datatype::new_const(name, &sort);
-                Ok(Dynamic::from_ast(&var))
+                // Dynamic::new_const, NOT Datatype::new_const: the sort is
+                // uninterpreted, and z3's Datatype constructor asserts its
+                // sort IS a datatype — third sibling of the 84e078f18 pair.
+                Ok(Dynamic::new_const(name, &sort))
             }
         }
     }
