@@ -1078,7 +1078,12 @@ public fn true_positives<T: RealField>(pred: &DynTensor<T>, target: &DynTensor<T
     let zeros = full_like(pred, 0 as T);
     let pp = gt(pred, &zeros);     // pred > 0
     let tp = gt(target, &zeros);   // target > 0
-    let both: DynTensor<Bool> = @vbc(TENSOR_BINOP, pp.data, tp.data, BinaryOp.And);
+    // Mask conjunction. `gt` masks are 0/1 indicators, and on
+    // indicators element-wise multiplication IS logical AND — the op
+    // table (TensorBinaryOp, 8 ring ops) deliberately carries no
+    // boolean op, and the `And` variant this line used to name was
+    // never declared by any enum on either side of the wire.
+    let both: DynTensor<Bool> = @vbc(TENSOR_BINOP, pp.data, tp.data, BinaryOp.Mul);
     let counts: DynTensor<USize> = both.cast();
     sum(&counts)
 }
@@ -1089,7 +1094,8 @@ public fn false_positives<T: RealField>(pred: &DynTensor<T>, target: &DynTensor<
     let zeros_t = full_like(target, 0 as T);
     let pp = gt(pred, &zeros_p);
     let tn = le(target, &zeros_t);
-    let both: DynTensor<Bool> = @vbc(TENSOR_BINOP, pp.data, tn.data, BinaryOp.And);
+    // Indicator-mask AND via Mul — see true_positives.
+    let both: DynTensor<Bool> = @vbc(TENSOR_BINOP, pp.data, tn.data, BinaryOp.Mul);
     let counts: DynTensor<USize> = both.cast();
     sum(&counts)
 }
@@ -1100,7 +1106,8 @@ public fn false_negatives<T: RealField>(pred: &DynTensor<T>, target: &DynTensor<
     let zeros_t = full_like(target, 0 as T);
     let pn = le(pred, &zeros_p);
     let tp = gt(target, &zeros_t);
-    let both: DynTensor<Bool> = @vbc(TENSOR_BINOP, pn.data, tp.data, BinaryOp.And);
+    // Indicator-mask AND via Mul — see true_positives.
+    let both: DynTensor<Bool> = @vbc(TENSOR_BINOP, pn.data, tp.data, BinaryOp.Mul);
     let counts: DynTensor<USize> = both.cast();
     sum(&counts)
 }
