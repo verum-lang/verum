@@ -37,8 +37,8 @@ fn empty_launch_shows_tours_and_blank_sheet() {
     assert!(text.contains("GUIDED TOURS"), "tours section:\n{text}");
     assert!(text.contains("blank sheet"), "blank-sheet entry:\n{text}");
     assert!(
-        text.contains("Verum Basics"),
-        "the first builtin tour is listed:\n{text}"
+        text.contains("First steps"),
+        "the first by-example tour is listed:\n{text}"
     );
 }
 
@@ -74,7 +74,7 @@ fn choosing_a_tour_loads_its_cells() {
     terminal.draw(|f| app.render(f)).expect("draw");
     let text = buffer_text(&terminal);
     assert!(
-        text.contains("Verum Basics"),
+        text.contains("First steps"),
         "the tour's title cell is in the notebook:\n{text}"
     );
 }
