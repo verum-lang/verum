@@ -694,6 +694,17 @@ enum Commands {
         all: bool,
     },
 
+    /// Read the Shape manifest embedded in a Verum AOT binary —
+    /// what the artifact may do, without sources.
+    #[command(display_order = 609)]
+    Inspect {
+        /// The binary to inspect.
+        binary: std::path::PathBuf,
+        /// Print the raw manifest JSON.
+        #[clap(long)]
+        json: bool,
+    },
+
     /// Serve the machine-facing Agent Protocol over stdio
     /// (JSON-RPC, Content-Length framing; stdout is frames-only).
     #[command(display_order = 608)]
@@ -761,8 +772,9 @@ enum Commands {
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Start interactive notebook (Playbook)
-    #[command(display_order = 701)]
+    /// Start interactive notebook (Playbook). `verum play` is the
+    /// same door with the newcomer's name (T0858: one entry command).
+    #[command(display_order = 701, visible_alias = "play")]
     Playbook {
  /// Optional .vrbook file to open
         #[clap(value_name = "FILE")]
@@ -3555,6 +3567,8 @@ fn run_command(cli: Cli) -> Result<()> {
             commands::doc::execute(open, document_private_items, no_deps, format.as_str())
         }
         Commands::Clean { all } => commands::clean::execute(all),
+        Commands::Inspect { binary, json } => commands::inspect::execute(&binary, json)
+            .map_err(|e| CliError::Custom(e.to_string())),
         Commands::Serve { agent } => {
             if !agent {
                 return Err(CliError::InvalidArgument(

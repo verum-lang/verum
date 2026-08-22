@@ -58,6 +58,10 @@ pub struct PlaybookApp {
     input_buffer: String,
     /// Set of collapsed cell IDs.
     collapsed_cells: HashSet<super::session::CellId>,
+    /// Full-screen help overlay (T0858 «видимая карта действий»):
+    /// `?` toggles it; any key closes it. The one-line contextual
+    /// hint stays in the footer — this is the COMPLETE map.
+    show_help_overlay: bool,
     /// Centralized keybinding dispatch.
     keybindings: Keybindings,
     /// Last execution time for stats display.
@@ -119,6 +123,7 @@ impl PlaybookApp {
             file_path: None,
             should_quit: false,
             status_message: None,
+            show_help_overlay: false,
             editor: EditorState::new(),
             layout_config: LayoutConfig::default(),
             sidebar_tab: SidebarTab::Variables,
@@ -264,6 +269,14 @@ impl PlaybookApp {
 
     pub fn handle_key(&mut self, key: KeyEvent) {
         self.status_message = None;
+
+        // Help overlay swallows every key: any press closes it. It
+        // must come before all other dispatch — a map you cannot
+        // close from is worse than no map.
+        if self.show_help_overlay {
+            self.show_help_overlay = false;
+            return;
+        }
 
         // Global: Ctrl+C cancels running execution
         if key.code == KeyCode::Char('c')
@@ -434,15 +447,7 @@ impl PlaybookApp {
                 self.search_results.clear();
             }
             KeyAction::ShowHelp => {
-                let help = match self.keybindings.mode() {
-                    KeybindingMode::Vim => {
-                        "j/k:nav i:edit x:run X:all o:new D:del K/J:move Tab:sidebar-tab Ctrl+B:sidebar /:search :cmd q:quit"
-                    }
-                    KeybindingMode::Standard => {
-                        "Arrows:nav Enter:edit F5:run F9:all Ins:new Del:del Tab/Shift+Tab:sidebar-tab Ctrl+B:sidebar Ctrl+S:save Ctrl+F:fs"
-                    }
-                };
-                self.status_message = Some(help.to_string());
+                self.show_help_overlay = true;
             }
             KeyAction::ToggleFullscreen => {
                 self.layout_config.toggle_fullscreen();
@@ -1318,6 +1323,66 @@ impl PlaybookApp {
         self.render_editor(frame, layout.editor);
         self.render_status(frame, layout.status);
         self.render_help(frame, layout.help);
+        if self.show_help_overlay {
+            self.render_help_overlay(frame);
+        }
+    }
+
+    /// The COMPLETE key map, centered over everything (`?` opens,
+    /// any key closes). The footer hint teaches the next three
+    /// moves; this teaches the whole game.
+    fn render_help_overlay(&self, frame: &mut Frame) {
+        use ratatui::widgets::Clear;
+        let area = frame.area();
+        let w = area.width.min(74);
+        let h = area.height.min(24);
+        let rect = Rect {
+            x: area.x + (area.width.saturating_sub(w)) / 2,
+            y: area.y + (area.height.saturating_sub(h)) / 2,
+            width: w,
+            height: h,
+        };
+        let vim = matches!(self.keybindings.mode(), KeybindingMode::Vim);
+        let nav = if vim { "j / k" } else { "↑ / ↓" };
+        let edit = if vim { "i" } else { "Enter" };
+        let run = if vim { "x" } else { "F5" };
+        let run_all = if vim { "X" } else { "F9" };
+        let new_cell = if vim { "o" } else { "Ins" };
+        let del_cell = if vim { "D" } else { "Del" };
+        let text = format!(
+            "
+  NAVIGATE            {nav}  move between cells
+                                  g / G  first / last cell
+
+               EDIT               {edit}  edit the selected cell
+                                  Esc  leave the editor
+
+               RUN                {run}  run cell    {run_all}  run all
+                                  Ctrl+C  cancel a running cell
+
+               CELLS              {new_cell}  new cell    {del_cell}  delete
+                                  K / J  move cell up / down
+
+               PANELS             Tab  next sidebar tab
+                                  Ctrl+B  toggle sidebar   F11  fullscreen
+
+               FILES              Ctrl+S  save    :w / :e  command forms
+
+               MODES              /  search    :  command    q  quit
+
+                                  press any key to close"
+        );
+        frame.render_widget(Clear, rect);
+        frame.render_widget(
+            Paragraph::new(text)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" KEY MAP — ? "),
+                )
+                .style(Style::default().bg(Color::Black).fg(Color::White)),
+            rect,
+        );
     }
 
     fn render_cells(&self, frame: &mut Frame, area: Rect) {
