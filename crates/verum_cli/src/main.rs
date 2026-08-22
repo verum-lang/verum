@@ -1775,6 +1775,16 @@ enum Commands {
         #[clap(long)]
         kernel_discharged_axioms: bool,
 
+ /// Attribute-registry export. Emits every attribute the compiler
+ /// actually knows, with its targets and arity. The registry was
+ /// previously unreadable from outside the compiler, which is how
+ /// documentation came to teach an attribute (`@logic`) that no
+ /// parser, grammar or registry entry ever defined. Consumers —
+ /// docs checks, editor tooling, linters — can now derive the set
+ /// instead of restating it.
+        #[clap(long)]
+        attribute_registry: bool,
+
  /// Verify-ladder audit. Walks every `@verify(strategy)`
  /// annotation, projects to its ν-ordinal, classifies dispatch
  /// status (implemented / fallback / pending), and verifies the
@@ -4261,6 +4271,7 @@ fn run_command(cli: Cli) -> Result<()> {
             cross_format,
             kernel_intrinsics,
             kernel_discharged_axioms,
+            attribute_registry,
             verify_ladder,
             manifest_coverage,
             mls_coverage,
@@ -4308,6 +4319,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_reflection_tower_with_format(output_format)
             } else if arch_discharges {
                 commands::audit::audit_arch_discharges_with_format(output_format)
+            } else if attribute_registry {
+                commands::audit::audit_attribute_registry(output_format)
             } else if counterfactual {
                 commands::audit::audit_counterfactual_with_format(output_format)
             } else if adjunctions {

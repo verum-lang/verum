@@ -10869,6 +10869,30 @@ struct DischargeCite {
     intrinsic_name: Text,
     file: PathBuf,
     recognised: bool,
+    /// How the kernel knows: `Some(Computed)` when it ran the
+    /// deciding check itself, `Some(Cited{source})` when it accepted a
+    /// proof living elsewhere, `None` when the dispatcher declined the
+    /// bare-argument form (the verdict needs structural data the audit
+    /// does not have). Reporting "N discharged" without this split is
+    /// a number in place of a status.
+    evidence: Option<verum_kernel::intrinsic_dispatch::Evidence>,
+}
+
+/// Render one discharge's evidence as JSON: what stands behind the
+/// verdict and, for a citation, where that proof actually lives.
+fn evidence_json(evidence: Option<&verum_kernel::intrinsic_dispatch::Evidence>) -> String {
+    use verum_kernel::intrinsic_dispatch::Evidence;
+    match evidence {
+        Some(Evidence::Computed) => "{ \"kind\": \"computed\" }".to_string(),
+        Some(Evidence::Cited { source }) => format!(
+            "{{ \"kind\": \"cited\", \"source\": \"{}\" }}",
+            json_escape(source)
+        ),
+        // The dispatcher declined the bare-argument form: this verdict
+        // needs structural data the audit does not carry. Saying so is
+        // not the same as saying it was discharged.
+        None => "{ \"kind\": \"needs_structural_args\" }".to_string(),
+    }
 }
 
 /// **Render the kernel-discharged-axioms audit report as JSON**, with
@@ -10906,6 +10930,27 @@ fn render_kernel_discharge_json(
         "  \"unrecognised_count\": {},\n",
         unrecognised_count
     ));
+    let computed = cites
+        .iter()
+        .filter(|c| c.evidence.as_ref().is_some_and(|e| e.is_computed()))
+        .count();
+    let cited = cites
+        .iter()
+        .filter(|c| {
+            matches!(
+                c.evidence,
+                Some(verum_kernel::intrinsic_dispatch::Evidence::Cited { .. })
+            )
+        })
+        .count();
+    out.push_str("  \"evidence_breakdown\": {\n");
+    out.push_str(&format!("    \"computed\": {},\n", computed));
+    out.push_str(&format!("    \"cited\": {},\n", cited));
+    out.push_str(&format!(
+        "    \"needs_structural_args\": {}\n",
+        cites.len().saturating_sub(computed + cited)
+    ));
+    out.push_str("  },\n");
     out.push_str("  \"discharges\": [\n");
     for (i, cite) in cites.iter().enumerate() {
  // Compose the dependents list for unrecognised cites only.
@@ -10940,11 +10985,12 @@ fn render_kernel_discharge_json(
             "[]".to_string()
         };
         out.push_str(&format!(
-            "    {{ \"axiom\": \"{}\", \"intrinsic\": \"{}\", \"file\": \"{}\", \"recognised\": {}, \"dependents\": {} }}{}\n",
+            "    {{ \"axiom\": \"{}\", \"intrinsic\": \"{}\", \"file\": \"{}\", \"recognised\": {}, \"evidence\": {}, \"dependents\": {} }}{}\n",
             json_escape(cite.axiom_name.as_str()),
             json_escape(cite.intrinsic_name.as_str()),
             json_escape(&cite.file.display().to_string()),
             cite.recognised,
+            evidence_json(cite.evidence.as_ref()),
             deps_json,
             if i + 1 < cites.len() { "," } else { "" }
         ));
@@ -10991,15 +11037,17 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
         return Ok(());
     }
 
- /// One @kernel_discharge citation site found in the corpus.
-    struct DischargeCite {
-        axiom_name: Text,
-        intrinsic_name: Text,
-        file: PathBuf,
-        recognised: bool,
-    }
+    // The record shape lives at module scope (`DischargeCite`) so the
+    // report renderer can take it by reference. A local re-declaration
+    // shadowed it here, which is why the renderer that was supposed to
+    // serve both emission paths could not be called from either.
 
     let mut cites: Vec<DischargeCite> = Vec::new();
+    // Parsed modules are kept so the report can name, for every
+    // unrecognised citation, the theorems that transitively depend on
+    // it. The count says something is broken; the dependents say what
+    // breaks with it.
+    let mut parsed_modules: Vec<verum_ast::Module> = Vec::new();
     let mut malformed: Vec<(PathBuf, Text)> = Vec::new();
     let mut parsed_files = 0usize;
     let mut skipped_files = 0usize;
@@ -11017,6 +11065,7 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
             }
         };
         parsed_files += 1;
+        parsed_modules.push(module.clone());
 
         for item in &module.items {
             let (item_name, decl_attrs): (Text, &verum_common::List<verum_ast::attr::Attribute>) =
@@ -11094,11 +11143,25 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
                     };
                     let intrinsic = intrinsic_name;
                     let recognised = is_known_intrinsic(intrinsic.as_str());
+                    // Ask the dispatcher how it would answer: the
+                    // evidence kind is a property of the intrinsic,
+                    // not of this call site.
+                    let evidence = match verum_kernel::intrinsic_dispatch::dispatch_intrinsic(
+                        intrinsic.as_str(),
+                        &[],
+                    ) {
+                        Some(verum_kernel::intrinsic_dispatch::IntrinsicValue::Decision {
+                            evidence,
+                            ..
+                        }) => Some(evidence),
+                        _ => None,
+                    };
                     cites.push(DischargeCite {
                         axiom_name: item_name.clone(),
                         intrinsic_name: intrinsic,
                         file: rel_path.clone(),
                         recognised,
+                        evidence,
                     });
                 }
             }
@@ -11107,6 +11170,42 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
 
     let total = cites.len();
     let unrecognised = cites.iter().filter(|c| !c.recognised).count();
+
+    // Dependents for the orphaned citations, computed once and shared
+    // by every emission path. `render_kernel_discharge_json` has
+    // carried this feature since #318/#188 and its doc claimed both
+    // paths used it — while BOTH paths in fact ran their own inline
+    // schema-1 copy and the shared renderer had no callers at all. A
+    // documented feature that lives only in dead code is worse than a
+    // missing one: the documentation vouches for it.
+    let module_refs: Vec<&verum_ast::Module> = parsed_modules.iter().collect();
+    let apply_graph =
+        verum_kernel::soundness::apply_graph::build_apply_graph_from_modules(&module_refs);
+    let mut dep_listings: std::collections::BTreeMap<
+        String,
+        Vec<verum_kernel::soundness::apply_graph::DependentTheorem>,
+    > = std::collections::BTreeMap::new();
+    for cite in cites.iter().filter(|c| !c.recognised) {
+        let deps = verum_kernel::soundness::apply_graph::dependent_theorems(
+            &apply_graph,
+            cite.axiom_name.as_str(),
+        );
+        if !deps.is_empty() {
+            dep_listings.insert(cite.axiom_name.as_str().to_string(), deps);
+        }
+    }
+    let theorem_sources: std::collections::BTreeMap<String, PathBuf> =
+        std::collections::BTreeMap::new();
+    let report_json = render_kernel_discharge_json(
+        vr_files.len(),
+        parsed_files,
+        skipped_files,
+        total,
+        unrecognised,
+        &cites,
+        &dep_listings,
+        &theorem_sources,
+    );
 
     match format {
         AuditFormat::Plain => {
@@ -11152,34 +11251,15 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
             }
         }
         AuditFormat::Json => {
-            let mut out = String::from("{\n");
-            out.push_str("  \"schema_version\": 1,\n");
-            out.push_str(&format!("  \"files_scanned\": {},\n", vr_files.len()));
-            out.push_str(&format!("  \"files_parsed\": {},\n", parsed_files));
-            out.push_str(&format!("  \"files_skipped\": {},\n", skipped_files));
-            out.push_str(&format!("  \"discharge_count\": {},\n", total));
-            out.push_str(&format!("  \"unrecognised_count\": {},\n", unrecognised));
-            out.push_str("  \"discharges\": [\n");
-            for (i, cite) in cites.iter().enumerate() {
-                out.push_str(&format!(
-                    "    {{ \"axiom\": \"{}\", \"intrinsic\": \"{}\", \"file\": \"{}\", \"recognised\": {} }}{}\n",
-                    json_escape(cite.axiom_name.as_str()),
-                    json_escape(cite.intrinsic_name.as_str()),
-                    json_escape(&cite.file.display().to_string()),
-                    cite.recognised,
-                    if i + 1 < cites.len() { "," } else { "" }
-                ));
-            }
-            out.push_str("  ]\n}");
  // #172 audit-output discipline: write JSON to disk
  // regardless of `--format` so bundle dispatcher (#151) and
  // downstream tooling can reliably read each per-gate report.
             if let Ok(manifest_dir) = Manifest::find_manifest_dir() {
                 let dir = manifest_dir.join("target").join("audit-reports");
                 let _ = std::fs::create_dir_all(&dir);
-                let _ = std::fs::write(dir.join("kernel-discharged-axioms.json"), &out);
+                let _ = std::fs::write(dir.join("kernel-discharged-axioms.json"), &report_json);
             }
-            println!("{}", out);
+            println!("{}", report_json);
         }
     }
 
@@ -11188,27 +11268,10 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
         if let Ok(manifest_dir) = Manifest::find_manifest_dir() {
             let dir = manifest_dir.join("target").join("audit-reports");
             let _ = std::fs::create_dir_all(&dir);
-            let mut out = String::new();
-            out.push_str("{\n");
-            out.push_str("  \"schema_version\": 1,\n");
-            out.push_str(&format!("  \"files_scanned\": {},\n", vr_files.len()));
-            out.push_str(&format!("  \"files_parsed\": {},\n", parsed_files));
-            out.push_str(&format!("  \"files_skipped\": {},\n", skipped_files));
-            out.push_str(&format!("  \"discharge_count\": {},\n", total));
-            out.push_str(&format!("  \"unrecognised_count\": {},\n", unrecognised));
-            out.push_str("  \"discharges\": [\n");
-            for (i, cite) in cites.iter().enumerate() {
-                out.push_str(&format!(
-                    "    {{ \"axiom\": \"{}\", \"intrinsic\": \"{}\", \"file\": \"{}\", \"recognised\": {} }}{}\n",
-                    json_escape(cite.axiom_name.as_str()),
-                    json_escape(cite.intrinsic_name.as_str()),
-                    json_escape(&cite.file.display().to_string()),
-                    cite.recognised,
-                    if i + 1 < cites.len() { "," } else { "" }
-                ));
-            }
-            out.push_str("  ]\n}");
-            let _ = std::fs::write(dir.join("kernel-discharged-axioms.json"), &out);
+            let _ = std::fs::write(
+                dir.join("kernel-discharged-axioms.json"),
+                &report_json,
+            );
         }
     }
 
@@ -11917,6 +11980,7 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
                 Some(verum_kernel::intrinsic_dispatch::IntrinsicValue::Decision {
                     holds,
                     reason,
+                    ..
                 }) => (holds, reason),
                 _ => (false, "intrinsic not dispatched".to_string()),
             };
@@ -15431,5 +15495,85 @@ pub fn audit_proof_archive_with_format(format: AuditFormat) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+// =============================================================================
+// Attribute-registry export
+// =============================================================================
+
+/// `verum audit --attribute-registry` — emit every attribute the
+/// compiler actually knows.
+///
+/// The registry had no reader outside the compiler. That is how the
+/// documentation site came to teach `@logic` across thirty-one pages:
+/// an attribute the parser does not accept, the grammar does not
+/// define and this registry never contained, with nothing able to
+/// notice the difference. A set that cannot be read from outside will
+/// be restated from outside, and a restatement drifts.
+///
+/// Downstream consumers — documentation checks, editor tooling,
+/// linters — should derive the attribute vocabulary from this output
+/// rather than maintain their own copy of it.
+pub fn audit_attribute_registry(format: AuditFormat) -> Result<()> {
+    use verum_types::attr::registry;
+
+    let reg = registry();
+    let mut names: Vec<String> = reg
+        .all_names()
+        .iter()
+        .map(|n| n.as_str().to_string())
+        .collect();
+    names.sort();
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("  {:<28}  {:<18}  {}", "ATTRIBUTE", "CATEGORY", "DOC");
+            println!("  {}", "-".repeat(92));
+            for name in &names {
+                let (category, doc) = match reg.get(name.as_str()) {
+                    Some(meta) => (
+                        meta.category.display_name().to_string(),
+                        meta.doc.as_str().lines().next().unwrap_or("").to_string(),
+                    ),
+                    None => ("?".to_string(), String::new()),
+                };
+                println!("  @{:<27}  {:<18}  {}", name, category, doc);
+            }
+            println!();
+            println!("  {} attributes registered.", names.len());
+            println!();
+        }
+        AuditFormat::Json => {
+            let mut out = String::from("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str(&format!("  \"attribute_count\": {},\n", names.len()));
+            out.push_str("  \"attributes\": [\n");
+            for (i, name) in names.iter().enumerate() {
+                let (category, doc) = match reg.get(name.as_str()) {
+                    Some(meta) => (
+                        meta.category.display_name().to_string(),
+                        meta.doc.as_str().lines().next().unwrap_or("").to_string(),
+                    ),
+                    None => ("?".to_string(), String::new()),
+                };
+                out.push_str(&format!(
+                    "    {{ \"name\": \"{}\", \"category\": \"{}\", \"doc\": \"{}\" }}{}\n",
+                    json_escape(name),
+                    json_escape(&category),
+                    json_escape(&doc),
+                    if i + 1 < names.len() { "," } else { "" }
+                ));
+            }
+            out.push_str("  ]\n}");
+            if let Ok(manifest_dir) = Manifest::find_manifest_dir() {
+                let dir = manifest_dir.join("target").join("audit-reports");
+                let _ = std::fs::create_dir_all(&dir);
+                let _ = std::fs::write(dir.join("attribute-registry.json"), &out);
+            }
+            println!("{}", out);
+        }
+    }
     Ok(())
 }

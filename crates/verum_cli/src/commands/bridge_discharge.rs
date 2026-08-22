@@ -292,7 +292,22 @@ fn handle_apply_callsite(
         let resolved: Vec<IntrinsicValue> =
             intrinsic_args.iter().filter_map(|v| v.clone()).collect();
         match dispatch_intrinsic(&bare_name, &resolved) {
-            Some(IntrinsicValue::Decision { holds, reason }) => (Some(holds), reason.clone()),
+            Some(IntrinsicValue::Decision {
+                holds,
+                evidence,
+                reason,
+            }) => (
+                Some(holds),
+                // Surface HOW the kernel knows: a computed verdict and
+                // one accepted on a published proof are both `true`
+                // and must not read the same in an audit.
+                match &evidence {
+                    verum_kernel::intrinsic_dispatch::Evidence::Computed => reason.clone(),
+                    verum_kernel::intrinsic_dispatch::Evidence::Cited { source } => {
+                        format!("[cited: {source}] {reason}")
+                    }
+                },
+            ),
             Some(IntrinsicValue::Bool(b)) => (Some(b), String::new()),
             Some(_) => (None, "dispatcher returned non-Decision value".to_string()),
             None => (

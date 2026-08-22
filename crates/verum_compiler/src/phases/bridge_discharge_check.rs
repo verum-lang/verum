@@ -295,6 +295,7 @@ fn check_apply_callsite(
         Some(IntrinsicValue::Decision {
             holds: false,
             reason,
+            ..
         }) => {
             errors.push(BridgeDischargeError {
                 item_name: ctx.item_name.clone(),
