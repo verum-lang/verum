@@ -694,6 +694,15 @@ enum Commands {
         all: bool,
     },
 
+    /// Serve the machine-facing Agent Protocol over stdio
+    /// (JSON-RPC, Content-Length framing; stdout is frames-only).
+    #[command(display_order = 608)]
+    Serve {
+        /// Start the agent protocol server (the only mode in v1).
+        #[clap(long)]
+        agent: bool,
+    },
+
     /// Judge tier identity: run a program under BOTH tiers
     /// (interpreter and AOT) and refuse to call different answers
     /// anything but a defect. Exit 3 on divergence.
@@ -3546,6 +3555,14 @@ fn run_command(cli: Cli) -> Result<()> {
             commands::doc::execute(open, document_private_items, no_deps, format.as_str())
         }
         Commands::Clean { all } => commands::clean::execute(all),
+        Commands::Serve { agent } => {
+            if !agent {
+                return Err(CliError::InvalidArgument(
+                    "serve currently requires --agent (the agent protocol is the only mode)".into(),
+                ));
+            }
+            commands::serve_agent::execute().map_err(|e| CliError::Custom(e.to_string()))
+        }
         Commands::DiffTiers { file, json } => commands::diff_tiers::execute(&file, json)
             .map_err(|e| CliError::Custom(e.to_string())),
         Commands::Diagnose(cmd) => commands::diagnose::execute(cmd),

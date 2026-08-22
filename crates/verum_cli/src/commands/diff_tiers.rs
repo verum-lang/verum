@@ -78,7 +78,9 @@ fn program_stdout(raw: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn execute(file: &std::path::Path, json: bool) -> Result<()> {
+/// Judge a program and RETURN the report — the reusable core the
+/// CLI command and the agent protocol (`tiers.diff`) both consume.
+pub fn judge(file: &std::path::Path) -> Result<DiffTiersReport> {
     let exe = std::env::current_exe().context("locating the verum binary")?;
     let tier0 = run_tier(&exe, "interpret", file)?;
     let tier1 = run_tier(&exe, "aot", file)?;
@@ -97,7 +99,7 @@ pub fn execute(file: &std::path::Path, json: bool) -> Result<()> {
     let exits_agree = tier0.exit == tier1.exit;
     let identical = exits_agree && first_divergence_line.is_none();
 
-    let report = DiffTiersReport {
+    Ok(DiffTiersReport {
         file: file.display().to_string(),
         tier0,
         tier1,
@@ -107,7 +109,15 @@ pub fn execute(file: &std::path::Path, json: bool) -> Result<()> {
             "DIVERGENT".to_string()
         },
         first_divergence_line,
-    };
+    })
+}
+
+pub fn execute(file: &std::path::Path, json: bool) -> Result<()> {
+    let report = judge(file)?;
+    let identical = report.verdict == "identical";
+    let exits_agree = report.tier0.exit == report.tier1.exit;
+    let t0_lines = program_stdout(&report.tier0.stdout);
+    let t1_lines = program_stdout(&report.tier1.stdout);
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
