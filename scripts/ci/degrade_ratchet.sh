@@ -22,17 +22,19 @@ PROBES=(
 )
 
 REPORT="$(mktemp)"
-trap 'rm -f "$REPORT"' EXIT
 export VERUM_DEGRADE_REPORT="$REPORT"
 
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK" "$REPORT"' EXIT
 for p in "${PROBES[@]}"; do
-  # Cache-bust: the AOT object cache legitimately skips lowering for
-  # an unchanged probe, and a skipped lowering writes NO degrade
-  # report — the counter would read 0 and the ratchet would demand a
-  # lie. Touching the probe forces an honest recompile (the
-  # probe-cache-ignores-env-flags trap, institutionalised away).
-  touch "$p"
-  "$VERUM" build "$p" >/dev/null 2>&1 || {
+  # Cache-bust: the AOT object cache keys on CONTENT, so an unchanged
+  # probe skips lowering entirely and a skipped lowering writes NO
+  # degrade report — the counter would read 0 and the ratchet would
+  # demand a lie (the probe-cache trap, institutionalised away).
+  # Salt a COPY with a unique comment; the original tree is untouched.
+  salted="$WORK/$(basename "$p")"
+  { cat "$p"; echo "// ratchet-salt $$-$RANDOM"; } > "$salted"
+  "$VERUM" build "$salted" >/dev/null 2>&1 || {
     echo "degrade-ratchet: probe failed to BUILD: $p" >&2
     exit 2
   }
