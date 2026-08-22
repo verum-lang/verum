@@ -155,7 +155,7 @@ src/
 - VBC → LLVM IR lowering
 - Proven-safe checks eliminated (0ns)
 - 50-90% check elimination (typical)
-- 85-95% native C performance
+- native-C parity (the 1x bar) in AOT
 - Multi-target GPU via MLIR (when @device(GPU) annotated)
 - Used for production builds
 
@@ -252,7 +252,7 @@ Tier 1 (AOT/LLVM) → Tier 0 (Interpreter)
 | Type Checking | < 100ms/10K LOC | ⏳ Pending |
 | CBGR Overhead | < 15ns per check | ✅ Achieved (~0.93ns gen+epoch check) |
 | Check Elimination | 50-90% typical | ⏳ Pending |
-| Runtime Performance | 0.85-0.95x Rust | ⏳ Pending |
+| Runtime Performance | 1x native C (parity bar) | ⏳ Pending |
 | Memory Overhead | < 5% vs unsafe | ⏳ Pending |
 
 Contract test gating compilation speed lives at

@@ -1341,7 +1341,7 @@ pub enum CompilationTier {
     #[default]
     Interpreter,
 
-    /// Tier 1: AOT compilation via LLVM (production, 85-95% native speed)
+    /// Tier 1: AOT compilation via LLVM (production, native-C parity bar)
     #[serde(rename = "1", alias = "aot", alias = "release", alias = "native")]
     Aot,
 }
@@ -1384,7 +1384,7 @@ impl CompilationTier {
     pub fn description(&self) -> &'static str {
         match self {
             CompilationTier::Interpreter => "VBC Interpreter (instant start, full diagnostics)",
-            CompilationTier::Aot => "AOT compilation (production, 85-95% native speed)",
+            CompilationTier::Aot => "AOT compilation (production, native-C parity bar)",
         }
     }
 

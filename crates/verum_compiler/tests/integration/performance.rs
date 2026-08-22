@@ -13,9 +13,9 @@
 //! - Compilation time vs execution time tradeoffs
 //!
 //! Performance targets: compilation > 50K LOC/sec, type inference < 100ms/10K LOC,
-//! CBGR overhead < 15ns, runtime 0.85-0.95x native C, memory overhead < 5%.
+//! CBGR overhead < 15ns, runtime 1x native C (parity bar), memory overhead < 5%.
 //! Two execution tiers: Tier 0 (interpreter, fastest startup, ~100ns CBGR),
-//! Tier 1 (AOT via LLVM, 85-95% native speed). Graceful fallback between tiers.
+//! Tier 1 (AOT via LLVM, native-C parity bar). Graceful fallback between tiers.
 
 use verum_common::{List};
 use verum_compiler::{
@@ -645,11 +645,11 @@ fn test_type_inference_speed_target() {
 
 #[test]
 fn test_runtime_performance_target() {
-    // Target: 0.85-0.95x native C (CLAUDE.md Performance Targets)
+    // Target: 1x native C — parity bar (CLAUDE.md Performance Targets)
 
     // This would require actual benchmarking against C
     // For now, we document the target
 
-    println!("Runtime performance target: 0.85-0.95x native C");
+    println!("Runtime performance target: 1x native C (parity bar)");
     println!("Requires compiled execution to measure");
 }

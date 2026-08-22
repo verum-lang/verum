@@ -70,7 +70,7 @@ Verum supports multiple compilation tiers for different use cases:
 |------|------|------------|----------|
 | 0 | Interpreted | Slower | Development, REPL |
 | 1 | JIT Basic | 80-90% native | Quick iteration |
-| 2 | JIT Optimized | 85-95% native | Production default |
+| 2 | JIT Optimized | native parity bar | Production default |
 | 3 | AOT Native | 90-100% native | Maximum performance |
 
 ## Language Features Demonstrated

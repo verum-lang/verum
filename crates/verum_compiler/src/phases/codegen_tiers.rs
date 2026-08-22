@@ -22,7 +22,7 @@
 //! - LLVM backend with full optimization
 //! - Proven-safe checks eliminated (0ns)
 //! - 50-90% check elimination (typical)
-//! - 0.85-0.95x Rust performance
+//! - native-C parity (the 1x bar)
 //!
 //! Phase 7: Code generation. Tier 0 (interpreter, full CBGR ~100ns),
 //! Tier 1 (baseline JIT, ~15ns CBGR), Tier 2 (optimizing JIT, ~5ns),
@@ -294,7 +294,7 @@ impl CodegenTiersPhase {
     /// ## Performance Characteristics
     /// - CBGR overhead: 0ns for proven-safe refs
     /// - Check elimination: 50-90% typical
-    /// - Performance: 0.85-0.95x Rust native
+    /// - Performance: native-C parity (the 1x bar)
     ///
     /// PERF: Takes llvm_ctx by reference to avoid creating new Context per call.
     #[cfg(feature = "llvm")]

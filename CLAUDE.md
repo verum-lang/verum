@@ -236,7 +236,7 @@ the workspace `Cargo.toml` is authoritative.
 CBGR check:        < 15ns       (measured ~0.93ns — production_targets bench)
 Type inference:    < 100ms / 10K LOC
 Compilation:       > 50K LOC/sec (measured ~1.4M LOC/sec parse — gated by tests/compilation_speed_contract.rs)
-Runtime:           0.85-0.95x native C
+Runtime:           1x native C — parity is the bar, not the ceiling (>1x sought via whole-program opt)
 Memory overhead:   < 5%
 ```
 

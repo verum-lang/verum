@@ -21,7 +21,7 @@
 //! Goal analysis accelerates verification by detecting trivial contradictions early
 //! and selecting appropriate tactics based on formula complexity. This supports the
 //! overall performance targets: CBGR check <15ns, type inference <100ms per 10K LOC,
-//! compilation >50K LOC/sec, runtime 0.85-0.95x native C.
+//! compilation >50K LOC/sec, runtime 1x native C (parity bar).
 
 use std::time::{Duration, Instant};
 

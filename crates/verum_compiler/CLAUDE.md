@@ -84,7 +84,7 @@ that is **NOT** part of the main compilation pipeline. MIR is used only for:
 | Tier | Mode | Description |
 |------|------|-------------|
 | 0 | `Interpret` | Direct VBC interpretation (fastest startup, ~100ns CBGR) |
-| 1 | `Aot` | Ahead-of-time compilation via LLVM (85-95% native speed) |
+| 1 | `Aot` | Ahead-of-time compilation via LLVM (native-C parity bar) |
 | - | `Check` | Type checking only, no code generation |
 
 > **Note**: JIT infrastructure exists internally for REPL, incremental compilation,
