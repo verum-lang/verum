@@ -317,7 +317,7 @@ implement GenerationalArena {
             (capacity + mask) & (!mask)
         };
 
-        let buf = __alloc_zeroed_raw(actual_cap);
+        let buf = __alloc_zeroed_raw(actual_cap, 8);
 
         GenerationalArena {
             buffer: buf,
@@ -340,7 +340,7 @@ implement GenerationalArena {
             (cap + mask) & (!mask)
         };
 
-        let buf = __alloc_zeroed_raw(actual_cap);
+        let buf = __alloc_zeroed_raw(actual_cap, 8);
 
         GenerationalArena {
             buffer: buf,
@@ -408,7 +408,7 @@ implement GenerationalArena {
                 };
 
                 if capped >= end {
-                    let new_buf = __alloc_zeroed_raw(capped);
+                    let new_buf = __alloc_zeroed_raw(capped, 8);
                     if new_buf != 0 {
                         // Copy existing data to new buffer.
                         // Earlier revisions used a manual
@@ -429,7 +429,7 @@ implement GenerationalArena {
                         // bandwidth (rep movsb / NEON / SVE).
                         memcpy_addr(new_buf, self.buffer, self.used);
                         // Free old buffer
-                        __dealloc_raw(self.buffer, self.capacity);
+                        __dealloc_raw(self.buffer, self.capacity, 8);
                         self.buffer = new_buf;
                         self.capacity = capped;
                         // Fall through to allocate
@@ -586,7 +586,7 @@ implement GenerationalArena {
     /// arena become dangling (caught by CBGR generation check).
     public fn destroy(&mut self) {
         if self.buffer != 0 {
-            __dealloc_raw(self.buffer, self.capacity);
+            __dealloc_raw(self.buffer, self.capacity, 8);
             self.buffer = 0;
             self.capacity = 0;
             self.used = 0;

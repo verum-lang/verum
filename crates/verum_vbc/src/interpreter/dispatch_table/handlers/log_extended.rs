@@ -179,19 +179,49 @@ pub(in super::super) fn handle_mem_extended(
 /// This family is the canonical instance of the defect the envelope exists to
 /// kill, and the reason the authority is unconditional. Each arm reads the
 /// register count of the **registry's** declared param shape (`AllocZeroed`
-/// reads dst + size + align = 3), but a Verum-source forward declaration may
-/// bind a SUBSET of those params — `core/intrinsics/runtime/os.vr`'s
-/// `__alloc_zeroed_raw(size: Int)` is annotated `@intrinsic("alloc_zeroed")`
+/// reads dst + size + align = 3), but a Verum-source forward declaration used
+/// to bind a SUBSET of those params — `core/intrinsics/runtime/os.vr`'s
+/// `__alloc_zeroed_raw(size: Int)` was annotated `@intrinsic("alloc_zeroed")`
 /// with one argument while the registry declares two. Codegen then emits FEWER
 /// operand bytes than the arm reads, the arm's `read_reg` overshoots into the
 /// next instruction's opcode byte, and the pc stays misaligned for the rest of
 /// the function: `GenerationalArena.new(N)` surfaced this as a "Null pointer
 /// dereference" at a downstream `SetF` whose object register had become
-/// garbage.
+/// garbage. That whole drift class is now pinned shut by
+/// `declared_arities_match_the_registry` in
+/// `tests/intrinsic_key_resolution_gate.rs` (CI-gated), and the `.vr`
+/// declarations carry `align` for real — but the envelope stays
+/// unconditional, because the gate guards the stdlib's declarations, not
+/// every bytecode producer that will ever exist.
 ///
 /// Arms may therefore read any number of bytes, in any order, and may `return`
 /// early — the envelope re-establishes the instruction boundary afterwards, so
 /// codegen drift can no longer leak past it.
+/// The one layout rule for the whole `MemExtended` raw-memory family:
+/// `size` is clamped to 1 (so `alloc(0)` returns a real, freeable
+/// pointer) and `align` is used AS SENT. Alloc, dealloc and both
+/// realloc legs must agree on this bit for bit — `dealloc`/`realloc`
+/// with any layout other than the one the block was allocated with is
+/// UB — so the rule lives once, here, instead of once per arm.
+///
+/// A zero or non-power-of-two `align` is refused loudly. The previous
+/// shape — three arms hardcoding 8 while reading (and discarding) the
+/// align register, one arm silently mapping 0 to 8 — was the
+/// consumer-side twin of the producer-side arity drift documented on
+/// [`mem_extended_body`]: a default that masks a caller that never set
+/// the value. Every `.vr` caller now passes a real alignment, and the
+/// arity gate pins that; a 0 arriving here again means a bytecode
+/// producer defect, and the panic must name it, not paper over it.
+fn raw_mem_layout(size: usize, align: usize, what: &str) -> InterpreterResult<std::alloc::Layout> {
+    std::alloc::Layout::from_size_align(size.max(1), align).map_err(|_| InterpreterError::Panic {
+        message: format!(
+            "invalid {what} layout: size={size}, align={align} \
+             (align must be a nonzero power of two — a 0 means the \
+             bytecode producer never sent the align operand)"
+        ),
+    })
+}
+
 fn mem_extended_body(
     state: &mut InterpreterState,
     sub_op: u8,
@@ -201,16 +231,12 @@ fn mem_extended_body(
         0x00 => {
             let dst = read_reg(state)?;
             let size_reg = read_reg(state)?;
-            let _align_reg = read_reg(state)?;
+            let align_reg = read_reg(state)?;
 
             let size = state.get_reg(size_reg).as_i64() as usize;
+            let align = state.get_reg(align_reg).as_i64() as usize;
 
-            // Allocate memory using system allocator
-            let layout = std::alloc::Layout::from_size_align(size.max(1), 8).map_err(|_| {
-                InterpreterError::Panic {
-                    message: "invalid allocation layout".into(),
-                }
-            })?;
+            let layout = raw_mem_layout(size, align, "allocation")?;
             let ptr = unsafe { std::alloc::alloc(layout) };
             if ptr.is_null() {
                 return Err(InterpreterError::Panic {
@@ -226,16 +252,12 @@ fn mem_extended_body(
         0x01 => {
             let dst = read_reg(state)?;
             let size_reg = read_reg(state)?;
-            let _align_reg = read_reg(state)?;
+            let align_reg = read_reg(state)?;
 
             let size = state.get_reg(size_reg).as_i64() as usize;
+            let align = state.get_reg(align_reg).as_i64() as usize;
 
-            // Allocate zeroed memory using system allocator
-            let layout = std::alloc::Layout::from_size_align(size.max(1), 8).map_err(|_| {
-                InterpreterError::Panic {
-                    message: "invalid allocation layout".into(),
-                }
-            })?;
+            let layout = raw_mem_layout(size, align, "allocation")?;
             let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
             if ptr.is_null() {
                 return Err(InterpreterError::Panic {
@@ -248,20 +270,22 @@ fn mem_extended_body(
         }
 
         // Dealloc: [ptr, size, align]
+        //
+        // No `size > 0` skip: the alloc arms clamp size to 1, so a
+        // block allocated as `alloc(0)` occupies real memory under
+        // layout (1, align) and MUST be freed under that same layout.
+        // The old guard leaked exactly those blocks.
         0x02 => {
             let ptr_reg = read_reg(state)?;
             let size_reg = read_reg(state)?;
-            let _align_reg = read_reg(state)?;
+            let align_reg = read_reg(state)?;
 
             let ptr = state.get_reg(ptr_reg).as_ptr::<u8>();
             let size = state.get_reg(size_reg).as_i64() as usize;
+            let align = state.get_reg(align_reg).as_i64() as usize;
 
-            if !ptr.is_null() && size > 0 {
-                let layout = std::alloc::Layout::from_size_align(size, 8).map_err(|_| {
-                    InterpreterError::Panic {
-                        message: "invalid deallocation layout".into(),
-                    }
-                })?;
+            if !ptr.is_null() {
+                let layout = raw_mem_layout(size, align, "deallocation")?;
                 unsafe { std::alloc::dealloc(ptr, layout) };
             }
 
@@ -279,10 +303,7 @@ fn mem_extended_body(
             let ptr = state.get_reg(ptr_reg).as_ptr::<u8>();
             let old_size = state.get_reg(old_size_reg).as_i64() as usize;
             let new_size = state.get_reg(new_size_reg).as_i64() as usize;
-            let align = {
-                let a = state.get_reg(align_reg).as_i64() as usize;
-                if a == 0 { 8 } else { a }
-            };
+            let align = state.get_reg(align_reg).as_i64() as usize;
 
             // LIST-REALLOC-CANONICAL-1: when `ptr` is an interpreter-heap
             // object, the .vr `resize_buffer`'s realloc reached a CANONICAL
@@ -335,12 +356,7 @@ fn mem_extended_body(
                 return Ok(DispatchResult::Continue);
             }
 
-            let new_layout =
-                std::alloc::Layout::from_size_align(new_size.max(1), align).map_err(|_| {
-                    InterpreterError::Panic {
-                        message: "invalid reallocation layout".into(),
-                    }
-                })?;
+            let new_layout = raw_mem_layout(new_size, align, "reallocation")?;
             let new_ptr = unsafe { std::alloc::alloc(new_layout) };
             if new_ptr.is_null() {
                 return Err(InterpreterError::Panic {
@@ -358,11 +374,10 @@ fn mem_extended_body(
                         std::ptr::write_bytes(new_ptr.add(old_size), 0, new_size - old_size);
                     }
                 }
-                // Free old allocation
-                if let Ok(old_layout) = std::alloc::Layout::from_size_align(old_size.max(1), align)
-                {
-                    unsafe { std::alloc::dealloc(ptr, old_layout) };
-                }
+                // Free old allocation — same rule as the alloc arms,
+                // or the layouts disagree and the free is UB.
+                let old_layout = raw_mem_layout(old_size, align, "reallocation")?;
+                unsafe { std::alloc::dealloc(ptr, old_layout) };
             }
 
             state.set_reg(dst, Value::from_ptr(new_ptr as *mut ()));

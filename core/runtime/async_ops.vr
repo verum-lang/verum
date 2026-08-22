@@ -95,13 +95,16 @@ public fn async_sleep_ms(ms: Int);
 @intrinsic("async_sleep_ns")
 public fn async_sleep_ns(ns: Int);
 
-/// Spawn a supervised task.
-@intrinsic("spawn_supervised")
-public fn spawn_supervised(supervisor: SupervisorHandleOpaque, f: fn() -> ()) -> JoinHandleOpaque;
-
-/// Log escalation to supervisor.
-@intrinsic("supervisor_log_escalation")
-public fn supervisor_log_escalation(supervisor: SupervisorHandleOpaque, msg: Text);
+// `spawn_supervised` and `supervisor_log_escalation` are NOT
+// redeclared here. This shim used to carry its own @intrinsic
+// declarations for both, with arities (2 and 2) that matched neither
+// the canonical declarations in core/intrinsics/runtime/async_ops.vr
+// (4 and 1) nor the dispatch registry (4 and 1) — and no consumer
+// ever mounted them from this module (core/runtime/supervisor.vr and
+// core/runtime/spawn.vr both go through core.intrinsics). A
+// declaration that nothing consumes cannot be caught by behaviour;
+// the arity gate in intrinsic_key_resolution_gate.rs is what caught
+// these. The canonical spellings are the only ones.
 
 /// Set parent supervisor.
 @intrinsic("supervisor_set_parent")

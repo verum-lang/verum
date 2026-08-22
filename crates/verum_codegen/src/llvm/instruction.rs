@@ -25587,23 +25587,34 @@ fn lower_mem_extended<'ctx>(
     // byte and silently miscompiled any function with ≥128 live regs.
     let mut pos = 0usize;
     match sub_op {
+        // The alloc/dealloc/realloc arms read all three declared operands
+        // unconditionally — same contract as the interpreter's
+        // `mem_extended_body`, pinned by the `.vr`↔registry arity gate
+        // (`declared_arities_match_the_registry`). `align` is passed
+        // through to `verum_cbgr_allocate_aligned`, never discarded:
+        // discarding it while accepting it at the `.vr` surface is the
+        // exact defect class T0844 closed for `cbgr_alloc`.
         0x00 => {
             // Alloc: operands = [dst, size, align]
             let dst = read_reg_varlen(operands, &mut pos)?;
             let size_reg = read_reg_varlen(operands, &mut pos)?;
-            let _align_reg = read_reg_varlen(operands, &mut pos).ok();
+            let align_reg = read_reg_varlen(operands, &mut pos)?;
             let size = ctx.get_register(size_reg)?;
+            let align = as_i64(ctx, ctx.get_register(align_reg)?, "mem_alloc_align")?;
             let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
             let fn_type = ctx
                 .types()
                 .ptr_type()
-                .fn_type(&[ctx.types().i64_type().into()], false);
+                .fn_type(&[i64_ty.into(), i64_ty.into()], false);
             let alloc_fn = module
-                .get_function("verum_cbgr_allocate")
-                .unwrap_or_else(|| module.add_function("verum_cbgr_allocate", fn_type, None));
+                .get_function("verum_cbgr_allocate_aligned")
+                .unwrap_or_else(|| {
+                    module.add_function("verum_cbgr_allocate_aligned", fn_type, None)
+                });
             let result = ctx
                 .builder()
-                .build_call(alloc_fn, &[size.into()], "mem_alloc")
+                .build_call(alloc_fn, &[size.into(), align.into()], "mem_alloc")
                 .or_llvm_err()?
                     .basic_value_or("MemAlloc: expected return value")?;
             ctx.set_register(dst, result);
@@ -25613,18 +25624,21 @@ fn lower_mem_extended<'ctx>(
             // AllocZeroed: operands = [dst, size, align]
             let dst = read_reg_varlen(operands, &mut pos)?;
             let size_reg = read_reg_varlen(operands, &mut pos)?;
-            let _align_reg = read_reg_varlen(operands, &mut pos).ok();
+            let align_reg = read_reg_varlen(operands, &mut pos)?;
             let size = ctx.get_register(size_reg)?;
+            let align = as_i64(ctx, ctx.get_register(align_reg)?, "mem_alloc_z_align")?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
-            let fn_type = ptr_ty.fn_type(&[i64_ty.into()], false);
+            let fn_type = ptr_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
             let alloc_fn = module
-                .get_function("verum_cbgr_allocate")
-                .unwrap_or_else(|| module.add_function("verum_cbgr_allocate", fn_type, None));
+                .get_function("verum_cbgr_allocate_aligned")
+                .unwrap_or_else(|| {
+                    module.add_function("verum_cbgr_allocate_aligned", fn_type, None)
+                });
             let result = ctx
                 .builder()
-                .build_call(alloc_fn, &[size.into()], "mem_alloc_zeroed")
+                .build_call(alloc_fn, &[size.into(), align.into()], "mem_alloc_zeroed")
                 .or_llvm_err()?
             .basic_value_or("MemAllocZeroed: expected return value")?;
             // Zero the allocated memory — result may be ptr or i64 depending on call target
@@ -25670,10 +25684,14 @@ fn lower_mem_extended<'ctx>(
             Ok(())
         }
         0x02 => {
-            // Dealloc: operands = [ptr, size, align]
+            // Dealloc: operands = [ptr, size, align]. Size and align are
+            // part of the declared arity but not of the call:
+            // `verum_cbgr_deallocate` recovers the true base and total
+            // extent from the allocation header (base_off@24 / total@28),
+            // which is authoritative over what the caller remembers.
             let ptr_reg = read_reg_varlen(operands, &mut pos)?;
-            let _size_reg = read_reg_varlen(operands, &mut pos).ok();
-            let _align_reg = read_reg_varlen(operands, &mut pos).ok();
+            let _size_reg = read_reg_varlen(operands, &mut pos)?;
+            let _align_reg = read_reg_varlen(operands, &mut pos)?;
             let ptr_raw = ctx.get_register(ptr_reg)?;
             let ptr_val = as_ptr(ctx, ptr_raw, "dealloc_ptr")?;
             let module = ctx.get_module();
@@ -25693,16 +25711,20 @@ fn lower_mem_extended<'ctx>(
             // Realloc: operands = [dst, ptr, old_size, new_size, align]
             let dst = read_reg_varlen(operands, &mut pos)?;
             let ptr_reg = read_reg_varlen(operands, &mut pos)?;
-            let _old_size = read_reg_varlen(operands, &mut pos)?; // unused — C runtime reads from AllocationHeader
+            let _old_size = read_reg_varlen(operands, &mut pos)?; // unused — the runtime reads it from the allocation header
             let new_size_reg = read_reg_varlen(operands, &mut pos)?;
-            let _align_reg = read_reg_varlen(operands, &mut pos).ok();
+            let align_reg = read_reg_varlen(operands, &mut pos)?;
             let ptr_raw = ctx.get_register(ptr_reg)?;
             let ptr_val = as_ptr(ctx, ptr_raw, "realloc_ptr")?;
             let new_size = ctx.get_register(new_size_reg)?;
+            let align = as_i64(ctx, ctx.get_register(align_reg)?, "mem_realloc_align")?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
-            let fn_type = ptr_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+            let fn_type = ptr_ty.fn_type(
+                &[ptr_ty.into(), i64_ty.into(), i64_ty.into()],
+                false,
+            );
             let realloc_fn = module
                 .get_function("verum_cbgr_realloc")
                 .unwrap_or_else(|| module.add_function("verum_cbgr_realloc", fn_type, None));
@@ -25710,7 +25732,7 @@ fn lower_mem_extended<'ctx>(
                 .builder()
                 .build_call(
                     realloc_fn,
-                    &[ptr_val.into(), new_size.into()],
+                    &[ptr_val.into(), new_size.into(), align.into()],
                     "mem_realloc",
                 )
                 .or_llvm_err()?
@@ -33249,16 +33271,22 @@ fn lower_ffi_extended<'ctx>(
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             let realloc_fn = module.get_function("verum_cbgr_realloc").unwrap_or_else(|| {
-                let fn_ty = ptr_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+                let fn_ty = ptr_ty.fn_type(
+                    &[ptr_ty.into(), i64_ty.into(), i64_ty.into()],
+                    false,
+                );
                 module.add_function("verum_cbgr_realloc", fn_ty, None)
             });
             let ptr_val = as_ptr(ctx, ctx.get_register(ptr_reg)?, "cbgr_user_realloc_ptr")?;
             let new_size = as_i64(ctx, ctx.get_register(new_size_reg)?, "cbgr_user_realloc_size")?;
+            // The user-facing surface has no align parameter; its blocks
+            // come from the plain CBGR wrappers, whose alignment is 32.
+            let align_32 = i64_ty.const_int(32, false);
             let new_ptr = ctx
                 .builder()
                 .build_call(
                     realloc_fn,
-                    &[ptr_val.into(), new_size.into()],
+                    &[ptr_val.into(), new_size.into(), align_32.into()],
                     "cbgr_user_realloc",
                 )
                 .or_llvm_err()?

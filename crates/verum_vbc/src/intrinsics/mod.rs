@@ -41,7 +41,6 @@ pub mod expand;
 #[cfg(feature = "codegen")]
 pub mod lowering;
 pub mod registry;
-pub mod signatures;
 
 #[cfg(feature = "codegen")]
 pub use lowering::IntrinsicLowering;
@@ -49,10 +48,14 @@ pub use registry::{
     INTRINSIC_REGISTRY, Intrinsic, IntrinsicCategory, IntrinsicHint, IntrinsicRegistry,
     IntrinsicResult,
 };
-pub use signatures::{
-    INTRINSIC_SIGNATURES, IntrinsicSignature, IntrinsicType, ProtocolBound, SignatureError,
-    TypeParam, get_signature,
-};
+// A `signatures` module (1046 lines, its own `IntrinsicSignature` table
+// keyed by the same names as the registry) used to be re-exported here.
+// Its lookup fn had no callers anywhere in the workspace, so the table
+// was a THIRD unverified description of every intrinsic's contract —
+// drift in it was unreadable by construction. Deleted under T0846; the
+// registry's `param_count`/strategy plus the `.vr` declarations are the
+// two surfaces that remain, and
+// `tests/intrinsic_key_resolution_gate.rs` pins them to each other.
 
 use crate::instruction::Opcode;
 

@@ -238,17 +238,29 @@ public fn __time_now_ms_raw() -> Int;
 // Memory — raw allocation (used by higher-level allocators in `core/mem/`)
 // =============================================================================
 
-/// Allocate size bytes. Returns pointer or 0.
+/// Allocate `size` bytes aligned to `align`. Returns pointer or 0.
+///
+/// `align` must be a nonzero power of two, and the SAME (`size`,
+/// `align`) pair must be handed back to `__dealloc_raw` — freeing
+/// under a different layout than the allocation is undefined
+/// behaviour in both tiers. These declarations carry `align` for
+/// real: an earlier revision declared one parameter while the
+/// dispatch registry declared two, so codegen emitted fewer operand
+/// bytes than the handler read and the pc desynced mid-function.
+/// The `.vr`↔registry arity gate
+/// (`verum_vbc/tests/intrinsic_key_resolution_gate.rs`) now pins
+/// every `@intrinsic` declaration to the registry's param count.
 @intrinsic("alloc")
-public fn __alloc_raw(size: Int) -> Int;
+public fn __alloc_raw(size: Int, align: Int) -> Int;
 
-/// Allocate zeroed memory.
+/// Allocate zeroed memory. Same layout contract as `__alloc_raw`.
 @intrinsic("alloc_zeroed")
-public fn __alloc_zeroed_raw(size: Int) -> Int;
+public fn __alloc_zeroed_raw(size: Int, align: Int) -> Int;
 
-/// Free previously allocated memory.
+/// Free memory allocated by `__alloc_raw` / `__alloc_zeroed_raw`,
+/// under the SAME (`size`, `align`) it was allocated with.
 @intrinsic("dealloc")
-public fn __dealloc_raw(ptr: Int, size: Int) -> Int;
+public fn __dealloc_raw(ptr: Int, size: Int, align: Int) -> Int;
 
 // =============================================================================
 // Process spawn / wait

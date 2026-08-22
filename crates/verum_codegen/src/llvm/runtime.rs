@@ -15987,7 +15987,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
-    /// verum_cbgr_realloc(ptr: i8*, new_size: i64) -> i8*
+    /// verum_cbgr_realloc(ptr: i8*, new_size: i64, align: i64) -> i8*
+    ///
+    /// `align` is the alignment the NEW block must satisfy — the caller
+    /// states it because a header cannot: the header records the old
+    /// block's size, not the contract the Verum source declared. Callers
+    /// that allocate through the plain CBGR wrappers pass 32 (the
+    /// wrappers' fixed alignment); `MemExtended` realloc passes the
+    /// `.vr`-declared `align` operand through.
     fn emit_cbgr_realloc(&self, module: &Module<'ctx>) -> Result<()> {
         let name = "verum_cbgr_realloc";
         if let Some(f) = module.get_function(name) {
@@ -16000,7 +16007,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i32_type = self.context.i32_type();
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = ptr_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        let fn_type = ptr_type.fn_type(
+            &[ptr_type.into(), i64_type.into(), i64_type.into()],
+            false,
+        );
         let func = module
             .get_function(name)
             .unwrap_or_else(|| module.add_function(name, fn_type, None));
@@ -16018,8 +16028,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .get_nth_param(1)
             .or_internal("missing param 1")?
             .into_int_value();
+        let align = func
+            .get_nth_param(2)
+            .or_internal("missing param 2")?
+            .into_int_value();
 
-        // if (!ptr) return cbgr_allocate(new_size)
+        // if (!ptr) return cbgr_allocate_aligned(new_size, align)
         let is_null = builder.build_is_null(ptr, "ptr_null").or_llvm_err()?;
         let null_bb = self.context.append_basic_block(func, "null_ptr");
         let check_size = self.context.append_basic_block(func, "check_size");
@@ -16029,10 +16043,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         builder.position_at_end(null_bb);
         let alloc_fn = module
-            .get_function("verum_cbgr_allocate")
-            .or_missing_fn("verum_cbgr_allocate")?;
+            .get_function("verum_cbgr_allocate_aligned")
+            .or_missing_fn("verum_cbgr_allocate_aligned")?;
         let new_ptr = builder
-            .build_call(alloc_fn, &[new_size.into()], "new_ptr")
+            .build_call(alloc_fn, &[new_size.into(), align.into()], "new_ptr")
             .or_llvm_err()?
             .basic_value_or("call returned void")?
             .into_pointer_value();
@@ -16098,7 +16112,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // new allocation
         let new_alloc = builder
-            .build_call(alloc_fn, &[new_size.into()], "new_alloc")
+            .build_call(alloc_fn, &[new_size.into(), align.into()], "new_alloc")
             .or_llvm_err()?
             .basic_value_or("call returned void")?
             .into_pointer_value();
