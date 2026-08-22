@@ -527,6 +527,29 @@ fn walk_expr_for_caps(
     }
 }
 
+/// The bare name of an impl block's self type — `implement Point {`
+/// and `implement Show for Point {` both yield `Point`; shapes without
+/// a nameable head (tuples, references) yield None and the impl's
+/// methods simply gain no qualified alias.
+fn impl_self_type_name(impl_decl: &verum_ast::decl::ImplDecl) -> Option<String> {
+    use verum_ast::decl::ImplKind;
+    let ty = match &impl_decl.kind {
+        ImplKind::Inherent(ty) => ty,
+        ImplKind::Protocol { for_type, .. } => for_type,
+    };
+    match &ty.kind {
+        verum_ast::ty::TypeKind::Path(path) => {
+            path.segments.iter().rev().find_map(|seg| match seg {
+                verum_ast::ty::PathSegment::Name(id) => {
+                    Some(id.name.as_str().to_string())
+                }
+                _ => None,
+            })
+        }
+        _ => None,
+    }
+}
+
 /// Extract a dotted path from an expression of `ExprKind::Path(...)`.
 /// Returns `Some("core.io.fs.read_file")` for paths and `None` for
 /// anything else.  Used by the capability walker to resolve
@@ -736,6 +759,13 @@ struct BodyFacts {
     /// classifies them against the module's function set and the
     /// parameter list.
     bare_calls: std::collections::HashSet<String>,
+    /// Dotted call paths the ontology did NOT resolve — candidate
+    /// qualified local methods (`Point.new`), mounted/stdlib callees
+    /// (`fs.open`, `core.fs.open`), and value-method dispatch
+    /// (`x.push`); the caller classifies them, and what it cannot
+    /// classify as a module edge it names value dispatch — the walker
+    /// itself never swallows a dotted call again.
+    dotted_calls: std::collections::HashSet<String>,
     /// Bare names passed as ARGUMENTS to calls — candidate
     /// hand-onward of capability-bearing parameters (`mix(r̄)`'s
     /// second clause).
@@ -795,8 +825,14 @@ pub(crate) fn extract_module_facts(
     // methods under their bare method name — local calls inside an
     // impl body use the bare name; qualified `Type.method` calls
     // also record under the qualified key).
-    let collect_fn =
-        |name: String, fn_decl: &verum_ast::decl::FunctionDecl, facts: &mut ModuleFacts| {
+    let mut dotted_by_fn: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    let mut qualified_local_alias: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let collect_fn = |name: String,
+                      fn_decl: &verum_ast::decl::FunctionDecl,
+                      facts: &mut ModuleFacts,
+                      dotted_by_fn: &mut std::collections::HashMap<String, Vec<String>>| {
             let mut body_facts = BodyFacts::default();
             if let Maybe::Some(body) = &fn_decl.body {
                 match body {
@@ -866,6 +902,10 @@ pub(crate) fn extract_module_facts(
                     callees.push(bare.clone());
                 }
             }
+            let mut dotted: Vec<String> =
+                body_facts.dotted_calls.iter().cloned().collect();
+            dotted.sort();
+            dotted_by_fn.insert(name.clone(), dotted);
             facts.functions.insert(
                 name,
                 FnFacts {
@@ -879,12 +919,27 @@ pub(crate) fn extract_module_facts(
     for item in &module.items {
         match &item.kind {
             ItemKind::Function(fn_decl) => {
-                collect_fn(fn_decl.name.name.to_string(), fn_decl, &mut facts);
+                collect_fn(
+                    fn_decl.name.name.to_string(),
+                    fn_decl,
+                    &mut facts,
+                    &mut dotted_by_fn,
+                );
             }
             ItemKind::Impl(impl_decl) => {
+                // The self-type's bare name, so `Type.method(...)` call
+                // sites link to the SAME summary the bare method name
+                // carries (one summary, two spellings — an alias, not
+                // a second node).
+                let self_ty_name = impl_self_type_name(impl_decl);
                 for impl_item in impl_decl.items.iter() {
                     if let verum_ast::decl::ImplItemKind::Function(f) = &impl_item.kind {
-                        collect_fn(f.name.name.to_string(), f, &mut facts);
+                        let bare = f.name.name.to_string();
+                        if let Some(ty) = &self_ty_name {
+                            qualified_local_alias
+                                .insert(format!("{ty}.{bare}"), bare.clone());
+                        }
+                        collect_fn(bare, f, &mut facts, &mut dotted_by_fn);
                     }
                 }
             }
@@ -897,6 +952,33 @@ pub(crate) fn extract_module_facts(
     // (a call through a parameter is polymorphism, not an edge).
     let local_names: std::collections::HashSet<String> =
         facts.functions.keys().cloned().collect();
+    // Dotted calls, classified now that the local name set exists:
+    //   * qualified local method (`Point.new`)      → call-graph edge;
+    //   * mount-expanded / stdlib-rooted callee     → resolved row, or
+    //     an UNRESOLVED edge the solver surfaces (no-silent-⊤);
+    //   * anything else is value-method dispatch (`x.push(1)`) — the
+    //     carry(T) law at the type seam governs it, not a module
+    //     edge; typed receiver dispatch is future work, never a guess.
+    for (name, fn_facts) in facts.functions.iter_mut() {
+        for dotted in dotted_by_fn.get(name).into_iter().flatten() {
+            let Some((first, rest)) = dotted.split_once('.') else {
+                continue;
+            };
+            let qualified = match mount_map.get(first) {
+                Some(prefix) => format!("{prefix}.{rest}"),
+                None => dotted.clone(),
+            };
+            if local_names.contains(&qualified) {
+                fn_facts.callees.push(qualified);
+            } else if let Some(bare) = qualified_local_alias.get(&qualified) {
+                fn_facts.callees.push(bare.clone());
+            } else if let Some(row) = (resolvers.imports)(&qualified) {
+                fn_facts.own.join(&row);
+            } else if mount_map.contains_key(first) || qualified.starts_with("core.") {
+                fn_facts.callees.push(qualified);
+            }
+        }
+    }
     for fn_facts in facts.functions.values_mut() {
         let mixed: std::collections::HashSet<&String> =
             fn_facts.mixed_params.iter().collect();
@@ -1068,6 +1150,8 @@ fn walk_expr_for_facts(expr: &verum_ast::expr::Expr, sink: &mut BodyFacts) {
                     sink.atoms.insert(cap);
                 } else if !path.contains('.') {
                     sink.bare_calls.insert(path);
+                } else {
+                    sink.dotted_calls.insert(path);
                 }
             }
             walk_expr_for_facts(func, sink);
@@ -1091,6 +1175,8 @@ fn walk_expr_for_facts(expr: &verum_ast::expr::Expr, sink: &mut BodyFacts) {
                     verum_kernel::arch_capability_inference::lookup_capability(&path)
                 {
                     sink.atoms.insert(cap);
+                } else {
+                    sink.dotted_calls.insert(path);
                 }
             }
             walk_expr_for_facts(receiver, sink);

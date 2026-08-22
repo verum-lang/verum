@@ -62,6 +62,11 @@ pub struct PlaybookApp {
     /// `?` toggles it; any key closes it. The one-line contextual
     /// hint stays in the footer — this is the COMPLETE map.
     show_help_overlay: bool,
+    /// Arch-lens content (T0858 slice 2): rendered lines mirrored
+    /// from `verum arch query --json` over the notebook-as-module
+    /// (the accepted state law: cells concatenate into one growing
+    /// module; the lens asks the SAME vocabulary agents use).
+    arch_lens_lines: Vec<String>,
     /// Centralized keybinding dispatch.
     keybindings: Keybindings,
     /// Last execution time for stats display.
@@ -124,6 +129,7 @@ impl PlaybookApp {
             should_quit: false,
             status_message: None,
             show_help_overlay: false,
+            arch_lens_lines: Vec::new(),
             editor: EditorState::new(),
             layout_config: LayoutConfig::default(),
             sidebar_tab: SidebarTab::Variables,
@@ -448,6 +454,12 @@ impl PlaybookApp {
             }
             KeyAction::ShowHelp => {
                 self.show_help_overlay = true;
+            }
+            KeyAction::ExecuteCell if self.sidebar_tab == SidebarTab::Arch => {
+                // In the Arch lens, `run` re-asks the surface question
+                // rather than executing a cell — the lens is a
+                // question, and r is its refresh.
+                self.refresh_arch_lens();
             }
             KeyAction::ToggleFullscreen => {
                 self.layout_config.toggle_fullscreen();
@@ -1451,6 +1463,22 @@ impl PlaybookApp {
         }
     }
 
+    /// Ask `verum arch query --json` about the notebook-as-module and
+    /// mirror the answer into lens lines. Subprocess on purpose: the
+    /// lens speaks the same vocabulary as agents and the CLI — one
+    /// derivation, three transports (accepted T0858 design).
+    fn refresh_arch_lens(&mut self) {
+        let mut source = String::new();
+        for cell in self.session.cells.iter().filter(|c| c.is_code()) {
+            source.push_str(cell.source.as_str());
+            source.push('\n');
+        }
+        self.arch_lens_lines = match arch_query_subprocess(&source) {
+            Ok(lines) => lines,
+            Err(e) => vec![format!("query failed: {e}")],
+        };
+    }
+
     fn render_sidebar(&self, frame: &mut Frame, area: Rect) {
         // Build variable info using proper value formatter
         let vars: Vec<VarInfo> = self
@@ -1557,7 +1585,8 @@ impl PlaybookApp {
             .variables(&vars)
             .functions(&funcs)
             .outline(&outline)
-            .stats(stats);
+            .stats(stats)
+            .arch_lines(&self.arch_lens_lines);
 
         frame.render_widget(sidebar, area);
     }
@@ -2233,4 +2262,69 @@ impl Default for PlaybookApp {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Run `verum arch query --json` on `source` (via a temp file) and
+/// flatten the report into display lines. Lives outside the app so
+/// the TUI layer stays free of compiler dependencies — the subprocess
+/// IS the dependency, and it is the same one agents use.
+fn arch_query_subprocess(source: &str) -> anyhow::Result<Vec<String>> {
+    use std::io::Write as _;
+    let exe = std::env::current_exe()?;
+    let mut tmp = tempfile::NamedTempFile::with_suffix(".vr")?;
+    tmp.write_all(source.as_bytes())?;
+    let out = std::process::Command::new(exe)
+        .args(["arch", "query", "--json", "--at"])
+        .arg(tmp.path())
+        .output()?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+                .lines()
+                .next()
+                .unwrap_or("arch query failed")
+        );
+    }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+    let mut lines = Vec::new();
+    lines.push("# inferred surface".to_string());
+    match v["inferred"].as_array() {
+        Some(a) if !a.is_empty() => {
+            for atom in a {
+                lines.push(format!(
+                    "{}  [{}]",
+                    atom["atom"].as_str().unwrap_or("?"),
+                    atom["evidence"].as_str().unwrap_or("?"),
+                ));
+            }
+        }
+        _ => lines.push("(empty)".to_string()),
+    }
+    if let Some(pinned) = v["pinned"].as_array() {
+        lines.push(String::new());
+        lines.push("# pinned".to_string());
+        for p in pinned {
+            lines.push(p.as_str().unwrap_or("?").to_string());
+        }
+        for e in v["escalations"].as_array().into_iter().flatten() {
+            lines.push(format!(
+                "ESCALATION {}",
+                e["atom"].as_str().unwrap_or("?")
+            ));
+        }
+        for d in v["dead_rights"].as_array().into_iter().flatten() {
+            lines.push(format!("DEAD RIGHT {}", d.as_str().unwrap_or("?")));
+        }
+    }
+    if let Some(unres) = v["unresolved_calls"].as_array() {
+        if !unres.is_empty() {
+            lines.push(String::new());
+            lines.push(format!("# unresolved calls ({})", unres.len()));
+            for u in unres.iter().take(12) {
+                lines.push(u.as_str().unwrap_or("?").to_string());
+            }
+        }
+    }
+    Ok(lines)
 }

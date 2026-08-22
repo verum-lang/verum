@@ -473,6 +473,11 @@ fn parse_capability(expr: &Expr) -> Result<Capability, ArchParseError> {
         || receiver_path.as_deref().map(|p| p.ends_with(".Capability")).unwrap_or(false)
     {
         if let Some(method) = method_name.as_deref() {
+            // Arms whose payload parser is total return directly;
+            // arms whose parser can refuse (`None`) FALL THROUGH to
+            // the Custom fallback below, which preserves the whole
+            // spelling — a pin this parser cannot carry faithfully is
+            // surfaced verbatim, never stamped into a wrong builtin.
             match method {
                 "Read" => {
                     return Ok(Capability::Read {
@@ -485,9 +490,9 @@ fn parse_capability(expr: &Expr) -> Result<Capability, ArchParseError> {
                     });
                 }
                 "Exec" => {
-                    return Ok(Capability::Exec {
-                        target: parse_exec_target_arg(call_args.first().copied()),
-                    });
+                    if let Some(target) = parse_exec_target_arg(call_args.first().copied()) {
+                        return Ok(Capability::Exec { target });
+                    }
                 }
                 "Escalate" => {
                     return Ok(Capability::Escalate {
@@ -495,35 +500,64 @@ fn parse_capability(expr: &Expr) -> Result<Capability, ArchParseError> {
                     });
                 }
                 "Spawn" => {
-                    return Ok(Capability::Spawn {
-                        lifetime: parse_lifetime_arg(call_args.first().copied()),
-                    });
+                    if let Some(lifetime) = parse_lifetime_arg(call_args.first().copied()) {
+                        return Ok(Capability::Spawn { lifetime });
+                    }
+                }
+                "TimeBound" => {
+                    if let Some(until) = parse_expiration_arg(call_args.first().copied()) {
+                        return Ok(Capability::TimeBound { until });
+                    }
                 }
                 "Persist" => {
-                    return Ok(Capability::Persist {
-                        medium: parse_medium_arg(call_args.first().copied()),
-                    });
+                    if let Some(medium) = parse_medium_arg(call_args.first().copied()) {
+                        return Ok(Capability::Persist { medium });
+                    }
                 }
                 "Network" => {
-                    return Ok(Capability::Network {
-                        protocol: parse_protocol_arg(call_args.first().copied()),
-                        direction: parse_direction_arg(call_args.get(1).copied()),
-                    });
+                    let protocol = parse_protocol_arg(call_args.first().copied());
+                    let direction = parse_direction_arg(call_args.get(1).copied());
+                    if let (Some(protocol), Some(direction)) = (protocol, direction) {
+                        return Ok(Capability::Network {
+                            protocol,
+                            direction,
+                        });
+                    }
+                }
+                "Custom" => {
+                    // Explicit `Capability.Custom("tag")` round-trips
+                    // with the tag alone.
+                    if let Some(tag) =
+                        call_args.first().and_then(|a| expr_string_literal(a))
+                    {
+                        return Ok(Capability::Custom {
+                            tag,
+                            schema: CapabilitySchema {
+                                description: "parsed from @arch_module".to_string(),
+                                transfers_privilege: false,
+                                subsumed_by: vec![],
+                            },
+                        });
+                    }
                 }
                 _ => {}
             }
         }
     }
 
-    // Fallback: unrecognised form — store as Custom with the
-    // dotted-path tag so JSON / diagnostic output still surfaces
-    // something meaningful.
-    let tag = match (receiver_path, method_name) {
+    // Fallback: unrecognised form — store as Custom whose tag is the
+    // WHOLE spelling, arguments included (`Capability.FileRead("/tmp/*")`
+    // keeps its resource). A dropped argument here is a lost right.
+    let mut tag = match (receiver_path, method_name) {
         (Some(r), Some(m)) => format!("{}.{}", r, m),
         (None, Some(m)) => m,
         (Some(r), None) => r,
         _ => "<unknown>".to_string(),
     };
+    if !call_args.is_empty() {
+        let rendered: Vec<String> = call_args.iter().map(|a| render_arg(a)).collect();
+        tag = format!("{}({})", tag, rendered.join(", "));
+    }
     Ok(Capability::Custom {
         tag,
         schema: CapabilitySchema {
@@ -534,41 +568,105 @@ fn parse_capability(expr: &Expr) -> Result<Capability, ArchParseError> {
     })
 }
 
-/// The `(last_segment, first_string_arg)` of a variant-shaped
-/// argument: `ResourceTag.Database("ledger")` → ("Database",
-/// Some("ledger")); a bare `ResourceTag.Logger` → ("Logger", None).
-/// Unparseable shapes yield ("", None) so every caller falls to its
-/// Custom arm with the raw rendering, never silently to a default.
-fn variant_last_and_string(expr: Option<&Expr>) -> (String, Option<String>) {
-    let Some(expr) = expr else {
-        return (String::new(), None);
+/// Best-effort spelling of a fallback argument — string and int
+/// literals verbatim, variant forms as `Path(args)`, anything else
+/// surfaced as `<expr>` rather than dropped.
+fn render_arg(expr: &Expr) -> String {
+    if let Some(t) = expr_string_literal(expr) {
+        return format!("{t:?}");
+    }
+    if let Some(n) = expr_int_literal(expr) {
+        return n.to_string();
+    }
+    if let Ok(path) = parse_path_string(expr, "capability-arg") {
+        return path;
+    }
+    match &expr.kind {
+        ExprKind::Call { func, args, .. } => {
+            let head = parse_path_string(func, "capability-arg")
+                .unwrap_or_else(|_| "<expr>".to_string());
+            let inner: Vec<String> = args.iter().map(render_arg).collect();
+            format!("{}({})", head, inner.join(", "))
+        }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            let head = parse_path_string(receiver, "capability-arg")
+                .map(|r| format!("{}.{}", r, method.name.as_str()))
+                .unwrap_or_else(|_| method.name.as_str().to_string());
+            let inner: Vec<String> = args.iter().map(render_arg).collect();
+            format!("{}({})", head, inner.join(", "))
+        }
+        _ => "<expr>".to_string(),
+    }
+}
+
+/// The dissected shape of a variant-form argument:
+/// `ResourceTag.Database("ledger")` → last `Database`, strings
+/// `["ledger"]`; `ExecTarget.Ffi("libz", "inflate")` → both strings;
+/// `ExecTarget.Syscall(93)` → ints `[93]`; bare `ResourceTag.Logger` →
+/// last `Logger`, no args; a direct string literal (`Custom("tag")`
+/// payload position) → strings only. Unparseable shapes yield an empty
+/// `last` so every caller falls to its HONEST fallback — never
+/// silently to a stamped default (the closed-set-with-a-default trap:
+/// the old protocol parser turned `Http2` into `Tcp`).
+struct VariantShape {
+    last: String,
+    strings: Vec<String>,
+    ints: Vec<u64>,
+}
+
+fn variant_shape(expr: Option<&Expr>) -> VariantShape {
+    let mut shape = VariantShape {
+        last: String::new(),
+        strings: Vec::new(),
+        ints: Vec::new(),
     };
-    let (path_expr, string_arg): (&Expr, Option<String>) = match &expr.kind {
-        ExprKind::Call { func, args, .. } => (
-            func.as_ref(),
-            args.iter().next().and_then(expr_string_literal),
-        ),
-        ExprKind::MethodCall { .. } => {
+    let Some(expr) = expr else { return shape };
+    let collect_args = |args: &[&Expr], shape: &mut VariantShape| {
+        for a in args {
+            if let Some(t) = expr_string_literal(a) {
+                shape.strings.push(t);
+            } else if let Some(n) = expr_int_literal(a) {
+                shape.ints.push(n);
+            }
+        }
+    };
+    match &expr.kind {
+        ExprKind::Call { func, args, .. } => {
+            shape.last = parse_path_string(func, "capability-arg")
+                .ok()
+                .and_then(|p| p.split('.').next_back().map(str::to_string))
+                .unwrap_or_default();
+            let arg_refs: Vec<&Expr> = args.iter().collect();
+            collect_args(&arg_refs, &mut shape);
+        }
+        ExprKind::MethodCall {
+            method, args, ..
+        } => {
             // `ResourceTag.Database("x")` parses as a method call on
             // the `ResourceTag` receiver; the method IS the variant.
-            if let ExprKind::MethodCall {
-                method, args, ..
-            } = &expr.kind
-            {
-                return (
-                    method.name.as_str().to_string(),
-                    args.iter().next().and_then(expr_string_literal),
-                );
-            }
-            unreachable!()
+            shape.last = method.name.as_str().to_string();
+            let arg_refs: Vec<&Expr> = args.iter().collect();
+            collect_args(&arg_refs, &mut shape);
         }
-        _ => (expr, None),
-    };
-    let last = parse_path_string(path_expr, "capability-arg")
-        .ok()
-        .and_then(|p| p.split('.').next_back().map(str::to_string))
-        .unwrap_or_default();
-    (last, string_arg)
+        _ => {
+            if let Some(t) = expr_string_literal(expr) {
+                shape.strings.push(t);
+            } else if let Some(n) = expr_int_literal(expr) {
+                shape.ints.push(n);
+            } else {
+                shape.last = parse_path_string(expr, "capability-arg")
+                    .ok()
+                    .and_then(|p| p.split('.').next_back().map(str::to_string))
+                    .unwrap_or_default();
+            }
+        }
+    }
+    shape
 }
 
 fn expr_string_literal(expr: &Expr) -> Option<String> {
@@ -588,105 +686,167 @@ fn expr_string_literal(expr: &Expr) -> Option<String> {
     None
 }
 
+fn expr_int_literal(expr: &Expr) -> Option<u64> {
+    use verum_ast::literal::LiteralKind;
+    if let ExprKind::Literal(lit) = &expr.kind {
+        if let LiteralKind::Int(i) = &lit.kind {
+            return u64::try_from(i.value).ok();
+        }
+    }
+    None
+}
+
+/// Total: any spelling yields an honest `ResourceTag` — unknown
+/// variant names surface as `Custom(<name>)`, never as a stamped
+/// builtin.
 fn parse_resource_tag_arg(arg: Option<&Expr>) -> ResourceTag {
-    let (last, sarg) = variant_last_and_string(arg);
-    let s = |d: &str| sarg.clone().unwrap_or_else(|| d.to_string());
-    match last.as_str() {
+    let shape = variant_shape(arg);
+    let s = |d: &str| shape.strings.first().cloned().unwrap_or_else(|| d.to_string());
+    match shape.last.as_str() {
         "Database" => ResourceTag::Database { name: s("*") },
         "File" => ResourceTag::File { path_pattern: s("*") },
         "Memory" => ResourceTag::Memory { region: s("*") },
         "Config" => ResourceTag::Config { namespace: s("*") },
         "Logger" => ResourceTag::Logger,
         "Random" => ResourceTag::Random,
-        _ => ResourceTag::Custom(if last.is_empty() {
-            "<unparsed>".to_string()
-        } else {
-            last
-        }),
+        // Explicit Custom round-trips: `ResourceTag.Custom("x")` is
+        // Custom("x"), not Custom("Custom").
+        "Custom" => ResourceTag::Custom(s("<unparsed>")),
+        "" => ResourceTag::Custom(s("<unparsed>")),
+        other => ResourceTag::Custom(other.to_string()),
     }
 }
 
-fn parse_exec_target_arg(arg: Option<&Expr>) -> ExecTarget {
-    let (last, sarg) = variant_last_and_string(arg);
-    match last.as_str() {
-        "Ffi" => ExecTarget::Ffi {
-            library: sarg.unwrap_or_else(|| "*".to_string()),
-            symbol: "*".to_string(),
-        },
-        // `Syscall(0)` carries an int literal v1 does not need — the
-        // variant identity is the judged fact.
-        "Syscall" => ExecTarget::Syscall { number: 0 },
-        "Program" => ExecTarget::Program {
-            path: sarg.unwrap_or_else(|| "*".to_string()),
-        },
-        _ => ExecTarget::Custom(if last.is_empty() {
-            "<unparsed>".to_string()
-        } else {
-            last
+/// `None` = the spelling names an exec form this parser cannot carry
+/// faithfully (e.g. `Syscall` without its number) — the caller falls
+/// to the Custom fallback, which preserves the whole spelling.
+fn parse_exec_target_arg(arg: Option<&Expr>) -> Option<ExecTarget> {
+    let shape = variant_shape(arg);
+    match shape.last.as_str() {
+        "Ffi" => Some(ExecTarget::Ffi {
+            library: shape.strings.first().cloned().unwrap_or_else(|| "*".to_string()),
+            symbol: shape.strings.get(1).cloned().unwrap_or_else(|| "*".to_string()),
         }),
+        // A syscall pin without its number would have to invent one
+        // (0 is a REAL syscall) — surface the spelling instead.
+        "Syscall" => shape.ints.first().map(|n| ExecTarget::Syscall {
+            number: *n as u32,
+        }),
+        "Program" => Some(ExecTarget::Program {
+            path: shape.strings.first().cloned().unwrap_or_else(|| "*".to_string()),
+        }),
+        "Custom" => Some(ExecTarget::Custom(
+            shape.strings.first().cloned().unwrap_or_else(|| "<unparsed>".to_string()),
+        )),
+        "" => None,
+        other => Some(ExecTarget::Custom(other.to_string())),
     }
 }
 
 fn parse_realm_arg(arg: Option<&Expr>) -> PrivilegeRealm {
-    let (last, _) = variant_last_and_string(arg);
-    match last.as_str() {
+    let shape = variant_shape(arg);
+    match shape.last.as_str() {
         "Admin" => PrivilegeRealm::Admin,
         "Root" => PrivilegeRealm::Root,
         "Audit" => PrivilegeRealm::Audit,
-        _ => PrivilegeRealm::Custom(if last.is_empty() {
-            "<unparsed>".to_string()
-        } else {
-            last
+        "Custom" => PrivilegeRealm::Custom(
+            shape.strings.first().cloned().unwrap_or_else(|| "<unparsed>".to_string()),
+        ),
+        "" => PrivilegeRealm::Custom(
+            shape.strings.first().cloned().unwrap_or_else(|| "<unparsed>".to_string()),
+        ),
+        other => PrivilegeRealm::Custom(other.to_string()),
+    }
+}
+
+/// `None` = unknown lifetime spelling, or `Deadlined` without its
+/// deadline — the old parser stamped both to `Detached`, silently
+/// WIDENING the pin (detached outlives everything).
+fn parse_lifetime_arg(arg: Option<&Expr>) -> Option<TaskLifetime> {
+    let shape = variant_shape(arg);
+    match shape.last.as_str() {
+        "ScopedToParent" => Some(TaskLifetime::ScopedToParent),
+        "Detached" => Some(TaskLifetime::Detached),
+        "Deadlined" => shape.ints.first().map(|ms| TaskLifetime::Deadlined {
+            milliseconds: *ms,
         }),
+        // `Spawn()` with no lifetime: the pin declares the WIDEST
+        // form on purpose, so the dead-right judgment can see it.
+        "" => Some(TaskLifetime::Detached),
+        _ => None,
     }
 }
 
-fn parse_lifetime_arg(arg: Option<&Expr>) -> TaskLifetime {
-    let (last, _) = variant_last_and_string(arg);
-    match last.as_str() {
-        "ScopedToParent" => TaskLifetime::ScopedToParent,
-        "Detached" | "" => TaskLifetime::Detached,
-        // Deadlined/AtUnixTime/AfterDuration/OnEvent carry payloads
-        // the pin-judgment does not compare in v1 — identity default.
-        _ => TaskLifetime::Detached,
+/// `None` = unknown or payload-less expiration spelling.
+fn parse_expiration_arg(arg: Option<&Expr>) -> Option<ExpirationPolicy> {
+    let shape = variant_shape(arg);
+    match shape.last.as_str() {
+        "AtUnixTime" => shape.ints.first().map(|s| ExpirationPolicy::AtUnixTime {
+            seconds: *s,
+        }),
+        "AfterDuration" => {
+            shape.ints.first().map(|ms| ExpirationPolicy::AfterDuration {
+                milliseconds: *ms,
+            })
+        }
+        "OnEvent" => shape.strings.first().map(|t| ExpirationPolicy::OnEvent {
+            event_tag: t.clone(),
+        }),
+        _ => None,
     }
 }
 
-fn parse_medium_arg(arg: Option<&Expr>) -> PersistenceMedium {
-    let (last, sarg) = variant_last_and_string(arg);
-    match last.as_str() {
-        "Disk" => PersistenceMedium::Disk {
-            path: sarg.unwrap_or_else(|| "*".to_string()),
-        },
-        "Database" | "DatabaseMedium" => PersistenceMedium::Database {
-            connection_tag: sarg.unwrap_or_else(|| "*".to_string()),
-        },
-        "DistributedLog" => PersistenceMedium::DistributedLog {
-            topic: sarg.unwrap_or_else(|| "*".to_string()),
-        },
-        _ => PersistenceMedium::Disk {
-            path: "<unparsed>".to_string(),
-        },
+/// `None` = unknown medium spelling (the old parser stamped it to
+/// `Disk("<unparsed>")`).
+fn parse_medium_arg(arg: Option<&Expr>) -> Option<PersistenceMedium> {
+    let shape = variant_shape(arg);
+    let s = |d: &str| shape.strings.first().cloned().unwrap_or_else(|| d.to_string());
+    match shape.last.as_str() {
+        "Disk" => Some(PersistenceMedium::Disk { path: s("*") }),
+        "Database" | "DatabaseMedium" => Some(PersistenceMedium::Database {
+            connection_tag: s("*"),
+        }),
+        "DistributedLog" => Some(PersistenceMedium::DistributedLog { topic: s("*") }),
+        _ => None,
     }
 }
 
-fn parse_protocol_arg(arg: Option<&Expr>) -> NetProtocol {
-    let (last, _) = variant_last_and_string(arg);
-    match last.as_str() {
-        "Udp" => NetProtocol::Udp,
-        "Unix" => NetProtocol::Unix,
-        "Tls" => NetProtocol::Tls,
-        "Quic" => NetProtocol::Quic,
-        _ => NetProtocol::Tcp,
+/// `None` = unknown protocol spelling. The full closed set is spelled
+/// out: the old parser's `_ => Tcp` default silently turned `Http2`,
+/// `Grpc`, and every other unlisted protocol into plain TCP, so the
+/// judgment compared against a fiction.
+fn parse_protocol_arg(arg: Option<&Expr>) -> Option<NetProtocol> {
+    let shape = variant_shape(arg);
+    match shape.last.as_str() {
+        "Tcp" => Some(NetProtocol::Tcp),
+        "Udp" => Some(NetProtocol::Udp),
+        "Unix" => Some(NetProtocol::Unix),
+        "Tls" => Some(NetProtocol::Tls),
+        "Quic" => Some(NetProtocol::Quic),
+        "Http" => Some(NetProtocol::Http),
+        "Http2" => Some(NetProtocol::Http2),
+        "Http3" => Some(NetProtocol::Http3),
+        "Grpc" => Some(NetProtocol::Grpc),
+        "WebSocket" => Some(NetProtocol::WebSocket),
+        "Mqtt" => Some(NetProtocol::Mqtt),
+        "Amqp" => Some(NetProtocol::Amqp),
+        _ => None,
     }
 }
 
-fn parse_direction_arg(arg: Option<&Expr>) -> NetDirection {
-    let (last, _) = variant_last_and_string(arg);
-    match last.as_str() {
-        "Inbound" => NetDirection::Inbound,
-        "Outbound" => NetDirection::Outbound,
-        _ => NetDirection::Bidirectional,
+/// `None` = unknown direction SPELLING; an ABSENT direction (the
+/// one-argument `Network(NetProtocol.Tcp)` form) is Bidirectional —
+/// an unstated direction pins the whole boundary, visibly wide.
+fn parse_direction_arg(arg: Option<&Expr>) -> Option<NetDirection> {
+    if arg.is_none() {
+        return Some(NetDirection::Bidirectional);
+    }
+    let shape = variant_shape(arg);
+    match shape.last.as_str() {
+        "Inbound" => Some(NetDirection::Inbound),
+        "Outbound" => Some(NetDirection::Outbound),
+        "Bidirectional" => Some(NetDirection::Bidirectional),
+        _ => None,
     }
 }
 

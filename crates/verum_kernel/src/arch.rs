@@ -315,6 +315,155 @@ pub struct CapabilitySchema {
     pub subsumed_by: Vec<String>,
 }
 
+// ---------------------------------------------------------------------
+// Canonical rendering — the ONE spelling of a capability.
+//
+// The Display output is exactly the `@arch_module` pin syntax, so the
+// round-trip law holds: parsing a rendered capability yields the same
+// capability (pinned by `arch_pin_roundtrip.rs` on the compiler side,
+// where source parsing lives). Every report, diagnostic, and manifest
+// renders through here — an escalation message IS the line the author
+// adds to the pin. Debug formatting in a public surface is a defect.
+// ---------------------------------------------------------------------
+
+impl std::fmt::Display for Capability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Capability::Read { resource } => write!(f, "Capability.Read({resource})"),
+            Capability::Write { resource } => write!(f, "Capability.Write({resource})"),
+            Capability::Exec { target } => write!(f, "Capability.Exec({target})"),
+            Capability::Escalate { realm } => write!(f, "Capability.Escalate({realm})"),
+            Capability::Spawn { lifetime } => write!(f, "Capability.Spawn({lifetime})"),
+            Capability::TimeBound { until } => write!(f, "Capability.TimeBound({until})"),
+            Capability::Persist { medium } => write!(f, "Capability.Persist({medium})"),
+            Capability::Network {
+                protocol,
+                direction,
+            } => write!(f, "Capability.Network({protocol}, {direction})"),
+            Capability::Custom { tag, .. } => {
+                write!(f, "Capability.Custom({tag:?})")
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for ResourceTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResourceTag::Database { name } => write!(f, "ResourceTag.Database({name:?})"),
+            ResourceTag::File { path_pattern } => {
+                write!(f, "ResourceTag.File({path_pattern:?})")
+            }
+            ResourceTag::Memory { region } => write!(f, "ResourceTag.Memory({region:?})"),
+            ResourceTag::Config { namespace } => {
+                write!(f, "ResourceTag.Config({namespace:?})")
+            }
+            ResourceTag::Logger => write!(f, "ResourceTag.Logger"),
+            ResourceTag::Random => write!(f, "ResourceTag.Random"),
+            ResourceTag::Custom(tag) => write!(f, "ResourceTag.Custom({tag:?})"),
+        }
+    }
+}
+
+impl std::fmt::Display for ExecTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExecTarget::Ffi { library, symbol } => {
+                write!(f, "ExecTarget.Ffi({library:?}, {symbol:?})")
+            }
+            ExecTarget::Syscall { number } => write!(f, "ExecTarget.Syscall({number})"),
+            ExecTarget::Program { path } => write!(f, "ExecTarget.Program({path:?})"),
+            ExecTarget::Custom(tag) => write!(f, "ExecTarget.Custom({tag:?})"),
+        }
+    }
+}
+
+impl std::fmt::Display for PrivilegeRealm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PrivilegeRealm::Admin => write!(f, "PrivilegeRealm.Admin"),
+            PrivilegeRealm::Root => write!(f, "PrivilegeRealm.Root"),
+            PrivilegeRealm::Audit => write!(f, "PrivilegeRealm.Audit"),
+            PrivilegeRealm::Custom(tag) => write!(f, "PrivilegeRealm.Custom({tag:?})"),
+        }
+    }
+}
+
+impl std::fmt::Display for TaskLifetime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TaskLifetime::ScopedToParent => write!(f, "TaskLifetime.ScopedToParent"),
+            TaskLifetime::Detached => write!(f, "TaskLifetime.Detached"),
+            TaskLifetime::Deadlined { milliseconds } => {
+                write!(f, "TaskLifetime.Deadlined({milliseconds})")
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for ExpirationPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExpirationPolicy::AtUnixTime { seconds } => {
+                write!(f, "ExpirationPolicy.AtUnixTime({seconds})")
+            }
+            ExpirationPolicy::AfterDuration { milliseconds } => {
+                write!(f, "ExpirationPolicy.AfterDuration({milliseconds})")
+            }
+            ExpirationPolicy::OnEvent { event_tag } => {
+                write!(f, "ExpirationPolicy.OnEvent({event_tag:?})")
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for PersistenceMedium {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PersistenceMedium::Disk { path } => {
+                write!(f, "PersistenceMedium.Disk({path:?})")
+            }
+            PersistenceMedium::Database { connection_tag } => {
+                write!(f, "PersistenceMedium.Database({connection_tag:?})")
+            }
+            PersistenceMedium::DistributedLog { topic } => {
+                write!(f, "PersistenceMedium.DistributedLog({topic:?})")
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for NetProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            NetProtocol::Tcp => "Tcp",
+            NetProtocol::Udp => "Udp",
+            NetProtocol::Unix => "Unix",
+            NetProtocol::Tls => "Tls",
+            NetProtocol::Quic => "Quic",
+            NetProtocol::Http => "Http",
+            NetProtocol::Http2 => "Http2",
+            NetProtocol::Http3 => "Http3",
+            NetProtocol::Grpc => "Grpc",
+            NetProtocol::WebSocket => "WebSocket",
+            NetProtocol::Mqtt => "Mqtt",
+            NetProtocol::Amqp => "Amqp",
+        };
+        write!(f, "NetProtocol.{name}")
+    }
+}
+
+impl std::fmt::Display for NetDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            NetDirection::Inbound => "Inbound",
+            NetDirection::Outbound => "Outbound",
+            NetDirection::Bidirectional => "Bidirectional",
+        };
+        write!(f, "NetDirection.{name}")
+    }
+}
+
 /// Canonical capability-ontology registry — kernel-side mirror of
 /// `core/architecture/capability_ontology.vr::ATS_V_CANONICAL_CAPABILITIES`.
 /// The cross-side pin test
@@ -732,7 +881,7 @@ impl Foundation {
 pub enum Tier {
     /// Tier 0: VBC interpreter — fast startup, ~100ns CBGR check.
     Interp,
-    /// Tier 1: AOT via LLVM — 85-95% native speed.
+    /// Tier 1: AOT via LLVM — native-C parity bar (1x).
     Aot,
     /// Tier 2: GPU compilation via MLIR.
     Gpu,

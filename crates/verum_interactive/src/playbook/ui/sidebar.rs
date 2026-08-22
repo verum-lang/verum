@@ -485,7 +485,40 @@ impl<'a> Widget for SidebarWidget<'a> {
         match self.tab {
             SidebarTab::Variables => self.render_variables(content, buf),
             SidebarTab::Outline => self.render_outline(content, buf),
+            SidebarTab::Arch => self.render_arch(content, buf),
             SidebarTab::DevTools => self.render_devtools(content, buf),
         }
+    }
+}
+
+impl SidebarWidget<'_> {
+    /// Paint the Arch lens: pre-rendered lines from the app (the
+    /// widget derives nothing — the one-vocabulary law). Colour by
+    /// line role: escalations red, dead rights yellow, atoms plain.
+    fn render_arch(&self, area: Rect, buf: &mut Buffer) {
+        let mut lines: Vec<Line> = Vec::new();
+        if self.arch_lines.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  (press r to query the notebook's surface)",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+        }
+        for raw in self.arch_lines {
+            let style = if raw.starts_with("ESCALATION") {
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+            } else if raw.starts_with("DEAD RIGHT") {
+                Style::default().fg(Color::Yellow)
+            } else if raw.starts_with('#') {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            lines.push(Line::from(Span::styled(format!("  {raw}"), style)));
+        }
+        Paragraph::new(lines).render(area, buf);
     }
 }

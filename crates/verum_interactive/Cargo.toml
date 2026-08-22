@@ -38,6 +38,8 @@ tokio = { workspace = true }
 # Serialization for .vrbook format
 serde = { workspace = true }
 serde_json = { workspace = true }
+anyhow = { workspace = true }
+tempfile = { workspace = true }
 
 # Utilities
 thiserror = { workspace = true }

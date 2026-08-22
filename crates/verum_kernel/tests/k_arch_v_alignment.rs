@@ -2143,9 +2143,13 @@ fn pin_compiler_phase_walks_body_for_capability_inference() {
     .expect("read ats_v_phase.rs");
 
     for needle in &[
-        // The two entry points (module-wide + per-item).
-        "pub(crate) fn infer_used_capabilities(",
+        // The per-item flat walk (AP-001 production) and the
+        // row-based module inference that REPLACED the module-wide
+        // flat walk in b07ba30e3 (T0848) — the module surface is
+        // solved transitively over the call graph now, not re-walked.
         "pub(crate) fn infer_used_capabilities_in_item(",
+        "fn extract_module_facts(",
+        "fn walk_expr_for_facts(",
         // The recursive walkers.
         "fn walk_item_body_for_caps(",
         "fn walk_block_for_caps(",
@@ -2156,7 +2160,7 @@ fn pin_compiler_phase_walks_body_for_capability_inference() {
         // The ontology dispatch site.
         "verum_kernel::arch_capability_inference::lookup_capability(",
         // Wired into phase_ats_v.
-        "infer_used_capabilities(module)",
+        "infer_module_summaries",
         "infer_used_capabilities_in_item(item)",
     ] {
         assert!(

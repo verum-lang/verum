@@ -69,7 +69,7 @@ pub struct ArchQueryReport {
 fn report_row_atoms(row: &Row) -> Vec<ReportedAtom> {
     row.facts()
         .map(|f| ReportedAtom {
-            atom: format!("{:?}", f.atom),
+            atom: f.atom.to_string(),
             evidence: match &f.evidence {
                 verum_kernel::intrinsic_dispatch::Evidence::Computed => "computed".to_string(),
                 verum_kernel::intrinsic_dispatch::Evidence::Cited { source } => {
@@ -93,7 +93,7 @@ pub fn arch_query_module(module: &Module) -> ArchQueryReport {
                 Some(
                     esc.iter()
                         .map(|f| ReportedAtom {
-                            atom: format!("{:?}", f.atom),
+                            atom: f.atom.to_string(),
                             evidence: match &f.evidence {
                                 verum_kernel::intrinsic_dispatch::Evidence::Computed => {
                                     "computed".to_string()
@@ -105,7 +105,7 @@ pub fn arch_query_module(module: &Module) -> ArchQueryReport {
                         })
                         .collect(),
                 ),
-                Some(dead.iter().map(|f| format!("{:?}", f.atom)).collect()),
+                Some(dead.iter().map(|f| f.atom.to_string()).collect()),
             )
         }
         None => (None, None),
@@ -116,7 +116,7 @@ pub fn arch_query_module(module: &Module) -> ArchQueryReport {
         inferred: report_row_atoms(&surface),
         pinned: pinned
             .as_ref()
-            .map(|row| row.facts().map(|f| format!("{:?}", f.atom)).collect()),
+            .map(|row| row.facts().map(|f| f.atom.to_string()).collect()),
         escalations,
         dead_rights,
         functions: solved
