@@ -577,7 +577,6 @@ fn test_compile_stdlib_heap_collection() {
 
 /// Tests compilation of core/collections/btree.vr
 #[test]
-#[ignore = "T0458 canonical-identity: dup simple names mis-resolve the layout — feature-unified workspace runs gate the unit tier on this red (T0839 tracks the six)"]
 fn test_compile_stdlib_btree() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -751,7 +750,6 @@ fn test_compile_stdlib_path() {
 
 /// Tests compilation of core/io/buffer.vr
 #[test]
-#[ignore = "T0458 canonical-identity: dup simple names mis-resolve the layout — feature-unified workspace runs gate the unit tier on this red (T0839 tracks the six)"]
 fn test_compile_stdlib_buffer() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/io/buffer.vr");
     if std::path::Path::new(path).exists() {
@@ -788,7 +786,6 @@ fn test_compile_stdlib_builder() {
 
 /// Tests compilation of core/text/format.vr
 #[test]
-#[ignore = "T0458 canonical-identity: dup simple names mis-resolve the layout — feature-unified workspace runs gate the unit tier on this red (T0839 tracks the six)"]
 fn test_compile_stdlib_format() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/text/format.vr");
     if std::path::Path::new(path).exists() {
@@ -1002,7 +999,6 @@ fn test_compile_stdlib_net_tcp() {
 /// Without mount resolution, those references are undefined and
 /// codegen fails — a test-harness gap, not a real codegen bug.
 #[test]
-#[ignore = "T0839: red fixture, class unclassified — feature-unified workspace runs gate the unit tier on this red (T0839 tracks the six)"]
 fn test_compile_stdlib_net_udp() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/net/udp.vr");
     let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
@@ -1344,7 +1340,6 @@ fn test_compile_stdlib_math_linalg() {
 
 /// Tests compilation of core/math/tensor.vr
 #[test]
-#[ignore = "T0839: red fixture, class unclassified — feature-unified workspace runs gate the unit tier on this red (T0839 tracks the six)"]
 fn test_compile_stdlib_math_tensor() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/math/tensor.vr");
     if std::path::Path::new(path).exists() {
@@ -1702,7 +1697,22 @@ fn test_compile_stdlib_coverage_report() {
     files.sort();
 
     for file_path in &files {
-        match compile_stdlib_file(file_path) {
+        // The census must SURVIVE what it counts: a FIELD-GUESS-HARD-1
+        // refusal is a panic by design, and uncaught it killed the
+        // whole sweep at the first offending file — a coverage report
+        // that dies on failure #1 reports nothing.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            compile_stdlib_file(file_path)
+        }))
+        .unwrap_or_else(|p| {
+            let msg = p
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "panic (non-string payload)".to_string());
+            Err(format!("panic: {msg}"))
+        });
+        match outcome {
             Ok(()) => passed += 1,
             Err(e) => {
                 // Distinguish parse errors from codegen errors
