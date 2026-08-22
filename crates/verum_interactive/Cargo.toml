@@ -17,6 +17,7 @@ workspace = true
 # Core Verum crates (only the ones actually used directly)
 verum_common = { workspace = true }  # List, Map, Text
 verum_ast = { workspace = true }      # FileId, Span
+verum_fast_parser = { workspace = true } # script-mode parse for the notebook-module law (T0858)
 
 # VBC interpreter for actual code execution
 verum_vbc = { workspace = true, features = ["codegen"] }
@@ -49,6 +50,9 @@ uuid = { version = "1.19", features = ["v4", "serde"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# Tests execute notebook cells; the script engine needs the real
+# compiler hook (mirrors the CLI's ensure_scripting_compiler_installed).
+verum_compiler = { workspace = true }
 
 [features]
 default = ["playbook"]

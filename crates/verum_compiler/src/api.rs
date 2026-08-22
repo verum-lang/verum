@@ -1139,6 +1139,13 @@ pub fn compile_script_to_vbc(source: &str) -> Result<verum_vbc::VbcModule, Compi
     // `LazyEmbedded` stdlib metadata that `phase_type_check` consumes.
     let options = CompilerOptions {
         input: std::path::PathBuf::from("<script>"),
+        // Script MODE, not just script entry: the engine's sources are
+        // top-level statements (REPL cells, embedded eval) with no
+        // shebang to autodetect — without this flag they parse in
+        // module mode and every statement is "expected item".
+        // Script-mode parsing is a superset (plain items still parse),
+        // so shebang'd and module-shaped sources are unaffected.
+        script_mode: true,
         ..Default::default()
     };
     let mut session = Session::new(options);

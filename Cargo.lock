@@ -5392,6 +5392,8 @@ dependencies = [
  "uuid",
  "verum_ast",
  "verum_common",
+ "verum_compiler",
+ "verum_fast_parser",
  "verum_lsp",
  "verum_types",
  "verum_vbc",

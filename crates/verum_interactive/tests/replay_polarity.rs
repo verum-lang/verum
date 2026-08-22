@@ -13,6 +13,7 @@ use verum_interactive::{CellKind, CellOutput, SessionState};
 /// A two-cell session, executed, saved, reloaded — the round trip a
 /// real book takes.
 fn saved_book(dir: &tempfile::TempDir) -> verum_interactive::playbook::persistence::PlaybookFile {
+    verum_compiler::api::ensure_scripting_compiler_installed();
     let mut session = SessionState::new();
     session.update_current_source("let answer = 41");
     session.insert_cell_after(CellKind::Code);

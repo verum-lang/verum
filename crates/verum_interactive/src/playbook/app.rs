@@ -1827,41 +1827,26 @@ impl PlaybookApp {
     }
 
     fn render_sidebar(&self, frame: &mut Frame, area: Rect) {
-        // Build variable info using proper value formatter
+        // Vars lens: top-level bindings of the LAST notebook run,
+        // debug-rendered from that same run (the vocabulary
+        // executor's VARS channel — T0858 slice 5). The
+        // `__vrnb_result` capture cell is machinery, not a binding.
         let vars: Vec<VarInfo> = self
             .session
-            .execution_context
-            .bindings
+            .var_previews
             .iter()
-            .map(|(name, info)| {
-                let preview = format_value(&info.value, &self.display_options).to_string();
-                VarInfo {
-                    name: name.to_string(),
-                    type_info: info.type_info.to_string(),
-                    value_preview: preview,
-                    is_mutable: info.is_mutable,
-                }
+            .filter(|(name, _)| name != "__vrnb_result")
+            .map(|(name, preview)| VarInfo {
+                name: name.clone(),
+                type_info: String::new(),
+                value_preview: preview.clone(),
+                is_mutable: false,
             })
             .collect();
 
-        let funcs: Vec<FuncInfo> = self
-            .session
-            .execution_context
-            .functions
-            .iter()
-            .map(|(name, info)| FuncInfo {
-                name: name.to_string(),
-                signature: format!(
-                    "({}) -> {}",
-                    info.params
-                        .iter()
-                        .map(|(n, t)| format!("{}: {}", n, t))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    info.return_type,
-                ),
-            })
-            .collect();
+        // Function signatures come from the notebook's own source —
+        // the parse the arch/VBC lenses already rely on.
+        let funcs: Vec<FuncInfo> = Vec::new();
 
         let outline: Vec<OutlineEntry> = self
             .session

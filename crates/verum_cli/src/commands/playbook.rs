@@ -48,6 +48,11 @@ pub fn execute(options: PlaybookOptions) -> Result<()> {
 
     ui::step("Starting Verum Playbook");
 
+    // The notebook executes cells through the script engine, whose
+    // compiler arrives via the process-wide hook (the same inversion
+    // core.script uses) — install it before the first run.
+    verum_compiler::api::ensure_scripting_compiler_installed();
+
     // Show tier info
     let tier_desc = match tier {
         0 => "Tier 0: Interpreter (full CBGR validation, ~15ns/check)",
