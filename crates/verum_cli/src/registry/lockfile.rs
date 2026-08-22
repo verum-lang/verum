@@ -195,7 +195,7 @@ fn calculate_checksum(path: &Path) -> Result<Text> {
         hasher.update(&buffer[..count]);
     }
 
-    Ok(format!("{:x}", hasher.finalize()).into())
+    Ok(hex::encode(hasher.finalize()).into())
 }
 
 /// Create lockfile from resolved dependencies

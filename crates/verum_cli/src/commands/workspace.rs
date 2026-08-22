@@ -711,7 +711,7 @@ fn calculate_member_checksum(path: &Path) -> Result<Text> {
         hasher.update(&buffer[..count]);
     }
 
-    Ok(format!("{:x}", hasher.finalize()).into())
+    Ok(hex::encode(hasher.finalize()).into())
 }
 
 /// Load README for workspace member

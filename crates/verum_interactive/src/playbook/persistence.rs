@@ -8,8 +8,16 @@ use serde::{Deserialize, Serialize};
 
 use super::session::Cell;
 
-/// Playbook file format version
-const FORMAT_VERSION: u32 = 1;
+/// Playbook file format version.
+///
+/// v2 (T0858 slice 4): the book carries its content-address CHAIN —
+/// cell k's address is sha256(address[k-1] ‖ source[k]) over the CODE
+/// cells (markdown rides the current address). The chain makes the
+/// book replayable bit-for-bit: `verum play --replay` recomputes it
+/// from the sources, so an out-of-step hand edit is caught BEFORE
+/// execution, and an output divergence names its cell. The recorded
+/// chain is derived data — the sources stay the only truth.
+pub const FORMAT_VERSION: u32 = 2;
 
 /// Playbook settings persisted with the file
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -46,6 +54,10 @@ pub struct PlaybookFile {
     /// Persisted settings
     #[serde(default)]
     pub settings: Option<PlaybookSettings>,
+    /// Content-address chain, one entry per cell (v2). Derived from
+    /// the sources at save; verified against them at replay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<Vec<String>>,
 }
 
 /// Playbook metadata
@@ -68,15 +80,11 @@ pub struct PlaybookMetadata {
     pub verum_version: Option<String>,
 }
 
-/// Load a playbook from a file
-pub fn load_playbook(path: &Path) -> io::Result<(Vec<Cell>, Option<PlaybookSettings>)> {
+/// Load a playbook file whole (the replay/freeze surface).
+pub fn load_playbook_file(path: &Path) -> io::Result<PlaybookFile> {
     let content = fs::read_to_string(path)?;
-
-    // Try to parse as PlaybookFile
     let playbook: PlaybookFile = serde_json::from_str(&content)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-    // Check version compatibility
     if playbook.version > FORMAT_VERSION {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -86,8 +94,67 @@ pub fn load_playbook(path: &Path) -> io::Result<(Vec<Cell>, Option<PlaybookSetti
             ),
         ));
     }
+    Ok(playbook)
+}
 
+/// Load a playbook from a file
+pub fn load_playbook(path: &Path) -> io::Result<(Vec<Cell>, Option<PlaybookSettings>)> {
+    let playbook = load_playbook_file(path)?;
     Ok((playbook.cells, playbook.settings))
+}
+
+/// The content-address chain of a cell list: code cell k advances the
+/// address to sha256(address[k-1] ‖ source[k]); a markdown cell rides
+/// the current address (it does not change the MODULE the address
+/// names). The genesis label pins the schema.
+pub fn chain_of_cells(cells: &[Cell]) -> Vec<String> {
+    use sha2::{Digest, Sha256};
+    let mut address = String::from("vrbook-chain-v2");
+    cells
+        .iter()
+        .map(|cell| {
+            if cell.is_code() {
+                let mut h = Sha256::new();
+                h.update(address.as_bytes());
+                h.update(cell.source.as_str().as_bytes());
+                address = h
+                    .finalize()
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
+            }
+            address.clone()
+        })
+        .collect()
+}
+
+/// The COMPARABLE rendering of a cell output: canonical JSON with
+/// `Timing` stripped recursively — timing is a price badge, not a
+/// result — and single-element `Multi` unwrapped. The unwrap is not
+/// cosmetic: the session wraps in `Multi` only when a Timing entry
+/// joined the value, and Timing itself appears only past a 100µs
+/// wall-clock threshold, so the WRAPPER varies run to run while the
+/// results do not. The comparable form is "the outputs that are
+/// results", invariant to packaging.
+pub fn comparable_output_json(output: &super::session::CellOutput) -> String {
+    use super::session::CellOutput;
+    fn normalize(output: &CellOutput) -> Option<CellOutput> {
+        match output {
+            CellOutput::Timing { .. } => None,
+            CellOutput::Multi { outputs } => {
+                let mut kept: Vec<CellOutput> =
+                    outputs.iter().filter_map(normalize).collect();
+                match kept.len() {
+                    0 => None,
+                    1 => Some(kept.pop().expect("len checked")),
+                    _ => Some(CellOutput::Multi { outputs: kept }),
+                }
+            }
+            other => Some(other.clone()),
+        }
+    }
+    let normalized = normalize(output).unwrap_or(CellOutput::Empty);
+    serde_json::to_string(&normalized).unwrap_or_else(|_| "<unserializable>".to_string())
 }
 
 /// Save a playbook to a file
@@ -109,12 +176,125 @@ pub fn save_playbook(
         },
         cells: cells.to_vec(),
         settings: settings.cloned(),
+        chain: Some(chain_of_cells(cells)),
     };
 
     let content = serde_json::to_string_pretty(&playbook)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
     fs::write(path, content)
+}
+
+/// The verdict of a headless replay (T0858 slice 4). One carrier for
+/// the law — the CLI only renders it and picks exit codes.
+#[derive(Debug)]
+pub enum ReplayVerdict {
+    /// The recorded chain does not match the sources: the book was
+    /// hand-edited out of step. Caught BEFORE any execution.
+    ChainOutOfStep {
+        cell: usize,
+        recorded: String,
+        recomputed: String,
+    },
+    /// The fresh run failed outright.
+    ExecutionFailed { error: String },
+    /// A recorded output does not match the fresh run, bit-for-bit
+    /// (Timing stripped). Names the first divergent cell.
+    Divergent {
+        cell: usize,
+        address: String,
+        recorded: String,
+        replayed: String,
+    },
+    /// Every recorded output reproduced exactly.
+    Identical {
+        cells: usize,
+        compared: usize,
+        unrecorded: usize,
+        head: String,
+    },
+}
+
+/// Replay a book from scratch and judge it. Returns the fresh session
+/// too, so a freeze can report what ACTUALLY happened this run.
+pub fn replay_book(
+    book: &PlaybookFile,
+) -> (ReplayVerdict, Option<super::session::SessionState>) {
+    let fresh_chain = chain_of_cells(&book.cells);
+
+    // 1. The chain law.
+    if let Some(recorded) = &book.chain {
+        if let Some(k) = (0..fresh_chain.len().max(recorded.len()))
+            .find(|&k| fresh_chain.get(k) != recorded.get(k))
+        {
+            return (
+                ReplayVerdict::ChainOutOfStep {
+                    cell: k,
+                    recorded: recorded.get(k).cloned().unwrap_or_default(),
+                    recomputed: fresh_chain.get(k).cloned().unwrap_or_default(),
+                },
+                None,
+            );
+        }
+    }
+
+    // 2. Fresh run: sources only, outputs cleared, from scratch.
+    let mut fresh_cells = book.cells.clone();
+    for c in &mut fresh_cells {
+        c.output = None;
+        c.execution_count = None;
+    }
+    let mut session = super::session::SessionState::with_cells(fresh_cells);
+    if let Err(e) = session.execute_all() {
+        return (
+            ReplayVerdict::ExecutionFailed {
+                error: e.to_string(),
+            },
+            Some(session),
+        );
+    }
+
+    // 3. Bit-for-bit comparison against the record.
+    let mut compared = 0usize;
+    let mut unrecorded = 0usize;
+    for (k, (recorded, fresh)) in
+        book.cells.iter().zip(session.cells.iter()).enumerate()
+    {
+        if !recorded.is_code() {
+            continue;
+        }
+        let Some(recorded_out) = &recorded.output else {
+            unrecorded += 1;
+            continue;
+        };
+        let replayed = fresh
+            .output
+            .as_ref()
+            .map(comparable_output_json)
+            .unwrap_or_else(|| "<no output>".to_string());
+        let recorded_json = comparable_output_json(recorded_out);
+        if replayed != recorded_json {
+            return (
+                ReplayVerdict::Divergent {
+                    cell: k,
+                    address: fresh_chain[k].clone(),
+                    recorded: recorded_json,
+                    replayed,
+                },
+                Some(session),
+            );
+        }
+        compared += 1;
+    }
+    (
+        ReplayVerdict::Identical {
+            cells: book.cells.len(),
+            compared,
+            unrecorded,
+            head: fresh_chain.last().cloned().unwrap_or_default(),
+        },
+        Some(session),
+    )
 }
 
 /// Export playbook to plain Verum source

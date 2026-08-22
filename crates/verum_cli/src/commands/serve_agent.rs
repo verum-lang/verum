@@ -59,7 +59,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(bytes);
-    format!("{:x}", h.finalize())
+    hex::encode(h.finalize())
 }
 
 /// Resolve the `{content}|{path}` convention: returns the SOURCE and

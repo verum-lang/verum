@@ -300,7 +300,7 @@ fn verify_cog(name: &str, version: &str, cog_file: &PathBuf) -> Result<()> {
         hasher.update(&buffer[..count]);
     }
 
-    let checksum = format!("{:x}", hasher.finalize());
+    let checksum = hex::encode(hasher.finalize());
 
     if checksum != metadata.checksum.as_str() {
         return Err(crate::error::CliError::Custom(format!(

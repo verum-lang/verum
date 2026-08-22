@@ -310,7 +310,7 @@ impl CacheManager {
         let content = std::fs::read(path)?;
         let mut hasher = Sha256::new();
         hasher.update(&content);
-        let actual = format!("{:x}", hasher.finalize());
+        let actual = hex::encode(hasher.finalize());
 
         Ok(actual == expected)
     }

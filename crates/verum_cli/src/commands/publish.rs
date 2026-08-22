@@ -213,7 +213,7 @@ fn build_tier0(manifest_dir: &Path, output_path: &Path) -> Result<bool> {
                     // Calculate source hash
                     let mut hasher = Sha256::new();
                     hasher.update(source.as_bytes());
-                    let hash = format!("{:x}", hasher.finalize());
+                    let hash = hex::encode(hasher.finalize());
 
                     let relative_path = path.strip_prefix(&src_dir).unwrap_or(path);
                     manifest_content.push_str(&format!(
@@ -275,7 +275,7 @@ fn build_tier1(manifest_dir: &Path, output_path: &Path) -> Result<bool> {
                 // Calculate source hash for cache validation
                 let mut hasher = Sha256::new();
                 hasher.update(source.as_bytes());
-                let hash = format!("{:x}", hasher.finalize());
+                let hash = hex::encode(hasher.finalize());
 
                 let relative_path = path.strip_prefix(&src_dir).unwrap_or(path);
                 manifest_content.push_str(&format!(
@@ -482,7 +482,7 @@ fn file_checksum(path: &Path) -> Result<Text> {
         hasher.update(&buffer[..count]);
     }
 
-    Ok(format!("{:x}", hasher.finalize()).into())
+    Ok(hex::encode(hasher.finalize()).into())
 }
 
 /// Create package tarball
@@ -573,7 +573,7 @@ fn calculate_checksum(path: &Path) -> Result<Text> {
         hasher.update(&buffer[..count]);
     }
 
-    Ok(format!("{:x}", hasher.finalize()).into())
+    Ok(hex::encode(hasher.finalize()).into())
 }
 
 /// Sign package
@@ -1337,7 +1337,7 @@ fn combine_multi_platform_artifacts(
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(manifest_json.as_bytes());
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     };
 
     // Create a virtual artifact pointing to the manifest

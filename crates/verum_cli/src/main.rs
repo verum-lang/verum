@@ -807,6 +807,17 @@ enum Commands {
  /// Disable ANSI colors
         #[clap(long)]
         no_color: bool,
+
+ /// Headless: re-run the book's chain from scratch and compare
+ /// outputs bit-for-bit (exit 2: chain out of step, 3: divergence)
+        #[clap(long, conflicts_with_all = ["vim", "preload", "tutorial", "export"])]
+        replay: bool,
+
+ /// Headless: replay, then write a frozen snapshot report
+ /// (markdown with chain addresses and the outputs that ACTUALLY
+ /// happened) to the given path
+        #[clap(long, value_name = "REPORT", conflicts_with_all = ["vim", "preload", "tutorial", "export", "replay"])]
+        freeze: Option<Text>,
     },
 
     /// Convert between Playbook formats
@@ -3618,16 +3629,29 @@ fn run_command(cli: Cli) -> Result<()> {
             profile,
             export,
             no_color,
-        } => commands::playbook::execute(commands::playbook::PlaybookOptions {
-            file: file.as_ref().map(|s| s.as_str()),
-            tier,
-            vim_mode: vim,
-            preload: preload.as_ref().map(|s| s.as_str()),
-            tutorial,
-            profile,
-            export: export.as_ref().map(|s| s.as_str()),
-            no_color,
-        }),
+            replay,
+            freeze,
+        } => {
+            if replay || freeze.is_some() {
+                let Some(file) = file.as_ref() else {
+                    return Err(CliError::Custom(
+                        "--replay/--freeze need a .vrbook file".to_string(),
+                    ));
+                };
+                commands::playbook::replay(file.as_str(), freeze.as_ref().map(|s| s.as_str()))
+            } else {
+                commands::playbook::execute(commands::playbook::PlaybookOptions {
+                    file: file.as_ref().map(|s| s.as_str()),
+                    tier,
+                    vim_mode: vim,
+                    preload: preload.as_ref().map(|s| s.as_str()),
+                    tutorial,
+                    profile,
+                    export: export.as_ref().map(|s| s.as_str()),
+                    no_color,
+                })
+            }
+        }
         Commands::PlaybookConvert(convert_cmd) => match convert_cmd {
             PlaybookConvertCommands::ToScript {
                 input,

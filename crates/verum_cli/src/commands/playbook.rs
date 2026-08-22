@@ -229,3 +229,148 @@ pub fn import_from_script(input: &str, output: Option<&str>) -> Result<()> {
     ui::success(&format!("Created: {}", output_path.display()));
     Ok(())
 }
+
+/// Headless replay of a .vrbook (T0858 slice 4): the verdict logic
+/// lives in `persistence::replay_book` (one carrier); this command
+/// renders it and picks the exit code (2: chain out of step, 3:
+/// divergence or failed run). With `freeze_to`, additionally writes
+/// the frozen snapshot report — what ACTUALLY happened on this run,
+/// chain addresses included; the live book stays the truth.
+pub fn replay(file: &str, freeze_to: Option<&str>) -> Result<()> {
+    use verum_interactive::playbook::persistence::{
+        ReplayVerdict, chain_of_cells, load_playbook_file, replay_book,
+    };
+
+    let path = PathBuf::from(file);
+    let book = load_playbook_file(&path)
+        .map_err(|e| CliError::custom(format!("reading {}: {e}", path.display())))?;
+
+    let (verdict, session) = replay_book(&book);
+    match verdict {
+        ReplayVerdict::ChainOutOfStep {
+            cell,
+            recorded,
+            recomputed,
+        } => {
+            ui::error(&format!(
+                "chain out of step at cell {} — the book's record was                  edited out of step with its sources (recorded {},                  recomputed {})",
+                cell + 1,
+                &recorded[..12.min(recorded.len())],
+                &recomputed[..12.min(recomputed.len())],
+            ));
+            std::process::exit(2);
+        }
+        ReplayVerdict::ExecutionFailed { error } => {
+            ui::error(&format!("replay execution failed: {error}"));
+            std::process::exit(3);
+        }
+        ReplayVerdict::Divergent {
+            cell,
+            address,
+            recorded,
+            replayed,
+        } => {
+            ui::error(&format!(
+                "DIVERGENT at cell {} (address {})",
+                cell + 1,
+                &address[..12.min(address.len())],
+            ));
+            println!("  recorded: {recorded}");
+            println!("  replayed: {replayed}");
+            std::process::exit(3);
+        }
+        ReplayVerdict::Identical {
+            cells,
+            compared,
+            unrecorded,
+            head,
+        } => {
+            ui::success(&format!(
+                "replay identical: {} cells ({} compared, {} unrecorded), chain head {}",
+                cells,
+                compared,
+                unrecorded,
+                &head[..12.min(head.len())],
+            ));
+        }
+    }
+
+    if let Some(report_path) = freeze_to {
+        let session = session.expect("identical verdict carries the session");
+        let chain = chain_of_cells(&book.cells);
+        let report = render_frozen_report(&book, &session, &chain);
+        std::fs::write(report_path, report)
+            .map_err(|e| CliError::custom(format!("writing {report_path}: {e}")))?;
+        ui::success(&format!("frozen report written: {report_path}"));
+    }
+    Ok(())
+}
+
+/// The frozen report: sources, chain addresses, and THIS run's
+/// outputs. Markdown so it reads anywhere.
+fn render_frozen_report(
+    book: &verum_interactive::playbook::persistence::PlaybookFile,
+    session: &verum_interactive::SessionState,
+    chain: &[String],
+) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let title = book
+        .metadata
+        .title
+        .clone()
+        .unwrap_or_else(|| "untitled".to_string());
+    let _ = writeln!(out, "# {title} — frozen replay report
+");
+    let _ = writeln!(
+        out,
+        "- verum {} · chain head `{}`
+",
+        env!("CARGO_PKG_VERSION"),
+        chain.last().map(String::as_str).unwrap_or("<empty>"),
+    );
+    for (k, cell) in session.cells.iter().enumerate() {
+        if cell.is_code() {
+            let _ = writeln!(out, "## cell {} · `{}`
+", k + 1, &chain[k][..12]);
+            let _ = writeln!(out, "```verum
+{}
+```
+", cell.source.as_str().trim_end());
+            if let Some(output) = &cell.output {
+                let _ = writeln!(out, "```
+{}
+```
+", frozen_output_text(output));
+            }
+        } else {
+            let _ = writeln!(out, "{}
+", cell.source.as_str().trim_end());
+        }
+    }
+    out
+}
+
+fn frozen_output_text(output: &verum_interactive::CellOutput) -> String {
+    use verum_interactive::CellOutput;
+    match output {
+        CellOutput::Value { repr, type_info, .. } => format!("{repr} : {type_info}"),
+        CellOutput::Stream { stdout, stderr } => {
+            let mut t = stdout.as_str().to_string();
+            if !stderr.is_empty() {
+                t.push_str("\n[stderr] ");
+                t.push_str(stderr.as_str());
+            }
+            t
+        }
+        CellOutput::Error { message, .. } => format!("error: {message}"),
+        CellOutput::Multi { outputs } => outputs
+            .iter()
+            .filter(|o| !matches!(o, CellOutput::Timing { .. }))
+            .map(frozen_output_text)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        CellOutput::Empty => String::new(),
+        other => serde_json::to_string(other).unwrap_or_else(|_| "<output>".to_string()),
+    }
+}
