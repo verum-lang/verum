@@ -26,6 +26,12 @@ trap 'rm -f "$REPORT"' EXIT
 export VERUM_DEGRADE_REPORT="$REPORT"
 
 for p in "${PROBES[@]}"; do
+  # Cache-bust: the AOT object cache legitimately skips lowering for
+  # an unchanged probe, and a skipped lowering writes NO degrade
+  # report — the counter would read 0 and the ratchet would demand a
+  # lie. Touching the probe forces an honest recompile (the
+  # probe-cache-ignores-env-flags trap, institutionalised away).
+  touch "$p"
   "$VERUM" build "$p" >/dev/null 2>&1 || {
     echo "degrade-ratchet: probe failed to BUILD: $p" >&2
     exit 2
