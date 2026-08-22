@@ -178,7 +178,7 @@ fn cos_kernel(x: Float) -> Float {
 // Sine function
 // Domain: (-∞, ∞), Range: [-1, 1]
 // Precision: < 1 ULP error
-public fn sin(x: Float) -> Float{it >= -1.0 && it <= 1.0} {
+public fn sin(x: Float) -> Float{(it >= -1.0 && it <= 1.0) || it != it} {
     if is_nan(x) || is_infinite(x) { return NAN; }
     if x == 0.0 { return x; }  // Preserve signed zero
 
@@ -197,7 +197,7 @@ public fn sin(x: Float) -> Float{it >= -1.0 && it <= 1.0} {
 // Cosine function
 // Domain: (-∞, ∞), Range: [-1, 1]
 // Precision: < 1 ULP error
-public fn cos(x: Float) -> Float{it >= -1.0 && it <= 1.0} {
+public fn cos(x: Float) -> Float{(it >= -1.0 && it <= 1.0) || it != it} {
     if is_nan(x) || is_infinite(x) { return NAN; }
 
     let (reduced, quadrant) = reduce_trig_arg(x);
@@ -356,8 +356,12 @@ public fn atan2(y: Float, x: Float) -> Float {
 // =============================================================================
 
 // Natural exponential e^x
-// Domain: (-∞, ∞), Range: (0, ∞)
-public fn exp(x: Float) -> Float{> 0.0} {
+// Domain: (-∞, ∞). IEEE image: [0, ∞] ∪ NaN — exp(NaN)=NaN,
+// exp(-∞)=0.0, and any x < −745.13 underflows to EXACT 0.0. The old
+// `{> 0.0}` claim was real analysis, not IEEE: the log-domain
+// probability idiom exp(lpmf) with lpmf ≈ −2839 (binomial tail)
+// died on a runtime refinement assert (dog-food find #5, T0864).
+public fn exp(x: Float) -> Float{it >= 0.0 || it != it} {
     if is_nan(x) { return NAN; }
     if x == INFINITY { return INFINITY; }
     if x == NEG_INFINITY { return 0.0; }
@@ -389,8 +393,8 @@ public fn exp(x: Float) -> Float{> 0.0} {
     ldexp(er, k)
 }
 
-// Base-2 exponential: 2^x
-public fn exp2(x: Float) -> Float{> 0.0} {
+// Base-2 exponential: 2^x — same IEEE image as exp (T0864).
+public fn exp2(x: Float) -> Float{it >= 0.0 || it != it} {
     exp(x * LN2)
 }
 
@@ -638,7 +642,7 @@ public fn clamp(x: Float, lo: Float, hi: Float) -> Float {
 
 // Absolute value
 @inline(always)
-public fn abs(x: Float) -> Float{>= 0.0} {
+public fn abs(x: Float) -> Float{it >= 0.0 || it != it} {
     if x < 0.0 { -x } else { x }
 }
 
@@ -779,8 +783,8 @@ public fn sinh(x: Float) -> Float {
 }
 
 /// Hyperbolic cosine.
-/// Domain: (-∞, ∞), Range: [1, ∞).
-public fn cosh(x: Float) -> Float{>= 1.0} {
+/// Domain: (-∞, ∞). IEEE image: [1, ∞] ∪ NaN (T0864).
+public fn cosh(x: Float) -> Float{it >= 1.0 || it != it} {
     if is_nan(x) { return NAN; }
     if x == INFINITY || x == NEG_INFINITY { return INFINITY; }
     let abs_x = abs(x);
@@ -793,8 +797,10 @@ public fn cosh(x: Float) -> Float{>= 1.0} {
 }
 
 /// Hyperbolic tangent.
-/// Domain: (-∞, ∞), Range: (-1, 1).
-public fn tanh(x: Float) -> Float{it > -1.0 && it < 1.0} {
+/// Domain: (-∞, ∞). IEEE image: [-1, 1] ∪ NaN — the body itself
+/// returns ±1.0 for ±∞, values the old strict bounds EXCLUDED
+/// (T0864): the boundary IEEE reaches belongs in the type.
+public fn tanh(x: Float) -> Float{(it >= -1.0 && it <= 1.0) || it != it} {
     if is_nan(x) { return NAN; }
     if x == INFINITY { return 1.0; }
     if x == NEG_INFINITY { return -1.0; }

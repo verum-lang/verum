@@ -84,7 +84,7 @@ public fn sinh(x: Float) -> Float {
 //
 
 // Always >= 1, symmetric: cosh(-x) = cosh(x)
-public fn cosh(x: Float) -> Float{>= 1.0} {
+public fn cosh(x: Float) -> Float{it >= 1.0 || it != it} {
     if is_nan(x) { return NAN; }
     if is_infinite(x) { return INFINITY; }
 
@@ -115,7 +115,7 @@ public fn cosh(x: Float) -> Float{>= 1.0} {
 //
 
 // Asymptotes to ±1 as x → ±∞
-public fn tanh(x: Float) -> Float{it > -1.0 && it < 1.0} {
+public fn tanh(x: Float) -> Float{(it >= -1.0 && it <= 1.0) || it != it} {
     if is_nan(x) { return NAN; }
 
     if x > 20.0 { return 1.0; }
@@ -142,7 +142,7 @@ public fn tanh(x: Float) -> Float{it > -1.0 && it < 1.0} {
 //
 
 // sech(x) = 1 / cosh(x) = 2 / (e^x + e^(-x))
-public fn sech(x: Float) -> Float{it > 0.0 && it <= 1.0} {
+public fn sech(x: Float) -> Float{(it >= 0.0 && it <= 1.0) || it != it} {
     1.0 / cosh(x)
 }
 

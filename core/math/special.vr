@@ -190,7 +190,7 @@ public fn lbeta(a: Float, b: Float) -> Float {
 //
 
 // Used in statistics: normal CDF = 0.5 * (1 + erf(x / √2))
-public fn erf(x: Float) -> Float{it >= -1.0 && it <= 1.0} {
+public fn erf(x: Float) -> Float{(it >= -1.0 && it <= 1.0) || it != it} {
     if is_nan(x) { return NAN; }
     if x == INFINITY { return 1.0; }
     if x == NEG_INFINITY { return -1.0; }

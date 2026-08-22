@@ -1,0 +1,72 @@
+// =============================================================================
+// refinement_ieee_honesty_test.vr — the IEEE-honesty law of math return
+// refinements (T0864)
+// =============================================================================
+// @test: run
+// @level: L1
+// @tier: 0
+// @expected-stdout: ieee-honesty: all paths green
+// @expected-exit: 0
+// @tags: math, refinement, ieee, nan, infinity, underflow, core
+// @description: Every math return refinement states the function's EXACT
+//               IEEE-754 image — judged on the three paths that broke the
+//               old claims: NaN, ±infinity, and under/overflow.  The
+//               motivating counterexample is the log-domain probability
+//               idiom: exp(lpmf) with lpmf ~ -2839 (binomial tail, n=4096)
+//               underflows to 0.0, which the old `Float{> 0.0}` claim
+//               rejected at runtime — any statistics program died on its
+//               first serious tail.
+// =============================================================================
+
+mount core.math.elementary.{sin, cos, exp, exp2, abs, cosh, tanh};
+mount core.math.special.{erf};
+mount core.math.constants.{INFINITY, NEG_INFINITY, NAN};
+
+fn assert_law(cond: Bool, label: Text) {
+    if !cond {
+        panic(f"ieee-honesty violated: {label}");
+    }
+}
+
+fn main() {
+    // --- exp: the motivating dog-food counterexample. -------------------
+    // Deep underflow (the log-domain probability idiom) is a VALUE, not
+    // a refinement violation.
+    let tail = exp(-2839.0);
+    assert_law(tail == 0.0, "exp(-2839) is exact zero");
+    assert_law(exp(NEG_INFINITY) == 0.0, "exp(-inf) is zero");
+    assert_law(exp(INFINITY) == INFINITY, "exp(+inf) is +inf");
+    let e_nan = exp(NAN);
+    assert_law(e_nan != e_nan, "exp(NaN) is NaN");
+    assert_law(exp(0.0) == 1.0, "exp(0) is one");
+
+    // exp2 rides the same image.
+    assert_law(exp2(-2839.0) == 0.0, "exp2 deep underflow is zero");
+    let e2_nan = exp2(NAN);
+    assert_law(e2_nan != e2_nan, "exp2(NaN) is NaN");
+
+    // --- tanh: the boundary the old type EXCLUDED is reached. -----------
+    assert_law(tanh(INFINITY) == 1.0, "tanh(+inf) is exactly one");
+    assert_law(tanh(NEG_INFINITY) == -1.0, "tanh(-inf) is exactly minus one");
+    let t_nan = tanh(NAN);
+    assert_law(t_nan != t_nan, "tanh(NaN) is NaN");
+
+    // --- abs / cosh: NaN flows through, everything else holds. ----------
+    let a_nan = abs(NAN);
+    assert_law(a_nan != a_nan, "abs(NaN) is NaN");
+    assert_law(abs(-3.5) == 3.5, "abs(-3.5)");
+    let c_nan = cosh(NAN);
+    assert_law(c_nan != c_nan, "cosh(NaN) is NaN");
+    assert_law(cosh(INFINITY) == INFINITY, "cosh(+inf) is +inf");
+
+    // --- sin / cos / erf: NaN paths of the bounded family. ---------------
+    let s_nan = sin(NAN);
+    assert_law(s_nan != s_nan, "sin(NaN) is NaN");
+    let sc_nan = cos(INFINITY);
+    assert_law(sc_nan != sc_nan, "cos(+inf) is NaN (IEEE)");
+    let erf_nan = erf(NAN);
+    assert_law(erf_nan != erf_nan, "erf(NaN) is NaN");
+    assert_law(erf(INFINITY) == 1.0, "erf(+inf) is exactly one");
+
+    print("ieee-honesty: all paths green");
+}
