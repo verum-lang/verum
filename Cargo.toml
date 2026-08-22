@@ -252,7 +252,13 @@ codegen-units = 16   # Balanced parallelism
 opt-level = 3        # Maximum performance optimization
 lto = false          # Disabled: causes rustc SIGSEGV with large LLVM static libs
 codegen-units = 1    # Single codegen unit for best optimization without LTO
-strip = true         # Strip symbols to reduce binary size
+# Line-table debuginfo, symbols kept: a release binary that crashes
+# must leave a NAMED backtrace. `strip = true` here is why every
+# T0837 corpse — CI gdb autopsy and darwin .ips alike — answered in
+# `??`. Distribution artifacts that care about size strip at package
+# time; the binaries this workspace builds are the ones we autopsy.
+debug = "line-tables-only"
+strip = "none"
 split-debuginfo = "packed"
 panic = "abort"      # Smaller binaries, faster linking
 
