@@ -39,6 +39,13 @@ struct JournalEntry {
     /// The verdict-bearing summary of the response (not the full
     /// payload — the journal is a ledger, not a cache).
     outcome: String,
+    /// sha256 of the raw request FRAME body (K-4: the two-ledger
+    /// judgment compares frame hashes across the seam; notifications
+    /// have a request hash and no response hash — the named legal
+    /// asymmetry).
+    request_frame_sha256: Option<String>,
+    /// sha256 of the raw response FRAME body (None for notifications).
+    response_frame_sha256: Option<String>,
 }
 
 struct AgentServer {
@@ -97,7 +104,19 @@ impl AgentServer {
             method: method.to_string(),
             content_hash: hash.map(str::to_string),
             outcome: outcome.to_string(),
+            request_frame_sha256: None,
+            response_frame_sha256: None,
         });
+    }
+
+    /// Stamp the LAST journal entry with the seam hashes (K-4). The
+    /// dispatch loop calls this once per handled message, after the
+    /// response frame bytes exist.
+    fn stamp_frames(&mut self, request_body: &[u8], response_body: Option<&[u8]>) {
+        if let Some(last) = self.journal.last_mut() {
+            last.request_frame_sha256 = Some(sha256_hex(request_body));
+            last.response_frame_sha256 = response_body.map(sha256_hex);
+        }
     }
 
     fn handle(&mut self, id: &Value, method: &str, params: &Value) -> Result<Value> {
@@ -111,7 +130,7 @@ impl AgentServer {
                         "tool_version": env!("CARGO_PKG_VERSION"),
                         "methods": [
                             "session.open", "session.journal", "parse.check",
-                            "arch.query", "tiers.diff", "shutdown",
+                            "arch.query", "test.run", "tiers.diff", "shutdown",
                         ],
                     }),
                 ))
@@ -151,6 +170,59 @@ impl AgentServer {
                 let mut env = envelope("1", serde_json::to_value(&report)?);
                 env["content_hash"] = json!(hash);
                 // Provenance law: what this verdict was computed from.
+                env["provenance"] = json!({
+                    "computed_from": { "content_sha256": hash },
+                    "tool_version": env!("CARGO_PKG_VERSION"),
+                    "evidence": "Computed",
+                });
+                Ok(env)
+            }
+            "test.run" => {
+                // The stand's oracle: run a program (its asserts ARE
+                // the test) under the interpreter tier with an
+                // explicit budget. MISSED-honesty: exceeding the
+                // budget is a named verdict, never a hang and never a
+                // fake failure.
+                let path = params
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .context("test.run requires `path`")?;
+                let budget_s = params
+                    .get("budget_s")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(60);
+                let bytes =
+                    std::fs::read(path).with_context(|| format!("reading {path}"))?;
+                let hash = sha256_hex(&bytes);
+                let exe = std::env::current_exe()?;
+                let mut child = std::process::Command::new(&exe)
+                    .args(["run", "--tier", "interpret", path])
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()?;
+                let deadline = std::time::Instant::now()
+                    + std::time::Duration::from_secs(budget_s);
+                let verdict = loop {
+                    match child.try_wait()? {
+                        Some(status) => {
+                            break if status.success() { "green" } else { "red" };
+                        }
+                        None if std::time::Instant::now() >= deadline => {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break "MISSED";
+                        }
+                        None => std::thread::sleep(
+                            std::time::Duration::from_millis(25),
+                        ),
+                    }
+                };
+                self.record(id, method, Some(&hash), verdict);
+                let mut env = envelope(
+                    "1",
+                    json!({ "verdict": verdict, "budget_s": budget_s }),
+                );
+                env["content_hash"] = json!(hash);
                 env["provenance"] = json!({
                     "computed_from": { "content_sha256": hash },
                     "tool_version": env!("CARGO_PKG_VERSION"),
@@ -251,10 +323,14 @@ pub fn execute() -> Result<()> {
             write_frame(&mut output, &resp)?;
             break;
         }
+        let request_body = serde_json::to_vec(&msg)?;
         if method == "$/cancel" {
             // v1 is a sequential queue: by the time a cancel arrives,
-            // the request it names has completed. Journal it honestly.
+            // the request it names has completed. Journal it honestly
+            // — request frame hashed, response hash ABSENT (the named
+            // legal asymmetry of the K-4 seam).
             server.record(&id, &method, None, "no-op (sequential v1)");
+            server.stamp_frames(&request_body, None);
             continue; // notification — no response
         }
 
@@ -266,6 +342,8 @@ pub fn execute() -> Result<()> {
                 "error": { "code": -32000, "message": e.to_string() },
             }),
         };
+        let response_body = serde_json::to_vec(&response)?;
+        server.stamp_frames(&request_body, Some(&response_body));
         write_frame(&mut output, &response)?;
     }
     eprintln!("agent session {} closed", server.session_id);

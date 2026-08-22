@@ -105,6 +105,37 @@ check("journal: query recorded with hash",
       any(e["method"] == "arch.query" and e.get("content_hash") == expected_hash
           for e in entries))
 
+# 5b. test.run oracle — green on a passing program, red on a failing
+# one, and the journal carries FRAME hashes (K-4 seam law).
+import tempfile, os
+green_src = 'fn main() -> Int { assert(1 + 1 == 2); 0 }'
+red_src = 'fn main() -> Int { assert(1 + 1 == 3); 0 }'
+gpath = tempfile.mktemp(suffix=".vr"); open(gpath, "w").write(green_src)
+rpath = tempfile.mktemp(suffix=".vr"); open(rpath, "w").write(red_src)
+
+send({"jsonrpc": "2.0", "id": 50, "method": "test.run",
+      "params": {"path": gpath, "budget_s": 120}})
+r = recv()
+check("test.run: green verdict", r["result"]["data"]["verdict"] == "green",
+      str(r["result"]["data"]))
+send({"jsonrpc": "2.0", "id": 51, "method": "test.run",
+      "params": {"path": rpath, "budget_s": 120}})
+r = recv()
+check("test.run: red verdict", r["result"]["data"]["verdict"] == "red",
+      str(r["result"]["data"]))
+os.unlink(gpath); os.unlink(rpath)
+
+send({"jsonrpc": "2.0", "id": 52, "method": "session.journal", "params": {}})
+r = recv()
+entries = r["result"]["data"]["entries"]
+check("journal: frame hashes stamped (K-4)",
+      all(e.get("request_frame_sha256") for e in entries
+          if e["method"] != "session.journal" or True),
+      str([{k: bool(v) for k, v in e.items()} for e in entries[-3:]]))
+check("journal: responses hashed on respondables",
+      any(e["method"] == "test.run" and e.get("response_frame_sha256")
+          for e in entries))
+
 # 6. shutdown
 send({"jsonrpc": "2.0", "id": 6, "method": "shutdown", "params": {}})
 r = recv()
