@@ -1923,7 +1923,16 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         use verum_vbc::types::TypeId;
         use verum_vbc::types::TypeRef;
 
-        for func_desc in &vbc_module.functions {
+        // The entry function's INDEX (one rule, both tiers — see
+        // VbcModule::entry_main). Index, not name: duplicate-named
+        // descriptors exist (paired emitters), and renaming by
+        // spelling would turn every twin into verum_main.
+        let entry_index = match vbc_module.entry_main() {
+            verum_vbc::module::EntryMain::Unique { index } => Some(index),
+            _ => None,
+        };
+
+        for (func_idx, func_desc) in vbc_module.functions.iter().enumerate() {
             // Determine effective return type:
             // - If instructions available and contain Ret (value return), use i64
             // - If instructions available and only RetV (void return), use UNIT
@@ -2037,8 +2046,14 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 .types
                 .lower_function_type(&effective_params, &effective_return_type)?;
 
-            // Rename "main" to "verum_main" so the C runtime entry point can call it
-            let func_name = if raw_name == "main" {
+            // Rename the ENTRY function to "verum_main" so the C
+            // runtime shim can call it. The entry is picked by the
+            // same rule the interpreter uses (VbcModule::entry_main):
+            // matching the literal spelling "main" here left a
+            // `module X;` program's `X.main` unrenamed — the shim's
+            // weak verum_main won the link and the binary silently
+            // exited 1 while Tier 0 at least said "no main".
+            let func_name = if raw_name == "main" || Some(func_idx) == entry_index {
                 "verum_main".to_string()
             } else {
                 raw_name.to_string()

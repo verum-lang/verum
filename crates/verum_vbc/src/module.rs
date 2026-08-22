@@ -90,6 +90,24 @@ fn push_ctx_type_id(instr: &Instruction, ids: &mut Vec<u32>) {
 /// A complete VBC module: header, pools (strings/constants/types), function
 /// descriptors and their bytecode — the unit produced by codegen, serialized
 /// into a `.vbc`/`.vbca` archive and executed by the interpreter.
+/// The verdict of `VbcModule::entry_main` — the ONE entry-point rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntryMain {
+    /// No entry point (library / script-wrapper module).
+    None,
+    /// Exactly one entry function.
+    Unique {
+        /// Index into `functions`.
+        index: usize,
+    },
+    /// Multiple qualified `*.main` and no bare `main` — surfaced,
+    /// never picked by registration order.
+    Ambiguous {
+        /// The candidate function names.
+        candidates: Vec<String>,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VbcModule {
     /// Module header.
@@ -514,6 +532,41 @@ impl VbcModule {
     }
 
     /// Gets a string by ID.
+    /// The module's application entry point, by ONE rule both tiers
+    /// share: a bare `main`, or — when a `module X;` header qualified
+    /// the file's functions — the UNIQUE `*.main`. Ambiguity is
+    /// surfaced, never resolved by luck: before this rule existed the
+    /// interpreter said "No main function found" while AOT linked a
+    /// binary whose runtime shim silently exited 1 — a tier-identity
+    /// violation on the very first program a newcomer writes with a
+    /// module header.
+    pub fn entry_main(&self) -> EntryMain {
+        let mut bare: Option<usize> = None;
+        let mut qualified: Vec<(usize, String)> = Vec::new();
+        for (idx, func) in self.functions.iter().enumerate() {
+            let Some(name) = self.get_string(func.name) else {
+                continue;
+            };
+            if name == "main" {
+                bare = Some(idx);
+            } else if name.ends_with(".main") {
+                qualified.push((idx, name.to_string()));
+            }
+        }
+        if let Some(idx) = bare {
+            return EntryMain::Unique { index: idx };
+        }
+        match qualified.len() {
+            0 => EntryMain::None,
+            1 => EntryMain::Unique {
+                index: qualified[0].0,
+            },
+            _ => EntryMain::Ambiguous {
+                candidates: qualified.into_iter().map(|(_, n)| n).collect(),
+            },
+        }
+    }
+
     pub fn get_string(&self, id: StringId) -> Option<&str> {
         self.strings.get(id)
     }

@@ -375,17 +375,24 @@ impl<'s> CompilationPipeline<'s> {
                 }
             }
         }
-        // Second pass: application entry `main`. Reached only when no
-        // script wrapper exists, i.e. the source is an application
-        // (no shebang, has `fn main()`).
-        for (idx, func_desc) in vbc_module.functions.iter().enumerate() {
-            if let Some(name) = vbc_module.get_string(func_desc.name) {
-                if name == "main" {
-                    return Ok(VbcFunctionId(idx as u32));
-                }
+        // Second pass: application entry, by the ONE rule both tiers
+        // share (bare `main`, or the unique `X.main` a `module X;`
+        // header produced — see VbcModule::entry_main).
+        match vbc_module.entry_main() {
+            verum_vbc::module::EntryMain::Unique { index } => {
+                Ok(VbcFunctionId(index as u32))
+            }
+            verum_vbc::module::EntryMain::Ambiguous { candidates } => {
+                Err(anyhow::anyhow!(
+                    "ambiguous entry point: no bare `main`, and {} qualified candidates: {}",
+                    candidates.len(),
+                    candidates.join(", ")
+                ))
+            }
+            verum_vbc::module::EntryMain::None => {
+                Err(anyhow::anyhow!("No main function found in VBC module"))
             }
         }
-        Err(anyhow::anyhow!("No main function found in VBC module"))
     }
 
     // ==================== Test Execution ====================
