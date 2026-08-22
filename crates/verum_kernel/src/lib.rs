@@ -101,6 +101,7 @@ pub mod arch_phase; // ATS-V phase 6.5 — architectural type checking phase
 pub mod arch_corpus; // ATS-V cross-cog corpus invariants
 pub mod arch_mtac; // ATS-V Modal-Temporal Architectural Calculus primitives
 pub mod arch_probe; // ATS-V executable counterexamples — one per roster code (T0841)
+pub mod arch_rows; // ATS-V-2 capability rows — the inference-first algebra (T0848)
 pub mod arch_counterfactual; // ATS-V counterfactual reasoning engine + metric extraction
 pub mod arch_adjunction; // ATS-V adjunction analyzer for refactoring
 pub mod arch_yoneda; // ATS-V Yoneda-equivalence checker
