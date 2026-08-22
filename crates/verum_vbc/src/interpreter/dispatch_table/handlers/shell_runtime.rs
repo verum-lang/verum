@@ -189,8 +189,41 @@ pub(in super::super) fn try_intercept_shell_runtime(
     };
     let elapsed_nanos = start.elapsed().as_nanos() as i64;
 
+    // The intercept honours each entry point's DECLARED .vr contract
+    // (dog-food find #1, T0861): `sh_check` returns
+    // `Result<ShellResult, ShellError>`; `sh` returns a BARE
+    // `ShellResult` — its .vr body unwraps Ok and folds Err through
+    // `ShellResult.from_error`. The pre-fix intercept wrapped BOTH in
+    // Result, so `sh("echo hi").success()` reached a Result receiver
+    // and panicked ("method not found on runtime kind Result") while
+    // the checker — reading the honest .vr signature — had approved
+    // the call. One entry point, one contract, both layers.
     if let Some(reason) = spawn_err {
+        if bare == "sh" {
+            // Mirror `ShellResult.from_error(SpawnFailed{..})`:
+            // empty stdout, the error text as stderr, raw=255<<8.
+            let msg = format!("spawn failed for `{cmd_text}`: {reason}");
+            return Ok(Some(build_bare_shell_result(
+                state,
+                255 << 8,
+                &[],
+                msg.as_bytes(),
+                &cmd_text,
+                0,
+            )?));
+        }
         return Ok(Some(build_err_spawn_failed(state, &cmd_text, &reason)?));
+    }
+
+    if bare == "sh" {
+        return Ok(Some(build_bare_shell_result(
+            state,
+            status_raw,
+            &stdout_bytes,
+            &stderr_bytes,
+            &cmd_text,
+            elapsed_nanos,
+        )?));
     }
 
     Ok(Some(build_ok_shell_result(
@@ -593,7 +626,8 @@ fn read_byte_list(v: Value) -> Vec<u8> {
 // ============================================================================
 
 /// Construct `Result.Ok(ShellResult { ... })` on the heap.
-fn build_ok_shell_result(
+/// Construct a bare `ShellResult` — the `sh()` contract.
+fn build_bare_shell_result(
     state: &mut InterpreterState,
     status_raw: i64,
     stdout_bytes: &[u8],
@@ -607,12 +641,29 @@ fn build_ok_shell_result(
     let cmd_val = alloc_string_value(state, command)?;
     let duration_val = alloc_record_one_field(state, "Duration", Value::from_i64(duration_nanos))?;
 
-    let shell_result = alloc_record_n_fields(
+    alloc_record_n_fields(
         state,
         "ShellResult",
         &[stdout_val, stderr_val, status_val, cmd_val, duration_val],
-    )?;
+    )
+}
 
+fn build_ok_shell_result(
+    state: &mut InterpreterState,
+    status_raw: i64,
+    stdout_bytes: &[u8],
+    stderr_bytes: &[u8],
+    command: &str,
+    duration_nanos: i64,
+) -> InterpreterResult<Value> {
+    let shell_result = build_bare_shell_result(
+        state,
+        status_raw,
+        stdout_bytes,
+        stderr_bytes,
+        command,
+        duration_nanos,
+    )?;
     // Wrap in Result.Ok (tag 0, single field).
     wrap_in_variant(state, "Result", 0, &[shell_result])
 }

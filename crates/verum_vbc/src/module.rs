@@ -87,9 +87,6 @@ fn push_ctx_type_id(instr: &Instruction, ids: &mut Vec<u32>) {
     }
 }
 
-/// A complete VBC module: header, pools (strings/constants/types), function
-/// descriptors and their bytecode — the unit produced by codegen, serialized
-/// into a `.vbc`/`.vbca` archive and executed by the interpreter.
 /// The verdict of `VbcModule::entry_main` — the ONE entry-point rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryMain {
@@ -108,6 +105,9 @@ pub enum EntryMain {
     },
 }
 
+/// A complete VBC module: header, pools (strings/constants/types), function
+/// descriptors and their bytecode — the unit produced by codegen, serialized
+/// into a `.vbc`/`.vbca` archive and executed by the interpreter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VbcModule {
     /// Module header.
@@ -531,7 +531,6 @@ impl VbcModule {
         self.strings.intern(s)
     }
 
-    /// Gets a string by ID.
     /// The module's application entry point, by ONE rule both tiers
     /// share: a bare `main`, or — when a `module X;` header qualified
     /// the file's functions — the UNIQUE `*.main`. Ambiguity is
@@ -567,6 +566,7 @@ impl VbcModule {
         }
     }
 
+    /// Gets a string by ID.
     pub fn get_string(&self, id: StringId) -> Option<&str> {
         self.strings.get(id)
     }
