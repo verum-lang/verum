@@ -499,7 +499,7 @@ impl SidebarWidget<'_> {
         let mut lines: Vec<Line> = Vec::new();
         if self.arch_lines.is_empty() {
             lines.push(Line::from(Span::styled(
-                "  (press r to query the notebook's surface)",
+                "  (run a cell — the lens follows the notebook)",
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::ITALIC),

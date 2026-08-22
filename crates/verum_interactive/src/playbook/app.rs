@@ -374,12 +374,16 @@ impl PlaybookApp {
                 self.sync_editor_from_cell();
                 self.enter_edit_mode();
             }
-            KeyAction::ExecuteCell => self.execute_current_cell(),
+            KeyAction::ExecuteCell => {
+                self.execute_current_cell();
+                self.refresh_arch_lens_if_active();
+            }
             KeyAction::ExecuteAllCells => {
                 self.commit_edit();
                 if let Err(e) = self.session.execute_all() {
                     self.status_message = Some(format!("Error: {}", e));
                 }
+                self.refresh_arch_lens_if_active();
             }
             KeyAction::ExecuteFromCurrent => {
                 self.commit_edit();
@@ -422,8 +426,14 @@ impl PlaybookApp {
             KeyAction::ToggleSidebar => {
                 self.layout_config.show_sidebar = !self.layout_config.show_sidebar;
             }
-            KeyAction::SidebarNextTab => self.sidebar_tab = self.sidebar_tab.next(),
-            KeyAction::SidebarPrevTab => self.sidebar_tab = self.sidebar_tab.prev(),
+            KeyAction::SidebarNextTab => {
+                self.sidebar_tab = self.sidebar_tab.next();
+                self.refresh_arch_lens_if_active();
+            }
+            KeyAction::SidebarPrevTab => {
+                self.sidebar_tab = self.sidebar_tab.prev();
+                self.refresh_arch_lens_if_active();
+            }
             KeyAction::Save => self.save(),
             KeyAction::Undo => {
                 if !self.session.undo() {
@@ -455,12 +465,6 @@ impl PlaybookApp {
             KeyAction::ShowHelp => {
                 self.show_help_overlay = true;
             }
-            KeyAction::ExecuteCell if self.sidebar_tab == SidebarTab::Arch => {
-                // In the Arch lens, `run` re-asks the surface question
-                // rather than executing a cell — the lens is a
-                // question, and r is its refresh.
-                self.refresh_arch_lens();
-            }
             KeyAction::ToggleFullscreen => {
                 self.layout_config.toggle_fullscreen();
                 self.editor.fullscreen = self.layout_config.editor_fullscreen;
@@ -474,7 +478,10 @@ impl PlaybookApp {
         let action = self.keybindings.edit_action(key);
         match action {
             KeyAction::ExitEdit => self.exit_edit_mode(),
-            KeyAction::ExecuteCell => self.execute_current_cell(),
+            KeyAction::ExecuteCell => {
+                self.execute_current_cell();
+                self.refresh_arch_lens_if_active();
+            }
             KeyAction::Save => {
                 self.commit_edit();
                 self.save();
@@ -1467,6 +1474,16 @@ impl PlaybookApp {
     /// mirror the answer into lens lines. Subprocess on purpose: the
     /// lens speaks the same vocabulary as agents and the CLI — one
     /// derivation, three transports (accepted T0858 design).
+    /// The lens mirrors the notebook, so it refreshes exactly when
+    /// its subject may have changed WHILE it is on screen: landing on
+    /// the tab, and executing cells with the tab open. No manual
+    /// refresh key exists to forget.
+    fn refresh_arch_lens_if_active(&mut self) {
+        if self.layout_config.show_sidebar && self.sidebar_tab == SidebarTab::Arch {
+            self.refresh_arch_lens();
+        }
+    }
+
     fn refresh_arch_lens(&mut self) {
         let mut source = String::new();
         for cell in self.session.cells.iter().filter(|c| c.is_code()) {
