@@ -81,6 +81,16 @@ jobs:
           /usr/bin/time -v cargo test --locked --tests -p verum_integration_tests 2>&1 \
             | tee integration-crate-tests.log | tail -40
 
+      - name: Semantic-debt ratchet (T0857)
+        # NOT continue-on-error: the ratchet is the one nightly gate
+        # that must BITE — growth means a PR added semantic debt
+        # (an unresolved dispatch the runtime-type-switch or a trap
+        # now covers), and shrinkage demands the budget be clicked
+        # down in the same change.
+        run: |
+          cargo build --locked -p verum_cli 2>&1 | tail -5
+          scripts/ci/degrade_ratchet.sh target/debug/verum
+
       - name: Upload suite logs
         if: always()
         uses: actions/upload-artifact@v4
