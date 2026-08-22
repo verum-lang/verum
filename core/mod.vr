@@ -586,6 +586,19 @@ public module prelude {
     public mount super.base.primitives.*;
     public mount super.base.coercion.*;
 
+    // From text.format — the LANGUAGE inserts these names: `f"{x:?}"`
+    // desugars to a bare `format_debug(&x)` call (see
+    // `verum_fast_parser/src/safe_interpolation.rs::format_debug_call`),
+    // and the TEXT-DEBUG-STATIC-1 codegen rewrite substitutes
+    // `format_debug_text` for the concrete-Text receiver IN PLACE, so
+    // it must resolve exactly where `format_debug` does.  Under the
+    // inclusion law these are the `panic`/`assert` family's kin — a
+    // name the grammar itself emits must be in scope everywhere.
+    // (`f"{x}"` display needs no name: the interpolation machinery
+    // reaches the formatter without one — measured with the prelude
+    // off.  Only the Debug arm rides a bare call.)
+    public mount super.text.format.{format_debug, format_debug_text};
+
     // From collections (common types)
     // The DEFINING modules, not the `collections` umbrella.
     //
@@ -638,20 +651,12 @@ public module prelude {
     // `io.File` and `io.read_to_string` are NOT re-exported: filesystem
     // API, not language.  ONE file in core/ used them ambiently.
 
-    // From text.format — `f"{x:?}"` lowers to `format_debug(&x)` and
-    // `f"{x}"` may lower to `format_display(&x)` (see
-    // `crates/verum_fast_parser/src/safe_interpolation.rs.wrap_with_format_spec`,
-    // §J close).  Surfacing them at the prelude makes f-string Debug
-    // dispatch work transparently in user code without requiring an
-    // explicit `mount core.text.format.{...}`.
-    // The f-string formatters are NOT re-exported.
-    //
-    // Same measurement: with the prelude off, `f"x={x}"` compiles, runs,
-    // and renders — the formatter is reached by the interpolation
-    // machinery, not by a name in scope.
-    // TEXT-DEBUG-STATIC-1: the concrete-Text twin rides the SAME bare
-    // resolution surface — the codegen rewrite substitutes the callee
-    // name in place, so it must resolve exactly where format_debug does.
+    // (The older text.format note that stood here said "NOT
+    // re-exported" while also observing that surfacing the names makes
+    // Debug dispatch work — the contradiction shipped as a live
+    // `unbound variable: format_debug` on every `f"{x:?}"`.  The
+    // Debug-arm pair is re-exported ABOVE, with the inclusion-law
+    // rationale.)
 
     // From sync (common primitives)
     // sync is NOT re-exported: concurrency is a library.  Fourteen files
