@@ -76,13 +76,19 @@ impl<'s> CompilationPipeline<'s> {
         let module_wide_foreign_constructs =
             collect_module_wide_foreign_foundations(module);
 
-        // Body-level capability inference (Q5).  Walks every
-        // function body in the module, matches each call site
-        // against the canonical ontology in
-        // `verum_kernel::arch_capability_inference`, and aggregates
-        // the inferred Capability set.  Activates AP-001
-        // CapabilityEscalation in production builds.
-        let inferred_used_capabilities = infer_used_capabilities(module);
+        // Body-level capability inference — ROW-BASED (T0848).
+        // Facts are extracted per function (ontology atoms, local
+        // call-graph edges, mixed fn-typed params) and solved by the
+        // kernel's SCC fixpoint: a helper's `Network` now reaches its
+        // caller's surface TRANSITIVELY, where the previous flat walk
+        // saw only direct primitive calls. The module surface feeds
+        // the same AP-001 plumbing as before.
+        let module_summaries = infer_module_summaries(module);
+        let inferred_used_capabilities: Vec<verum_kernel::arch::Capability> = module_summaries
+            .module_surface()
+            .facts()
+            .map(|f| f.atom.clone())
+            .collect();
 
         // 1. Module-level @arch_module(...) — the primary surface.
         //   Use the registry-aware entry so cross-cog peer resolution
@@ -326,16 +332,10 @@ fn build_violation_diagnostic(
 /// positives (ontology match is exact); ambiguous resolution
 /// silently falls through, producing an empty list (silent path
 /// for AP-001 — no violation reported).
-pub(crate) fn infer_used_capabilities(
-    module: &verum_ast::Module,
-) -> Vec<verum_kernel::arch::Capability> {
-    use std::collections::HashSet;
-    let mut found: HashSet<verum_kernel::arch::Capability> = HashSet::new();
-    for item in &module.items {
-        walk_item_body_for_caps(item, &mut found);
-    }
-    found.into_iter().collect()
-}
+// The module-level flat walker is GONE (T0848): module surfaces come
+// from `infer_module_summaries` — transitive, row-based, solved in
+// the kernel. The per-item walker below remains for per-item
+// `@arch_module` checks, whose scope is a single body by design.
 
 /// Single-item variant — walks only the given item's body.  Used
 /// when `phase_ats_v` runs the per-item registry-aware check.
@@ -420,10 +420,23 @@ fn walk_expr_for_caps(
                 walk_expr_for_caps(a, sink);
             }
         }
-        ExprKind::MethodCall { receiver, args, .. } => {
-            // Method-call resolution requires the symbol table for
-            // type-aware lookup.  v1 walks the receiver + args for
-            // nested calls but does not attribute the method itself.
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            // Dotted primitive calls ARE method calls in the AST
+            // (receiver field-chain + method) — resolve them against
+            // the ontology through the same resolver the row walker
+            // uses. Type-aware receiver dispatch stays future work.
+            if let Some(path) = method_call_dotted_path(receiver, method) {
+                if let Some(cap) =
+                    verum_kernel::arch_capability_inference::lookup_capability(&path)
+                {
+                    sink.insert(cap);
+                }
+            }
             walk_expr_for_caps(receiver, sink);
             for a in args.iter() {
                 walk_expr_for_caps(a, sink);
@@ -510,8 +523,32 @@ fn expr_to_dotted_path(expr: &verum_ast::expr::Expr) -> Option<String> {
                 Some(segs.join("."))
             }
         }
+        // `core.net.tcp` parses as Field(Field(Path(core), net), tcp) —
+        // the parser builds field chains, not multi-segment paths, for
+        // dotted expressions. Without this arm every fully-qualified
+        // primitive call was invisible to the ontology (the walker
+        // matched a shape the parser never produces).
+        ExprKind::Field { expr: base, field } => {
+            let mut path = expr_to_dotted_path(base)?;
+            path.push('.');
+            path.push_str(field.name.as_str());
+            Some(path)
+        }
         _ => None,
     }
+}
+
+/// The dotted path of a METHOD call: `core.net.tcp.connect(...)` is
+/// `MethodCall { receiver: core.net.tcp, method: connect }` in the
+/// AST — the receiver chain plus the method name is the ontology key.
+fn method_call_dotted_path(
+    receiver: &verum_ast::expr::Expr,
+    method: &verum_ast::Ident,
+) -> Option<String> {
+    let mut path = expr_to_dotted_path(receiver)?;
+    path.push('.');
+    path.push_str(method.name.as_str());
+    Some(path)
 }
 
 /// Walk the entire module — both module-level attributes AND
@@ -647,4 +684,324 @@ fn item_display_name(item: &verum_ast::Item) -> String {
         ItemKind::Module(d) => d.name.name.as_str().to_string(),
         _ => "<item>".to_string(),
     }
+}
+
+// ============================================================================
+// T0848 — row-based inference: per-function fact extraction
+// ============================================================================
+//
+// The AST-aware HALF of the inference-first design
+// (`docs/architecture/ats-v2-capability-rows.md` §3/§6): this layer
+// only EXTRACTS facts — own ontology atoms, local call-graph edges,
+// mixed capability-bearing parameters — and hands them to the
+// kernel's AST-blind solver (`verum_kernel::arch_rows`), which owns
+// the algebra and the fixpoint. Nothing here re-derives lattice law.
+
+use verum_kernel::arch_rows::{FnFacts, ModuleFacts, ModuleSummaries};
+
+/// Collect the call-relevant facts of one function body.
+#[derive(Default)]
+struct BodyFacts {
+    /// Ontology atoms from fully-qualified primitive calls.
+    atoms: std::collections::HashSet<verum_kernel::arch::Capability>,
+    /// Bare names invoked as `name(...)` — candidate local callees
+    /// AND candidate mixed-parameter invocations; the caller
+    /// classifies them against the module's function set and the
+    /// parameter list.
+    bare_calls: std::collections::HashSet<String>,
+    /// Bare names passed as ARGUMENTS to calls — candidate
+    /// hand-onward of capability-bearing parameters (`mix(r̄)`'s
+    /// second clause).
+    bare_args: std::collections::HashSet<String>,
+}
+
+/// Extract `ModuleFacts` for the kernel solver from a parsed module.
+///
+/// Classification rules (v1, module-local):
+///   * A dotted path that resolves in the ontology → own atom.
+///   * A bare call whose name is a module-local function → call-graph
+///     edge (the solver joins the callee's summary transitively —
+///     this is exactly what the flat walk could not see).
+///   * A bare call/arg whose name is a FUNCTION-TYPED parameter of
+///     the enclosing fn → mixed param (opens the summary, Rule G).
+///   * Everything else stays untracked in v1 — cross-module summary
+///     consumption is the next slice and lands as CITED module
+///     interfaces, never as a silent widening.
+pub(crate) fn extract_module_facts(module: &Module) -> ModuleFacts {
+    use verum_ast::decl::{FunctionBody, FunctionParamKind, ItemKind};
+
+    let mut facts = ModuleFacts::default();
+
+    // Pass 1: the module-local function name set (free fns + impl
+    // methods under their bare method name — local calls inside an
+    // impl body use the bare name; qualified `Type.method` calls
+    // also record under the qualified key).
+    let mut collect_fn =
+        |name: String, fn_decl: &verum_ast::decl::FunctionDecl, facts: &mut ModuleFacts| {
+            let mut body_facts = BodyFacts::default();
+            if let Maybe::Some(body) = &fn_decl.body {
+                match body {
+                    FunctionBody::Block(block) => walk_block_for_facts(block, &mut body_facts),
+                    FunctionBody::Expr(expr) => walk_expr_for_facts(expr, &mut body_facts),
+                }
+            }
+            // Function-typed parameter names of THIS fn.
+            let fn_typed_params: Vec<String> = fn_decl
+                .params
+                .iter()
+                .filter_map(|p| match &p.kind {
+                    FunctionParamKind::Regular { pattern, ty, .. } => {
+                        let is_fn_type = matches!(
+                            ty.kind,
+                            verum_ast::ty::TypeKind::Function { .. }
+                        );
+                        if !is_fn_type {
+                            return None;
+                        }
+                        pattern_bound_name(pattern)
+                    }
+                    _ => None,
+                })
+                .collect();
+            let mixed_params: Vec<String> = fn_typed_params
+                .into_iter()
+                .filter(|p| {
+                    body_facts.bare_calls.contains(p) || body_facts.bare_args.contains(p)
+                })
+                .collect();
+            facts.functions.insert(
+                name,
+                FnFacts {
+                    own: verum_kernel::arch_rows::Row::computed(
+                        body_facts.atoms.iter().cloned(),
+                    ),
+                    // Callee classification happens in pass 2 once the
+                    // full local name set is known; stash bare calls
+                    // in callees for now and filter below.
+                    callees: body_facts.bare_calls.into_iter().collect(),
+                    mixed_params,
+                },
+            );
+        };
+
+    for item in &module.items {
+        match &item.kind {
+            ItemKind::Function(fn_decl) => {
+                collect_fn(fn_decl.name.name.to_string(), fn_decl, &mut facts);
+            }
+            ItemKind::Impl(impl_decl) => {
+                for impl_item in impl_decl.items.iter() {
+                    if let verum_ast::decl::ImplItemKind::Function(f) = &impl_item.kind {
+                        collect_fn(f.name.name.to_string(), f, &mut facts);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Pass 2: keep as call-graph edges only names that ARE
+    // module-local functions and are not this fn's own mixed params
+    // (a call through a parameter is polymorphism, not an edge).
+    let local_names: std::collections::HashSet<String> =
+        facts.functions.keys().cloned().collect();
+    for fn_facts in facts.functions.values_mut() {
+        let mixed: std::collections::HashSet<&String> =
+            fn_facts.mixed_params.iter().collect();
+        fn_facts
+            .callees
+            .retain(|c| local_names.contains(c) && !mixed.contains(c));
+    }
+
+    facts
+}
+
+/// The single bound name of an irrefutable parameter pattern, when it
+/// has one (v1 skips destructuring patterns — a destructured fn-typed
+/// parameter is rare and lands with cross-module summaries).
+fn pattern_bound_name(pattern: &verum_ast::Pattern) -> Option<String> {
+    use verum_ast::PatternKind;
+    match &pattern.kind {
+        PatternKind::Ident { name, .. } => Some(name.name.to_string()),
+        _ => None,
+    }
+}
+
+fn walk_block_for_facts(block: &verum_ast::Block, sink: &mut BodyFacts) {
+    for stmt in block.stmts.iter() {
+        walk_stmt_for_facts(stmt, sink);
+    }
+    if let Maybe::Some(tail) = &block.expr {
+        walk_expr_for_facts(tail, sink);
+    }
+}
+
+fn walk_stmt_for_facts(stmt: &verum_ast::stmt::Stmt, sink: &mut BodyFacts) {
+    use verum_ast::stmt::StmtKind;
+    match &stmt.kind {
+        StmtKind::Expr { expr, .. } => walk_expr_for_facts(expr, sink),
+        StmtKind::Let { value, .. } => {
+            if let Maybe::Some(init) = value {
+                walk_expr_for_facts(init, sink);
+            }
+        }
+        StmtKind::LetElse { value, .. } => walk_expr_for_facts(value, sink),
+        StmtKind::Defer(expr) | StmtKind::Errdefer(expr) => walk_expr_for_facts(expr, sink),
+        StmtKind::Provide { value, .. } | StmtKind::ProvideScope { value, .. } => {
+            walk_expr_for_facts(value, sink);
+        }
+        _ => {}
+    }
+}
+
+fn walk_expr_for_facts(expr: &verum_ast::expr::Expr, sink: &mut BodyFacts) {
+    use verum_ast::expr::ExprKind;
+    match &expr.kind {
+        ExprKind::Call { func, args, .. } => {
+            if let Some(path) = expr_to_dotted_path(func) {
+                if let Some(cap) =
+                    verum_kernel::arch_capability_inference::lookup_capability(&path)
+                {
+                    sink.atoms.insert(cap);
+                } else if !path.contains('.') {
+                    sink.bare_calls.insert(path);
+                }
+            }
+            walk_expr_for_facts(func, sink);
+            for a in args.iter() {
+                if let Some(p) = expr_to_dotted_path(a) {
+                    if !p.contains('.') {
+                        sink.bare_args.insert(p);
+                    }
+                }
+                walk_expr_for_facts(a, sink);
+            }
+        }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            if let Some(path) = method_call_dotted_path(receiver, method) {
+                if let Some(cap) =
+                    verum_kernel::arch_capability_inference::lookup_capability(&path)
+                {
+                    sink.atoms.insert(cap);
+                }
+            }
+            walk_expr_for_facts(receiver, sink);
+            for a in args.iter() {
+                if let Some(p) = expr_to_dotted_path(a) {
+                    if !p.contains('.') {
+                        sink.bare_args.insert(p);
+                    }
+                }
+                walk_expr_for_facts(a, sink);
+            }
+        }
+        ExprKind::Block(block) => walk_block_for_facts(block, sink),
+        ExprKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            walk_block_for_facts(then_branch, sink);
+            if let Maybe::Some(else_b) = else_branch {
+                walk_expr_for_facts(else_b, sink);
+            }
+        }
+        ExprKind::Match { expr: scrut, arms } => {
+            walk_expr_for_facts(scrut, sink);
+            for arm in arms.iter() {
+                walk_expr_for_facts(&arm.body, sink);
+            }
+        }
+        ExprKind::While {
+            condition, body, ..
+        } => {
+            walk_expr_for_facts(condition, sink);
+            walk_block_for_facts(body, sink);
+        }
+        ExprKind::For { iter, body, .. } => {
+            walk_expr_for_facts(iter, sink);
+            walk_block_for_facts(body, sink);
+        }
+        ExprKind::Loop { body, .. } => walk_block_for_facts(body, sink),
+        ExprKind::Binary { left, right, .. } => {
+            walk_expr_for_facts(left, sink);
+            walk_expr_for_facts(right, sink);
+        }
+        ExprKind::Unary { expr: inner, .. } => walk_expr_for_facts(inner, sink),
+        ExprKind::Field { expr: inner, .. }
+        | ExprKind::OptionalChain { expr: inner, .. }
+        | ExprKind::TupleIndex { expr: inner, .. } => walk_expr_for_facts(inner, sink),
+        ExprKind::Index { expr: e, index } => {
+            walk_expr_for_facts(e, sink);
+            walk_expr_for_facts(index, sink);
+        }
+        ExprKind::Tuple(items) => {
+            for e in items.iter() {
+                walk_expr_for_facts(e, sink);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Row-based module inference: extract facts, solve, return the
+/// module surface as the flat capability list the existing phase
+/// plumbing consumes — TRANSITIVE now (a helper's `Network` reaches
+/// its caller's surface through the summary join), where the flat
+/// walk saw only direct calls.
+pub(crate) fn infer_module_summaries(module: &Module) -> ModuleSummaries {
+    extract_module_facts(module).solve()
+}
+
+// ============================================================================
+// Public query surface (consumed by crate::arch_query — the CLI tool)
+// ============================================================================
+
+/// Public entry for `verum arch query`: the SAME extraction+solve the
+/// phase runs — one derivation, two consumers (compiler diagnostics
+/// and the agent-facing tool must never disagree about a surface).
+pub fn infer_summaries_for_query(module: &Module) -> ModuleSummaries {
+    infer_module_summaries(module)
+}
+
+/// The module's PINNED capability row, when the module-level
+/// `@arch_module` declares one: `requires ∪ exposes`, provenance
+/// `Cited` (a pin is intent taken on the author's authority — the
+/// inference is what is `Computed`).
+pub fn pinned_capabilities_of_module(
+    module: &Module,
+) -> Option<verum_kernel::arch_rows::Row> {
+    let mut args: Option<&[verum_ast::expr::Expr]> = None;
+    let attr_sources = std::iter::once(&module.attributes)
+        .chain(module.items.iter().map(|i| &i.attributes));
+    for attrs in attr_sources {
+        for attr in attrs.iter() {
+            if attr.name.as_str() == "arch_module" {
+                args = Some(match &attr.args {
+                    Maybe::Some(a) => a.as_slice(),
+                    Maybe::None => &[],
+                });
+            }
+        }
+        if args.is_some() {
+            break;
+        }
+    }
+    let shape = verum_kernel::arch_parse::parse_arch_module(args?).ok()?;
+    let row = verum_kernel::arch_rows::Row::cited(
+        shape
+            .requires
+            .iter()
+            .chain(shape.exposes.iter())
+            .cloned(),
+        "@arch_module pin",
+    );
+    // A pin with zero capabilities is still a pin (an explicitly
+    // empty surface is a claim worth judging against).
+    Some(row)
 }

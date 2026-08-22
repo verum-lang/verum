@@ -41,6 +41,7 @@ pub mod config;
 pub mod cubical;
 pub mod dap;
 pub mod deps;
+pub mod arch;
 pub mod diagnose;
 pub mod doc;
 /// `verum doc-render` subcommand — auto-paper generator. Walks

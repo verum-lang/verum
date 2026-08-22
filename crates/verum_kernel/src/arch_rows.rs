@@ -301,3 +301,335 @@ pub fn atoms_dying_at_boundary<'a>(
         })
         .collect()
 }
+
+// ============================================================================
+// The module solver — SCC fixpoint over per-function facts (§6)
+// ============================================================================
+
+/// Everything inference EXTRACTS from one function's body — the
+/// solver's input row. The extraction layer (compiler-side, AST-aware)
+/// produces these; the solver here is AST-blind on purpose: the
+/// algebra and the algorithm stay in the kernel where they are
+/// unit-pinned, and the compiler contributes only facts.
+#[derive(Debug, Clone, Default)]
+pub struct FnFacts {
+    /// Ontology atoms from direct primitive calls in the body
+    /// (`S_f`'s ground part, §3).
+    pub own: Row,
+    /// DIRECT calls to named functions (resolved within the module —
+    /// the local call-graph edges the fixpoint runs over).
+    pub callees: Vec<String>,
+    /// Capability-bearing parameters the body may call or hand onward
+    /// (`mix(r̄)`, §3). Each becomes a row variable of the summary.
+    pub mixed_params: Vec<String>,
+}
+
+/// Per-module inference input: function name → facts.
+#[derive(Debug, Clone, Default)]
+pub struct ModuleFacts {
+    /// Facts per function, keyed by the name callees use.
+    pub functions: BTreeMap<String, FnFacts>,
+}
+
+impl ModuleFacts {
+    /// Solve to summaries: Tarjan SCCs over the local call graph in
+    /// reverse topological order; within an SCC, Kleene-iterate joins
+    /// until stable (§6 — the lattice is the finite product of atom
+    /// powerset × provenance meet, so stabilisation is guaranteed and
+    /// the iteration count is bounded by `|𝒦| × |SCC|`).
+    ///
+    /// A callee with NO facts entry is an UNRESOLVED edge. Per the
+    /// no-silent-⊤ law (§4) it must not silently widen OR silently
+    /// vanish: it is returned in `unresolved` so the caller turns it
+    /// into a fixpoint obligation or a diagnostic — never a guess.
+    pub fn solve(&self) -> ModuleSummaries {
+        // --- Tarjan, iterative, over the name graph. -----------------
+        let names: Vec<&String> = self.functions.keys().collect();
+        let index_of: BTreeMap<&str, usize> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.as_str(), i))
+            .collect();
+        let n = names.len();
+        let adj: Vec<Vec<usize>> = names
+            .iter()
+            .map(|name| {
+                self.functions[*name]
+                    .callees
+                    .iter()
+                    .filter_map(|c| index_of.get(c.as_str()).copied())
+                    .collect()
+            })
+            .collect();
+
+        let mut sccs: Vec<Vec<usize>> = Vec::new();
+        {
+            let mut index = vec![usize::MAX; n];
+            let mut low = vec![0usize; n];
+            let mut on_stack = vec![false; n];
+            let mut stack: Vec<usize> = Vec::new();
+            let mut next_index = 0usize;
+            // Iterative Tarjan: (node, child-cursor) frames.
+            for root in 0..n {
+                if index[root] != usize::MAX {
+                    continue;
+                }
+                let mut frames: Vec<(usize, usize)> = vec![(root, 0)];
+                while let Some(&mut (v, ref mut cursor)) = frames.last_mut() {
+                    if *cursor == 0 {
+                        index[v] = next_index;
+                        low[v] = next_index;
+                        next_index += 1;
+                        stack.push(v);
+                        on_stack[v] = true;
+                    }
+                    if *cursor < adj[v].len() {
+                        let w = adj[v][*cursor];
+                        *cursor += 1;
+                        if index[w] == usize::MAX {
+                            frames.push((w, 0));
+                        } else if on_stack[w] {
+                            low[v] = low[v].min(index[w]);
+                        }
+                    } else {
+                        if low[v] == index[v] {
+                            let mut comp = Vec::new();
+                            loop {
+                                let w = stack.pop().expect("tarjan stack underflow");
+                                on_stack[w] = false;
+                                comp.push(w);
+                                if w == v {
+                                    break;
+                                }
+                            }
+                            sccs.push(comp);
+                        }
+                        let (child, _) = frames.pop().expect("frame underflow");
+                        if let Some(&mut (parent, _)) = frames.last_mut() {
+                            low[parent] = low[parent].min(low[child]);
+                        }
+                    }
+                }
+            }
+        }
+        // Tarjan emits SCCs in REVERSE topological order of the
+        // condensation — exactly the order summaries must be
+        // installed (callees before callers).
+
+        let mut summaries: BTreeMap<String, Row> = BTreeMap::new();
+        let mut unresolved: Vec<UnresolvedEdge> = Vec::new();
+
+        for comp in &sccs {
+            // Kleene iteration within the component.
+            loop {
+                let mut changed = false;
+                for &vi in comp {
+                    let name = names[vi].clone();
+                    let facts = &self.functions[&name];
+                    let mut row = facts.own.clone();
+                    for p in &facts.mixed_params {
+                        row.open_over(RowVar {
+                            owner: name.clone(),
+                            param: p.clone(),
+                        });
+                    }
+                    for callee in &facts.callees {
+                        match summaries.get(callee) {
+                            Some(callee_row) => row.join(callee_row),
+                            None if self.functions.contains_key(callee) => {
+                                // Same-SCC callee not yet stabilised —
+                                // its current partial summary is what
+                                // the iteration refines; nothing to do
+                                // this pass.
+                            }
+                            None => {
+                                let edge = UnresolvedEdge {
+                                    caller: name.clone(),
+                                    callee: callee.clone(),
+                                };
+                                if !unresolved.contains(&edge) {
+                                    unresolved.push(edge);
+                                }
+                            }
+                        }
+                    }
+                    let prev = summaries.get(&name);
+                    let grew = match prev {
+                        None => true,
+                        Some(p) => {
+                            row.atom_count() > p.atom_count()
+                                || row.variables().len() > p.variables().len()
+                        }
+                    };
+                    if grew {
+                        summaries.insert(name, row);
+                        changed = true;
+                    }
+                }
+                if !changed {
+                    break;
+                }
+            }
+        }
+
+        ModuleSummaries {
+            summaries,
+            unresolved,
+        }
+    }
+}
+
+/// A call edge the solver could not resolve to any summary — the
+/// caller must surface it (obligation or diagnostic), never guess.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnresolvedEdge {
+    /// The calling function.
+    pub caller: String,
+    /// The name that resolved to nothing.
+    pub callee: String,
+}
+
+/// The solver's output: installed summaries plus the unresolved
+/// edges the no-silent-⊤ law forbids swallowing.
+#[derive(Debug, Clone, Default)]
+pub struct ModuleSummaries {
+    /// Function name → its solved row (Rule G: these ARE the
+    /// generalisation points).
+    pub summaries: BTreeMap<String, Row>,
+    /// Edges with no target summary — surfaced, not guessed.
+    pub unresolved: Vec<UnresolvedEdge>,
+}
+
+impl ModuleSummaries {
+    /// The module's inferred surface: the join of every summary's
+    /// ground atoms (§5's clause (a); value-flow escapes join in at
+    /// the extraction layer as additional facts).
+    pub fn module_surface(&self) -> Row {
+        let mut out = Row::empty();
+        for row in self.summaries.values() {
+            out.join(row);
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod solver_tests {
+    //! Solver pins live INLINE deliberately: the workspace `--lib`
+    //! CI job is the gated surface, and the solver is exactly the
+    //! kind of quiet machinery that must not depend on a non-gated
+    //! suite (the T0834 lesson).
+
+    use super::*;
+    use crate::arch::{Capability, NetDirection, NetProtocol, ResourceTag};
+
+    fn read_atom() -> Capability {
+        Capability::Read {
+            resource: ResourceTag::Logger,
+        }
+    }
+
+    fn net_atom() -> Capability {
+        Capability::Network {
+            protocol: NetProtocol::Tcp,
+            direction: NetDirection::Outbound,
+        }
+    }
+
+    /// Transitivity: caller absorbs callee atoms through the graph.
+    #[test]
+    fn atoms_flow_up_the_call_graph() {
+        let mut m = ModuleFacts::default();
+        m.functions.insert(
+            "leaf".into(),
+            FnFacts {
+                own: Row::computed([net_atom()]),
+                ..Default::default()
+            },
+        );
+        m.functions.insert(
+            "mid".into(),
+            FnFacts {
+                callees: vec!["leaf".into()],
+                ..Default::default()
+            },
+        );
+        m.functions.insert(
+            "top".into(),
+            FnFacts {
+                own: Row::computed([read_atom()]),
+                callees: vec!["mid".into()],
+                ..Default::default()
+            },
+        );
+        let solved = m.solve();
+        assert!(solved.unresolved.is_empty());
+        assert_eq!(solved.summaries["top"].atom_count(), 2);
+        assert_eq!(solved.summaries["mid"].atom_count(), 1);
+    }
+
+    /// Mutual recursion stabilises with the union of both bodies.
+    #[test]
+    fn scc_fixpoint_stabilises_mutual_recursion() {
+        let mut m = ModuleFacts::default();
+        m.functions.insert(
+            "ping".into(),
+            FnFacts {
+                own: Row::computed([read_atom()]),
+                callees: vec!["pong".into()],
+                ..Default::default()
+            },
+        );
+        m.functions.insert(
+            "pong".into(),
+            FnFacts {
+                own: Row::computed([net_atom()]),
+                callees: vec!["ping".into()],
+                ..Default::default()
+            },
+        );
+        let solved = m.solve();
+        assert_eq!(solved.summaries["ping"].atom_count(), 2);
+        assert_eq!(solved.summaries["pong"].atom_count(), 2);
+    }
+
+    /// The no-silent-⊤ law at the solver: an unknown callee is
+    /// SURFACED, and the caller's row does not silently widen.
+    #[test]
+    fn unknown_callee_is_surfaced_never_guessed() {
+        let mut m = ModuleFacts::default();
+        m.functions.insert(
+            "caller".into(),
+            FnFacts {
+                callees: vec!["mystery".into()],
+                ..Default::default()
+            },
+        );
+        let solved = m.solve();
+        assert_eq!(solved.unresolved.len(), 1);
+        assert_eq!(solved.unresolved[0].callee, "mystery");
+        assert_eq!(solved.summaries["caller"].atom_count(), 0);
+    }
+
+    /// Mixed params become row variables of the summary (Rule G) —
+    /// and an innocent function with no capability traffic stays ∅.
+    #[test]
+    fn mixed_params_open_the_summary_and_innocents_stay_empty() {
+        let mut m = ModuleFacts::default();
+        m.functions.insert(
+            "apply".into(),
+            FnFacts {
+                mixed_params: vec!["f".into()],
+                ..Default::default()
+            },
+        );
+        m.functions.insert(
+            "pure_math".into(),
+            FnFacts::default(),
+        );
+        let solved = m.solve();
+        assert_eq!(solved.summaries["apply"].variables().len(), 1);
+        assert!(solved.summaries["pure_math"].is_closed());
+        assert_eq!(solved.summaries["pure_math"].atom_count(), 0);
+    }
+}

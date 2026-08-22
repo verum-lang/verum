@@ -454,9 +454,21 @@ fn parse_capability(expr: &Expr) -> Result<Capability, ArchParseError> {
         }
     };
 
-    // Recognise canonical `Capability.<Variant>` forms — produce
-    // real Capability variants for downstream structural-equality
-    // matching.  Ignore the inner args (placeholder fillers).
+    // Recognise canonical `Capability.<Variant>(args...)` forms and
+    // parse the ARGUMENTS into the variant's real payload. This block
+    // used to ignore every inner argument ("placeholder fillers"):
+    // all eight arms produced fixed placeholders, so every pin in the
+    // corpus — `Read(ResourceTag.Database("ledger"))`,
+    // `Network(NetProtocol.Tcp, NetDirection.Outbound)` — parsed to
+    // the same handful of stamped values. The judgment against an
+    // INFERRED atom could then agree only by accident: the T0834
+    // class (a parser blind to the fields its own surface advertises),
+    // caught live by the row judgment's clean-twin fixture (T0848).
+    let call_args: Vec<&Expr> = match &expr.kind {
+        ExprKind::MethodCall { args, .. } => args.iter().collect(),
+        ExprKind::Call { args, .. } => args.iter().collect(),
+        _ => Vec::new(),
+    };
     if matches!(receiver_path.as_deref(), Some("Capability") | None)
         || receiver_path.as_deref().map(|p| p.ends_with(".Capability")).unwrap_or(false)
     {
@@ -464,40 +476,38 @@ fn parse_capability(expr: &Expr) -> Result<Capability, ArchParseError> {
             match method {
                 "Read" => {
                     return Ok(Capability::Read {
-                        resource: ResourceTag::Custom("<inferred>".to_string()),
+                        resource: parse_resource_tag_arg(call_args.first().copied()),
                     });
                 }
                 "Write" => {
                     return Ok(Capability::Write {
-                        resource: ResourceTag::Custom("<inferred>".to_string()),
+                        resource: parse_resource_tag_arg(call_args.first().copied()),
                     });
                 }
                 "Exec" => {
                     return Ok(Capability::Exec {
-                        target: ExecTarget::Custom("<inferred>".to_string()),
+                        target: parse_exec_target_arg(call_args.first().copied()),
                     });
                 }
                 "Escalate" => {
                     return Ok(Capability::Escalate {
-                        realm: PrivilegeRealm::Custom("<inferred>".to_string()),
+                        realm: parse_realm_arg(call_args.first().copied()),
                     });
                 }
                 "Spawn" => {
                     return Ok(Capability::Spawn {
-                        lifetime: TaskLifetime::Detached,
+                        lifetime: parse_lifetime_arg(call_args.first().copied()),
                     });
                 }
                 "Persist" => {
                     return Ok(Capability::Persist {
-                        medium: PersistenceMedium::Disk {
-                            path: "<inferred>".to_string(),
-                        },
+                        medium: parse_medium_arg(call_args.first().copied()),
                     });
                 }
                 "Network" => {
                     return Ok(Capability::Network {
-                        protocol: NetProtocol::Tcp,
-                        direction: NetDirection::Bidirectional,
+                        protocol: parse_protocol_arg(call_args.first().copied()),
+                        direction: parse_direction_arg(call_args.get(1).copied()),
                     });
                 }
                 _ => {}
@@ -522,6 +532,162 @@ fn parse_capability(expr: &Expr) -> Result<Capability, ArchParseError> {
             subsumed_by: vec![],
         },
     })
+}
+
+/// The `(last_segment, first_string_arg)` of a variant-shaped
+/// argument: `ResourceTag.Database("ledger")` → ("Database",
+/// Some("ledger")); a bare `ResourceTag.Logger` → ("Logger", None).
+/// Unparseable shapes yield ("", None) so every caller falls to its
+/// Custom arm with the raw rendering, never silently to a default.
+fn variant_last_and_string(expr: Option<&Expr>) -> (String, Option<String>) {
+    let Some(expr) = expr else {
+        return (String::new(), None);
+    };
+    let (path_expr, string_arg): (&Expr, Option<String>) = match &expr.kind {
+        ExprKind::Call { func, args, .. } => (
+            func.as_ref(),
+            args.iter().next().and_then(expr_string_literal),
+        ),
+        ExprKind::MethodCall { .. } => {
+            // `ResourceTag.Database("x")` parses as a method call on
+            // the `ResourceTag` receiver; the method IS the variant.
+            if let ExprKind::MethodCall {
+                method, args, ..
+            } = &expr.kind
+            {
+                return (
+                    method.name.as_str().to_string(),
+                    args.iter().next().and_then(expr_string_literal),
+                );
+            }
+            unreachable!()
+        }
+        _ => (expr, None),
+    };
+    let last = parse_path_string(path_expr, "capability-arg")
+        .ok()
+        .and_then(|p| p.split('.').next_back().map(str::to_string))
+        .unwrap_or_default();
+    (last, string_arg)
+}
+
+fn expr_string_literal(expr: &Expr) -> Option<String> {
+    use verum_ast::literal::LiteralKind;
+    if let ExprKind::Literal(lit) = &expr.kind {
+        if let LiteralKind::Text(t) = &lit.kind {
+            // The lexer keeps the surrounding quotes in the token text;
+            // the capability payload wants the VALUE.
+            let raw = t.to_string();
+            let trimmed = raw
+                .strip_prefix('"')
+                .and_then(|x| x.strip_suffix('"'))
+                .unwrap_or(&raw);
+            return Some(trimmed.to_string());
+        }
+    }
+    None
+}
+
+fn parse_resource_tag_arg(arg: Option<&Expr>) -> ResourceTag {
+    let (last, sarg) = variant_last_and_string(arg);
+    let s = |d: &str| sarg.clone().unwrap_or_else(|| d.to_string());
+    match last.as_str() {
+        "Database" => ResourceTag::Database { name: s("*") },
+        "File" => ResourceTag::File { path_pattern: s("*") },
+        "Memory" => ResourceTag::Memory { region: s("*") },
+        "Config" => ResourceTag::Config { namespace: s("*") },
+        "Logger" => ResourceTag::Logger,
+        "Random" => ResourceTag::Random,
+        _ => ResourceTag::Custom(if last.is_empty() {
+            "<unparsed>".to_string()
+        } else {
+            last
+        }),
+    }
+}
+
+fn parse_exec_target_arg(arg: Option<&Expr>) -> ExecTarget {
+    let (last, sarg) = variant_last_and_string(arg);
+    match last.as_str() {
+        "Ffi" => ExecTarget::Ffi {
+            library: sarg.unwrap_or_else(|| "*".to_string()),
+            symbol: "*".to_string(),
+        },
+        // `Syscall(0)` carries an int literal v1 does not need — the
+        // variant identity is the judged fact.
+        "Syscall" => ExecTarget::Syscall { number: 0 },
+        "Program" => ExecTarget::Program {
+            path: sarg.unwrap_or_else(|| "*".to_string()),
+        },
+        _ => ExecTarget::Custom(if last.is_empty() {
+            "<unparsed>".to_string()
+        } else {
+            last
+        }),
+    }
+}
+
+fn parse_realm_arg(arg: Option<&Expr>) -> PrivilegeRealm {
+    let (last, _) = variant_last_and_string(arg);
+    match last.as_str() {
+        "Admin" => PrivilegeRealm::Admin,
+        "Root" => PrivilegeRealm::Root,
+        "Audit" => PrivilegeRealm::Audit,
+        _ => PrivilegeRealm::Custom(if last.is_empty() {
+            "<unparsed>".to_string()
+        } else {
+            last
+        }),
+    }
+}
+
+fn parse_lifetime_arg(arg: Option<&Expr>) -> TaskLifetime {
+    let (last, _) = variant_last_and_string(arg);
+    match last.as_str() {
+        "ScopedToParent" => TaskLifetime::ScopedToParent,
+        "Detached" | "" => TaskLifetime::Detached,
+        // Deadlined/AtUnixTime/AfterDuration/OnEvent carry payloads
+        // the pin-judgment does not compare in v1 — identity default.
+        _ => TaskLifetime::Detached,
+    }
+}
+
+fn parse_medium_arg(arg: Option<&Expr>) -> PersistenceMedium {
+    let (last, sarg) = variant_last_and_string(arg);
+    match last.as_str() {
+        "Disk" => PersistenceMedium::Disk {
+            path: sarg.unwrap_or_else(|| "*".to_string()),
+        },
+        "Database" | "DatabaseMedium" => PersistenceMedium::Database {
+            connection_tag: sarg.unwrap_or_else(|| "*".to_string()),
+        },
+        "DistributedLog" => PersistenceMedium::DistributedLog {
+            topic: sarg.unwrap_or_else(|| "*".to_string()),
+        },
+        _ => PersistenceMedium::Disk {
+            path: "<unparsed>".to_string(),
+        },
+    }
+}
+
+fn parse_protocol_arg(arg: Option<&Expr>) -> NetProtocol {
+    let (last, _) = variant_last_and_string(arg);
+    match last.as_str() {
+        "Udp" => NetProtocol::Udp,
+        "Unix" => NetProtocol::Unix,
+        "Tls" => NetProtocol::Tls,
+        "Quic" => NetProtocol::Quic,
+        _ => NetProtocol::Tcp,
+    }
+}
+
+fn parse_direction_arg(arg: Option<&Expr>) -> NetDirection {
+    let (last, _) = variant_last_and_string(arg);
+    match last.as_str() {
+        "Inbound" => NetDirection::Inbound,
+        "Outbound" => NetDirection::Outbound,
+        _ => NetDirection::Bidirectional,
+    }
 }
 
 fn parse_invariant_list(expr: &Expr) -> Result<Vec<BoundaryInvariant>, ArchParseError> {

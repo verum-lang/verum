@@ -2000,6 +2000,19 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum ArchCommands {
+    /// Answer "what may the code at this path do?" — the inferred
+    /// capability surface (row-solved, transitive), the
+    /// `@arch_module` pin, and the two-direction judgment between
+    /// them (T0848). `--json` is the append-only machine contract
+    /// for coding agents (the ask → patch → diff cycle).
+    Query {
+        /// Path to a `.vr` file to query.
+        #[clap(long = "at", value_name = "FILE")]
+        at: std::path::PathBuf,
+        /// Emit the machine-readable JSON report.
+        #[clap(long)]
+        json: bool,
+    },
  /// Show structured architectural type information for a cog.
  /// Per spec §32.4: outputs `Shape` + anti-pattern violations
  /// + suggestions in human-friendly plain text or
@@ -4568,6 +4581,10 @@ fn run_command(cli: Cli) -> Result<()> {
             Ok(())
         } // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system
         Commands::Arch { cmd } => match cmd {
+            ArchCommands::Query { at, json } => {
+                commands::arch::query(&at, json)
+                    .map_err(|e| CliError::Custom(e.to_string()))
+            }
             ArchCommands::Explain { cog, format } => {
                 let output_format = match format.as_str() {
                     "plain" => commands::audit::AuditFormat::Plain,

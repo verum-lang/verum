@@ -204,6 +204,7 @@ pub mod lint;
 pub mod literal_parsers;
 pub mod literal_registry;
 pub mod options;
+pub mod arch_query; // T0848 — the agent-facing `verum arch query` surface
 pub mod pipeline;
 pub mod stdlib_symbol_manifest;
 pub mod target_spec; // Audit-E2: cross-compile-aware target spec for cfg evaluation // #102: Build-time per-module symbol table (target-independent)
