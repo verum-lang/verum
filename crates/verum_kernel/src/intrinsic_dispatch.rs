@@ -70,12 +70,57 @@ pub enum IntrinsicValue {
     Decision {
  /// The decision verdict (true ⇒ predicate holds).
         holds: bool,
+ /// How the kernel knows. A verdict the kernel COMPUTED and one
+ /// it accepted on someone else's proof are both `holds: true`
+ /// and must never read the same to a consumer.
+        #[serde(default)]
+        evidence: Evidence,
  /// Human-readable rationale for the verdict (cited in audit
  /// reports + cert-replay diagnostics).
         reason: String,
     },
  /// Unit / void.
     Unit,
+}
+
+/// What stands behind a [`IntrinsicValue::Decision`].
+///
+/// The trust base of a proof kernel is only meaningful if it is
+/// legible: an audit that reports "40 discharged" without saying how
+/// many were executed and how many were taken on citation is
+/// reporting a number, not a status. Two states are enough and they
+/// are exhaustive — either this kernel ran the check that decides the
+/// question, or it is relying on something outside itself, in which
+/// case it must say what.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Evidence {
+    /// The kernel executed the check that decides this verdict.
+    #[default]
+    Computed,
+    /// Accepted on a proof that lives outside this kernel — a
+    /// published result, a foreign prover's theorem, or a Verum-side
+    /// lemma the kernel does not re-check here. `source` names it;
+    /// an empty source is rejected by `cited`.
+    Cited {
+        /// Where the proof actually lives.
+        source: String,
+    },
+}
+
+impl Evidence {
+    /// True when this kernel ran the deciding check itself.
+    pub fn is_computed(&self) -> bool {
+        matches!(self, Evidence::Computed)
+    }
+
+    /// Stable tag for audit JSON.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Evidence::Computed => "computed",
+            Evidence::Cited { .. } => "cited",
+        }
+    }
 }
 
 impl IntrinsicValue {
@@ -127,6 +172,33 @@ impl IntrinsicValue {
 fn decision(holds: bool, reason: impl Into<String>) -> Option<IntrinsicValue> {
     Some(IntrinsicValue::Decision {
         holds,
+        evidence: Evidence::Computed,
+        reason: reason.into(),
+    })
+}
+
+/// A verdict this kernel did NOT decide: it holds on the strength of
+/// a proof living elsewhere, and `source` names where.
+///
+/// Kept separate from [`decision`] so that "the kernel ran the check"
+/// and "the kernel took a published proof's word" cannot be written
+/// the same way. Panics on an empty source: a citation that names
+/// nothing is indistinguishable from an assertion, which is the shape
+/// this distinction exists to make impossible.
+#[inline]
+fn cited(
+    holds: bool,
+    source: impl Into<String>,
+    reason: impl Into<String>,
+) -> Option<IntrinsicValue> {
+    let source = source.into();
+    assert!(
+        !source.trim().is_empty(),
+        "a cited verdict must name where the proof lives",
+    );
+    Some(IntrinsicValue::Decision {
+        holds,
+        evidence: Evidence::Cited { source },
         reason: reason.into(),
     })
 }
@@ -327,9 +399,6 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
                     level, universe
                 ))
         }
- // **Bare-arg form** preserved for back-compat callers that don't
- // (yet) thread structural data; gated on a separate name.
-        "kernel_yoneda_embedding_bare" => decision(true, "yoneda::yoneda_embedding (bare-arg back-compat — prefer the parameterised form)"),
         "kernel_kan_extension" => {
  // args: [is_fully_faithful: Bool, target_has_colimits: Bool]
             let ff = args.first()?.as_bool()?;
@@ -525,10 +594,10 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         }
 
  // -- Gödel coding ------------------------------------------------
-        "kernel_godel_coding" => decision(true, "godel_coding: Cantor pairing + PrimRec + MuRec + GodelEncoding all decidable"),
+        "kernel_godel_coding" => cited(true, "verum_kernel::godel_coding (Cantor pairing / PrimRec / MuRec decidability)", "godel_coding: Cantor pairing + PrimRec + MuRec + GodelEncoding all decidable"),
 
  // -- Industrial tactics ------------------------------------------
-        "kernel_tactics_industrial" => decision(true, "tactics_industrial: lia/decide/induction/congruence/eauto deterministic dispatchers"),
+        "kernel_tactics_industrial" => cited(true, "verum_kernel::tactics (lia/decide/induction/congruence/eauto dispatchers)", "tactics_industrial: lia/decide/induction/congruence/eauto deterministic dispatchers"),
 
  // -- Cross-format CI ---------------------------------------------
         "kernel_cross_format_gate" => {
@@ -545,7 +614,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         }
 
  // -- Mechanisation roadmap ---------------------------------------
-        "kernel_mechanisation_roadmap" => decision(true, "mechanisation_roadmap: HTT + AR 1994 enumerations always available"),
+        "kernel_mechanisation_roadmap" => cited(true, "verum_kernel mechanisation roadmap manifest", "mechanisation_roadmap: HTT + AR 1994 enumerations always available"),
  // -- MSFS self-containment ---------------------------------------
  // Backed by `mechanisation_roadmap::msfs_self_contained()` —
  // returns true iff zero AxiomCited + zero Pending in MSFS scope.
@@ -651,26 +720,26 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
  // canonical roster + IOU citations. The audit gate
  // (`verum audit --codegen-attestation`) cross-checks both
  // surfaces and reports per-pass discharge status.
-        "kernel_vbc_lowering_preserves_semantics" => decision(true, "CompCert simulation diagram (Leroy 2009 §5.2) — TypedAST → \
+        "kernel_vbc_lowering_preserves_semantics" => cited(true, "Leroy 2009 §5.2 (CompCert simulation diagram); core/verify/codegen_soundness/vbc_lowering.vr", "CompCert simulation diagram (Leroy 2009 §5.2) — TypedAST → \
                      VBC lowering preserves operational semantics; admitted \
                      with framework citation, see \
                      core/verify/codegen_soundness/vbc_lowering.vr"),
-        "kernel_ssa_construction_preserves_semantics" => decision(true, "Beringer-Stark CC 2002 §3 / Cytron et al TOPLAS 1991 — \
+        "kernel_ssa_construction_preserves_semantics" => cited(true, "Beringer-Stark CC 2002 §3; Cytron et al TOPLAS 1991; core/verify/codegen_soundness/ssa_construction.vr", "Beringer-Stark CC 2002 §3 / Cytron et al TOPLAS 1991 — \
                      SSA construction preserves operational semantics; admitted \
                      with framework citation, see \
                      core/verify/codegen_soundness/ssa_construction.vr"),
-        "kernel_register_allocation_preserves_semantics" => decision(true, "George-Appel TOPLAS 1996 §6 — register allocation preserves \
+        "kernel_register_allocation_preserves_semantics" => cited(true, "George-Appel TOPLAS 1996 §6; core/verify/codegen_soundness/register_allocation.vr", "George-Appel TOPLAS 1996 §6 — register allocation preserves \
                      observable behaviour; admitted with framework citation, see \
                      core/verify/codegen_soundness/register_allocation.vr"),
-        "kernel_linear_scan_regalloc_preserves_semantics" => decision(true, "Poletto-Sarkar TOPLAS 1999 §3 / Mössenböck CC 2002 §4 — \
+        "kernel_linear_scan_regalloc_preserves_semantics" => cited(true, "Poletto-Sarkar TOPLAS 1999 §3; Mossenbock CC 2002 §4; core/verify/codegen_soundness/linear_scan_regalloc.vr", "Poletto-Sarkar TOPLAS 1999 §3 / Mössenböck CC 2002 §4 — \
                      linear-scan regalloc preserves observable behaviour AND \
                      live-range monotonicity; admitted with framework citation, \
                      see core/verify/codegen_soundness/linear_scan_regalloc.vr"),
-        "kernel_llvm_emission_preserves_semantics" => decision(true, "Vellvm POPL 2012 §4-5 — LLVM IR emission preserves \
+        "kernel_llvm_emission_preserves_semantics" => cited(true, "Vellvm POPL 2012 §4-5; core/verify/codegen_soundness/llvm_emission.vr", "Vellvm POPL 2012 §4-5 — LLVM IR emission preserves \
                      operational semantics modulo LLVM-internal scheduling; \
                      admitted with framework citation, see \
                      core/verify/codegen_soundness/llvm_emission.vr"),
-        "kernel_machine_code_emission_preserves_semantics" => decision(true, "CompCertELF Wang-Wilke-Leroy POPL 2020 §6 + Leroy 2009 §6 \
+        "kernel_machine_code_emission_preserves_semantics" => cited(true, "Wang-Wilke-Leroy POPL 2020 §6 (CompCertELF); Leroy 2009 §6; core/verify/codegen_soundness/machine_code_emission.vr", "CompCertELF Wang-Wilke-Leroy POPL 2020 §6 + Leroy 2009 §6 \
                      external-call axiom — machine-code emission boundary \
                      attestation (LLVM-version pinning + ABI conformance); \
                      admitted with framework citation, see \
@@ -687,42 +756,42 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
  // the dispatcher returns `Decision { holds: true }` to make
  // the bidirectional contract surface in
  // `verum audit --kernel-discharged-axioms`.
-        "kernel_var" | "kernel_var_strict" => decision(true, "kernel_v0/k_var_sound: variable lookup — bookkeeping rule, no \
+        "kernel_var" | "kernel_var_strict" => cited(true, "core/verify/kernel_v0/rules/k_var.vr (bookkeeping rule, no upstream obligation)", "kernel_v0/k_var_sound: variable lookup — bookkeeping rule, no \
                      upstream proof obligation. See \
                      core/verify/kernel_v0/rules/k_var.vr."),
-        "kernel_universe_intro" | "kernel_universe_intro_strict" => decision(true, "kernel_v0/k_univ_sound: universe-introduction soundness — \
+        "kernel_universe_intro" | "kernel_universe_intro_strict" => cited(true, "core.verify.kernel_v0.lemmas.sub.cumulative_universe_inclusion; core/verify/kernel_v0/rules/k_univ.vr", "kernel_v0/k_univ_sound: universe-introduction soundness — \
                      U_n : U_{n+1} cumulative hierarchy. Discharged by \
                      core.verify.kernel_v0.lemmas.sub.cumulative_universe_inclusion. \
                      See core/verify/kernel_v0/rules/k_univ.vr."),
-        "kernel_forward_axiom" | "kernel_forward_axiom_strict" => decision(true, "kernel_v0/k_fwax_sound: forward-axiom witness import — relies on \
+        "kernel_forward_axiom" | "kernel_forward_axiom_strict" => cited(true, "foreign-system proof in its native theory (Coq/Lean/Isabelle/Agda); core/verify/kernel_v0/rules/k_fwax.vr", "kernel_v0/k_fwax_sound: forward-axiom witness import — relies on \
                      foreign-system proof of the axiom in its native theory \
                      (Coq/Lean/Isabelle/Agda mathlib). See \
                      core/verify/kernel_v0/rules/k_fwax.vr."),
-        "kernel_positivity" | "kernel_positivity_strict" => decision(true, "kernel_v0/k_pos_sound: strict-positivity check for inductive \
+        "kernel_positivity" | "kernel_positivity_strict" => cited(true, "core/verify/kernel_v0/rules/k_pos.vr", "kernel_v0/k_pos_sound: strict-positivity check for inductive \
                      types — Coquand-Huet 1988. Discharged by per-rule structural \
                      analysis. See core/verify/kernel_v0/rules/k_pos.vr."),
-        "kernel_pi_form" | "kernel_pi_form_strict" => decision(true, "kernel_v0/k_pi_form_sound: Π-formation rule. Discharged by \
+        "kernel_pi_form" | "kernel_pi_form_strict" => cited(true, "core/verify/kernel_v0/rules/k_pi.vr", "kernel_v0/k_pi_form_sound: Π-formation rule. Discharged by \
                      core.verify.kernel_v0.lemmas.subst.subst_preserves_typing. \
                      See core/verify/kernel_v0/rules/k_pi_form.vr."),
-        "kernel_lam_intro" | "kernel_lam_intro_strict" => decision(true, "kernel_v0/k_lam_intro_sound: λ-introduction rule. Discharged by \
+        "kernel_lam_intro" | "kernel_lam_intro_strict" => cited(true, "core/verify/kernel_v0/rules/k_lam.vr", "kernel_v0/k_lam_intro_sound: λ-introduction rule. Discharged by \
                      core.verify.kernel_v0.lemmas.cartesian.cartesian_closure_for_pi. \
                      See core/verify/kernel_v0/rules/k_lam_intro.vr."),
-        "kernel_app_elim" | "kernel_app_elim_strict" => decision(true, "kernel_v0/k_app_elim_sound: application-elimination rule. \
+        "kernel_app_elim" | "kernel_app_elim_strict" => cited(true, "core/verify/kernel_v0/rules/k_app.vr", "kernel_v0/k_app_elim_sound: application-elimination rule. \
                      Discharged by \
                      core.verify.kernel_v0.lemmas.subst.subst_preserves_typing + \
                      core.verify.kernel_v0.lemmas.beta.church_rosser_confluence. \
                      See core/verify/kernel_v0/rules/k_app_elim.vr."),
-        "kernel_beta" | "kernel_beta_strict" => decision(true, "kernel_v0/k_beta_sound: β-conversion soundness — (λx.b) a ↝_β \
+        "kernel_beta" | "kernel_beta_strict" => cited(true, "core/verify/kernel_v0/rules/k_beta.vr", "kernel_v0/k_beta_sound: β-conversion soundness — (λx.b) a ↝_β \
                      b[x:=a] preserves typing. Discharged by \
                      core.verify.kernel_v0.lemmas.beta.church_rosser_confluence. \
                      See core/verify/kernel_v0/rules/k_beta.vr."),
-        "kernel_eta" | "kernel_eta_strict" => decision(true, "kernel_v0/k_eta_sound: η-conversion soundness. Discharged by \
+        "kernel_eta" | "kernel_eta_strict" => cited(true, "core/verify/kernel_v0/rules/k_eta.vr", "kernel_v0/k_eta_sound: η-conversion soundness. Discharged by \
                      core.verify.kernel_v0.lemmas.eta.function_extensionality. \
                      See core/verify/kernel_v0/rules/k_eta.vr."),
-        "kernel_sub" | "kernel_sub_strict" => decision(true, "kernel_v0/k_sub_sound: subsumption rule. Discharged by \
+        "kernel_sub" | "kernel_sub_strict" => cited(true, "core/verify/kernel_v0/rules/k_sub.vr", "kernel_v0/k_sub_sound: subsumption rule. Discharged by \
                      core.verify.kernel_v0.lemmas.sub.cumulative_universe_inclusion. \
                      See core/verify/kernel_v0/rules/k_sub.vr."),
-        "kernel_soundness_v0" => decision(true, "kernel_v0/kernel_soundness: master soundness theorem. \
+        "kernel_soundness_v0" => cited(true, "core/verify/kernel_v0/soundness.vr — per-rule case split over the 10 k_*_sound lemmas", "kernel_v0/kernel_soundness: master soundness theorem. \
                      Discharged by per-rule case-split over the 10 k_*_sound \
                      lemmas. See core/verify/kernel_v0/soundness.vr."),
 
@@ -734,7 +803,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
  // invariant (6-variant HeapPredicate, 4-variant Capability);
  // the dispatcher returns `Decision { holds: true }` so the
  // audit gate counts the alignment as discharged.
-        "kernel_separation_logic_alignment_is_sound" => decision(true, "core/logic/separation.vr ↔ verum_kernel::separation_logic \
+        "kernel_separation_logic_alignment_is_sound" => cited(true, "verum_kernel::separation_logic::tests cardinality pins; core/verify/separation_soundness/separation_logic_alignment.vr", "core/logic/separation.vr ↔ verum_kernel::separation_logic \
                      structural alignment — CI-pinned via cardinality tests in \
                      verum_kernel::separation_logic::tests. See \
                      core/verify/separation_soundness/separation_logic_alignment.vr."),
@@ -882,7 +951,6 @@ pub fn available_intrinsics() -> &'static [&'static str] {
 /// Every non-architectural intrinsic name.
 const BASE_INTRINSICS: &[&str] = &[
         "kernel_yoneda_embedding",
-        "kernel_yoneda_embedding_bare",
         "kernel_identity_is_equivalence",
         "kernel_kan_extension",
         "kernel_straightening_equivalence",
@@ -1013,6 +1081,7 @@ mod tests {
         assert_eq!(
             IntrinsicValue::Decision {
                 holds: true,
+                evidence: Evidence::Computed,
                 reason: "x".into()
             }
             .as_bool(),
@@ -1069,13 +1138,6 @@ mod tests {
             dispatch_intrinsic("kernel_yoneda_embedding", &[]).is_none(),
             "ATTACK: no-args call must fail dispatch (no silent-true)"
         );
-    }
-
-    #[test]
-    fn yoneda_embedding_bare_back_compat() {
- // The _bare form is documented back-compat.
-        let r = dispatch_intrinsic("kernel_yoneda_embedding_bare", &[]).unwrap();
-        assert_eq!(r.as_bool(), Some(true));
     }
 
  // ----- Identity-is-equivalence -----

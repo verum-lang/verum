@@ -10,7 +10,7 @@
 use verum_kernel::arch_anti_pattern::AntiPatternCode;
 use verum_kernel::arch_probe::{ProbeOutcome, probe_table, run_all_probes, run_probe};
 use verum_kernel::intrinsic_dispatch::{
-    IntrinsicValue, available_intrinsics, dispatch_intrinsic, is_known_intrinsic,
+    Evidence, IntrinsicValue, available_intrinsics, dispatch_intrinsic, is_known_intrinsic,
 };
 
 /// Every architectural name the corpus can cite resolves. The eight
@@ -67,13 +67,20 @@ fn a_discharge_reflects_its_probes() {
     let value = dispatch_intrinsic("kernel_arch_cve_closure", &[])
         .expect("the CVE-closure discharge resolves");
     match value {
-        IntrinsicValue::Decision { holds, reason } => {
+        IntrinsicValue::Decision { holds, evidence, reason } => {
             assert_eq!(
                 run_probe(AntiPatternCode::CveIncomplete),
                 Some(ProbeOutcome::Discharged),
                 "precondition: the CVE-incomplete probe discharges"
             );
             assert!(holds, "the discharge must follow its probe; reason: {reason}");
+            assert_eq!(
+                evidence,
+                Evidence::Computed,
+                "an architectural discharge RUNS its checker, so its evidence is \
+                 computed — a citation here would mean the kernel took someone's word \
+                 for a property it can decide itself"
+            );
             assert!(
                 reason.contains("discharged by execution"),
                 "the reason must say the verdict was EXECUTED, not asserted: {reason}"
@@ -87,8 +94,9 @@ fn a_discharge_reflects_its_probes() {
     let value = dispatch_intrinsic("kernel_arch_anti_pattern_check", &[])
         .expect("the catalogue discharge resolves");
     match value {
-        IntrinsicValue::Decision { holds, reason } => {
+        IntrinsicValue::Decision { holds, evidence, reason } => {
             assert!(holds, "the catalogue discharge failed: {reason}");
+            assert_eq!(evidence, Evidence::Computed);
             let roster = probe_table().len();
             assert!(
                 reason.contains(&format!("{roster} probe(s)")),
@@ -115,8 +123,13 @@ fn no_architectural_discharge_is_evidence_free() {
 
     for name in available_intrinsics().iter().filter(|n| n.starts_with("kernel_arch_")) {
         match dispatch_intrinsic(name, &[]) {
-            Some(IntrinsicValue::Decision { holds, reason }) => {
+            Some(IntrinsicValue::Decision { holds, evidence, reason }) => {
                 assert!(holds, "`{name}` reports NOT discharged: {reason}");
+                assert!(
+                    evidence.is_computed(),
+                    "`{name}` answered with cited evidence ({evidence:?}) — every \
+                     architectural property is decidable here and must be decided here"
+                );
                 assert!(
                     reason.contains("probe(s) ran against the live checkers")
                         || reason.contains("structural claim DISCHARGED"),
