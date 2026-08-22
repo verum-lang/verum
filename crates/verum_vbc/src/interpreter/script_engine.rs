@@ -495,6 +495,13 @@ impl ScriptEngine {
         self.cancel.store(true, Ordering::SeqCst);
     }
 
+    /// A cloneable handle to this engine's interrupt flag, for a host
+    /// that moves the engine into a worker thread and cancels from
+    /// outside (store `true` = request cooperative stop).
+    pub fn interrupt_handle(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.cancel.clone()
+    }
+
     /// Clear a pending interrupt so the engine can be reused.
     pub fn clear_interrupt(&self) {
         self.cancel.store(false, Ordering::SeqCst);

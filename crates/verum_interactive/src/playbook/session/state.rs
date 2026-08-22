@@ -336,10 +336,33 @@ impl SessionState {
     /// engine and distribute outputs: each executed cell gets its
     /// stdout segment; the target cell also gets the run's value and
     /// price; the VARS tail refreshes the Vars lens.
+    /// The grown-module question for the SYNC path (tests, replay).
+    /// The interactive path prepares the same question, runs it on a
+    /// worker engine, and applies the same outcome — one carrier.
     fn run_notebook_upto(&mut self, upto: usize) -> Result<(), Text> {
+        let Some((source, indices)) = self.prepare_notebook_run(upto) else {
+            return Ok(());
+        };
+        let started = std::time::Instant::now();
+        let outcome = run_grown_module(&mut self.engine, &source);
+        let elapsed = started.elapsed();
+        self.apply_notebook_outcome(&indices, outcome, elapsed)
+    }
+
+    /// The last run's top-level bindings (name, rendered value),
+    /// machinery names filtered — the Vars lens / completion feed.
+    pub fn var_previews_iter(&self) -> impl Iterator<Item = &(String, String)> {
+        self.var_previews
+            .iter()
+            .filter(|(n, _)| n != "__vrnb_result")
+    }
+
+    /// Build the grown module up to `upto`; None when there is
+    /// nothing to run.
+    pub fn prepare_notebook_run(&self, upto: usize) -> Option<(String, Vec<usize>)> {
         let (source, indices) = self.chain_source_upto(upto);
         if indices.is_empty() {
-            return Ok(());
+            return None;
         }
         // Diagnostic tap: VERUM_NB_DEBUG=1 prints the exact grown
         // module the engine will compile — the first question when a
@@ -347,32 +370,19 @@ impl SessionState {
         if std::env::var("VERUM_NB_DEBUG").is_ok() {
             eprintln!("[nb-module]\n{source}[/nb-module]");
         }
+        Some((source, indices))
+    }
+
+    /// Distribute one run's outcome over the cells (stdout segments,
+    /// target value, price, VARS channel).
+    pub fn apply_notebook_outcome(
+        &mut self,
+        indices: &[usize],
+        outcome: verum_vbc::interpreter::ScriptOutcome,
+        elapsed: std::time::Duration,
+    ) -> Result<(), Text> {
         self.execution_count += 1;
         let count = self.execution_count;
-
-        let started = std::time::Instant::now();
-        // Script-mode sources compile to a `__verum_script_main`
-        // wrapper; a notebook whose cells define their own `fn main`
-        // (a module-shaped notebook) has no wrapper — try both.
-        let outcome = match self.engine.compile(&source) {
-            Ok(module) => {
-                let out =
-                    self.engine
-                        .run_to_outcome(module.clone(), "__verum_script_main", &[]);
-                match &out.error {
-                    Some(verum_vbc::interpreter::ScriptError::EntryNotFound(_)) => {
-                        self.engine.run_to_outcome(module, "main", &[])
-                    }
-                    _ => out,
-                }
-            }
-            Err(error) => verum_vbc::interpreter::ScriptOutcome {
-                value: verum_vbc::interpreter::ScriptValueOwned::Nil,
-                error: Some(error),
-                stdout: String::new(),
-            },
-        };
-        let elapsed = started.elapsed();
 
         // Split stdout into per-cell segments by the cell marks.
         let mut segments: Vec<String> = vec![String::new(); indices.len()];
@@ -418,7 +428,7 @@ impl SessionState {
             .collect();
 
         // Distribute outputs.
-        let target = *indices.last().expect("nonempty");
+        let target = *indices.last().expect("nonempty indices");
         for (seg_pos, &cell_idx) in indices.iter().enumerate() {
             let seg = segments[seg_pos].trim_end_matches('\n');
             let is_target = cell_idx == target;
@@ -750,6 +760,33 @@ fn top_level_let_names(source: &str) -> Vec<String> {
     }
     out.reverse();
     out
+}
+
+/// Compile and run a grown module on `engine`: script-mode sources
+/// compile to a `__verum_script_main` wrapper; a module-shaped
+/// notebook (cells defining their own `fn main`) has no wrapper —
+/// try both. Free function so the interactive worker thread can own
+/// a throwaway engine.
+pub fn run_grown_module(
+    engine: &mut verum_vbc::interpreter::ScriptEngine,
+    source: &str,
+) -> verum_vbc::interpreter::ScriptOutcome {
+    match engine.compile(source) {
+        Ok(module) => {
+            let out = engine.run_to_outcome(module.clone(), "__verum_script_main", &[]);
+            match &out.error {
+                Some(verum_vbc::interpreter::ScriptError::EntryNotFound(_)) => {
+                    engine.run_to_outcome(module, "main", &[])
+                }
+                _ => out,
+            }
+        }
+        Err(error) => verum_vbc::interpreter::ScriptOutcome {
+            value: verum_vbc::interpreter::ScriptValueOwned::Nil,
+            error: Some(error),
+            stdout: String::new(),
+        },
+    }
 }
 
 /// REPL idiom normalization: a lone `let x = 41` (no trailing `;`)

@@ -9,4 +9,4 @@ mod cell;
 mod state;
 
 pub use cell::{Cell, CellId, CellKind, CellOutput, TensorStats};
-pub use state::SessionState;
+pub use state::{SessionState, run_grown_module};

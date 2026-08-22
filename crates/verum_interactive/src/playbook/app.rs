@@ -131,14 +131,13 @@ pub struct PlaybookApp {
 /// Message from worker thread back to UI.
 #[allow(clippy::large_enum_variant)]
 enum AsyncExecMsg {
-    Done {
-        output: CellOutput,
-        context: crate::execution::ExecutionContext,
-        instructions: u64,
-        peak_stack: usize,
-        time_ms: f64,
+    /// One grown-module run finished (T0858): the outcome distributes
+    /// over cells via SessionState::apply_notebook_outcome.
+    NotebookDone {
+        indices: Vec<usize>,
+        outcome: verum_vbc::interpreter::ScriptOutcome,
+        elapsed: std::time::Duration,
     },
-    Error(String),
 }
 
 impl PlaybookApp {
@@ -201,42 +200,30 @@ impl PlaybookApp {
         };
 
         match rx.try_recv() {
-            Ok(AsyncExecMsg::Done {
-                output,
-                context,
-                instructions,
-                peak_stack,
-                time_ms,
+            Ok(AsyncExecMsg::NotebookDone {
+                indices,
+                outcome,
+                elapsed,
             }) => {
                 let cell_idx = self.pending_cell_idx.unwrap_or(0);
-                self.session.execution_context = context;
-                self.session.execution_count += 1;
-                let count = self.session.execution_count;
-                if cell_idx < self.session.cells.len() {
-                    self.session.cells[cell_idx].set_output(output, count);
-                }
+                let time_ms = elapsed.as_secs_f64() * 1000.0;
+                let verdict = self
+                    .session
+                    .apply_notebook_outcome(&indices, outcome, elapsed);
                 self.last_exec_time_ms = time_ms;
-                self.last_instructions = instructions;
-                self.last_peak_stack = peak_stack;
-                self.session.last_instructions = instructions;
-                self.session.last_peak_stack = peak_stack;
-                self.mark_dependents_dirty();
-                self.status_message = Some(format!("Done ({:.1}ms)", time_ms));
-                self.journal_push(format!(
-                    "run cell {} ({time_ms:.1}ms)",
-                    cell_idx + 1
-                ));
-                self.cleanup_pending();
-            }
-            Ok(AsyncExecMsg::Error(e)) => {
-                let cell_idx = self.pending_cell_idx.unwrap_or(0);
-                self.session.execution_count += 1;
-                let count = self.session.execution_count;
-                if cell_idx < self.session.cells.len() {
-                    self.session.cells[cell_idx].set_output(CellOutput::error(e.clone()), count);
+                match verdict {
+                    Ok(()) => {
+                        self.status_message = Some(format!("Done ({time_ms:.1}ms)"));
+                        self.journal_push(format!(
+                            "run cell {} ({time_ms:.1}ms)",
+                            cell_idx + 1
+                        ));
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Error: {e}"));
+                        self.journal_push(format!("run cell {} error", cell_idx + 1));
+                    }
                 }
-                self.status_message = Some(format!("Error: {}", e));
-                self.journal_push(format!("run cell {} error", cell_idx + 1));
                 self.cleanup_pending();
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {
@@ -633,13 +620,7 @@ impl PlaybookApp {
 
                             let mut candidates: Vec<String> = Vec::new();
                             // From execution context bindings
-                            for name in self.session.execution_context.binding_names() {
-                                if name.as_str().starts_with(&partial) {
-                                    candidates.push(name.to_string());
-                                }
-                            }
-                            // From execution context functions
-                            for name in self.session.execution_context.function_names() {
+                            for (name, _) in self.session.var_previews_iter() {
                                 if name.as_str().starts_with(&partial) {
                                     candidates.push(name.to_string());
                                 }
@@ -756,97 +737,32 @@ impl PlaybookApp {
 
         let cell_idx = self.session.selected_cell;
         let cell_id = self.session.current_cell().id;
-        let source = self.session.current_cell().source.clone();
         self.previous_cell_sources
-            .insert(cell_id, source.to_string());
+            .insert(cell_id, self.session.current_cell().source.to_string());
 
-        // Clone state for the worker thread
-        let context = self.session.execution_context.clone();
-        let line_number = cell_idx + 1;
-        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let cancel_clone = cancel_flag.clone();
+        // The grown-module question, prepared on the UI thread; a
+        // throwaway engine runs it on the worker (the compiler and
+        // archive caches are process-wide, so per-run engines are
+        // cheap), and its interrupt handle IS the cancel flag.
+        let Some((source, indices)) = self.session.prepare_notebook_run(cell_idx) else {
+            return;
+        };
+        let mut engine = verum_vbc::interpreter::ScriptEngine::new()
+            .allow_file_io()
+            .allow_network()
+            .allow_process();
+        let cancel_flag = engine.interrupt_handle();
 
         let (tx, rx) = std::sync::mpsc::channel();
-
         let thread = std::thread::spawn(move || {
-            use crate::ExecutionPipeline;
-
-            let mut pipeline = ExecutionPipeline::new();
-            let mut ctx = context;
-            let start = Instant::now();
-
-            // Compile
-            let compiled = match pipeline.compile(source.as_str(), line_number) {
-                Ok(c) => c,
-                Err(e) => {
-                    let _ = tx.send(AsyncExecMsg::Error(e.to_string()));
-                    return;
-                }
-            };
-
-            // Set cancel flag on the interpreter (via pipeline.execute)
-            // We need to modify the interpreter's config inside execute()
-            // For now, set it via a wrapper
-            let result = {
-                // Execute — the pipeline's execute() creates an Interpreter internally.
-                // We set max_instructions as before; cancel_flag is checked in dispatch loop.
-                // To pass cancel_flag, we need pipeline.execute to accept it.
-                // Simpler: use compile_and_execute_for_cell which calls execute internally.
-                pipeline.compile_and_execute_for_cell(
-                    source.as_str(),
-                    line_number,
-                    &mut ctx,
-                    cell_id,
-                )
-            };
-
-            let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-
-            match result {
-                Ok(output) => {
-                    use crate::playbook::session::CellOutput;
-
-                    let mut outputs = Vec::new();
-                    if !output.stdout.is_empty() || !output.stderr.is_empty() {
-                        outputs.push(CellOutput::stream_with_stderr(
-                            output.stdout.clone(),
-                            output.stderr.clone(),
-                        ));
-                    }
-                    if let Some(value) = output.value {
-                        outputs.push(CellOutput::value_with_raw(
-                            output.display.clone(),
-                            output.type_info.clone(),
-                            value,
-                        ));
-                    } else if !output.display.is_empty()
-                        && output.display.as_str() != "()"
-                        && output.type_info.as_str() != "()"
-                    {
-                        outputs.push(CellOutput::value(
-                            output.display.clone(),
-                            output.type_info.clone(),
-                        ));
-                    }
-
-                    let cell_output = match outputs.len() {
-                        0 => CellOutput::Empty,
-                        1 => outputs.pop().unwrap(),
-                        _ => CellOutput::multi(outputs),
-                    };
-
-                    let _ = tx.send(AsyncExecMsg::Done {
-                        output: cell_output,
-                        context: ctx,
-                        instructions: output.instructions_executed,
-                        peak_stack: output.peak_stack_depth,
-                        time_ms: elapsed_ms,
-                    });
-                }
-                Err(e) => {
-                    let _ = tx.send(AsyncExecMsg::Error(e.to_string()));
-                }
-            }
+            let started = Instant::now();
+            let outcome =
+                crate::playbook::session::run_grown_module(&mut engine, &source);
+            let _ = tx.send(AsyncExecMsg::NotebookDone {
+                indices,
+                outcome,
+                elapsed: started.elapsed(),
+            });
         });
 
         self.pending_rx = Some(rx);
@@ -858,38 +774,15 @@ impl PlaybookApp {
         self.status_message = Some(format!("⏳ Running cell {}...", cell_idx + 1));
     }
 
-    /// Mark cells that depend on the current cell's bindings as dirty.
+    /// In the recompute-from-source model every code cell AFTER the
+    /// executed one shows output from an older question — mark them
+    /// stale wholesale (the old binding-dependency graph belonged to
+    /// the retired execution bridge).
     fn mark_dependents_dirty(&mut self) {
-        let cell_id = self.session.current_cell().id;
-        // Collect binding names defined by the current cell
-        let defined: Vec<verum_common::Text> = self
-            .session
-            .execution_context
-            .bindings
-            .iter()
-            .filter(|(_, info)| info.defined_in == cell_id)
-            .map(|(name, _)| name.clone())
-            .collect();
-
-        // Find all cells that use those bindings and mark them dirty
-        for binding_name in &defined {
-            let dependents = self
-                .session
-                .execution_context
-                .dependencies
-                .dependents(binding_name)
-                .to_vec();
-            for dep_id in dependents {
-                if dep_id != cell_id
-                    && let Some((_, cell)) = self
-                        .session
-                        .cells
-                        .iter_mut()
-                        .enumerate()
-                        .find(|(_, c)| c.id == dep_id)
-                {
-                    cell.dirty = true;
-                }
+        let after = self.session.selected_cell + 1;
+        for cell in self.session.cells.iter_mut().skip(after) {
+            if cell.output.is_some() {
+                cell.dirty = true;
             }
         }
     }
@@ -982,13 +875,12 @@ impl PlaybookApp {
                 self.status_message = Some("Cells merged".to_string());
             }
             Some("deps") => {
-                let cell_id = self.session.current_cell().id;
+                // Recompute model: a cell's effective inputs are ALL
+                // bindings of the module above it — list the run's
+                // top-level bindings instead of a per-cell graph.
                 let defined: Vec<String> = self
                     .session
-                    .execution_context
-                    .bindings
-                    .iter()
-                    .filter(|(_, info)| info.defined_in == cell_id)
+                    .var_previews_iter()
                     .map(|(name, _)| name.to_string())
                     .collect();
                 if defined.is_empty() {
@@ -1896,8 +1788,8 @@ impl PlaybookApp {
             markdown_cells: md_count,
             executed_count: exec_count,
             error_count: err_count,
-            binding_count: self.session.execution_context.bindings.len(),
-            function_count: self.session.execution_context.functions.len(),
+            binding_count: self.session.var_previews_iter().count(),
+            function_count: 0,
             last_cell_source: self
                 .session
                 .current_cell()
