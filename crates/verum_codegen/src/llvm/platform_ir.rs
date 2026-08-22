@@ -3312,10 +3312,8 @@ impl<'ctx> PlatformIR<'ctx> {
     ///     metadata: i64, offset_from_base: u32, reserved: u32 } = 32 bytes
     /// The check stubs below only read the first 3 fields (offsets 0/8/12)
     /// which are common to both shapes, so a single emit handles both.
-    /// AllocationHeader: 8 bytes before pointer (generation u32 + caps u32 packed).
-    ///
-    /// These are performance stubs — real CBGR checks will be re-enabled when
-    /// the full header layout is migrated.
+    /// AllocationHeader: the canonical 32-byte header before the user
+    /// pointer (`verum_common::layout::ALLOCATION_HEADER_*`).
     fn emit_cbgr_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
@@ -3725,12 +3723,13 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // ====================================================================
         // Real CBGR validation — generational + epoch checks
+        // (header offsets are the canonical verum_common::layout ones)
         // ====================================================================
         //
 
         // AllocationHeader layout (32 bytes before user pointer):
-        //  offset 0: generation (i32)
-        //  offset 4: epoch (i16) + capabilities (i16)
+        //  generation @ 8 (i32)     — canonical layout
+        //  epoch      @ 12 (i16), capabilities @ 14 (i16)
         //
 
         // ThinRef layout: { ptr: i64, generation: i32, epoch_and_caps: i32 }
@@ -3787,21 +3786,44 @@ impl<'ctx> PlatformIR<'ctx> {
                     .build_int_to_ptr(header_ptr_int, ptr_type, "header_ptr")
                     .or_llvm_err()?;
 
-                // Load actual_gen from header offset 0 (i32)
+                // Load actual_gen from the canonical gen@8 slot. This
+                // function used to read gen@0/epoch@4 — an arrangement
+                // shared only with create_thin_ref, under which the
+                // "epoch" compared was the low half of the allocation
+                // SIZE both times: the epoch check passed vacuously and
+                // an epoch revocation was invisible to Tier-1 (T0846
+                // layer 2).
+                let i8_type = ctx.i8_type();
+                // SAFETY: fixed in-header offset within the 32-byte header.
+                let gen_ptr = unsafe {
+                    builder
+                        .build_in_bounds_gep(
+                            i8_type,
+                            header_ptr,
+                            &[i64_type.const_int(
+                                verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET,
+                                false,
+                            )],
+                            "gen_ptr",
+                        )
+                        .or_llvm_err()?
+                };
                 let actual_gen = builder
-                    .build_load(i32_type, header_ptr, "actual_gen")
+                    .build_load(i32_type, gen_ptr, "actual_gen")
                     .or_llvm_err()?
                     .into_int_value();
 
-                // Load actual_epoch from header offset 4 (i16)
-                let i8_type = ctx.i8_type();
-                // SAFETY: GEP into the CBGR header to access the epoch field at a fixed offset; the header layout is defined by the allocator
+                // Load actual_epoch from the canonical epoch@12 slot
+                // SAFETY: fixed in-header offset within the 32-byte header.
                 let epoch_ptr = unsafe {
                     builder
                         .build_in_bounds_gep(
                             i8_type,
                             header_ptr,
-                            &[i64_type.const_int(4, false)],
+                            &[i64_type.const_int(
+                                verum_common::layout::ALLOCATION_HEADER_EPOCH_OFFSET,
+                                false,
+                            )],
                             "epoch_ptr",
                         )
                         .or_llvm_err()?

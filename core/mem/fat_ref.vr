@@ -298,21 +298,34 @@ implement<T> FatRef<T> {
     /// Get pointer to base of allocation (before any offset).
     @inline
     fn base_ptr(&self) -> &unsafe Byte {
-        ptr_offset(self.ptr, -(self.offset_from_base as Int))
+        // BYTE arithmetic through Int, deliberately NOT ptr_offset:
+        // the runtime PtrSub/PtrAdd family element-scales its offset
+        // by 8 even for Byte pointees (T0452 class), so
+        // `ptr_offset(ptr, -HEADER_SIZE)` reached ptr-256, not ptr-32
+        // (T0425 defect #1). An Int add/sub has no element to scale.
+        ((self.ptr as Int) - (self.offset_from_base as Int)) as &unsafe Byte
     }
 
     /// Get pointer to allocation header at base.
     @inline
     public unsafe fn base_header(&self) -> &unsafe AllocationHeader {
-        let base = self.base_ptr();
-        ptr_offset(base, -HEADER_SIZE) as &unsafe AllocationHeader
+        // BYTE arithmetic through Int, deliberately NOT ptr_offset:
+        // the runtime PtrSub/PtrAdd family element-scales its offset
+        // by 8 even for Byte pointees (T0452 class), so
+        // `ptr_offset(ptr, -HEADER_SIZE)` reached ptr-256, not ptr-32
+        // (T0425 defect #1). An Int add/sub has no element to scale.
+        ((self.base_ptr() as Int) - HEADER_SIZE) as &unsafe AllocationHeader
     }
 
     /// Get mutable header at base.
     @inline
     public unsafe fn base_header_mut(&self) -> &unsafe mut AllocationHeader {
-        let base = self.base_ptr();
-        ptr_offset(base, -HEADER_SIZE) as &unsafe mut AllocationHeader
+        // BYTE arithmetic through Int, deliberately NOT ptr_offset:
+        // the runtime PtrSub/PtrAdd family element-scales its offset
+        // by 8 even for Byte pointees (T0452 class), so
+        // `ptr_offset(ptr, -HEADER_SIZE)` reached ptr-256, not ptr-32
+        // (T0425 defect #1). An Int add/sub has no element to scale.
+        ((self.base_ptr() as Int) - HEADER_SIZE) as &unsafe mut AllocationHeader
     }
 
     // =========================================================================

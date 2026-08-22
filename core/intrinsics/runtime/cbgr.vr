@@ -127,9 +127,11 @@ public unsafe fn cbgr_invalidate(user_ptr: Int);
 @intrinsic("cbgr_epoch_begin")
 public fn cbgr_epoch_begin() -> Int;
 
-/// Get the current global epoch.  Lock-free atomic read.
-@intrinsic("cbgr_get_epoch")
-public fn cbgr_get_epoch() -> Int;
+// `cbgr_get_epoch` is deliberately GONE. It was a second name for
+// `cbgr_current_epoch` (SECTION 2 above) with zero callers, no
+// registry entry and no handler on either tier — a declaration whose
+// only effect was to be a third description of one concept. One
+// concept, one name (T0846).
 
 /// Advance the global generation counter — invalidates ALL
 /// outstanding references with the previous generation.  Heavy

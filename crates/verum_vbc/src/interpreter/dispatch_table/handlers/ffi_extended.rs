@@ -1874,6 +1874,52 @@ unsafe {
             Ok(DispatchResult::Continue)
         }
 
+        Some(SystemSubOpcode::CbgrGetHeader) => {
+            // get_header_from_ptr(user_ptr): recover the CBGR AllocationHeader
+            // that precedes user data by a FIXED ALLOCATION_HEADER_SIZE bytes.
+            // Format: dst:reg, ptr:reg  (exactly 2 regs — NOT PtrSub's 3).
+            //
+            // Mirrors `AllocationHeader.from_user_ptr` (core/mem/header.vr).
+            // The offset is a fixed 32-byte constant, NOT element-scaled —
+            // distinct from PtrSub (0x64), whose byte this lowering used to
+            // squat (T0425).
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+
+            let addr = value_as_addr(state.get_reg(ptr_reg));
+            let header_addr = addr
+                .checked_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize)
+                .ok_or(InterpreterError::IntegerOverflow {
+                    operation: "CbgrGetHeader",
+                })?;
+            // Int-tagged address — same rationale as PtrSub/PtrAdd: a
+            // pointer-tagged interior address becomes a droppable-looking
+            // heap object and DropRef chases bytes as a header.
+            state.set_reg(dst, Value::from_i64(header_addr as i64));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(SystemSubOpcode::CbgrGetGeneration) => {
+            // cbgr_get_generation(user_ptr): *(u32*)(ptr - 32 + gen@8).
+            // Format: dst:reg, ptr:reg.
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+
+            let addr = value_as_addr(state.get_reg(ptr_reg));
+            let gen_addr = addr
+                .checked_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize)
+                .map(|h| h + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
+                .ok_or(InterpreterError::IntegerOverflow {
+                    operation: "CbgrGetGeneration",
+                })?;
+            // SAFETY: the caller contract (unsafe intrinsic) requires a
+            // live CBGR user pointer; the header precedes it by
+            // construction of both tiers' allocators.
+            let generation = unsafe { *(gen_addr as *const u32) };
+            state.set_reg(dst, Value::from_i64(generation as i64));
+            Ok(DispatchResult::Continue)
+        }
+
         Some(SystemSubOpcode::PtrDiff) => {
             // Pointer difference: compute distance in bytes
             // Format: dst:reg, ptr1:reg, ptr2:reg
@@ -3963,14 +4009,10 @@ unsafe {
             // `raw_size` arrives as i64 from the Verum register file.
             const MAX_ALLOC: i64 = verum_common::layout::MAX_ALLOCATION_SIZE as i64;
             if raw_size <= 0 || raw_size > MAX_ALLOC || raw_align <= 0 || raw_align > 4096 {
-                // Build an Err(nil) variant via the canonical Result
-                // builder so the layout matches `MakeVariant` exactly
-                // and destructuring `Err(_)` fires cleanly in user code.
-                let err_val = super::method_dispatch::make_result_variant(
-                    state,
-                    verum_common::well_known_types::result_error_tag(),
-                    Value::nil(),
-                )?;
+                // A rejected size/align is `Err(AllocError.InvalidSize)`
+                // with the offending size as the payload field — a real
+                // error value whose `.message()` works.
+                let err_val = make_alloc_err(state, ALLOC_ERR_INVALID_SIZE, raw_size)?;
                 state.set_reg(dst, err_val);
                 return Ok(DispatchResult::Continue);
             }
@@ -3990,21 +4032,12 @@ unsafe {
                 cbgr_user_allocate(state, raw_size, raw_align)
             };
             if ptr == 0 {
-                // Out of memory is an `Err`, not a bare nil. The old
-                // comment here claimed a nil makes `Err(e) => ...` fire
-                // — it does not: a nil is not a Result variant, so the
-                // caller's match read it AS one, which is the same
-                // category of lie the Tier-1 arm told with its raw
-                // pointer (T0844). The realloc handler below was
-                // already fixed to a real variant under T0463; this is
-                // its sibling. Payload stays nil — constructing the
-                // precise AllocError needs the module's type tables,
-                // which this handler does not consult (ledger row).
-                let err_val = super::method_dispatch::make_result_variant(
-                    state,
-                    verum_common::well_known_types::result_error_tag(),
-                    Value::nil(),
-                )?;
+                // Out of memory is `Err(AllocError.OutOfMemory{requested})`
+                // — a real two-level variant. The ledger row that said
+                // "payload stays nil because this handler does not
+                // consult the type tables" is discharged: the type index
+                // resolves `AllocError` in O(1).
+                let err_val = make_alloc_err(state, ALLOC_ERR_OUT_OF_MEMORY, raw_size)?;
                 state.set_reg(dst, err_val);
                 return Ok(DispatchResult::Continue);
             }
@@ -4375,11 +4408,7 @@ unsafe {
             let raw_align = state.get_reg(align_reg).as_integer_compatible();
             const MAX_ALLOC: i64 = verum_common::layout::MAX_ALLOCATION_SIZE as i64;
             if new_size <= 0 || new_size > MAX_ALLOC || raw_align <= 0 || raw_align > 4096 {
-                let err_val = super::method_dispatch::make_result_variant(
-                    state,
-                    verum_common::well_known_types::result_error_tag(),
-                    Value::nil(),
-                )?;
+                let err_val = make_alloc_err(state, ALLOC_ERR_INVALID_SIZE, new_size)?;
                 state.set_reg(dst, err_val);
                 return Ok(DispatchResult::Continue);
             }
@@ -4396,12 +4425,9 @@ unsafe {
             };
             if ptr == 0 {
                 // The .vr contract is Result<(ptr, gen, epoch), AllocError> —
-                // a bare nil here desynced the caller's match (T0463).
-                let err_val = super::method_dispatch::make_result_variant(
-                    state,
-                    verum_common::well_known_types::result_error_tag(),
-                    Value::nil(),
-                )?;
+                // a bare nil desynced the caller's match (T0463), and an
+                // Err(nil) payload exploded on `e.message()` (T0846).
+                let err_val = make_alloc_err(state, ALLOC_ERR_OUT_OF_MEMORY, new_size)?;
                 state.set_reg(dst, err_val);
                 return Ok(DispatchResult::Continue);
             }
@@ -4600,6 +4626,44 @@ fn value_as_addr(v: Value) -> usize {
 /// side tables (this is also what lets the interpreter FREE bridge memory
 /// instead of the leak-over-double-free policy the internal CbgrDealloc op
 /// is forced into).
+/// Build `Err(AllocError.<variant>{field})` the way user code expects it:
+/// a REAL two-level variant, not an `Err(nil)` whose payload explodes on
+/// `e.message()`. The AllocError payload is a 1-field record variant
+/// anchored to the RESOLVED `AllocError` type id, so method dispatch on
+/// the error value finds `AllocError.message` (T0846 layer 2 — the
+/// nil-payload row of the ledger).
+///
+/// Falls back to `Err(nil)` only when the `AllocError` type is not in
+/// the module's type index (a no-stdlib module compiled without the
+/// declaring type) — the OLD behaviour, now the exception with a stated
+/// reason instead of the rule.
+fn make_alloc_err(
+    state: &mut InterpreterState,
+    variant_tag: u32,
+    field_value: i64,
+) -> InterpreterResult<Value> {
+    let payload = match super::heap_helpers::lookup_type_id_by_name(state, "AllocError") {
+        Some(type_id) => super::method_dispatch::alloc_variant_with_payload(
+            state,
+            type_id,
+            variant_tag,
+            Value::from_i64(field_value),
+        )?,
+        None => Value::nil(),
+    };
+    super::method_dispatch::make_result_variant(
+        state,
+        verum_common::well_known_types::result_error_tag(),
+        payload,
+    )
+}
+
+/// `AllocError` variant tags, by declaration order in
+/// `core/mem/allocator.vr` (`OutOfMemory | InvalidSize |
+/// InvalidAlignment | ...`).
+const ALLOC_ERR_OUT_OF_MEMORY: u32 = 0;
+const ALLOC_ERR_INVALID_SIZE: u32 = 1;
+
 fn cbgr_user_allocate(state: &mut InterpreterState, raw_size: i64, raw_align: i64) -> i64 {
     use verum_common::layout as l;
     const MAX_ALLOC: i64 = verum_common::layout::MAX_ALLOCATION_SIZE as i64;
@@ -4629,15 +4693,16 @@ fn cbgr_user_allocate(state: &mut InterpreterState, raw_size: i64, raw_align: i6
     // by construction of the slack budget above.
     unsafe {
         *((header_addr + l::ALLOCATION_HEADER_SIZE_OFFSET as usize) as *mut u32) = size as u32;
-        *((header_addr + l::ALLOCATION_HEADER_ALIGNMENT_OFFSET as usize) as *mut u32) =
-            align as u32;
+        *((header_addr + l::ALLOCATION_HEADER_ALIGNMENT_OFFSET as usize) as *mut u16) =
+            align as u16;
+        *((header_addr + l::ALLOCATION_HEADER_BASE_OFFSET_OFFSET as usize) as *mut u16) =
+            (header_addr - base_addr) as u16;
         *((header_addr + l::ALLOCATION_HEADER_GENERATION_OFFSET as usize) as *mut u32) = 1;
         *((header_addr + l::ALLOCATION_HEADER_EPOCH_OFFSET as usize) as *mut u16) =
             state.cbgr_epoch as u16;
         *((header_addr + l::ALLOCATION_HEADER_FLAGS_OFFSET as usize) as *mut u32) = 0;
-        *((header_addr + l::ALLOCATION_HEADER_RESERVED_OFFSET as usize) as *mut u32) =
-            (header_addr - base_addr) as u32;
-        *((header_addr + l::ALLOCATION_HEADER_RESERVED_OFFSET as usize + 4) as *mut u32) =
+        *((header_addr + l::ALLOCATION_HEADER_REF_COUNT_OFFSET as usize) as *mut u32) = 1;
+        *((header_addr + l::ALLOCATION_HEADER_TOTAL_OFFSET as usize) as *mut u32) =
             total as u32;
     }
     state.cbgr_allocations.insert(header_addr);
@@ -4754,9 +4819,9 @@ fn cbgr_user_deallocate(state: &mut InterpreterState, user: i64) {
     unsafe {
         let flags_ptr = (header_addr + l::ALLOCATION_HEADER_FLAGS_OFFSET as usize) as *mut u32;
         *flags_ptr |= verum_common::cbgr::flags::FREED;
-        let base_offset = *((header_addr + l::ALLOCATION_HEADER_RESERVED_OFFSET as usize)
-            as *const u32) as usize;
-        let total = *((header_addr + l::ALLOCATION_HEADER_RESERVED_OFFSET as usize + 4)
+        let base_offset = *((header_addr + l::ALLOCATION_HEADER_BASE_OFFSET_OFFSET as usize)
+            as *const u16) as usize;
+        let total = *((header_addr + l::ALLOCATION_HEADER_TOTAL_OFFSET as usize)
             as *const u32) as usize;
         if total > 0 && base_offset <= header_addr {
             let base = (header_addr - base_offset) as *mut u8;
@@ -4785,7 +4850,7 @@ fn cbgr_user_realloc(state: &mut InterpreterState, user: i64, new_size: i64) -> 
     let (old_size, align) = unsafe {
         (
             *((header_addr + l::ALLOCATION_HEADER_SIZE_OFFSET as usize) as *const u32) as i64,
-            *((header_addr + l::ALLOCATION_HEADER_ALIGNMENT_OFFSET as usize) as *const u32) as i64,
+            *((header_addr + l::ALLOCATION_HEADER_ALIGNMENT_OFFSET as usize) as *const u16) as i64,
         )
     };
     let new_user = cbgr_user_allocate(state, new_size, align);

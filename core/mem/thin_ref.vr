@@ -573,8 +573,12 @@ implement<T> ThinRef<T> {
     /// Reference must be non-null and have valid header at offset -32.
     @inline
     public unsafe fn header(&self) -> &unsafe AllocationHeader {
-        let raw = self.ptr as &unsafe Byte;
-        ptr_offset(raw, -HEADER_SIZE) as &unsafe AllocationHeader
+        // BYTE arithmetic through Int, deliberately NOT ptr_offset:
+        // the runtime PtrSub/PtrAdd family element-scales its offset
+        // by 8 even for Byte pointees (T0452 class), so
+        // `ptr_offset(ptr, -HEADER_SIZE)` reached ptr-256, not ptr-32
+        // (T0425 defect #1). An Int add/sub has no element to scale.
+        ((self.ptr as Int) - HEADER_SIZE) as &unsafe AllocationHeader
     }
 
     /// Get mutable header reference.
@@ -586,8 +590,12 @@ implement<T> ThinRef<T> {
     /// Reference must be non-null and caller must have exclusive access.
     @inline
     public unsafe fn header_mut(&self) -> &unsafe mut AllocationHeader {
-        let raw = self.ptr as &unsafe Byte;
-        ptr_offset(raw, -HEADER_SIZE) as &unsafe mut AllocationHeader
+        // BYTE arithmetic through Int, deliberately NOT ptr_offset:
+        // the runtime PtrSub/PtrAdd family element-scales its offset
+        // by 8 even for Byte pointees (T0452 class), so
+        // `ptr_offset(ptr, -HEADER_SIZE)` reached ptr-256, not ptr-32
+        // (T0425 defect #1). An Int add/sub has no element to scale.
+        ((self.ptr as Int) - HEADER_SIZE) as &unsafe mut AllocationHeader
     }
 }
 

@@ -35140,7 +35140,22 @@ impl VbcCodegen {
                 self.emit_intrinsic_library_call("verum_cbgr_invalidate", args, dest)?;
             }
             InlineSequenceId::CbgrGetGeneration => {
-                self.emit_intrinsic_library_call("verum_cbgr_get_generation", args, dest)?;
+                // Read generation (u32) from the allocation header of a
+                // user pointer: *(u32*)(ptr - 32 + gen@8). Dedicated
+                // FfiExtended sub-op on both tiers; this arm used to be
+                // a name-dispatched library call, and the OTHER registry
+                // entry for the same concept was DirectOpcode(Deref) —
+                // which dereferenced the USER pointer and returned data,
+                // not the generation (T0846 layer 2).
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(1) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0xAA, // CbgrGetGeneration
+                    operands,
+                });
             }
             InlineSequenceId::CbgrAdvanceGeneration => {
                 self.emit_intrinsic_library_call("verum_cbgr_advance_generation", args, dest)?;
@@ -36640,8 +36655,13 @@ impl VbcCodegen {
                 for &arg in args.iter() {
                     Self::write_reg(&mut operands, arg.0);
                 }
+                // Dedicated CbgrGetHeader sub-op. This byte was 0x64
+                // (PtrSub) — a collision that desynced (PtrSub reads 3
+                // regs, this emits 2) and mis-valued (element-scaled
+                // subtraction of a phantom offset) every inlined call
+                // (T0425).
                 self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x64, // CbgrGetHeader
+                    sub_op: 0xA9, // CbgrGetHeader
                     operands,
                 });
             }

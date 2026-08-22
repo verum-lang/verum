@@ -572,9 +572,13 @@ pub struct AllocationHeader {
     /// Allocation size in bytes (excluding header).
     /// Matches stdlib: `size: UInt32`
     size: u32,
-    /// Alignment requirement.
-    /// Matches stdlib: `alignment: UInt32`
-    alignment: u32,
+    /// Requested user alignment (validated ≤ 4096, so u16 holds it).
+    /// Matches stdlib: `alignment: UInt16`
+    alignment: u16,
+    /// Header address minus malloc base (front alignment slack).
+    /// slack < align + 32 ≤ 4128, so u16 holds it.
+    /// Matches stdlib: `base_offset: UInt16`
+    base_offset: u16,
     /// Current generation counter (atomic).
     /// Matches stdlib: `generation: UInt32` (with atomic semantics)
     generation: AtomicU32,
@@ -590,9 +594,12 @@ pub struct AllocationHeader {
     /// Allocation state flags.
     /// Matches stdlib: `flags: UInt32`
     flags: AtomicU32,
-    /// Reserved for future use.
-    /// Matches stdlib: `reserved: [UInt32; 2]`
-    _reserved: [u32; 2],
+    /// Live-reference count; allocation starts at 1.
+    /// Matches stdlib: `ref_count: UInt32` (with atomic semantics)
+    ref_count: AtomicU32,
+    /// Full malloc extent: front slack + 32-byte header + user size.
+    /// Matches stdlib: `total: UInt32`
+    total: u32,
 }
 
 impl AllocationHeader {
@@ -609,15 +616,18 @@ impl AllocationHeader {
     /// Matches stdlib: `AllocationHeader.new(size, alignment, type_id, capabilities)`
     #[inline]
     pub fn new(size: u32, alignment: u32, type_id: u32, capabilities: u16) -> Self {
+        debug_assert!(alignment <= 4096, "alignment exceeds the validated bound");
         Self {
             size,
-            alignment,
+            alignment: alignment as u16,
+            base_offset: 0,
             generation: AtomicU32::new(GEN_INITIAL),
             epoch: AtomicU16::new(current_epoch_u16()),
             capabilities: AtomicU16::new(capabilities),
             type_id,
             flags: AtomicU32::new(0),
-            _reserved: [0, 0],
+            ref_count: AtomicU32::new(1),
+            total: 0,
         }
     }
 
@@ -638,7 +648,7 @@ impl AllocationHeader {
     /// Matches stdlib: `get_alignment(&self) -> UInt32`
     #[inline(always)]
     pub fn alignment(&self) -> u32 {
-        self.alignment
+        self.alignment as u32
     }
 
     /// Get the type ID.
@@ -1117,6 +1127,23 @@ mod tests {
             ALLOCATION_HEADER_FLAGS_OFFSET,
             "AllocationHeader::flags offset drifted",
         );
+        assert_eq!(
+            std::mem::offset_of!(AllocationHeader, base_offset) as u64,
+            ALLOCATION_HEADER_BASE_OFFSET_OFFSET,
+            "AllocationHeader::base_offset offset drifted",
+        );
+        assert_eq!(
+            std::mem::offset_of!(AllocationHeader, ref_count) as u64,
+            ALLOCATION_HEADER_REF_COUNT_OFFSET,
+            "AllocationHeader::ref_count offset drifted",
+        );
+        assert_eq!(
+            std::mem::offset_of!(AllocationHeader, total) as u64,
+            ALLOCATION_HEADER_TOTAL_OFFSET,
+            "AllocationHeader::total offset drifted",
+        );
+        // ref_count must stay atomicrmw-compatible: 4-byte aligned.
+        assert_eq!(ALLOCATION_HEADER_REF_COUNT_OFFSET % 4, 0);
         // Total struct size matches the canonical constant.
         assert_eq!(
             std::mem::size_of::<AllocationHeader>() as u64,

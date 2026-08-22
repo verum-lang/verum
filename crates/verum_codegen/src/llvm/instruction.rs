@@ -30495,6 +30495,81 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        Some(SystemSubOpcode::CbgrGetHeader) => {
+            // Format: dst:reg, ptr:reg
+            // get_header_from_ptr(user_ptr) = user_ptr - ALLOCATION_HEADER_SIZE.
+            // FIXED 32-byte back-step (raw i8 GEP), NOT element-scaled like
+            // PtrSub — recovers the CBGR AllocationHeader prefix. Mirrors the
+            // codegen back-pointer arithmetic documented on
+            // `verum_common::layout::ALLOCATION_HEADER_SIZE`.
+            if operands.len() < 2 {
+                return Err(LlvmLoweringError::internal(
+                    "CbgrGetHeader: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
+            let i8_type = ctx.types().i8_type();
+            let neg_off = ctx
+                .types()
+                .i64_type()
+                .const_int(verum_common::layout::ALLOCATION_HEADER_SIZE, false);
+            let neg_off = ctx
+                .builder()
+                .build_int_neg(neg_off, "neg_hdr_off")
+                .or_llvm_err()?;
+            // SAFETY: non-inbounds GEP — the result addresses the header
+            // region, which is a distinct logical object from the
+            // user-data allocation.
+            let header = unsafe {
+                ctx.builder()
+                    .build_gep(i8_type, ptr, &[neg_off], "cbgr_get_header")
+                    .or_llvm_err()?
+            };
+            ctx.set_register(dst_reg, header.into());
+            Ok(())
+        }
+
+        Some(SystemSubOpcode::CbgrGetGeneration) => {
+            // Format: dst:reg, ptr:reg
+            // generation = *(u32*)(user_ptr - 32 + GENERATION_OFFSET).
+            if operands.len() < 2 {
+                return Err(LlvmLoweringError::internal(
+                    "CbgrGetGeneration: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
+            let i8_type = ctx.types().i8_type();
+            let i32_type = ctx.types().i32_type();
+            let i64_type = ctx.types().i64_type();
+            let off = verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as i64
+                - verum_common::layout::ALLOCATION_HEADER_SIZE as i64;
+            let off_v = i64_type.const_int(off as u64, true);
+            // SAFETY: non-inbounds GEP into the header region preceding
+            // the user allocation; fixed canonical offset.
+            let gen_ptr = unsafe {
+                ctx.builder()
+                    .build_gep(i8_type, ptr, &[off_v], "cbgr_gen_ptr")
+                    .or_llvm_err()?
+            };
+            let gen32 = ctx
+                .builder()
+                .build_load(i32_type, gen_ptr, "cbgr_generation")
+                .or_llvm_err()?
+                .into_int_value();
+            let gen64 = ctx
+                .builder()
+                .build_int_z_extend(gen32, i64_type, "cbgr_generation64")
+                .or_llvm_err()?;
+            ctx.set_register(dst_reg, gen64.into());
+            Ok(())
+        }
+
         Some(SystemSubOpcode::PtrDiff) => {
             // Format: dst:reg, ptr1:reg, ptr2:reg
             if operands.len() < 3 {
@@ -32942,21 +33017,13 @@ fn lower_ffi_extended<'ctx>(
                 .or_llvm_err()?;
 
             // Err — both for rejected arguments and for OOM, matching
-            // the Tier-0 handler. Payload is nil (0): constructing the
-            // precise AllocError variant needs the module's type
-            // tables, which neither tier consults here. (Both tiers
-            // share this wart; it is on the audit ledger.)
+            // the Tier-0 handler: `Err(AllocError.InvalidSize{size})`,
+            // a real two-level variant (the OOM leg is unreachable in
+            // practice — verum_checked_malloc aborts — so the rejected
+            // arguments are what this arm actually reports).
             builder.position_at_end(err_bb);
-            let err_variant = runtime.lower_make_variant(
-                builder,
-                module,
-                verum_common::well_known_types::result_error_tag(),
-                1,
-            )?;
-            runtime.lower_set_variant_data(builder, err_variant, 0, i64_ty.const_zero())?;
-            let err_int = builder
-                .build_ptr_to_int(err_variant, i64_ty, "cbgr_err_int")
-                .or_llvm_err()?;
+            let err_int = build_alloc_err_value(ctx, 1, size_val, "cbgr_err")?;
+            let builder = ctx.builder();
             builder.build_unconditional_branch(done_bb).or_llvm_err()?;
             let err_end_bb = builder
                 .get_insert_block()
@@ -33124,16 +33191,8 @@ fn lower_ffi_extended<'ctx>(
                 .or_llvm_err()?;
 
             builder.position_at_end(err_bb);
-            let err_variant = runtime.lower_make_variant(
-                builder,
-                module,
-                verum_common::well_known_types::result_error_tag(),
-                1,
-            )?;
-            runtime.lower_set_variant_data(builder, err_variant, 0, i64_ty.const_zero())?;
-            let err_int = builder
-                .build_ptr_to_int(err_variant, i64_ty, "cbgr_re_err_int")
-                .or_llvm_err()?;
+            let err_int = build_alloc_err_value(ctx, 1, new_size, "cbgr_re_err")?;
+            let builder = ctx.builder();
             builder.build_unconditional_branch(done_bb).or_llvm_err()?;
             let err_end_bb = builder
                 .get_insert_block()
@@ -34022,6 +34081,56 @@ fn lower_try_end<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>) -> Result<()> {
 /// are untagged, so guessing here would be exactly the suffix-heuristic
 /// dispatch the design invariants forbid. Wrong programs fail loudly;
 /// they never answer wrongly.
+/// Build the `Err(AllocError.<variant>{field})` value for the CBGR
+/// allocation arms — a REAL two-level variant whose `.message()`
+/// dispatches, replacing the old `Err` with a 0 payload that read as a
+/// null variant and exploded on any method call (T0846 layer 2, the
+/// nil-payload ledger row).
+///
+/// The `AllocError` type id is resolved AT LOWERING TIME from the VBC
+/// type table; a module compiled without the declaring type falls back
+/// to the old 0 payload — the exception with a stated reason, no longer
+/// the rule. Variant tags follow the declaration order in
+/// `core/mem/allocator.vr` (`OutOfMemory = 0 | InvalidSize = 1 | ...`).
+fn build_alloc_err_value<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    variant_tag: u32,
+    field_value: verum_llvm::values::IntValue<'ctx>,
+    what: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    let i64_ty = ctx.types().i64_type();
+    let alloc_err_tid: Option<u32> = ctx.vbc_module().and_then(|vbc| {
+        vbc.types.iter().find_map(|t| {
+            let name = vbc.get_string(t.name).unwrap_or("");
+            (name == "AllocError" || name.ends_with(".AllocError")).then_some(t.id.0)
+        })
+    });
+    let module = ctx.get_module();
+    let runtime = RuntimeLowering::new(ctx.llvm_context());
+    let builder = ctx.builder();
+    let payload: verum_llvm::values::IntValue<'ctx> = match alloc_err_tid {
+        Some(tid) => {
+            let inner = runtime.lower_make_variant(builder, module, variant_tag, 1)?;
+            runtime.stamp_variant_header(builder, inner, tid, 1)?;
+            runtime.lower_set_variant_data(builder, inner, 0, field_value)?;
+            builder
+                .build_ptr_to_int(inner, i64_ty, &format!("{what}_payload_int"))
+                .or_llvm_err()?
+        }
+        None => i64_ty.const_zero(),
+    };
+    let err_variant = runtime.lower_make_variant(
+        builder,
+        module,
+        verum_common::well_known_types::result_error_tag(),
+        1,
+    )?;
+    runtime.lower_set_variant_data(builder, err_variant, 0, payload)?;
+    Ok(builder
+        .build_ptr_to_int(err_variant, i64_ty, &format!("{what}_int"))
+        .or_llvm_err()?)
+}
+
 fn build_runtime_type_switch<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     receiver: Reg,

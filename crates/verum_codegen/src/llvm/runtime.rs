@@ -15366,54 +15366,55 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // splitting allocations into halves visible to one path but not
     // the other.
 
-    /// Offset of the atomic `generation` u32 field. (First field —
-    /// the generation lives at the user pointer's `-32` baseline.)
-    ///
-    /// Unused only incidentally: being offset 0, the emitters reach
-    /// this field through the raw header pointer (`let gen_ptr = raw`)
-    /// instead of a GEP, so nothing names the constant. It stays
-    /// because the field table above is this section's drift contract
-    /// — a partial mirror would make whoever adds the next field
-    /// re-derive an offset by hand (T0132).
-    #[allow(dead_code)]
-    const AOT_HDR_GENERATION_OFFSET: u64 = 0;
-
     /// Offset of the `size` u32 field.
-    const AOT_HDR_SIZE_OFFSET: u64 = 4;
-
-    /// Offset of the atomic `epoch` u16 field.
-    const AOT_HDR_EPOCH_OFFSET: u64 = 8;
-
-    /// Offset of the `capabilities` u16 field.
-    const AOT_HDR_CAPABILITIES_OFFSET: u64 = 10;
-
-    /// Offset of the atomic `ref_count` u32 field.
-    const AOT_HDR_REF_COUNT_OFFSET: u64 = 12;
-
-    /// Offset of the atomic `flags` u64 field
-    /// (FLAG_REVOKED bit — set by `verum_cbgr_revoke`).
-    const AOT_HDR_FLAGS_OFFSET: u64 = 16;
-
-    /// Offset of the `next_free` pointer (allocator free-list link).
     ///
-    /// Unused only incidentally: `emit_cbgr_allocate` leaves the field
-    /// NULL from the header-wide `memset` rather than storing through
-    /// a GEP. Kept for the same reason as `AOT_HDR_GENERATION_OFFSET`
-    /// — the seven offsets are one layout mirror (T0132).
-    #[allow(dead_code)]
-    /// Byte offset of `header - base` within the header (u32).
+    /// These eight aliases ARE `verum_common::layout::ALLOCATION_HEADER_*`
+    /// — the ONE allocation-header layout both tiers share (T0846
+    /// layer 2). This section used to carry its own `AOT_HDR_*`
+    /// arrangement (`gen@0/size@4/epoch@8/caps@10/rc@12/flags@16`),
+    /// which meant a Tier-0 header and a Tier-1 header for the same
+    /// declared contract had different shapes, and the ThinRef
+    /// constructors — following a THIRD arrangement — read the low
+    /// half of `size` wherever they meant `epoch`, degenerating the
+    /// Tier-1 epoch validation into `size == size`. The aliases exist
+    /// so the emitters below stay readable; their values are the
+    /// canonical constants, pinned by verum_common's offset tests.
+    const AOT_HDR_SIZE_OFFSET: u64 = verum_common::layout::ALLOCATION_HEADER_SIZE_OFFSET;
+
+    /// Offset of the `alignment` u16 field.
+    const AOT_HDR_ALIGN_OFFSET: u64 = verum_common::layout::ALLOCATION_HEADER_ALIGNMENT_OFFSET;
+
+    /// Offset of the `base_offset` u16 field (`header - base`).
     ///
     /// An aligned allocation places the header inside the alignment
     /// slack, so the header address is NOT the malloc base. This word
-    /// is how `verum_cbgr_deallocate` finds the base to free — the
-    /// same role `verum_common::layout::ALLOCATION_HEADER_RESERVED_OFFSET`
-    /// plays in the Tier-0 model. (The slot previously held a declared
-    /// but never-referenced `next_free` freelist pointer.)
-    const AOT_HDR_BASE_OFF_OFFSET: u64 = 24;
+    /// is how `verum_cbgr_deallocate` finds the base to free.
+    const AOT_HDR_BASE_OFF_OFFSET: u64 =
+        verum_common::layout::ALLOCATION_HEADER_BASE_OFFSET_OFFSET;
+
+    /// Offset of the atomic `generation` u32 field.
+    const AOT_HDR_GENERATION_OFFSET: u64 =
+        verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET;
+
+    /// Offset of the atomic `epoch` u16 field.
+    const AOT_HDR_EPOCH_OFFSET: u64 = verum_common::layout::ALLOCATION_HEADER_EPOCH_OFFSET;
+
+    /// Offset of the `capabilities` u16 field.
+    const AOT_HDR_CAPABILITIES_OFFSET: u64 =
+        verum_common::layout::ALLOCATION_HEADER_CAPABILITIES_OFFSET;
+
+    /// Offset of the atomic `flags` u32 field
+    /// (FLAG_REVOKED bit — set by `verum_cbgr_revoke`).
+    const AOT_HDR_FLAGS_OFFSET: u64 = verum_common::layout::ALLOCATION_HEADER_FLAGS_OFFSET;
+
+    /// Offset of the atomic `ref_count` u32 field.
+    const AOT_HDR_REF_COUNT_OFFSET: u64 =
+        verum_common::layout::ALLOCATION_HEADER_REF_COUNT_OFFSET;
+
     /// Byte offset of the allocation's TOTAL size within the header
-    /// (u32): header + user data + alignment slack. `free` needs the
-    /// full extent, and `size@4` only records the USER size.
-    const AOT_HDR_TOTAL_OFFSET: u64 = 28;
+    /// (u32): front slack + header + user data. `free` needs the
+    /// full extent, and `size@0` only records the USER size.
+    const AOT_HDR_TOTAL_OFFSET: u64 = verum_common::layout::ALLOCATION_HEADER_TOTAL_OFFSET;
 
     /// Emit all CBGR LLVM IR functions.
     fn emit_verum_cbgr_functions(&self, module: &Module<'ctx>) -> Result<()> {
@@ -15734,13 +15735,46 @@ impl<'ctx> RuntimeLowering<'ctx> {
             "rc_ptr",
         )?;
 
+        // alignment@4 (u16): the REQUESTED user alignment, recorded so
+        // the header is self-describing (≤ 4096 is validated upstream,
+        // so the truncation is lossless).
+        let align_u16 = builder
+            .build_int_truncate(align_req, i16_type, "align16")
+            .or_llvm_err()?;
+        // SAFETY: fixed in-header offset, as above.
+        let align_slot = unsafe {
+            builder
+                .build_gep(
+                    i8_type,
+                    header,
+                    &[i64_type.const_int(Self::AOT_HDR_ALIGN_OFFSET, false)],
+                    "align_ptr",
+                )
+                .or_llvm_err()?
+        };
+        builder.build_store(align_slot, align_u16).or_llvm_err()?;
+
+        // base_offset@6 (u16): slack < align + 32 ≤ 4128, lossless.
         let base_off64 = builder
             .build_int_sub(header_int, raw_int, "base_off64")
             .or_llvm_err()?;
-        let base_off = builder
-            .build_int_truncate(base_off64, i32_type, "base_off32")
+        let base_off16 = builder
+            .build_int_truncate(base_off64, i16_type, "base_off16")
             .or_llvm_err()?;
-        store_u32(Self::AOT_HDR_BASE_OFF_OFFSET, base_off, "base_off_ptr")?;
+        // SAFETY: fixed in-header offset, as above.
+        let base_off_slot = unsafe {
+            builder
+                .build_gep(
+                    i8_type,
+                    header,
+                    &[i64_type.const_int(Self::AOT_HDR_BASE_OFF_OFFSET, false)],
+                    "base_off_ptr",
+                )
+                .or_llvm_err()?
+        };
+        builder
+            .build_store(base_off_slot, base_off16)
+            .or_llvm_err()?;
         let total_u32 = builder
             .build_int_truncate(total_size, i32_type, "total32")
             .or_llvm_err()?;
@@ -15844,8 +15878,17 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let header = self.emit_cbgr_get_header(&builder, ptr)?;
 
         // generation = atomic_fetch_add(&header->generation, 1) + 1
-        // offset 0 = generation (i32)
-        let gen_ptr = header;
+        // SAFETY: fixed in-header offset (canonical layout, gen@8).
+        let gen_ptr = unsafe {
+            builder
+                .build_gep(
+                    i8_type,
+                    header,
+                    &[i64_type.const_int(Self::AOT_HDR_GENERATION_OFFSET, false)],
+                    "gen_ptr",
+                )
+                .or_llvm_err()?
+        };
         let old_gen = builder
             .build_atomicrmw(
                 verum_llvm::AtomicRMWBinOp::Add,
@@ -15950,12 +15993,13 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 )
                 .or_llvm_err()?
         };
-        let base_off_u32 = builder
-            .build_load(i32_type, base_off_ptr, "hdr_base_off")
+        let i16_type = self.context.i16_type();
+        let base_off_u16 = builder
+            .build_load(i16_type, base_off_ptr, "hdr_base_off")
             .or_llvm_err()?
             .into_int_value();
         let base_off = builder
-            .build_int_z_extend(base_off_u32, i64_type, "base_off64")
+            .build_int_z_extend(base_off_u16, i64_type, "base_off64")
             .or_llvm_err()?;
         let header_int = builder
             .build_ptr_to_int(header, i64_type, "header_int")
@@ -16088,7 +16132,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_gep(
                     i8_type,
                     header,
-                    &[i64_type.const_int(4, false)],
+                    &[i64_type.const_int(Self::AOT_HDR_SIZE_OFFSET, false)],
                     "old_size_ptr",
                 )
                 .or_llvm_err()?
@@ -16297,17 +16341,32 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder.position_at_end(do_revoke);
         let header = self.emit_cbgr_get_header(&builder, ptr)?;
 
-        // atomic_fetch_add(&header->generation, 1)
+        // atomic_fetch_add(&header->generation, 1) — canonical gen@8.
+        // SAFETY: fixed in-header offset.
+        let gen_ptr = unsafe {
+            builder
+                .build_gep(
+                    i8_type,
+                    header,
+                    &[i64_type.const_int(Self::AOT_HDR_GENERATION_OFFSET, false)],
+                    "gen_ptr",
+                )
+                .or_llvm_err()?
+        };
         builder
             .build_atomicrmw(
                 verum_llvm::AtomicRMWBinOp::Add,
-                header,
+                gen_ptr,
                 i32_type.const_int(1, false),
                 verum_llvm::AtomicOrdering::AcquireRelease,
             )
             .or_llvm_err()?;
 
-        // atomic_fetch_or(&header->flags, FLAG_REVOKED)
+        // atomic_fetch_or(&header->flags, FLAG_REVOKED) — flags is a
+        // canonical u32 slot; an i64 RMW here would also clobber
+        // ref_count@24 (the old AOT arrangement declared flags "u64"
+        // over what was then dead space — the canonical layout has no
+        // dead space to hide in).
         // SAFETY: GEP into the CBGR header to access the flags field; the header layout is a compile-time constant
         let flags_ptr = unsafe {
             builder
@@ -16318,7 +16377,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_atomicrmw(
                 verum_llvm::AtomicRMWBinOp::Or,
                 flags_ptr,
-                i64_type.const_int(Self::FLAG_REVOKED, false),
+                i32_type.const_int(Self::FLAG_REVOKED, false),
                 verum_llvm::AtomicOrdering::Release,
             )
             .or_llvm_err()?;
@@ -16480,7 +16539,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             }
         }
 
+        let i8_type = self.context.i8_type();
         let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let void_type = self.context.void_type();
         let fn_type = void_type.fn_type(&[ptr_type.into()], false);
@@ -16511,9 +16572,20 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         builder.position_at_end(do_inv);
         let header = self.emit_cbgr_get_header(&builder, ptr)?;
-        // header->generation = 0 (atomic store, release)
+        // header->generation = 0 (canonical layout, gen@8)
+        // SAFETY: fixed in-header offset.
+        let gen_ptr = unsafe {
+            builder
+                .build_gep(
+                    i8_type,
+                    header,
+                    &[i64_type.const_int(Self::AOT_HDR_GENERATION_OFFSET, false)],
+                    "gen_ptr",
+                )
+                .or_llvm_err()?
+        };
         builder
-            .build_store(header, i32_type.const_zero())
+            .build_store(gen_ptr, i32_type.const_zero())
             .or_llvm_err()?;
         builder.build_return(None).or_llvm_err()?;
         Ok(())

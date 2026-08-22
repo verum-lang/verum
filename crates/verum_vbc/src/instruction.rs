@@ -5024,6 +5024,35 @@ pub enum SystemSubOpcode {
     /// Plain raw-pointer WRITE with MACHINE semantics — see PtrRead.
     PtrWrite = 0x6C,
 
+    /// Recover a CBGR allocation header from a user-data pointer.
+    ///
+    /// Format: `dst:reg, ptr:reg`
+    ///
+    /// Computes `ptr - ALLOCATION_HEADER_SIZE` (a fixed 32-byte back-step,
+    /// NOT element-scaled), recovering the `AllocationHeader` that precedes
+    /// every CBGR allocation. Mirrors `AllocationHeader.from_user_ptr`
+    /// (`core/mem/header.vr`). This is the lowering of the
+    /// `get_header_from_ptr` intrinsic.
+    ///
+    /// Distinct from `PtrSub` (0x64): `get_header_from_ptr` takes ONE
+    /// pointer argument (2 regs total) and subtracts a fixed byte constant,
+    /// whereas `PtrSub` takes a runtime, element-scaled offset (3 regs).
+    /// The two shared byte 0x64 before this variant existed — a genuine
+    /// opcode collision (T0425) that both mis-valued and desynced the
+    /// stream by under-reading one register. (The fix branch used 0x68,
+    /// which T0188's PtrReadVolatile claimed first — hence the CBGR band.)
+    CbgrGetHeader = 0xA9,
+
+    /// Read the u32 `generation` field of a user pointer's allocation
+    /// header (canonical `gen@8` inside the 32-byte header at ptr-32).
+    ///
+    /// Format: `dst:reg, ptr:reg`
+    ///
+    /// The `cbgr_get_generation` intrinsic used to lower to a plain
+    /// `Deref` of the USER pointer — returning the first word of user
+    /// data as if it were the generation (T0846 layer 2).
+    CbgrGetGeneration = 0xAA,
+
     // ========================================================================
     // Time Operations (0x70-0x7F)
     // ========================================================================
@@ -5805,6 +5834,8 @@ impl SystemSubOpcode {
             0x6A => Some(Self::StaticMutAddrSized),
             0x6B => Some(Self::PtrRead),
             0x6C => Some(Self::PtrWrite),
+            0xA9 => Some(Self::CbgrGetHeader),
+            0xAA => Some(Self::CbgrGetGeneration),
             0x63 => Some(Self::PtrAdd),
             0x64 => Some(Self::PtrSub),
             0x65 => Some(Self::PtrDiff),
@@ -5992,6 +6023,8 @@ impl SystemSubOpcode {
             Self::PtrSub                 => m!("FFI_PTR_SUB",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrDiff                => m!("FFI_PTR_DIFF",               RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrIsNull              => m!("FFI_PTR_IS_NULL",            RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::CbgrGetHeader          => m!("CBGR_GET_HEADER",            CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::CbgrGetGeneration      => m!("CBGR_GET_GENERATION",        CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=false),
 
             // ===== Time Operations (0x70-0x7F) =====
             Self::TimeMonotonicNanos     => m!("TIME_MONOTONIC_NANOS",       TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
@@ -16490,7 +16523,7 @@ mod tests {
         // corresponding meta() arm is in place.
         let mut count = 0;
         for_every_system_sub_opcode(|_| count += 1);
-        assert_eq!(count, 117,
+        assert_eq!(count, 119,
             "SystemSubOpcode variant count drift: expected 115, got {}",
             count);
     }
@@ -16646,7 +16679,7 @@ mod tests {
         // Mirrors the system_meta_count pin: 112 + the T0188/T0133
         // trio (PtrReadVolatile / PtrWriteVolatile / StaticMutAddrSized)
         // + the T0108 machine-semantics pair (PtrRead / PtrWrite).
-        assert_eq!(seen.len(), 117);
+        assert_eq!(seen.len(), 119);
     }
 
     // ========================================================================

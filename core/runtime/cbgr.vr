@@ -26,7 +26,6 @@ public mount core.intrinsics.runtime.cbgr.{
     cbgr_check_write,
     cbgr_validate_ref,
     cbgr_invalidate,
-    cbgr_get_epoch,
     cbgr_current_epoch,
     cbgr_epoch_begin,
     cbgr_advance_epoch,

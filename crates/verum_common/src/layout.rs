@@ -190,21 +190,40 @@ pub const EPOCH_MASK_U32: u32 = (1u32 << EPOCH_BITS) - 1; // 0xFFFF
 pub const ALLOCATION_HEADER_SIZE: u64 = 32;
 
 // ----------------------------------------------------------------------------
-// AllocationHeader per-field byte offsets
+// AllocationHeader per-field byte offsets — THE one layout, both tiers
 // ----------------------------------------------------------------------------
 //
 // Layout (`core/mem/header.vr`, mirrored by
 // `verum_common::cbgr::AllocationHeader` `#[repr(C, align(32))]`):
 // ```text
-//     size:         u32        @  0
-//     alignment:    u32        @  4
+//     size:         u32        @  0   user size, bytes
+//     alignment:    u16        @  4   requested user alignment (≤ 4096)
+//     base_offset:  u16        @  6   header − malloc base (front slack)
 //     generation:   AtomicU32  @  8
 //     epoch:        AtomicU16  @ 12
 //     capabilities: AtomicU16  @ 14
 //     type_id:      u32        @ 16
 //     flags:        AtomicU32  @ 20
-//     reserved:     [u32; 2]   @ 24
+//     ref_count:    AtomicU32  @ 24   live-reference count (starts at 1)
+//     total:        u32        @ 28   full malloc extent (slack + 32 + size)
 // ```
+//
+// This is the SINGLE allocation-header layout for the whole platform:
+// the Tier-0 interpreter's CBGR bridge and the Tier-1 AOT runtime write
+// and read these exact offsets. (T0846 layer 2 — the AOT side used to
+// carry its own `AOT_HDR_*` arrangement with `gen@0/size@4/epoch@8`,
+// and a THIRD arrangement lived in the ThinRef constructors, which made
+// the Tier-1 epoch validation a tautology: it compared the low bits of
+// `size` against themselves. One layout, one authority, pinned tests.)
+//
+// Field-packing notes, so nobody "fixes" them apart:
+//   * `alignment` fits u16 because both tiers validate align ≤ 4096.
+//   * `base_offset` fits u16 because slack < align + 32 ≤ 4128.
+//   * `ref_count` sits at offset 24 (4-aligned) because it is updated
+//     with atomicrmw; do not move it to a 2-aligned slot.
+//   * `total` is stored rather than recomputed so `free(base, total)`
+//     needs no arithmetic that could drift from the allocator's.
+//
 // Drift contract pinned by the `offset_of!`-based tests in
 // `verum_common::cbgr::tests::allocation_header_field_offsets_pinned`.
 // Codegen / SMT verifier / static analysis layers that materialise
@@ -214,8 +233,11 @@ pub const ALLOCATION_HEADER_SIZE: u64 = 32;
 /// Offset of the `size` field in `AllocationHeader`.
 pub const ALLOCATION_HEADER_SIZE_OFFSET: u64 = 0;
 
-/// Offset of the `alignment` field.
+/// Offset of the `alignment` u16 field.
 pub const ALLOCATION_HEADER_ALIGNMENT_OFFSET: u64 = 4;
+
+/// Offset of the `base_offset` u16 field (header − malloc base).
+pub const ALLOCATION_HEADER_BASE_OFFSET_OFFSET: u64 = 6;
 
 /// Offset of the atomic `generation` u32 field.
 pub const ALLOCATION_HEADER_GENERATION_OFFSET: u64 = 8;
@@ -232,8 +254,11 @@ pub const ALLOCATION_HEADER_TYPE_ID_OFFSET: u64 = 16;
 /// Offset of the atomic `flags` u32 field.
 pub const ALLOCATION_HEADER_FLAGS_OFFSET: u64 = 20;
 
-/// Offset of the `reserved` `[u32; 2]` padding field.
-pub const ALLOCATION_HEADER_RESERVED_OFFSET: u64 = 24;
+/// Offset of the atomic `ref_count` u32 field.
+pub const ALLOCATION_HEADER_REF_COUNT_OFFSET: u64 = 24;
+
+/// Offset of the `total` u32 field (full malloc extent).
+pub const ALLOCATION_HEADER_TOTAL_OFFSET: u64 = 28;
 
 // ============================================================================
 // Heap object header (Tier-0 interpreter / Tier-1 codegen shared)
@@ -717,8 +742,9 @@ mod tests {
 
     /// AllocationHeader field offsets are derived from
     /// `ALLOCATION_HEADER_SIZE_OFFSET = 0` plus declared field widths.
-    /// Layout: `size(4) + alignment(4) + generation(4) + epoch(2) +
-    /// capabilities(2) + type_id(4) + flags(4) + reserved(8)` = 32 bytes.
+    /// Layout: `size(4) + alignment(2) + base_offset(2) + generation(4)
+    /// + epoch(2) + capabilities(2) + type_id(4) + flags(4) +
+    /// ref_count(4) + total(4)` = 32 bytes.
     /// Each next offset must equal previous offset + previous field
     /// width — pinning here guarantees the constants stay self-
     /// consistent independent of the actual `#[repr(C)]` struct.
@@ -727,18 +753,22 @@ mod tests {
         // Derived offsets: each field starts where the previous ended.
         assert_eq!(ALLOCATION_HEADER_SIZE_OFFSET, 0);
         assert_eq!(ALLOCATION_HEADER_ALIGNMENT_OFFSET, 4);   // size: u32 → 4
-        assert_eq!(ALLOCATION_HEADER_GENERATION_OFFSET, 8);  // alignment: u32 → 8
+        assert_eq!(ALLOCATION_HEADER_BASE_OFFSET_OFFSET, 6); // alignment: u16 → 6
+        assert_eq!(ALLOCATION_HEADER_GENERATION_OFFSET, 8);  // base_offset: u16 → 8
         assert_eq!(ALLOCATION_HEADER_EPOCH_OFFSET, 12);      // generation: u32 → 12
         assert_eq!(ALLOCATION_HEADER_CAPABILITIES_OFFSET, 14); // epoch: u16 → 14
         assert_eq!(ALLOCATION_HEADER_TYPE_ID_OFFSET, 16);    // capabilities: u16 → 16
         assert_eq!(ALLOCATION_HEADER_FLAGS_OFFSET, 20);      // type_id: u32 → 20
-        assert_eq!(ALLOCATION_HEADER_RESERVED_OFFSET, 24);   // flags: u32 → 24
-        // Reserved is 8 bytes (u32 × 2), filling out to 32.
+        assert_eq!(ALLOCATION_HEADER_REF_COUNT_OFFSET, 24);  // flags: u32 → 24
+        assert_eq!(ALLOCATION_HEADER_TOTAL_OFFSET, 28);      // ref_count: u32 → 28
+        // total: u32 fills out to exactly the 32-byte header.
         assert_eq!(
-            ALLOCATION_HEADER_RESERVED_OFFSET + 8,
+            ALLOCATION_HEADER_TOTAL_OFFSET + 4,
             ALLOCATION_HEADER_SIZE,
-            "reserved [u32; 2] fits exactly into the 32-byte total",
+            "total u32 fits exactly into the 32-byte total",
         );
+        // ref_count is updated with atomicrmw — must stay 4-aligned.
+        assert_eq!(ALLOCATION_HEADER_REF_COUNT_OFFSET % 4, 0);
     }
 
     /// Bit-packing constants stay self-consistent: caps + epoch widths

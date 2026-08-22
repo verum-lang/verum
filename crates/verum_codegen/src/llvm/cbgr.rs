@@ -235,9 +235,17 @@ impl<'ctx> CbgrLowering<'ctx> {
 
     /// Create a ThinRef from a raw user pointer.
     ///
-    /// Reads the allocation header at `ptr - 32`:
-    ///  - offset 0: generation (i32)
-    ///  - offset 4: epoch (i16)
+    /// Reads the allocation header at `ptr - 32` through the canonical
+    /// layout (`verum_common::layout::ALLOCATION_HEADER_*`):
+    ///  - generation @ 8 (i32)
+    ///  - epoch      @ 12 (i16)
+    ///
+    /// This constructor used to read `gen@0 / epoch@4` — a third,
+    /// private arrangement that agreed with `validate_ref` and with
+    /// NOTHING else: the allocator put `size` at 4, so the "epoch" a
+    /// ThinRef carried was the low half of the allocation size, and the
+    /// downstream epoch comparison validated `size == size` (T0846
+    /// layer 2 — the Tier-1 epoch check was a tautology).
     ///
     /// Packs into `{ ptr, generation, epoch_and_caps }` where epoch_and_caps
     /// stores epoch in the low 16 bits and zero capabilities in the high 16.
@@ -265,18 +273,39 @@ impl<'ctx> CbgrLowering<'ctx> {
                 .or_llvm_err()?
         };
 
-        // 2. Load generation (i32) from header offset 0
+        // 2. Load generation (i32) from the canonical gen@8 slot
+        // SAFETY: fixed in-header offset within the 32-byte header.
+        let gen_ptr = unsafe {
+            builder
+                .build_gep(
+                    i8_type,
+                    header_ptr,
+                    &[i64_type.const_int(
+                        verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET,
+                        false,
+                    )],
+                    "cbgr.gen_ptr",
+                )
+                .or_llvm_err()?
+        };
         let generation = builder
-            .build_load(i32_type, header_ptr, "cbgr.alloc_gen")
+            .build_load(i32_type, gen_ptr, "cbgr.alloc_gen")
             .or_llvm_err()?
             .into_int_value();
 
-        // 3. Load epoch (i16) from header offset 4
-        let four = i64_type.const_int(4, false);
-        // SAFETY: GEP at +4 bytes into the CBGR header to read the epoch field; the header is at least 32 bytes (generation at 0, epoch at 4)
+        // 3. Load epoch (i16) from the canonical epoch@12 slot
+        // SAFETY: fixed in-header offset within the 32-byte header.
         let epoch_ptr = unsafe {
             builder
-                .build_gep(i8_type, header_ptr, &[four], "cbgr.epoch_ptr")
+                .build_gep(
+                    i8_type,
+                    header_ptr,
+                    &[i64_type.const_int(
+                        verum_common::layout::ALLOCATION_HEADER_EPOCH_OFFSET,
+                        false,
+                    )],
+                    "cbgr.epoch_ptr",
+                )
                 .or_llvm_err()?
         };
         let epoch = builder

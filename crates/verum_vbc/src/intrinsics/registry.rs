@@ -5282,7 +5282,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Unsafe],
         param_count: 1,                                         // ptr
         return_count: 1,                                        // generation
-        strategy: CodegenStrategy::DirectOpcode(Opcode::Deref), // read header
+        // Was DirectOpcode(Deref) — which dereferences the USER pointer
+        // and returns the first word of user DATA, not the generation
+        // (T0846 layer 2). The dedicated sequence reads the canonical
+        // gen@8 slot of the header at ptr-32.
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrGetGeneration),
         mlir_op: Some("verum.cbgr.generation"),
         doc: "Get generation counter for allocation",
     },

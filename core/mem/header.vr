@@ -16,17 +16,28 @@
 // ```
 // Offset Size Field Description
 // ──────────────────────────────────────────────────────────────────────
-// 0 4 generation Current generation counter (atomic) — HOT
-// 4 4 epoch_and_caps Packed: epoch (i16) + capabilities (i16)
-// 8 4 size Allocation size in bytes (excluding header)
-// 12 4 alignment Alignment requirement
+// 0 4 size Allocation size in bytes (excluding header)
+// 4 2 alignment Requested user alignment (validated ≤ 4096)
+// 6 2 base_offset Header address − malloc base (front slack)
+// 8 4 generation Current generation counter (atomic) — HOT
+// 12 4 epoch_and_caps Packed: epoch (low i16) + capabilities (high i16)
 // 16 4 type_id Runtime type identifier
 // 20 4 flags Allocation state flags
-// 24 4 ref_count Reference count (atomic)
-// 28 4 reserved Reserved for future use
+// 24 4 ref_count Reference count (atomic, starts at 1)
+// 28 4 total Full malloc extent (slack + header + user size)
 // ──────────────────────────────────────────────────────────────────────
 // Total: 32 bytes (half cache line, 32-byte aligned)
 // ```
+//
+// THE one allocation-header layout for the whole platform (T0846
+// layer 2): the Tier-0 interpreter bridge, the Tier-1 AOT runtime and
+// this declaration all read the same offsets, pinned on the Rust side
+// by `verum_common::layout::ALLOCATION_HEADER_*` and its offset_of!
+// tests. Before the unification this file declared generation at
+// offset 0 while the interpreter wrote it at 8 and the AOT runtime at
+// 0 with a different neighbourhood — three descriptions, no two
+// agreeing, and every .vr header read through this struct read the
+// wrong field.
 //
 
 // # Thread Safety
@@ -39,9 +50,8 @@
 // # Performance
 //
 
-// Hot path optimization: generation is at offset 0 for cache-line-aligned
-// first access. Generation + epoch_and_caps form the first 8 bytes,
-// enabling combined 64-bit atomic load for ~15ns validation.
+// Hot path: generation + epoch_and_caps sit adjacent at offsets 8..16,
+// enabling a combined 64-bit atomic load for validation.
 //
 
 // Spec: docs/architecture/new-arch-spec.md Section 6.1
@@ -238,19 +248,23 @@ implement Eq for MemValidationError {
 
 @repr(C, align(32))
 public type AllocationHeader is {
+    /// Allocation size in bytes (excluding header).
+    size: UInt32,  // Offset 0
+
+    /// Requested user alignment (validated ≤ 4096, so UInt16 holds it).
+    alignment: UInt16,  // Offset 4
+
+    /// Header address − malloc base (front alignment slack; < align + 32).
+    base_offset: UInt16,  // Offset 6
+
     /// Current generation counter (atomic) — HOT: checked on every deref.
     /// Starts at GEN_INITIAL (1), increments on deallocation/revocation.
-    generation: UInt32,  // Offset 0, AtomicU32 semantics via intrinsics
+    generation: UInt32,  // Offset 8, AtomicU32 semantics via intrinsics
 
     /// Packed epoch (lower 16 bits) + capabilities (upper 16 bits) (atomic).
-    /// Epoch: wraparound protection counter. Capabilities: access control flags.
-    epoch_and_caps: UInt32,  // Offset 4, AtomicU32 semantics
-
-    /// Allocation size in bytes (excluding header).
-    size: UInt32,  // Offset 8
-
-    /// Alignment requirement for the allocation.
-    alignment: UInt32,  // Offset 12
+    /// On little-endian this is exactly epoch@12 (u16) + caps@14 (u16),
+    /// matching `ALLOCATION_HEADER_EPOCH_OFFSET` / `_CAPABILITIES_OFFSET`.
+    epoch_and_caps: UInt32,  // Offset 12, AtomicU32 semantics
 
     /// Runtime type identifier (for debugging and profiling).
     type_id: UInt32,  // Offset 16
@@ -258,11 +272,11 @@ public type AllocationHeader is {
     /// Allocation state flags.
     flags: UInt32,  // Offset 20
 
-    /// Reference count (atomic).
+    /// Reference count (atomic); an allocation starts at 1.
     ref_count: UInt32,  // Offset 24
 
-    /// Reserved for future use.
-    reserved: UInt32,  // Offset 28
+    /// Full malloc extent: front slack + 32-byte header + user size.
+    total: UInt32,  // Offset 28
 };
 
 implement AllocationHeader {
@@ -273,16 +287,20 @@ implement AllocationHeader {
         type_id: UInt32,
         capabilities: UInt16,
     ) -> AllocationHeader {
+        if alignment > 4096 {
+            panic("AllocationHeader.new: alignment exceeds the validated 4096 bound");
+        }
         let epoch_and_caps = (capabilities as UInt32) << 16;
         AllocationHeader {
+            size: size,
+            alignment: alignment as UInt16,
+            base_offset: 0,
             generation: GEN_INITIAL,
             epoch_and_caps: epoch_and_caps,
-            size: size,
-            alignment: alignment,
             type_id: type_id,
             flags: 0,
-            ref_count: 0,
-            reserved: 0,
+            ref_count: 1,
+            total: 0,
         }
     }
 
@@ -562,8 +580,9 @@ implement AllocationHeader {
     }
 
     /// Load generation and epoch in a SINGLE 64-bit access (faster).
-    /// Generation (offset 0) + epoch_and_caps (offset 4) are adjacent,
-    /// enabling a combined 64-bit atomic load.
+    /// Generation (offset 8) + epoch_and_caps (offset 12) are adjacent
+    /// and the pair starts 8-aligned, enabling a combined 64-bit
+    /// atomic load.
     @inline
     public unsafe fn load_generation_epoch_combined(&self) -> (UInt32, UInt16) {
         // Cast generation field address to UInt64 pointer and load
@@ -727,22 +746,34 @@ implement AllocationHeader {
     /// Get pointer to user data (after header).
     @inline
     public unsafe fn user_ptr(&self) -> &unsafe Byte {
-        let self_ptr = self as &unsafe Byte;
-        ptr_offset(self_ptr, HEADER_SIZE)
+        // BYTE arithmetic through Int, deliberately NOT ptr_offset:
+        // the runtime PtrSub/PtrAdd family element-scales its offset
+        // by 8 even for Byte pointees (T0452 class), so
+        // `ptr_offset(ptr, -HEADER_SIZE)` reached ptr-256, not ptr-32
+        // (T0425 defect #1). An Int add/sub has no element to scale.
+        ((self as &unsafe Byte as Int) + HEADER_SIZE) as &unsafe Byte
     }
 
     /// Get header from user pointer.
     @inline
     public unsafe fn from_user_ptr(ptr: &unsafe Byte) -> &AllocationHeader {
-        let header_ptr = ptr_offset(ptr, -HEADER_SIZE);
-        header_ptr as &AllocationHeader
+        // BYTE arithmetic through Int, deliberately NOT ptr_offset:
+        // the runtime PtrSub/PtrAdd family element-scales its offset
+        // by 8 even for Byte pointees (T0452 class), so
+        // `ptr_offset(ptr, -HEADER_SIZE)` reached ptr-256, not ptr-32
+        // (T0425 defect #1). An Int add/sub has no element to scale.
+        ((ptr as Int) - HEADER_SIZE) as &AllocationHeader
     }
 
     /// Get mutable header from user pointer.
     @inline
     public unsafe fn from_user_ptr_mut(ptr: &unsafe Byte) -> &mut AllocationHeader {
-        let header_ptr = ptr_offset(ptr, -HEADER_SIZE);
-        header_ptr as &mut AllocationHeader
+        // BYTE arithmetic through Int, deliberately NOT ptr_offset:
+        // the runtime PtrSub/PtrAdd family element-scales its offset
+        // by 8 even for Byte pointees (T0452 class), so
+        // `ptr_offset(ptr, -HEADER_SIZE)` reached ptr-256, not ptr-32
+        // (T0425 defect #1). An Int add/sub has no element to scale.
+        ((ptr as Int) - HEADER_SIZE) as &mut AllocationHeader
     }
 
     /// Check if allocation is pinned.
@@ -820,7 +851,7 @@ implement AllocationHeader {
     /// Get alignment.
     @inline
     public fn get_alignment(&self) -> UInt32 {
-        self.alignment
+        self.alignment as UInt32
     }
 
     /// Get type ID.
