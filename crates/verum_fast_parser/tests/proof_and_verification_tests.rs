@@ -1337,3 +1337,80 @@ fn proof_block_paren_grouped_binop_inside_call_parses() {
     "#,
     );
 }
+
+// ---------------------------------------------------------------------------
+// T0842: `apply lemma(args…)` decomposes into lemma + instantiation args
+// ---------------------------------------------------------------------------
+
+/// The proof-body parser used to stuff the WHOLE call expression into
+/// `TacticExpr::Apply::lemma` and leave `args` empty — every argumented
+/// apply reached the engine as a nameless lemma (`"grounding(w)"`)
+/// that matched nothing in the hints database, so the step silently
+/// contributed no fact (d1_repro trace). This pins the decomposition.
+#[test]
+fn apply_with_arguments_decomposes_into_lemma_and_args() {
+    use verum_ast::decl::{ProofBody, ProofStepKind, TacticExpr};
+    use verum_ast::ExprKind;
+
+    let module = parse_module(
+        r#"
+type W is { flag: Bool };
+
+axiom grounding(w: &W)
+    ensures w.flag;
+
+theorem uses_apply(w: &W)
+    ensures w.flag
+{
+    proof {
+        apply grounding(w);
+    }
+}
+"#,
+    );
+
+    let theorem = module
+        .items
+        .iter()
+        .find_map(|it| match &it.kind {
+            ItemKind::Theorem(t) if t.name.name.as_str() == "uses_apply" => Some(t),
+            _ => None,
+        })
+        .expect("theorem parses");
+    let body = match &theorem.proof {
+        verum_common::Maybe::Some(b) => b,
+        verum_common::Maybe::None => panic!("theorem has a proof body"),
+    };
+    let structure = match body {
+        ProofBody::Structured(s) => s,
+        other => panic!("expected structured proof, got {:?}", other),
+    };
+    let (lemma, args) = structure
+        .steps
+        .iter()
+        .find_map(|s| match &s.kind {
+            ProofStepKind::Tactic(TacticExpr::Apply { lemma, args }) => Some((lemma, args)),
+            _ => None,
+        })
+        .expect("bare apply step present");
+
+    match &lemma.kind {
+        ExprKind::Path(p) => assert_eq!(
+            p.as_ident().expect("simple lemma name").as_str(),
+            "grounding",
+            "lemma must be the callee NAME, not the whole call"
+        ),
+        other => panic!(
+            "lemma must decompose to a bare path, got {:?} — the whole-call \
+             form is exactly the defect this test pins",
+            other
+        ),
+    }
+    assert_eq!(args.len(), 1, "instantiation args must be captured");
+    match &args[0].kind {
+        ExprKind::Path(p) => {
+            assert_eq!(p.as_ident().expect("arg ident").as_str(), "w")
+        }
+        other => panic!("arg must be the identifier `w`, got {:?}", other),
+    }
+}

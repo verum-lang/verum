@@ -2904,9 +2904,22 @@ impl<'a> RecursiveParser<'a> {
             Some(TokenKind::Ident(name)) if name.as_str() == "apply" => {
                 self.stream.advance();
                 let lemma = self.parse_expr()?;
+                // `apply f(a, b)` parses as one Call expression —
+                // decompose it into the lemma name and instantiation
+                // arguments. The `args` field was never populated
+                // here, so every argumented apply reached the proof
+                // engine as a nameless `Apply` whose "lemma" was the
+                // whole call TEXT (`"grounding(w)"`), matching no
+                // registered lemma (T0842 trace, d1_repro).
+                let (lemma, args) = match lemma.kind {
+                    verum_ast::ExprKind::Call { func, args, .. } => {
+                        ((*func).clone(), args)
+                    }
+                    _ => (lemma, List::new()),
+                };
                 Ok(TacticExpr::Apply {
                     lemma: Heap::new(lemma),
-                    args: List::new(),
+                    args,
                 })
             }
 
