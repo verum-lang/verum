@@ -41,6 +41,12 @@ concurrency:
   group: build-llvm
   cancel-in-progress: false
 
+env:
+  # THE tool requirement list — the resolve staleness check and the
+  # per-triple publish gate both read it; ci.yml's consumer assert
+  # names the same tools.
+  REQUIRED_LLVM_TOOLS: llvm-config llc opt llvm-link
+
 permissions:
   contents: write
 
@@ -97,8 +103,30 @@ jobs:
             runner="${entry##* }"
             archive="verum-llvm-${LLVM_TAG}-${triple}.tar.zst"
             if [[ "${FORCE}" != "true" ]] && grep -qxF "${archive}" <<< "${EXISTING}"; then
-              echo "✓ ${archive} already published — skipping ${triple}"
-              continue
+              # Published is not enough: the archive must satisfy TODAY'S
+              # tool requirements. The manifest is a tiny companion asset;
+              # a pre-manifest archive (or one missing a required tool)
+              # is stale and rebuilds. This is what lets a requirement
+              # change reach a month-old asset without admin dispatch.
+              fresh=true
+              if grep -qxF "${archive}.manifest" <<< "${EXISTING}"; then
+                rm -f /tmp/m.manifest
+                if gh release download "${PREBUILT_TAG}" --repo "${{ github.repository }}" \
+                     --pattern "${archive}.manifest" -O /tmp/m.manifest 2>/dev/null; then
+                  for tool in ${REQUIRED_LLVM_TOOLS}; do
+                    grep -qxF "${tool}" /tmp/m.manifest || { fresh=false; break; }
+                  done
+                else
+                  fresh=false
+                fi
+              else
+                fresh=false
+              fi
+              if [[ "${fresh}" == "true" ]]; then
+                echo "✓ ${archive} published and its manifest satisfies [${REQUIRED_LLVM_TOOLS}] — skipping ${triple}"
+                continue
+              fi
+              echo "✗ ${archive} published but STALE against [${REQUIRED_LLVM_TOOLS}] — rebuilding ${triple}"
             fi
             echo "→ will build ${triple} on ${runner}"
             INCLUDE+="{\"triple\":\"${triple}\",\"runner\":\"${runner}\"},"
@@ -168,7 +196,7 @@ jobs:
           # shells out to llc / opt / llvm-link, and publishing an archive
           # without them produces a green build here and "Failed to
           # execute llc" in every downstream job.
-          for tool in llvm-config llc opt llvm-link; do
+          for tool in ${REQUIRED_LLVM_TOOLS}; do
             test -f "install/bin/${tool}" || test -f "install/bin/${tool}.exe" \
               || { echo "::error::install/bin/${tool} missing — refusing to publish an incomplete prebuilt"; exit 1; }
           done
@@ -205,6 +233,13 @@ jobs:
           # Pipe through zstd explicitly — bsdtar/GNU-tar `--zstd` support
           # varies across runner images, the pipe form works everywhere.
           tar -cf - install | zstd -T0 -19 -o "${ARCHIVE}"
+          # Tool manifest — the resolve job reads it to decide whether a
+          # PUBLISHED archive still satisfies TODAY'S tool requirements.
+          # Without it, requirements added after an asset was built (the
+          # llc/opt/llvm-link assert, 2026-08-18) never invalidate the
+          # month-old asset: the builder skips (asset exists), the
+          # consumer asserts and dies, and no path rebuilds.
+          ls install/bin | sed 's/\.exe$//' > "${ARCHIVE}.manifest"
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
           else
@@ -225,6 +260,7 @@ jobs:
           path: |
             llvm/verum-llvm-*.tar.zst
             llvm/verum-llvm-*.tar.zst.sha256
+            llvm/verum-llvm-*.tar.zst.manifest
           if-no-files-found: error
 
   # -------------------------------------------------------------------------
@@ -249,7 +285,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          find _artifacts -type f \( -name '*.tar.zst' -o -name '*.sha256' \) \
+          find _artifacts -type f \( -name '*.tar.zst' -o -name '*.sha256' -o -name '*.manifest' \) \
             -exec cp {} release/ \;
           ls -lh release/
           [[ -n "$(ls -A release)" ]]

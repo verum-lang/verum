@@ -438,7 +438,31 @@ jobs:
         # located.
         env:
           VTEST_TRACE_SPEC: "1"
-        run: make test-l0 PARALLEL=4 2>&1 | tee l0.log; exit ${PIPESTATUS[0]}
+        # Cores on: the vtest RUNNER has died SIGSEGV inside/after the
+        # aot/ section on this very step (T0837 — last START
+        # 1049_barrier_sync.vr, corpse 76 s later) and the log's whole
+        # testimony was "Error 139". Same arming as nightly.yml.
+        run: |
+          ulimit -c unlimited
+          sudo sysctl -w kernel.core_pattern="$PWD/core.%e.%p" >/dev/null
+          make test-l0 PARALLEL=4 2>&1 | tee l0.log; exit ${PIPESTATUS[0]}
+
+      - name: Backtrace any L0 core dump (T0837)
+        if: failure()
+        working-directory: vcs
+        run: |
+          shopt -s nullglob
+          cores=(core.*)
+          if [ ${#cores[@]} -eq 0 ]; then
+            echo "no core files — the failure was not a runner crash"
+            exit 0
+          fi
+          sudo apt-get install -y gdb >/dev/null 2>&1 || true
+          for c in "${cores[@]}"; do
+            echo "=== backtrace for $c ==="
+            gdb -batch -ex "thread apply all bt" \
+              ../target/release/vtest "$c" 2>&1 | tail -80
+          done
 
       - name: Run L1-core (100% required)
         working-directory: vcs
