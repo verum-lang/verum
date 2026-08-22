@@ -19603,6 +19603,49 @@ impl VbcCodegen {
     }
 
     fn resolve_field_index_impl(&mut self, type_name: Option<&str>, field_name: &str) -> (u32, bool) {
+        // **ALIAS-TO-LAYOUT.** A record literal built through a type
+        // ALIAS (`type IoError is StreamError;` then `IoError { kind,
+        // .. }`) must resolve its fields against the TARGET's layout:
+        // the alias declares no fields of its own, so looking the
+        // alias name up verbatim missed every table and fell to the
+        // global interner — a guessed index, and since T0723 a
+        // FIELD-GUESS-HARD-1 refusal (measured: net_udp's IoError
+        // literals, the fixture red the unit tier tripped over).
+        // `resolve_type_alias` chases the chain to its fixpoint with a
+        // cycle guard.
+        let resolved_alias_target;
+        let type_name = match type_name {
+            Some(tn) => {
+                // Two alias channels, one hop: mount aliases live in
+                // `type_aliases` (chased to a fixpoint by
+                // resolve_type_alias); DECLARED aliases live on their
+                // TypeDescriptor as `alias_target_name` (the T0533
+                // identity carry).
+                let via_mount = self.resolve_type_alias(tn);
+                let mut current = via_mount;
+                let mut hops = 0u8;
+                while hops < 8 {
+                    let next = self
+                        .type_name_to_id
+                        .get(&current)
+                        .and_then(|&tid| self.type_by_id(tid))
+                        .filter(|td| matches!(td.kind, crate::types::TypeKind::Alias))
+                        .and_then(|td| td.alias_target_name)
+                        .and_then(|sid| self.ctx.strings.get(sid.0 as usize))
+                        .map(|s| s.to_string());
+                    match next {
+                        Some(t) if t != current => {
+                            current = t;
+                            hops += 1;
+                        }
+                        _ => break,
+                    }
+                }
+                resolved_alias_target = current;
+                Some(resolved_alias_target.as_str())
+            }
+            None => None,
+        };
         // **TUPLE-POSITIONAL-FIELD-1 (B1 root).** `_N` field names are
         // positional BY CONSTRUCTION — the parser synthesizes them for
         // tuple records and newtypes (`FileDesc(x)` ⇒ field `_0`).
