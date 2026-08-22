@@ -105,7 +105,18 @@ load-bearing weight:
   form gate before try_apply — diagnosis in progress by
   instrumented replay, and corpora deliberately do NOT work
   around it with field-level goal forms (a workaround would
-  mask the hypothesis-channel bug from the lint); (D2) *the
+  mask the hypothesis-channel bug from the lint). Root
+  CANDIDATE (T0842, from the reflection WARN read as
+  evidence): reflection runs a SINGLE pass — P calling a
+  not-yet-reflected Q is rejected instead of iterating to a
+  fixpoint over the call graph (the same closure-by-set-not-
+  by-pass class as transitive re-exports/T0566 and the removed
+  MAX_DEPTH); if confirmed, both (D1) layers share one root —
+  an unreflected aggregator is an opaque app with no defining
+  axiom, hence unproved under verbatim ensures. Field-level
+  aggregator conjunctions are then a SYMPTOMATIC alignment to
+  single-pass reflection; the canon lands after the code
+  verdict; (D2) *the
   prover does not explain itself* — proof_search has zero
   tracing today; minimal tracing lands with the E0319 work so
   a future «unproved» always names its break point.
