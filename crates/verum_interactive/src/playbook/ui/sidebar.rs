@@ -23,6 +23,10 @@ pub enum SidebarTab {
     /// demand — an expensive question, asked only when the reader
     /// presses for it (the price-badge discipline).
     Tiers,
+    /// The Journal lens (T0858 slice 5): the session's glass mind —
+    /// every question the session asked (runs, lens queries, tier
+    /// judgments) with its chain address and price, append-only.
+    Journal,
     DevTools,
 }
 
@@ -33,7 +37,8 @@ impl SidebarTab {
             Self::Outline => Self::Arch,
             Self::Arch => Self::Vbc,
             Self::Vbc => Self::Tiers,
-            Self::Tiers => Self::DevTools,
+            Self::Tiers => Self::Journal,
+            Self::Journal => Self::DevTools,
             Self::DevTools => Self::Variables,
         }
     }
@@ -44,7 +49,8 @@ impl SidebarTab {
             Self::Arch => Self::Outline,
             Self::Vbc => Self::Arch,
             Self::Tiers => Self::Vbc,
-            Self::DevTools => Self::Tiers,
+            Self::Journal => Self::Tiers,
+            Self::DevTools => Self::Journal,
         }
     }
     pub fn index(self) -> usize {
@@ -54,7 +60,8 @@ impl SidebarTab {
             Self::Arch => 2,
             Self::Vbc => 3,
             Self::Tiers => 4,
-            Self::DevTools => 5,
+            Self::Journal => 5,
+            Self::DevTools => 6,
         }
     }
 }
@@ -118,6 +125,8 @@ pub struct SidebarWidget<'a> {
     vbc_text: &'a str,
     /// Pre-rendered Tiers-lens lines (verdict or progress).
     tiers_lines: &'a [String],
+    /// Pre-rendered Journal lines, append-only, newest last.
+    journal_lines: &'a [String],
 }
 
 impl<'a> SidebarWidget<'a> {
@@ -131,6 +140,7 @@ impl<'a> SidebarWidget<'a> {
             arch_lines: &[],
             vbc_text: "",
             tiers_lines: &[],
+            journal_lines: &[],
         }
     }
 
@@ -164,6 +174,10 @@ impl<'a> SidebarWidget<'a> {
     }
     pub fn tiers_lines(mut self, lines: &'a [String]) -> Self {
         self.tiers_lines = lines;
+        self
+    }
+    pub fn journal_lines(mut self, lines: &'a [String]) -> Self {
+        self.journal_lines = lines;
         self
     }
     pub fn cell_info(self, _count: usize, _selected: usize) -> Self {
@@ -474,6 +488,7 @@ impl<'a> Widget for SidebarWidget<'a> {
             SidebarTab::Arch => " Arch ",
             SidebarTab::Vbc => " VBC ",
             SidebarTab::Tiers => " Tiers ",
+            SidebarTab::Journal => " Journal ",
             SidebarTab::DevTools => " Session ",
         };
 
@@ -494,7 +509,7 @@ impl<'a> Widget for SidebarWidget<'a> {
         }
 
         // Tab bar — rename to meaningful labels
-        let tabs = Tabs::new(vec!["Vars", "Cells", "Arch", "VBC", "Tiers", "Session"])
+        let tabs = Tabs::new(vec!["Vars", "Cells", "Arch", "VBC", "Tiers", "Jrnl", "Session"])
             .select(self.tab.index())
             .style(Style::default().fg(Color::DarkGray))
             .highlight_style(
@@ -518,6 +533,7 @@ impl<'a> Widget for SidebarWidget<'a> {
             SidebarTab::Arch => self.render_arch(content, buf),
             SidebarTab::Vbc => self.render_vbc(content, buf),
             SidebarTab::Tiers => self.render_tiers(content, buf),
+            SidebarTab::Journal => self.render_journal(content, buf),
             SidebarTab::DevTools => self.render_devtools(content, buf),
         }
     }
@@ -605,6 +621,31 @@ impl SidebarWidget<'_> {
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            lines.push(Line::from(Span::styled(format!("  {raw}"), style)));
+        }
+        Paragraph::new(lines).render(area, buf);
+    }
+
+    /// Paint the Journal lens: the newest entries that fit, oldest
+    /// first among them — a ledger reads downward.
+    fn render_journal(&self, area: Rect, buf: &mut Buffer) {
+        let mut lines: Vec<Line> = Vec::new();
+        if self.journal_lines.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  (nothing asked yet — every run and query lands here)",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+        }
+        let visible = area.height as usize;
+        let skip = self.journal_lines.len().saturating_sub(visible);
+        for raw in &self.journal_lines[skip..] {
+            let style = if raw.contains(" error") || raw.contains("DIVERGENT") {
+                Style::default().fg(Color::Red)
             } else {
                 Style::default().fg(Color::Gray)
             };

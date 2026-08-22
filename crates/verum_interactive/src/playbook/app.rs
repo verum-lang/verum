@@ -78,6 +78,11 @@ pub struct PlaybookApp {
     tiers_rx: Option<std::sync::mpsc::Receiver<Vec<String>>>,
     tiers_tmp: Option<tempfile::NamedTempFile>,
     tiers_started: Option<Instant>,
+    /// The session journal (T0858 slice 5): every question this
+    /// session asked — runs, lens queries, tier judgments — one line
+    /// each, append-only, with the chain address where one exists.
+    /// The TUI twin of the protocol's frame journal.
+    journal: Vec<String>,
     /// Arch-lens content (T0858 slice 2): rendered lines mirrored
     /// from `verum arch query --json` over the notebook-as-module
     /// (the accepted state law: cells concatenate into one growing
@@ -151,6 +156,7 @@ impl PlaybookApp {
             tiers_rx: None,
             tiers_tmp: None,
             tiers_started: None,
+            journal: Vec::new(),
             arch_lens_lines: Vec::new(),
             editor: EditorState::new(),
             layout_config: LayoutConfig::default(),
@@ -216,6 +222,10 @@ impl PlaybookApp {
                 self.session.last_peak_stack = peak_stack;
                 self.mark_dependents_dirty();
                 self.status_message = Some(format!("Done ({:.1}ms)", time_ms));
+                self.journal_push(format!(
+                    "run cell {} ({time_ms:.1}ms)",
+                    cell_idx + 1
+                ));
                 self.cleanup_pending();
             }
             Ok(AsyncExecMsg::Error(e)) => {
@@ -226,6 +236,7 @@ impl PlaybookApp {
                     self.session.cells[cell_idx].set_output(CellOutput::error(e.clone()), count);
                 }
                 self.status_message = Some(format!("Error: {}", e));
+                self.journal_push(format!("run cell {} error", cell_idx + 1));
                 self.cleanup_pending();
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {
@@ -1738,6 +1749,7 @@ impl PlaybookApp {
         self.tiers_rx = Some(rx);
         self.tiers_started = Some(Instant::now());
         self.tiers_lens_lines = vec!["judging… (builds both tiers)".to_string()];
+        self.journal_push("tiers.diff started");
     }
 
     /// Poll the in-flight tier judgment; called from the UI tick.
@@ -1751,9 +1763,14 @@ impl PlaybookApp {
                         started.elapsed().as_secs_f64()
                     ));
                 }
+                let verdict = lines
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "?".to_string());
                 self.tiers_lens_lines = lines;
                 self.tiers_rx = None;
                 self.tiers_tmp = None;
+                self.journal_push(format!("tiers.diff {verdict}"));
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {
                 if let Some(started) = self.tiers_started {
@@ -1772,6 +1789,17 @@ impl PlaybookApp {
         }
     }
 
+    /// Append a journal line: wall time, the chain address of the
+    /// module the question was about (when it has one), the event.
+    fn journal_push(&mut self, event: impl AsRef<str>) {
+        let at = chrono::Local::now().format("%H:%M:%S");
+        let address = super::persistence::chain_of_cells(&self.session.cells)
+            .last()
+            .map(|h| h[..8.min(h.len())].to_string())
+            .unwrap_or_else(|| "--------".to_string());
+        self.journal.push(format!("{at} {address} {}", event.as_ref()));
+    }
+
     /// The growing module: every code cell in order (the accepted
     /// state law — state lives in the QUESTION).
     fn notebook_module_source(&self) -> String {
@@ -1785,10 +1813,17 @@ impl PlaybookApp {
 
     fn refresh_arch_lens(&mut self) {
         let source = self.notebook_module_source();
+        if source.trim().is_empty() {
+            // An empty module is not a question — no subprocess, no
+            // journal entry (same law as the VBC lens).
+            self.arch_lens_lines = Vec::new();
+            return;
+        }
         self.arch_lens_lines = match arch_query_subprocess(&source) {
             Ok(lines) => lines,
             Err(e) => vec![format!("query failed: {e}")],
         };
+        self.journal_push("arch.query");
     }
 
     fn render_sidebar(&self, frame: &mut Frame, area: Rect) {
@@ -1900,7 +1935,8 @@ impl PlaybookApp {
             .stats(stats)
             .arch_lines(&self.arch_lens_lines)
             .vbc_text(&self.vbc_lens_text)
-            .tiers_lines(&self.tiers_lens_lines);
+            .tiers_lines(&self.tiers_lens_lines)
+            .journal_lines(&self.journal);
 
         frame.render_widget(sidebar, area);
     }
