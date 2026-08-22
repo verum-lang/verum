@@ -182,6 +182,21 @@ fn libsys_extern<'ctx>(
     module.add_function(name, fn_type, None)
 }
 
+/// What a null pointer means at a particular load site.
+///
+/// Named at every call so the reading is a decision on the record
+/// rather than an assumption in someone's head.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NullMeans {
+    /// Null IS a value: the unit-variant-as-0 encoding, where `None`
+    /// and `Ok(())` travel as `0`. Loading yields `0`.
+    TheValueZero,
+    /// Null has no meaning here — it says an earlier lowering built an
+    /// object it should not have. No guard: the program faults at the
+    /// bad pointer instead of computing with a fabricated `0`.
+    CompilerDefect,
+}
+
 impl<'ctx> RuntimeLowering<'ctx> {
     /// Create a new runtime lowering helper.
     pub fn new(context: &'ctx Context) -> Self {
@@ -1727,6 +1742,97 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
+    /// Load an `i64` at `offset` from `ptr`, with an explicit reading
+    /// of what a null `ptr` MEANS here.
+    ///
+    /// The two readings are not interchangeable, and choosing wrongly
+    /// is how this file produced two different bugs:
+    ///
+    /// * [`NullMeans::TheValueZero`] — Verum encodes `None` / `Ok(())`
+    ///   as `0`, so for variant-payload extraction a null receiver is
+    ///   a legitimate value. Yielding `0` is the encoding, not a
+    ///   fallback. `lower_get_variant_data` grew this guard under
+    ///   T0330 after `f"{maybe}"` crashed at Tier 1.
+    /// * [`NullMeans::CompilerDefect`] — a null tuple has no meaning;
+    ///   it says an earlier lowering produced an object it should not
+    ///   have. No guard is emitted, so the program faults exactly
+    ///   where the bad pointer is used. That is deliberate: yielding
+    ///   `0` here would convert a reproducible crash into a wrong
+    ///   answer nothing reports, and a miscompilation that ANSWERS is
+    ///   worse than one that stops.
+    ///
+    /// One carrier, so the policy cannot drift between siblings — the
+    /// original defect was not a missing guard but a guard that stayed
+    /// a local decision while its neighbour never learned it.
+    fn load_i64_at_offset(
+        &self,
+        builder: &Builder<'ctx>,
+        ptr: PointerValue<'ctx>,
+        offset: u64,
+        what: &str,
+        on_null: NullMeans,
+    ) -> Result<IntValue<'ctx>> {
+        let i64_type = self.context.i64_type();
+
+        let emit_load = |builder: &Builder<'ctx>| -> Result<IntValue<'ctx>> {
+            // SAFETY: GEP on a pointer to an object whose layout puts
+            // `offset` inside the allocation. Nullness is the caller's
+            // declared concern, not this GEP's.
+            let elem_ptr = unsafe {
+                builder
+                    .build_in_bounds_gep(
+                        self.context.i8_type(),
+                        ptr,
+                        &[i64_type.const_int(offset, false)],
+                        &format!("{what}_ptr"),
+                    )
+                    .or_llvm_err()?
+            };
+            Ok(builder
+                .build_load(i64_type, elem_ptr, &format!("{what}_value"))
+                .or_llvm_err()?
+                .into_int_value())
+        };
+
+        if matches!(on_null, NullMeans::CompilerDefect) {
+            return emit_load(builder);
+        }
+
+        let current_fn = builder
+            .get_insert_block()
+            .and_then(|b| b.get_parent())
+            .or_internal("load_i64_at_offset: no insert block/function")?;
+        let entry_bb = builder
+            .get_insert_block()
+            .or_internal("load_i64_at_offset: no insert block")?;
+        let load_bb = self
+            .context
+            .append_basic_block(current_fn, &format!("{what}_load"));
+        let merge_bb = self
+            .context
+            .append_basic_block(current_fn, &format!("{what}_merge"));
+
+        let is_null = builder
+            .build_is_null(ptr, &format!("{what}_is_null"))
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, merge_bb, load_bb)
+            .or_llvm_err()?;
+
+        builder.position_at_end(load_bb);
+        let loaded = emit_load(builder)?;
+        builder
+            .build_unconditional_branch(merge_bb)
+            .or_llvm_err()?;
+
+        builder.position_at_end(merge_bb);
+        let value = builder
+            .build_phi(i64_type, &format!("{what}_result"))
+            .or_llvm_err()?;
+        value.add_incoming(&[(&i64_type.const_zero(), entry_bb), (&loaded, load_bb)]);
+        Ok(value.as_basic_value().into_int_value())
+    }
+
     /// Lower GetVariantData instruction.
     ///
     /// Gets a field from the variant payload.
@@ -1736,64 +1842,21 @@ impl<'ctx> RuntimeLowering<'ctx> {
         variant_ptr: PointerValue<'ctx>,
         field_idx: u32,
     ) -> Result<IntValue<'ctx>> {
-        let i64_type = self.context.i64_type();
-
-        // NULL-variant guard (T0330). The IsVariant lowering deliberately
-        // accepts value 0 as "the tag-0 variant" (the unit-variant-as-0
-        // encoding: None / Ok(()) travel as 0 through unmonomorphized
-        // generic returns). Payload extraction must honour the SAME
+        // NULL-variant guard (T0330). `IsVariant` deliberately accepts
+        // value 0 as "the tag-0 variant" (the unit-variant-as-0
+        // encoding: None / Ok(()) travel as 0 through unmonomorphised
+        // generic returns). Payload extraction honours the SAME
         // encoding: the payload of a 0-variant is 0 (unit), never a
-        // dereference of NULL+32 — that exact deref was the Tier-1
-        // SIGSEGV in every `f"{maybe}"` (Maybe.fmt's `?` on a write_str
-        // result the RTS default arm zeroed).
-        let current_fn = builder
-            .get_insert_block()
-            .and_then(|b| b.get_parent())
-            .or_internal("lower_get_variant_data: no insert block/function")?;
-        let load_bb = self.context.append_basic_block(current_fn, "gvd_load");
-        let merge_bb = self.context.append_basic_block(current_fn, "gvd_merge");
-        let entry_bb = builder
-            .get_insert_block()
-            .or_internal("lower_get_variant_data: no insert block")?;
-        let is_null = builder
-            .build_is_null(variant_ptr, "gvd_is_null")
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(is_null, merge_bb, load_bb)
-            .or_llvm_err()?;
-
-        builder.position_at_end(load_bb);
-        // Calculate field offset: VARIANT_PAYLOAD_OFFSET + field_idx * 8
+        // dereference of NULL + offset — that exact deref was the
+        // Tier-1 SIGSEGV in every `f"{maybe}"`.
         let field_offset = Self::VARIANT_PAYLOAD_OFFSET + (field_idx as u64 * VALUE_SIZE);
-        // SAFETY: in-bounds GEP on a non-null pointer to an object with known layout; the offset is within the allocated size
-        let field_ptr = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    self.context.i8_type(),
-                    variant_ptr,
-                    &[i64_type.const_int(field_offset, false)],
-                    "field_ptr",
-                )
-                .or_llvm_err()?
-        };
-        let loaded = builder
-            .build_load(i64_type, field_ptr, "field_value")
-            .or_llvm_err()?
-            .into_int_value();
-        builder
-            .build_unconditional_branch(merge_bb)
-            .or_llvm_err()?;
-
-        builder.position_at_end(merge_bb);
-        let value = builder
-            .build_phi(i64_type, "gvd_value")
-            .or_llvm_err()?;
-        value.add_incoming(&[
-            (&i64_type.const_zero(), entry_bb),
-            (&loaded, load_bb),
-        ]);
-
-        Ok(value.as_basic_value().into_int_value())
+        self.load_i64_at_offset(
+            builder,
+            variant_ptr,
+            field_offset,
+            "gvd",
+            NullMeans::TheValueZero,
+        )
     }
 
     /// Lower IsVar instruction.
@@ -1990,27 +2053,20 @@ impl<'ctx> RuntimeLowering<'ctx> {
         tuple_ptr: PointerValue<'ctx>,
         index: u32,
     ) -> Result<IntValue<'ctx>> {
-        let i64_type = self.context.i64_type();
-
+        // A tuple pointer reaches here from producers that legitimately
+        // yield 0 for an absent value (see
+        // `load_i64_at_offset`). Unpacking one used to GEP and
+        // load straight through it; its SAFETY note reasoned about the
+        // OFFSET being in bounds, which was true and beside the point —
+        // the hazard was the POINTER.
         let offset = Self::OBJECT_HEADER_SIZE + (index as u64 * VALUE_SIZE);
-        // SAFETY: in-bounds GEP on a pointer to an object with known layout; the offset is within the allocated size
-        let elem_ptr = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    self.context.i8_type(),
-                    tuple_ptr,
-                    &[i64_type.const_int(offset, false)],
-                    "unpack_elem_ptr",
-                )
-                .or_llvm_err()?
-        };
-
-        let value = builder
-            .build_load(i64_type, elem_ptr, "unpack_value")
-            .or_llvm_err()?
-            .into_int_value();
-
-        Ok(value)
+        self.load_i64_at_offset(
+            builder,
+            tuple_ptr,
+            offset,
+            "unpack",
+            NullMeans::CompilerDefect,
+        )
     }
 
     // =========================================================================
