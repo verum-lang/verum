@@ -127,6 +127,7 @@ pub mod literal;
 pub mod meta_value;
 pub mod pattern;
 pub mod pretty;
+pub mod prelude;
 pub mod span;
 pub mod stmt;
 pub mod ty;

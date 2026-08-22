@@ -578,57 +578,13 @@ impl Default for BuildMode {
 /// DEFINED there). The mount is inserted at index 0 so every explicit
 /// user mount and local definition resolves after it and therefore
 /// shadows it.
+/// The implicit prelude, injected for every user compile. The
+/// injector itself is LANGUAGE semantics and lives in
+/// `verum_ast::prelude` (the VBC test harness injects the same mount
+/// so stdlib files compile under production's ambient vocabulary);
+/// this is the pipeline's door to it.
 pub(crate) fn inject_implicit_prelude_mount(module: &mut verum_ast::Module) {
-    use verum_ast::decl::{MountDecl, Visibility};
-    use verum_ast::span::Span;
-    use verum_ast::{Ident, Item, ItemKind, MountTree, MountTreeKind, Path, PathSegment};
-    use verum_common::{List, Maybe, Text};
-
-    if module.has_no_implicit_prelude() {
-        return;
-    }
-    // Process-level escape hatch (diagnostics + A/B isolation): treat
-    // every module as `@![no_implicit_prelude]`.
-    if std::env::var_os("VERUM_NO_IMPLICIT_PRELUDE").is_some() {
-        return;
-    }
-    // Idempotence: a module that already mounts `core.prelude` (glob or
-    // subtree) keeps its own declaration as the single import site.
-    let already_mounted = module.items.iter().any(|item| {
-        let ItemKind::Mount(decl) = &item.kind else {
-            return false;
-        };
-        let path = match &decl.tree.kind {
-            MountTreeKind::Glob(p) | MountTreeKind::Path(p) => p,
-            MountTreeKind::Nested { prefix, .. } => prefix,
-            MountTreeKind::File { .. } => return false,
-        };
-        let mut names = path.segments.iter().filter_map(|s| match s {
-            PathSegment::Name(id) => Some(id.name.as_str()),
-            _ => None,
-        });
-        names.next() == Some("core") && names.next() == Some("prelude")
-    });
-    if already_mounted {
-        return;
-    }
-
-    let span = Span::new(0, 0, module.file_id);
-    let mut segments = List::new();
-    segments.push(PathSegment::Name(Ident::new(Text::from("core"), span)));
-    segments.push(PathSegment::Name(Ident::new(Text::from("prelude"), span)));
-    let tree = MountTree {
-        kind: MountTreeKind::Glob(Path::new(segments, span)),
-        alias: Maybe::None,
-        span,
-    };
-    let decl = MountDecl {
-        visibility: Visibility::Private,
-        tree,
-        alias: Maybe::None,
-        span,
-    };
-    module.items.insert(0, Item::new(ItemKind::Mount(decl), span));
+    verum_ast::prelude::inject_implicit_prelude_mount(module);
 }
 
 // SmtCheckResult moved to crate::pipeline::refinement_verify

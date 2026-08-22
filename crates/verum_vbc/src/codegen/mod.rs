@@ -6875,6 +6875,60 @@ impl VbcCodegen {
         self.register_stdlib_intrinsics();
         self.register_runtime_io_functions();
 
+        // The implicit prelude is language semantics, and this entry
+        // compiles a module the way production does — so it mounts
+        // `core.prelude.*` exactly as the pipeline injects it
+        // (verum_ast::prelude is the ONE injector). Without this, a
+        // mount-free stdlib file (btree.vr relies wholly on ambient
+        // prelude vocabulary) compiled here with no `List.from` in
+        // sight and died "undefined function" while compiling
+        // verbatim in production.
+        let mut module_with_prelude = module.clone();
+        verum_ast::prelude::inject_implicit_prelude_mount(&mut module_with_prelude);
+        // A multi-file DIRECTORY module compiles as a unit in
+        // production (the bake's entry granularity): a file may use
+        // its siblings' declarations with no mount at all —
+        // core/action/gauge.vr uses enactments.vr's Enactment that
+        // way. Mirror the unit here with a synthetic `mount super.*;`
+        // (the relative resolver walks the file's own directory),
+        // except at the core root, where "the siblings" would be the
+        // entire library.
+        {
+            use verum_ast::decl::{MountDecl, Visibility};
+            use verum_ast::{Ident, Item, ItemKind, MountTree, MountTreeKind, Path, PathSegment};
+            let src_dir = std::path::Path::new(source_path).parent();
+            let at_core_root = src_dir
+                .and_then(|d| std::fs::canonicalize(d).ok())
+                .zip(std::fs::canonicalize(core_root).ok())
+                .is_some_and(|(a, b)| a == b);
+            if !at_core_root {
+                let span = verum_ast::span::Span::new(0, 0, module_with_prelude.file_id);
+                let mut segments = verum_common::List::new();
+                segments.push(PathSegment::Name(Ident::new(
+                    verum_common::Text::from("super"),
+                    span,
+                )));
+                let tree = MountTree {
+                    kind: MountTreeKind::Glob(Path::new(segments, span)),
+                    alias: verum_common::Maybe::None,
+                    span,
+                };
+                module_with_prelude.items.insert(
+                    0,
+                    Item::new(
+                        ItemKind::Mount(MountDecl {
+                            visibility: Visibility::Private,
+                            tree,
+                            alias: verum_common::Maybe::None,
+                            span,
+                        }),
+                        span,
+                    ),
+                );
+            }
+        }
+        let module = &module_with_prelude;
+
         // Mount resolution: parse imported .vr files and register their declarations.
         // This happens after builtins are registered so that imported types don't
         // conflict with built-in variants (None, Some, Ok, Err, etc.).
@@ -7209,6 +7263,84 @@ impl VbcCodegen {
         mount_cost::report(source_path, t0.elapsed());
     }
 
+    /// Resolve a glob over a module that exists INLINE in its parent's
+    /// file rather than on disk (`mount core.prelude.*` — the prelude
+    /// is `public module prelude { ... }` inside core/mod.vr). Parses
+    /// the parent's mod.vr / file, locates the inline module by its
+    /// last path segment, and recurses on the mount declarations that
+    /// module contains, with the PARENT file as the source context so
+    /// its dot-relative re-exports resolve against the parent's
+    /// directory. A miss stays silent: the glob may name a registry
+    /// module this file-based resolver legitimately cannot see.
+    #[cfg(feature = "codegen")]
+    fn resolve_inline_module_glob(
+        &mut self,
+        module_path: &[String],
+        source_path: &str,
+        core_root: &str,
+        resolved_files: &mut std::collections::HashSet<String>,
+        depth: u32,
+    ) {
+        let Some((inline_name, parent_segments)) = module_path.split_last() else {
+            return;
+        };
+        let parent_path: Vec<String> = if parent_segments.is_empty() {
+            return;
+        } else {
+            parent_segments.to_vec()
+        };
+        let parent_candidates =
+            Self::module_path_to_file_candidates(&parent_path, source_path, core_root);
+        for candidate in parent_candidates {
+            if Self::canonicalize_memo(&candidate).is_none() {
+                continue;
+            }
+            let Ok(source) = std::fs::read_to_string(&candidate) else {
+                continue;
+            };
+            let mut parser = verum_fast_parser::Parser::new(&source);
+            let Ok(parent_module) = parser.parse_module() else {
+                continue;
+            };
+            let inline = parent_module.items.iter().find_map(|item| {
+                if let ItemKind::Module(m) = &item.kind
+                    && m.name.name.as_str() == inline_name.as_str()
+                {
+                    Some(m)
+                } else {
+                    None
+                }
+            });
+            let Some(inline) = inline else { continue };
+            let verum_common::Maybe::Some(inline_items) = &inline.items else {
+                return;
+            };
+            // A synthetic module holding just the inline module's mount
+            // declarations — resolve_mounts_recursive does the rest.
+            let mut mounts: verum_common::List<verum_ast::Item> = verum_common::List::new();
+            for item in inline_items.iter() {
+                if matches!(item.kind, ItemKind::Mount(_)) {
+                    mounts.push(item.clone());
+                }
+            }
+            if !mounts.is_empty() {
+                let synthetic = verum_ast::Module::new(
+                    mounts,
+                    parent_module.file_id,
+                    parent_module.span,
+                );
+                self.resolve_mounts_recursive(
+                    &synthetic,
+                    &candidate,
+                    core_root,
+                    resolved_files,
+                    depth + 1,
+                );
+            }
+            return;
+        }
+    }
+
     /// Recursively resolves mount declarations to a FIXPOINT.
     ///
     /// The `resolved_files` visited set is the ONLY terminator: every
@@ -7275,6 +7407,7 @@ impl VbcCodegen {
                 // single `core/mod.vr` candidate (which holds no mounts).
                 let globs = Self::extract_glob_mount_paths(&mount_decl.tree, &[]);
                 for module_path in globs {
+                    let mut glob_resolved = false;
                     let file_candidates =
                         Self::module_path_to_file_candidates(&module_path, source_path, core_root);
                     for candidate in file_candidates {
@@ -7303,8 +7436,30 @@ impl VbcCodegen {
                                 resolved_files.insert(canonical);
                                 to_parse.push(vr_file.clone());
                             }
+                            glob_resolved = true;
                             break; // Walked one valid root, done with this glob
                         }
+                    }
+                    if !glob_resolved {
+                        // No file or directory answers to this path: the
+                        // module may be INLINE in its parent's mod.vr —
+                        // `mount core.prelude.*` names `public module
+                        // prelude { ... }` inside core/mod.vr, a module
+                        // that exists in the language and not on disk.
+                        // Resolve by parsing the parent file, finding the
+                        // inline module, and recursing on ITS mount
+                        // declarations with the parent file as the source
+                        // context (so its dot-relative re-exports resolve
+                        // against the parent's directory) — the glob
+                        // expands to exactly what the inline module
+                        // re-exports, never to a whole-tree walk.
+                        self.resolve_inline_module_glob(
+                            &module_path,
+                            source_path,
+                            core_root,
+                            resolved_files,
+                            depth,
+                        );
                     }
                 }
             }
