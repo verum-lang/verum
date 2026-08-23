@@ -17026,6 +17026,54 @@ mod tests {
     }
 
     #[test]
+    // ========================================================================
+    // T0852 family pin-gate — every gateway enum round-trips its byte
+    // space and answers for its pinned variant count.  A byte listed in
+    // from_byte but absent from the enum (or vice versa) fails here; a
+    // new variant landing without a conscious pin bump fails here.
+    // ========================================================================
+    #[test]
+    fn family_gateway_enums_roundtrip_and_counts_pinned() {
+        fn sweep<T: Copy + std::fmt::Debug + PartialEq>(
+            from: fn(u8) -> Option<T>,
+            to: fn(T) -> u8,
+        ) -> usize {
+            let mut n = 0;
+            for byte in 0..=255u8 {
+                if let Some(op) = from(byte) {
+                    assert_eq!(to(op), byte, "{op:?} byte drift");
+                    n += 1;
+                }
+            }
+            n
+        }
+        assert_eq!(
+            sweep(TimeSubOpcode::from_byte, TimeSubOpcode::to_byte),
+            7,
+            "TimeSubOpcode variant count drift"
+        );
+        assert_eq!(
+            sweep(SysSubOpcode::from_byte, SysSubOpcode::to_byte),
+            13,
+            "SysSubOpcode variant count drift"
+        );
+        assert_eq!(
+            sweep(MachSubOpcode::from_byte, MachSubOpcode::to_byte),
+            9,
+            "MachSubOpcode variant count drift"
+        );
+        assert_eq!(
+            sweep(SyncSubOpcode::from_byte, SyncSubOpcode::to_byte),
+            21,
+            "SyncSubOpcode variant count drift"
+        );
+        assert_eq!(
+            sweep(MemSubOpcode::from_byte, MemSubOpcode::to_byte),
+            35,
+            "MemSubOpcode variant count drift"
+        );
+    }
+
     fn cbgr_meta_count_pinned_at_sixty() {
         // 46 pre-T0846; +7 (EpochBegin/CheckFat/CheckWrite/Revoke/
         // RegisterRoot/RefRelease/ValidateRef, T0846); +7 (the
