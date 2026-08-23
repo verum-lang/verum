@@ -61,7 +61,7 @@ fn fat_ref_single_referent(v: &Value) -> Option<Value> {
 /// `VERUM_DISABLE_PROTOCOL_DISPATCH` (module.rs).
 fn unit_dyn_dispatch_disabled() -> bool {
     static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *FLAG.get_or_init(|| std::env::var_os("VERUM_DISABLE_UNIT_DYN_DISPATCH").is_some())
+    *FLAG.get_or_init(|| crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::DisableUnitDynDispatch))
 }
 
 /// Resolution outcome of the T0245 unit-receiver protocol-implementor walk.
@@ -327,7 +327,7 @@ pub(in super::super) fn handle_call_method(
     let mut call_witness_sidecar: Option<Box<[crate::types::TypeRef]>> =
         state.pending_call_witness.take();
 
-    if std::env::var("VERUM_TRACE_CALLM_EQ").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmEq) {
         let mname = state.module.strings.get(StringId(method_id)).unwrap_or("?");
         let cbgr = super::cbgr_helpers::is_cbgr_ref(&receiver);
         let is_int = receiver.is_int();
@@ -904,7 +904,7 @@ pub(in super::super) fn handle_call_method(
     // reference if present).  Small-string in-place mutation isn't
     // possible (NaN-boxed values aren't heap-allocated), so we always
     // promote to a heap Text on first mutation.
-    if std::env::var("VERUM_TRACE_PUSH_STR").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePushStr) {
         eprintln!(
             "[CallM trace] method_name='{}' bare='{}' receiver_kind={}",
             method_name,
@@ -915,7 +915,7 @@ pub(in super::super) fn handle_call_method(
             else { "other" },
         );
     }
-    if std::env::var("VERUM_TRACE_PUSH_STR_X").is_ok()
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePushStrX)
         && (bare_method_name == "push_str" || bare_method_name == "push")
     {
         eprintln!(
@@ -955,7 +955,7 @@ pub(in super::super) fn handle_call_method(
         // to the byte-transparent heap blob.
         let mut current_bytes = extract_text_bytes(&dispatch_receiver, state);
         let caller_base = state.reg_base();
-        if std::env::var("VERUM_TRACE_PUSH_STR").is_ok() {
+        if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePushStr) {
             eprintln!(
                 "[push_str trace] INTERCEPT FIRED, current_bytes.len = {}",
                 current_bytes.len(),
@@ -1016,7 +1016,7 @@ pub(in super::super) fn handle_call_method(
         // caller's frame slot if present.
         if is_cbgr_ref(&receiver) {
             let (abs_index, _) = decode_cbgr_ref(receiver);
-            if std::env::var("VERUM_TRACE_PUSH_STR").is_ok() {
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePushStr) {
                 eprintln!(
                     "[push_str trace] WRITEBACK via CBGR ref, abs_index={}, new_text.len={}",
                     abs_index,
@@ -1025,7 +1025,7 @@ pub(in super::super) fn handle_call_method(
             }
             state.registers.set_absolute(abs_index, new_value);
         } else {
-            if std::env::var("VERUM_TRACE_PUSH_STR").is_ok() {
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePushStr) {
                 eprintln!(
                     "[push_str trace] WRITEBACK via caller_base+receiver_reg, base={} reg={} new_text.len={}",
                     caller_base,
@@ -1303,7 +1303,7 @@ pub(in super::super) fn handle_call_method(
             _ => {}
         }
     }
-    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
         let rk = if dispatch_receiver.is_int() { "int".to_string() }
             else if dispatch_receiver.is_float() { "float".to_string() }
             else if dispatch_receiver.is_ptr() {
@@ -1376,7 +1376,7 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
-    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
         eprintln!("[callm-flow] B-pre-array method={}", method_name);
     }
     // Try built-in array/list methods (map, filter, fold, etc.)
@@ -1451,7 +1451,7 @@ pub(in super::super) fn handle_call_method(
     // the arm that CALLS it belongs after the existing fast paths, and
     // placing it needs the exit point they fall through (see the flow
     // trace below).
-    if std::env::var("VERUM_TRACE_STATIC_CALL").is_ok()
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceStaticCall)
         && receiver.is_small_string()
     {
         let tname = receiver.as_small_string().as_str().to_string();
@@ -1464,7 +1464,7 @@ pub(in super::super) fn handle_call_method(
             state.module.find_function_by_name(&qualified).is_some()
         );
     }
-    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
         eprintln!("[callm-flow] C-pre-variant-1 method={}", method_name);
     }
     if !prefer_user_compiled
@@ -1533,7 +1533,7 @@ pub(in super::super) fn handle_call_method(
             // the stamping site writes through.
             unsafe { *(stamp_addr as *const u32) == crate::types::TypeId::HEAP.0 }
         };
-        if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
             eprintln!(
                 "[callm-flow] C0-carrier-block method={} heapcell={} tid={}",
                 method_name,
@@ -1552,7 +1552,7 @@ pub(in super::super) fn handle_call_method(
         // tid=520` — and 520 IS `TypeId::SHARED`, so the arm fires.
         if !is_heap_cbgr_cell
             && header.type_id == TypeId::SHARED
-            && std::env::var_os("VERUM_SHARED_NATIVE").is_none()
+            && !crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::SharedNative)
         {
             // Shared layout: [ObjectHeader][refcount: i64][value: Value]
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
@@ -1582,7 +1582,7 @@ pub(in super::super) fn handle_call_method(
                 // layout, which the interp repr `[refcount][value]` does not
                 // carry, so the interp answers from ITS OWN repr.
                 "get_mut" => {
-                    if std::env::var_os("VERUM_TRACE_STATICMUT").is_some() {
+                    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceStaticmut) {
                         eprintln!("[shared-trace] get_mut arm HIT");
                     }
                     // Same `&mut T` contract as borrow_mut (memory.vr's
@@ -1797,7 +1797,7 @@ pub(in super::super) fn handle_call_method(
                 }
             }
         } else if is_heap_cbgr_cell {
-            if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
                 eprintln!("[callm-flow] C1a-heap-carrier method={}", method_name);
             }
             // HEAP-CARRIER-PEEL-1 (T0106 leg-2c), continued: any method
@@ -1929,7 +1929,7 @@ pub(in super::super) fn handle_call_method(
         None
     };
 
-    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
         eprintln!("[callm-flow] C1b-pre-shared-new method={}", method_name);
     }
 
@@ -1946,7 +1946,7 @@ pub(in super::super) fn handle_call_method(
     if bare_method_name == "new"
         && let Some(ref name) = receiver_type_name
         && WKT::Shared.matches(name)
-        && std::env::var_os("VERUM_SHARED_NATIVE").is_none()
+        && !crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::SharedNative)
     {
         let caller_base = state.reg_base();
         let value = if args.count > 0 {
@@ -2264,7 +2264,7 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
-    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
         eprintln!("[callm-flow] C2-post-new-block method={}", bare_method_name);
     }
 
@@ -2491,7 +2491,7 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
-    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
         eprintln!("[callm-flow] C3-pre-usersearch method={}", bare_method_name);
     }
     // Fallback: try to find a user-defined impl method by searching for "Type.method_name"
@@ -2848,7 +2848,7 @@ pub(in super::super) fn handle_call_method(
                     && (func.params.len() == args.count as usize + 1
                         || func.params.len() == args.count as usize)
                 {
-                    if std::env::var_os("VERUM_TRACE_PROTOCOL_DISPATCH").is_some() {
+                    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceProtocolDispatch) {
                         eprintln!(
                             "[protocol-dispatch] hit tid={} method='{}' -> fid={} '{}'",
                             tid.0,
@@ -2964,7 +2964,7 @@ pub(in super::super) fn handle_call_method(
         } else {
             None
         };
-        if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
             eprintln!(
                 "[dyn-recover] method={} concrete_type={:?} target_kind={}",
                 method_name,
@@ -3620,7 +3620,7 @@ pub(in super::super) fn handle_call_method(
                                             )
                                         {
                                             true
-                                        } else if std::env::var("VERUM_SUFFIX_COMPAT_LEGACY").is_ok() {
+                                        } else if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::SuffixCompatLegacy) {
                                             matches!(
                                                 tname,
                                                 "Int" | "Bool" | "Float"
@@ -3812,7 +3812,7 @@ pub(in super::super) fn handle_call_method(
         // for diagnosing CallM mis-dispatch (a bare method name routing
         // to the wrong type's impl) — the runtime receiver type that the
         // resolution keyed on is otherwise invisible.
-        if std::env::var("VERUM_TRACE_DISPATCH").is_ok() {
+        if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceDispatch) {
             let tname = state
                 .module
                 .get_function(target_func_id)
@@ -4001,7 +4001,7 @@ pub(in super::super) fn handle_call_method(
     // — the variant layout is type-erased and the closure carries
     // the type-specific work — so it is sound to retry here as a
     // safety net before panicking.
-    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
         eprintln!("[callm-flow] D-pre-variant-2 method={}", method_name);
     }
     if dispatch_receiver.is_ptr()
@@ -4088,7 +4088,7 @@ pub(in super::super) fn handle_call_method(
     // exist in the module — so we never override an explicit
     // qualified-name match.  Pinned in
     // `core-tests/collections/slice/regression_test.vr` §A.
-    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
         eprintln!("[callm-flow] F-safety-net method={}", method_name);
     }
     if (dispatch_receiver.is_regular_ptr() || dispatch_receiver.is_fat_ref())
@@ -4109,7 +4109,7 @@ pub(in super::super) fn handle_call_method(
             // uses. `recv_type_id = LIST` engages exactly that branch
             // below without touching memory.
             let recv_type_id = if dispatch_receiver.is_fat_ref() {
-                if std::env::var("VERUM_TRACE_FATREF_ROUTE").is_ok() {
+                if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceFatrefRoute) {
                     eprintln!(
                         "[fatref-route] method='{}' bare='{}' → Slice-first prefix table",
                         method_name, bare_method_name
@@ -4544,7 +4544,7 @@ pub(in super::super) fn handle_call_method(
         s
     };
 
-    if std::env::var("VERUM_TRACE_CALLM_FAIL").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFail) {
         let depth = state.call_stack.depth();
         let frame_info: Vec<String> = (0..depth)
             .filter_map(|i| {
@@ -4569,7 +4569,7 @@ pub(in super::super) fn handle_call_method(
         );
     }
 
-    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
         eprintln!("[callm-flow] Z-pre-panic method={}", method_name);
     }
     Err(InterpreterError::Panic {
@@ -10989,7 +10989,7 @@ pub(super) fn dispatch_array_method(
         if header.type_id.is_list_like() {
             let slots = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let backing = unsafe { (*slots.add(2)).as_ptr::<u8>() };
-            if std::env::var("VERUM_TRACE_ASPTR").is_ok() {
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceAsptr) {
                 // Diagnostic: raw slot bits + decoded backing for the
                 // LIST-ASPTR-HEADER-1 investigation.
                 let raw: [u64; 3] = unsafe {

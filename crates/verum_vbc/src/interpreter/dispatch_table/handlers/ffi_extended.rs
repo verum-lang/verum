@@ -450,7 +450,7 @@ fn ffi_extended_body(
                 // if the object is sitting one slot over, the address
                 // lowering picked the wrong register; if every slot is
                 // empty, the receiver was never materialised at all.
-                if std::env::var("VERUM_TRACE_FIELDADDR").is_ok() {
+                if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceFieldaddr) {
                     let lo = obj_reg.0.saturating_sub(2);
                     let neighbours: Vec<String> = (lo..=obj_reg.0 + 2)
                         .map(|r| {
@@ -514,7 +514,7 @@ fn ffi_extended_body(
             // test, that fix never executed and stands unmeasured rather
             // than refuted. This prints the receiver's post-resolution
             // tag and both addresses so the question closes on data.
-            if std::env::var("VERUM_TRACE_FIELDADDR").is_ok() {
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceFieldaddr) {
                 eprintln!(
                     "[fieldaddr-ok] tag={:?} is_int={} is_ptr={} obj={:p} field_addr={:p} off={}",
                     obj_val.tag(),
@@ -2285,7 +2285,7 @@ pub(super) fn cbgr_user_allocate(state: &mut InterpreterState, raw_size: i64, ra
 pub(super) fn cbgr_legacy_alloc() -> bool {
     static LEGACY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *LEGACY.get_or_init(|| {
-        std::env::var("VERUM_CBGR_LEGACY_ALLOC").map(|v| v == "1").unwrap_or(false)
+        crate::interpreter::env_flags::get(crate::interpreter::env_flags::Flag::CbgrLegacyAlloc) == Some("1")
     })
 }
 

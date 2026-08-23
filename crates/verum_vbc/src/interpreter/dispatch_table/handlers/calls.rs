@@ -207,7 +207,7 @@ pub(in super::super) fn handle_call(
     let reg_count = func.register_count;
     let has_intrinsic_marker = func.intrinsic_name.is_some();
 
-    if std::env::var("VERUM_TRACE_CALLS").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCalls) {
         let func_name: String = state
             .module
             .strings
@@ -229,7 +229,42 @@ pub(in super::super) fn handle_call(
     // high-level intrinsics in Rust; reserve FFI dispatch for genuinely-
     // foreign cases. See `shell_runtime.rs` for the full rationale and
     // the marshaling contract.
-    {
+    // Intercept-verdict cache (perf, 2026-08-23): the 18-rung ladder
+    // below does string probes (rfind/split/contains) on EVERY call —
+    // sampled at ~3-4 µs per archive-function call, dominated by
+    // StrSearcher + the name's String allocation.  Every rung except
+    // the shape-guarded wrapper one decides purely on (name, argc),
+    // both fixed per FunctionId, so the ladder's outcome is cached:
+    // 1 = no rung's name matches (skip everything — the mass path),
+    // 2 = only the wrapper rung's NAME matches (try just it),
+    // 0 = unknown (first call: run the ladder, then classify).
+    const IV_UNKNOWN: u8 = 0;
+    const IV_NONE: u8 = 1;
+    const IV_WRAPPER_ONLY: u8 = 2;
+    let iv = state
+        .intercept_verdicts
+        .get(func_id.0 as usize)
+        .copied()
+        .unwrap_or(IV_UNKNOWN);
+    if iv == IV_WRAPPER_ONLY {
+        let caller_base = state.reg_base();
+        let func_name: String = state
+            .module
+            .strings
+            .get(func_name_id)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        if let Some(result) = super::wrapper_runtime::try_intercept_wrapper_call(
+            state,
+            &func_name,
+            args.start.0,
+            args.count,
+            caller_base,
+        )? {
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
+        }
+    } else if iv == IV_UNKNOWN {
         let caller_base = state.reg_base();
         let func_name: String = state
             .module
@@ -504,6 +539,20 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
+
+            // Every rung answered None — classify and cache, so the
+            // next call of this function skips the ladder entirely
+            // (or goes straight to the one shape-guarded rung).
+            let verdict = if super::wrapper_runtime::wrapper_name_matches(&func_name) {
+                IV_WRAPPER_ONLY
+            } else {
+                IV_NONE
+            };
+            let idx = func_id.0 as usize;
+            if state.intercept_verdicts.len() <= idx {
+                state.intercept_verdicts.resize(idx + 1, IV_UNKNOWN);
+            }
+            state.intercept_verdicts[idx] = verdict;
         }
     }
 
@@ -740,7 +789,7 @@ pub(in super::super) fn handle_call_generic(
     let reg_count = func.register_count;
     let has_intrinsic_marker = func.intrinsic_name.is_some();
 
-    if std::env::var("VERUM_TRACE_CALLS").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCalls) {
         let func_name: String = state
             .module
             .strings
@@ -1335,7 +1384,7 @@ fn try_dispatch_intrinsic_named(
     // not the CallG intercept chain — the qualifier-gated high-level
     // env_runtime intercepts never see bare-resolved user calls).
     // Bridge to the shared env_runtime arms.
-    if std::env::var("VERUM_TRACE_ENVSTUB").is_ok() && func_name.contains("env") {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceEnvstub) && func_name.contains("env") {
         eprintln!("[envstub] by-name dispatch sees func_name={} bare={}", func_name, name);
     }
     if matches!(name, "get_env_impl" | "set_env_impl" | "unset_env_impl") {
@@ -2193,7 +2242,7 @@ fn try_dispatch_intrinsic_named(
             };
             let func_val = get_arg(state, func_idx);
             let arg_val = get_arg(state, arg_idx);
-            if std::env::var_os("VERUM_TRACE_POOL").is_some() {
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePool) {
                 eprintln!(
                     "[pool] submit func_val tag={:?} bits={:#x} is_ptr={} is_func_ref={} is_int={} arg tag={:?}",
                     func_val.tag(),
@@ -2237,7 +2286,7 @@ fn try_dispatch_intrinsic_named(
                     )?
                 }
             };
-            if std::env::var_os("VERUM_TRACE_POOL").is_some() {
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePool) {
                 eprintln!(
                     "[pool] submit result tag={:?} bits={:#x} as_int={}",
                     result.tag(),

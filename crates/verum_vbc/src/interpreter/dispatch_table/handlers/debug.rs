@@ -373,7 +373,7 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
             {
                 return format_variant_for_print_depth(state, base_ptr, depth + 1);
             }
-            if std::env::var("VERUM_TRACE_LISTREPR").is_ok() {
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceListrepr) {
                 let existing = state
                     .module
                     .types

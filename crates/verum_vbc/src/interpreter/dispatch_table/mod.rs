@@ -1316,12 +1316,12 @@ pub fn dispatch_loop_table_with_entry_depth(
         // prints pc + opcode + classification of r1/r2/r3 for the matching
         // function, so a same-bytecode/different-result divergence between
         // two functions is directly observable.
-        if let Ok(ref pcfilter) = std::env::var("VERUM_TRACE_PC") {
+        if let Some(pcfilter) = crate::interpreter::env_flags::get(crate::interpreter::env_flags::Flag::TracePc) {
             let fname = state
                 .call_stack
                 .current_function_name(&state.module)
                 .unwrap_or_default();
-            if fname.contains(pcfilter.as_str()) {
+            if fname.contains(pcfilter) {
                 let cls = |r: u16| -> String {
                     let v = state.get_reg(Reg(r));
                     if v.is_nil() { "nil".to_string() }
@@ -1341,7 +1341,7 @@ pub fn dispatch_loop_table_with_entry_depth(
                 // decoded instruction (operands included) — bytecode is
                 // re-decoded at this pc only when tracing, zero cost
                 // otherwise.
-                let decoded = if std::env::var("VERUM_TRACE_PC_DECODE").is_ok() {
+                let decoded = if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePcDecode) {
                     // Re-fetch the slice: `bytecode` above ends its borrow
                     // before advance_pc; reusing it here would extend the
                     // immutable borrow across the mutable calls (E0502).

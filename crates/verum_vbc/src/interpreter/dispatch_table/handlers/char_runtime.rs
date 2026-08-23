@@ -350,7 +350,7 @@ fn write_utf8_bytes_to_buf(buf_val: Value, src: &[u8; 4], n_bytes: usize) {
 
 fn write_utf16_units_to_buf(buf_val: Value, src: &[u16; 2], n_units: usize) {
     // SLICE-ELEM-WRITE-1 oracle: classify the buffer value on demand.
-    if std::env::var("VERUM_TRACE_ENCBUF").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceEncbuf) {
         eprintln!(
             "[encbuf/u16] fat={} thin={} ptr={} nil={} raw=0x{:016x}",
             buf_val.is_fat_ref(),

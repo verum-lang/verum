@@ -49,6 +49,7 @@
 //! let result = interp.execute_function(FunctionId(0))?;
 //! ```
 
+pub(crate) mod env_flags;
 pub mod autodiff;
 mod autodiff_record;
 mod cbgr_heap;

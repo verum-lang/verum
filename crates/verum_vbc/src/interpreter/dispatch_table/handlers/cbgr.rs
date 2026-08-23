@@ -575,7 +575,7 @@ pub(in super::super) fn handle_deref_mut(
     let value_reg = read_reg(state)?;
     let ref_val = state.get_reg(ref_reg);
     let value = state.get_reg(value_reg);
-    if std::env::var("VERUM_TRACE_PTRWRITE").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePtrwrite) {
         let addr = if ref_val.is_ptr() {
             ref_val.as_ptr::<u8>() as usize
         } else if ref_val.is_int() {
@@ -1079,7 +1079,7 @@ pub(in super::super) fn handle_drop_ref(
                     .zip(unsafe { heap::ObjectHeader::try_from_ptr(header_ptr) })
                     .map(|(desc, header)| header.layout_matches_descriptor(desc))
                     .unwrap_or(false);
-                if !plausible && std::env::var("VERUM_TRACE_DROPFN").is_ok() {
+                if !plausible && crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceDropfn) {
                     let tn = state
                         .module
                         .types
@@ -1135,7 +1135,7 @@ pub(in super::super) fn handle_drop_ref(
                 });
 
             if let Some((drop_fn_id, reg_count, _bytecode_offset)) = drop_info {
-                if std::env::var("VERUM_TRACE_DROPFN").is_ok() {
+                if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceDropfn) {
                     let tn = if let Some(type_idx) = type_desc_idx {
                         state
                             .module
@@ -1652,7 +1652,7 @@ fn cbgr_extended_body(
                 state.set_reg(dst, Value::nil());
             } else {
                 state.cbgr_mutable_ptrs.insert(addr);
-                if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+                if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
                     eprintln!("[raw-addr] insert {:#x}", addr);
                 }
                 state.set_reg(dst, Value::from_ptr(addr as *mut u8));

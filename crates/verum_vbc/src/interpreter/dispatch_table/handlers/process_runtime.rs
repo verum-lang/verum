@@ -50,7 +50,7 @@ pub(in super::super) fn try_intercept_process_runtime(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     let bare = func_name.rsplit('.').next().unwrap_or(func_name);
-    if std::env::var("VERUM_TRACE_PROCESS").is_ok()
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceProcess)
         && (func_name.contains("spawn") || func_name.contains("wait") || func_name.contains("exec.run"))
     {
         eprintln!(
@@ -718,7 +718,7 @@ pub(super) fn spawn_raw_triple(
 ) -> i64 {
     use std::process::Stdio;
     if process_spawn_denied(state, program) {
-        if std::env::var("VERUM_TRACE_PROCESS").is_ok() {
+        if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceProcess) {
             eprintln!(
                 "[process_runtime] __process_spawn_raw '{}' denied by Process permission",
                 program
@@ -740,7 +740,7 @@ pub(super) fn spawn_raw_triple(
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            if std::env::var("VERUM_TRACE_PROCESS").is_ok() {
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceProcess) {
                 eprintln!(
                     "[process_runtime] __process_spawn_raw '{}' failed: {}",
                     program, e

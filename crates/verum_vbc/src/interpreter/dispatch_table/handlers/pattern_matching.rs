@@ -403,7 +403,7 @@ pub(in super::super) fn handle_get_variant_data(
     if variant.is_ptr() && !variant.is_nil() {
         let ptr_addr = variant.as_ptr::<u8>() as usize;
         if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
-            if std::env::var("VERUM_TRACE_GVD").is_ok() {
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceGvd) {
                 eprintln!("[gvd] INTERIOR-DEREF ptr={:#x} (in cbgr_mutable_ptrs)", ptr_addr);
             }
             // SAFETY: heap-interior pointer tracked in
@@ -429,7 +429,7 @@ pub(in super::super) fn handle_get_variant_data(
             unsafe {
                 let field_ptr = base_ptr.add(field_offset) as *const Value;
                 let value = std::ptr::read(field_ptr);
-                if std::env::var("VERUM_TRACE_GVD").is_ok() {
+                if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceGvd) {
                     eprintln!(
                         "[gvd] read base={:#x} field={} off={} -> bits={:#x} (int? {})",
                         base_ptr as usize, field, field_offset, value.to_bits(),
@@ -633,7 +633,7 @@ pub(in super::super) fn handle_match_tag(
         false
     };
 
-    if std::env::var("VERUM_TRACE_MATCHTAG").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceMatchtag) {
         let vt = if value.is_ptr() && !value.is_nil() {
             let p = value.as_ptr::<u8>();
             if !p.is_null() { unsafe { heap::variant_tag(p) as i64 } } else { -1 }

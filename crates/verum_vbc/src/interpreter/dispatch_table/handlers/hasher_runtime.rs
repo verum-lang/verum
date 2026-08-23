@@ -63,7 +63,7 @@ pub(in super::super) fn try_intercept_default_hasher(
     // ThinRefs so we land on the heap-record Value.
     let self_raw = state.registers.get(caller_base, Reg(args_start_reg));
     let self_val = deref_self(state, self_raw);
-    if std::env::var("VERUM_TRACE_HASHER").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceHasher) {
         let k = |v: &Value| -> &'static str {
             if is_cbgr_ref(v) { "cbgr-ref" }
             else if v.is_thin_ref() { "thin-ref" }

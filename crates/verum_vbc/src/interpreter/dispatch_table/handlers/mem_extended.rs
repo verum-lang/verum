@@ -950,7 +950,7 @@ fn mem_extended_body(
             // (provenance, not the tag) AND the block must have room for
             // the WHOLE value — a block sized for a reference keeps the
             // pointer write.
-            if std::env::var("VERUM_TRACE_PTRWRITE").is_ok() {
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePtrwrite) {
                 let room = super::cbgr::bridge_extent_room(state, ptr as usize);
                 let hsize = if v.is_regular_ptr() && !v.is_nil() {
                     unsafe {
@@ -1024,7 +1024,7 @@ fn mem_extended_body(
             };
             // SAFETY: null-checked; caller supplies a pointer valid for
             // `size`-byte writes (raw-pointer contract).
-                        if std::env::var_os("VERUM_TRACE_STATICMUT").is_some() {
+                        if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceStaticmut) {
                 eprintln!("[staticmut-trace] 0x6C write ptr={:p} payload={} size={}", ptr, payload, size);
             }
 unsafe {
@@ -1648,7 +1648,7 @@ unsafe {
             // this interpreter allocates a zero-initialised cell.
             // Subsequent reads return the same stable address.
             let cell_addr = state.static_mut_cell_addr(slot);
-            if std::env::var_os("VERUM_TRACE_STATICMUT").is_some() {
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceStaticmut) {
                 eprintln!("[staticmut-trace] 0x52 slot={} -> addr={:p}", slot, cell_addr);
             }
             state.set_reg(dst, Value::from_ptr::<u8>(cell_addr));

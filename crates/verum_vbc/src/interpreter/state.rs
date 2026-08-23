@@ -710,6 +710,17 @@ pub struct InterpreterState {
     /// Incremented by BypassBegin, decremented by BypassEnd.
     pub cbgr_bypass_depth: u32,
 
+    /// Per-function verdict of the `handle_call` intercept ladder
+    /// (calls.rs): 0 = unknown, 1 = no intercept's NAME matches (skip
+    /// the whole 18-rung ladder — no string ops, no name alloc),
+    /// 2 = only the shape-guarded wrapper rung's name matches (try
+    /// just that one).  Indexed by `FunctionId.0`; grows on demand.
+    /// Sound because every non-wrapper rung's verdict is a pure
+    /// function of (name, argc) — both fixed per descriptor — and the
+    /// env toggles the rungs consult are process-cached in
+    /// `env_flags`.
+    pub intercept_verdicts: Vec<u8>,
+
     /// Global generation-id counter — the Tier-0 twin of the AOT's
     /// `verum_ir_generation_counter` global (runtime.rs
     /// `emit_cbgr_new_generation`): starts at 1, and
@@ -2708,6 +2719,7 @@ impl InterpreterState {
             static_mut_wide_cells: HashMap::new(),
             cbgr_epoch: 1,
             cbgr_bypass_depth: 0,
+            intercept_verdicts: Vec::new(),
             cbgr_generation_counter: 1,
             cbgr_allocations: HashSet::new(),
             cbgr_bridge_extents: std::collections::BTreeMap::new(),

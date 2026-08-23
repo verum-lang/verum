@@ -209,7 +209,9 @@ impl RegisterFile {
         // corruption that (pre-guard) recursed primitive dispatch to a
         // process-killing SIGBUS. `VERUM_TRAP_SELFREF=1` prints the
         // write site with a native backtrace and keeps running.
-        if std::env::var_os("VERUM_TRAP_SELFREF").is_some() && value.is_int() {
+        if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TrapSelfref)
+            && value.is_int()
+        {
             let encoded = value.as_i64();
             if encoded < -1 {
                 let raw = -(encoded + 1);

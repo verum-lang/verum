@@ -22,7 +22,7 @@ pub(in super::super) fn handle_eqi(
     let b = read_reg(state)?;
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
-    if std::env::var("VERUM_TRACE_EQ_RUNTIME").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceEqRuntime) {
         eprintln!(
             "[eqi-entry] va.is_ptr={} vb.is_ptr={} va.bits=0x{:x} vb.bits=0x{:x}",
             va.is_ptr(), vb.is_ptr(), va.to_bits(), vb.to_bits(),
@@ -243,7 +243,7 @@ pub(in super::super) fn handle_eqg(
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
 
-    if std::env::var("VERUM_TRACE_EQ_RUNTIME").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceEqRuntime) {
         eprintln!(
             "[eqg-entry] protocol_id={} va.is_ptr={} vb.is_ptr={} va.bits=0x{:x} vb.bits=0x{:x}",
             protocol_id, va.is_ptr(), vb.is_ptr(), va.to_bits(), vb.to_bits(),
@@ -372,7 +372,7 @@ fn runtime_type_name_for_eq(v: &Value, state: &InterpreterState) -> Option<Strin
     // `ref_or_stub` stubbing). The guards' rationale lives there; this
     // wrapper only keeps the Eq-specific trace hook.
     let resolved = super::object_dispatch::runtime_type_for_dispatch(v, state);
-    if std::env::var("VERUM_TRACE_EQ_RUNTIME").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceEqRuntime) {
         match &resolved {
             Some((raw_id, name)) => eprintln!(
                 "[eq-runtime] raw_id={} (0x{:x}) name={} is_synthetic={} is_maybe={} is_result={}",

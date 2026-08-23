@@ -53,7 +53,7 @@ const CBGR_REGREF_GEN_MASK: u32 = (1u32 << CBGR_REGREF_GEN_BITS) - 1;
 fn legacy_int_refs() -> bool {
     static CELL: OnceLock<bool> = OnceLock::new();
     *CELL.get_or_init(|| {
-        std::env::var_os("VERUM_CBGR_LEGACY_INT_REFS")
+        crate::interpreter::env_flags::get(crate::interpreter::env_flags::Flag::CbgrLegacyIntRefs).map(std::ffi::OsString::from)
             .map(|v| v == "1" || v == "true")
             .unwrap_or(false)
     })

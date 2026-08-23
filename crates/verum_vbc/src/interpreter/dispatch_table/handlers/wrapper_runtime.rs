@@ -112,6 +112,16 @@ fn shared_refcount_ptr(v: &Value) -> Option<*mut Value> {
     Some(unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value })
 }
 
+/// Name-only predicate for the intercept-verdict cache (calls.rs):
+/// does this qualified name even LOOK like a `Heap.*` / `Shared.*`
+/// wrapper method?  The full intercept below is shape-guarded (it
+/// inspects the receiver's runtime repr), so its verdict cannot be
+/// cached per function id — but a name that matches NEITHER type can
+/// never fire it, and THAT is cacheable.
+pub(in super::super) fn wrapper_name_matches(func_name: &str) -> bool {
+    method_of(func_name, "Heap").is_some() || method_of(func_name, "Shared").is_some()
+}
+
 /// Try to intercept a statically-resolved wrapper-method `Call` by
 /// qualified name.  Returns `Some(value)` when the interception fires.
 pub(in super::super) fn try_intercept_wrapper_call(
@@ -145,7 +155,7 @@ pub(in super::super) fn try_intercept_wrapper_call(
             // `[refcount][value]` layout, and the mixture reads as a
             // defect in the stdlib bodies.
             if let Some(rc_ptr) = shared_refcount_ptr(&v)
-                && std::env::var_os("VERUM_SHARED_NATIVE").is_none()
+                && !crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::SharedNative)
             {
                 match method {
                     "strong_count" => {

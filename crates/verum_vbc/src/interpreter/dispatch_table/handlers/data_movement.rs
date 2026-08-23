@@ -22,7 +22,7 @@ pub(in super::super) fn handle_mov(
     // SELF-REF WRITE context (#48 forensics, opt-in): name the fn+pc
     // that Movs a register-ref into its own referent slot (pairs with
     // the registers.set trap that prints the native backtrace).
-    if std::env::var_os("VERUM_TRAP_SELFREF").is_some() && value.is_int() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TrapSelfref) && value.is_int() {
         let encoded = value.as_i64();
         if encoded < -1 {
             let raw = -(encoded + 1);

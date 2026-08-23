@@ -108,7 +108,7 @@ pub(in super::super) fn handle_get_field(
     // List object's field words and peeks the buffer candidates, so the
     // element-representation question (NaN-boxed Values vs raw ints)
     // is answered by evidence, not inference.
-    if std::env::var("VERUM_TRACE_LISTREPR").is_ok() && obj_val.is_ptr() && !obj_val.is_nil() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceListrepr) && obj_val.is_ptr() && !obj_val.is_nil() {
         let p = obj_val.as_ptr::<u8>();
         if !p.is_null() {
             let h = unsafe { heap::ObjectHeader::ref_or_stub(p) };
@@ -501,7 +501,7 @@ pub(in super::super) fn handle_get_field(
     // in ffi_extended.rs): their field slots start at the user pointer.
     // The discriminator is the live-extent index, the same fact
     // `bridge_scalar_slot` uses to decide provenance.
-    if std::env::var("VERUM_TRACE_GETF").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceGetf) {
         eprintln!(
             "[getf] ptr={:p} idx={} off={} room={:?} hdr_size={:?}",
             ptr,

@@ -317,7 +317,7 @@ fn intercept_exists(
 ) -> InterpreterResult<Option<Value>> {
     let path = extract_path_arg(state, args_start_reg, caller_base);
     let exists = std::path::Path::new(&path).exists();
-    if std::env::var("VERUM_DEBUG_FS").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::DebugFs) {
         eprintln!("[path_exists] path='{}' exists={}", path, exists);
     }
     Ok(Some(Value::from_bool(exists)))

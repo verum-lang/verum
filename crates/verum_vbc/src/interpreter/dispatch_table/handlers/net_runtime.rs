@@ -2081,7 +2081,7 @@ pub(in super::super) fn try_intercept_tcp_method(
         method_name.contains("UdpSocket.") || is_record_typed_as(state, receiver, "UdpSocket");
     let is_listener =
         method_name.contains("TcpListener.") || is_record_typed_as(state, receiver, "TcpListener");
-    if std::env::var("VERUM_TRACE_TCP").is_ok() {
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceTcp) {
         eprintln!(
             "[trace-net-method] method={:?} bare={:?} args={} is_udp={} is_listener={}",
             method_name, bare_method, arg_count, is_udp, is_listener
