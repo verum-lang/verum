@@ -11,7 +11,6 @@ use verum_common::Text;
 
 use super::cell::{Cell, CellId, CellKind, CellOutput, TensorStats};
 use crate::IncrementalScriptParser;
-use crate::execution::{ExecutionContext, ExecutionError, ExecutionPipeline};
 
 /// Session state for a playbook
 ///
@@ -27,10 +26,6 @@ pub struct SessionState {
     pub selected_cell: usize,
     /// Incremental parser for the session (provides caching and dependency tracking)
     pub parser: IncrementalScriptParser,
-    /// Execution pipeline for VBC compilation and execution
-    pub pipeline: ExecutionPipeline,
-    /// Cross-cell execution context (bindings, functions)
-    pub execution_context: ExecutionContext,
     /// The ONE vocabulary executor (T0858 slice 5): cells run as a
     /// GROWING MODULE through the script engine — the same
     /// hook-installed compiler `verum run` and `core.script` use.
@@ -67,8 +62,6 @@ impl SessionState {
             cells: vec![Cell::new_code("")],
             selected_cell: 0,
             parser: IncrementalScriptParser::new(),
-            pipeline: ExecutionPipeline::with_file_id(file_id),
-            execution_context: ExecutionContext::new(),
             // Permissive caps on purpose: the playground is a LOCAL
             // interactive tool, the moral peer of `verum run` in the
             // user's own terminal — sandboxing belongs to script
@@ -485,68 +478,7 @@ impl SessionState {
     }
 
     /// Convert an execution error to a CellOutput
-    fn execution_error_to_output(&self, error: ExecutionError) -> CellOutput {
-        match error {
-            ExecutionError::Parse(errors) => {
-                // Try to extract line:col from error messages for better display
-                let formatted: Vec<String> = errors
-                    .iter()
-                    .map(|e| {
-                        // Match patterns like "line 5" or "5:10" or "at line 5, column 10"
-                        let s = e.as_str();
-                        // Already has line info — pass through
-                        if s.starts_with("[line") {
-                            return s.to_string();
-                        }
-                        // Try "line N" pattern
-                        if let Some(pos) = s.find("line ") {
-                            let after = &s[pos + 5..];
-                            if after.starts_with(|c: char| c.is_ascii_digit()) {
-                                let num: String =
-                                    after.chars().take_while(|c| c.is_ascii_digit()).collect();
-                                return format!("[line {}] {}", num, s);
-                            }
-                        }
-                        // Try "N:M" pattern at start (e.g. "3:10: unexpected token")
-                        let trimmed = s.trim_start();
-                        if let Some(colon_pos) = trimmed.find(':') {
-                            let before = &trimmed[..colon_pos];
-                            if !before.is_empty() && before.chars().all(|c| c.is_ascii_digit()) {
-                                let line_num = before;
-                                // Check for col after first colon
-                                let rest = &trimmed[colon_pos + 1..];
-                                if let Some(colon2) = rest.find(':') {
-                                    let col_part = &rest[..colon2];
-                                    if !col_part.is_empty()
-                                        && col_part.chars().all(|c| c.is_ascii_digit())
-                                    {
-                                        return format!(
-                                            "[line {}:{}] {}",
-                                            line_num,
-                                            col_part,
-                                            rest[colon2 + 1..].trim_start()
-                                        );
-                                    }
-                                }
-                                return format!("[line {}] {}", line_num, rest.trim_start());
-                            }
-                        }
-                        s.to_string()
-                    })
-                    .collect();
-                let message = formatted.join("\n");
-                CellOutput::error_with_suggestions(message, None, Vec::new())
-            }
-            ExecutionError::Codegen(msg) => {
-                CellOutput::error(format!("Compilation error: {}", msg))
-            }
-            ExecutionError::Runtime(msg) => CellOutput::error(format!("Runtime error: {}", msg)),
-            ExecutionError::Type(msg) => CellOutput::error(format!("Type error: {}", msg)),
-            ExecutionError::InvalidState(msg) => {
-                CellOutput::error(format!("Invalid state: {}", msg))
-            }
-        }
-    }
+
 
     /// Execute all cells from the beginning
     ///
@@ -586,27 +518,11 @@ impl SessionState {
             cell.clear_output();
         }
         self.parser.reset();
-        self.pipeline.reset_parser();
-        self.pipeline.clear_cache();
-        self.execution_context.reset();
         self.execution_count = 0;
         self.dirty = true;
     }
 
-    /// Get the current execution context (for completions, hover, etc.)
-    pub fn context(&self) -> &ExecutionContext {
-        &self.execution_context
-    }
 
-    /// Get all available variable names for completion
-    pub fn available_bindings(&self) -> impl Iterator<Item = &Text> {
-        self.execution_context.binding_names()
-    }
-
-    /// Get all available function names for completion
-    pub fn available_functions(&self) -> impl Iterator<Item = &Text> {
-        self.execution_context.function_names()
-    }
 
     /// Save state for undo
     fn save_undo_state(&mut self) {

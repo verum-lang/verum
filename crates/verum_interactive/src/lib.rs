@@ -54,7 +54,7 @@
 #![allow(dead_code)]
 
 pub mod discovery;
-pub mod execution;
+pub mod value_format;
 
 #[cfg(feature = "playbook")]
 pub mod playbook;
@@ -90,12 +90,9 @@ pub use playbook::{
     TensorStats as PlaybookTensorStats,
 };
 
-// Re-export execution types
-pub use execution::{
-    AsyncExecutor, BindingInfo, CompiledCell, ExecutionContext, ExecutionError, ExecutionHandle,
-    ExecutionMessage, ExecutionPipeline, ExecutionResult, ExecutionStatus, OutputLine,
-    ProgressDisplay, ProgressStyle, StreamingOutput,
-};
+// Re-export value rendering (the execution bridge it used to ride
+// in died with T0858 slice 5 — cells run through the script engine).
+pub use value_format::{ValueDisplayOptions, format_value};
 
 // Re-export output types
 pub use output::{

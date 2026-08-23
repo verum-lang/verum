@@ -35,6 +35,7 @@ fn draw(app: &PlaybookApp) -> String {
 /// is on screen — from the same artifact path the interpreter runs.
 #[test]
 fn vbc_lens_shows_the_notebook_bytecode() {
+    verum_compiler::api::ensure_scripting_compiler_installed();
     let mut app = PlaybookApp::new();
     app.session
         .update_current_source("fn main() -> Int { 40 + 2 }");

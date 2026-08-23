@@ -20,7 +20,7 @@ use super::ui::{
     PlaybookLayout, SidebarTab, SidebarWidget, VarInfo, cell_height,
 };
 use crate::discovery::tutorials::{Tutorial, builtin_tutorials};
-use crate::execution::value_format::{ValueDisplayOptions, format_value};
+use crate::value_format::{ValueDisplayOptions, format_value};
 
 /// Visual theme for the playbook UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1596,11 +1596,12 @@ impl PlaybookApp {
             self.vbc_lens_text = String::new();
             return;
         }
-        let mut pipeline = crate::execution::ExecutionPipeline::new();
-        self.vbc_lens_text = match pipeline.compile(&source, 1) {
-            Ok(compiled) => verum_vbc::disassemble::disassemble_module(&compiled.module),
-            Err(e) => format!("; compile failed:
-; {e}"),
+        // The engine's compile IS the artifact path cells execute on
+        // (T0858 slice 5) — the lens disassembles that module, not a
+        // second derivation.
+        self.vbc_lens_text = match self.session.engine.compile(&source) {
+            Ok(module) => verum_vbc::disassemble::disassemble_module(&module),
+            Err(e) => format!("; compile failed:\n; {e:?}"),
         };
     }
 

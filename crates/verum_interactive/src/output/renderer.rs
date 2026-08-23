@@ -106,7 +106,7 @@ pub struct DefaultRenderer;
 
 impl OutputRenderer for DefaultRenderer {
     fn render(&self, value: &Value, type_info: &Text, format: OutputFormat) -> RenderedOutput {
-        use crate::execution::{ValueDisplayOptions, format_value};
+        use crate::value_format::{ValueDisplayOptions, format_value};
 
         let options = ValueDisplayOptions::default();
         let text = format_value(value, &options);

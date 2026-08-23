@@ -6,7 +6,7 @@ use verum_common::Text;
 use verum_vbc::value::Value;
 
 use super::renderer::{OutputFormat, RenderedOutput};
-use crate::execution::{ValueDisplayOptions, format_value};
+use crate::value_format::{ValueDisplayOptions, format_value};
 
 /// Renders a struct/record value.
 pub fn render_struct(
