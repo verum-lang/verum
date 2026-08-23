@@ -157,6 +157,9 @@ impl Keybindings {
             KeyCode::F(1) => KeyAction::ShowHelp,
             KeyCode::Char('?') => KeyAction::ShowHelp,
             KeyCode::F(2) => KeyAction::EnterCommand,
+            // Search works in BOTH binding modes — it was vim-only,
+            // leaving Standard users no way to reach it at all.
+            KeyCode::Char('/') => KeyAction::EnterSearch,
             _ => KeyAction::None,
         }
     }
