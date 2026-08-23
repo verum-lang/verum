@@ -6415,6 +6415,16 @@ impl TypeChecker {
                             return Ok(InferResult::new(ctor_fn));
                         }
                         Ok(InferResult::new(resolved_ty))
+                    } else if let Some(scheme) =
+                        self.lookup_static_or_load_from_metadata(name)
+                    {
+                        // Lazy stdlib `<Type>.<method>` static-fn scheme
+                        // (the retired eager 30k scan's on-demand twin) —
+                        // covers both the bare `Map.new` and the
+                        // module-qualified `core.collections.map.Map.new`
+                        // spellings a field-access chain can produce.
+                        let ty = scheme.instantiate();
+                        Ok(InferResult::new(self.unifier.apply(&ty)))
                     } else {
                         Err(TypeError::UnboundVariable {
                             name: name.to_text(),
@@ -8122,8 +8132,9 @@ impl TypeChecker {
                     format!("{}.{}", module_path, field_name).into();
                 // The qualified function/const may already be in env
                 // via the cross-module import pass that ran for the
-                // archive-side load.
-                if let Some(scheme) = self.ctx.env.lookup(&qualified) {
+                // archive-side load; otherwise pull the static-method
+                // scheme lazily from the baked metadata.
+                if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified) {
                     let ty = scheme.instantiate();
                     return Ok(InferResult::new(self.unifier.apply(&ty)));
                 }
@@ -8245,8 +8256,10 @@ impl TypeChecker {
             let field_name = field.name.as_str();
             let qualified_name = format!("{}.{}", type_name, field_name);
 
-            // Strategy 1: Try to look up the qualified variant name in env
-            if let Some(scheme) = self.ctx.env.lookup(&qualified_name) {
+            // Strategy 1: env, falling back to the baked metadata's
+            // static-method schemes on first touch (lazy twin of the
+            // retired eager 30k-scheme scan).
+            if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified_name) {
                 let ty = scheme.instantiate();
                 return Ok(InferResult::new(ty));
             }

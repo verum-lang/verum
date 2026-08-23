@@ -320,51 +320,80 @@ impl TypeChecker {
     /// dispatch paths find it.
     ///
     /// Idempotent — first-wins insert via `insert_mono`.
-    pub(super) fn register_stdlib_static_methods_from_metadata(
+    /// Lazy twin of the retired eager
+    /// `register_stdlib_static_methods_from_metadata` scan
+    /// (T2-extended-perf follow-up): resolve ONE `<Type>.<method>`
+    /// static-fn scheme from the baked metadata at its lookup site,
+    /// registering it into env on first use.
+    ///
+    /// The eager scan built ~30 500 schemes on EVERY cold start
+    /// (~290 ms of `scheme_from_function_descriptor` alone, measured
+    /// 2026-08-23) so that a handful of multi-mount field-access
+    /// paths could `env.lookup("Map.new")`.  The lookup sites now
+    /// call this instead: an env hit costs one map probe, a metadata
+    /// hit builds exactly the scheme the program touches, and a miss
+    /// stays a miss.
+    ///
+    /// The carrier filter mirrors the old scan: the name must be a
+    /// single-dot `<Type>.<method>` whose prefix is a metadata type
+    /// or a primitive WKT — free fns (`core.shell.exec.run`) never
+    /// match.
+    pub(super) fn lookup_static_or_load_from_metadata(
         &mut self,
-        metadata: &crate::core_metadata::CoreMetadata,
-    ) {
-        for (qualified_name, fd) in metadata.functions.iter() {
-            if fd.is_const {
-                continue;
-            }
-            // Filter: must have shape `<Type>.<method>` — i.e. exactly
-            // one dot at the right place — AND the prefix must be a
-            // known stdlib type (either in metadata.types or a
-            // primitive WKT).  This avoids over-registering free fns
-            // like `core.shell.exec.run`.
-            let Some(dot_idx) = qualified_name.as_str().rfind('.') else {
-                continue;
-            };
-            let type_part = &qualified_name.as_str()[..dot_idx];
-            // Reject if there are MORE dots in type_part (free fn
-            // module-qualified form like "core.shell.exec.run").
-            if type_part.contains('.') {
-                continue;
-            }
-            // Only proceed if type_part is a known carrier — checked
-            // against metadata.types (covers user-defined types) +
-            // WKT (covers primitives that live in the VM model).
-            let is_carrier = metadata
-                .types
-                .contains_key(&verum_common::Text::from(type_part))
-                || verum_common::well_known_types::WellKnownType::from_name(type_part)
-                    .is_some();
-            if !is_carrier {
-                continue;
-            }
-            // Skip if already registered (first-wins for cross-type
-            // method name collisions handled at instance dispatch via
-            // the inherent_methods bucket separately).
-            if self.ctx.env.lookup(qualified_name.as_str()).is_some() {
-                continue;
-            }
-            let scheme = Self::scheme_from_function_descriptor(fd);
+        qualified_name: &str,
+    ) -> Option<crate::context::TypeScheme> {
+        if std::env::var_os("VERUM_TRACE_STATIC_LAZY").is_some() {
+            eprintln!("[static-lazy] probe '{qualified_name}'");
+        }
+        if let Some(scheme) = self.ctx.env.lookup(qualified_name) {
+            return Some(scheme.clone());
+        }
+        let metadata = match &self.core_metadata {
+            verum_common::Maybe::Some(m) => std::sync::Arc::clone(m),
+            verum_common::Maybe::None => return None,
+        };
+        // Normalise to the bare `<Type>.<method>` spelling the baked
+        // descriptors use: a module-qualified caller form
+        // (`core.collections.map.Map.new`) keeps only its LAST two
+        // segments.  The carrier check then guards against free fns
+        // whose penultimate segment is a module, not a type
+        // (`core.shell.exec.run` → `exec` is no metadata type).
+        let dot_idx = qualified_name.rfind('.')?;
+        let method_part = &qualified_name[dot_idx + 1..];
+        let head = &qualified_name[..dot_idx];
+        let type_part = match head.rfind('.') {
+            Some(i) => &head[i + 1..],
+            None => head,
+        };
+        if type_part.is_empty() {
+            return None;
+        }
+        let is_carrier = metadata
+            .types
+            .contains_key(&verum_common::Text::from(type_part))
+            || verum_common::well_known_types::WellKnownType::from_name(type_part).is_some();
+        if !is_carrier {
+            return None;
+        }
+        let bare = format!("{type_part}.{method_part}");
+        let fd = metadata.functions.get(&verum_common::Text::from(bare.as_str()))?;
+        if fd.is_const {
+            return None;
+        }
+        let scheme = Self::scheme_from_function_descriptor(fd);
+        // Register under the BARE canonical spelling (what the eager
+        // scan used), plus the caller's spelling when it differs, so
+        // repeat lookups through either form are env hits.
+        self.ctx
+            .env
+            .insert(verum_common::Text::from(bare.as_str()), scheme.clone());
+        if bare.as_str() != qualified_name {
             self.ctx
                 .env
-                .insert(verum_common::Text::from(qualified_name.as_str()), scheme);
-            self.register_required_params_from_descriptor(qualified_name.as_str(), fd);
+                .insert(verum_common::Text::from(qualified_name), scheme.clone());
         }
+        self.register_required_params_from_descriptor(bare.as_str(), fd);
+        Some(scheme)
     }
 
     /// BAKED-DEFAULT-ARG-1: lazy metadata answer for the arity gate.

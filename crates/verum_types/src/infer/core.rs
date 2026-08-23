@@ -1023,16 +1023,21 @@ impl TypeChecker {
         // Takes `Arc<CoreMetadata>` so production callers (which
         // hold an `Arc` from the pipeline's lazy embedded sidecar)
         // hand off the metadata in O(1) — no 15ms 3MB deep clone.
+        let trace = std::env::var_os("VERUM_TRACE_LOADCOST").is_some();
+        let t = std::time::Instant::now();
         let mut checker = Self::with_minimal_context();
+        if trace {
+            eprintln!("[loadcost]     nwc_minimal_context     {:>8.1} ms", t.elapsed().as_secs_f64() * 1e3);
+        }
+        let t = std::time::Instant::now();
         checker.register_coercion_markers_from_metadata(&metadata);
-        // Eagerly register `<Type>.<method>` static fns into env so
-        // multi-mount field-access paths (`Map.new()` when both
-        // `mount core.collections.map.Map` and a sibling collection
-        // mount put `Map` into module_aliases instead of env) resolve
-        // via env.lookup("Map.new").  Sister call to
-        // `register_stdlib_consts_from_metadata` — both are bounded by
-        // the metadata size and run in single-millisecond range.
-        checker.register_stdlib_static_methods_from_metadata(&metadata);
+        if trace {
+            eprintln!("[loadcost]     nwc_coercion_markers    {:>8.1} ms ({} impls)", t.elapsed().as_secs_f64() * 1e3, metadata.implementations.len());
+        }
+        // `<Type>.<method>` static fns are resolved LAZILY at their
+        // lookup sites via `lookup_static_or_load_from_metadata` —
+        // the eager 30k-scheme scan this constructor used to run
+        // cost ~150 ms release / ~420 ms debug per cold start.
         checker.core_metadata = Maybe::Some(metadata);
         checker
     }
@@ -1167,13 +1172,11 @@ impl TypeChecker {
         // (`let s = SSO_CAPACITY;`) resolve via env.lookup.  Cheap to
         // do eagerly; ~3000 inserts run in sub-millisecond.
         self.register_stdlib_consts_from_metadata(&metadata);
-        // Register stdlib `<Type>.<method>` static fns under bare
-        // canonical form so `Map.new` / `List.new` / etc. resolve
-        // through env.lookup at the field-access fallback in
-        // expr.rs::infer_expr_field (line ~6618).  Closes the
-        // multi-mount typechecker/codegen registry-key drift
-        // documented in MEMORY.md (session 2026-05-12 wrap).
-        self.register_stdlib_static_methods_from_metadata(&metadata);
+        // Stdlib `<Type>.<method>` static fns resolve LAZILY through
+        // `lookup_static_or_load_from_metadata` at the qualified
+        // lookup sites — the eager 30k-scheme scan that used to run
+        // here (and in new_with_core) cost ~150 ms release per cold
+        // start for schemes a script never touches.
 
         // Unconditionally register every type alias from metadata
         // into the unifier's alias registry.  Aliases are cheap

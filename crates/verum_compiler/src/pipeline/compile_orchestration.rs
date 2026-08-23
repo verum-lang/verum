@@ -121,28 +121,49 @@ impl<'s> CompilationPipeline<'s> {
         // needs no stdlib — so the mount closure is known and the
         // stdlib load materialises only the reachable slice instead
         // of all ~2300 modules. Same shape as run_full_compilation.
+        // VERUM_TRACE_PHASES=1: per-phase wall-clock breakdown on
+        // stderr — the cold-start budget instrument (perf-parity bar).
+        let timing = std::env::var("VERUM_TRACE_PHASES").is_ok();
+        macro_rules! lap {
+            ($t:ident, $label:expr) => {
+                if timing {
+                    eprintln!("[phase] {:<28} {:>8.1}ms", $label, $t.elapsed().as_secs_f64() * 1e3);
+                }
+                #[allow(unused_assignments)]
+                let $t = std::time::Instant::now();
+                let _ = &$t;
+            };
+        }
+        let t = std::time::Instant::now();
         let temp_path = PathBuf::from("<script>");
         let file_id = self
             .session
             .load_source_string(source, temp_path.clone())
             .context("Failed to load script source")?;
         let mut module = self.phase_parse(file_id)?;
+        lap!(t, "parse");
         let reachable = if std::env::var("VERUM_FULL_STDLIB").is_ok() {
             None
         } else {
             crate::stdlib_reachability::compute_reachable_stdlib_modules(&module)
         };
+        lap!(t, "stdlib reachability");
         self.load_stdlib_modules_scoped(reachable.as_ref())?;
+        lap!(t, "stdlib load (scoped)");
         if std::env::var("VERUM_FULL_STDLIB").is_err() {
             self.clear_non_compilable_stdlib_modules(Some(&module));
         }
         self.phase_safety_gate(&module)?;
+        lap!(t, "safety gate");
         self.phase_type_check(&module)?;
+        lap!(t, "type check");
         self.apply_resolved_call_targets(&mut module);
         self.phase_cbgr_analysis(&module)?;
+        lap!(t, "cbgr analysis");
 
         // Codegen: AST → VBC with the embedded stdlib archive linked.
         let vbc = self.compile_ast_to_vbc(&module)?;
+        lap!(t, "codegen + archive link");
         self.session.record_compiled_vbc(vbc.clone());
         Ok(vbc)
     }

@@ -22244,7 +22244,7 @@ impl TypeChecker {
 
             // Also check for variant constructors like Maybe<Int>.Some(42)
             let qualified_name = format!("{}.{}", type_name, method_name);
-            if let Some(scheme) = self.ctx.env.lookup(&qualified_name) {
+            if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified_name) {
                 let constructor_ty = scheme.instantiate();
 
                 if let Type::Function {
@@ -22572,6 +22572,15 @@ impl TypeChecker {
                         }
                     })
                 });
+            // Lazy stdlib static-fn scheme (the retired eager 30k scan's
+            // on-demand twin) — separate step because the loader needs
+            // `&mut self`, which the `.or_else` closures above hold off.
+            let env_hit = match env_hit {
+                Some(s) => Some(s),
+                None => type_method_form
+                    .as_ref()
+                    .and_then(|s| self.lookup_static_or_load_from_metadata(s.as_str())),
+            };
             if let Some(scheme) = env_hit {
                 // INSTANTIATE-AT-USE (persistent-var-leak class, the
                 // [[persistent-var-leak-value-position-variant]] twin):
@@ -23249,7 +23258,7 @@ impl TypeChecker {
 
                 // Try to look up the qualified variant constructor or static method.
                 let mut env_resolved = false;
-                if let Some(scheme) = self.ctx.env.lookup(&qualified_name) {
+                if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified_name) {
                     let constructor_ty = scheme.instantiate();
 
                     if let Type::Function {
