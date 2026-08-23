@@ -1239,6 +1239,15 @@ impl PlaybookApp {
     }
 
     fn enter_edit_mode(&mut self) {
+        // The editor may be STALE relative to the cell: navigation
+        // syncs it, but programmatic source changes (open_book onto the
+        // same index, replay, update_current_source from code) do not.
+        // Entering edit with a stale buffer meant commit_edit on exit
+        // OVERWROTE the cell with the old text — sync on entry unless
+        // the buffer already matches.
+        if self.editor.content() != self.session.current_cell().source.as_str() {
+            self.sync_editor_from_cell();
+        }
         self.mode = AppMode::Edit;
         self.editor.move_to_end(false);
     }
