@@ -536,6 +536,36 @@ impl TypeChecker {
             _,
         ) = crate::infer::helpers::with_declared_generic_names(declared_names.clone(), || {
             crate::infer::helpers::with_generic_var_scope_capture(|| {
+                // PARAMNAME-CARRY bridge (T0701 pattern, static/free-fn
+                // leg — T0277 tail): one declared generic reaches this
+                // parser under TWO spellings — the source name (`"T"`,
+                // carried verbatim in param strings) and the positional
+                // placeholder (`"__generic_i"`, legacy TypeRef renders
+                // in the return string).  Pre-seed BOTH spellings onto
+                // ONE scope var per declared param, in serialisation
+                // order (impl-level first — the descriptor doc pins
+                // `__generic_i` with `i < impl_generic_names.len()` to
+                // impl params).  Without the bridge, `List.from`'s
+                // param `[T]` and return `List<__generic_0>` parsed to
+                // DISCONNECTED vars: the argument fixed T = Int while
+                // the return stayed `List<_>` forever — E404 on every
+                // un-annotated `List.from([..])` / `Shared.new(..)`
+                // chain (the reference_system check-red cluster).
+                for (i, name) in fd
+                    .impl_generic_names
+                    .iter()
+                    .chain(fd.generic_params.iter().map(|gp| &gp.name))
+                    .enumerate()
+                {
+                    if let Some(tv) =
+                        crate::infer::helpers::intern_scope_generic(name.as_str())
+                    {
+                        crate::infer::helpers::alias_scope_generic(
+                            &format!("__generic_{i}"),
+                            tv,
+                        );
+                    }
+                }
                 // HOF reconnection (T0702, free-fn twin of the T0701
                 // method-path leg): a fn-bounded generic param (`f: F`
                 // where `F: fn() -> Maybe<T>`) is serialised with its

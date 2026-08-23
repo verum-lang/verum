@@ -15600,6 +15600,88 @@ impl TypeChecker {
                 leftover.shift_remove(v);
             }
         }
+        // T0277 tail (E404 `let c = Some(42)` → `Maybe<_>`): a leftover
+        // persistent PAYLOAD var is, positionally, one of the parent's
+        // generic params — the lazy-load registration stores
+        // `Var(persistent)` payload slots with an EMPTY `type_params`
+        // list, so neither tv_subst (names) nor var_subst (declared
+        // vars) learns the mapping, and blanket freshening produced a
+        // var DISCONNECTED from the return's fresh_args: the argument
+        // bound the payload var while `Maybe<fresh>` stayed free
+        // forever.  Map the first `generics_count` distinct leftovers
+        // onto fresh_args IN ORDER (payload appearance order = param
+        // order for every registration path); only true extras — more
+        // distinct vars than the parent has params — keep brand-new
+        // freshes.
+        {
+            // Which fresh_args actually LANDED in the payload via the
+            // name/var substitutions above?  (Collect vars over the
+            // already-substituted params; fresh_args were excluded
+            // from `leftover`, so re-walk explicitly.)
+            let fresh_set: std::collections::HashSet<crate::ty::TypeVar> = fresh_args
+                .iter()
+                .filter_map(|t| match t {
+                    Type::Var(v) => Some(*v),
+                    _ => None,
+                })
+                .collect();
+            let mut appears = false;
+            {
+                let mut seen: indexmap::IndexMap<crate::ty::TypeVar, Type> =
+                    indexmap::IndexMap::new();
+                for p in params.iter() {
+                    // reuse the same walker via a throwaway map
+                    fn walk(
+                        ty: &Type,
+                        set: &std::collections::HashSet<crate::ty::TypeVar>,
+                        hit: &mut bool,
+                    ) {
+                        match ty {
+                            Type::Var(v) => {
+                                if set.contains(v) {
+                                    *hit = true;
+                                }
+                            }
+                            Type::Named { args, .. } | Type::Generic { args, .. } => {
+                                for a in args.iter() {
+                                    walk(a, set, hit);
+                                }
+                            }
+                            Type::Tuple(parts) => {
+                                for t in parts.iter() {
+                                    walk(t, set, hit);
+                                }
+                            }
+                            Type::Function {
+                                params,
+                                return_type,
+                                ..
+                            } => {
+                                for t in params.iter() {
+                                    walk(t, set, hit);
+                                }
+                                walk(return_type, set, hit);
+                            }
+                            Type::Reference { inner, .. }
+                            | Type::CheckedReference { inner, .. }
+                            | Type::UnsafeReference { inner, .. } => {
+                                walk(inner, set, hit)
+                            }
+                            _ => {}
+                        }
+                    }
+                    walk(p, &fresh_set, &mut appears);
+                }
+                let _ = &mut seen;
+            }
+            if !appears && leftover.len() <= fresh_args.len() {
+                for (i, (_, replacement)) in leftover.iter_mut().enumerate() {
+                    if let Some(fa) = fresh_args.get(i) {
+                        *replacement = fa.clone();
+                    }
+                }
+            }
+        }
         let return_type = if leftover.is_empty() {
             return_type
         } else {
