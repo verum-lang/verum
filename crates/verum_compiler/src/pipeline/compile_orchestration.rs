@@ -48,10 +48,8 @@ impl<'s> CompilationPipeline<'s> {
 
         info!("Compiling source string ({} bytes)", source.len());
 
-        // Load stdlib modules first (enables std.* imports and type resolution)
-        self.load_stdlib_modules()?;
-
-        // Create a temporary file ID for the source
+        // Parse first, then load only the reachable stdlib slice
+        // (T0827 — same shape as run_full_compilation).
         let temp_path = PathBuf::from("<string>");
         let file_id = self
             .session
@@ -60,6 +58,13 @@ impl<'s> CompilationPipeline<'s> {
 
         // Parse
         let module = self.phase_parse(file_id)?;
+
+        let reachable = if std::env::var("VERUM_FULL_STDLIB").is_ok() {
+            None
+        } else {
+            crate::stdlib_reachability::compute_reachable_stdlib_modules(&module)
+        };
+        self.load_stdlib_modules_scoped(reachable.as_ref())?;
 
         // Type check
         self.phase_type_check(&module)?;
@@ -111,14 +116,23 @@ impl<'s> CompilationPipeline<'s> {
         &mut self,
         source: &str,
     ) -> Result<std::sync::Arc<verum_vbc::module::VbcModule>> {
-        // Frontend (mirrors `run_interpreter`'s essential pre-execution phases).
-        self.load_stdlib_modules()?;
+        // Frontend (mirrors `run_interpreter`'s essential pre-execution
+        // phases). STDLIB-LOAD-COST (T0827): parse FIRST — the parse
+        // needs no stdlib — so the mount closure is known and the
+        // stdlib load materialises only the reachable slice instead
+        // of all ~2300 modules. Same shape as run_full_compilation.
         let temp_path = PathBuf::from("<script>");
         let file_id = self
             .session
             .load_source_string(source, temp_path.clone())
             .context("Failed to load script source")?;
         let mut module = self.phase_parse(file_id)?;
+        let reachable = if std::env::var("VERUM_FULL_STDLIB").is_ok() {
+            None
+        } else {
+            crate::stdlib_reachability::compute_reachable_stdlib_modules(&module)
+        };
+        self.load_stdlib_modules_scoped(reachable.as_ref())?;
         if std::env::var("VERUM_FULL_STDLIB").is_err() {
             self.clear_non_compilable_stdlib_modules(Some(&module));
         }
@@ -503,9 +517,6 @@ impl<'s> CompilationPipeline<'s> {
     pub fn compile_project(&mut self) -> Result<()> {
         let start = Instant::now();
 
-        // Load stdlib modules first (enables std.* imports)
-        self.load_stdlib_modules()?;
-
         info!("Discovering project files...");
         let project_files = self.session.discover_project_files()?;
 
@@ -513,6 +524,17 @@ impl<'s> CompilationPipeline<'s> {
             warn!("No .vr files found in project directory");
             return Ok(());
         }
+
+        // STDLIB-LOAD-COST (T0827): prescan the user files with the
+        // fast parser to learn the mount closure BEFORE the stdlib
+        // load, so only the reachable slice materialises. The files
+        // are parsed again below through the full pipeline — the fast
+        // prescan is milliseconds against the hundreds of registrations
+        // it prevents. Any unreadable/unparseable file yields None
+        // (full registration): a broken closure must widen, not
+        // narrow (unparseable-module-ships-as-silent-zero).
+        let prescan_scope = prescan_stdlib_scope(&project_files);
+        self.load_stdlib_modules_scoped(prescan_scope.as_ref())?;
 
         info!("Found {} .vr file(s)", project_files.len());
 
@@ -606,9 +628,6 @@ impl<'s> CompilationPipeline<'s> {
 
         info!("Starting project-wide type checking...");
 
-        // Load stdlib modules first (enables std.* imports)
-        self.load_stdlib_modules()?;
-
         // 1. Discover all .vr files in the project
         info!("Discovering project files...");
         let project_files = self.session.discover_project_files()?;
@@ -617,6 +636,12 @@ impl<'s> CompilationPipeline<'s> {
             warn!("No .vr files found in project directory");
             return Ok(CheckResult::success(0, 0, start.elapsed()));
         }
+
+        // STDLIB-LOAD-COST (T0827): prescan for the mount closure so
+        // the stdlib load below materialises the reachable slice, not
+        // all ~2300 modules — see compile_project for the full note.
+        let prescan_scope = prescan_stdlib_scope(&project_files);
+        self.load_stdlib_modules_scoped(prescan_scope.as_ref())?;
 
         info!("Found {} .vr file(s) to check", project_files.len());
 
@@ -1324,4 +1349,34 @@ impl<'s> CompilationPipeline<'s> {
 
         Ok(result)
     }
+}
+
+/// T0827 — the mount-closure prescan: fast-parse each user file and
+/// union the per-module stdlib reachability closures. `None` (= load
+/// everything) when the env opt-out is set, any file fails to read or
+/// parse, or any per-module closure is unavailable — a broken closure
+/// must WIDEN the load, never narrow it.
+fn prescan_stdlib_scope(
+    project_files: &[PathBuf],
+) -> Option<std::collections::HashSet<String>> {
+    if std::env::var("VERUM_FULL_STDLIB").is_ok()
+        || std::env::var("VERUM_NO_STDLIB_SCOPE").is_ok()
+    {
+        return None;
+    }
+    let parser = verum_fast_parser::FastParser::new();
+    let mut union: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for path in project_files {
+        let source = std::fs::read_to_string(path).ok()?;
+        let mut module = parser
+            .parse_module_str(&source, verum_ast::FileId::new(0))
+            .ok()?;
+        // The implicit prelude mount is injected before the real
+        // parse below — mirror it here so the closure includes what
+        // the prelude pulls in.
+        crate::pipeline::inject_implicit_prelude_mount(&mut module);
+        let set = crate::stdlib_reachability::compute_reachable_stdlib_modules(&module)?;
+        union.extend(set);
+    }
+    Some(union)
 }
