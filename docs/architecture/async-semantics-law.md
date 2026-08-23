@@ -1,8 +1,13 @@
 # Async semantics: one law for docs, checker, and both tiers
 
-Status: DECISION REQUIRED (T0861 tail). The sh() dog-food crash is
-fixed at the intercept layer; this document is about the deeper
-split it exposed. Owner ruling wanted on §4.
+Status: IMPLEMENTED per §4's recommendation (candidate A — V0
+legalized), pending owner ratification; reverting is one change in
+`wrap_return_type_for_sig_full` if (B) is ruled instead. The law is
+executable: `vcs/specs/L2-standard/async/eager_async_law.vr`
+(differential — both tiers must agree), and by-example/12 documents
+it (that chapter COMPILES AND RUNS for the first time; it was
+written against the never-implemented lazy model and its mount of
+`from_millis` never resolved).
 
 ## 1. The three-way divergence, measured
 

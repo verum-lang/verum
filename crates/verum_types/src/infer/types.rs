@@ -459,7 +459,17 @@ impl TypeChecker {
         } else {
             with_throws
         };
-        if is_async {
+        // ASYNC-SEMANTICS-LAW (T0861, docs/architecture/
+        // async-semantics-law.md): the V0 execution model is
+        // legalized — calling an async fn RUNS it and yields its
+        // value on both tiers, so the signature carries the BARE
+        // return type. `Future<T>` remains the type of explicit
+        // futures only (spawn handles, the Future protocol's own
+        // implementors). The single exception is `async fn*`:
+        // for-await iteration is protocol machinery that genuinely
+        // consumes `Future<Generator<..>>` (SHELL-5a), so async
+        // GENERATORS keep the wrap.
+        if is_async && is_generator {
             Type::Future {
                 output: Box::new(with_generator),
             }

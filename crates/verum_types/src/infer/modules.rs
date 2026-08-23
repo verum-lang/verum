@@ -10138,32 +10138,16 @@ impl TypeChecker {
         // see the union rather than only the first error type.
         // NOTE: uses `throws` + `is_async`=false here because the outer
         // generator wrap below also has its own async branch.
-        let return_for_sig_base =
-            self.wrap_return_type_for_sig(initial_return_type.clone(), &func.throws_clause, false);
-
-        // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Async functions return Future<T>
-        // Concurrency model: structured concurrency with nurseries, async/await, channels, Send/Sync protocol bounds — Section 12 - Generators return Generator<Y, R>
-        let initial_return_for_sig = if func.is_generator {
-            // Generator functions return Generator<Yield, Return> type
-            // Grammar: grammar/verum.ebnf v2.10 - fn_keyword = 'fn' , [ '*' ]
-            // The declared return type (-> T) is the yield type, generators finish with Unit
-            if func.is_async {
-                // Async generators: Future<Generator<Yield, Unit>>
-                // The outer Future wraps the generator for async iteration
-                Type::Future {
-                    output: Box::new(Type::generator(return_for_sig_base, Type::unit())),
-                }
-            } else {
-                // Sync generators: Generator<YieldTy, Unit>
-                Type::generator(return_for_sig_base, Type::unit())
-            }
-        } else if func.is_async {
-            Type::Future {
-                output: Box::new(return_for_sig_base),
-            }
-        } else {
-            return_for_sig_base
-        };
+        // One carrier for the whole signature wrap: throws →
+        // generator → async, with the async law inside it (bare
+        // return for async fns; Future<Generator<..>> only for
+        // `async fn*`).
+        let initial_return_for_sig = self.wrap_return_type_for_sig_full(
+            initial_return_type.clone(),
+            &func.throws_clause,
+            func.is_async,
+            func.is_generator,
+        );
 
         // Create initial function type with contexts and add to environment (for recursive calls)
         let initial_func_type = if let Some(req) = context_requirement.clone() {
@@ -11648,26 +11632,16 @@ impl TypeChecker {
 
         self.ctx.exit_scope();
 
-        // Wrap final return type for async functions and generators
-        // Concurrency model: structured concurrency with nurseries, async/await, channels, Send/Sync protocol bounds — Section 12 - Generators
-        let final_return_type = if func.is_generator {
-            // Generator functions return Generator<YieldTy, Unit>
-            // The body's return_type is the yield type (e.g., Int for `fn* foo() -> Int`)
-            if func.is_async {
-                // Async generators: Future<Generator<Yield, Unit>>
-                Type::Future {
-                    output: Box::new(Type::generator(return_type.clone(), Type::unit())),
-                }
-            } else {
-                Type::generator(return_type.clone(), Type::unit())
-            }
-        } else if func.is_async {
-            Type::Future {
-                output: Box::new(return_type.clone()),
-            }
-        } else {
-            return_type.clone()
-        };
+        // One carrier for the final signature wrap (throws handled at
+        // declaration; generator/async law lives in
+        // wrap_return_type_for_sig_full — async fns carry their BARE
+        // return type, async GENERATORS keep Future<Generator<..>>).
+        let final_return_type = self.wrap_return_type_for_sig_full(
+            return_type.clone(),
+            &verum_common::Maybe::None,
+            func.is_async,
+            func.is_generator,
+        );
         // Resolve the return type through the unifier BEFORE generalization so an
         // associated-type projection recovered during the body-vs-declared check
         // survives into the stored scheme (source-driven stdlib path).  For a

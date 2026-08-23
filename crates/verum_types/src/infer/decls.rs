@@ -7081,14 +7081,14 @@ impl TypeChecker {
             Type::Unit
         };
 
-        // Wrap return type in Future<T> for async functions
-        let return_for_sig = if func.is_async {
-            Type::Future {
-                output: Box::new(return_type),
-            }
-        } else {
-            return_type
-        };
+        // One carrier for signature wrapping (throws/generator/async —
+        // the async law lives THERE, not in per-site copies).
+        let return_for_sig = self.wrap_return_type_for_sig_full(
+            return_type,
+            &func.throws_clause,
+            func.is_async,
+            func.is_generator,
+        );
 
         // Build function type (intrinsics don't use context requirements)
         let func_type = Type::function(param_types, return_for_sig);
@@ -7599,15 +7599,14 @@ impl TypeChecker {
                             .map(|t| self.ast_to_type(t))
                             .unwrap_or(Ok(Type::Unit))?;
 
-                        // CRITICAL FIX: Wrap return type in Future<T> for async methods
-                        // This enables proper await type checking: async_method().await yields T, not Future<T>
-                        let final_return_type = if func.is_async {
-                            Type::Future {
-                                output: Box::new(return_type),
-                            }
-                        } else {
-                            return_type
-                        };
+                        // One carrier for signature wrapping — see
+                        // wrap_return_type_for_sig_full (the async law).
+                        let final_return_type = self.wrap_return_type_for_sig_full(
+                            return_type,
+                            &func.throws_clause,
+                            func.is_async,
+                            func.is_generator,
+                        );
 
                         let method_ty = Type::function(param_types, final_return_type);
                         methods.insert(method_name.clone(), method_ty);

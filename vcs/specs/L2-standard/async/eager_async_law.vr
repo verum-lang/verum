@@ -1,0 +1,44 @@
+// =============================================================================
+// eager_async_law.vr — the async-semantics law, pinned (T0861)
+// =============================================================================
+// @test: differential
+// @level: L2
+// @tier: all
+// @tags: async, await, spawn, semantics, law
+// @expected-stdout: before yield
+// body ran
+// after yield
+// value=141
+// spawned ran
+// @expected-exit: 0
+// @description: docs/architecture/async-semantics-law.md, executable:
+//               (1) calling an async fn RUNS its body and returns the
+//               value — no hidden future; (2) .await is a yield point,
+//               identity over a ready value; (3) the tail AFTER an
+//               await runs (no lost continuation); (4) a spawn handle
+//               awaits to the task's completion. Divergence between
+//               tiers on any of these is a defect, not a dialect.
+// =============================================================================
+
+mount core.async.spawn;
+
+async fn plain() -> Int {
+    print("body ran");
+    41
+}
+
+async fn with_yield() -> Int {
+    print("before yield");
+    let x = plain().await;
+    print("after yield");
+    x + 100
+}
+
+fn main() {
+    let v = with_yield();
+    print(f"value={v}");
+    let handle = spawn(async {
+        print("spawned ran");
+    });
+    handle.await;
+}
