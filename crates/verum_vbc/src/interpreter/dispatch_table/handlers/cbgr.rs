@@ -13,6 +13,7 @@ use super::cbgr_helpers::{
     strip_cbgr_ref_mutability, validate_cbgr_generation, validate_epoch_window,
 };
 use crate::instruction::{CbgrSubOpcode, Opcode, Reg};
+use super::ffi_extended::{ALLOC_ERR_INVALID_SIZE, ALLOC_ERR_OUT_OF_MEMORY, cbgr_header_generation_epoch, cbgr_legacy_alloc, cbgr_legacy_allocate, cbgr_user_allocate, cbgr_user_deallocate, cbgr_user_realloc, make_alloc_err, MAX_FFI_ALLOCATION_SIZE, value_as_addr};
 use crate::types::TypeId;
 use crate::value::{Capabilities, FatRef, Value};
 use verum_common::cbgr::caps;
@@ -3203,13 +3204,351 @@ fn cbgr_extended_body(
         // Dispatching to them now means a forward-rolled bytecode
         // file that uses the new home will execute correctly.
         // ================================================================
-        Some(CbgrSubOpcode::Alloc)
-        | Some(CbgrSubOpcode::AllocZeroed)
-        | Some(CbgrSubOpcode::Dealloc)
-        | Some(CbgrSubOpcode::SecureZero) => Err(InterpreterError::NotImplemented {
-            feature: "cbgr_extended allocator (Phase 4 of subop refactor not yet wired)",
-            opcode: Some(Opcode::CbgrExtended),
-        }),
+        // ================================================================
+        // Allocator + public bridge (0x60-0x6A) — T0852: the arms below
+        // migrated here from ffi_extended.rs (SystemSubOpcode::Cbgr*),
+        // completing the Phase-4 re-homing this band was reserved for.
+        // ================================================================
+        Some(CbgrSubOpcode::Alloc) | Some(CbgrSubOpcode::AllocZeroed) => {
+            // Both spellings allocate zero-initialised memory:
+            // `cbgr_user_allocate` uses `alloc_zeroed` unconditionally so
+            // uninitialised reads stay deterministic under the interpreter.
+            // Zeroing the non-`_zeroed` spelling is a strengthening, never
+            // an observable regression.  (The distinction still matters on
+            // the `VERUM_CBGR_LEGACY_ALLOC` path, which reproduces the old
+            // alloc/alloc_zeroed split exactly.)
+            let zeroed = matches!(sub_op, Some(CbgrSubOpcode::AllocZeroed));
+            let dst = read_reg(state)?;
+            let size_reg = read_reg(state)?;
+            let align_reg = read_reg(state)?;
+            let raw_size = state.get_reg(size_reg).as_integer_compatible();
+            let raw_align = state.get_reg(align_reg).as_integer_compatible();
+            // Size/align arguments arrive from the Verum side and can be
+            // garbage (bad codegen, pointer-tagged values leaking into
+            // the call). Reject absurd sizes/aligns up front and return
+            // the same "Err(OutOfMemory)" shape the stdlib would — the
+            // caller can then surface an allocation failure instead of
+            // the interpreter panicking on LayoutError.
+            // 1 GiB cap — same `verum_common::layout::MAX_ALLOCATION_SIZE`
+            // ceiling as every other heap path; here cast to i64 since
+            // `raw_size` arrives as i64 from the Verum register file.
+            const MAX_ALLOC: i64 = verum_common::layout::MAX_ALLOCATION_SIZE as i64;
+            if raw_size <= 0 || raw_size > MAX_ALLOC || raw_align <= 0 || raw_align > 4096 {
+                // A rejected size/align is `Err(AllocError.InvalidSize)`
+                // with the offending size as the payload field — a real
+                // error value whose `.message()` works.
+                let err_val = make_alloc_err(state, ALLOC_ERR_INVALID_SIZE, raw_size)?;
+                state.set_reg(dst, err_val);
+                return Ok(DispatchResult::Continue);
+            }
+            // ONE header-model authority (T0451).  `cbgr_user_allocate`
+            // lays down the 32-byte `AllocationHeader` at `user - 32`,
+            // registers the HEADER address in `cbgr_allocations`, and
+            // records `{base_offset, total}` in the reserved word so the
+            // exact `Layout` is reconstructible at free time.  Layouts
+            // that overflow `isize::MAX` (adversarial bytecode requesting
+            // a near-max size) return 0 rather than panicking the
+            // interpreter — the same OOM-equivalent the null-pointer
+            // branch modelled before.
+            let legacy = cbgr_legacy_alloc();
+            let ptr = if legacy {
+                cbgr_legacy_allocate(state, raw_size, raw_align, zeroed)
+            } else {
+                cbgr_user_allocate(state, raw_size, raw_align)
+            };
+            if ptr == 0 {
+                // Out of memory is `Err(AllocError.OutOfMemory{requested})`
+                // — a real two-level variant. The ledger row that said
+                // "payload stays nil because this handler does not
+                // consult the type tables" is discharged: the type index
+                // resolves `AllocError` in O(1).
+                let err_val = make_alloc_err(state, ALLOC_ERR_OUT_OF_MEMORY, raw_size)?;
+                state.set_reg(dst, err_val);
+                return Ok(DispatchResult::Continue);
+            }
+            // Report the generation/epoch the header actually carries —
+            // reading them back keeps the returned tuple and the in-memory
+            // header from ever drifting apart.  The legacy path has no
+            // header to read, so it keeps synthesising the old constants.
+            let (generation, epoch) = if legacy {
+                (1i64, state.cbgr_epoch as i64)
+            } else {
+                cbgr_header_generation_epoch(ptr)
+            };
+            // Materialise a 3-tuple matching `Pack` layout so
+            // `let (ptr, g, e) = …` destructures each field at its
+            // expected offset.
+            let tuple_size = 3 * std::mem::size_of::<Value>();
+            let tuple_obj =
+                state
+                    .heap
+                    .alloc_with_init(crate::types::TypeId::TUPLE, tuple_size, |_data| {})?;
+            let tuple_data = tuple_obj.data_ptr() as *mut Value;
+            unsafe {
+                std::ptr::write(tuple_data.add(0), Value::from_i64(ptr as i64));
+                std::ptr::write(tuple_data.add(1), Value::from_i64(generation));
+                std::ptr::write(tuple_data.add(2), Value::from_i64(epoch));
+            }
+            let tuple_val = Value::from_ptr(tuple_obj.as_ptr());
+
+            // Wrap in Ok(tuple) via the canonical Result builder —
+            // tag drawn from `RESULT_VARIANT_LAYOUT`, layout
+            // bit-equivalent to `MakeVariant` so user code's
+            // `let Ok(t) = …` destructures correctly.
+            let ok_val = super::method_dispatch::make_result_variant(
+                state,
+                verum_common::well_known_types::result_success_tag(),
+                tuple_val,
+            )?;
+            state.set_reg(dst, ok_val);
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::Dealloc) => {
+            let _dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let _size_reg = read_reg(state)?;
+            let _align_reg = read_reg(state)?;
+            // T0451: this used to be an unconditional leak, justified by
+            // "the interpreter has no way to match the exact Layout passed
+            // at allocation time without carrying extra metadata".  With
+            // the header model that justification is gone: every block is
+            // self-describing (`{base_offset, total}` in the header's
+            // reserved word), so the exact `Layout` IS reconstructible.
+            //
+
+            // `cbgr_user_deallocate` also sets the FREED flag and removes
+            // the header address from `cbgr_allocations`, which is what
+            // makes `increment_generation` and the use-after-free probes
+            // observe a real transition instead of writing through a
+            // header that never existed.  It is defensively a no-op on 0,
+            // on untracked pointers, and on double-free (the tracked-set
+            // removal is the gate), so the leak-over-double-free safety
+            // property the old comment cared about is preserved.
+            if !cbgr_legacy_alloc() {
+                let user = state.get_reg(ptr_reg).as_integer_compatible();
+                cbgr_user_deallocate(state, user);
+            }
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::SecureZero) => {
+            // Format: dst_ptr:reg, size:reg
+            //
+
+            // Volatile zero of `size` bytes at `dst_ptr`. In the
+            // interpreter the volatile property is moot — there's no
+            // optimiser pass that could elide writes — so we just
+            // perform `write_volatile` on each byte to mirror the
+            // ABI contract that the AOT path enforces.
+            //
+
+            // Audit: `tls-quic-security-audit spec` §2
+            // Action #2.
+            let dst_reg = read_reg(state)?;
+            let size_reg = read_reg(state)?;
+            // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
+            // CMemcpy above).
+            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))) as *mut u8;
+            let size_raw = state.get_reg(size_reg).as_i64();
+
+            // SECURITY: same bounds discipline as `CMemset`.
+            if size_raw < 0 || (size_raw as u64) > MAX_FFI_ALLOCATION_SIZE as u64 {
+                return Err(InterpreterError::InvalidOperand {
+                    message: format!(
+                        "CSecureZero: size {} exceeds maximum {} or is negative",
+                        size_raw, MAX_FFI_ALLOCATION_SIZE
+                    ),
+                });
+            }
+            let size = size_raw as usize;
+
+            if !dst_ptr.is_null() && size > 0 {
+                // SAFETY: size is bounded to <= MAX_FFI_ALLOCATION_SIZE and
+                // dst_ptr has been null-checked. Volatile writes
+                // ensure the compiler doesn't elide the loop on the
+                // host side either (defence-in-depth — the
+                // interpreter's runtime ABI ought to be observable
+                // even though Rust optimisers shouldn't see across
+                // this fn boundary).
+                unsafe {
+                    let mut p = dst_ptr;
+                    let end = dst_ptr.add(size);
+                    while p < end {
+                        std::ptr::write_volatile(p, 0u8);
+                        p = p.add(1);
+                    }
+                }
+            }
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::ReallocInternal) => {
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let old_size_reg = read_reg(state)?;
+            let new_size_reg = read_reg(state)?;
+            let align_reg = read_reg(state)?;
+            let old_ptr = state.get_reg(ptr_reg).as_integer_compatible();
+            let old_size = state.get_reg(old_size_reg).as_integer_compatible();
+            let new_size = state.get_reg(new_size_reg).as_integer_compatible();
+            let raw_align = state.get_reg(align_reg).as_integer_compatible();
+            const MAX_ALLOC: i64 = verum_common::layout::MAX_ALLOCATION_SIZE as i64;
+            if new_size <= 0 || new_size > MAX_ALLOC || raw_align <= 0 || raw_align > 4096 {
+                let err_val = make_alloc_err(state, ALLOC_ERR_INVALID_SIZE, new_size)?;
+                state.set_reg(dst, err_val);
+                return Ok(DispatchResult::Continue);
+            }
+            // T0451: header-model allocation, same ONE authority as
+            // CbgrAlloc.  The copy is driven by the caller-supplied
+            // `old_size` (not the header's) so this keeps working for an
+            // old pointer that never came from the bridge — e.g. bytecode
+            // that reallocs a block obtained some other way.
+            let legacy = cbgr_legacy_alloc();
+            let ptr = if legacy {
+                cbgr_legacy_allocate(state, new_size, raw_align, false)
+            } else {
+                cbgr_user_allocate(state, new_size, raw_align)
+            };
+            if ptr == 0 {
+                // The .vr contract is Result<(ptr, gen, epoch), AllocError> —
+                // a bare nil desynced the caller's match (T0463), and an
+                // Err(nil) payload exploded on `e.message()` (T0846).
+                let err_val = make_alloc_err(state, ALLOC_ERR_OUT_OF_MEMORY, new_size)?;
+                state.set_reg(dst, err_val);
+                return Ok(DispatchResult::Continue);
+            }
+            // Preserve min(old, new) bytes from the previous block.
+            if old_ptr != 0 && old_size > 0 {
+                let copy = (old_size.min(new_size)) as usize;
+                // SAFETY: caller-supplied old block; the copy length is
+                // bounded by both the old and the fresh allocation sizes.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        old_ptr as usize as *const u8,
+                        ptr as usize as *mut u8,
+                        copy,
+                    );
+                }
+            }
+            // Release the old block once its contents are safe.  This is a
+            // no-op unless the old pointer was itself a tracked bridge
+            // allocation, so an untracked old pointer keeps the historical
+            // leak-over-double-free behaviour instead of freeing memory we
+            // do not own.
+            if !legacy {
+                cbgr_user_deallocate(state, old_ptr);
+            }
+            let (generation, epoch) = if legacy {
+                (1i64, state.cbgr_epoch as i64)
+            } else {
+                cbgr_header_generation_epoch(ptr)
+            };
+            let tuple_size = 3 * std::mem::size_of::<Value>();
+            let tuple_obj =
+                state
+                    .heap
+                    .alloc_with_init(crate::types::TypeId::TUPLE, tuple_size, |_data| {})?;
+            let tuple_data = tuple_obj.data_ptr() as *mut Value;
+            unsafe {
+                std::ptr::write(tuple_data.add(0), Value::from_i64(ptr as i64));
+                std::ptr::write(tuple_data.add(1), Value::from_i64(generation));
+                std::ptr::write(tuple_data.add(2), Value::from_i64(epoch));
+            }
+            let tuple_val = Value::from_ptr(tuple_obj.as_ptr());
+            let ok_val = super::method_dispatch::make_result_variant(
+                state,
+                verum_common::well_known_types::result_success_tag(),
+                tuple_val,
+            )?;
+            state.set_reg(dst, ok_val);
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::AllocateUser) => {
+            let dst = read_reg(state)?;
+            let size_reg = read_reg(state)?;
+            let align_reg = read_reg(state)?;
+            let raw_size = state.get_reg(size_reg).as_integer_compatible();
+            let raw_align = state.get_reg(align_reg).as_integer_compatible();
+            let user = cbgr_user_allocate(state, raw_size, raw_align);
+            state.set_reg(dst, Value::from_i64(user));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::DeallocUser) => {
+            let _dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let user = state.get_reg(ptr_reg).as_integer_compatible();
+            cbgr_user_deallocate(state, user);
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::ReallocUser) => {
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let new_size_reg = read_reg(state)?;
+            let user = state.get_reg(ptr_reg).as_integer_compatible();
+            let new_size = state.get_reg(new_size_reg).as_integer_compatible();
+            let result = cbgr_user_realloc(state, user, new_size);
+            state.set_reg(dst, Value::from_i64(result));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::ValidateBool) => {
+            let dst = read_reg(state)?;
+            let ref_reg = read_reg(state)?;
+            let ref_val = state.get_reg(ref_reg);
+            let verdict = super::cbgr::validate_ref_bool(state, ref_val);
+            state.set_reg(dst, Value::from_bool(verdict));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::GetHeader) => {
+            // get_header_from_ptr(user_ptr): recover the CBGR AllocationHeader
+            // that precedes user data by a FIXED ALLOCATION_HEADER_SIZE bytes.
+            // Format: dst:reg, ptr:reg  (exactly 2 regs — NOT PtrSub's 3).
+            //
+            // Mirrors `AllocationHeader.from_user_ptr` (core/mem/header.vr).
+            // The offset is a fixed 32-byte constant, NOT element-scaled —
+            // distinct from PtrSub (0x64), whose byte this lowering used to
+            // squat (T0425).
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+
+            let addr = value_as_addr(state.get_reg(ptr_reg));
+            let header_addr = addr
+                .checked_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize)
+                .ok_or(InterpreterError::IntegerOverflow {
+                    operation: "CbgrGetHeader",
+                })?;
+            // Int-tagged address — same rationale as PtrSub/PtrAdd: a
+            // pointer-tagged interior address becomes a droppable-looking
+            // heap object and DropRef chases bytes as a header.
+            state.set_reg(dst, Value::from_i64(header_addr as i64));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::GetGenerationUser) => {
+            // cbgr_get_generation(user_ptr): *(u32*)(ptr - 32 + gen@8).
+            // Format: dst:reg, ptr:reg.
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+
+            let addr = value_as_addr(state.get_reg(ptr_reg));
+            let gen_addr = addr
+                .checked_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize)
+                .map(|h| h + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
+                .ok_or(InterpreterError::IntegerOverflow {
+                    operation: "CbgrGetGeneration",
+                })?;
+            // SAFETY: the caller contract (unsafe intrinsic) requires a
+            // live CBGR user pointer; the header precedes it by
+            // construction of both tiers' allocators.
+            let generation = unsafe { *(gen_addr as *const u32) };
+            state.set_reg(dst, Value::from_i64(generation as i64));
+            Ok(DispatchResult::Continue)
+        }
 
         // ================================================================
         // Unimplemented sub-opcodes
@@ -3264,8 +3603,8 @@ mod tests {
                 value: 8,
             },
             // r0 = cbgr_allocate(32, 8) — Int-tagged user pointer.
-            Instruction::FfiExtended {
-                sub_op: crate::instruction::SystemSubOpcode::CbgrAllocateUser as u8,
+            Instruction::CbgrExtended {
+                sub_op: crate::instruction::CbgrSubOpcode::AllocateUser as u8,
                 operands: vec![0, 1, 2],
             },
             Instruction::LoadI {

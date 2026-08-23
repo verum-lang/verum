@@ -797,6 +797,33 @@ pub enum Opcode {
     // future extended-byte gateways (e.g. dedicated `Async*` /
     // `Stream*` / `Fast*` prefixes).  See
     // `docs/architecture/sub-opcode-refactor-plan.md`.
+    // ========================================================================
+    // Family gateways 0xF0-0xF3 — T0852 opcode-map audit.
+    //
+    // These are the honest homes for the ~50 SystemSubOpcode squatters
+    // that had nothing to do with FFI (owner mandate 2026-08-22).  Each
+    // uses the standard extended envelope
+    // `[opcode][sub_op:u8][len:varint][operands]` (dispatch_enveloped),
+    // with its own sub-op enum: TimeSubOpcode / SysSubOpcode /
+    // MachSubOpcode / SyncSubOpcode.  0xF4-0xF7 remain the growth
+    // reserve for future families.
+    // ========================================================================
+    /// Time-clock operations (TimeSubOpcode): monotonic/realtime reads,
+    /// sleeps, cpu-time clocks.
+    /// Format: `[0xF0] [sub_opcode:u8] [len:varint] [operands...]`
+    TimeExtended = 0xF0,
+    /// POSIX-process operations (SysSubOpcode): pid/tid, mmap family,
+    /// entropy, environment, tier introspection.
+    /// Format: `[0xF1] [sub_opcode:u8] [len:varint] [operands...]`
+    SysExtended = 0xF1,
+    /// Mach kernel operations, Apple-specific (MachSubOpcode).
+    /// Format: `[0xF2] [sub_opcode:u8] [len:varint] [operands...]`
+    MachExtended = 0xF2,
+    /// Cross-platform synchronization (SyncSubOpcode): futex, spinlock,
+    /// waitgroup, atomic-RMW, TLS slots.
+    /// Format: `[0xF3] [sub_opcode:u8] [len:varint] [operands...]`
+    SyncExtended = 0xF3,
+
     /// GPU extended operations prefix.
     ///
     /// This opcode is followed by a sub-opcode byte (GpuSubOpcode) that specifies
@@ -4693,20 +4720,7 @@ pub enum SystemSubOpcode {
     /// Returns: negative if ptr1 < ptr2, 0 if equal, positive if ptr1 > ptr2
     CMemcmp = 0x46,
 
-    /// Generate cryptographically secure random u64.
-    ///
-    /// Format: `dst:reg`
-    /// Uses platform-specific secure random:
-    /// - macOS: getentropy()
-    /// - Linux: getrandom syscall
-    /// - Windows: BCryptGenRandom
-    RandomU64 = 0x47,
 
-    /// Generate random float in [0, 1).
-    ///
-    /// Format: `dst:reg`
-    /// Uses RandomU64 internally with IEEE 754 conversion.
-    RandomFloat = 0x48,
 
     /// Allocate a byte array (contiguous bytes, not Values).
     ///
@@ -4877,23 +4891,6 @@ pub enum SystemSubOpcode {
     /// Store a 64-bit integer at a raw address: `dst, addr, value`.
     RawStoreI64 = 0x58,
 
-    /// Flat TLS slot quartet — `tls_slot_get/set/has/clear` (runtime/tls.vr).
-    /// History: the quartet rode DirectOpcode(TlsGet/TlsSet), whose emission
-    /// writes DST FIRST — TlsSet then read the destination register index as
-    /// the SLOT, so `tls_slot_set(241, p)` wrote to slot <temp-reg-index>
-    /// and the whole set/get/has round-trip broke.  Formats:
-    /// get `dst,slot` / set `slot,value` / has `dst,slot` / clear `slot`.
-    TlsSlotGetF = 0x59,
-    /// Set a flat TLS slot: `slot, value`.
-    TlsSlotSetF = 0x5A,
-    /// Test whether a flat TLS slot is occupied: `dst, slot`.
-    TlsSlotHasF = 0x5B,
-    /// Clear a flat TLS slot: `slot`.
-    TlsSlotClearF = 0x5C,
-    /// `tls_get_base` — an opaque non-null TLS base pointer.  The old route
-    /// (OpcodeWithMode(TlsGet, 0)) returned the CONTENT of context slot 0.
-    /// Format: `dst`.
-    TlsGetBaseF = 0x5D,
 
     // ========================================================================
     // Raw Pointer Operations (0x60-0x6F)
@@ -5024,215 +5021,42 @@ pub enum SystemSubOpcode {
     /// Plain raw-pointer WRITE with MACHINE semantics — see PtrRead.
     PtrWrite = 0x6C,
 
-    /// Recover a CBGR allocation header from a user-data pointer.
-    ///
-    /// Format: `dst:reg, ptr:reg`
-    ///
-    /// Computes `ptr - ALLOCATION_HEADER_SIZE` (a fixed 32-byte back-step,
-    /// NOT element-scaled), recovering the `AllocationHeader` that precedes
-    /// every CBGR allocation. Mirrors `AllocationHeader.from_user_ptr`
-    /// (`core/mem/header.vr`). This is the lowering of the
-    /// `get_header_from_ptr` intrinsic.
-    ///
-    /// Distinct from `PtrSub` (0x64): `get_header_from_ptr` takes ONE
-    /// pointer argument (2 regs total) and subtracts a fixed byte constant,
-    /// whereas `PtrSub` takes a runtime, element-scaled offset (3 regs).
-    /// The two shared byte 0x64 before this variant existed — a genuine
-    /// opcode collision (T0425) that both mis-valued and desynced the
-    /// stream by under-reading one register. (The fix branch used 0x68,
-    /// which T0188's PtrReadVolatile claimed first — hence the CBGR band.)
-    CbgrGetHeader = 0xA9,
 
-    /// Read the u32 `generation` field of a user pointer's allocation
-    /// header (canonical `gen@8` inside the 32-byte header at ptr-32).
-    ///
-    /// Format: `dst:reg, ptr:reg`
-    ///
-    /// The `cbgr_get_generation` intrinsic used to lower to a plain
-    /// `Deref` of the USER pointer — returning the first word of user
-    /// data as if it were the generation (T0846 layer 2).
-    CbgrGetGeneration = 0xAA,
 
     // ========================================================================
     // Time Operations (0x70-0x7F)
     // ========================================================================
-    /// Get monotonic time in nanoseconds.
-    ///
-    /// Format: `dst:reg`
-    /// Returns: Current monotonic clock time in nanoseconds (i64).
-    /// Uses platform-specific monotonic clock (CLOCK_MONOTONIC on macOS/Linux).
-    TimeMonotonicNanos = 0x70,
 
-    /// Get realtime (wall clock) in nanoseconds since Unix epoch.
-    ///
-    /// Format: `dst:reg`
-    /// Returns: Nanoseconds since 1970-01-01T00:00:00Z (i64).
-    TimeRealtimeNanos = 0x71,
 
-    /// Get raw monotonic time in nanoseconds (not NTP-adjusted).
-    ///
-    /// Format: `dst:reg`
-    /// Returns: Raw monotonic clock time in nanoseconds (i64).
-    /// Uses CLOCK_MONOTONIC_RAW on macOS/Linux.
-    TimeMonotonicRawNanos = 0x72,
 
-    /// Sleep for specified nanoseconds.
-    ///
-    /// Format: `nanos:reg`
-    /// Sleeps the current thread for the specified duration.
-    TimeSleepNanos = 0x73,
 
-    /// Get thread CPU time in nanoseconds.
-    ///
-    /// Format: `dst:reg`
-    /// Returns: Thread CPU time in nanoseconds (i64).
-    /// Uses CLOCK_THREAD_CPUTIME_ID.
-    TimeThreadCpuNanos = 0x74,
 
-    /// Get process CPU time in nanoseconds.
-    ///
-    /// Format: `dst:reg`
-    /// Returns: Process CPU time in nanoseconds (i64).
-    /// Uses CLOCK_PROCESS_CPUTIME_ID.
-    TimeProcessCpuNanos = 0x75,
-    /// Sleep for the given number of MILLISECONDS (`sleep_ms`).  The
-    /// millisecond form gets its own sub-op so the ms→ns scaling lives in
-    /// ONE place per tier instead of in every emitter.
-    /// Format: `ms:reg` — this sub-op takes no destination register.
-    TimeSleepMillis = 0x76,
 
     // ========================================================================
     // System Call Operations (0x80-0x8F)
     // ========================================================================
-    /// Get process ID.
-    ///
-    /// Format: `dst:reg`
-    /// Returns: Process ID as i64.
-    SysGetpid = 0x80,
 
-    /// Get thread ID.
-    ///
-    /// Format: `dst:reg`
-    /// Returns: Thread ID as u64.
-    SysGettid = 0x81,
 
-    /// Memory map (mmap).
-    ///
-    /// Format: `dst:reg, addr:reg, len:reg, prot:reg, flags:reg, fd:reg, offset:reg`
-    /// Returns: Result variant (Ok=pointer, Err=OSError).
-    SysMmap = 0x82,
 
-    /// Memory unmap (munmap).
-    ///
-    /// Format: `dst:reg, addr:reg, len:reg`
-    /// Returns: Result variant (Ok=unit, Err=OSError).
-    SysMunmap = 0x83,
 
-    /// Memory advise (madvise).
-    ///
-    /// Format: `dst:reg, addr:reg, len:reg, advice:reg`
-    /// Returns: Result variant (Ok=unit, Err=OSError).
-    SysMadvise = 0x84,
 
-    /// Get entropy (getentropy).
-    ///
-    /// Format: `dst:reg, buf:reg, len:reg`
-    /// Returns: Result variant (Ok=unit, Err=OSError).
-    SysGetentropy = 0x85,
 
-    /// Execution-tier query (`get_tier`). TIER-DETECT-AOT-1: tier
-    /// detection MUST be resolved per tier, never folded into the
-    /// shared VBC — one bytecode stream serves both tiers, so a
-    /// compile-time constant is tier-incoherent by construction.
-    /// The interpreter answers 0; the LLVM lowering emits const 3.
-    ///
-    /// Format: `dst:reg`
-    /// Returns: Int tier id per the stdlib contract (tier.vr):
-    /// 0 = VBC interpreter, 1/2 = JIT tiers, 3 = AOT.
-    ExecutionTier = 0x86,
 
-    /// Interpreter-tier predicate (`is_interpreted`). Same per-tier
-    /// contract as [`ExecutionTier`]: interpreter answers true, the
-    /// LLVM lowering emits const false.
-    ///
-    /// Format: `dst:reg`
-    /// Returns: Bool.
-    IsInterpreted = 0x87,
 
-    /// ENV-IMPL-TRIO-1 (#55): read env var. Per-tier backend —
-    /// interpreter answers via std::env, LLVM lowering via libSystem
-    /// getenv (darwin's required boundary).
-    ///
-    /// Format: `dst:reg, name_bytes:reg`
-    /// Returns: Maybe<Text>.
-    EnvGet = 0x88,
 
-    /// Set env var (name, value byte-slices). Returns Result<(), Text>.
-    ///
-    /// Format: `dst:reg, name_bytes:reg, value_bytes:reg`
-    EnvSet = 0x89,
 
-    /// Remove env var. Returns Result<(), Text>.
-    ///
-    /// Format: `dst:reg, name_bytes:reg`
-    EnvUnset = 0x8A,
 
     // =========================================================================
     // Mach Kernel Operations (macOS)
     // =========================================================================
-    /// Mach vm_allocate (safe wrapper).
-    ///
-    /// Format: `dst:reg, size:reg, anywhere:reg`
-    /// Returns: Result variant (Ok=VmAddress as Int, Err=KernReturn as Int).
-    MachVmAllocate = 0x90,
 
-    /// Mach vm_deallocate (safe wrapper).
-    ///
-    /// Format: `dst:reg, addr:reg, size:reg`
-    /// Returns: Result variant (Ok=unit, Err=KernReturn as Int).
-    MachVmDeallocate = 0x91,
 
-    /// Mach vm_protect (safe wrapper).
-    ///
-    /// Format: `dst:reg, addr:reg, size:reg, prot:reg`
-    /// Returns: Result variant (Ok=unit, Err=KernReturn as Int).
-    MachVmProtect = 0x92,
 
-    /// Mach semaphore_create (safe wrapper).
-    ///
-    /// Format: `dst:reg, initial_value:reg`
-    /// Returns: Result variant (Ok=SemaphoreT as Int, Err=KernReturn as Int).
-    MachSemCreate = 0x93,
 
-    /// Mach semaphore_destroy (safe wrapper).
-    ///
-    /// Format: `dst:reg, sem:reg`
-    /// Returns: Result variant (Ok=unit, Err=KernReturn as Int).
-    MachSemDestroy = 0x94,
 
-    /// Mach semaphore_signal (safe wrapper).
-    ///
-    /// Format: `dst:reg, sem:reg`
-    /// Returns: Result variant (Ok=unit, Err=KernReturn as Int).
-    MachSemSignal = 0x95,
 
-    /// Mach semaphore_wait (safe wrapper).
-    ///
-    /// Format: `dst:reg, sem:reg`
-    /// Returns: Result variant (Ok=unit, Err=KernReturn as Int).
-    MachSemWait = 0x96,
 
-    /// Mach mach_error_string.
-    ///
-    /// Format: `dst:reg, kern_return:reg`
-    /// Returns: Text (string).
-    MachErrorString = 0x97,
 
-    /// Mach mach_wait_until (sleep until deadline).
-    ///
-    /// Format: `dst:reg, deadline:reg`
-    /// Returns: Result variant (Ok=unit, Err=KernReturn as Int).
-    MachSleepUntil = 0x98,
 
     // ========================================================================
     // CBGR Memory Operations (0xA0-0xAF) — tracked allocation/deallocation
@@ -5240,164 +5064,20 @@ pub enum SystemSubOpcode {
     // at 0x40-0x42: these return a Result tuple `(ptr, generation, epoch)`
     // and register the allocation in the CBGR validation table.
     // ========================================================================
-    /// Allocate memory with CBGR tracking.
-    ///
-    /// Format: `dst:reg, size:reg, align:reg`
-    /// Returns: Result tuple `(ptr, generation, epoch)` or AllocError.
-    CbgrAlloc = 0xA0,
 
-    /// Allocate zeroed memory with CBGR tracking.
-    ///
-    /// Format: `dst:reg, size:reg, align:reg`
-    /// Returns: Result tuple `(ptr, generation, epoch)` or AllocError.
-    CbgrAllocZeroed = 0xA1,
 
-    /// Deallocate memory previously allocated via `CbgrAlloc`.
-    ///
-    /// Format: `dst:reg, ptr:reg, size:reg, align:reg`
-    /// Returns: Result unit or AllocError.
-    CbgrDealloc = 0xA2,
 
-    /// Cryptographically-secure zero — volatile memset(0) that
-    /// survives every LLVM optimization pass.
-    ///
-    /// Format: `dst:reg, size:reg`
-    /// Returns: nothing (the destination buffer is zeroed in-place).
-    ///
-    /// AOT lowering: `llvm.memset.p0.i64(dst, 0, size, isvolatile=true)`.
-    /// The `i1 true` volatile flag prevents DCE elimination of the
-    /// memset even when the LLVM optimiser proves the buffer is dead
-    /// immediately after — which is the *exact* situation we use this
-    /// op for: zeroising secret bytes (key material, AEAD tags, PSK
-    /// binders) right before they leave scope.
-    ///
-    /// Interpreter lowering: writes zeros to the dst slice; volatile
-    /// is moot in the interpreter since there is no optimiser pass
-    /// that could elide the writes.
-    ///
-    /// Distinct from `CMemset` (0x44) because LLVM's non-volatile
-    /// memset is dead-code-eliminated when the buffer is dead — a
-    /// catastrophic security property. See audit
-    /// `tls-quic-security-audit spec` §2 (zeroise on
-    /// drop) Action #2.
-    CSecureZero = 0xA3,
 
-    /// Reallocate an allocator-internal CBGR allocation.
-    ///
-    /// Format: `dst:reg, ptr:reg, old_size:reg, new_size:reg, align:reg`
-    /// Returns: new pointer (raw; the stdlib allocator wrapper packages
-    /// the Result tuple on top, mirroring `CbgrAlloc`).
-    ///
-    /// HISTORY: `cbgr_realloc`'s inline sequence used to emit sub-op
-    /// 0x63 — which is `PtrAdd`.  Every reallocation therefore computed
-    /// `ptr + old_size` instead of reallocating (interp: garbage operand
-    /// decode → SIGSEGV; AOT: silent pointer-add).  The 0x60-0x62 stub
-    /// collision was fixed for alloc/dealloc (see the 0xA0-0xA2 block
-    /// comment in `expressions.rs`) but realloc was missed.
-    CbgrRealloc = 0xA4,
 
-    /// Public CBGR bridge (`core/intrinsics/runtime/cbgr.vr`): allocate
-    /// `size` bytes with a 32-byte AllocationHeader prefix; returns the
-    /// USER pointer (header + 32) as a plain Int address, or 0.
-    ///
-    /// Format: `dst:reg, size:reg, align:reg`
-    /// AOT: `verum_cbgr_allocate(size)`; interpreter mirrors the same
-    /// header layout (`verum_common::layout::ALLOCATION_HEADER_*`).
-    CbgrAllocateUser = 0xA5,
 
-    /// Public CBGR bridge: free a `CbgrAllocateUser` allocation.
-    /// No-op on 0.  Format: `dst:reg, ptr:reg`
-    CbgrDeallocUser = 0xA6,
 
-    /// Public CBGR bridge: reallocate to `new_size`, preserving
-    /// `min(old, new)` bytes (old size read from the AllocationHeader).
-    /// Returns the new user pointer or 0.
-    /// Format: `dst:reg, ptr:reg, new_size:reg`
-    CbgrReallocUser = 0xA7,
 
-    /// `cbgr_validate<T>(&T) -> Bool` — non-trapping reference
-    /// validation.  Unlike `ChkRef` (which PANICS on an invalid
-    /// reference and writes nothing), this writes the verdict as a
-    /// Bool into `dst` — the shape the stdlib declaration promises.
-    /// Format: `dst:reg, ref:reg`
-    CbgrValidateBool = 0xA8,
 
     // ========================================================================
     // Synchronization Primitives (0xB0-0xBF)
     // ========================================================================
-    /// Futex-style wait on a 32-bit memory address.
-    ///
-    /// Format: `dst:reg, addr:reg, expected:reg, timeout_ns:reg`
-    /// VBC ABI: `(addr: i64, expected: i64, timeout_ns: i64) -> i64` —
-    /// returns 0 on wake, -EAGAIN if `*addr != expected`, -ETIMEDOUT on
-    /// timeout. AOT lowering routes to the `verum_futex_wait` runtime
-    /// helper (Linux: futex syscall; macOS: __ulock_wait; Windows:
-    /// WaitOnAddress). Interpreter mode parks via `std::thread::park`
-    /// keyed by address — sufficient for green-thread cooperation.
-    FutexWait = 0xB0,
 
-    /// Futex-style wake of N waiters on a 32-bit memory address.
-    ///
-    /// Format: `dst:reg, addr:reg, count:reg`
-    /// VBC ABI: `(addr: i64, count: i64) -> i64` — returns the number
-    /// of waiters actually woken. AOT lowers to `verum_futex_wake`
-    /// runtime helper. Interpreter unparks at most `count` threads
-    /// blocked on `addr` via the same wait queue used by `FutexWait`.
-    FutexWake = 0xB1,
 
-    /// Spinlock acquire (test-and-set with backoff).
-    ///
-    /// Format: `dst:reg, lock_addr:reg`
-    /// VBC ABI: `(lock_addr: i64) -> i64` — `dst` always set to 0
-    /// after the lock is held. AOT lowers to `verum_spinlock_lock`
-    /// (CAS loop with `pause`/`yield` backoff). Interpreter spins via
-    /// AtomicU8::compare_exchange + `std::thread::yield_now`.
-    SpinlockLock = 0xB2,
-    /// Spinlock trio completing 0xB2.  History: try_lock rode
-    /// OpcodeWithSize(AtomicCas,4) with ONE argument — the CAS read unset
-    /// expected/desired operand registers and always failed; unlock rode
-    /// AtomicStore with the VALUE operand missing; is_locked returned the
-    /// raw u32 where the signature promises Bool.  Formats:
-    /// try_lock `dst,lock` (Bool) / unlock `lock` / is_locked `dst,lock` (Bool).
-    SpinlockTryLock = 0xB3,
-    /// Release a spinlock: `lock`.
-    SpinlockUnlock = 0xB4,
-    /// Test whether a spinlock is currently held: `dst, lock` (Bool).
-    SpinlockIsLocked = 0xB5,
-    /// WaitGroup family (`__waitgroup_*_raw`, sync.vr #65).  Interp: the
-    /// handle-table impl in `interpreter::waitgroup`; AOT: an 8-byte
-    /// cbgr allocation holding an atomic i64 counter (handle = address).
-    /// Formats: new `dst` / add `dst,wg,delta` / done `dst,wg` /
-    /// wait `dst,wg` / try_wait `dst,wg` / destroy `dst,wg`.
-    WaitgroupNew = 0xB6,
-    /// Increment a wait-group counter: `wg, delta`.
-    WaitgroupAdd = 0xB7,
-    /// Decrement a wait-group counter: `wg`.
-    WaitgroupDone = 0xB8,
-    /// Block until a wait-group reaches zero: `wg`.
-    WaitgroupWait = 0xB9,
-    /// Non-blocking wait-group poll: `dst, wg` (Bool).
-    WaitgroupTryWait = 0xBA,
-    /// Release wait-group resources: `wg`.
-    WaitgroupDestroy = 0xBB,
-    /// Atomic read-modify-write — the ONE authority for every
-    /// `atomic_fetch_*` / `atomic_exchange` intrinsic at both tiers.
-    ///
-    /// Format: `dst:reg, ptr:reg, val:reg, op:u8, size:u8` where `op`
-    /// is an [`AtomicRmwOp`] byte and `size` is the access width in
-    /// bytes (1/2/4/8).  `dst` receives the value read BEFORE the
-    /// update, per the C11 / LLVM `atomicrmw` convention.
-    ///
-    /// History: fetch_add and its five siblings used to be lowered
-    /// inline as `AtomicLoad` + arithmetic + a SINGLE `AtomicCas`
-    /// whose result was then discarded by a `Mov dst, old_val`.  With
-    /// no retry on CAS failure that sequence silently DROPS the update
-    /// whenever two threads interleave — a lost counter increment with
-    /// no error anywhere, invisible to any single-threaded test.  The
-    /// update must be one indivisible operation, so it is one opcode:
-    /// the interpreter uses a hardware RMW (or a bounded CAS retry
-    /// loop for NaN-boxed 8-byte slots) and AOT emits `atomicrmw`.
-    AtomicRmw = 0xBC,
 }
 
 /// Which read-modify-write an [`SystemSubOpcode::AtomicRmw`] performs.
@@ -5480,8 +5160,8 @@ impl AtomicRmwOp {
         write_reg(&mut operands, val.0);
         operands.push(self.to_byte());
         operands.push(size);
-        Instruction::FfiExtended {
-            sub_op: SystemSubOpcode::AtomicRmw as u8,
+        Instruction::SyncExtended {
+            sub_op: SyncSubOpcode::AtomicRmw as u8,
             operands,
         }
     }
@@ -5539,10 +5219,34 @@ pub enum TimeSubOpcode {
     ThreadCpuNanos = 0x04,
     /// `clock_gettime(CLOCK_PROCESS_CPUTIME_ID)`.
     ProcessCpuNanos = 0x05,
-    // 0x06-0x1F  RESERVED for cross-platform time
+    /// Sleep for N milliseconds (convenience twin of `SleepNanos`,
+    /// carried over from `SystemSubOpcode::TimeSleepMillis`).
+    SleepMillis = 0x06,
+    // 0x07-0x1F  RESERVED for cross-platform time
     //              (Windows QueryPerformanceCounter, POSIX
     //               timer_create, monotonic-since-epoch helpers).
     // 0x20-0xFF  RESERVED for general future growth.
+}
+
+impl TimeSubOpcode {
+    /// Creates a time sub-opcode from a byte value.
+    pub fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0x00 => Some(Self::MonotonicNanos),
+            0x01 => Some(Self::RealtimeNanos),
+            0x02 => Some(Self::MonotonicRawNanos),
+            0x03 => Some(Self::SleepNanos),
+            0x04 => Some(Self::ThreadCpuNanos),
+            0x05 => Some(Self::ProcessCpuNanos),
+            0x06 => Some(Self::SleepMillis),
+            _ => None,
+        }
+    }
+
+    /// Returns the byte value of this sub-opcode.
+    pub fn to_byte(self) -> u8 {
+        self as u8
+    }
 }
 
 /// POSIX-syscall operations — extracted from `SystemSubOpcode::Sys*`.
@@ -5565,11 +5269,55 @@ pub enum SysSubOpcode {
     Madvise = 0x04,
     /// `getentropy()` — fill buffer with cryptographically-secure bytes.
     GetEntropy = 0x05,
-    // 0x06-0x1F  RESERVED for syscalls
+    /// Fast non-crypto random u64 (xorshift-class; NOT secure — see
+    /// the csprng tier-divergence dossier).
+    RandomU64 = 0x06,
+    /// Fast non-crypto random f64 in [0, 1).
+    RandomFloat = 0x07,
+    // 0x08-0x1F  RESERVED for syscalls
     //              (fork, exec*, signal, sigaction, waitpid,
     //               prctl, ptrace, etc.).
-    // 0x20-0x3F  RESERVED for /proc & /sys access.
+    /// Which execution tier is running: 0 = interpreter, 1 = AOT.
+    /// Per-tier constant answers (TIER-DETECT-AOT-1).
+    ExecutionTier = 0x20,
+    /// `true` on the interpreter, `false` in AOT output.
+    IsInterpreted = 0x21,
+    // 0x22-0x2F  RESERVED for runtime introspection.
+    /// Read an environment variable (dst, name) → Text | Unit.
+    EnvGet = 0x30,
+    /// Set an environment variable (name, value).
+    EnvSet = 0x31,
+    /// Remove an environment variable (name).
+    EnvUnset = 0x32,
+    // 0x33-0x3F  RESERVED for environment / process metadata.
     // 0x40-0xFF  RESERVED.
+}
+
+impl SysSubOpcode {
+    /// Creates a sys sub-opcode from a byte value.
+    pub fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0x00 => Some(Self::GetPid),
+            0x01 => Some(Self::GetTid),
+            0x02 => Some(Self::Mmap),
+            0x03 => Some(Self::Munmap),
+            0x04 => Some(Self::Madvise),
+            0x05 => Some(Self::GetEntropy),
+            0x06 => Some(Self::RandomU64),
+            0x07 => Some(Self::RandomFloat),
+            0x20 => Some(Self::ExecutionTier),
+            0x21 => Some(Self::IsInterpreted),
+            0x30 => Some(Self::EnvGet),
+            0x31 => Some(Self::EnvSet),
+            0x32 => Some(Self::EnvUnset),
+            _ => None,
+        }
+    }
+
+    /// Returns the byte value of this sub-opcode.
+    pub fn to_byte(self) -> u8 {
+        self as u8
+    }
 }
 
 /// Mach kernel operations (Apple-specific) — extracted from
@@ -5628,15 +5376,105 @@ pub enum SyncSubOpcode {
     SpinlockTryLock = 0x11,
     /// Spinlock release — atomic store with release ordering.
     SpinlockUnlock = 0x12,
+    /// Non-blocking spinlock state probe.
+    SpinlockIsLocked = 0x13,
     /// `thread.park(ns)` — park current thread for N nanoseconds
     /// (Rust-style park, distinct from `nanosleep` because parks
     /// can be unparked early).
     ParkNs = 0x20,
     /// `thread.unpark(handle)` — wake a parked thread.
     Unpark = 0x21,
-    // 0x22-0xFF  RESERVED for sync primitives (semaphore,
+    // -- Waitgroup family (0x30-0x3F) — carried over from
+    //    SystemSubOpcode::Waitgroup* (T0852).
+    /// Create a waitgroup; returns its handle.
+    WaitgroupNew = 0x30,
+    /// Add N to the waitgroup counter.
+    WaitgroupAdd = 0x31,
+    /// Decrement the waitgroup counter by 1.
+    WaitgroupDone = 0x32,
+    /// Block until the counter reaches 0.
+    WaitgroupWait = 0x33,
+    /// Non-blocking wait probe — 1 when the counter is 0.
+    WaitgroupTryWait = 0x34,
+    /// Destroy a waitgroup handle.
+    WaitgroupDestroy = 0x35,
+    /// Atomic read-modify-write envelope (AtomicRmwOp sub-operation +
+    /// width byte in the operand stream — see the atomic-rmw-family
+    /// envelope contract).
+    AtomicRmw = 0x40,
+    // -- Thread-local slots (0x50-0x5F) — carried over from
+    //    SystemSubOpcode::TlsSlot* (T0852).
+    /// Read a TLS slot (dst, slot).
+    TlsSlotGet = 0x50,
+    /// Write a TLS slot (slot, value).
+    TlsSlotSet = 0x51,
+    /// Probe a TLS slot (dst, slot) → Bool.
+    TlsSlotHas = 0x52,
+    /// Clear a TLS slot (slot).
+    TlsSlotClear = 0x53,
+    /// Base address of the TLS block (dst).
+    TlsGetBase = 0x54,
+    // 0x55-0xFF  RESERVED for sync primitives (semaphore,
     //              condvar, atomic memory-ordering helpers,
     //              cross-platform shims).
+}
+
+impl SyncSubOpcode {
+    /// Creates a sync sub-opcode from a byte value.
+    pub fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0x00 => Some(Self::FutexWait),
+            0x01 => Some(Self::FutexWake),
+            0x02 => Some(Self::FutexWakeAll),
+            0x10 => Some(Self::SpinlockLock),
+            0x11 => Some(Self::SpinlockTryLock),
+            0x12 => Some(Self::SpinlockUnlock),
+            0x13 => Some(Self::SpinlockIsLocked),
+            0x20 => Some(Self::ParkNs),
+            0x21 => Some(Self::Unpark),
+            0x30 => Some(Self::WaitgroupNew),
+            0x31 => Some(Self::WaitgroupAdd),
+            0x32 => Some(Self::WaitgroupDone),
+            0x33 => Some(Self::WaitgroupWait),
+            0x34 => Some(Self::WaitgroupTryWait),
+            0x35 => Some(Self::WaitgroupDestroy),
+            0x40 => Some(Self::AtomicRmw),
+            0x50 => Some(Self::TlsSlotGet),
+            0x51 => Some(Self::TlsSlotSet),
+            0x52 => Some(Self::TlsSlotHas),
+            0x53 => Some(Self::TlsSlotClear),
+            0x54 => Some(Self::TlsGetBase),
+            _ => None,
+        }
+    }
+
+    /// Returns the byte value of this sub-opcode.
+    pub fn to_byte(self) -> u8 {
+        self as u8
+    }
+}
+
+impl MachSubOpcode {
+    /// Creates a mach sub-opcode from a byte value.
+    pub fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0x00 => Some(Self::VmAllocate),
+            0x01 => Some(Self::VmDeallocate),
+            0x02 => Some(Self::VmProtect),
+            0x10 => Some(Self::SemCreate),
+            0x11 => Some(Self::SemDestroy),
+            0x12 => Some(Self::SemSignal),
+            0x13 => Some(Self::SemWait),
+            0x20 => Some(Self::ErrorString),
+            0x21 => Some(Self::SleepUntil),
+            _ => None,
+        }
+    }
+
+    /// Returns the byte value of this sub-opcode.
+    pub fn to_byte(self) -> u8 {
+        self as u8
+    }
 }
 
 // ============================================================================
@@ -5798,8 +5636,6 @@ impl SystemSubOpcode {
             0x44 => Some(Self::CMemset),
             0x45 => Some(Self::CMemmove),
             0x46 => Some(Self::CMemcmp),
-            0x47 => Some(Self::RandomU64),
-            0x48 => Some(Self::RandomFloat),
             0x49 => Some(Self::NewByteArray),
             0x4A => Some(Self::ByteArrayElementAddr),
             0x4B => Some(Self::ByteArrayLoad),
@@ -5819,11 +5655,6 @@ impl SystemSubOpcode {
             0x56 => Some(Self::RawStoreI32),
             0x57 => Some(Self::RawLoadI64),
             0x58 => Some(Self::RawStoreI64),
-            0x59 => Some(Self::TlsSlotGetF),
-            0x5A => Some(Self::TlsSlotSetF),
-            0x5B => Some(Self::TlsSlotHasF),
-            0x5C => Some(Self::TlsSlotClearF),
-            0x5D => Some(Self::TlsGetBaseF),
             // Raw Pointer Operations
             0x60 => Some(Self::DerefRaw),
             0x61 => Some(Self::DerefMutRaw),
@@ -5834,66 +5665,15 @@ impl SystemSubOpcode {
             0x6A => Some(Self::StaticMutAddrSized),
             0x6B => Some(Self::PtrRead),
             0x6C => Some(Self::PtrWrite),
-            0xA9 => Some(Self::CbgrGetHeader),
-            0xAA => Some(Self::CbgrGetGeneration),
             0x63 => Some(Self::PtrAdd),
             0x64 => Some(Self::PtrSub),
             0x65 => Some(Self::PtrDiff),
             0x66 => Some(Self::PtrIsNull),
             // Time Operations
-            0x70 => Some(Self::TimeMonotonicNanos),
-            0x71 => Some(Self::TimeRealtimeNanos),
-            0x72 => Some(Self::TimeMonotonicRawNanos),
-            0x73 => Some(Self::TimeSleepNanos),
-            0x74 => Some(Self::TimeThreadCpuNanos),
-            0x75 => Some(Self::TimeProcessCpuNanos),
-            0x76 => Some(Self::TimeSleepMillis),
             // System Call Operations
-            0x80 => Some(Self::SysGetpid),
-            0x81 => Some(Self::SysGettid),
-            0x82 => Some(Self::SysMmap),
-            0x83 => Some(Self::SysMunmap),
-            0x84 => Some(Self::SysMadvise),
-            0x85 => Some(Self::SysGetentropy),
-            0x86 => Some(Self::ExecutionTier),
-            0x87 => Some(Self::IsInterpreted),
-            0x88 => Some(Self::EnvGet),
-            0x89 => Some(Self::EnvSet),
-            0x8A => Some(Self::EnvUnset),
             // Mach Kernel Operations
-            0x90 => Some(Self::MachVmAllocate),
-            0x91 => Some(Self::MachVmDeallocate),
-            0x92 => Some(Self::MachVmProtect),
-            0x93 => Some(Self::MachSemCreate),
-            0x94 => Some(Self::MachSemDestroy),
-            0x95 => Some(Self::MachSemSignal),
-            0x96 => Some(Self::MachSemWait),
-            0x97 => Some(Self::MachErrorString),
-            0x98 => Some(Self::MachSleepUntil),
             // CBGR Memory Operations
-            0xA0 => Some(Self::CbgrAlloc),
-            0xA1 => Some(Self::CbgrAllocZeroed),
-            0xA2 => Some(Self::CbgrDealloc),
-            0xA3 => Some(Self::CSecureZero),
-            0xA4 => Some(Self::CbgrRealloc),
-            0xA5 => Some(Self::CbgrAllocateUser),
-            0xA6 => Some(Self::CbgrDeallocUser),
-            0xA7 => Some(Self::CbgrReallocUser),
-            0xA8 => Some(Self::CbgrValidateBool),
             // Synchronization Primitives
-            0xB0 => Some(Self::FutexWait),
-            0xB1 => Some(Self::FutexWake),
-            0xB2 => Some(Self::SpinlockLock),
-            0xB3 => Some(Self::SpinlockTryLock),
-            0xB4 => Some(Self::SpinlockUnlock),
-            0xB5 => Some(Self::SpinlockIsLocked),
-            0xB6 => Some(Self::WaitgroupNew),
-            0xB7 => Some(Self::WaitgroupAdd),
-            0xB8 => Some(Self::WaitgroupDone),
-            0xB9 => Some(Self::WaitgroupWait),
-            0xBA => Some(Self::WaitgroupTryWait),
-            0xBB => Some(Self::WaitgroupDestroy),
-            0xBC => Some(Self::AtomicRmw),
             _ => None,
         }
     }
@@ -5911,9 +5691,8 @@ impl SystemSubOpcode {
     /// `#[inline]` projections through this method's return value.
     pub const fn meta(self) -> SystemOpMeta {
         use SystemCategory::{
-            CallbackSupport, CallingConvention, CbgrMemoryOperations, ErrorHandling,
-            MachKernelOperations, Marshalling, MemoryOperations, RawPointerOperations,
-            SymbolResolution, SynchronizationPrimitives, SystemCallOperations, TimeOperations,
+            CallbackSupport, CallingConvention, ErrorHandling, Marshalling, MemoryOperations,
+            RawPointerOperations, SymbolResolution,
         };
 
         // Field order: mnemonic, category, is_call, is_marshal,
@@ -5981,8 +5760,6 @@ impl SystemSubOpcode {
             Self::CMemset                => m!("FFI_C_MEMSET",               MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
             Self::CMemmove               => m!("FFI_C_MEMMOVE",              MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
             Self::CMemcmp                => m!("FFI_C_MEMCMP",               MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
-            Self::RandomU64              => m!("FFI_RANDOM_U64",             MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
-            Self::RandomFloat            => m!("FFI_RANDOM_FLOAT",           MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
             Self::NewByteArray           => m!("FFI_NEW_BYTE_ARRAY",         MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
             Self::ByteArrayElementAddr   => m!("FFI_BYTE_ARRAY_ELEM_ADDR",   MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
             Self::ByteArrayLoad          => m!("FFI_BYTE_ARRAY_LOAD",        MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
@@ -6003,11 +5780,6 @@ impl SystemSubOpcode {
             Self::RawStoreI32          => m!("RAW_STORE_I32",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
             Self::RawLoadI64          => m!("RAW_LOAD_I64",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
             Self::RawStoreI64          => m!("RAW_STORE_I64",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
-            Self::TlsSlotGetF          => m!("TLS_SLOT_GET",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
-            Self::TlsSlotSetF          => m!("TLS_SLOT_SET",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
-            Self::TlsSlotHasF          => m!("TLS_SLOT_HAS",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
-            Self::TlsSlotClearF          => m!("TLS_SLOT_CLEAR",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
-            Self::TlsGetBaseF          => m!("TLS_GET_BASE",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
 
             // ===== Raw Pointer Operations (0x60-0x6F) =====
             Self::DerefRaw               => m!("FFI_DEREF_RAW",              RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
@@ -6023,68 +5795,16 @@ impl SystemSubOpcode {
             Self::PtrSub                 => m!("FFI_PTR_SUB",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrDiff                => m!("FFI_PTR_DIFF",               RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::PtrIsNull              => m!("FFI_PTR_IS_NULL",            RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::CbgrGetHeader          => m!("CBGR_GET_HEADER",            CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::CbgrGetGeneration      => m!("CBGR_GET_GENERATION",        CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=false),
 
             // ===== Time Operations (0x70-0x7F) =====
-            Self::TimeMonotonicNanos     => m!("TIME_MONOTONIC_NANOS",       TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
-            Self::TimeRealtimeNanos      => m!("TIME_REALTIME_NANOS",        TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
-            Self::TimeMonotonicRawNanos  => m!("TIME_MONOTONIC_RAW_NANOS",   TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
-            Self::TimeSleepNanos         => m!("TIME_SLEEP_NANOS",           TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
-            Self::TimeThreadCpuNanos     => m!("TIME_THREAD_CPU_NANOS",      TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
-            Self::TimeProcessCpuNanos    => m!("TIME_PROCESS_CPU_NANOS",     TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
-            Self::TimeSleepMillis    => m!("TIME_SLEEP_MILLIS",     TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
 
             // ===== System Call Operations (0x80-0x8F) =====
-            Self::SysGetpid              => m!("SYS_GETPID",                 SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::SysGettid              => m!("SYS_GETTID",                 SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::SysMmap                => m!("SYS_MMAP",                   SystemCallOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::SysMunmap              => m!("SYS_MUNMAP",                 SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=true),
-            Self::SysMadvise             => m!("SYS_MADVISE",                SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::SysGetentropy          => m!("SYS_GETENTROPY",             SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::ExecutionTier          => m!("EXECUTION_TIER",             SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::IsInterpreted          => m!("IS_INTERPRETED",             SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::EnvGet                 => m!("FFI_ENV_GET",               SystemCallOperations,        call=false, marshal=false, alloc=false,  dealloc=false),
-            Self::EnvSet                 => m!("FFI_ENV_SET",               SystemCallOperations,        call=false, marshal=false, alloc=false,  dealloc=false),
-            Self::EnvUnset               => m!("FFI_ENV_UNSET",             SystemCallOperations,        call=false, marshal=false, alloc=false,  dealloc=false),
 
             // ===== Mach Kernel Operations (0x90-0x9F) =====
-            // Allocation-vs-release tagging mirrors Linux mmap pair.
-            Self::MachVmAllocate         => m!("MACH_VM_ALLOCATE",           MachKernelOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::MachVmDeallocate       => m!("MACH_VM_DEALLOCATE",         MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=true),
-            Self::MachVmProtect          => m!("MACH_VM_PROTECT",            MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::MachSemCreate          => m!("MACH_SEM_CREATE",            MachKernelOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::MachSemDestroy         => m!("MACH_SEM_DESTROY",           MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=true),
-            Self::MachSemSignal          => m!("MACH_SEM_SIGNAL",            MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::MachSemWait            => m!("MACH_SEM_WAIT",              MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::MachErrorString        => m!("MACH_ERROR_STRING",          MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::MachSleepUntil         => m!("MACH_SLEEP_UNTIL",           MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=false),
 
             // ===== CBGR Memory Operations (0xA0-0xAF) =====
-            Self::CbgrAlloc              => m!("CBGR_ALLOC",                 CbgrMemoryOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::CbgrAllocZeroed        => m!("CBGR_ALLOC_ZEROED",          CbgrMemoryOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::CbgrDealloc            => m!("CBGR_DEALLOC",               CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=true),
-            Self::CSecureZero            => m!("FFI_C_SECURE_ZERO",          CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::CbgrRealloc            => m!("CBGR_REALLOC",               CbgrMemoryOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::CbgrAllocateUser       => m!("CBGR_ALLOCATE_USER",         CbgrMemoryOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::CbgrDeallocUser        => m!("CBGR_DEALLOC_USER",          CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=true),
-            Self::CbgrReallocUser        => m!("CBGR_REALLOC_USER",          CbgrMemoryOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::CbgrValidateBool       => m!("CBGR_VALIDATE_BOOL",         CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=false),
 
             // ===== Synchronization Primitives (0xB0-0xBF) =====
-            Self::FutexWait              => m!("SYNC_FUTEX_WAIT",            SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
-            Self::FutexWake              => m!("SYNC_FUTEX_WAKE",            SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
-            Self::SpinlockLock           => m!("SYNC_SPINLOCK_LOCK",         SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
-            Self::SpinlockTryLock           => m!("SYNC_SPIN_TRY_LOCK",         SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
-            Self::SpinlockUnlock            => m!("SYNC_SPIN_UNLOCK",           SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
-            Self::SpinlockIsLocked          => m!("SYNC_SPIN_IS_LOCKED",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
-            Self::WaitgroupNew          => m!("SYNC_WG_NEW",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
-            Self::WaitgroupAdd          => m!("SYNC_WG_ADD",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
-            Self::WaitgroupDone          => m!("SYNC_WG_DONE",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
-            Self::WaitgroupWait          => m!("SYNC_WG_WAIT",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
-            Self::WaitgroupTryWait          => m!("SYNC_WG_TRY_WAIT",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
-            Self::WaitgroupDestroy          => m!("SYNC_WG_DESTROY",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
-            Self::AtomicRmw                 => m!("SYNC_ATOMIC_RMW",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
         }
     }
 
@@ -8791,13 +8511,40 @@ pub enum CbgrSubOpcode {
     /// Used for cryptographic zeroization (key material, etc.).
     /// Maps to `explicit_bzero` / `SecureZeroMemory` per platform.
     SecureZero = 0x63,
-    // 0x64-0x6F  RESERVED for allocator-side primitives
+    /// Allocator-internal 4-arg realloc `(ptr, old_size, new_size,
+    /// align)` used by `core/mem/allocator.vr` — carried over from
+    /// `SystemSubOpcode::CbgrRealloc` (T0852).
+    /// Format: `dst:reg, ptr:reg, old_size:reg, new_size:reg, align:reg`
+    ReallocInternal = 0x64,
+    /// Public bridge: allocate; returns user pointer (0 on failure).
+    /// Carried over from `SystemSubOpcode::CbgrAllocateUser`.
+    /// Format: `dst:reg, size:reg, align:reg`
+    AllocateUser = 0x65,
+    /// Public bridge: free a user-pointer allocation (no-op on 0).
+    /// Format: `dst:reg, ptr:reg` (dst unused — kept for wire shape)
+    DeallocUser = 0x66,
+    /// Public bridge: 2-arg realloc preserving min(old, new) bytes.
+    /// Format: `dst:reg, ptr:reg, new_size:reg`
+    ReallocUser = 0x67,
+    /// Non-trapping reference validation → Bool (`cbgr_validate`).
+    /// Format: `dst:reg, ref:reg`
+    ValidateBool = 0x68,
+    /// Allocation-header address of a pointer (`get_header_from_ptr`):
+    /// `ptr - ALLOCATION_HEADER_SIZE`.
+    /// Format: `dst:reg, ptr:reg`
+    GetHeader = 0x69,
+    /// Read the canonical gen@8 header slot of a USER pointer
+    /// (`cbgr_get_generation`) — distinct from `GetGeneration` (0x20),
+    /// which takes a reference VALUE.
+    /// Format: `dst:reg, ptr:reg`
+    GetGenerationUser = 0x6A,
+    // 0x6B-0x6F  RESERVED for allocator-side primitives
     //              (e.g. realloc-in-place, alloc-with-tag,
     //               heap-statistics-snapshot).
 }
 
 // =========================================================================
-// CbgrSubOpcode metadata — single source of truth for the 50 variants.
+// CbgrSubOpcode metadata — single source of truth for the 57 variants.
 //
 // The legacy implementation maintained five parallel match-arm
 // methods (`mnemonic`, `category`, `creates_reference`,
@@ -8949,6 +8696,13 @@ impl CbgrSubOpcode {
             0x61 => Some(Self::AllocZeroed),
             0x62 => Some(Self::Dealloc),
             0x63 => Some(Self::SecureZero),
+            0x64 => Some(Self::ReallocInternal),
+            0x65 => Some(Self::AllocateUser),
+            0x66 => Some(Self::DeallocUser),
+            0x67 => Some(Self::ReallocUser),
+            0x68 => Some(Self::ValidateBool),
+            0x69 => Some(Self::GetHeader),
+            0x6A => Some(Self::GetGenerationUser),
 
             _ => None,
         }
@@ -9061,6 +8815,13 @@ impl CbgrSubOpcode {
             Self::AllocZeroed        => m!("CBGR_ALLOC_ZEROED",      Allocator,               cref=false, mcaps=false, val=false),
             Self::Dealloc            => m!("CBGR_DEALLOC",           Allocator,               cref=false, mcaps=false, val=false),
             Self::SecureZero         => m!("CBGR_SECURE_ZERO",       Allocator,               cref=false, mcaps=false, val=false),
+            Self::ReallocInternal    => m!("CBGR_REALLOC_INTERNAL",  Allocator,               cref=false, mcaps=false, val=false),
+            Self::AllocateUser       => m!("CBGR_ALLOCATE_USER",     Allocator,               cref=false, mcaps=false, val=false),
+            Self::DeallocUser        => m!("CBGR_DEALLOC_USER",      Allocator,               cref=false, mcaps=false, val=false),
+            Self::ReallocUser        => m!("CBGR_REALLOC_USER",      Allocator,               cref=false, mcaps=false, val=false),
+            Self::ValidateBool       => m!("CBGR_VALIDATE_BOOL",     Allocator,               cref=false, mcaps=false, val=true),
+            Self::GetHeader          => m!("CBGR_GET_HEADER",        Allocator,               cref=false, mcaps=false, val=false),
+            Self::GetGenerationUser  => m!("CBGR_GET_GEN_USER",      Allocator,               cref=false, mcaps=false, val=false),
         }
     }
 
@@ -10544,22 +10305,22 @@ impl Opcode {
     /// # Safety invariant
     ///
     /// Phase 4 of the sub-opcode refactor reclaimed bytes 0xF0-0xF7,
-    /// 0xFE, and 0xFF (the legacy top-level Tensor* opcodes), so the
-    /// previous "all 256 u8 values are valid" assumption no longer
-    /// holds.  Reclaimed bytes map to `Opcode::Unreachable` — the
-    /// closest existing sentinel — and the decoder catches them via
-    /// the corresponding match-all path that returns
-    /// `Instruction::Unreachable`.  When a future opcode reuses one
-    /// of the reclaimed bytes, remove that range from the explicit
-    /// guard below.
+    /// 0xFE, and 0xFF (the legacy top-level Tensor* opcodes).  T0852
+    /// re-populated 0xF0-0xF3 with the family gateways (TimeExtended /
+    /// SysExtended / MachExtended / SyncExtended); 0xF4-0xF7, 0xFE and
+    /// 0xFF remain reclaimed and map to `Opcode::Unreachable` — the
+    /// closest existing sentinel — which the decoder catches via the
+    /// match-all path returning `Instruction::Unreachable`.  When a
+    /// future opcode reuses one of the reclaimed bytes, remove that
+    /// range from the explicit guard below.
     pub fn from_byte(byte: u8) -> Self {
-        if matches!(byte, 0xF0..=0xF7 | 0xFE | 0xFF) {
+        if matches!(byte, 0xF4..=0xF7 | 0xFE | 0xFF) {
             return Opcode::Unreachable;
         }
         // SAFETY: every byte outside the reclaimed range above maps to
         // a valid `Opcode` variant.  Verified by (1) the compile-time
         // size assertion above, (2) the enum definition assigning
-        // every byte in 0x00..=0xEF, 0xF8..=0xFD a variant.
+        // every byte in 0x00..=0xF3, 0xF8..=0xFD a variant.
         unsafe { std::mem::transmute(byte) }
     }
 
@@ -10797,6 +10558,10 @@ impl Opcode {
             // Tensor + GPU (0xF0-0xFF) — Phase 4: legacy
             // TensorNew/Binop/Unop/Matmul/Reduce/Reshape/Transpose/
             // Slice mnemonics deleted along with their Opcode bytes.
+            Opcode::TimeExtended => "TIME_EXTENDED",
+            Opcode::SysExtended => "SYS_EXTENDED",
+            Opcode::MachExtended => "MACH_EXTENDED",
+            Opcode::SyncExtended => "SYNC_EXTENDED",
             Opcode::GpuExtended => "GPU_EXTENDED",
             Opcode::GpuSync => "GPU_SYNC",
             Opcode::GpuMemcpy => "GPU_MEMCPY",
@@ -13878,6 +13643,40 @@ pub enum Instruction {
     },
 
     // ========================================================================
+    // Family gateways (T0852) — the honest homes for the operations
+    // that used to squat in FfiExtended's SystemSubOpcode pocket.
+    // Same envelope wire format as FfiExtended.
+    // ========================================================================
+    /// Time-clock operations (`TimeSubOpcode`).
+    TimeExtended {
+        /// Time sub-opcode.
+        sub_op: u8,
+        /// Operand bytes (decoded by interpreter).
+        operands: Vec<u8>,
+    },
+    /// POSIX-process operations (`SysSubOpcode`).
+    SysExtended {
+        /// Sys sub-opcode.
+        sub_op: u8,
+        /// Operand bytes (decoded by interpreter).
+        operands: Vec<u8>,
+    },
+    /// Mach kernel operations (`MachSubOpcode`).
+    MachExtended {
+        /// Mach sub-opcode.
+        sub_op: u8,
+        /// Operand bytes (decoded by interpreter).
+        operands: Vec<u8>,
+    },
+    /// Cross-platform synchronization (`SyncSubOpcode`).
+    SyncExtended {
+        /// Sync sub-opcode.
+        sub_op: u8,
+        /// Operand bytes (decoded by interpreter).
+        operands: Vec<u8>,
+    },
+
+    // ========================================================================
     // Generic Extended (#167 Part A)
     // ========================================================================
     /// General-purpose extension instruction.
@@ -14728,7 +14527,7 @@ mod tests {
             // them to `Unreachable` rather than transmuting into an
             // invalid discriminant; the roundtrip on those bytes is
             // therefore lossy by design and excluded.
-            if matches!(byte, 0xF0..=0xF7 | 0xFE | 0xFF) {
+            if matches!(byte, 0xF4..=0xF7 | 0xFE | 0xFF) {
                 assert_eq!(Opcode::from_byte(byte), Opcode::Unreachable);
                 continue;
             }
@@ -16583,15 +16382,16 @@ mod tests {
     }
 
     #[test]
-    fn system_meta_count_pinned_at_one_hundred_eleven() {
-        // 114 currently reachable variants spread over twelve 16-byte
-        // bands.  Bumping this assertion is the explicit signal that
-        // a new SystemSubOpcode entry has landed and the
-        // corresponding meta() arm is in place.
+    fn system_meta_count_pinned_at_sixty_one() {
+        // T0852 re-homed 58 squatters (Time 7, Sys/Env/Random/Tier 13,
+        // Mach 9, Sync/TLS/WG/AtomicRmw 18, Cbgr 11) into their family
+        // gateways, leaving the honest FFI surface here.  Bumping this
+        // assertion is the explicit signal that a new SystemSubOpcode
+        // entry has landed with its meta() arm in place.
         let mut count = 0;
         for_every_system_sub_opcode(|_| count += 1);
-        assert_eq!(count, 119,
-            "SystemSubOpcode variant count drift: expected 115, got {}",
+        assert_eq!(count, 61,
+            "SystemSubOpcode variant count drift: expected 61, got {}",
             count);
     }
 
@@ -16613,6 +16413,8 @@ mod tests {
         // count pin: new variants land INSIDE their band; this list
         // only ever shrinks (via a schema bump).
         let band_exceptions: &[(u8, SystemCategory)] = &[
+            // (T0852: the TLS-slot family rows moved to SyncSubOpcode
+            // 0x50-0x54 and left this list.)
             (0x52, SystemCategory::MemoryOperations),          // StaticMutAddr
             (0x53, SystemCategory::MemoryOperations),          // RawLoadU8
             (0x54, SystemCategory::MemoryOperations),          // RawStoreU8
@@ -16620,11 +16422,6 @@ mod tests {
             (0x56, SystemCategory::MemoryOperations),          // RawStoreI32
             (0x57, SystemCategory::MemoryOperations),          // RawLoadI64
             (0x58, SystemCategory::MemoryOperations),          // RawStoreI64
-            (0x59, SystemCategory::MemoryOperations),          // TlsSlotGetF
-            (0x5A, SystemCategory::MemoryOperations),          // TlsSlotSetF
-            (0x5B, SystemCategory::MemoryOperations),          // TlsSlotHasF
-            (0x5C, SystemCategory::MemoryOperations),          // TlsSlotClearF
-            (0x5D, SystemCategory::MemoryOperations),          // TlsGetBaseF
             (0x5E, SystemCategory::MemoryOperations),          // TypedArrayStore
             (0x5F, SystemCategory::MemoryOperations),          // TypedArrayLoad
         ];
@@ -16728,8 +16525,12 @@ mod tests {
             if op.allocates()   { alloc += 1; }
             if op.deallocates() { dealloc += 1; }
         });
-        assert_eq!(alloc, 13, "allocator count drift");
-        assert_eq!(dealloc, 7, "deallocator count drift");
+        // T0852: the Cbgr / Mach / Waitgroup allocators moved to their
+        // family gateways; the honest FFI surface allocates via CAlloc,
+        // CRealloc, NewByteArray, NewTypedArray, CreateCallback and
+        // frees via CFree, FreeCallback.
+        assert_eq!(alloc, 5, "allocator count drift");
+        assert_eq!(dealloc, 2, "deallocator count drift");
     }
 
     #[test]
@@ -16743,10 +16544,9 @@ mod tests {
                 "duplicate mnemonic {:?} on variant {:?}", m, op);
             seen.push(m);
         });
-        // Mirrors the system_meta_count pin: 112 + the T0188/T0133
-        // trio (PtrReadVolatile / PtrWriteVolatile / StaticMutAddrSized)
-        // + the T0108 machine-semantics pair (PtrRead / PtrWrite).
-        assert_eq!(seen.len(), 119);
+        // Mirrors the system_meta_count pin (T0852: 61 honest-FFI
+        // variants after the family re-homing).
+        assert_eq!(seen.len(), 61);
     }
 
     // ========================================================================
@@ -17376,11 +17176,14 @@ mod tests {
     }
 
     #[test]
-    fn cbgr_meta_count_pinned_at_forty_four() {
+    fn cbgr_meta_count_pinned_at_sixty() {
+        // 46 pre-T0846; +7 (EpochBegin/CheckFat/CheckWrite/Revoke/
+        // RegisterRoot/RefRelease/ValidateRef, T0846); +7 (the
+        // allocator + public-bridge re-homing, T0852) = 60.
         let mut count = 0;
         for_every_cbgr_sub_opcode(|_| count += 1);
-        assert_eq!(count, 46,
-            "CbgrSubOpcode variant count drift: expected 46, got {}", count);
+        assert_eq!(count, 60,
+            "CbgrSubOpcode variant count drift: expected 60, got {}", count);
     }
 
     #[test]
@@ -17457,17 +17260,23 @@ mod tests {
 
     #[test]
     fn cbgr_meta_is_validation_set_pinned() {
-        // Validation predicates: CapCheck / ValidateEpoch / IsValid.
+        // Validation predicates: CapCheck / ValidateEpoch / IsValid,
+        // plus T0846's CheckFat / CheckWrite / ValidateRef and T0852's
+        // re-homed ValidateBool.
         let mut count = 0;
         for_every_cbgr_sub_opcode(|op| {
             if op.is_validation() { count += 1; }
         });
-        assert_eq!(count, 3,
-            "is_validation count drift: expected 3");
+        assert_eq!(count, 7,
+            "is_validation count drift: expected 7");
         for op in [
             CbgrSubOpcode::CapCheck,
             CbgrSubOpcode::ValidateEpoch,
             CbgrSubOpcode::IsValid,
+            CbgrSubOpcode::CheckFat,
+            CbgrSubOpcode::CheckWrite,
+            CbgrSubOpcode::ValidateRef,
+            CbgrSubOpcode::ValidateBool,
         ] {
             assert!(op.is_validation(), "{:?} should be a validation op", op);
         }
@@ -17499,7 +17308,7 @@ mod tests {
                 "duplicate mnemonic {:?} on variant {:?}", m, op);
             seen.push(m);
         });
-        assert_eq!(seen.len(), 46);
+        assert_eq!(seen.len(), 60);
     }
 
     // ========================================================================

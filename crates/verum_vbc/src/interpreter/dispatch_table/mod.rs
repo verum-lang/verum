@@ -147,6 +147,10 @@ use handlers::system::{
 use handlers::arith_extended::handle_arith_extended;
 use handlers::char_extended::handle_char_extended;
 use handlers::ffi_extended::handle_ffi_extended;
+use handlers::mach_extended::handle_mach_extended;
+use handlers::sync_extended::handle_sync_extended;
+use handlers::sys_extended::handle_sys_extended;
+use handlers::time_extended::handle_time_extended;
 use handlers::log_extended::{handle_log_extended, handle_mem_extended};
 use handlers::math_extended::handle_math_extended;
 use handlers::simd_extended::handle_simd_extended;
@@ -157,11 +161,6 @@ use handlers::cubical::handle_cubical_extended;
 use handlers::extended::handle_extended;
 use handlers::gpu::{handle_gpu_alloc, handle_gpu_extended, handle_gpu_memcpy, handle_gpu_sync};
 use handlers::ml_extended::handle_ml_extended;
-use handlers::tensor::{
-    handle_tensor_binop, handle_tensor_from_slice, handle_tensor_full, handle_tensor_matmul,
-    handle_tensor_new, handle_tensor_reduce, handle_tensor_reshape, handle_tensor_slice,
-    handle_tensor_transpose, handle_tensor_unop,
-};
 use handlers::tensor_extended::handle_tensor_extended;
 
 // ============================================================================
@@ -508,16 +507,17 @@ const fn build_dispatch_table() -> [Handler; 256] {
     table[0xEF] = handle_grad_stop; // GradStop = 0xEF
 
     // ========================================================================
-    // Tensor Operations (0xF0-0xF7) - matches instruction.rs
+    // Family gateways (0xF0-0xF3) — T0852 opcode-map audit.  The
+    // legacy top-level Tensor* opcodes that used to sit on 0xF0-0xF7
+    // were reclaimed by Phase 4 of the sub-opcode refactor (their
+    // enum variants are gone; the old rows here were dead entries the
+    // enum could never produce).  0xF4-0xF7 stay on the unimplemented
+    // handler as the growth reserve.
     // ========================================================================
-    table[0xF0] = handle_tensor_new; // TensorNew = 0xF0
-    table[0xF1] = handle_tensor_binop; // TensorBinop = 0xF1
-    table[0xF2] = handle_tensor_unop; // TensorUnop = 0xF2
-    table[0xF3] = handle_tensor_matmul; // TensorMatmul = 0xF3
-    table[0xF4] = handle_tensor_reduce; // TensorReduce = 0xF4
-    table[0xF5] = handle_tensor_reshape; // TensorReshape = 0xF5
-    table[0xF6] = handle_tensor_transpose; // TensorTranspose = 0xF6
-    table[0xF7] = handle_tensor_slice; // TensorSlice = 0xF7
+    table[0xF0] = handle_time_extended; // TimeExtended = 0xF0
+    table[0xF1] = handle_sys_extended; // SysExtended = 0xF1
+    table[0xF2] = handle_mach_extended; // MachExtended = 0xF2
+    table[0xF3] = handle_sync_extended; // SyncExtended = 0xF3
 
     // GPU Operations (0xF8-0xFB)
     table[0xF8] = handle_gpu_extended; // GpuExtended = 0xF8
@@ -531,9 +531,9 @@ const fn build_dispatch_table() -> [Handler; 256] {
     // ML Extended Opcode (0xFD)
     table[0xFD] = handle_ml_extended; // MlExtended = 0xFD
 
-    // Tensor Additional (0xFE-0xFF)
-    table[0xFE] = handle_tensor_full; // TensorFull = 0xFE
-    table[0xFF] = handle_tensor_from_slice; // TensorFromSlice = 0xFF
+    // 0xFE-0xFF: reclaimed (Phase 4) — stay on handle_not_implemented.
+    // The legacy TensorFull / TensorFromSlice rows were dead entries:
+    // their enum variants no longer exist, so nothing could emit them.
 
     table
 }

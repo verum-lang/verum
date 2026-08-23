@@ -33215,8 +33215,8 @@ impl VbcCodegen {
                     let mut operands = Vec::<u8>::new();
                     Self::write_reg(&mut operands, args[0].0); // dst
                     Self::write_reg(&mut operands, args[1].0); // size
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0xA3, // CSecureZero
+                    self.ctx.emit(Instruction::CbgrExtended {
+                        sub_op: 0x63, // CbgrSubOpcode::SecureZero
                         operands,
                     });
                 }
@@ -33647,18 +33647,18 @@ impl VbcCodegen {
             }
 
             // Spinlock and futex — synchronization primitives.
-            // Route through `FfiExtended` sub-ops 0xB0–0xB2 so the
-            // interpreter has a typed dispatch path; AOT lowers the
-            // same sub-ops to `verum_futex_wait` / `verum_futex_wake`
-            // / `verum_spinlock_lock` runtime helpers.
+            // Route through `SyncExtended` (T0852: the sync family's
+            // honest home) so the interpreter has a typed dispatch
+            // path; AOT lowers the same sub-ops to `verum_futex_wait`
+            // / `verum_futex_wake` / `verum_spinlock_lock` helpers.
             InlineSequenceId::SpinlockLock
             | InlineSequenceId::FutexWait
             | InlineSequenceId::FutexWake => {
-                use crate::instruction::SystemSubOpcode;
+                use crate::instruction::SyncSubOpcode;
                 let sub_op = match seq_id {
-                    InlineSequenceId::SpinlockLock => SystemSubOpcode::SpinlockLock as u8,
-                    InlineSequenceId::FutexWait => SystemSubOpcode::FutexWait as u8,
-                    InlineSequenceId::FutexWake => SystemSubOpcode::FutexWake as u8,
+                    InlineSequenceId::SpinlockLock => SyncSubOpcode::SpinlockLock as u8,
+                    InlineSequenceId::FutexWait => SyncSubOpcode::FutexWait as u8,
+                    InlineSequenceId::FutexWake => SyncSubOpcode::FutexWake as u8,
                     _ => unreachable!(),
                 };
                 let mut operands = Vec::<u8>::new();
@@ -33667,7 +33667,7 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, arg.0);
                 }
                 self.ctx
-                    .emit(Instruction::FfiExtended { sub_op, operands });
+                    .emit(Instruction::SyncExtended { sub_op, operands });
             }
 
             // Sqrt - native VBC instruction
@@ -33713,8 +33713,8 @@ impl VbcCodegen {
                 // Emit FfiExtended TimeMonotonicNanos -> dest
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x70, // TimeMonotonicNanos
+                self.ctx.emit(Instruction::TimeExtended {
+                    sub_op: 0x00, // TimeSubOpcode::MonotonicNanos
                     operands,
                 });
             }
@@ -33723,8 +33723,8 @@ impl VbcCodegen {
                 let tmp = self.ctx.alloc_temp();
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, tmp.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x71, // TimeRealtimeNanos
+                self.ctx.emit(Instruction::TimeExtended {
+                    sub_op: 0x01, // TimeSubOpcode::RealtimeNanos
                     operands,
                 });
                 let divisor = self.ctx.alloc_temp();
@@ -33743,8 +33743,8 @@ impl VbcCodegen {
                 // Emit FfiExtended TimeRealtimeNanos -> dest (raw nanoseconds, no division)
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x71, // TimeRealtimeNanos
+                self.ctx.emit(Instruction::TimeExtended {
+                    sub_op: 0x01, // TimeSubOpcode::RealtimeNanos
                     operands,
                 });
             }
@@ -34504,8 +34504,8 @@ impl VbcCodegen {
                 // Format: dst:reg
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x47, // RandomU64
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x06, // SysSubOpcode::RandomU64
                     operands,
                 });
             }
@@ -34514,8 +34514,8 @@ impl VbcCodegen {
                 // Format: dst:reg
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x48, // RandomFloat
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x07, // SysSubOpcode::RandomFloat
                     operands,
                 });
             }
@@ -34534,8 +34534,8 @@ impl VbcCodegen {
             InlineSequenceId::RandomFloat01 => {
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x48, // RandomFloat — uniform in [0, 1)
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x07, // SysSubOpcode::RandomFloat
                     operands,
                 });
             }
@@ -35152,8 +35152,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(1) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0xAA, // CbgrGetGeneration
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: 0x6a, // CbgrSubOpcode::GetGenerationUser
                     operands,
                 });
             }
@@ -35801,8 +35801,8 @@ impl VbcCodegen {
                 // FfiExtended TimeMonotonicNanos -> dest (stores nanoseconds)
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x70, // TimeMonotonicNanos
+                self.ctx.emit(Instruction::TimeExtended {
+                    sub_op: 0x00, // TimeSubOpcode::MonotonicNanos
                     operands,
                 });
             }
@@ -35812,8 +35812,8 @@ impl VbcCodegen {
                     let now = self.ctx.alloc_temp();
                     let mut operands = Vec::<u8>::new();
                     Self::write_reg(&mut operands, now.0);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x70, // TimeMonotonicNanos
+                    self.ctx.emit(Instruction::TimeExtended {
+                        sub_op: 0x00, // TimeSubOpcode::MonotonicNanos
                         operands,
                     });
                     self.ctx.emit(Instruction::BinaryI {
@@ -35921,8 +35921,8 @@ impl VbcCodegen {
                 let nanos = self.ctx.alloc_temp();
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, nanos.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x70, // TimeMonotonicNanos
+                self.ctx.emit(Instruction::TimeExtended {
+                    sub_op: 0x00, // TimeSubOpcode::MonotonicNanos
                     operands,
                 });
                 let divisor = self.ctx.alloc_temp();
@@ -35942,8 +35942,8 @@ impl VbcCodegen {
                 let nanos = self.ctx.alloc_temp();
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, nanos.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x70, // TimeMonotonicNanos
+                self.ctx.emit(Instruction::TimeExtended {
+                    sub_op: 0x00, // TimeSubOpcode::MonotonicNanos
                     operands,
                 });
                 let divisor = self.ctx.alloc_temp();
@@ -35963,8 +35963,8 @@ impl VbcCodegen {
                 let nanos = self.ctx.alloc_temp();
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, nanos.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x71, // TimeRealtimeNanos
+                self.ctx.emit(Instruction::TimeExtended {
+                    sub_op: 0x01, // TimeSubOpcode::RealtimeNanos
                     operands,
                 });
                 let divisor = self.ctx.alloc_temp();
@@ -36000,8 +36000,8 @@ impl VbcCodegen {
                     });
                     let mut operands = Vec::<u8>::new();
                     Self::write_reg(&mut operands, nanos.0);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x73, // TimeSleepNanos
+                    self.ctx.emit(Instruction::TimeExtended {
+                        sub_op: 0x03, // TimeSubOpcode::SleepNanos
                         operands,
                     });
                 }
@@ -36027,8 +36027,8 @@ impl VbcCodegen {
                     });
                     let mut operands = Vec::<u8>::new();
                     Self::write_reg(&mut operands, nanos.0);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x73, // TimeSleepNanos
+                    self.ctx.emit(Instruction::TimeExtended {
+                        sub_op: 0x03, // TimeSubOpcode::SleepNanos
                         operands,
                     });
                 }
@@ -36042,8 +36042,8 @@ impl VbcCodegen {
                 if !args.is_empty() {
                     let mut operands = Vec::<u8>::new();
                     Self::write_reg(&mut operands, args[0].0);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x73, // TimeSleepNanos
+                    self.ctx.emit(Instruction::TimeExtended {
+                        sub_op: 0x03, // TimeSubOpcode::SleepNanos
                         operands,
                     });
                 }
@@ -36056,8 +36056,8 @@ impl VbcCodegen {
             InlineSequenceId::SysGetpid => {
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x80, // SysGetpid
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x00, // SysSubOpcode::GetPid
                     operands,
                 });
             }
@@ -36067,16 +36067,16 @@ impl VbcCodegen {
                 // tiers). Interp handler → 0; LLVM lowering → const 1.
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x86, // SystemSubOpcode::ExecutionTier
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x20, // SysSubOpcode::ExecutionTier
                     operands,
                 });
             }
             InlineSequenceId::IsInterpretedSeq => {
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x87, // SystemSubOpcode::IsInterpreted
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x21, // SysSubOpcode::IsInterpreted
                     operands,
                 });
             }
@@ -36087,8 +36087,8 @@ impl VbcCodegen {
                 if let Some(&a) = args.first() {
                     Self::write_reg(&mut operands, a.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x88, // SystemSubOpcode::EnvGet
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x30, // SysSubOpcode::EnvGet
                     operands,
                 });
             }
@@ -36099,8 +36099,8 @@ impl VbcCodegen {
                 for &a in args.iter().take(2) {
                     Self::write_reg(&mut operands, a.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x89, // SystemSubOpcode::EnvSet
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x31, // SysSubOpcode::EnvSet
                     operands,
                 });
             }
@@ -36111,16 +36111,16 @@ impl VbcCodegen {
                 if let Some(&a) = args.first() {
                     Self::write_reg(&mut operands, a.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x8A, // SystemSubOpcode::EnvUnset
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x32, // SysSubOpcode::EnvUnset
                     operands,
                 });
             }
             InlineSequenceId::SysGettid => {
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x81, // SysGettid
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x01, // SysSubOpcode::GetTid
                     operands,
                 });
             }
@@ -36131,8 +36131,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(6) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x82, // SysMmap
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x02, // SysSubOpcode::Mmap
                     operands,
                 });
             }
@@ -36143,8 +36143,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(2) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x83, // SysMunmap
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x03, // SysSubOpcode::Munmap
                     operands,
                 });
             }
@@ -36155,8 +36155,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(3) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x84, // SysMadvise
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x04, // SysSubOpcode::Madvise
                     operands,
                 });
             }
@@ -36167,8 +36167,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(2) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x85, // SysGetentropy
+                self.ctx.emit(Instruction::SysExtended {
+                    sub_op: 0x05, // SysSubOpcode::GetEntropy
                     operands,
                 });
             }
@@ -36182,8 +36182,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(2) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x90,
+                self.ctx.emit(Instruction::MachExtended {
+                    sub_op: 0x00, // MachSubOpcode::VmAllocate
                     operands,
                 });
             }
@@ -36194,8 +36194,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(2) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x91,
+                self.ctx.emit(Instruction::MachExtended {
+                    sub_op: 0x01, // MachSubOpcode::VmDeallocate
                     operands,
                 });
             }
@@ -36206,8 +36206,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(3) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x92,
+                self.ctx.emit(Instruction::MachExtended {
+                    sub_op: 0x02, // MachSubOpcode::VmProtect
                     operands,
                 });
             }
@@ -36218,8 +36218,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(1) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x93,
+                self.ctx.emit(Instruction::MachExtended {
+                    sub_op: 0x10, // MachSubOpcode::SemCreate
                     operands,
                 });
             }
@@ -36230,8 +36230,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(1) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x94,
+                self.ctx.emit(Instruction::MachExtended {
+                    sub_op: 0x11, // MachSubOpcode::SemDestroy
                     operands,
                 });
             }
@@ -36242,8 +36242,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(1) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x95,
+                self.ctx.emit(Instruction::MachExtended {
+                    sub_op: 0x12, // MachSubOpcode::SemSignal
                     operands,
                 });
             }
@@ -36254,8 +36254,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(1) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x96,
+                self.ctx.emit(Instruction::MachExtended {
+                    sub_op: 0x13, // MachSubOpcode::SemWait
                     operands,
                 });
             }
@@ -36266,8 +36266,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(1) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x97,
+                self.ctx.emit(Instruction::MachExtended {
+                    sub_op: 0x20, // MachSubOpcode::ErrorString
                     operands,
                 });
             }
@@ -36278,8 +36278,8 @@ impl VbcCodegen {
                 for &arg in args.iter().take(1) {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x98,
+                self.ctx.emit(Instruction::MachExtended {
+                    sub_op: 0x21, // MachSubOpcode::SleepUntil
                     operands,
                 });
             }
@@ -36376,8 +36376,8 @@ impl VbcCodegen {
                 for &arg in args.iter() {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0xA0, // CbgrAlloc
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: 0x60, // CbgrSubOpcode::Alloc
                     operands,
                 });
             }
@@ -36387,8 +36387,8 @@ impl VbcCodegen {
                 for &arg in args.iter() {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0xA1, // CbgrAllocZeroed
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: 0x61, // CbgrSubOpcode::AllocZeroed
                     operands,
                 });
             }
@@ -36398,8 +36398,8 @@ impl VbcCodegen {
                 for &arg in args.iter() {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0xA2, // CbgrDealloc
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: 0x62, // CbgrSubOpcode::Dealloc
                     operands,
                 });
             }
@@ -36409,15 +36409,13 @@ impl VbcCodegen {
                 for &arg in args.iter() {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    // 0xA4 = SystemSubOpcode::CbgrRealloc.  This used to emit
-                    // the legacy 0x63 — which decodes as PtrAdd: every
+                self.ctx.emit(Instruction::CbgrExtended {
+                    // The allocator-internal 4-arg realloc, in its honest
+                    // home since T0852 (was FfiExtended 0xA4; before that
+                    // the legacy 0x63 — which decoded as PtrAdd: every
                     // reallocation computed `ptr + old_size` instead of
-                    // reallocating (interp SIGSEGV on operand-count mismatch,
-                    // AOT silent pointer-add).  Same legacy-stub collision
-                    // family as the 0x60-0x62 note above; realloc was missed
-                    // by that fix.
-                    sub_op: 0xA4, // CbgrRealloc
+                    // reallocating).
+                    sub_op: 0x64, // CbgrSubOpcode::ReallocInternal
                     operands,
                 });
             }
@@ -36429,8 +36427,8 @@ impl VbcCodegen {
                 for &arg in args.iter() {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0xA5, // CbgrAllocateUser
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: 0x65, // CbgrSubOpcode::AllocateUser
                     operands,
                 });
             }
@@ -36440,8 +36438,8 @@ impl VbcCodegen {
                 for &arg in args.iter() {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0xA6, // CbgrDeallocUser
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: 0x66, // CbgrSubOpcode::DeallocUser
                     operands,
                 });
             }
@@ -36451,8 +36449,8 @@ impl VbcCodegen {
                 for &arg in args.iter() {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0xA7, // CbgrReallocUser
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: 0x67, // CbgrSubOpcode::ReallocUser
                     operands,
                 });
             }
@@ -36470,22 +36468,17 @@ impl VbcCodegen {
             | InlineSequenceId::SleepNanosSeq
             | InlineSequenceId::SleepMillisSeq
             | InlineSequenceId::RealtimeNanosSeq => {
-                let sub_op: u8 = match seq_id {
-                    InlineSequenceId::RawLoadU8 => 0x53,
-                    InlineSequenceId::RawStoreU8 => 0x54,
-                    InlineSequenceId::RawLoadI32 => 0x55,
-                    InlineSequenceId::RawStoreI32 => 0x56,
-                    InlineSequenceId::RawLoadI64 => 0x57,
-                    InlineSequenceId::RawStoreI64 => 0x58,
-                    InlineSequenceId::SleepNanosSeq => 0x73,   // TimeSleepNanos
-                    InlineSequenceId::SleepMillisSeq => 0x76,  // TimeSleepMillis
-                    _ => 0x71,                                  // TimeRealtimeNanos
+                let time_sub: Option<u8> = match seq_id {
+                    InlineSequenceId::SleepNanosSeq => Some(0x03),  // TimeSubOpcode::SleepNanos
+                    InlineSequenceId::SleepMillisSeq => Some(0x06), // TimeSubOpcode::SleepMillis
+                    InlineSequenceId::RealtimeNanosSeq => Some(0x01), // TimeSubOpcode::RealtimeNanos
+                    _ => None,
                 };
                 let mut operands = Vec::<u8>::new();
-                // The sleep handlers (0x73 existing / 0x76 new) take ONLY
-                // the duration operand — no dst (return_count 0); writing a
-                // dst here would be read as the duration.  Every other id
-                // in this arm uses the dst-first convention.
+                // The sleep handlers take ONLY the duration operand — no
+                // dst (return_count 0); writing a dst here would be read
+                // as the duration.  Every other id in this arm uses the
+                // dst-first convention.
                 let takes_dst = !matches!(
                     seq_id,
                     InlineSequenceId::SleepNanosSeq | InlineSequenceId::SleepMillisSeq
@@ -36496,7 +36489,20 @@ impl VbcCodegen {
                 for &arg in args.iter() {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended { sub_op, operands });
+                if let Some(sub_op) = time_sub {
+                    // Time family — its honest home (T0852).
+                    self.ctx.emit(Instruction::TimeExtended { sub_op, operands });
+                } else {
+                    let sub_op: u8 = match seq_id {
+                        InlineSequenceId::RawLoadU8 => 0x53,
+                        InlineSequenceId::RawStoreU8 => 0x54,
+                        InlineSequenceId::RawLoadI32 => 0x55,
+                        InlineSequenceId::RawStoreI32 => 0x56,
+                        InlineSequenceId::RawLoadI64 => 0x57,
+                        _ => 0x58, // RawStoreI64
+                    };
+                    self.ctx.emit(Instruction::FfiExtended { sub_op, operands });
+                }
             }
 
             // Spinlock trio, flat TLS quartet, fences.  Value-returning ids
@@ -36510,14 +36516,15 @@ impl VbcCodegen {
             | InlineSequenceId::TlsSetSeq
             | InlineSequenceId::TlsHasSeq
             | InlineSequenceId::TlsClearSeq => {
+                use crate::instruction::SyncSubOpcode as Sy;
                 let (sub_op, takes_dst): (u8, bool) = match seq_id {
-                    InlineSequenceId::SpinTryLockSeq => (0xB3, true),
-                    InlineSequenceId::SpinUnlockSeq => (0xB4, false),
-                    InlineSequenceId::SpinIsLockedSeq => (0xB5, true),
-                    InlineSequenceId::TlsGetSeq => (0x59, true),
-                    InlineSequenceId::TlsSetSeq => (0x5A, false),
-                    InlineSequenceId::TlsHasSeq => (0x5B, true),
-                    _ => (0x5C, false), // TlsClearSeq
+                    InlineSequenceId::SpinTryLockSeq => (Sy::SpinlockTryLock as u8, true),
+                    InlineSequenceId::SpinUnlockSeq => (Sy::SpinlockUnlock as u8, false),
+                    InlineSequenceId::SpinIsLockedSeq => (Sy::SpinlockIsLocked as u8, true),
+                    InlineSequenceId::TlsGetSeq => (Sy::TlsSlotGet as u8, true),
+                    InlineSequenceId::TlsSetSeq => (Sy::TlsSlotSet as u8, false),
+                    InlineSequenceId::TlsHasSeq => (Sy::TlsSlotHas as u8, true),
+                    _ => (Sy::TlsSlotClear as u8, false), // TlsClearSeq
                 };
                 let mut operands = Vec::<u8>::new();
                 if takes_dst {
@@ -36526,7 +36533,7 @@ impl VbcCodegen {
                 for &arg in args.iter() {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended { sub_op, operands });
+                self.ctx.emit(Instruction::SyncExtended { sub_op, operands });
             }
 
             InlineSequenceId::FenceSeq => {
@@ -36546,25 +36553,26 @@ impl VbcCodegen {
             | InlineSequenceId::WgTryWaitSeq
             | InlineSequenceId::WgDestroySeq
             | InlineSequenceId::TlsGetBaseSeq => {
+                use crate::instruction::SyncSubOpcode as Sy;
                 let sub_op: u8 = match seq_id {
-                    InlineSequenceId::WgNewSeq => 0xB6,
-                    InlineSequenceId::WgAddSeq => 0xB7,
-                    InlineSequenceId::WgDoneSeq => 0xB8,
-                    InlineSequenceId::WgWaitSeq => 0xB9,
-                    InlineSequenceId::WgTryWaitSeq => 0xBA,
-                    InlineSequenceId::WgDestroySeq => 0xBB,
-                    _ => 0x5D, // TlsGetBaseSeq
+                    InlineSequenceId::WgNewSeq => Sy::WaitgroupNew as u8,
+                    InlineSequenceId::WgAddSeq => Sy::WaitgroupAdd as u8,
+                    InlineSequenceId::WgDoneSeq => Sy::WaitgroupDone as u8,
+                    InlineSequenceId::WgWaitSeq => Sy::WaitgroupWait as u8,
+                    InlineSequenceId::WgTryWaitSeq => Sy::WaitgroupTryWait as u8,
+                    InlineSequenceId::WgDestroySeq => Sy::WaitgroupDestroy as u8,
+                    _ => Sy::TlsGetBase as u8, // TlsGetBaseSeq
                 };
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
                 for &arg in args.iter() {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended { sub_op, operands });
+                self.ctx.emit(Instruction::SyncExtended { sub_op, operands });
             }
 
             InlineSequenceId::FutexWakeOneSeq | InlineSequenceId::FutexWakeAllSeq => {
-                use crate::instruction::SystemSubOpcode;
+                use crate::instruction::SyncSubOpcode;
                 // Materialise the count immediate (1 or i32::MAX) so the
                 // FutexWake decoder finds its third operand.
                 let count = self.ctx.alloc_temp();
@@ -36580,8 +36588,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, addr.0);
                 }
                 Self::write_reg(&mut operands, count.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: SystemSubOpcode::FutexWake as u8,
+                self.ctx.emit(Instruction::SyncExtended {
+                    sub_op: SyncSubOpcode::FutexWake as u8,
                     operands,
                 });
                 self.ctx.free_temp(count);
@@ -36604,8 +36612,8 @@ impl VbcCodegen {
                 for &arg in args.iter() {
                     Self::write_reg(&mut operands, arg.0);
                 }
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0xA8, // CbgrValidateBool
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: 0x68, // CbgrSubOpcode::ValidateBool
                     operands,
                 });
             }
@@ -36709,8 +36717,8 @@ impl VbcCodegen {
                 // regs, this emits 2) and mis-valued (element-scaled
                 // subtraction of a phantom offset) every inlined call
                 // (T0425).
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0xA9, // CbgrGetHeader
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: 0x69, // CbgrSubOpcode::GetHeader
                     operands,
                 });
             }
@@ -38066,8 +38074,8 @@ impl VbcCodegen {
                 // Use FfiExtended with sub_op 0x70 (TimeMonotonicNanos)
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x70, // TimeMonotonicNanos
+                self.ctx.emit(Instruction::TimeExtended {
+                    sub_op: 0x00, // TimeSubOpcode::MonotonicNanos
                     operands,
                 });
             }

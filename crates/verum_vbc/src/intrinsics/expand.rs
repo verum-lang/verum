@@ -742,8 +742,8 @@ fn expand_sequence(
             for a in args {
                 write_reg(&mut operands, a.0);
             }
-            e.emit(Instruction::FfiExtended {
-                sub_op: 0xA2, // CbgrDealloc
+            e.emit(Instruction::CbgrExtended {
+                sub_op: 0x62, // CbgrSubOpcode::Dealloc
                 operands,
             });
         }

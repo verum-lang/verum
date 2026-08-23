@@ -195,6 +195,11 @@ pub(super) mod cubical;
 pub(super) mod envelope;
 pub(super) mod extended;
 pub(super) mod ffi_extended;
+// Family gateways (T0852) — honest homes for the ex-FfiExtended squatters.
+pub(super) mod time_extended;
+pub(super) mod sys_extended;
+pub(super) mod mach_extended;
+pub(super) mod sync_extended;
 // Embedded scripting engine (Extended sub-ops 0x20-0x2F) — `core.script`.
 pub(super) mod script_runtime;
 pub(super) mod gpu;

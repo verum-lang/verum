@@ -560,7 +560,7 @@ fn test_opcode_all_values_valid() {
     // (lossy by design — see `Opcode::from_byte` doc comment).
     for byte in 0..=255u8 {
         let op = Opcode::from_byte(byte);
-        if matches!(byte, 0xF0..=0xF7 | 0xFE | 0xFF) {
+        if matches!(byte, 0xF4..=0xF7 | 0xFE | 0xFF) {
             assert_eq!(op, Opcode::Unreachable);
         } else {
             assert_eq!(op.to_byte(), byte);

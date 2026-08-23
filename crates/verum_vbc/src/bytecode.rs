@@ -2842,6 +2842,31 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_varint(operands.len() as u64, output);
             output.extend_from_slice(operands);
         }
+        // Family gateways (T0852) — same envelope as FfiExtended.
+        Instruction::TimeExtended { sub_op, operands } => {
+            output.push(Opcode::TimeExtended.to_byte());
+            output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
+            output.extend_from_slice(operands);
+        }
+        Instruction::SysExtended { sub_op, operands } => {
+            output.push(Opcode::SysExtended.to_byte());
+            output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
+            output.extend_from_slice(operands);
+        }
+        Instruction::MachExtended { sub_op, operands } => {
+            output.push(Opcode::MachExtended.to_byte());
+            output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
+            output.extend_from_slice(operands);
+        }
+        Instruction::SyncExtended { sub_op, operands } => {
+            output.push(Opcode::SyncExtended.to_byte());
+            output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
+            output.extend_from_slice(operands);
+        }
         Instruction::MemExtended { sub_op, operands } => {
             output.push(Opcode::MemExtended.to_byte());
             output.push(*sub_op);
@@ -3253,13 +3278,23 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
     let opcode_byte = decode_u8(data, offset)?;
 
     // Phase 4 of the sub-opcode refactor reclaimed bytes 0xF0-0xF7,
-    // 0xFE, and 0xFF (the legacy top-level Tensor* opcodes).  The
-    // decoder rejects those bytes explicitly so a bytecode artifact
-    // produced by a pre-Phase-4 toolchain — or a corrupted byte
-    // stream — surfaces as a clean `InvalidOpcode` error rather than
-    // silently decoding to `Unreachable` (which `Opcode::from_byte`
-    // returns as the in-memory sentinel for the reclaimed range).
-    if matches!(opcode_byte, 0xF0..=0xF7 | 0xFE | 0xFF) {
+    // 0xFE, and 0xFF (the legacy top-level Tensor* opcodes); T0852
+    // re-populated 0xF0-0xF3 with the family gateways (Time/Sys/Mach/
+    // SyncExtended).  The decoder rejects the still-reclaimed bytes
+    // explicitly so a bytecode artifact produced by a pre-Phase-4
+    // toolchain — or a corrupted byte stream — surfaces as a clean
+    // `InvalidOpcode` error rather than silently decoding to
+    // `Unreachable` (which `Opcode::from_byte` returns as the
+    // in-memory sentinel for the reclaimed range).
+    //
+    // REGRESSION PIN (T0852): this guard sits ABOVE the per-opcode
+    // match, so listing a LIVE byte here unreachable-izes its decode
+    // arm below.  The first bake with TimeExtended bodies hit exactly
+    // that: every archive module containing a 0xF0 instruction failed
+    // to decode, the loader fell back to declaration-only parsing, and
+    // `Time.monotonic()` silently returned Unit from a 1-byte forward
+    // stub.  Keep this range the exact complement of the live opcodes.
+    if matches!(opcode_byte, 0xF4..=0xF7 | 0xFE | 0xFF) {
         return Err(VbcError::InvalidOpcode(opcode_byte));
     }
 
@@ -5239,6 +5274,27 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let sub_op = decode_u8(data, offset)?;
             let operands = decode_extended_operands(data, offset)?;
             Ok(Instruction::FfiExtended { sub_op, operands })
+        }
+        // Family gateways (T0852) — same blob envelope as FfiExtended.
+        Opcode::TimeExtended => {
+            let sub_op = decode_u8(data, offset)?;
+            let operands = decode_extended_operands(data, offset)?;
+            Ok(Instruction::TimeExtended { sub_op, operands })
+        }
+        Opcode::SysExtended => {
+            let sub_op = decode_u8(data, offset)?;
+            let operands = decode_extended_operands(data, offset)?;
+            Ok(Instruction::SysExtended { sub_op, operands })
+        }
+        Opcode::MachExtended => {
+            let sub_op = decode_u8(data, offset)?;
+            let operands = decode_extended_operands(data, offset)?;
+            Ok(Instruction::MachExtended { sub_op, operands })
+        }
+        Opcode::SyncExtended => {
+            let sub_op = decode_u8(data, offset)?;
+            let operands = decode_extended_operands(data, offset)?;
+            Ok(Instruction::SyncExtended { sub_op, operands })
         }
         Opcode::MathExtended => {
             let sub_op = decode_u8(data, offset)?;

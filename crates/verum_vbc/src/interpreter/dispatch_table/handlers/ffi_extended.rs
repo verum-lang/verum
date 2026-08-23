@@ -7,7 +7,6 @@ use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
 use super::envelope::dispatch_enveloped;
-use super::method_dispatch::{monotonic_nanos_shared, realtime_nanos_shared};
 #[allow(unused_imports)]
 use crate::instruction::{SystemSubOpcode, Reg};
 #[allow(unused_imports)]
@@ -147,7 +146,7 @@ fn check_ffi_permission(state: &mut InterpreterState, symbol_idx: u32) -> Interp
 /// (`CMemcpy`, `CMemset`, `CMemmove`, `CMemcmp`).  Same 1 GiB
 /// ceiling as every other heap path in the toolchain — single source
 /// of truth is `verum_common::layout::MAX_ALLOCATION_SIZE`.
-const MAX_FFI_ALLOCATION_SIZE: usize = verum_common::layout::MAX_ALLOCATION_SIZE;
+pub(super) const MAX_FFI_ALLOCATION_SIZE: usize = verum_common::layout::MAX_ALLOCATION_SIZE;
 
 // Extended opcode handlers
 
@@ -251,57 +250,6 @@ fn ffi_extended_body(
             Ok(DispatchResult::Continue)
         }
 
-        Some(SystemSubOpcode::CSecureZero) => {
-            // Format: dst_ptr:reg, size:reg
-            //
-
-            // Volatile zero of `size` bytes at `dst_ptr`. In the
-            // interpreter the volatile property is moot — there's no
-            // optimiser pass that could elide writes — so we just
-            // perform `write_volatile` on each byte to mirror the
-            // ABI contract that the AOT path enforces.
-            //
-
-            // Audit: `tls-quic-security-audit spec` §2
-            // Action #2.
-            let dst_reg = read_reg(state)?;
-            let size_reg = read_reg(state)?;
-            // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
-            // CMemcpy above).
-            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))) as *mut u8;
-            let size_raw = state.get_reg(size_reg).as_i64();
-
-            // SECURITY: same bounds discipline as `CMemset`.
-            if size_raw < 0 || (size_raw as u64) > MAX_FFI_ALLOCATION_SIZE as u64 {
-                return Err(InterpreterError::InvalidOperand {
-                    message: format!(
-                        "CSecureZero: size {} exceeds maximum {} or is negative",
-                        size_raw, MAX_FFI_ALLOCATION_SIZE
-                    ),
-                });
-            }
-            let size = size_raw as usize;
-
-            if !dst_ptr.is_null() && size > 0 {
-                // SAFETY: size is bounded to <= MAX_FFI_ALLOCATION_SIZE and
-                // dst_ptr has been null-checked. Volatile writes
-                // ensure the compiler doesn't elide the loop on the
-                // host side either (defence-in-depth — the
-                // interpreter's runtime ABI ought to be observable
-                // even though Rust optimisers shouldn't see across
-                // this fn boundary).
-                unsafe {
-                    let mut p = dst_ptr;
-                    let end = dst_ptr.add(size);
-                    while p < end {
-                        std::ptr::write_volatile(p, 0u8);
-                        p = p.add(1);
-                    }
-                }
-            }
-            Ok(DispatchResult::Continue)
-        }
-
         Some(SystemSubOpcode::CMemmove) => {
             // Format: dst_ptr:reg, src_ptr:reg, size:reg
             let dst_reg = read_reg(state)?;
@@ -384,90 +332,10 @@ fn ffi_extended_body(
         // ================================================================
         // Synchronization Primitives (0xB0-0xBF)
         // ================================================================
-        Some(SystemSubOpcode::FutexWait) => {
-            // Format: dst:reg, addr:reg, expected:reg, timeout_ns:reg
-            // ABI: `(addr, expected, timeout_ns) -> i64` —
-            //   0      → woken
-            //   -EAGAIN (-11) → `*addr != expected`
-            //   -ETIMEDOUT (-110 Linux / -60 macOS; we use -110 universally)
-            let dst = read_reg(state)?;
-            let addr_reg = read_reg(state)?;
-            let expected_reg = read_reg(state)?;
-            let timeout_reg = read_reg(state)?;
-
-            // MEM-BULK-ADDR-DUAL-1: futex words arrive via as_mut_ptr
-            // (ptr- OR int-tagged) — use the canonical dual extraction.
-            let addr = value_as_addr(state.get_reg(addr_reg)) as *const i32;
-            // BOXED-INT-OPERAND-SWEEP-1: expected/timeout originate in
-            // user expressions (`Duration.as_nanos() as UInt64` casts can
-            // BOX) — raw .as_i64() read box bits (the TimeSleepNanos
-            // class, 490ae89c3). Canonical maybe-boxed reader.
-            let expected = state.get_reg(expected_reg).as_integer_compatible() as i32;
-            let timeout_ns = state.get_reg(timeout_reg).as_integer_compatible();
-
-            let result = futex_park::wait(addr, expected, timeout_ns);
-            state.set_reg(dst, Value::from_i64(result));
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::FutexWake) => {
-            // Format: dst:reg, addr:reg, count:reg
-            // ABI: `(addr, count) -> i64` returns # waiters woken.
-            let dst = read_reg(state)?;
-            let addr_reg = read_reg(state)?;
-            let count_reg = read_reg(state)?;
-
-            // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction.
-            let addr = value_as_addr(state.get_reg(addr_reg)) as *const i32;
-            // BOXED-INT-OPERAND-SWEEP-1: canonical maybe-boxed reader.
-            let count = state.get_reg(count_reg).as_integer_compatible();
-
-            let woken = futex_park::wake(addr, count);
-            state.set_reg(dst, Value::from_i64(woken));
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::SpinlockLock) => {
-            // Format: dst:reg, lock_addr:reg
-            // ABI: `(lock_addr: i64) -> i64` (always returns 0)
-            // Atomic CAS loop: 0 → 1 means lock acquired.
-            let dst = read_reg(state)?;
-            let lock_reg = read_reg(state)?;
-
-            // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction.
-            let lock_addr = value_as_addr(state.get_reg(lock_reg)) as *mut u8;
-            if !lock_addr.is_null() {
-                // SAFETY: caller is responsible for `lock_addr` pointing
-                // at a live u8 lock cell. Use atomic CAS to flip 0→1.
-                let atomic = unsafe { &*(lock_addr as *const std::sync::atomic::AtomicU8) };
-                let mut spin = 0u32;
-                while atomic
-                    .compare_exchange_weak(
-                        0,
-                        1,
-                        std::sync::atomic::Ordering::Acquire,
-                        std::sync::atomic::Ordering::Relaxed,
-                    )
-                    .is_err()
-                {
-                    spin = spin.saturating_add(1);
-                    if spin < 64 {
-                        std::hint::spin_loop();
-                    } else {
-                        std::thread::yield_now();
-                        spin = 0;
-                    }
-                }
-            }
-            state.set_reg(dst, Value::from_i64(0));
-            Ok(DispatchResult::Continue)
-        }
-
         // Every `atomic_fetch_*` / `atomic_exchange` intrinsic lands
         // here. The implementation lives with the other atomic handlers
         // in `system.rs` so the load / store / CAS / RMW semantics stay
         // in one file.
-        Some(SystemSubOpcode::AtomicRmw) => super::system::handle_atomic_rmw(state),
 
         // ================================================================
         // Byte Array Allocation
@@ -1874,52 +1742,6 @@ unsafe {
             Ok(DispatchResult::Continue)
         }
 
-        Some(SystemSubOpcode::CbgrGetHeader) => {
-            // get_header_from_ptr(user_ptr): recover the CBGR AllocationHeader
-            // that precedes user data by a FIXED ALLOCATION_HEADER_SIZE bytes.
-            // Format: dst:reg, ptr:reg  (exactly 2 regs — NOT PtrSub's 3).
-            //
-            // Mirrors `AllocationHeader.from_user_ptr` (core/mem/header.vr).
-            // The offset is a fixed 32-byte constant, NOT element-scaled —
-            // distinct from PtrSub (0x64), whose byte this lowering used to
-            // squat (T0425).
-            let dst = read_reg(state)?;
-            let ptr_reg = read_reg(state)?;
-
-            let addr = value_as_addr(state.get_reg(ptr_reg));
-            let header_addr = addr
-                .checked_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize)
-                .ok_or(InterpreterError::IntegerOverflow {
-                    operation: "CbgrGetHeader",
-                })?;
-            // Int-tagged address — same rationale as PtrSub/PtrAdd: a
-            // pointer-tagged interior address becomes a droppable-looking
-            // heap object and DropRef chases bytes as a header.
-            state.set_reg(dst, Value::from_i64(header_addr as i64));
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::CbgrGetGeneration) => {
-            // cbgr_get_generation(user_ptr): *(u32*)(ptr - 32 + gen@8).
-            // Format: dst:reg, ptr:reg.
-            let dst = read_reg(state)?;
-            let ptr_reg = read_reg(state)?;
-
-            let addr = value_as_addr(state.get_reg(ptr_reg));
-            let gen_addr = addr
-                .checked_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize)
-                .map(|h| h + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
-                .ok_or(InterpreterError::IntegerOverflow {
-                    operation: "CbgrGetGeneration",
-                })?;
-            // SAFETY: the caller contract (unsafe intrinsic) requires a
-            // live CBGR user pointer; the header precedes it by
-            // construction of both tiers' allocators.
-            let generation = unsafe { *(gen_addr as *const u32) };
-            state.set_reg(dst, Value::from_i64(generation as i64));
-            Ok(DispatchResult::Continue)
-        }
-
         Some(SystemSubOpcode::PtrDiff) => {
             // Pointer difference: compute distance in bytes
             // Format: dst:reg, ptr1:reg, ptr2:reg
@@ -1999,31 +1821,6 @@ unsafe {
         // ================================================================
         // Random number generation
         // ================================================================
-        Some(SystemSubOpcode::RandomU64) => {
-            // Format: dst:reg
-            let dst = read_reg(state)?;
-            // ONE entropy authority (crate::entropy): every return
-            // code is checked, and it aborts rather than yielding
-            // predictable bytes. The per-platform draw used to be
-            // inline here AND in RandomFloat, discarding the syscall
-            // result in both.
-            let random_value = crate::entropy::secure_random_u64();
-            state.set_reg(dst, Value::from_i64(random_value as i64));
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::RandomFloat) => {
-            // Format: dst:reg
-            let dst = read_reg(state)?;
-            let random_u64 = crate::entropy::secure_random_u64();
-            // IEEE 754 conversion: (bits >> 11) * (1.0 / 2^53) — the
-            // 53 bits a double represents exactly, so every
-            // representable value in [0, 1) is equally likely.
-            let float_value = (random_u64 >> 11) as f64 * (1.0 / ((1u64 << 53) as f64));
-            state.set_reg(dst, Value::from_f64(float_value));
-            Ok(DispatchResult::Continue)
-        }
-
         // ================================================================
         // Errno operations
         // ================================================================
@@ -2825,379 +2622,12 @@ unsafe {
         // ==============================================================
         // Time Operations (0x70-0x75)
         // ==============================================================
-        Some(SystemSubOpcode::TimeMonotonicNanos) => {
-            let dst = read_reg(state)?;
-            state.set_reg(dst, Value::from_i64(monotonic_nanos_shared()));
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::TimeRealtimeNanos) => {
-            let dst = read_reg(state)?;
-            state.set_reg(dst, Value::from_i64(realtime_nanos_shared()));
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::TimeMonotonicRawNanos) => {
-            // Same as MonotonicNanos for VBC interpreter (no NTP distinction)
-            let dst = read_reg(state)?;
-            state.set_reg(dst, Value::from_i64(monotonic_nanos_shared()));
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::TimeSleepNanos) => {
-            let nanos_reg = read_reg(state)?;
-            // BOXED-INT-OPERAND-1: the duration arrives via `ns as UInt64`,
-            // which can BOX the value — raw `.as_i64()` read the box bits
-            // (garbage, typically failing the `> 0` gate) and the sleep
-            // silently no-op'd (test_sleep_*_lower_bound pins). Use the
-            // canonical maybe-boxed reader, same as sibling
-            // TimeSleepMillis (0x76).
-            let nanos = state.get_reg(nanos_reg).as_integer_compatible();
-            if nanos > 0 {
-                std::thread::sleep(std::time::Duration::from_nanos(nanos as u64));
-            }
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::TimeThreadCpuNanos) => {
-            let dst = read_reg(state)?;
-            state.set_reg(dst, Value::from_i64(monotonic_nanos_shared()));
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::TimeProcessCpuNanos) => {
-            let dst = read_reg(state)?;
-            state.set_reg(dst, Value::from_i64(monotonic_nanos_shared()));
-            Ok(DispatchResult::Continue)
-        }
-
         // ==============================================================
         // System Call Operations (0x80-0x85)
         // ==============================================================
-        Some(SystemSubOpcode::SysGetpid) => {
-            let dst = read_reg(state)?;
-            let pid = std::process::id();
-            state.set_reg(dst, Value::from_i64(pid as i64));
-            Ok(DispatchResult::Continue)
-        }
-
         // TIER-DETECT-AOT-1: per-tier answers. THIS side is the
         // interpreter, so tier = 0 / is_interpreted = true; the LLVM
         // lowering emits const 1 / false for the same sub-ops.
-        Some(SystemSubOpcode::ExecutionTier) => {
-            let dst = read_reg(state)?;
-            state.set_reg(dst, Value::from_i64(0));
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::IsInterpreted) => {
-            let dst = read_reg(state)?;
-            state.set_reg(dst, Value::from_bool(true));
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::SysGettid) => {
-            let dst = read_reg(state)?;
-            #[cfg(unix)]
-            let tid: u64 = {
-                // On macOS the 0 init is the out-param seed; elsewhere the
-                // binding is assigned exactly once below (the seed would be
-                // 'never read' under -D warnings on Linux builders).
-                #[cfg(target_os = "macos")]
-                let mut tid: u64 = 0;
-                #[cfg(not(target_os = "macos"))]
-                let tid: u64;
-                // SAFETY: `tid` is a live stack u64. `pthread_threadid_np` writes
-                // exactly one u64 via the provided pointer when the first arg is
-                // 0 (self). The Apple libc contract is well-defined.
-                #[cfg(target_os = "macos")]
-                unsafe {
-                    libc::pthread_threadid_np(0, &mut tid);
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    // On other Unix, use the thread id as a hash of the thread handle
-                    let id = std::thread::current().id();
-                    tid = format!("{:?}", id)
-                        .chars()
-                        .filter(|c| c.is_ascii_digit())
-                        .collect::<String>()
-                        .parse()
-                        .unwrap_or(0);
-                }
-                tid
-            };
-            #[cfg(windows)]
-            let tid: u64 = {
-                // SAFETY: GetCurrentThreadId is always safe and takes no pointer arguments.
-                unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() as u64 }
-            };
-            #[cfg(not(any(unix, windows)))]
-            let tid: u64 = 0;
-            state.set_reg(dst, Value::from_i64(tid as i64));
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::SysMmap) => {
-            let dst = read_reg(state)?;
-            let addr_reg = read_reg(state)?;
-            let len_reg = read_reg(state)?;
-            let prot_reg = read_reg(state)?;
-            let flags_reg = read_reg(state)?;
-            let fd_reg = read_reg(state)?;
-            let offset_reg = read_reg(state)?;
-
-            let addr = state.get_reg(addr_reg).as_i64();
-            let len = state.get_reg(len_reg).as_i64();
-            let _offset = state.get_reg(offset_reg).as_i64();
-
-            // Extract prot flags from MemProt struct object
-            // MemProt { read: Bool, write: Bool, exec: Bool }
-            let prot_val = state.get_reg(prot_reg);
-            let prot_flags = extract_memprot_flags(state, prot_val);
-
-            // Extract map flags from MapFlags struct object
-            // MapFlags { shared: Bool, is_private: Bool, anonymous: Bool, fixed: Bool }
-            let flags_val = state.get_reg(flags_reg);
-            let map_flags = extract_mapflags(state, flags_val);
-
-            // Extract fd from FileDesc newtype (Int)
-            let fd_val = state.get_reg(fd_reg);
-            let fd = extract_filedesc(state, fd_val);
-
-            #[cfg(unix)]
-            {
-                let offset = _offset;
-                // SAFETY: `mmap` is a well-defined kernel syscall. The caller
-                // supplies the same arguments the AOT path would; invalid inputs
-                // return `MAP_FAILED` without corrupting our process state. No
-                // Rust references are dereferenced here.
-                let result = unsafe {
-                    libc::mmap(
-                        addr as *mut libc::c_void,
-                        len as libc::size_t,
-                        prot_flags,
-                        map_flags,
-                        fd,
-                        offset as libc::off_t,
-                    )
-                };
-
-                if result == libc::MAP_FAILED {
-                    let errno = get_platform_errno();
-                    let err_obj = make_oserror_variant(state, errno)?;
-                    state.set_reg(dst, err_obj);
-                } else {
-                    let ok_obj = make_result_ok_ptr(state, result as i64)?;
-                    state.set_reg(dst, ok_obj);
-                }
-            }
-
-            #[cfg(windows)]
-            {
-                let _ = (fd, map_flags);
-                // Translate MemProt flags to Windows page protection constants
-                let win_prot = memprot_to_win_protect(prot_flags);
-                let alloc_type = 0x00001000u32 | 0x00002000u32; // MEM_COMMIT | MEM_RESERVE
-                // SAFETY: VirtualAlloc is a well-defined Win32 API. Invalid inputs
-                // return NULL without corrupting process state.
-                let result = unsafe {
-                    windows_sys::Win32::System::Memory::VirtualAlloc(
-                        if addr == 0 {
-                            std::ptr::null()
-                        } else {
-                            addr as *const core::ffi::c_void
-                        },
-                        len as usize,
-                        alloc_type,
-                        win_prot,
-                    )
-                };
-                if result.is_null() {
-                    let errno = get_platform_errno();
-                    let err_obj = make_oserror_variant(state, errno)?;
-                    state.set_reg(dst, err_obj);
-                } else {
-                    let ok_obj = make_result_ok_ptr(state, result as i64)?;
-                    state.set_reg(dst, ok_obj);
-                }
-            }
-
-            #[cfg(not(any(unix, windows)))]
-            {
-                let err_obj = make_oserror_variant_with_msg(
-                    state,
-                    38,
-                    "mmap not supported on this platform",
-                )?;
-                state.set_reg(dst, err_obj);
-            }
-
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::SysMunmap) => {
-            let dst = read_reg(state)?;
-            let addr_reg = read_reg(state)?;
-            let len_reg = read_reg(state)?;
-
-            let addr = state.get_reg(addr_reg).as_i64();
-            let len = state.get_reg(len_reg).as_i64();
-
-            #[cfg(unix)]
-            {
-                // SAFETY: `munmap` is a well-defined kernel syscall that fails
-                // with a negative result on invalid inputs. No Rust references
-                // are dereferenced; correctness is the caller's responsibility.
-                let result =
-                    unsafe { libc::munmap(addr as *mut libc::c_void, len as libc::size_t) };
-
-                if result < 0 {
-                    let errno = get_platform_errno();
-                    let err_obj = make_oserror_variant(state, errno)?;
-                    state.set_reg(dst, err_obj);
-                } else {
-                    let ok_obj = make_result_ok_unit(state)?;
-                    state.set_reg(dst, ok_obj);
-                }
-            }
-
-            #[cfg(windows)]
-            {
-                let _ = len;
-                // SAFETY: VirtualFree with MEM_RELEASE (0x00008000) is well-defined.
-                // The size parameter must be 0 when using MEM_RELEASE.
-                let result = unsafe {
-                    windows_sys::Win32::System::Memory::VirtualFree(
-                        addr as *mut core::ffi::c_void,
-                        0,
-                        0x00008000u32, // MEM_RELEASE
-                    )
-                };
-                if result == 0 {
-                    let errno = get_platform_errno();
-                    let err_obj = make_oserror_variant(state, errno)?;
-                    state.set_reg(dst, err_obj);
-                } else {
-                    let ok_obj = make_result_ok_unit(state)?;
-                    state.set_reg(dst, ok_obj);
-                }
-            }
-
-            #[cfg(not(any(unix, windows)))]
-            {
-                let _ = (addr, len);
-                let err_obj = make_oserror_variant_with_msg(
-                    state,
-                    38,
-                    "munmap not supported on this platform",
-                )?;
-                state.set_reg(dst, err_obj);
-            }
-
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::SysMadvise) => {
-            let dst = read_reg(state)?;
-            let addr_reg = read_reg(state)?;
-            let len_reg = read_reg(state)?;
-            let advice_reg = read_reg(state)?;
-
-            let _addr = state.get_reg(addr_reg).as_i64();
-            let _len = state.get_reg(len_reg).as_i64();
-            let _advice = state.get_reg(advice_reg).as_i64();
-
-            #[cfg(unix)]
-            {
-                // SAFETY: `madvise` is a kernel syscall that validates the
-                // supplied address range and returns `-1` on invalid input.
-                let result = unsafe {
-                    libc::madvise(
-                        _addr as *mut libc::c_void,
-                        _len as libc::size_t,
-                        _advice as i32,
-                    )
-                };
-
-                if result < 0 {
-                    let errno = get_platform_errno();
-                    let err_obj = make_oserror_variant(state, errno)?;
-                    state.set_reg(dst, err_obj);
-                } else {
-                    let ok_obj = make_result_ok_unit(state)?;
-                    state.set_reg(dst, ok_obj);
-                }
-            }
-
-            #[cfg(not(unix))]
-            {
-                // madvise is advisory-only; no-op on Windows and other platforms
-                let ok_obj = make_result_ok_unit(state)?;
-                state.set_reg(dst, ok_obj);
-            }
-
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::SysGetentropy) => {
-            let dst = read_reg(state)?;
-            let buf_reg = read_reg(state)?;
-            let len_reg = read_reg(state)?;
-
-            // `buf` arrives as a Verum `&unsafe Byte` reference whose
-            // runtime representation is a Pointer-tagged Value (the
-            // common case — `tail.as_mut_ptr() as &unsafe Byte`). A
-            // small minority of callers fabricate a raw address as
-            // an Int and cast — handle that too. `as_i64()` on a
-            // Pointer-tagged value extracts the sign-extended payload
-            // bits, which silently misreads high-address pointers as
-            // negative offsets, making the draw fault with EFAULT and
-            // the whole CSPRNG chain return Err.
-            let buf_val = state.get_reg(buf_reg);
-            let buf = if buf_val.is_ptr() {
-                buf_val.as_ptr::<u8>() as usize as u64
-            } else {
-                buf_val.as_i64() as u64
-            };
-            let len = state.get_reg(len_reg).as_i64();
-
-            if len > 256 {
-                // getentropy has a 256-byte limit
-                let err_obj = make_oserror_variant_with_msg(state, 5, "getentropy: max 256 bytes")?;
-                state.set_reg(dst, err_obj);
-            } else {
-                // ONE entropy implementation (crate::entropy). This
-                // shim keeps the REPORTING contract — a syscall shim
-                // relays the kernel's answer — while
-                // `entropy::fill_secure` carries the abort contract
-                // the language needs.
-                //
-                // SAFETY: `len` was bounded to <= 256 above and `buf`
-                // is the caller's address; building a slice over it is
-                // the same trust boundary the direct call had, and the
-                // kernel still validates the pointer (EFAULT).
-                let result: i32 = {
-                    let slice =
-                        unsafe { std::slice::from_raw_parts_mut(buf as *mut u8, len as usize) };
-                    match crate::entropy::try_fill_secure(slice) {
-                        Ok(()) => 0,
-                        Err(_) => -1,
-                    }
-                };
-
-                if result < 0 {
-                    let errno = get_platform_errno();
-                    let err_obj = make_oserror_variant(state, errno)?;
-                    state.set_reg(dst, err_obj);
-                } else {
-                    let ok_obj = make_result_ok_unit(state)?;
-                    state.set_reg(dst, ok_obj);
-                }
-            }
-            Ok(DispatchResult::Continue)
-        }
-
         // ==============================================================
         // Symbol Resolution (0x00-0x02) — stubs
         // ==============================================================
@@ -3827,124 +3257,6 @@ unsafe {
         // must end where the encoder said the instruction ends, whatever
         // the caller does with the error.
         // ==============================================================
-        Some(SystemSubOpcode::MachVmAllocate) => {
-            // Format: dst:reg, size:reg, anywhere:reg
-            let _dst = read_reg(state)?;
-            let _size_reg = read_reg(state)?;
-            let _anywhere_reg = read_reg(state)?;
-            Err(InterpreterError::NotImplemented {
-                feature: "mach_vm_allocate: the interpreter has no Mach kernel binding — call \
-                          vm_allocate through core.sys.darwin.mach (an @ffi(\"libSystem.B.dylib\") \
-                          extern block), not the mach_vm_allocate intrinsic",
-                opcode: None,
-            })
-        }
-
-        Some(SystemSubOpcode::MachVmDeallocate) => {
-            // Format: dst:reg, addr:reg, size:reg
-            let _dst = read_reg(state)?;
-            let _addr_reg = read_reg(state)?;
-            let _size_reg = read_reg(state)?;
-            Err(InterpreterError::NotImplemented {
-                feature: "mach_vm_deallocate: the interpreter has no Mach kernel binding — call \
-                          vm_deallocate through core.sys.darwin.mach (an @ffi(\"libSystem.B.dylib\") \
-                          extern block), not the mach_vm_deallocate intrinsic",
-                opcode: None,
-            })
-        }
-
-        Some(SystemSubOpcode::MachVmProtect) => {
-            // Format: dst:reg, addr:reg, size:reg, prot:reg
-            let _dst = read_reg(state)?;
-            let _addr_reg = read_reg(state)?;
-            let _size_reg = read_reg(state)?;
-            let _prot_reg = read_reg(state)?;
-            Err(InterpreterError::NotImplemented {
-                feature: "mach_vm_protect: the interpreter has no Mach kernel binding — call \
-                          vm_protect through core.sys.darwin.mach (an @ffi(\"libSystem.B.dylib\") \
-                          extern block), not the mach_vm_protect intrinsic",
-                opcode: None,
-            })
-        }
-
-        Some(SystemSubOpcode::MachSemCreate) => {
-            // Format: dst:reg, initial_value:reg
-            let _dst = read_reg(state)?;
-            let _value_reg = read_reg(state)?;
-            Err(InterpreterError::NotImplemented {
-                feature: "mach_sem_create: the interpreter has no Mach kernel binding — call \
-                          semaphore_create through core.sys.darwin.mach (an \
-                          @ffi(\"libSystem.B.dylib\") extern block), not the mach_sem_create \
-                          intrinsic",
-                opcode: None,
-            })
-        }
-
-        Some(SystemSubOpcode::MachSemDestroy) => {
-            // Format: dst:reg, sem:reg
-            let _dst = read_reg(state)?;
-            let _sem_reg = read_reg(state)?;
-            Err(InterpreterError::NotImplemented {
-                feature: "mach_sem_destroy: the interpreter has no Mach kernel binding — call \
-                          semaphore_destroy through core.sys.darwin.mach (an \
-                          @ffi(\"libSystem.B.dylib\") extern block), not the mach_sem_destroy \
-                          intrinsic",
-                opcode: None,
-            })
-        }
-
-        Some(SystemSubOpcode::MachSemSignal) => {
-            // Format: dst:reg, sem:reg
-            let _dst = read_reg(state)?;
-            let _sem_reg = read_reg(state)?;
-            Err(InterpreterError::NotImplemented {
-                feature: "mach_sem_signal: the interpreter has no Mach kernel binding — call \
-                          semaphore_signal through core.sys.darwin.mach (an \
-                          @ffi(\"libSystem.B.dylib\") extern block), not the mach_sem_signal \
-                          intrinsic",
-                opcode: None,
-            })
-        }
-
-        Some(SystemSubOpcode::MachSemWait) => {
-            // Format: dst:reg, sem:reg
-            let _dst = read_reg(state)?;
-            let _sem_reg = read_reg(state)?;
-            Err(InterpreterError::NotImplemented {
-                feature: "mach_sem_wait: the interpreter has no Mach kernel binding — call \
-                          semaphore_wait through core.sys.darwin.mach (an \
-                          @ffi(\"libSystem.B.dylib\") extern block), not the mach_sem_wait \
-                          intrinsic",
-                opcode: None,
-            })
-        }
-
-        Some(SystemSubOpcode::MachErrorString) => {
-            // Format: dst:reg, kern_return:reg
-            let _dst = read_reg(state)?;
-            let _err_reg = read_reg(state)?;
-            Err(InterpreterError::NotImplemented {
-                feature: "mach_error_string: the interpreter has no Mach kernel binding and will \
-                          not guess a description — call error_string through \
-                          core.sys.darwin.mach (an @ffi(\"libSystem.B.dylib\") extern block), not \
-                          the mach_error_string intrinsic",
-                opcode: None,
-            })
-        }
-
-        Some(SystemSubOpcode::MachSleepUntil) => {
-            // Format: dst:reg, deadline:reg
-            let _dst = read_reg(state)?;
-            let _deadline_reg = read_reg(state)?;
-            Err(InterpreterError::NotImplemented {
-                feature: "mach_sleep_until: the interpreter has no Mach kernel binding — call \
-                          mach_wait_until through core.sys.darwin.mach (an \
-                          @ffi(\"libSystem.B.dylib\") extern block), not the mach_sleep_until \
-                          intrinsic",
-                opcode: None,
-            })
-        }
-
         // =================================================================
         // CBGR Memory Operations (0xA0-0xA2) — tracked allocation for
         // Shared<T>, Heap<T>, List/Map internals, and any code path that
@@ -3984,305 +3296,27 @@ unsafe {
         // code.  The generation/epoch reported here are READ BACK from the
         // header just written, so the tuple and the header can never drift.
         // =================================================================
-        Some(SystemSubOpcode::CbgrAlloc) | Some(SystemSubOpcode::CbgrAllocZeroed) => {
-            // Both spellings allocate zero-initialised memory:
-            // `cbgr_user_allocate` uses `alloc_zeroed` unconditionally so
-            // uninitialised reads stay deterministic under the interpreter.
-            // Zeroing the non-`_zeroed` spelling is a strengthening, never
-            // an observable regression.  (The distinction still matters on
-            // the `VERUM_CBGR_LEGACY_ALLOC` path, which reproduces the old
-            // alloc/alloc_zeroed split exactly.)
-            let zeroed = matches!(sub_op, Some(SystemSubOpcode::CbgrAllocZeroed));
-            let dst = read_reg(state)?;
-            let size_reg = read_reg(state)?;
-            let align_reg = read_reg(state)?;
-            let raw_size = state.get_reg(size_reg).as_integer_compatible();
-            let raw_align = state.get_reg(align_reg).as_integer_compatible();
-            // Size/align arguments arrive from the Verum side and can be
-            // garbage (bad codegen, pointer-tagged values leaking into
-            // the call). Reject absurd sizes/aligns up front and return
-            // the same "Err(OutOfMemory)" shape the stdlib would — the
-            // caller can then surface an allocation failure instead of
-            // the interpreter panicking on LayoutError.
-            // 1 GiB cap — same `verum_common::layout::MAX_ALLOCATION_SIZE`
-            // ceiling as every other heap path; here cast to i64 since
-            // `raw_size` arrives as i64 from the Verum register file.
-            const MAX_ALLOC: i64 = verum_common::layout::MAX_ALLOCATION_SIZE as i64;
-            if raw_size <= 0 || raw_size > MAX_ALLOC || raw_align <= 0 || raw_align > 4096 {
-                // A rejected size/align is `Err(AllocError.InvalidSize)`
-                // with the offending size as the payload field — a real
-                // error value whose `.message()` works.
-                let err_val = make_alloc_err(state, ALLOC_ERR_INVALID_SIZE, raw_size)?;
-                state.set_reg(dst, err_val);
-                return Ok(DispatchResult::Continue);
-            }
-            // ONE header-model authority (T0451).  `cbgr_user_allocate`
-            // lays down the 32-byte `AllocationHeader` at `user - 32`,
-            // registers the HEADER address in `cbgr_allocations`, and
-            // records `{base_offset, total}` in the reserved word so the
-            // exact `Layout` is reconstructible at free time.  Layouts
-            // that overflow `isize::MAX` (adversarial bytecode requesting
-            // a near-max size) return 0 rather than panicking the
-            // interpreter — the same OOM-equivalent the null-pointer
-            // branch modelled before.
-            let legacy = cbgr_legacy_alloc();
-            let ptr = if legacy {
-                cbgr_legacy_allocate(state, raw_size, raw_align, zeroed)
-            } else {
-                cbgr_user_allocate(state, raw_size, raw_align)
-            };
-            if ptr == 0 {
-                // Out of memory is `Err(AllocError.OutOfMemory{requested})`
-                // — a real two-level variant. The ledger row that said
-                // "payload stays nil because this handler does not
-                // consult the type tables" is discharged: the type index
-                // resolves `AllocError` in O(1).
-                let err_val = make_alloc_err(state, ALLOC_ERR_OUT_OF_MEMORY, raw_size)?;
-                state.set_reg(dst, err_val);
-                return Ok(DispatchResult::Continue);
-            }
-            // Report the generation/epoch the header actually carries —
-            // reading them back keeps the returned tuple and the in-memory
-            // header from ever drifting apart.  The legacy path has no
-            // header to read, so it keeps synthesising the old constants.
-            let (generation, epoch) = if legacy {
-                (1i64, state.cbgr_epoch as i64)
-            } else {
-                cbgr_header_generation_epoch(ptr)
-            };
-            // Materialise a 3-tuple matching `Pack` layout so
-            // `let (ptr, g, e) = …` destructures each field at its
-            // expected offset.
-            let tuple_size = 3 * std::mem::size_of::<Value>();
-            let tuple_obj =
-                state
-                    .heap
-                    .alloc_with_init(crate::types::TypeId::TUPLE, tuple_size, |_data| {})?;
-            let tuple_data = tuple_obj.data_ptr() as *mut Value;
-            unsafe {
-                std::ptr::write(tuple_data.add(0), Value::from_i64(ptr as i64));
-                std::ptr::write(tuple_data.add(1), Value::from_i64(generation));
-                std::ptr::write(tuple_data.add(2), Value::from_i64(epoch));
-            }
-            let tuple_val = Value::from_ptr(tuple_obj.as_ptr());
-
-            // Wrap in Ok(tuple) via the canonical Result builder —
-            // tag drawn from `RESULT_VARIANT_LAYOUT`, layout
-            // bit-equivalent to `MakeVariant` so user code's
-            // `let Ok(t) = …` destructures correctly.
-            let ok_val = super::method_dispatch::make_result_variant(
-                state,
-                verum_common::well_known_types::result_success_tag(),
-                tuple_val,
-            )?;
-            state.set_reg(dst, ok_val);
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::CbgrDealloc) => {
-            let _dst = read_reg(state)?;
-            let ptr_reg = read_reg(state)?;
-            let _size_reg = read_reg(state)?;
-            let _align_reg = read_reg(state)?;
-            // T0451: this used to be an unconditional leak, justified by
-            // "the interpreter has no way to match the exact Layout passed
-            // at allocation time without carrying extra metadata".  With
-            // the header model that justification is gone: every block is
-            // self-describing (`{base_offset, total}` in the header's
-            // reserved word), so the exact `Layout` IS reconstructible.
-            //
-
-            // `cbgr_user_deallocate` also sets the FREED flag and removes
-            // the header address from `cbgr_allocations`, which is what
-            // makes `increment_generation` and the use-after-free probes
-            // observe a real transition instead of writing through a
-            // header that never existed.  It is defensively a no-op on 0,
-            // on untracked pointers, and on double-free (the tracked-set
-            // removal is the gate), so the leak-over-double-free safety
-            // property the old comment cared about is preserved.
-            if !cbgr_legacy_alloc() {
-                let user = state.get_reg(ptr_reg).as_integer_compatible();
-                cbgr_user_deallocate(state, user);
-            }
-            Ok(DispatchResult::Continue)
-        }
-
         // =================================================================
         // Flat TLS slot quartet (0x59-0x5C) — wraps the same
         // state.tls_get/tls_set storage the TlsGet/TlsSet OPCODES use, with
         // the shapes the stdlib declarations promise (Bool has, nil clear).
         // =================================================================
-        Some(SystemSubOpcode::TlsSlotGetF) => {
-            let dst = read_reg(state)?;
-            let slot_reg = read_reg(state)?;
-            let slot = state.get_reg(slot_reg).as_integer_compatible() as usize;
-            // TLS-SLOT-GET-NULL-1: the declared return is `*const Byte` —
-            // an ABSENT slot is the NULL POINTER (0), not nil.  A nil here
-            // was both type-dishonest (silent-nil class) and a cross-tier
-            // divergence: the AOT twin reads a zero-initialised
-            // `__verum_tls_slots` thread-local and honestly yields 0.
-            let value = state
-                .user_tls_slots
-                .get(&(slot as u16))
-                .copied()
-                .unwrap_or_else(|| Value::from_i64(0));
-            state.set_reg(dst, value);
-            Ok(DispatchResult::Continue)
-        }
-        Some(SystemSubOpcode::TlsSlotSetF) => {
-            let slot_reg = read_reg(state)?;
-            let val_reg = read_reg(state)?;
-            let slot = state.get_reg(slot_reg).as_integer_compatible() as usize;
-            let value = state.get_reg(val_reg);
-            state.user_tls_slots.insert(slot as u16, value);
-            Ok(DispatchResult::Continue)
-        }
-        Some(SystemSubOpcode::TlsSlotHasF) => {
-            let dst = read_reg(state)?;
-            let slot_reg = read_reg(state)?;
-            let slot = state.get_reg(slot_reg).as_integer_compatible() as usize;
-            let occupied = state
-                .user_tls_slots
-                .get(&(slot as u16))
-                .map(|v| !v.is_nil())
-                .unwrap_or(false);
-            state.set_reg(dst, Value::from_bool(occupied));
-            Ok(DispatchResult::Continue)
-        }
-        Some(SystemSubOpcode::TlsSlotClearF) => {
-            let slot_reg = read_reg(state)?;
-            let slot = state.get_reg(slot_reg).as_integer_compatible() as usize;
-            state.user_tls_slots.remove(&(slot as u16));
-            Ok(DispatchResult::Continue)
-        }
-
         // =================================================================
         // tls_get_base (0x5D) — an opaque, stable, non-null base pointer.
         // The interpreter has no real TLS block; the state address is the
         // honest opaque anchor.  (The old OpcodeWithMode(TlsGet, 0) route
         // returned the CONTENT of context slot 0.)
         // =================================================================
-        Some(SystemSubOpcode::TlsGetBaseF) => {
-            let dst = read_reg(state)?;
-            let anchor = state as *const InterpreterState as i64;
-            state.set_reg(dst, Value::from_i64(anchor));
-            Ok(DispatchResult::Continue)
-        }
-
         // =================================================================
         // WaitGroup family (0xB6-0xBB) — delegates to the same handle-table
         // implementation the legacy name-dispatch arms use.
         // =================================================================
-        Some(SystemSubOpcode::WaitgroupNew) => {
-            let dst = read_reg(state)?;
-            state.set_reg(dst, Value::from_i64(crate::interpreter::waitgroup::wg_new()));
-            Ok(DispatchResult::Continue)
-        }
-        Some(SystemSubOpcode::WaitgroupAdd) => {
-            let dst = read_reg(state)?;
-            let wg_reg = read_reg(state)?;
-            let delta_reg = read_reg(state)?;
-            let wg = state.get_reg(wg_reg).as_integer_compatible();
-            let delta = state.get_reg(delta_reg).as_integer_compatible();
-            state.set_reg(
-                dst,
-                Value::from_i64(crate::interpreter::waitgroup::wg_add(wg, delta)),
-            );
-            Ok(DispatchResult::Continue)
-        }
-        Some(SystemSubOpcode::WaitgroupDone) => {
-            let dst = read_reg(state)?;
-            let wg_reg = read_reg(state)?;
-            let wg = state.get_reg(wg_reg).as_integer_compatible();
-            state.set_reg(
-                dst,
-                Value::from_i64(crate::interpreter::waitgroup::wg_done(wg)),
-            );
-            Ok(DispatchResult::Continue)
-        }
-        Some(SystemSubOpcode::WaitgroupWait) => {
-            let dst = read_reg(state)?;
-            let wg_reg = read_reg(state)?;
-            let wg = state.get_reg(wg_reg).as_integer_compatible();
-            state.set_reg(
-                dst,
-                Value::from_i64(crate::interpreter::waitgroup::wg_wait(wg)),
-            );
-            Ok(DispatchResult::Continue)
-        }
-        Some(SystemSubOpcode::WaitgroupTryWait) => {
-            let dst = read_reg(state)?;
-            let wg_reg = read_reg(state)?;
-            let wg = state.get_reg(wg_reg).as_integer_compatible();
-            state.set_reg(
-                dst,
-                Value::from_i64(crate::interpreter::waitgroup::wg_try_wait(wg)),
-            );
-            Ok(DispatchResult::Continue)
-        }
-        Some(SystemSubOpcode::WaitgroupDestroy) => {
-            let dst = read_reg(state)?;
-            let wg_reg = read_reg(state)?;
-            let wg = state.get_reg(wg_reg).as_integer_compatible();
-            state.set_reg(
-                dst,
-                Value::from_i64(crate::interpreter::waitgroup::wg_destroy(wg)),
-            );
-            Ok(DispatchResult::Continue)
-        }
-
         // =================================================================
         // Spinlock trio (0xB3-0xB5) — AtomicU32 per the declared
         // `*mut UInt32` contract.  (SpinlockLock at 0xB2 predates this and
         // spins an AtomicU8 — low-byte-compatible on little-endian; the
         // divergence is recorded in the sync audit.)
         // =================================================================
-        Some(SystemSubOpcode::SpinlockTryLock) => {
-            let dst = read_reg(state)?;
-            let lock_reg = read_reg(state)?;
-            let addr = value_as_addr(state.get_reg(lock_reg));
-            let acquired = if addr != 0 {
-                // SAFETY: caller warrants a live u32 lock cell.
-                let atomic = unsafe { &*(addr as *const std::sync::atomic::AtomicU32) };
-                atomic
-                    .compare_exchange(
-                        0,
-                        1,
-                        std::sync::atomic::Ordering::Acquire,
-                        std::sync::atomic::Ordering::Relaxed,
-                    )
-                    .is_ok()
-            } else {
-                false
-            };
-            state.set_reg(dst, Value::from_bool(acquired));
-            Ok(DispatchResult::Continue)
-        }
-        Some(SystemSubOpcode::SpinlockUnlock) => {
-            let lock_reg = read_reg(state)?;
-            let addr = value_as_addr(state.get_reg(lock_reg));
-            if addr != 0 {
-                // SAFETY: as above.
-                let atomic = unsafe { &*(addr as *const std::sync::atomic::AtomicU32) };
-                atomic.store(0, std::sync::atomic::Ordering::Release);
-            }
-            Ok(DispatchResult::Continue)
-        }
-        Some(SystemSubOpcode::SpinlockIsLocked) => {
-            let dst = read_reg(state)?;
-            let lock_reg = read_reg(state)?;
-            let addr = value_as_addr(state.get_reg(lock_reg));
-            let locked = if addr != 0 {
-                // SAFETY: as above.
-                let atomic = unsafe { &*(addr as *const std::sync::atomic::AtomicU32) };
-                atomic.load(std::sync::atomic::Ordering::Acquire) != 0
-            } else {
-                false
-            };
-            state.set_reg(dst, Value::from_bool(locked));
-            Ok(DispatchResult::Continue)
-        }
-
         // =================================================================
         // Raw byte/word leaves (0x53-0x58) — the table-authoritative route
         // for mem_raw's load/store over Int addresses (mirrors the legacy
@@ -4370,15 +3404,6 @@ unsafe {
 
         // TimeSleepMillis (0x76) — millisecond sleep; same (duration)-only
         // operand shape as TimeSleepNanos (0x73).
-        Some(SystemSubOpcode::TimeSleepMillis) => {
-            let ms_reg = read_reg(state)?;
-            let ms = state.get_reg(ms_reg).as_integer_compatible();
-            if ms > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(ms as u64));
-            }
-            Ok(DispatchResult::Continue)
-        }
-
         // =================================================================
         // Allocator-internal realloc (0xA4) — the 4-arg
         // `cbgr_realloc(ptr, old_size, new_size, align)` form used by
@@ -4396,88 +3421,6 @@ unsafe {
         // `ptr + old_size` (AOT).  See the SystemSubOpcode::CbgrRealloc
         // doc comment.
         // =================================================================
-        Some(SystemSubOpcode::CbgrRealloc) => {
-            let dst = read_reg(state)?;
-            let ptr_reg = read_reg(state)?;
-            let old_size_reg = read_reg(state)?;
-            let new_size_reg = read_reg(state)?;
-            let align_reg = read_reg(state)?;
-            let old_ptr = state.get_reg(ptr_reg).as_integer_compatible();
-            let old_size = state.get_reg(old_size_reg).as_integer_compatible();
-            let new_size = state.get_reg(new_size_reg).as_integer_compatible();
-            let raw_align = state.get_reg(align_reg).as_integer_compatible();
-            const MAX_ALLOC: i64 = verum_common::layout::MAX_ALLOCATION_SIZE as i64;
-            if new_size <= 0 || new_size > MAX_ALLOC || raw_align <= 0 || raw_align > 4096 {
-                let err_val = make_alloc_err(state, ALLOC_ERR_INVALID_SIZE, new_size)?;
-                state.set_reg(dst, err_val);
-                return Ok(DispatchResult::Continue);
-            }
-            // T0451: header-model allocation, same ONE authority as
-            // CbgrAlloc.  The copy is driven by the caller-supplied
-            // `old_size` (not the header's) so this keeps working for an
-            // old pointer that never came from the bridge — e.g. bytecode
-            // that reallocs a block obtained some other way.
-            let legacy = cbgr_legacy_alloc();
-            let ptr = if legacy {
-                cbgr_legacy_allocate(state, new_size, raw_align, false)
-            } else {
-                cbgr_user_allocate(state, new_size, raw_align)
-            };
-            if ptr == 0 {
-                // The .vr contract is Result<(ptr, gen, epoch), AllocError> —
-                // a bare nil desynced the caller's match (T0463), and an
-                // Err(nil) payload exploded on `e.message()` (T0846).
-                let err_val = make_alloc_err(state, ALLOC_ERR_OUT_OF_MEMORY, new_size)?;
-                state.set_reg(dst, err_val);
-                return Ok(DispatchResult::Continue);
-            }
-            // Preserve min(old, new) bytes from the previous block.
-            if old_ptr != 0 && old_size > 0 {
-                let copy = (old_size.min(new_size)) as usize;
-                // SAFETY: caller-supplied old block; the copy length is
-                // bounded by both the old and the fresh allocation sizes.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        old_ptr as usize as *const u8,
-                        ptr as usize as *mut u8,
-                        copy,
-                    );
-                }
-            }
-            // Release the old block once its contents are safe.  This is a
-            // no-op unless the old pointer was itself a tracked bridge
-            // allocation, so an untracked old pointer keeps the historical
-            // leak-over-double-free behaviour instead of freeing memory we
-            // do not own.
-            if !legacy {
-                cbgr_user_deallocate(state, old_ptr);
-            }
-            let (generation, epoch) = if legacy {
-                (1i64, state.cbgr_epoch as i64)
-            } else {
-                cbgr_header_generation_epoch(ptr)
-            };
-            let tuple_size = 3 * std::mem::size_of::<Value>();
-            let tuple_obj =
-                state
-                    .heap
-                    .alloc_with_init(crate::types::TypeId::TUPLE, tuple_size, |_data| {})?;
-            let tuple_data = tuple_obj.data_ptr() as *mut Value;
-            unsafe {
-                std::ptr::write(tuple_data.add(0), Value::from_i64(ptr as i64));
-                std::ptr::write(tuple_data.add(1), Value::from_i64(generation));
-                std::ptr::write(tuple_data.add(2), Value::from_i64(epoch));
-            }
-            let tuple_val = Value::from_ptr(tuple_obj.as_ptr());
-            let ok_val = super::method_dispatch::make_result_variant(
-                state,
-                verum_common::well_known_types::result_success_tag(),
-                tuple_val,
-            )?;
-            state.set_reg(dst, ok_val);
-            Ok(DispatchResult::Continue)
-        }
-
         // =================================================================
         // Public CBGR bridge (0xA5-0xA7) — the user-pointer API declared
         // in `core/intrinsics/runtime/cbgr.vr`.  The interpreter mirrors
@@ -4490,46 +3433,7 @@ unsafe {
         // making each allocation fully self-describing — deallocation
         // reconstructs the exact Layout with no side tables.
         // =================================================================
-        Some(SystemSubOpcode::CbgrAllocateUser) => {
-            let dst = read_reg(state)?;
-            let size_reg = read_reg(state)?;
-            let align_reg = read_reg(state)?;
-            let raw_size = state.get_reg(size_reg).as_integer_compatible();
-            let raw_align = state.get_reg(align_reg).as_integer_compatible();
-            let user = cbgr_user_allocate(state, raw_size, raw_align);
-            state.set_reg(dst, Value::from_i64(user));
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::CbgrDeallocUser) => {
-            let _dst = read_reg(state)?;
-            let ptr_reg = read_reg(state)?;
-            let user = state.get_reg(ptr_reg).as_integer_compatible();
-            cbgr_user_deallocate(state, user);
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::CbgrReallocUser) => {
-            let dst = read_reg(state)?;
-            let ptr_reg = read_reg(state)?;
-            let new_size_reg = read_reg(state)?;
-            let user = state.get_reg(ptr_reg).as_integer_compatible();
-            let new_size = state.get_reg(new_size_reg).as_integer_compatible();
-            let result = cbgr_user_realloc(state, user, new_size);
-            state.set_reg(dst, Value::from_i64(result));
-            Ok(DispatchResult::Continue)
-        }
-
         // `cbgr_validate<T>(&T) -> Bool` — non-trapping validation.
-        Some(SystemSubOpcode::CbgrValidateBool) => {
-            let dst = read_reg(state)?;
-            let ref_reg = read_reg(state)?;
-            let ref_val = state.get_reg(ref_reg);
-            let verdict = super::cbgr::validate_ref_bool(state, ref_val);
-            state.set_reg(dst, Value::from_bool(verdict));
-            Ok(DispatchResult::Continue)
-        }
-
         // ================================================================
         // Environment access (0x88-0x8A) — T0450.
         //
@@ -4547,45 +3451,6 @@ unsafe {
         // Wire: [dst][name] for get/unset, [dst][name][value] for set, with
         // the `&[Byte]` arguments decoded the same way the name intercept
         // decodes them.
-        Some(SystemSubOpcode::EnvGet) => {
-            let dst = read_reg(state)?;
-            let name_reg = read_reg(state)?;
-            let base = state.reg_base();
-            let name = super::file_runtime::extract_byte_list_arg(state, name_reg.0, base);
-            let key = String::from_utf8_lossy(&name).into_owned();
-            let value = super::env_runtime::env_get_maybe(state, &key)?
-                .expect("env_get_maybe always yields a Maybe value");
-            state.set_reg(dst, value);
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::EnvSet) => {
-            let dst = read_reg(state)?;
-            let name_reg = read_reg(state)?;
-            let value_reg = read_reg(state)?;
-            let base = state.reg_base();
-            let name = super::file_runtime::extract_byte_list_arg(state, name_reg.0, base);
-            let val = super::file_runtime::extract_byte_list_arg(state, value_reg.0, base);
-            let key = String::from_utf8_lossy(&name).into_owned();
-            let value = String::from_utf8_lossy(&val).into_owned();
-            super::env_runtime::env_set_raw(state, &key, &value);
-            let ok = super::env_runtime::env_unit_ok(state)?;
-            state.set_reg(dst, ok);
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(SystemSubOpcode::EnvUnset) => {
-            let dst = read_reg(state)?;
-            let name_reg = read_reg(state)?;
-            let base = state.reg_base();
-            let name = super::file_runtime::extract_byte_list_arg(state, name_reg.0, base);
-            let key = String::from_utf8_lossy(&name).into_owned();
-            super::env_runtime::env_unset_raw(state, &key);
-            let ok = super::env_runtime::env_unit_ok(state)?;
-            state.set_reg(dst, ok);
-            Ok(DispatchResult::Continue)
-        }
-
         // Unimplemented sub-opcodes
         _ => Err(InterpreterError::NotImplemented {
             feature: "ffi_extended sub-opcode",
@@ -4606,7 +3471,7 @@ unsafe {
 /// `PtrIsNull` family used `as_ptr()` alone, which decodes an int-tagged
 /// address as NULL — so `ptr_add(p, 1)` on a cast pointer produced address
 /// 8 and every downstream atomic/deref through it null-faulted.
-fn value_as_addr(v: Value) -> usize {
+pub(super) fn value_as_addr(v: Value) -> usize {
     if v.is_ptr() {
         v.as_ptr::<u8>() as usize
     } else {
@@ -4637,7 +3502,7 @@ fn value_as_addr(v: Value) -> usize {
 /// the module's type index (a no-stdlib module compiled without the
 /// declaring type) — the OLD behaviour, now the exception with a stated
 /// reason instead of the rule.
-fn make_alloc_err(
+pub(super) fn make_alloc_err(
     state: &mut InterpreterState,
     variant_tag: u32,
     field_value: i64,
@@ -4661,10 +3526,10 @@ fn make_alloc_err(
 /// `AllocError` variant tags, by declaration order in
 /// `core/mem/allocator.vr` (`OutOfMemory | InvalidSize |
 /// InvalidAlignment | ...`).
-const ALLOC_ERR_OUT_OF_MEMORY: u32 = 0;
-const ALLOC_ERR_INVALID_SIZE: u32 = 1;
+pub(super) const ALLOC_ERR_OUT_OF_MEMORY: u32 = 0;
+pub(super) const ALLOC_ERR_INVALID_SIZE: u32 = 1;
 
-fn cbgr_user_allocate(state: &mut InterpreterState, raw_size: i64, raw_align: i64) -> i64 {
+pub(super) fn cbgr_user_allocate(state: &mut InterpreterState, raw_size: i64, raw_align: i64) -> i64 {
     use verum_common::layout as l;
     const MAX_ALLOC: i64 = verum_common::layout::MAX_ALLOCATION_SIZE as i64;
     let hdr = l::ALLOCATION_HEADER_SIZE as usize;
@@ -4724,7 +3589,7 @@ fn cbgr_user_allocate(state: &mut InterpreterState, raw_size: i64, raw_align: i6
 /// binary — run the suite twice, once with the switch — rather than
 /// requiring a second build of the unmodified tree.  Read once and cached;
 /// the header model is the default.
-fn cbgr_legacy_alloc() -> bool {
+pub(super) fn cbgr_legacy_alloc() -> bool {
     static LEGACY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *LEGACY.get_or_init(|| {
         std::env::var("VERUM_CBGR_LEGACY_ALLOC").map(|v| v == "1").unwrap_or(false)
@@ -4733,7 +3598,7 @@ fn cbgr_legacy_alloc() -> bool {
 
 /// Pre-T0451 raw allocation, retained solely as the kill-switch path (see
 /// [`cbgr_legacy_alloc`]).  Returns the user address or 0.
-fn cbgr_legacy_allocate(
+pub(super) fn cbgr_legacy_allocate(
     state: &mut InterpreterState,
     raw_size: i64,
     raw_align: i64,
@@ -4770,7 +3635,7 @@ fn cbgr_legacy_allocate(
 /// the reported pair and the in-memory header cannot drift (T0451).  Field
 /// offsets come from `verum_common::layout` — the same constants every
 /// other header consumer reads — never magic numbers.
-fn cbgr_header_generation_epoch(user: i64) -> (i64, i64) {
+pub(super) fn cbgr_header_generation_epoch(user: i64) -> (i64, i64) {
     use verum_common::layout as l;
     let header_addr = user as usize - l::ALLOCATION_HEADER_SIZE as usize;
     // SAFETY: `user` is a pointer just returned by `cbgr_user_allocate`,
@@ -4835,7 +3700,7 @@ pub(super) fn cbgr_user_deallocate(state: &mut InterpreterState, user: i64) {
 /// Reallocate a bridge allocation to `new_size`, preserving
 /// `min(old, new)` bytes.  Returns the new user pointer, or 0 with the
 /// original allocation untouched on failure.
-fn cbgr_user_realloc(state: &mut InterpreterState, user: i64, new_size: i64) -> i64 {
+pub(super) fn cbgr_user_realloc(state: &mut InterpreterState, user: i64, new_size: i64) -> i64 {
     use verum_common::layout as l;
     let hdr = l::ALLOCATION_HEADER_SIZE as usize;
     if user <= 0 || new_size <= 0 || (user as usize) < hdr {
@@ -5221,7 +4086,7 @@ pub(in super::super) fn errno_to_string(errno: i32) -> String {
 
 /// Get the current platform errno/last-error code.
 #[inline]
-fn get_platform_errno() -> i32 {
+pub(super) fn get_platform_errno() -> i32 {
     #[cfg(unix)]
     {
         // Use std::io::Error::last_os_error() which is cross-platform within Unix
@@ -5265,7 +4130,7 @@ fn memprot_to_win_protect(prot_flags: i32) -> u32 {
 /// fairness on the same key. The implementation deliberately does
 /// not call into the kernel — it stays pure-Rust so cross-build /
 /// no-libc invariants are preserved.
-mod futex_park {
+pub(super) mod futex_park {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
     use std::sync::{Arc, Condvar, Mutex, OnceLock};
@@ -5399,158 +4264,3 @@ mod futex_park {
     }
 }
 
-/// T0110 — the Tier-0 Mach arms must never fake success.
-///
-/// Every test asserts an OBSERVED behaviour of `ffi_extended_body`: what the
-/// handler returns, and what it leaves in the destination register. All of
-/// them failed against the pre-fix arms, which reported `Continue` after
-/// fabricating a value (a `std::alloc` block for `mach_vm_allocate`, an
-/// incrementing fake handle for `mach_sem_create`, the string "success" for
-/// EVERY code from `mach_error_string`) or after writing nothing at all.
-#[cfg(test)]
-mod mach_arms_never_fake_success {
-    use super::*;
-    use crate::instruction::Reg;
-    use crate::module::{FunctionDescriptor, FunctionId, VbcModule};
-    use std::sync::Arc;
-
-    const MACH_SUB_OPCODES: &[SystemSubOpcode] = &[
-        SystemSubOpcode::MachVmAllocate,
-        SystemSubOpcode::MachVmDeallocate,
-        SystemSubOpcode::MachVmProtect,
-        SystemSubOpcode::MachSemCreate,
-        SystemSubOpcode::MachSemDestroy,
-        SystemSubOpcode::MachSemSignal,
-        SystemSubOpcode::MachSemWait,
-        SystemSubOpcode::MachErrorString,
-        SystemSubOpcode::MachSleepUntil,
-    ];
-
-    /// An interpreter positioned at `operands`, with one frame of 16
-    /// registers, ready for `ffi_extended_body` to decode from.
-    ///
-    /// The operand registers hold plausible INTEGER arguments (a size, a
-    /// flag, a protection mask) rather than the uninitialised nil a fresh
-    /// frame starts with. That matters for the before/after measurement:
-    /// with nil arguments the pre-fix `MachVmAllocate` panicked inside
-    /// `Value::as_i64` and the tests would have "failed" on a crash instead
-    /// of on the fabricated answer they exist to catch.
-    fn state_reading(operands: &[u8]) -> InterpreterState {
-        let mut module = VbcModule::new("t0110_mach".to_string());
-        let name = module.strings.intern("t0110_mach_probe");
-        module.bytecode.extend_from_slice(operands);
-        module.add_function(FunctionDescriptor::new(name));
-
-        let mut state = InterpreterState::new(Arc::new(module));
-        state
-            .call_stack
-            .push_frame(FunctionId(0), 16, 0, Reg(0))
-            .expect("probe frame");
-        state.registers.push_frame(16);
-        for (reg, arg) in [(2u16, 4096i64), (3, 1), (4, 3)] {
-            state.set_reg(Reg(reg), Value::from_i64(arg));
-        }
-        state
-    }
-
-    /// Four operand bytes cover the widest arm (`MachVmProtect`); the
-    /// narrower ones simply stop earlier.
-    fn run(sub_op: SystemSubOpcode) -> (InterpreterState, InterpreterResult<DispatchResult>) {
-        let mut state = state_reading(&[1u8, 2, 3, 4]);
-        let result = ffi_extended_body(&mut state, sub_op as u8);
-        (state, result)
-    }
-
-    /// The whole family refuses, and each refusal names ITSELF — a caller
-    /// that gets "not implemented" has to know which of the nine failed.
-    #[test]
-    fn every_mach_sub_opcode_reports_not_implemented_naming_itself() {
-        for &sub_op in MACH_SUB_OPCODES {
-            let (_state, result) = run(sub_op);
-            let err = result.expect_err("a Mach op with no binding must not report success");
-            let text = err.to_string();
-            let intrinsic = sub_op.meta().mnemonic.to_lowercase();
-            assert!(
-                text.contains(&intrinsic),
-                "the diagnostic must name the operation that failed; {:?} said: {text}",
-                sub_op
-            );
-            assert!(
-                text.contains("core.sys.darwin.mach"),
-                "the diagnostic must name the binding that works; {:?} said: {text}",
-                sub_op
-            );
-        }
-    }
-
-    /// `mach_error_string` answered the string "success" for every code,
-    /// including failures — the one arm that reported the OPPOSITE of what
-    /// happened rather than merely skipping work.
-    #[test]
-    fn mach_error_string_never_answers_success_for_a_failure_code() {
-        let (state, result) = run(SystemSubOpcode::MachErrorString);
-        assert!(
-            result.is_err(),
-            "mach_error_string must not describe an unknown KernReturn"
-        );
-        let dst = state.get_reg(Reg(1));
-        assert!(
-            !dst.is_small_string() && !dst.is_ptr(),
-            "no description may reach the destination register; it holds {dst:?}"
-        );
-    }
-
-    /// The destination register must be left ALONE. Pre-fix, two arms wrote
-    /// a fabricated value into it (a heap pointer, a fake semaphore handle)
-    /// that the caller would have used as a Mach result.
-    #[test]
-    fn no_mach_arm_writes_a_fabricated_value_to_its_destination() {
-        for &sub_op in MACH_SUB_OPCODES {
-            let mut state = state_reading(&[1u8, 2, 3, 4]);
-            let sentinel = Value::from_i64(0x5EED);
-            state.set_reg(Reg(1), sentinel);
-            let _ = ffi_extended_body(&mut state, sub_op as u8);
-            // Read the value WITHOUT `as_i64`: pre-fix, three of these arms
-            // left a pointer or a string here, and the panicking accessor
-            // would have hidden what was actually written.
-            let after = state.get_reg(Reg(1));
-            assert!(
-                after.is_int() && after.as_i64() == 0x5EED,
-                "{:?} wrote to the destination register instead of failing; it now holds {after:?}",
-                sub_op
-            );
-        }
-    }
-
-    /// The operand cursor must end where the encoder said the instruction
-    /// ends, whatever the caller does with the error — otherwise a caught
-    /// error would leave the decoder mid-instruction.
-    ///
-    /// Unlike its siblings this one also held BEFORE the fix (the stub arms
-    /// consumed their operands too). It is here to guard the new failure
-    /// path, where returning `Err` early — the obvious way to write these
-    /// arms — would silently break the invariant.
-    #[test]
-    fn every_mach_arm_consumes_exactly_its_operands_before_failing() {
-        for (sub_op, operand_count) in [
-            (SystemSubOpcode::MachVmAllocate, 3u32),
-            (SystemSubOpcode::MachVmDeallocate, 3),
-            (SystemSubOpcode::MachVmProtect, 4),
-            (SystemSubOpcode::MachSemCreate, 2),
-            (SystemSubOpcode::MachSemDestroy, 2),
-            (SystemSubOpcode::MachSemSignal, 2),
-            (SystemSubOpcode::MachSemWait, 2),
-            (SystemSubOpcode::MachErrorString, 2),
-            (SystemSubOpcode::MachSleepUntil, 2),
-        ] {
-            let mut state = state_reading(&[1u8, 2, 3, 4]);
-            let _ = ffi_extended_body(&mut state, sub_op as u8);
-            assert_eq!(
-                state.pc(),
-                operand_count,
-                "{:?} must consume exactly {operand_count} operand bytes before failing",
-                sub_op
-            );
-        }
-    }
-}

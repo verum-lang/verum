@@ -9,7 +9,8 @@ use verum_llvm::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, Fun
 use verum_llvm::{AtomicOrdering, AtomicRMWBinOp, FloatPredicate, IntPredicate};
 use verum_vbc::instruction::{
     ArithSubOpcode, AtomicRmwOp, BinaryFloatOp, BinaryGenericOp, BinaryIntOp, BitwiseOp,
-    CmpSubOpcode, CompareOp, SystemSubOpcode, FloatToIntMode, Instruction, MathSubOpcode, Reg,
+    CmpSubOpcode, CompareOp, SystemSubOpcode, FloatToIntMode, Instruction, MachSubOpcode,
+    MathSubOpcode, Reg, SyncSubOpcode, SysSubOpcode, TimeSubOpcode,
     SimdSubOpcode, UnaryFloatOp, UnaryIntOp,
 };
 use verum_vbc::module::{CType, ConstId, Constant, FfiSymbolId, FunctionId};
@@ -6222,6 +6223,10 @@ pub fn lower_instruction<'ctx>(
         // FFI Extended Operations (0xBC)
         // ====================================================================
         Instruction::FfiExtended { sub_op, operands } => lower_ffi_extended(ctx, *sub_op, operands),
+        Instruction::TimeExtended { sub_op, operands } => lower_time_extended(ctx, *sub_op, operands),
+        Instruction::SysExtended { sub_op, operands } => lower_sys_extended(ctx, *sub_op, operands),
+        Instruction::MachExtended { sub_op, operands } => lower_mach_extended(ctx, *sub_op, operands),
+        Instruction::SyncExtended { sub_op, operands } => lower_sync_extended(ctx, *sub_op, operands),
 
         // ====================================================================
         // Exception Handling Operations (0xD0-0xD3)
@@ -23890,6 +23895,7 @@ fn lower_cbgr_extended<'ctx>(
     sub_op: u8,
     operands: &[u8],
 ) -> Result<()> {
+    let mut ffi = FfiLowering::new(ctx.llvm_context());
     match sub_op {
         0x0B => {
             // RefListElement — build a plain element pointer into a
@@ -25635,88 +25641,576 @@ fn lower_cbgr_extended<'ctx>(
         // ===================================================================
         // Allocator primitives (0x60-0x63) — runtime-routed mallocs.
         // ===================================================================
+        // ===================================================================
+        // Allocator + public bridge (0x60-0x6A) — T0852: migrated here
+        // from lower_ffi_extended (SystemSubOpcode::Cbgr*).  The old
+        // 0x60-0x63 arms here were dead simplified stubs (1-arg
+        // verum_cbgr_alloc) that nothing ever emitted.
+        // ===================================================================
         0x60 | 0x61 => {
-            // Alloc(0x60) / AllocZeroed(0x61) — allocate `size` bytes.
-            // verum_cbgr_alloc{,_zeroed}(size: i64) -> ptr
+            // The FULL .vr contract, at Tier 1 exactly as at Tier 0:
+            //
+            //   cbgr_alloc(size, align)
+            //       -> Result<(&unsafe Byte, UInt32, UInt16), AllocError>
+            //
+            // The previous arm returned the raw pointer with a comment
+            // reasoning that "the stdlib allocator wrapper handles the
+            // packaging on top" — describing a world that no longer
+            // existed: this intrinsic IS the replacement for that
+            // wrapper, so nothing packaged anything, and every caller
+            // that matched on the Result (Shared.new, Heap.new — every
+            // allocation in the language) read the raw pointer AS a
+            // variant. GetVariantData then dereferenced offset 24
+            // INSIDE the fresh block, the "payload" unpacked to
+            // garbage, and ptr_write faulted — the single crashing
+            // frame behind 34 darwin autopsies (T0844).
+            //
+            // Both allocating sub-ops share the arm because the
+            // allocator zeroes every block: "zeroed" is not a second
+            // allocator, it is the only one.
+            if operands.len() < 3 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let size_reg = op_reg(operands, 1);
+            let align_reg = op_reg(operands, 2);
+            let i64_ty = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let builder = ctx.builder();
+            let runtime = RuntimeLowering::new(ctx.llvm_context());
+
+            let size_val = as_i64(ctx, ctx.get_register(size_reg)?, "cbgr_alloc_size")?;
+            let align_val = as_i64(ctx, ctx.get_register(align_reg)?, "cbgr_alloc_align")?;
+
+            let current_fn = builder
+                .get_insert_block()
+                .and_then(|b| b.get_parent())
+                .or_internal("cbgr_alloc: no insert block/function")?;
+            let alloc_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_go");
+            let err_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_err");
+            let ok_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_ok");
+            let done_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_done");
+
+            // Validation mirrors the Tier-0 handler bit for bit:
+            // 0 < size <= MAX_ALLOCATION_SIZE, 0 < align <= 4096,
+            // align a power of two.
+            let zero = i64_ty.const_zero();
+            let max_alloc =
+                i64_ty.const_int(verum_common::layout::MAX_ALLOCATION_SIZE as u64, false);
+            let size_pos = builder
+                .build_int_compare(IntPredicate::SGT, size_val, zero, "size_pos")
+                .or_llvm_err()?;
+            let size_max = builder
+                .build_int_compare(IntPredicate::SLE, size_val, max_alloc, "size_le_max")
+                .or_llvm_err()?;
+            let align_pos = builder
+                .build_int_compare(IntPredicate::SGT, align_val, zero, "align_pos")
+                .or_llvm_err()?;
+            let align_max = builder
+                .build_int_compare(
+                    IntPredicate::SLE,
+                    align_val,
+                    i64_ty.const_int(4096, false),
+                    "align_le_max",
+                )
+                .or_llvm_err()?;
+            let align_m1 = builder
+                .build_int_sub(align_val, i64_ty.const_int(1, false), "align_m1")
+                .or_llvm_err()?;
+            let and = builder
+                .build_and(align_val, align_m1, "align_and")
+                .or_llvm_err()?;
+            let pow2 = builder
+                .build_int_compare(IntPredicate::EQ, and, zero, "align_pow2")
+                .or_llvm_err()?;
+            let v1 = builder.build_and(size_pos, size_max, "v1").or_llvm_err()?;
+            let v2 = builder.build_and(align_pos, align_max, "v2").or_llvm_err()?;
+            let v3 = builder.build_and(v1, v2, "v3").or_llvm_err()?;
+            let valid = builder.build_and(v3, pow2, "valid").or_llvm_err()?;
+            builder
+                .build_conditional_branch(valid, alloc_bb, err_bb)
+                .or_llvm_err()?;
+
+            // Err — both for rejected arguments and for OOM, matching
+            // the Tier-0 handler: `Err(AllocError.InvalidSize{size})`,
+            // a real two-level variant (the OOM leg is unreachable in
+            // practice — verum_checked_malloc aborts — so the rejected
+            // arguments are what this arm actually reports).
+            builder.position_at_end(err_bb);
+            let err_int = build_alloc_err_value(ctx, 1, size_val, "cbgr_err")?;
+            let builder = ctx.builder();
+            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
+            let err_end_bb = builder
+                .get_insert_block()
+                .or_internal("cbgr_alloc: err block vanished")?;
+
+            // Allocate through the ONE aligned body.
+            builder.position_at_end(alloc_bb);
+            let ptr_ty = ctx.types().ptr_type();
+            let alloc_fn = module
+                .get_function("verum_cbgr_allocate_aligned")
+                .unwrap_or_else(|| {
+                    let fn_ty = ptr_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
+                    module.add_function("verum_cbgr_allocate_aligned", fn_ty, None)
+                });
+            let ptr = builder
+                .build_call(alloc_fn, &[size_val.into(), align_val.into()], "cbgr_alloc_ptr")
+                .or_llvm_err()?
+                .basic_value_or("cbgr_alloc returned no value")?
+                .into_pointer_value();
+            let is_null = builder
+                .build_is_null(ptr, "cbgr_alloc_oom")
+                .or_llvm_err()?;
+            builder
+                .build_conditional_branch(is_null, err_bb, ok_bb)
+                .or_llvm_err()?;
+
+            // Ok((ptr, gen, epoch)) — gen and epoch READ BACK from the
+            // header the allocator wrote, so tuple and header cannot
+            // drift.
+            builder.position_at_end(ok_bb);
+            let (generation, epoch) = runtime.lower_header_gen_epoch(builder, ptr)?;
+            let ptr_int = builder
+                .build_ptr_to_int(ptr, i64_ty, "cbgr_user_int")
+                .or_llvm_err()?;
+            let tuple_ptr = runtime.lower_pack_typed(
+                builder,
+                module,
+                &[ptr_int, generation, epoch],
+                verum_vbc::types::TypeId::TUPLE.0,
+            )?;
+            let tuple_int = builder
+                .build_ptr_to_int(tuple_ptr, i64_ty, "cbgr_tuple_int")
+                .or_llvm_err()?;
+            let ok_variant = runtime.lower_make_variant(
+                builder,
+                module,
+                verum_common::well_known_types::result_success_tag(),
+                1,
+            )?;
+            runtime.lower_set_variant_data(builder, ok_variant, 0, tuple_int)?;
+            let ok_int = builder
+                .build_ptr_to_int(ok_variant, i64_ty, "cbgr_ok_int")
+                .or_llvm_err()?;
+            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
+            let ok_end_bb = builder
+                .get_insert_block()
+                .or_internal("cbgr_alloc: ok block vanished")?;
+
+            builder.position_at_end(done_bb);
+            let result = builder
+                .build_phi(i64_ty, "cbgr_alloc_result")
+                .or_llvm_err()?;
+            result.add_incoming(&[(&err_int, err_end_bb), (&ok_int, ok_end_bb)]);
+            let result_val = result.as_basic_value().into_int_value();
+            ctx.set_register(dst, result_val.into());
+            ctx.mark_variant_register(dst);
+            ctx.set_obj_alloc_size(dst, RuntimeLowering::OBJECT_HEADER_SIZE + 8 + 8);
+            Ok(())
+        }
+        0x62 => {
+            if operands.len() < 4 {
+                return Ok(());
+            }
+            let _dst = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let dealloc_fn = module
+                .get_function("verum_cbgr_deallocate")
+                .unwrap_or_else(|| {
+                    let fn_ty = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
+                    module.add_function("verum_cbgr_deallocate", fn_ty, None)
+                });
+            let raw = ctx.get_register(ptr_reg)?;
+            let ptr_val = as_ptr(ctx, raw, "cbgr_dealloc_ptr")?;
+            ctx.builder()
+                .build_call(dealloc_fn, &[ptr_val.into()], "")
+                .or_llvm_err()?;
+            let _ = i64_ty;
+            Ok(())
+        }
+
+        0x63 => {
+            // Format: dst_ptr:reg, size:reg
+            //
+
+            // Volatile memset to 0 — survives every LLVM optimisation
+            // pass. Used to zeroise secret material (key schedules,
+            // AEAD tags, PSK binders) right before the storage leaves
+            // scope. The ordinary `CMemset` opcode emits a
+            // non-volatile call which `MemCpyOptPass` /
+            // `DeadStoreEliminationPass` would elide; that's a
+            // catastrophic security bug, so we route the
+            // security-critical zero through a separate opcode.
+            //
+
+            // Spec: tls-quic-security-audit §2 Action #2 ("LLVM-IR
+            // audit of zeroise memset preservation").
+            if operands.len() < 2 {
+                return Err(LlvmLoweringError::internal(
+                    "CSecureZero: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let size_reg = op_reg(operands, 1);
+
+            let dst_ptr = as_ptr(ctx, ctx.get_register(dst_reg)?, "dst_ptr")?;
+            let size = as_i64(ctx, ctx.get_register(size_reg)?, "size")?;
+
+            let module = ctx.get_module();
+            ffi.lower_secure_zero(ctx.builder(), &module, dst_ptr, size)?;
+            Ok(())
+        }
+
+        0x64 => {
+            // Same contract, same construction, same reasons as the
+            // CbgrAlloc arm above: Result<(ptr, gen, epoch), AllocError>,
+            // built at Tier 1 exactly as the Tier-0 handler builds it
+            // (which was itself repaired under T0463 after a bare nil
+            // desynced the caller's match). The previous arm returned
+            // the raw pointer AND read only (ptr, new_size), silently
+            // dropping both old_size and align.
+            if operands.len() < 5 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let old_size_reg = op_reg(operands, 2);
+            let new_size_reg = op_reg(operands, 3);
+            let align_reg = op_reg(operands, 4);
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let module = ctx.get_module();
+            let builder = ctx.builder();
+            let runtime = RuntimeLowering::new(ctx.llvm_context());
+
+            let old_ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "cbgr_realloc_old")?;
+            let old_size = as_i64(ctx, ctx.get_register(old_size_reg)?, "cbgr_realloc_oldsz")?;
+            let new_size = as_i64(ctx, ctx.get_register(new_size_reg)?, "cbgr_realloc_newsz")?;
+            let align_val = as_i64(ctx, ctx.get_register(align_reg)?, "cbgr_realloc_align")?;
+
+            let current_fn = builder
+                .get_insert_block()
+                .and_then(|b| b.get_parent())
+                .or_internal("cbgr_realloc: no insert block/function")?;
+            let go_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_go");
+            let err_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_err");
+            let ok_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_ok");
+            let done_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_done");
+
+            let zero = i64_ty.const_zero();
+            let max_alloc =
+                i64_ty.const_int(verum_common::layout::MAX_ALLOCATION_SIZE as u64, false);
+            let size_pos = builder
+                .build_int_compare(IntPredicate::SGT, new_size, zero, "re_size_pos")
+                .or_llvm_err()?;
+            let size_max = builder
+                .build_int_compare(IntPredicate::SLE, new_size, max_alloc, "re_size_max")
+                .or_llvm_err()?;
+            let align_pos = builder
+                .build_int_compare(IntPredicate::SGT, align_val, zero, "re_align_pos")
+                .or_llvm_err()?;
+            let align_max = builder
+                .build_int_compare(
+                    IntPredicate::SLE,
+                    align_val,
+                    i64_ty.const_int(4096, false),
+                    "re_align_max",
+                )
+                .or_llvm_err()?;
+            let v1 = builder.build_and(size_pos, size_max, "re_v1").or_llvm_err()?;
+            let v2 = builder.build_and(align_pos, align_max, "re_v2").or_llvm_err()?;
+            let valid = builder.build_and(v1, v2, "re_valid").or_llvm_err()?;
+            builder
+                .build_conditional_branch(valid, go_bb, err_bb)
+                .or_llvm_err()?;
+
+            builder.position_at_end(err_bb);
+            let err_int = build_alloc_err_value(ctx, 1, new_size, "cbgr_re_err")?;
+            let builder = ctx.builder();
+            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
+            let err_end_bb = builder
+                .get_insert_block()
+                .or_internal("cbgr_realloc: err block vanished")?;
+
+            builder.position_at_end(go_bb);
+            let alloc_fn = module
+                .get_function("verum_cbgr_allocate_aligned")
+                .unwrap_or_else(|| {
+                    let fn_ty = ptr_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
+                    module.add_function("verum_cbgr_allocate_aligned", fn_ty, None)
+                });
+            let new_ptr = builder
+                .build_call(alloc_fn, &[new_size.into(), align_val.into()], "cbgr_re_new")
+                .or_llvm_err()?
+                .basic_value_or("cbgr_realloc alloc returned no value")?
+                .into_pointer_value();
+            let is_null = builder
+                .build_is_null(new_ptr, "cbgr_re_oom")
+                .or_llvm_err()?;
+            builder
+                .build_conditional_branch(is_null, err_bb, ok_bb)
+                .or_llvm_err()?;
+
+            builder.position_at_end(ok_bb);
+            // copy min(old_size, new_size) then release the old block.
+            let old_lt = builder
+                .build_int_compare(IntPredicate::SLT, old_size, new_size, "re_old_lt")
+                .or_llvm_err()?;
+            let copy_len = builder
+                .build_select(old_lt, old_size, new_size, "re_copy_len")
+                .or_llvm_err()?
+                .into_int_value();
+            let memcpy_fn = module.get_function("memcpy").unwrap_or_else(|| {
+                let fn_ty = ptr_ty
+                    .fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
+                module.add_function("memcpy", fn_ty, None)
+            });
+            builder
+                .build_call(
+                    memcpy_fn,
+                    &[new_ptr.into(), old_ptr.into(), copy_len.into()],
+                    "",
+                )
+                .or_llvm_err()?;
+            let dealloc_fn = module
+                .get_function("verum_cbgr_deallocate")
+                .unwrap_or_else(|| {
+                    let fn_ty = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
+                    module.add_function("verum_cbgr_deallocate", fn_ty, None)
+                });
+            builder
+                .build_call(dealloc_fn, &[old_ptr.into()], "")
+                .or_llvm_err()?;
+            let (generation, epoch) = runtime.lower_header_gen_epoch(builder, new_ptr)?;
+            let ptr_int = builder
+                .build_ptr_to_int(new_ptr, i64_ty, "cbgr_re_user_int")
+                .or_llvm_err()?;
+            let tuple_ptr = runtime.lower_pack_typed(
+                builder,
+                module,
+                &[ptr_int, generation, epoch],
+                verum_vbc::types::TypeId::TUPLE.0,
+            )?;
+            let tuple_int = builder
+                .build_ptr_to_int(tuple_ptr, i64_ty, "cbgr_re_tuple_int")
+                .or_llvm_err()?;
+            let ok_variant = runtime.lower_make_variant(
+                builder,
+                module,
+                verum_common::well_known_types::result_success_tag(),
+                1,
+            )?;
+            runtime.lower_set_variant_data(builder, ok_variant, 0, tuple_int)?;
+            let ok_int = builder
+                .build_ptr_to_int(ok_variant, i64_ty, "cbgr_re_ok_int")
+                .or_llvm_err()?;
+            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
+            let ok_end_bb = builder
+                .get_insert_block()
+                .or_internal("cbgr_realloc: ok block vanished")?;
+
+            builder.position_at_end(done_bb);
+            let result = builder
+                .build_phi(i64_ty, "cbgr_re_result")
+                .or_llvm_err()?;
+            result.add_incoming(&[(&err_int, err_end_bb), (&ok_int, ok_end_bb)]);
+            let result_val = result.as_basic_value().into_int_value();
+            ctx.set_register(dst, result_val.into());
+            ctx.mark_variant_register(dst);
+            ctx.set_obj_alloc_size(dst, RuntimeLowering::OBJECT_HEADER_SIZE + 8 + 8);
+            Ok(())
+        }
+
+        0x65 => {
+            // Format: dst, size, align — the runtime allocate takes only
+            // the size; alignment beyond the header's natural 8/16 is a
+            // documented bridge limitation (see cbgr.vr audit).
             if operands.len() < 2 {
                 return Ok(());
             }
             let dst = op_reg(operands, 0);
-            let size = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "alloc_size")?;
+            let size_reg = op_reg(operands, 1);
             let module = ctx.get_module();
-            let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
-            let extern_name = if sub_op == 0x60 {
-                "verum_cbgr_alloc"
-            } else {
-                "verum_cbgr_alloc_zeroed"
-            };
-            let fn_type = ptr_ty.fn_type(&[i64_ty.into()], false);
-            let f = module
-                .get_function(extern_name)
-                .unwrap_or_else(|| module.add_function(extern_name, fn_type, None));
-            let result = ctx
+            let ptr_ty = ctx.types().ptr_type();
+            let alloc_fn = module.get_function("verum_cbgr_allocate").unwrap_or_else(|| {
+                let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
+                module.add_function("verum_cbgr_allocate", fn_ty, None)
+            });
+            let size_val = as_i64(ctx, ctx.get_register(size_reg)?, "cbgr_user_size")?;
+            let ptr = ctx
                 .builder()
-                .build_call(f, &[size.into()], "alloc")
+                .build_call(alloc_fn, &[size_val.into()], "cbgr_user_ptr")
                 .or_llvm_err()?
-                    .basic_value_or("Alloc: expected return value")?;
-            let ptr_as_i64 = ctx
+                .basic_value_or("cbgr_allocate returned no value")?;
+            // The bridge returns a plain Int address — convert so downstream
+            // integer arithmetic (`p + i`, `p % align`) sees an i64.
+            let as_int = ctx
                 .builder()
-                .build_ptr_to_int(result.into_pointer_value(), i64_ty, "alloc_i64")
+                .build_ptr_to_int(ptr.into_pointer_value(), i64_ty, "cbgr_user_addr")
                 .or_llvm_err()?;
-            ctx.set_register(dst, ptr_as_i64.into());
+            ctx.set_register(dst, as_int.into());
             Ok(())
         }
-        0x62 => {
-            // Dealloc — free a previously-allocated block.
-            // verum_cbgr_dealloc(ptr: ptr, size: i64) -> void
+
+        0x66 => {
+            // Format: dst, ptr
             if operands.len() < 2 {
                 return Ok(());
             }
-            let ptr = ctx.get_register(op_reg(operands, 0))?;
-            let size = if operands.len() >= 2 {
-                as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "dealloc_size")?
-            } else {
-                ctx.types().i64_type().const_zero()
+            let _dst = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let dealloc_fn = module
+                .get_function("verum_cbgr_deallocate")
+                .unwrap_or_else(|| {
+                    let fn_ty = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
+                    module.add_function("verum_cbgr_deallocate", fn_ty, None)
+                });
+            let ptr_val = as_ptr(ctx, ctx.get_register(ptr_reg)?, "cbgr_user_dealloc_ptr")?;
+            ctx.builder()
+                .build_call(dealloc_fn, &[ptr_val.into()], "")
+                .or_llvm_err()?;
+            Ok(())
+        }
+
+        0x67 => {
+            // Format: dst, ptr, new_size
+            if operands.len() < 3 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let new_size_reg = op_reg(operands, 2);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let realloc_fn = module.get_function("verum_cbgr_realloc").unwrap_or_else(|| {
+                let fn_ty = ptr_ty.fn_type(
+                    &[ptr_ty.into(), i64_ty.into(), i64_ty.into()],
+                    false,
+                );
+                module.add_function("verum_cbgr_realloc", fn_ty, None)
+            });
+            let ptr_val = as_ptr(ctx, ctx.get_register(ptr_reg)?, "cbgr_user_realloc_ptr")?;
+            let new_size = as_i64(ctx, ctx.get_register(new_size_reg)?, "cbgr_user_realloc_size")?;
+            // The user-facing surface has no align parameter; its blocks
+            // come from the plain CBGR wrappers, whose alignment is 32.
+            let align_32 = i64_ty.const_int(32, false);
+            let new_ptr = ctx
+                .builder()
+                .build_call(
+                    realloc_fn,
+                    &[ptr_val.into(), new_size.into(), align_32.into()],
+                    "cbgr_user_realloc",
+                )
+                .or_llvm_err()?
+                .basic_value_or("cbgr_realloc returned no value")?;
+            let as_int = ctx
+                .builder()
+                .build_ptr_to_int(new_ptr.into_pointer_value(), i64_ty, "cbgr_user_realloc_addr")
+                .or_llvm_err()?;
+            ctx.set_register(dst, as_int.into());
+            Ok(())
+        }
+
+        0x68 => {
+            // Format: dst, ref.  Tier-2 semantics: an AOT reference that
+            // reaches this op is compiler-checked; the residual dynamic
+            // question is null-ness.  (Full generational validation is the
+            // interpreter's Tier-0 job — see handlers/cbgr.rs.)
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let ref_reg = op_reg(operands, 1);
+            let ptr = as_ptr(ctx, ctx.get_register(ref_reg)?, "cbgr_validate_ref")?;
+            let is_null = ffi.lower_ptr_is_null(ctx.builder(), ptr)?;
+            let one = is_null.get_type().const_int(1, false);
+            let live = ctx
+                .builder()
+                .build_xor(is_null, one, "cbgr_validate_live")
+                .or_llvm_err()?;
+            ctx.set_register(dst, live.into());
+            Ok(())
+        }
+
+        0x69 => {
+            // Format: dst:reg, ptr:reg
+            // get_header_from_ptr(user_ptr) = user_ptr - ALLOCATION_HEADER_SIZE.
+            // FIXED 32-byte back-step (raw i8 GEP), NOT element-scaled like
+            // PtrSub — recovers the CBGR AllocationHeader prefix. Mirrors the
+            // codegen back-pointer arithmetic documented on
+            // `verum_common::layout::ALLOCATION_HEADER_SIZE`.
+            if operands.len() < 2 {
+                return Err(LlvmLoweringError::internal(
+                    "CbgrGetHeader: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
+            let i8_type = ctx.types().i8_type();
+            let neg_off = ctx
+                .types()
+                .i64_type()
+                .const_int(verum_common::layout::ALLOCATION_HEADER_SIZE, false);
+            let neg_off = ctx
+                .builder()
+                .build_int_neg(neg_off, "neg_hdr_off")
+                .or_llvm_err()?;
+            // SAFETY: non-inbounds GEP — the result addresses the header
+            // region, which is a distinct logical object from the
+            // user-data allocation.
+            let header = unsafe {
+                ctx.builder()
+                    .build_gep(i8_type, ptr, &[neg_off], "cbgr_get_header")
+                    .or_llvm_err()?
             };
-            let module = ctx.get_module();
-            let ptr_ty = ctx.types().ptr_type();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = ctx
-                .types()
-                .void_type()
-                .fn_type(&[ptr_ty.into(), i64_ty.into()], false);
-            let f = module
-                .get_function("verum_cbgr_dealloc")
-                .unwrap_or_else(|| module.add_function("verum_cbgr_dealloc", fn_type, None));
-            let ptr_val = as_ptr(ctx, ptr, "dealloc_ptr")?;
-            ctx.builder()
-                .build_call(f, &[ptr_val.into(), size.into()], "")
-                .or_llvm_err()?;
+            ctx.set_register(dst_reg, header.into());
             Ok(())
         }
-        0x63 => {
-            // SecureZero — overwrite a memory region with zeros, in a
-            // way the optimiser can't elide.  Routes through a runtime
-            // extern that uses `volatile` stores under the hood.
-            // verum_cbgr_secure_zero(ptr: ptr, size: i64) -> void
+
+        0x6A => {
+            // Format: dst:reg, ptr:reg
+            // generation = *(u32*)(user_ptr - 32 + GENERATION_OFFSET).
             if operands.len() < 2 {
-                return Ok(());
+                return Err(LlvmLoweringError::internal(
+                    "CbgrGetGeneration: insufficient operands",
+                ));
             }
-            let ptr = ctx.get_register(op_reg(operands, 0))?;
-            let size = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "sz_size")?;
-            let module = ctx.get_module();
-            let ptr_ty = ctx.types().ptr_type();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = ctx
-                .types()
-                .void_type()
-                .fn_type(&[ptr_ty.into(), i64_ty.into()], false);
-            let f = super::error::get_or_declare_function(module, "verum_cbgr_secure_zero", fn_type);
-            let ptr_val = as_ptr(ctx, ptr, "sz_ptr")?;
-            ctx.builder()
-                .build_call(f, &[ptr_val.into(), size.into()], "")
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
+            let i8_type = ctx.types().i8_type();
+            let i32_type = ctx.types().i32_type();
+            let i64_type = ctx.types().i64_type();
+            let off = verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as i64
+                - verum_common::layout::ALLOCATION_HEADER_SIZE as i64;
+            let off_v = i64_type.const_int(off as u64, true);
+            // SAFETY: non-inbounds GEP into the header region preceding
+            // the user allocation; fixed canonical offset.
+            let gen_ptr = unsafe {
+                ctx.builder()
+                    .build_gep(i8_type, ptr, &[off_v], "cbgr_gen_ptr")
+                    .or_llvm_err()?
+            };
+            let gen32 = ctx
+                .builder()
+                .build_load(i32_type, gen_ptr, "cbgr_generation")
+                .or_llvm_err()?
+                .into_int_value();
+            let gen64 = ctx
+                .builder()
+                .build_int_z_extend(gen32, i64_type, "cbgr_generation64")
                 .or_llvm_err()?;
+            ctx.set_register(dst_reg, gen64.into());
             Ok(())
         }
 
@@ -30012,42 +30506,909 @@ fn lower_math_binary_f64<'ctx>(
 ///
 /// This implements zero-cost FFI for AOT compilation by generating direct
 /// LLVM calls and memory operations instead of libffi dynamic dispatch.
-fn lower_ffi_extended<'ctx>(
+/// Lower `Opcode::TimeExtended` — the time family's honest home (T0852).
+/// These arms lived in `lower_ffi_extended` as SystemSubOpcode squatters.
+fn lower_time_extended<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     sub_op: u8,
     operands: &[u8],
 ) -> Result<()> {
-    let sub_opcode = SystemSubOpcode::from_byte(sub_op);
-    let mut ffi = FfiLowering::new(ctx.llvm_context());
-
+    let sub_opcode = TimeSubOpcode::from_byte(sub_op);
     match sub_opcode {
-        // ================================================================
-        // Memory Operations (0x40-0x4F)
-        // ================================================================
-        Some(SystemSubOpcode::CMemcpy) => {
-            // Format: dst_ptr:reg, src_ptr:reg, size:reg
-            if operands.len() < 3 {
+        Some(TimeSubOpcode::MonotonicNanos) => {
+            if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
-                    "CMemcpy: insufficient operands",
+                    "TimeMonotonicNanos: insufficient operands",
                 ));
             }
             let dst_reg = op_reg(operands, 0);
-            let src_reg = op_reg(operands, 1);
-            let size_reg = op_reg(operands, 2);
-
-            let dst_ptr = as_ptr(ctx, ctx.get_register(dst_reg)?, "dst_ptr")?;
-            let src_ptr = as_ptr(ctx, ctx.get_register(src_reg)?, "src_ptr")?;
-            let size = as_i64(ctx, ctx.get_register(size_reg)?, "size")?;
-
             let module = ctx.get_module();
-            ffi.lower_memcpy(ctx.builder(), &module, dst_ptr, src_ptr, size)?;
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = i64_ty.fn_type(&[], false);
+            let time_fn = super::error::get_or_declare_function(module, "verum_time_monotonic_nanos", fn_type);
+            let result = ctx
+                .builder()
+                .build_call(time_fn, &[], "mono_nanos")
+                .or_llvm_err()?
+            .basic_value_or("TimeMonotonicNanos: expected return value")?;
+            ctx.set_register(dst_reg, result);
             Ok(())
         }
 
-        // ================================================================
-        // Atomic read-modify-write (0xBC)
-        // ================================================================
-        Some(SystemSubOpcode::AtomicRmw) => {
+        Some(TimeSubOpcode::RealtimeNanos) => {
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "TimeRealtimeNanos: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = i64_ty.fn_type(&[], false);
+            let time_fn = module
+                .get_function("verum_time_realtime_nanos")
+                .unwrap_or_else(|| module.add_function("verum_time_realtime_nanos", fn_type, None));
+            let result = ctx
+                .builder()
+                .build_call(time_fn, &[], "real_nanos")
+                .or_llvm_err()?
+            .basic_value_or("TimeRealtimeNanos: expected return value")?;
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        Some(TimeSubOpcode::MonotonicRawNanos) => {
+            // On macOS, same as MonotonicNanos; on Linux, CLOCK_MONOTONIC_RAW
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "TimeMonotonicRawNanos: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = i64_ty.fn_type(&[], false);
+            let time_fn = super::error::get_or_declare_function(module, "verum_time_monotonic_nanos", fn_type);
+            let result = ctx
+                .builder()
+                .build_call(time_fn, &[], "raw_nanos")
+                .or_llvm_err()?
+            .basic_value_or("TimeMonotonicRawNanos: expected return value")?;
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        Some(TimeSubOpcode::SleepNanos) => {
+            if operands.is_empty() {
+                return Ok(());
+            }
+            let nanos = ctx.get_register(op_reg(operands, 0))?;
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into()], false);
+            let sleep_fn = module
+                .get_function("verum_time_sleep_nanos")
+                .unwrap_or_else(|| module.add_function("verum_time_sleep_nanos", fn_type, None));
+            ctx.builder()
+                .build_call(sleep_fn, &[nanos.into()], "")
+                .or_llvm_err()?;
+            Ok(())
+        }
+
+        Some(TimeSubOpcode::SleepMillis) => {
+            // Millisecond sleep — scale to ns and reuse the canonical
+            // verum_time_sleep_nanos runtime (single sleep authority).
+            if operands.is_empty() {
+                return Ok(());
+            }
+            let ms = as_i64(ctx, ctx.get_register(op_reg(operands, 0))?, "sleep_ms")?;
+            let i64_ty = ctx.types().i64_type();
+            let ns = ctx
+                .builder()
+                .build_int_mul(ms, i64_ty.const_int(1_000_000, false), "sleep_ms_ns")
+                .or_llvm_err()?;
+            let module = ctx.get_module();
+            let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into()], false);
+            let sleep_fn = module
+                .get_function("verum_time_sleep_nanos")
+                .unwrap_or_else(|| module.add_function("verum_time_sleep_nanos", fn_type, None));
+            ctx.builder()
+                .build_call(sleep_fn, &[ns.into()], "")
+                .or_llvm_err()?;
+            Ok(())
+        }
+
+        Some(TimeSubOpcode::ThreadCpuNanos) | Some(TimeSubOpcode::ProcessCpuNanos) => {
+            // Use monotonic time as fallback for CPU time
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "TimeCpuNanos: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = i64_ty.fn_type(&[], false);
+            let time_fn = super::error::get_or_declare_function(module, "verum_time_monotonic_nanos", fn_type);
+            let result = ctx
+                .builder()
+                .build_call(time_fn, &[], "cpu_nanos")
+                .or_llvm_err()?
+            .basic_value_or("TimeCpuNanos: expected return value")?;
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        _ => {
+            ctx.emit_unimplemented_sub_op("TimeExtended", sub_op);
+            Ok(())
+        }
+    }
+}
+
+/// Lower `Opcode::SysExtended` — the sys family's honest home (T0852).
+/// These arms lived in `lower_ffi_extended` as SystemSubOpcode squatters.
+fn lower_sys_extended<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    sub_op: u8,
+    operands: &[u8],
+) -> Result<()> {
+    let sub_opcode = SysSubOpcode::from_byte(sub_op);
+    match sub_opcode {
+        Some(SysSubOpcode::GetPid) => {
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "SysGetpid: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = i64_ty.fn_type(&[], false);
+            let pid_fn = module
+                .get_function("verum_sys_getpid")
+                .unwrap_or_else(|| module.add_function("verum_sys_getpid", fn_type, None));
+            let result = ctx
+                .builder()
+                .build_call(pid_fn, &[], "getpid")
+                .or_llvm_err()?
+                    .basic_value_or("SysGetpid: expected return value")?;
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        Some(SysSubOpcode::GetTid) => {
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "SysGettid: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = i64_ty.fn_type(&[], false);
+            let tid_fn = module
+                .get_function("verum_sys_gettid")
+                .unwrap_or_else(|| module.add_function("verum_sys_gettid", fn_type, None));
+            let result = ctx
+                .builder()
+                .build_call(tid_fn, &[], "gettid")
+                .or_llvm_err()?
+                    .basic_value_or("SysGettid: expected return value")?;
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        Some(SysSubOpcode::Mmap) => {
+            // mmap(addr, length, prot, flags, fd, offset) -> ptr
+            if operands.len() < 7 {
+                return Err(LlvmLoweringError::internal(
+                    "SysMmap: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = ptr_ty.fn_type(
+                &[
+                    ptr_ty.into(),
+                    i64_ty.into(),
+                    i64_ty.into(),
+                    i64_ty.into(),
+                    i64_ty.into(),
+                    i64_ty.into(),
+                ],
+                false,
+            );
+            let mmap_fn = module
+                .get_function("verum_sys_mmap")
+                .unwrap_or_else(|| module.add_function("verum_sys_mmap", fn_type, None));
+            let args: Vec<BasicMetadataValueEnum> = (1..7)
+                .map(|i| {
+                    ctx.get_register(operands[i] as u16)
+                        .unwrap_or(i64_ty.const_zero().into())
+                        .into()
+                })
+                .collect();
+            let result = ctx
+                .builder()
+                .build_call(mmap_fn, &args, "mmap")
+                .or_llvm_err()?
+                    .basic_value_or("SysMmap: expected return value")?;
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        Some(SysSubOpcode::Munmap) => {
+            // munmap(addr, length)
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let addr = ctx.get_register(op_reg(operands, 0))?;
+            let length = ctx.get_register(op_reg(operands, 1))?;
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = ctx
+                .types()
+                .void_type()
+                .fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+            let munmap_fn = module
+                .get_function("verum_sys_munmap")
+                .unwrap_or_else(|| module.add_function("verum_sys_munmap", fn_type, None));
+            ctx.builder()
+                .build_call(munmap_fn, &[addr.into(), length.into()], "")
+                .or_llvm_err()?;
+            Ok(())
+        }
+
+        Some(SysSubOpcode::Madvise) => {
+            // madvise(addr, length, advice)
+            if operands.len() < 3 {
+                return Ok(());
+            }
+            let addr = ctx.get_register(op_reg(operands, 0))?;
+            let length = ctx.get_register(op_reg(operands, 1))?;
+            let advice = ctx.get_register(op_reg(operands, 2))?;
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = i64_ty.fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into()], false);
+            let madvise_fn = module
+                .get_function("verum_sys_madvise")
+                .unwrap_or_else(|| module.add_function("verum_sys_madvise", fn_type, None));
+            let result = ctx
+                .builder()
+                .build_call(
+                    madvise_fn,
+                    &[addr.into(), length.into(), advice.into()],
+                    "madvise",
+                )
+                .or_llvm_err()?
+                    .basic_value_or("SysMadvise: expected return value")?;
+            // Store result if there's a destination
+            if operands.len() >= 4 {
+                ctx.set_register(op_reg(operands, 3), result);
+            }
+            Ok(())
+        }
+
+        Some(SysSubOpcode::GetEntropy) => {
+            // getentropy(buf, length) -> 0 on success
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "SysGetentropy: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let buf = ctx.get_register(op_reg(operands, 1))?;
+            let length = ctx.get_register(op_reg(operands, 2))?;
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = i64_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+            let getentropy_fn = module
+                .get_function("verum_sys_getentropy")
+                .unwrap_or_else(|| module.add_function("verum_sys_getentropy", fn_type, None));
+            let result = ctx
+                .builder()
+                .build_call(getentropy_fn, &[buf.into(), length.into()], "getentropy")
+                .or_llvm_err()?
+            .basic_value_or("SysGetentropy: expected return value")?;
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        Some(SysSubOpcode::ExecutionTier) => {
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "ExecutionTier: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let aot_code = ctx.types().i64_type().const_int(3, false);
+            ctx.set_register(dst_reg, aot_code.into());
+            Ok(())
+        }
+
+        Some(SysSubOpcode::IsInterpreted) => {
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "IsInterpreted: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let f = ctx.types().bool_type().const_int(0, false);
+            ctx.set_register(dst_reg, f.into());
+            ctx.mark_bool_register(dst_reg);
+            Ok(())
+        }
+
+        Some(SysSubOpcode::EnvGet) => {
+            let mut pos = 0usize;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let name_reg = read_reg_varlen(operands, &mut pos)?;
+            let cstr = emit_env_bytes_to_cstr(ctx, name_reg, "envget_name")?;
+            let module = ctx.get_module();
+            let i8p = ctx.types().ptr_type();
+            let getenv_ty = i8p.fn_type(&[i8p.into()], false);
+            let getenv_fn =
+                super::error::get_or_declare_function(&module, "getenv", getenv_ty);
+            let raw = ctx
+                .builder()
+                .build_call(getenv_fn, &[cstr.into()], "envget_raw")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("getenv returns ptr")?
+                .into_pointer_value();
+            let i64_ty = ctx.types().i64_type();
+            let raw_i = ctx
+                .builder()
+                .build_ptr_to_int(raw, i64_ty, "envget_raw_i")
+                .or_llvm_err()?;
+            let is_null = ctx
+                .builder()
+                .build_int_compare(
+                    IntPredicate::EQ,
+                    raw_i,
+                    i64_ty.const_zero(),
+                    "envget_null",
+                )
+                .or_llvm_err()?;
+            let f = ctx.function();
+            let cx = ctx.llvm_context();
+            let some_bb = cx.append_basic_block(f, "envget_some");
+            let none_bb = cx.append_basic_block(f, "envget_none");
+            let merge_bb = cx.append_basic_block(f, "envget_merge");
+            ctx.builder()
+                .build_conditional_branch(is_null, none_bb, some_bb)
+                .or_llvm_err()?;
+            // Some: text = verum_text_from_cstr(raw); variant tag=1 payload
+            ctx.builder().position_at_end(some_bb);
+            let from_cstr_ty = i64_ty.fn_type(&[i8p.into()], false);
+            let from_cstr = super::error::get_or_declare_function(
+                &module,
+                "verum_text_from_cstr",
+                from_cstr_ty,
+            );
+            // verum_text_from_cstr's canonical ABI is i64(ptr) — the
+            // NaN-boxed Text handle — at every other call site in
+            // this file. The ptr-returning read here aborted native
+            // codegen for ANY program whose bake includes the env
+            // wrapper (T0225; first-wins duplicate-declaration class
+            // T0208).
+            let text_i = ctx
+                .builder()
+                .build_call(from_cstr, &[raw.into()], "envget_text")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("from_cstr returns i64 text handle")?
+                .into_int_value();
+            let some_v = emit_env_variant(ctx, TypeId::MAYBE.0, 1, Some(text_i), "envget_s")?;
+            let some_end = ctx.builder().get_insert_block().unwrap();
+            ctx.builder()
+                .build_unconditional_branch(merge_bb)
+                .or_llvm_err()?;
+            // None: tag=0, no payload
+            ctx.builder().position_at_end(none_bb);
+            let none_v = emit_env_variant(ctx, TypeId::MAYBE.0, 0, None, "envget_n")?;
+            let none_end = ctx.builder().get_insert_block().unwrap();
+            ctx.builder()
+                .build_unconditional_branch(merge_bb)
+                .or_llvm_err()?;
+            ctx.builder().position_at_end(merge_bb);
+            let phi = ctx.builder().build_phi(i64_ty, "envget_out").or_llvm_err()?;
+            phi.add_incoming(&[(&some_v, some_end), (&none_v, none_end)]);
+            ctx.set_register(dst, phi.as_basic_value());
+            Ok(())
+        }
+
+        Some(SysSubOpcode::EnvSet) => {
+            let mut pos = 0usize;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let name_reg = read_reg_varlen(operands, &mut pos)?;
+            let value_reg = read_reg_varlen(operands, &mut pos)?;
+            let name_c = emit_env_bytes_to_cstr(ctx, name_reg, "envset_name")?;
+            let value_c = emit_env_bytes_to_cstr(ctx, value_reg, "envset_val")?;
+            let module = ctx.get_module();
+            let i8p = ctx.types().ptr_type();
+            let i32_ty = ctx.types().i32_type();
+            let setenv_ty = i32_ty.fn_type(&[i8p.into(), i8p.into(), i32_ty.into()], false);
+            let setenv_fn =
+                super::error::get_or_declare_function(&module, "setenv", setenv_ty);
+            ctx.builder()
+                .build_call(
+                    setenv_fn,
+                    &[name_c.into(), value_c.into(), i32_ty.const_int(1, false).into()],
+                    "",
+                )
+                .or_llvm_err()?;
+            let ok = emit_env_variant(ctx, TypeId::RESULT.0, 0, Some(ctx.types().i64_type().const_zero()), "envset_ok")?;
+            ctx.set_register(dst, ok.into());
+            Ok(())
+        }
+
+        Some(SysSubOpcode::EnvUnset) => {
+            let mut pos = 0usize;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let name_reg = read_reg_varlen(operands, &mut pos)?;
+            let name_c = emit_env_bytes_to_cstr(ctx, name_reg, "envunset_name")?;
+            let module = ctx.get_module();
+            let i8p = ctx.types().ptr_type();
+            let i32_ty = ctx.types().i32_type();
+            let unsetenv_ty = i32_ty.fn_type(&[i8p.into()], false);
+            let unsetenv_fn =
+                super::error::get_or_declare_function(&module, "unsetenv", unsetenv_ty);
+            ctx.builder()
+                .build_call(unsetenv_fn, &[name_c.into()], "")
+                .or_llvm_err()?;
+            let ok = emit_env_variant(ctx, TypeId::RESULT.0, 0, Some(ctx.types().i64_type().const_zero()), "envunset_ok")?;
+            ctx.set_register(dst, ok.into());
+            Ok(())
+        }
+
+        Some(SysSubOpcode::RandomU64) => {
+            // Generate random u64 via runtime
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "RandomU64: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = i64_ty.fn_type(&[], false);
+            let rand_fn = module
+                .get_function("verum_random_u64")
+                .unwrap_or_else(|| module.add_function("verum_random_u64", fn_type, None));
+            let result = ctx
+                .builder()
+                .build_call(rand_fn, &[], "random_u64")
+                .or_llvm_err()?
+                    .basic_value_or("RandomU64: expected return value")?;
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        Some(SysSubOpcode::RandomFloat) => {
+            // Generate random float [0.0, 1.0) via runtime
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "RandomFloat: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let f64_ty = ctx.types().f64_type();
+            let fn_type = f64_ty.fn_type(&[], false);
+            let rand_fn = module
+                .get_function("verum_random_float")
+                .unwrap_or_else(|| module.add_function("verum_random_float", fn_type, None));
+            let result = ctx
+                .builder()
+                .build_call(rand_fn, &[], "random_float")
+                .or_llvm_err()?
+                    .basic_value_or("RandomFloat: expected return value")?;
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        _ => {
+            ctx.emit_unimplemented_sub_op("SysExtended", sub_op);
+            Ok(())
+        }
+    }
+}
+
+/// Lower `Opcode::MachExtended` — the mach family's honest home (T0852).
+/// These arms lived in `lower_ffi_extended` as SystemSubOpcode squatters.
+fn lower_mach_extended<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    sub_op: u8,
+    operands: &[u8],
+) -> Result<()> {
+    let sub_opcode = MachSubOpcode::from_byte(sub_op);
+    match sub_opcode {
+        Some(MachSubOpcode::VmAllocate)
+        | Some(MachSubOpcode::VmDeallocate)
+        | Some(MachSubOpcode::VmProtect)
+        | Some(MachSubOpcode::SemCreate)
+        | Some(MachSubOpcode::SemDestroy)
+        | Some(MachSubOpcode::SemSignal)
+        | Some(MachSubOpcode::SemWait)
+        | Some(MachSubOpcode::ErrorString)
+        | Some(MachSubOpcode::SleepUntil) => {
+            // T0110: all nine used to collapse into one arm that stored
+            // `i64 0` into the destination and returned Ok, under the comment
+            // "return 0/null on non-macOS, delegate to runtime on macOS". The
+            // delegation was described and never written — the body had no
+            // macOS branch and read no triple at all.
+            //
+            // Zero is not a neutral placeholder here: zero is KERN_SUCCESS.
+            // Every one of these therefore reported SUCCESS on every target,
+            // macOS included — `mach_vm_allocate` succeeding without
+            // allocating and leaving its address untouched, `mach_sem_wait`
+            // succeeding without waiting, `mach_sem_signal` succeeding
+            // without signalling. A semaphore wait that returns success
+            // without blocking is not a degraded answer; it is undetectable
+            // at the call site.
+            //
+            // Both branches are now loud, and the branch is chosen by the
+            // TARGET triple (per the standing rule that per-platform
+            // decisions in emitted IR never read a host `cfg`) because the
+            // two situations need different diagnoses. Nothing in `core/`
+            // reaches these sub-opcodes: `core/sys/darwin/mach.vr` binds the
+            // same kernel calls through an `@ffi("libSystem.B.dylib")`
+            // `extern` block, which the AOT backend already lowers correctly
+            // — that is the path to use, and implementing a second one here
+            // would also have to settle the documented `Result<_, KernReturn>`
+            // return shape, which NEITHER tier currently produces.
+            let module = ctx.get_module();
+            let mnemonic = sub_opcode.map(|op| format!("{op:?}")).unwrap_or_else(|| "MACH_*".to_string());
+            if target_is_darwin(module) {
+                Err(LlvmLoweringError::unsupported(format!(
+                    "{mnemonic}: the AOT backend has no Tier-1 lowering for the \
+                     Mach kernel sub-opcodes. Call the Mach API through \
+                     `core.sys.darwin.mach` (an `@ffi(\"libSystem.B.dylib\")` \
+                     `extern` block, lowered as an ordinary FFI call) instead \
+                     of the `mach_*` intrinsic (T0110)."
+                )))
+            } else {
+                let triple = module.get_triple();
+                let triple = triple.as_str().to_string_lossy();
+                Err(LlvmLoweringError::unsupported(format!(
+                    "{mnemonic}: Mach is the macOS/Darwin kernel interface and \
+                     target `{triple}` does not provide it. This call cannot \
+                     succeed on this target — guard it behind a Darwin-only \
+                     path rather than compiling it for `{triple}` (T0110)."
+                )))
+            }
+        }
+
+        _ => {
+            ctx.emit_unimplemented_sub_op("MachExtended", sub_op);
+            Ok(())
+        }
+    }
+}
+
+/// Lower `Opcode::SyncExtended` — the sync family's honest home (T0852).
+/// These arms lived in `lower_ffi_extended` as SystemSubOpcode squatters.
+fn lower_sync_extended<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    sub_op: u8,
+    operands: &[u8],
+) -> Result<()> {
+    let sub_opcode = SyncSubOpcode::from_byte(sub_op);
+    match sub_opcode {
+        Some(SyncSubOpcode::FutexWait) => {
+            if operands.len() < 4 {
+                return Err(LlvmLoweringError::internal(
+                    "FutexWait: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let addr_reg = op_reg(operands, 1);
+            let expected_reg = op_reg(operands, 2);
+            let timeout_reg = op_reg(operands, 3);
+
+            let i64_type = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let fn_type =
+                i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+            let wait_fn = module
+                .get_function("verum_futex_wait")
+                .unwrap_or_else(|| module.add_function("verum_futex_wait", fn_type, None));
+
+            let addr_val = as_i64(ctx, ctx.get_register(addr_reg)?, "futex_addr")?;
+            let expected_val = as_i64(ctx, ctx.get_register(expected_reg)?, "futex_expected")?;
+            let timeout_val = as_i64(ctx, ctx.get_register(timeout_reg)?, "futex_timeout")?;
+
+            let result = ctx
+                .builder()
+                .build_call(
+                    wait_fn,
+                    &[addr_val.into(), expected_val.into(), timeout_val.into()],
+                    "futex_wait",
+                )
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .unwrap_or_else(|| i64_type.const_int(0, false).into());
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        Some(SyncSubOpcode::FutexWake) => {
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "FutexWake: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let addr_reg = op_reg(operands, 1);
+            let count_reg = op_reg(operands, 2);
+
+            let i64_type = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+            let wake_fn = module
+                .get_function("verum_futex_wake")
+                .unwrap_or_else(|| module.add_function("verum_futex_wake", fn_type, None));
+
+            let addr_val = as_i64(ctx, ctx.get_register(addr_reg)?, "futex_addr")?;
+            let count_val = as_i64(ctx, ctx.get_register(count_reg)?, "futex_count")?;
+
+            let result = ctx
+                .builder()
+                .build_call(wake_fn, &[addr_val.into(), count_val.into()], "futex_wake")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .unwrap_or_else(|| i64_type.const_int(0, false).into());
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        Some(SyncSubOpcode::SpinlockLock) => {
+            if operands.len() < 2 {
+                return Err(LlvmLoweringError::internal(
+                    "SpinlockLock: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let addr_reg = op_reg(operands, 1);
+
+            let i64_type = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let void_type = ctx.types().void_type();
+            let fn_type = void_type.fn_type(&[i64_type.into()], false);
+            let lock_fn = module
+                .get_function("verum_spinlock_lock")
+                .unwrap_or_else(|| module.add_function("verum_spinlock_lock", fn_type, None));
+
+            let addr_val = as_i64(ctx, ctx.get_register(addr_reg)?, "spinlock_addr")?;
+            ctx.builder()
+                .build_call(lock_fn, &[addr_val.into()], "")
+                .or_llvm_err()?;
+            ctx.set_register(dst_reg, i64_type.const_int(0, false).into());
+            Ok(())
+        }
+
+        Some(SyncSubOpcode::SpinlockTryLock) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "spin_addr")?;
+            let i32_ty = ctx.types().i32_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(addr, ptr_ty, "spin_ptr")
+                .or_llvm_err()?;
+            let cas = ctx
+                .builder()
+                .build_cmpxchg(
+                    p,
+                    i32_ty.const_int(0, false),
+                    i32_ty.const_int(1, false),
+                    AtomicOrdering::SequentiallyConsistent,
+                    AtomicOrdering::SequentiallyConsistent,
+                )
+                .or_llvm_err()?;
+            let ok = ctx
+                .builder()
+                .build_extract_value(cas, 1, "spin_acquired")
+                .or_llvm_err()?;
+            ctx.set_register(dst, ok);
+            Ok(())
+        }
+        Some(SyncSubOpcode::SpinlockUnlock) => {
+            if operands.is_empty() {
+                return Ok(());
+            }
+            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 0))?, "spin_addr")?;
+            let i32_ty = ctx.types().i32_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(addr, ptr_ty, "spin_ptr")
+                .or_llvm_err()?;
+            let st = ctx
+                .builder()
+                .build_store(p, i32_ty.const_int(0, false))
+                .or_llvm_err()?;
+            let _ = st.set_atomic_ordering(AtomicOrdering::SequentiallyConsistent);
+            Ok(())
+        }
+        Some(SyncSubOpcode::SpinlockIsLocked) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "spin_addr")?;
+            let i32_ty = ctx.types().i32_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(addr, ptr_ty, "spin_ptr")
+                .or_llvm_err()?;
+            let ld = ctx
+                .builder()
+                .build_load(i32_ty, p, "spin_load")
+                .or_llvm_err()?;
+            let locked = ctx
+                .builder()
+                .build_int_compare(
+                    IntPredicate::NE,
+                    ld.into_int_value(),
+                    i32_ty.const_int(0, false),
+                    "spin_locked",
+                )
+                .or_llvm_err()?;
+            ctx.set_register(dst, locked.into());
+            Ok(())
+        }
+
+        Some(SyncSubOpcode::WaitgroupNew) => {
+            if operands.is_empty() {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let alloc_fn = module.get_function("verum_cbgr_allocate").unwrap_or_else(|| {
+                let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
+                module.add_function("verum_cbgr_allocate", fn_ty, None)
+            });
+            let p = ctx
+                .builder()
+                .build_call(alloc_fn, &[i64_ty.const_int(8, false).into()], "wg_alloc")
+                .or_llvm_err()?
+                .basic_value_or("wg_alloc returned no value")?;
+            let pp = p.into_pointer_value();
+            ctx.builder()
+                .build_store(pp, i64_ty.const_int(0, false))
+                .or_llvm_err()?;
+            let handle = ctx
+                .builder()
+                .build_ptr_to_int(pp, i64_ty, "wg_handle")
+                .or_llvm_err()?;
+            ctx.set_register(dst, handle.into());
+            Ok(())
+        }
+        Some(SyncSubOpcode::WaitgroupWait) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let wg = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "wg_handle")?;
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(wg, ptr_ty, "wg_ptr")
+                .or_llvm_err()?;
+            // Spin-wait loop: load; ==0 → done; else sleep 100µs and retry.
+            // Correct-first; futex parking is the perf follow-up (task #5).
+            let cur_bb = ctx
+                .builder()
+                .get_insert_block()
+                .ok_or_else(|| LlvmLoweringError::internal("wg wait: no insert block"))?;
+            let function = cur_bb
+                .get_parent()
+                .ok_or_else(|| LlvmLoweringError::internal("wg wait: no parent fn"))?;
+            let loop_bb = ctx.llvm_context().append_basic_block(function, "wg_wait_loop");
+            let done_bb = ctx.llvm_context().append_basic_block(function, "wg_wait_done");
+            ctx.builder().build_unconditional_branch(loop_bb).or_llvm_err()?;
+            ctx.builder().position_at_end(loop_bb);
+            let v = ctx
+                .builder()
+                .build_load(i64_ty, p, "wg_count")
+                .or_llvm_err()?
+                .into_int_value();
+            let is_zero = ctx
+                .builder()
+                .build_int_compare(IntPredicate::EQ, v, i64_ty.const_int(0, false), "wg_zero")
+                .or_llvm_err()?;
+            let sleep_bb = ctx.llvm_context().append_basic_block(function, "wg_wait_sleep");
+            ctx.builder()
+                .build_conditional_branch(is_zero, done_bb, sleep_bb)
+                .or_llvm_err()?;
+            ctx.builder().position_at_end(sleep_bb);
+            let module = ctx.get_module();
+            let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into()], false);
+            let sleep_fn = module
+                .get_function("verum_time_sleep_nanos")
+                .unwrap_or_else(|| module.add_function("verum_time_sleep_nanos", fn_type, None));
+            ctx.builder()
+                .build_call(sleep_fn, &[i64_ty.const_int(100_000, false).into()], "")
+                .or_llvm_err()?;
+            ctx.builder().build_unconditional_branch(loop_bb).or_llvm_err()?;
+            ctx.builder().position_at_end(done_bb);
+            ctx.set_register(dst, i64_ty.const_int(0, false).into());
+            Ok(())
+        }
+        Some(SyncSubOpcode::WaitgroupTryWait) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let wg = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "wg_handle")?;
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(wg, ptr_ty, "wg_ptr")
+                .or_llvm_err()?;
+            let v = ctx
+                .builder()
+                .build_load(i64_ty, p, "wg_count")
+                .or_llvm_err()?
+                .into_int_value();
+            let is_zero = ctx
+                .builder()
+                .build_int_compare(IntPredicate::EQ, v, i64_ty.const_int(0, false), "wg_zero")
+                .or_llvm_err()?;
+            let as_i64_val = ctx
+                .builder()
+                .build_int_z_extend(is_zero, i64_ty, "wg_try")
+                .or_llvm_err()?;
+            ctx.set_register(dst, as_i64_val.into());
+            Ok(())
+        }
+        Some(SyncSubOpcode::WaitgroupDestroy) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let wg = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "wg_handle")?;
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let dealloc_fn = module
+                .get_function("verum_cbgr_deallocate")
+                .unwrap_or_else(|| {
+                    let fn_ty = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
+                    module.add_function("verum_cbgr_deallocate", fn_ty, None)
+                });
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(wg, ptr_ty, "wg_ptr")
+                .or_llvm_err()?;
+            ctx.builder()
+                .build_call(dealloc_fn, &[p.into()], "")
+                .or_llvm_err()?;
+            ctx.set_register(dst, i64_ty.const_int(0, false).into());
+            Ok(())
+        }
+
+        Some(SyncSubOpcode::AtomicRmw) => {
             // Format: dst:reg, ptr:reg, val:reg, op:u8, size:u8
             //
             // The Tier-0 twin runs a hardware RMW (or, for NaN-boxed
@@ -30142,6 +31503,177 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        Some(SyncSubOpcode::TlsGetBase) => {
+            if operands.is_empty() {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let slots_ty = i64_ty.array_type(256);
+            let global = module.get_global("__verum_tls_slots").unwrap_or_else(|| {
+                let g = module.add_global(slots_ty, None, "__verum_tls_slots");
+                g.set_thread_local(true);
+                g.set_initializer(&slots_ty.const_zero());
+                g
+            });
+            let addr = ctx
+                .builder()
+                .build_ptr_to_int(global.as_pointer_value(), i64_ty, "tls_base")
+                .or_llvm_err()?;
+            ctx.set_register(dst, addr.into());
+            Ok(())
+        }
+
+        Some(SyncSubOpcode::TlsSlotGet)
+        | Some(SyncSubOpcode::TlsSlotSet)
+        | Some(SyncSubOpcode::TlsSlotHas)
+        | Some(SyncSubOpcode::TlsSlotClear) => {
+            if operands.is_empty() {
+                return Ok(());
+            }
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let slots_ty = i64_ty.array_type(256);
+            let global = module.get_global("__verum_tls_slots").unwrap_or_else(|| {
+                let g = module.add_global(slots_ty, None, "__verum_tls_slots");
+                g.set_thread_local(true);
+                g.set_initializer(&slots_ty.const_zero());
+                g
+            });
+            let base = global.as_pointer_value();
+            let zero = i64_ty.const_int(0, false);
+            let value_returning = matches!(
+                sub_opcode,
+                Some(SyncSubOpcode::TlsSlotGet) | Some(SyncSubOpcode::TlsSlotHas)
+            );
+            let slot_idx = if value_returning { 1 } else { 0 };
+            if operands.len() <= slot_idx {
+                return Ok(());
+            }
+            let slot = as_i64(ctx, ctx.get_register(op_reg(operands, slot_idx))?, "tls_slot")?;
+            let gep = unsafe {
+                ctx.builder()
+                    .build_gep(slots_ty, base, &[zero, slot], "tls_gep")
+                    .or_llvm_err()?
+            };
+            match sub_opcode {
+                Some(SyncSubOpcode::TlsSlotGet) => {
+                    let dst = op_reg(operands, 0);
+                    let v = ctx
+                        .builder()
+                        .build_load(i64_ty, gep, "tls_load")
+                        .or_llvm_err()?;
+                    ctx.set_register(dst, v);
+                }
+                Some(SyncSubOpcode::TlsSlotSet) => {
+                    if operands.len() < 2 {
+                        return Ok(());
+                    }
+                    let value =
+                        as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "tls_val")?;
+                    ctx.builder().build_store(gep, value).or_llvm_err()?;
+                }
+                Some(SyncSubOpcode::TlsSlotHas) => {
+                    let dst = op_reg(operands, 0);
+                    let v = ctx
+                        .builder()
+                        .build_load(i64_ty, gep, "tls_load")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    let occupied = ctx
+                        .builder()
+                        .build_int_compare(
+                            IntPredicate::NE,
+                            v,
+                            i64_ty.const_int(0, false),
+                            "tls_has",
+                        )
+                        .or_llvm_err()?;
+                    ctx.set_register(dst, occupied.into());
+                }
+                _ => {
+                    // TlsSlotClear
+                    ctx.builder()
+                        .build_store(gep, i64_ty.const_int(0, false))
+                        .or_llvm_err()?;
+                }
+            }
+            Ok(())
+        }
+
+        Some(SyncSubOpcode::WaitgroupAdd)
+        | Some(SyncSubOpcode::WaitgroupDone) => {
+            let need = if matches!(sub_opcode, Some(SyncSubOpcode::WaitgroupAdd)) { 3 } else { 2 };
+            if operands.len() < need {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let wg = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "wg_handle")?;
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(wg, ptr_ty, "wg_ptr")
+                .or_llvm_err()?;
+            let delta = if matches!(sub_opcode, Some(SyncSubOpcode::WaitgroupAdd)) {
+                as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "wg_delta")?
+            } else {
+                i64_ty.const_int(1, false)
+            };
+            let op = if matches!(sub_opcode, Some(SyncSubOpcode::WaitgroupAdd)) {
+                AtomicRMWBinOp::Add
+            } else {
+                AtomicRMWBinOp::Sub
+            };
+            ctx.builder()
+                .build_atomicrmw(op, p, delta, AtomicOrdering::SequentiallyConsistent)
+                .map_err(|e| LlvmLoweringError::BuilderError(format!("wg rmw: {}", e).into()))?;
+            ctx.set_register(dst, i64_ty.const_int(0, false).into());
+            Ok(())
+        }
+        _ => {
+            ctx.emit_unimplemented_sub_op("SyncExtended", sub_op);
+            Ok(())
+        }
+    }
+}
+
+fn lower_ffi_extended<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    sub_op: u8,
+    operands: &[u8],
+) -> Result<()> {
+    let sub_opcode = SystemSubOpcode::from_byte(sub_op);
+    let mut ffi = FfiLowering::new(ctx.llvm_context());
+
+    match sub_opcode {
+        // ================================================================
+        // Memory Operations (0x40-0x4F)
+        // ================================================================
+        Some(SystemSubOpcode::CMemcpy) => {
+            // Format: dst_ptr:reg, src_ptr:reg, size:reg
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "CMemcpy: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let src_reg = op_reg(operands, 1);
+            let size_reg = op_reg(operands, 2);
+
+            let dst_ptr = as_ptr(ctx, ctx.get_register(dst_reg)?, "dst_ptr")?;
+            let src_ptr = as_ptr(ctx, ctx.get_register(src_reg)?, "src_ptr")?;
+            let size = as_i64(ctx, ctx.get_register(size_reg)?, "size")?;
+
+            let module = ctx.get_module();
+            ffi.lower_memcpy(ctx.builder(), &module, dst_ptr, src_ptr, size)?;
+            Ok(())
+        }
+
+        // ================================================================
+        // Atomic read-modify-write (0xBC)
+        // ================================================================
         Some(SystemSubOpcode::CMemset) => {
             // Format: dst_ptr:reg, value:reg, size:reg
             if operands.len() < 3 {
@@ -30159,38 +31691,6 @@ fn lower_ffi_extended<'ctx>(
 
             let module = ctx.get_module();
             ffi.lower_memset(ctx.builder(), &module, dst_ptr, value, size)?;
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::CSecureZero) => {
-            // Format: dst_ptr:reg, size:reg
-            //
-
-            // Volatile memset to 0 — survives every LLVM optimisation
-            // pass. Used to zeroise secret material (key schedules,
-            // AEAD tags, PSK binders) right before the storage leaves
-            // scope. The ordinary `CMemset` opcode emits a
-            // non-volatile call which `MemCpyOptPass` /
-            // `DeadStoreEliminationPass` would elide; that's a
-            // catastrophic security bug, so we route the
-            // security-critical zero through a separate opcode.
-            //
-
-            // Spec: tls-quic-security-audit §2 Action #2 ("LLVM-IR
-            // audit of zeroise memset preservation").
-            if operands.len() < 2 {
-                return Err(LlvmLoweringError::internal(
-                    "CSecureZero: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let size_reg = op_reg(operands, 1);
-
-            let dst_ptr = as_ptr(ctx, ctx.get_register(dst_reg)?, "dst_ptr")?;
-            let size = as_i64(ctx, ctx.get_register(size_reg)?, "size")?;
-
-            let module = ctx.get_module();
-            ffi.lower_secure_zero(ctx.builder(), &module, dst_ptr, size)?;
             Ok(())
         }
 
@@ -30625,81 +32125,6 @@ fn lower_ffi_extended<'ctx>(
             let result = ffi.lower_ptr_sub(ctx.builder(), ptr, offset)?;
 
             ctx.set_register(dst_reg, result.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::CbgrGetHeader) => {
-            // Format: dst:reg, ptr:reg
-            // get_header_from_ptr(user_ptr) = user_ptr - ALLOCATION_HEADER_SIZE.
-            // FIXED 32-byte back-step (raw i8 GEP), NOT element-scaled like
-            // PtrSub — recovers the CBGR AllocationHeader prefix. Mirrors the
-            // codegen back-pointer arithmetic documented on
-            // `verum_common::layout::ALLOCATION_HEADER_SIZE`.
-            if operands.len() < 2 {
-                return Err(LlvmLoweringError::internal(
-                    "CbgrGetHeader: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-
-            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
-            let i8_type = ctx.types().i8_type();
-            let neg_off = ctx
-                .types()
-                .i64_type()
-                .const_int(verum_common::layout::ALLOCATION_HEADER_SIZE, false);
-            let neg_off = ctx
-                .builder()
-                .build_int_neg(neg_off, "neg_hdr_off")
-                .or_llvm_err()?;
-            // SAFETY: non-inbounds GEP — the result addresses the header
-            // region, which is a distinct logical object from the
-            // user-data allocation.
-            let header = unsafe {
-                ctx.builder()
-                    .build_gep(i8_type, ptr, &[neg_off], "cbgr_get_header")
-                    .or_llvm_err()?
-            };
-            ctx.set_register(dst_reg, header.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::CbgrGetGeneration) => {
-            // Format: dst:reg, ptr:reg
-            // generation = *(u32*)(user_ptr - 32 + GENERATION_OFFSET).
-            if operands.len() < 2 {
-                return Err(LlvmLoweringError::internal(
-                    "CbgrGetGeneration: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-
-            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
-            let i8_type = ctx.types().i8_type();
-            let i32_type = ctx.types().i32_type();
-            let i64_type = ctx.types().i64_type();
-            let off = verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as i64
-                - verum_common::layout::ALLOCATION_HEADER_SIZE as i64;
-            let off_v = i64_type.const_int(off as u64, true);
-            // SAFETY: non-inbounds GEP into the header region preceding
-            // the user allocation; fixed canonical offset.
-            let gen_ptr = unsafe {
-                ctx.builder()
-                    .build_gep(i8_type, ptr, &[off_v], "cbgr_gen_ptr")
-                    .or_llvm_err()?
-            };
-            let gen32 = ctx
-                .builder()
-                .build_load(i32_type, gen_ptr, "cbgr_generation")
-                .or_llvm_err()?
-                .into_int_value();
-            let gen64 = ctx
-                .builder()
-                .build_int_z_extend(gen32, i64_type, "cbgr_generation64")
-                .or_llvm_err()?;
-            ctx.set_register(dst_reg, gen64.into());
             Ok(())
         }
 
@@ -31525,52 +32950,6 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(SystemSubOpcode::RandomU64) => {
-            // Generate random u64 via runtime
-            if operands.is_empty() {
-                return Err(LlvmLoweringError::internal(
-                    "RandomU64: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = i64_ty.fn_type(&[], false);
-            let rand_fn = module
-                .get_function("verum_random_u64")
-                .unwrap_or_else(|| module.add_function("verum_random_u64", fn_type, None));
-            let result = ctx
-                .builder()
-                .build_call(rand_fn, &[], "random_u64")
-                .or_llvm_err()?
-                    .basic_value_or("RandomU64: expected return value")?;
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::RandomFloat) => {
-            // Generate random float [0.0, 1.0) via runtime
-            if operands.is_empty() {
-                return Err(LlvmLoweringError::internal(
-                    "RandomFloat: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let module = ctx.get_module();
-            let f64_ty = ctx.types().f64_type();
-            let fn_type = f64_ty.fn_type(&[], false);
-            let rand_fn = module
-                .get_function("verum_random_float")
-                .unwrap_or_else(|| module.add_function("verum_random_float", fn_type, None));
-            let result = ctx
-                .builder()
-                .build_call(rand_fn, &[], "random_float")
-                .or_llvm_err()?
-                    .basic_value_or("RandomFloat: expected return value")?;
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
         Some(SystemSubOpcode::NewByteArray) => {
             // Allocate byte array: dst = verum_alloc_bytes(size)
             if operands.len() < 2 {
@@ -32093,109 +33472,6 @@ fn lower_ffi_extended<'ctx>(
         }
 
         // Time sub-opcodes (0x70-0x75) — call runtime time functions
-        Some(SystemSubOpcode::TimeMonotonicNanos) => {
-            if operands.is_empty() {
-                return Err(LlvmLoweringError::internal(
-                    "TimeMonotonicNanos: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = i64_ty.fn_type(&[], false);
-            let time_fn = super::error::get_or_declare_function(module, "verum_time_monotonic_nanos", fn_type);
-            let result = ctx
-                .builder()
-                .build_call(time_fn, &[], "mono_nanos")
-                .or_llvm_err()?
-            .basic_value_or("TimeMonotonicNanos: expected return value")?;
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::TimeRealtimeNanos) => {
-            if operands.is_empty() {
-                return Err(LlvmLoweringError::internal(
-                    "TimeRealtimeNanos: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = i64_ty.fn_type(&[], false);
-            let time_fn = module
-                .get_function("verum_time_realtime_nanos")
-                .unwrap_or_else(|| module.add_function("verum_time_realtime_nanos", fn_type, None));
-            let result = ctx
-                .builder()
-                .build_call(time_fn, &[], "real_nanos")
-                .or_llvm_err()?
-            .basic_value_or("TimeRealtimeNanos: expected return value")?;
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::TimeMonotonicRawNanos) => {
-            // On macOS, same as MonotonicNanos; on Linux, CLOCK_MONOTONIC_RAW
-            if operands.is_empty() {
-                return Err(LlvmLoweringError::internal(
-                    "TimeMonotonicRawNanos: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = i64_ty.fn_type(&[], false);
-            let time_fn = super::error::get_or_declare_function(module, "verum_time_monotonic_nanos", fn_type);
-            let result = ctx
-                .builder()
-                .build_call(time_fn, &[], "raw_nanos")
-                .or_llvm_err()?
-            .basic_value_or("TimeMonotonicRawNanos: expected return value")?;
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::TimeSleepNanos) => {
-            if operands.is_empty() {
-                return Ok(());
-            }
-            let nanos = ctx.get_register(op_reg(operands, 0))?;
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into()], false);
-            let sleep_fn = module
-                .get_function("verum_time_sleep_nanos")
-                .unwrap_or_else(|| module.add_function("verum_time_sleep_nanos", fn_type, None));
-            ctx.builder()
-                .build_call(sleep_fn, &[nanos.into()], "")
-                .or_llvm_err()?;
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::TimeSleepMillis) => {
-            // Millisecond sleep — scale to ns and reuse the canonical
-            // verum_time_sleep_nanos runtime (single sleep authority).
-            if operands.is_empty() {
-                return Ok(());
-            }
-            let ms = as_i64(ctx, ctx.get_register(op_reg(operands, 0))?, "sleep_ms")?;
-            let i64_ty = ctx.types().i64_type();
-            let ns = ctx
-                .builder()
-                .build_int_mul(ms, i64_ty.const_int(1_000_000, false), "sleep_ms_ns")
-                .or_llvm_err()?;
-            let module = ctx.get_module();
-            let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into()], false);
-            let sleep_fn = module
-                .get_function("verum_time_sleep_nanos")
-                .unwrap_or_else(|| module.add_function("verum_time_sleep_nanos", fn_type, None));
-            ctx.builder()
-                .build_call(sleep_fn, &[ns.into()], "")
-                .or_llvm_err()?;
-            Ok(())
-        }
-
         // ================================================================
         // Raw byte/word leaves (0x53-0x58) — mem_raw's load/store over Int
         // addresses.  Pre-arm these lowered the bodyless declaration stubs:
@@ -32297,83 +33573,6 @@ fn lower_ffi_extended<'ctx>(
         // [256 x i64] backs the slots — no runtime externs needed and the
         // semantics match the interpreter's flat table.
         // ================================================================
-        Some(SystemSubOpcode::TlsSlotGetF)
-        | Some(SystemSubOpcode::TlsSlotSetF)
-        | Some(SystemSubOpcode::TlsSlotHasF)
-        | Some(SystemSubOpcode::TlsSlotClearF) => {
-            if operands.is_empty() {
-                return Ok(());
-            }
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let slots_ty = i64_ty.array_type(256);
-            let global = module.get_global("__verum_tls_slots").unwrap_or_else(|| {
-                let g = module.add_global(slots_ty, None, "__verum_tls_slots");
-                g.set_thread_local(true);
-                g.set_initializer(&slots_ty.const_zero());
-                g
-            });
-            let base = global.as_pointer_value();
-            let zero = i64_ty.const_int(0, false);
-            let value_returning = matches!(
-                sub_opcode,
-                Some(SystemSubOpcode::TlsSlotGetF) | Some(SystemSubOpcode::TlsSlotHasF)
-            );
-            let slot_idx = if value_returning { 1 } else { 0 };
-            if operands.len() <= slot_idx {
-                return Ok(());
-            }
-            let slot = as_i64(ctx, ctx.get_register(op_reg(operands, slot_idx))?, "tls_slot")?;
-            let gep = unsafe {
-                ctx.builder()
-                    .build_gep(slots_ty, base, &[zero, slot], "tls_gep")
-                    .or_llvm_err()?
-            };
-            match sub_opcode {
-                Some(SystemSubOpcode::TlsSlotGetF) => {
-                    let dst = op_reg(operands, 0);
-                    let v = ctx
-                        .builder()
-                        .build_load(i64_ty, gep, "tls_load")
-                        .or_llvm_err()?;
-                    ctx.set_register(dst, v);
-                }
-                Some(SystemSubOpcode::TlsSlotHasF) => {
-                    let dst = op_reg(operands, 0);
-                    let v = ctx
-                        .builder()
-                        .build_load(i64_ty, gep, "tls_load")
-                        .or_llvm_err()?
-                        .into_int_value();
-                    let occupied = ctx
-                        .builder()
-                        .build_int_compare(
-                            IntPredicate::NE,
-                            v,
-                            i64_ty.const_int(0, false),
-                            "tls_has",
-                        )
-                        .or_llvm_err()?;
-                    ctx.set_register(dst, occupied.into());
-                }
-                Some(SystemSubOpcode::TlsSlotSetF) => {
-                    if operands.len() < 2 {
-                        return Ok(());
-                    }
-                    let value =
-                        as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "tls_val")?;
-                    ctx.builder().build_store(gep, value).or_llvm_err()?;
-                }
-                _ => {
-                    // TlsSlotClearF
-                    ctx.builder()
-                        .build_store(gep, i64_ty.const_int(0, false))
-                        .or_llvm_err()?;
-                }
-            }
-            Ok(())
-        }
-
         // ================================================================
         // Spinlock trio (0xB3-0xB5) — u32 cmpxchg / store-0 / load-compare
         // per the declared *mut UInt32 contract.  SeqCst mirrors the
@@ -32384,294 +33583,11 @@ fn lower_ffi_extended<'ctx>(
         // tls_get_base (0x5D) — address of the user-TLS thread_local
         // global (same backing as the 0x59-0x5C quartet).
         // ================================================================
-        Some(SystemSubOpcode::TlsGetBaseF) => {
-            if operands.is_empty() {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let slots_ty = i64_ty.array_type(256);
-            let global = module.get_global("__verum_tls_slots").unwrap_or_else(|| {
-                let g = module.add_global(slots_ty, None, "__verum_tls_slots");
-                g.set_thread_local(true);
-                g.set_initializer(&slots_ty.const_zero());
-                g
-            });
-            let addr = ctx
-                .builder()
-                .build_ptr_to_int(global.as_pointer_value(), i64_ty, "tls_base")
-                .or_llvm_err()?;
-            ctx.set_register(dst, addr.into());
-            Ok(())
-        }
-
         // ================================================================
         // WaitGroup family (0xB6-0xBB): an 8-byte cbgr allocation holding
         // an atomic i64 counter; the handle IS the address.  The interp's
         // handle-table impl is its tier twin (opaque handles per tier).
         // ================================================================
-        Some(SystemSubOpcode::WaitgroupNew) => {
-            if operands.is_empty() {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let alloc_fn = module.get_function("verum_cbgr_allocate").unwrap_or_else(|| {
-                let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
-                module.add_function("verum_cbgr_allocate", fn_ty, None)
-            });
-            let p = ctx
-                .builder()
-                .build_call(alloc_fn, &[i64_ty.const_int(8, false).into()], "wg_alloc")
-                .or_llvm_err()?
-                .basic_value_or("wg_alloc returned no value")?;
-            let pp = p.into_pointer_value();
-            ctx.builder()
-                .build_store(pp, i64_ty.const_int(0, false))
-                .or_llvm_err()?;
-            let handle = ctx
-                .builder()
-                .build_ptr_to_int(pp, i64_ty, "wg_handle")
-                .or_llvm_err()?;
-            ctx.set_register(dst, handle.into());
-            Ok(())
-        }
-        Some(SystemSubOpcode::WaitgroupAdd)
-        | Some(SystemSubOpcode::WaitgroupDone) => {
-            let need = if matches!(sub_opcode, Some(SystemSubOpcode::WaitgroupAdd)) { 3 } else { 2 };
-            if operands.len() < need {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let wg = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "wg_handle")?;
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let p = ctx
-                .builder()
-                .build_int_to_ptr(wg, ptr_ty, "wg_ptr")
-                .or_llvm_err()?;
-            let delta = if matches!(sub_opcode, Some(SystemSubOpcode::WaitgroupAdd)) {
-                as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "wg_delta")?
-            } else {
-                i64_ty.const_int(1, false)
-            };
-            let op = if matches!(sub_opcode, Some(SystemSubOpcode::WaitgroupAdd)) {
-                AtomicRMWBinOp::Add
-            } else {
-                AtomicRMWBinOp::Sub
-            };
-            ctx.builder()
-                .build_atomicrmw(op, p, delta, AtomicOrdering::SequentiallyConsistent)
-                .map_err(|e| LlvmLoweringError::BuilderError(format!("wg rmw: {}", e).into()))?;
-            ctx.set_register(dst, i64_ty.const_int(0, false).into());
-            Ok(())
-        }
-        Some(SystemSubOpcode::WaitgroupTryWait) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let wg = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "wg_handle")?;
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let p = ctx
-                .builder()
-                .build_int_to_ptr(wg, ptr_ty, "wg_ptr")
-                .or_llvm_err()?;
-            let v = ctx
-                .builder()
-                .build_load(i64_ty, p, "wg_count")
-                .or_llvm_err()?
-                .into_int_value();
-            let is_zero = ctx
-                .builder()
-                .build_int_compare(IntPredicate::EQ, v, i64_ty.const_int(0, false), "wg_zero")
-                .or_llvm_err()?;
-            let as_i64_val = ctx
-                .builder()
-                .build_int_z_extend(is_zero, i64_ty, "wg_try")
-                .or_llvm_err()?;
-            ctx.set_register(dst, as_i64_val.into());
-            Ok(())
-        }
-        Some(SystemSubOpcode::WaitgroupWait) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let wg = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "wg_handle")?;
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let p = ctx
-                .builder()
-                .build_int_to_ptr(wg, ptr_ty, "wg_ptr")
-                .or_llvm_err()?;
-            // Spin-wait loop: load; ==0 → done; else sleep 100µs and retry.
-            // Correct-first; futex parking is the perf follow-up (task #5).
-            let cur_bb = ctx
-                .builder()
-                .get_insert_block()
-                .ok_or_else(|| LlvmLoweringError::internal("wg wait: no insert block"))?;
-            let function = cur_bb
-                .get_parent()
-                .ok_or_else(|| LlvmLoweringError::internal("wg wait: no parent fn"))?;
-            let loop_bb = ctx.llvm_context().append_basic_block(function, "wg_wait_loop");
-            let done_bb = ctx.llvm_context().append_basic_block(function, "wg_wait_done");
-            ctx.builder().build_unconditional_branch(loop_bb).or_llvm_err()?;
-            ctx.builder().position_at_end(loop_bb);
-            let v = ctx
-                .builder()
-                .build_load(i64_ty, p, "wg_count")
-                .or_llvm_err()?
-                .into_int_value();
-            let is_zero = ctx
-                .builder()
-                .build_int_compare(IntPredicate::EQ, v, i64_ty.const_int(0, false), "wg_zero")
-                .or_llvm_err()?;
-            let sleep_bb = ctx.llvm_context().append_basic_block(function, "wg_wait_sleep");
-            ctx.builder()
-                .build_conditional_branch(is_zero, done_bb, sleep_bb)
-                .or_llvm_err()?;
-            ctx.builder().position_at_end(sleep_bb);
-            let module = ctx.get_module();
-            let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into()], false);
-            let sleep_fn = module
-                .get_function("verum_time_sleep_nanos")
-                .unwrap_or_else(|| module.add_function("verum_time_sleep_nanos", fn_type, None));
-            ctx.builder()
-                .build_call(sleep_fn, &[i64_ty.const_int(100_000, false).into()], "")
-                .or_llvm_err()?;
-            ctx.builder().build_unconditional_branch(loop_bb).or_llvm_err()?;
-            ctx.builder().position_at_end(done_bb);
-            ctx.set_register(dst, i64_ty.const_int(0, false).into());
-            Ok(())
-        }
-        Some(SystemSubOpcode::WaitgroupDestroy) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let wg = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "wg_handle")?;
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let dealloc_fn = module
-                .get_function("verum_cbgr_deallocate")
-                .unwrap_or_else(|| {
-                    let fn_ty = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
-                    module.add_function("verum_cbgr_deallocate", fn_ty, None)
-                });
-            let p = ctx
-                .builder()
-                .build_int_to_ptr(wg, ptr_ty, "wg_ptr")
-                .or_llvm_err()?;
-            ctx.builder()
-                .build_call(dealloc_fn, &[p.into()], "")
-                .or_llvm_err()?;
-            ctx.set_register(dst, i64_ty.const_int(0, false).into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::SpinlockTryLock) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "spin_addr")?;
-            let i32_ty = ctx.types().i32_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let p = ctx
-                .builder()
-                .build_int_to_ptr(addr, ptr_ty, "spin_ptr")
-                .or_llvm_err()?;
-            let cas = ctx
-                .builder()
-                .build_cmpxchg(
-                    p,
-                    i32_ty.const_int(0, false),
-                    i32_ty.const_int(1, false),
-                    AtomicOrdering::SequentiallyConsistent,
-                    AtomicOrdering::SequentiallyConsistent,
-                )
-                .or_llvm_err()?;
-            let ok = ctx
-                .builder()
-                .build_extract_value(cas, 1, "spin_acquired")
-                .or_llvm_err()?;
-            ctx.set_register(dst, ok);
-            Ok(())
-        }
-        Some(SystemSubOpcode::SpinlockUnlock) => {
-            if operands.is_empty() {
-                return Ok(());
-            }
-            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 0))?, "spin_addr")?;
-            let i32_ty = ctx.types().i32_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let p = ctx
-                .builder()
-                .build_int_to_ptr(addr, ptr_ty, "spin_ptr")
-                .or_llvm_err()?;
-            let st = ctx
-                .builder()
-                .build_store(p, i32_ty.const_int(0, false))
-                .or_llvm_err()?;
-            let _ = st.set_atomic_ordering(AtomicOrdering::SequentiallyConsistent);
-            Ok(())
-        }
-        Some(SystemSubOpcode::SpinlockIsLocked) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "spin_addr")?;
-            let i32_ty = ctx.types().i32_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let p = ctx
-                .builder()
-                .build_int_to_ptr(addr, ptr_ty, "spin_ptr")
-                .or_llvm_err()?;
-            let ld = ctx
-                .builder()
-                .build_load(i32_ty, p, "spin_load")
-                .or_llvm_err()?;
-            let locked = ctx
-                .builder()
-                .build_int_compare(
-                    IntPredicate::NE,
-                    ld.into_int_value(),
-                    i32_ty.const_int(0, false),
-                    "spin_locked",
-                )
-                .or_llvm_err()?;
-            ctx.set_register(dst, locked.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::TimeThreadCpuNanos) | Some(SystemSubOpcode::TimeProcessCpuNanos) => {
-            // Use monotonic time as fallback for CPU time
-            if operands.is_empty() {
-                return Err(LlvmLoweringError::internal(
-                    "TimeCpuNanos: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = i64_ty.fn_type(&[], false);
-            let time_fn = super::error::get_or_declare_function(module, "verum_time_monotonic_nanos", fn_type);
-            let result = ctx
-                .builder()
-                .build_call(time_fn, &[], "cpu_nanos")
-                .or_llvm_err()?
-            .basic_value_or("TimeCpuNanos: expected return value")?;
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
         // TIER-DETECT-AOT-1: per-tier answers. THIS side is the LLVM
         // (AOT) lowering, so tier = 3 / is_interpreted = false; the
         // interpreter handler answers 0 / true for the same sub-ops.
@@ -32680,197 +33596,7 @@ fn lower_ffi_extended<'ctx>(
         // Wire codes follow the stdlib contract
         // (core/intrinsics/runtime/tier.vr `get_tier`):
         // 0 = VBC interpreter, 1/2 = JIT tiers, 3 = AOT.
-        Some(SystemSubOpcode::ExecutionTier) => {
-            if operands.is_empty() {
-                return Err(LlvmLoweringError::internal(
-                    "ExecutionTier: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let aot_code = ctx.types().i64_type().const_int(3, false);
-            ctx.set_register(dst_reg, aot_code.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::IsInterpreted) => {
-            if operands.is_empty() {
-                return Err(LlvmLoweringError::internal(
-                    "IsInterpreted: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let f = ctx.types().bool_type().const_int(0, false);
-            ctx.set_register(dst_reg, f.into());
-            ctx.mark_bool_register(dst_reg);
-            Ok(())
-        }
-
         // System Call Operations (0x80-0x85)
-        Some(SystemSubOpcode::SysGetpid) => {
-            if operands.is_empty() {
-                return Err(LlvmLoweringError::internal(
-                    "SysGetpid: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = i64_ty.fn_type(&[], false);
-            let pid_fn = module
-                .get_function("verum_sys_getpid")
-                .unwrap_or_else(|| module.add_function("verum_sys_getpid", fn_type, None));
-            let result = ctx
-                .builder()
-                .build_call(pid_fn, &[], "getpid")
-                .or_llvm_err()?
-                    .basic_value_or("SysGetpid: expected return value")?;
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::SysGettid) => {
-            if operands.is_empty() {
-                return Err(LlvmLoweringError::internal(
-                    "SysGettid: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = i64_ty.fn_type(&[], false);
-            let tid_fn = module
-                .get_function("verum_sys_gettid")
-                .unwrap_or_else(|| module.add_function("verum_sys_gettid", fn_type, None));
-            let result = ctx
-                .builder()
-                .build_call(tid_fn, &[], "gettid")
-                .or_llvm_err()?
-                    .basic_value_or("SysGettid: expected return value")?;
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::SysMmap) => {
-            // mmap(addr, length, prot, flags, fd, offset) -> ptr
-            if operands.len() < 7 {
-                return Err(LlvmLoweringError::internal(
-                    "SysMmap: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let module = ctx.get_module();
-            let ptr_ty = ctx.types().ptr_type();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = ptr_ty.fn_type(
-                &[
-                    ptr_ty.into(),
-                    i64_ty.into(),
-                    i64_ty.into(),
-                    i64_ty.into(),
-                    i64_ty.into(),
-                    i64_ty.into(),
-                ],
-                false,
-            );
-            let mmap_fn = module
-                .get_function("verum_sys_mmap")
-                .unwrap_or_else(|| module.add_function("verum_sys_mmap", fn_type, None));
-            let args: Vec<BasicMetadataValueEnum> = (1..7)
-                .map(|i| {
-                    ctx.get_register(operands[i] as u16)
-                        .unwrap_or(i64_ty.const_zero().into())
-                        .into()
-                })
-                .collect();
-            let result = ctx
-                .builder()
-                .build_call(mmap_fn, &args, "mmap")
-                .or_llvm_err()?
-                    .basic_value_or("SysMmap: expected return value")?;
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::SysMunmap) => {
-            // munmap(addr, length)
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let addr = ctx.get_register(op_reg(operands, 0))?;
-            let length = ctx.get_register(op_reg(operands, 1))?;
-            let module = ctx.get_module();
-            let ptr_ty = ctx.types().ptr_type();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = ctx
-                .types()
-                .void_type()
-                .fn_type(&[ptr_ty.into(), i64_ty.into()], false);
-            let munmap_fn = module
-                .get_function("verum_sys_munmap")
-                .unwrap_or_else(|| module.add_function("verum_sys_munmap", fn_type, None));
-            ctx.builder()
-                .build_call(munmap_fn, &[addr.into(), length.into()], "")
-                .or_llvm_err()?;
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::SysMadvise) => {
-            // madvise(addr, length, advice)
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let addr = ctx.get_register(op_reg(operands, 0))?;
-            let length = ctx.get_register(op_reg(operands, 1))?;
-            let advice = ctx.get_register(op_reg(operands, 2))?;
-            let module = ctx.get_module();
-            let ptr_ty = ctx.types().ptr_type();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = i64_ty.fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into()], false);
-            let madvise_fn = module
-                .get_function("verum_sys_madvise")
-                .unwrap_or_else(|| module.add_function("verum_sys_madvise", fn_type, None));
-            let result = ctx
-                .builder()
-                .build_call(
-                    madvise_fn,
-                    &[addr.into(), length.into(), advice.into()],
-                    "madvise",
-                )
-                .or_llvm_err()?
-                    .basic_value_or("SysMadvise: expected return value")?;
-            // Store result if there's a destination
-            if operands.len() >= 4 {
-                ctx.set_register(op_reg(operands, 3), result);
-            }
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::SysGetentropy) => {
-            // getentropy(buf, length) -> 0 on success
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "SysGetentropy: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let buf = ctx.get_register(op_reg(operands, 1))?;
-            let length = ctx.get_register(op_reg(operands, 2))?;
-            let module = ctx.get_module();
-            let ptr_ty = ctx.types().ptr_type();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = i64_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false);
-            let getentropy_fn = module
-                .get_function("verum_sys_getentropy")
-                .unwrap_or_else(|| module.add_function("verum_sys_getentropy", fn_type, None));
-            let result = ctx
-                .builder()
-                .build_call(getentropy_fn, &[buf.into(), length.into()], "getentropy")
-                .or_llvm_err()?
-            .basic_value_or("SysGetentropy: expected return value")?;
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
         // ENV-IMPL-TRIO-1 (#55, Tier-1 side): environment variables via
         // libSystem getenv/setenv/unsetenv (darwin's required boundary;
         // the interpreter side answers with std::env). The byte-slice
@@ -32878,378 +33604,12 @@ fn lower_ffi_extended<'ctx>(
         // copied into a NUL-terminated scratch C string; results are the
         // stdlib-declared variants (Maybe<Text> / Result<(), Text>) with
         // stamped headers so downstream RTID dispatch stays sound.
-        Some(SystemSubOpcode::EnvGet) => {
-            let mut pos = 0usize;
-            let dst = read_reg_varlen(operands, &mut pos)?;
-            let name_reg = read_reg_varlen(operands, &mut pos)?;
-            let cstr = emit_env_bytes_to_cstr(ctx, name_reg, "envget_name")?;
-            let module = ctx.get_module();
-            let i8p = ctx.types().ptr_type();
-            let getenv_ty = i8p.fn_type(&[i8p.into()], false);
-            let getenv_fn =
-                super::error::get_or_declare_function(&module, "getenv", getenv_ty);
-            let raw = ctx
-                .builder()
-                .build_call(getenv_fn, &[cstr.into()], "envget_raw")
-                .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("getenv returns ptr")?
-                .into_pointer_value();
-            let i64_ty = ctx.types().i64_type();
-            let raw_i = ctx
-                .builder()
-                .build_ptr_to_int(raw, i64_ty, "envget_raw_i")
-                .or_llvm_err()?;
-            let is_null = ctx
-                .builder()
-                .build_int_compare(
-                    IntPredicate::EQ,
-                    raw_i,
-                    i64_ty.const_zero(),
-                    "envget_null",
-                )
-                .or_llvm_err()?;
-            let f = ctx.function();
-            let cx = ctx.llvm_context();
-            let some_bb = cx.append_basic_block(f, "envget_some");
-            let none_bb = cx.append_basic_block(f, "envget_none");
-            let merge_bb = cx.append_basic_block(f, "envget_merge");
-            ctx.builder()
-                .build_conditional_branch(is_null, none_bb, some_bb)
-                .or_llvm_err()?;
-            // Some: text = verum_text_from_cstr(raw); variant tag=1 payload
-            ctx.builder().position_at_end(some_bb);
-            let from_cstr_ty = i64_ty.fn_type(&[i8p.into()], false);
-            let from_cstr = super::error::get_or_declare_function(
-                &module,
-                "verum_text_from_cstr",
-                from_cstr_ty,
-            );
-            // verum_text_from_cstr's canonical ABI is i64(ptr) — the
-            // NaN-boxed Text handle — at every other call site in
-            // this file. The ptr-returning read here aborted native
-            // codegen for ANY program whose bake includes the env
-            // wrapper (T0225; first-wins duplicate-declaration class
-            // T0208).
-            let text_i = ctx
-                .builder()
-                .build_call(from_cstr, &[raw.into()], "envget_text")
-                .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("from_cstr returns i64 text handle")?
-                .into_int_value();
-            let some_v = emit_env_variant(ctx, TypeId::MAYBE.0, 1, Some(text_i), "envget_s")?;
-            let some_end = ctx.builder().get_insert_block().unwrap();
-            ctx.builder()
-                .build_unconditional_branch(merge_bb)
-                .or_llvm_err()?;
-            // None: tag=0, no payload
-            ctx.builder().position_at_end(none_bb);
-            let none_v = emit_env_variant(ctx, TypeId::MAYBE.0, 0, None, "envget_n")?;
-            let none_end = ctx.builder().get_insert_block().unwrap();
-            ctx.builder()
-                .build_unconditional_branch(merge_bb)
-                .or_llvm_err()?;
-            ctx.builder().position_at_end(merge_bb);
-            let phi = ctx.builder().build_phi(i64_ty, "envget_out").or_llvm_err()?;
-            phi.add_incoming(&[(&some_v, some_end), (&none_v, none_end)]);
-            ctx.set_register(dst, phi.as_basic_value());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::EnvSet) => {
-            let mut pos = 0usize;
-            let dst = read_reg_varlen(operands, &mut pos)?;
-            let name_reg = read_reg_varlen(operands, &mut pos)?;
-            let value_reg = read_reg_varlen(operands, &mut pos)?;
-            let name_c = emit_env_bytes_to_cstr(ctx, name_reg, "envset_name")?;
-            let value_c = emit_env_bytes_to_cstr(ctx, value_reg, "envset_val")?;
-            let module = ctx.get_module();
-            let i8p = ctx.types().ptr_type();
-            let i32_ty = ctx.types().i32_type();
-            let setenv_ty = i32_ty.fn_type(&[i8p.into(), i8p.into(), i32_ty.into()], false);
-            let setenv_fn =
-                super::error::get_or_declare_function(&module, "setenv", setenv_ty);
-            ctx.builder()
-                .build_call(
-                    setenv_fn,
-                    &[name_c.into(), value_c.into(), i32_ty.const_int(1, false).into()],
-                    "",
-                )
-                .or_llvm_err()?;
-            let ok = emit_env_variant(ctx, TypeId::RESULT.0, 0, Some(ctx.types().i64_type().const_zero()), "envset_ok")?;
-            ctx.set_register(dst, ok.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::EnvUnset) => {
-            let mut pos = 0usize;
-            let dst = read_reg_varlen(operands, &mut pos)?;
-            let name_reg = read_reg_varlen(operands, &mut pos)?;
-            let name_c = emit_env_bytes_to_cstr(ctx, name_reg, "envunset_name")?;
-            let module = ctx.get_module();
-            let i8p = ctx.types().ptr_type();
-            let i32_ty = ctx.types().i32_type();
-            let unsetenv_ty = i32_ty.fn_type(&[i8p.into()], false);
-            let unsetenv_fn =
-                super::error::get_or_declare_function(&module, "unsetenv", unsetenv_ty);
-            ctx.builder()
-                .build_call(unsetenv_fn, &[name_c.into()], "")
-                .or_llvm_err()?;
-            let ok = emit_env_variant(ctx, TypeId::RESULT.0, 0, Some(ctx.types().i64_type().const_zero()), "envunset_ok")?;
-            ctx.set_register(dst, ok.into());
-            Ok(())
-        }
-
         // Mach Kernel Operations (0x90-0x98) — macOS kernel API surface.
-        Some(SystemSubOpcode::MachVmAllocate)
-        | Some(SystemSubOpcode::MachVmDeallocate)
-        | Some(SystemSubOpcode::MachVmProtect)
-        | Some(SystemSubOpcode::MachSemCreate)
-        | Some(SystemSubOpcode::MachSemDestroy)
-        | Some(SystemSubOpcode::MachSemSignal)
-        | Some(SystemSubOpcode::MachSemWait)
-        | Some(SystemSubOpcode::MachErrorString)
-        | Some(SystemSubOpcode::MachSleepUntil) => {
-            // T0110: all nine used to collapse into one arm that stored
-            // `i64 0` into the destination and returned Ok, under the comment
-            // "return 0/null on non-macOS, delegate to runtime on macOS". The
-            // delegation was described and never written — the body had no
-            // macOS branch and read no triple at all.
-            //
-            // Zero is not a neutral placeholder here: zero is KERN_SUCCESS.
-            // Every one of these therefore reported SUCCESS on every target,
-            // macOS included — `mach_vm_allocate` succeeding without
-            // allocating and leaving its address untouched, `mach_sem_wait`
-            // succeeding without waiting, `mach_sem_signal` succeeding
-            // without signalling. A semaphore wait that returns success
-            // without blocking is not a degraded answer; it is undetectable
-            // at the call site.
-            //
-            // Both branches are now loud, and the branch is chosen by the
-            // TARGET triple (per the standing rule that per-platform
-            // decisions in emitted IR never read a host `cfg`) because the
-            // two situations need different diagnoses. Nothing in `core/`
-            // reaches these sub-opcodes: `core/sys/darwin/mach.vr` binds the
-            // same kernel calls through an `@ffi("libSystem.B.dylib")`
-            // `extern` block, which the AOT backend already lowers correctly
-            // — that is the path to use, and implementing a second one here
-            // would also have to settle the documented `Result<_, KernReturn>`
-            // return shape, which NEITHER tier currently produces.
-            let module = ctx.get_module();
-            let mnemonic = sub_opcode.map(|op| op.meta().mnemonic).unwrap_or("MACH_*");
-            if target_is_darwin(module) {
-                Err(LlvmLoweringError::unsupported(format!(
-                    "{mnemonic}: the AOT backend has no Tier-1 lowering for the \
-                     Mach kernel sub-opcodes. Call the Mach API through \
-                     `core.sys.darwin.mach` (an `@ffi(\"libSystem.B.dylib\")` \
-                     `extern` block, lowered as an ordinary FFI call) instead \
-                     of the `mach_*` intrinsic (T0110)."
-                )))
-            } else {
-                let triple = module.get_triple();
-                let triple = triple.as_str().to_string_lossy();
-                Err(LlvmLoweringError::unsupported(format!(
-                    "{mnemonic}: Mach is the macOS/Darwin kernel interface and \
-                     target `{triple}` does not provide it. This call cannot \
-                     succeed on this target — guard it behind a Darwin-only \
-                     path rather than compiling it for `{triple}` (T0110)."
-                )))
-            }
-        }
-
         // CBGR Memory Operations (0xA0-0xA2) — tracked allocation for
         // Shared<T>, Heap<T>, List/Map internals. In AOT we route to the
         // C runtime's `verum_cbgr_allocate` / `verum_cbgr_deallocate`
         // helpers which own the actual page/slot machinery; this mirrors
         // how the slice ops at 0x06-0x09 call `verum_cbgr_allocate`.
-        Some(SystemSubOpcode::CbgrAlloc) | Some(SystemSubOpcode::CbgrAllocZeroed) => {
-            // The FULL .vr contract, at Tier 1 exactly as at Tier 0:
-            //
-            //   cbgr_alloc(size, align)
-            //       -> Result<(&unsafe Byte, UInt32, UInt16), AllocError>
-            //
-            // The previous arm returned the raw pointer with a comment
-            // reasoning that "the stdlib allocator wrapper handles the
-            // packaging on top" — describing a world that no longer
-            // existed: this intrinsic IS the replacement for that
-            // wrapper, so nothing packaged anything, and every caller
-            // that matched on the Result (Shared.new, Heap.new — every
-            // allocation in the language) read the raw pointer AS a
-            // variant. GetVariantData then dereferenced offset 24
-            // INSIDE the fresh block, the "payload" unpacked to
-            // garbage, and ptr_write faulted — the single crashing
-            // frame behind 34 darwin autopsies (T0844).
-            //
-            // Both allocating sub-ops share the arm because the
-            // allocator zeroes every block: "zeroed" is not a second
-            // allocator, it is the only one.
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let size_reg = op_reg(operands, 1);
-            let align_reg = op_reg(operands, 2);
-            let i64_ty = ctx.types().i64_type();
-            let module = ctx.get_module();
-            let builder = ctx.builder();
-            let runtime = RuntimeLowering::new(ctx.llvm_context());
-
-            let size_val = as_i64(ctx, ctx.get_register(size_reg)?, "cbgr_alloc_size")?;
-            let align_val = as_i64(ctx, ctx.get_register(align_reg)?, "cbgr_alloc_align")?;
-
-            let current_fn = builder
-                .get_insert_block()
-                .and_then(|b| b.get_parent())
-                .or_internal("cbgr_alloc: no insert block/function")?;
-            let alloc_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_go");
-            let err_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_err");
-            let ok_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_ok");
-            let done_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_done");
-
-            // Validation mirrors the Tier-0 handler bit for bit:
-            // 0 < size <= MAX_ALLOCATION_SIZE, 0 < align <= 4096,
-            // align a power of two.
-            let zero = i64_ty.const_zero();
-            let max_alloc =
-                i64_ty.const_int(verum_common::layout::MAX_ALLOCATION_SIZE as u64, false);
-            let size_pos = builder
-                .build_int_compare(IntPredicate::SGT, size_val, zero, "size_pos")
-                .or_llvm_err()?;
-            let size_max = builder
-                .build_int_compare(IntPredicate::SLE, size_val, max_alloc, "size_le_max")
-                .or_llvm_err()?;
-            let align_pos = builder
-                .build_int_compare(IntPredicate::SGT, align_val, zero, "align_pos")
-                .or_llvm_err()?;
-            let align_max = builder
-                .build_int_compare(
-                    IntPredicate::SLE,
-                    align_val,
-                    i64_ty.const_int(4096, false),
-                    "align_le_max",
-                )
-                .or_llvm_err()?;
-            let align_m1 = builder
-                .build_int_sub(align_val, i64_ty.const_int(1, false), "align_m1")
-                .or_llvm_err()?;
-            let and = builder
-                .build_and(align_val, align_m1, "align_and")
-                .or_llvm_err()?;
-            let pow2 = builder
-                .build_int_compare(IntPredicate::EQ, and, zero, "align_pow2")
-                .or_llvm_err()?;
-            let v1 = builder.build_and(size_pos, size_max, "v1").or_llvm_err()?;
-            let v2 = builder.build_and(align_pos, align_max, "v2").or_llvm_err()?;
-            let v3 = builder.build_and(v1, v2, "v3").or_llvm_err()?;
-            let valid = builder.build_and(v3, pow2, "valid").or_llvm_err()?;
-            builder
-                .build_conditional_branch(valid, alloc_bb, err_bb)
-                .or_llvm_err()?;
-
-            // Err — both for rejected arguments and for OOM, matching
-            // the Tier-0 handler: `Err(AllocError.InvalidSize{size})`,
-            // a real two-level variant (the OOM leg is unreachable in
-            // practice — verum_checked_malloc aborts — so the rejected
-            // arguments are what this arm actually reports).
-            builder.position_at_end(err_bb);
-            let err_int = build_alloc_err_value(ctx, 1, size_val, "cbgr_err")?;
-            let builder = ctx.builder();
-            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
-            let err_end_bb = builder
-                .get_insert_block()
-                .or_internal("cbgr_alloc: err block vanished")?;
-
-            // Allocate through the ONE aligned body.
-            builder.position_at_end(alloc_bb);
-            let ptr_ty = ctx.types().ptr_type();
-            let alloc_fn = module
-                .get_function("verum_cbgr_allocate_aligned")
-                .unwrap_or_else(|| {
-                    let fn_ty = ptr_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
-                    module.add_function("verum_cbgr_allocate_aligned", fn_ty, None)
-                });
-            let ptr = builder
-                .build_call(alloc_fn, &[size_val.into(), align_val.into()], "cbgr_alloc_ptr")
-                .or_llvm_err()?
-                .basic_value_or("cbgr_alloc returned no value")?
-                .into_pointer_value();
-            let is_null = builder
-                .build_is_null(ptr, "cbgr_alloc_oom")
-                .or_llvm_err()?;
-            builder
-                .build_conditional_branch(is_null, err_bb, ok_bb)
-                .or_llvm_err()?;
-
-            // Ok((ptr, gen, epoch)) — gen and epoch READ BACK from the
-            // header the allocator wrote, so tuple and header cannot
-            // drift.
-            builder.position_at_end(ok_bb);
-            let (generation, epoch) = runtime.lower_header_gen_epoch(builder, ptr)?;
-            let ptr_int = builder
-                .build_ptr_to_int(ptr, i64_ty, "cbgr_user_int")
-                .or_llvm_err()?;
-            let tuple_ptr = runtime.lower_pack_typed(
-                builder,
-                module,
-                &[ptr_int, generation, epoch],
-                verum_vbc::types::TypeId::TUPLE.0,
-            )?;
-            let tuple_int = builder
-                .build_ptr_to_int(tuple_ptr, i64_ty, "cbgr_tuple_int")
-                .or_llvm_err()?;
-            let ok_variant = runtime.lower_make_variant(
-                builder,
-                module,
-                verum_common::well_known_types::result_success_tag(),
-                1,
-            )?;
-            runtime.lower_set_variant_data(builder, ok_variant, 0, tuple_int)?;
-            let ok_int = builder
-                .build_ptr_to_int(ok_variant, i64_ty, "cbgr_ok_int")
-                .or_llvm_err()?;
-            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
-            let ok_end_bb = builder
-                .get_insert_block()
-                .or_internal("cbgr_alloc: ok block vanished")?;
-
-            builder.position_at_end(done_bb);
-            let result = builder
-                .build_phi(i64_ty, "cbgr_alloc_result")
-                .or_llvm_err()?;
-            result.add_incoming(&[(&err_int, err_end_bb), (&ok_int, ok_end_bb)]);
-            let result_val = result.as_basic_value().into_int_value();
-            ctx.set_register(dst, result_val.into());
-            ctx.mark_variant_register(dst);
-            ctx.set_obj_alloc_size(dst, RuntimeLowering::OBJECT_HEADER_SIZE + 8 + 8);
-            Ok(())
-        }
-        Some(SystemSubOpcode::CbgrDealloc) => {
-            if operands.len() < 4 {
-                return Ok(());
-            }
-            let _dst = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let dealloc_fn = module
-                .get_function("verum_cbgr_deallocate")
-                .unwrap_or_else(|| {
-                    let fn_ty = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
-                    module.add_function("verum_cbgr_deallocate", fn_ty, None)
-                });
-            let raw = ctx.get_register(ptr_reg)?;
-            let ptr_val = as_ptr(ctx, raw, "cbgr_dealloc_ptr")?;
-            ctx.builder()
-                .build_call(dealloc_fn, &[ptr_val.into()], "")
-                .or_llvm_err()?;
-            let _ = i64_ty;
-            Ok(())
-        }
-
         // ================================================================
         // Allocator-internal realloc (0xA4) + public CBGR bridge
         // (0xA5-0xA8).  All route through the `verum_cbgr_*` runtime
@@ -33260,281 +33620,6 @@ fn lower_ffi_extended<'ctx>(
         // AOT reallocation silently computed `ptr + old_size`; the bridge
         // sub-ops did not exist at all.
         // ================================================================
-        Some(SystemSubOpcode::CbgrRealloc) => {
-            // Same contract, same construction, same reasons as the
-            // CbgrAlloc arm above: Result<(ptr, gen, epoch), AllocError>,
-            // built at Tier 1 exactly as the Tier-0 handler builds it
-            // (which was itself repaired under T0463 after a bare nil
-            // desynced the caller's match). The previous arm returned
-            // the raw pointer AND read only (ptr, new_size), silently
-            // dropping both old_size and align.
-            if operands.len() < 5 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-            let old_size_reg = op_reg(operands, 2);
-            let new_size_reg = op_reg(operands, 3);
-            let align_reg = op_reg(operands, 4);
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let module = ctx.get_module();
-            let builder = ctx.builder();
-            let runtime = RuntimeLowering::new(ctx.llvm_context());
-
-            let old_ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "cbgr_realloc_old")?;
-            let old_size = as_i64(ctx, ctx.get_register(old_size_reg)?, "cbgr_realloc_oldsz")?;
-            let new_size = as_i64(ctx, ctx.get_register(new_size_reg)?, "cbgr_realloc_newsz")?;
-            let align_val = as_i64(ctx, ctx.get_register(align_reg)?, "cbgr_realloc_align")?;
-
-            let current_fn = builder
-                .get_insert_block()
-                .and_then(|b| b.get_parent())
-                .or_internal("cbgr_realloc: no insert block/function")?;
-            let go_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_go");
-            let err_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_err");
-            let ok_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_ok");
-            let done_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_done");
-
-            let zero = i64_ty.const_zero();
-            let max_alloc =
-                i64_ty.const_int(verum_common::layout::MAX_ALLOCATION_SIZE as u64, false);
-            let size_pos = builder
-                .build_int_compare(IntPredicate::SGT, new_size, zero, "re_size_pos")
-                .or_llvm_err()?;
-            let size_max = builder
-                .build_int_compare(IntPredicate::SLE, new_size, max_alloc, "re_size_max")
-                .or_llvm_err()?;
-            let align_pos = builder
-                .build_int_compare(IntPredicate::SGT, align_val, zero, "re_align_pos")
-                .or_llvm_err()?;
-            let align_max = builder
-                .build_int_compare(
-                    IntPredicate::SLE,
-                    align_val,
-                    i64_ty.const_int(4096, false),
-                    "re_align_max",
-                )
-                .or_llvm_err()?;
-            let v1 = builder.build_and(size_pos, size_max, "re_v1").or_llvm_err()?;
-            let v2 = builder.build_and(align_pos, align_max, "re_v2").or_llvm_err()?;
-            let valid = builder.build_and(v1, v2, "re_valid").or_llvm_err()?;
-            builder
-                .build_conditional_branch(valid, go_bb, err_bb)
-                .or_llvm_err()?;
-
-            builder.position_at_end(err_bb);
-            let err_int = build_alloc_err_value(ctx, 1, new_size, "cbgr_re_err")?;
-            let builder = ctx.builder();
-            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
-            let err_end_bb = builder
-                .get_insert_block()
-                .or_internal("cbgr_realloc: err block vanished")?;
-
-            builder.position_at_end(go_bb);
-            let alloc_fn = module
-                .get_function("verum_cbgr_allocate_aligned")
-                .unwrap_or_else(|| {
-                    let fn_ty = ptr_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
-                    module.add_function("verum_cbgr_allocate_aligned", fn_ty, None)
-                });
-            let new_ptr = builder
-                .build_call(alloc_fn, &[new_size.into(), align_val.into()], "cbgr_re_new")
-                .or_llvm_err()?
-                .basic_value_or("cbgr_realloc alloc returned no value")?
-                .into_pointer_value();
-            let is_null = builder
-                .build_is_null(new_ptr, "cbgr_re_oom")
-                .or_llvm_err()?;
-            builder
-                .build_conditional_branch(is_null, err_bb, ok_bb)
-                .or_llvm_err()?;
-
-            builder.position_at_end(ok_bb);
-            // copy min(old_size, new_size) then release the old block.
-            let old_lt = builder
-                .build_int_compare(IntPredicate::SLT, old_size, new_size, "re_old_lt")
-                .or_llvm_err()?;
-            let copy_len = builder
-                .build_select(old_lt, old_size, new_size, "re_copy_len")
-                .or_llvm_err()?
-                .into_int_value();
-            let memcpy_fn = module.get_function("memcpy").unwrap_or_else(|| {
-                let fn_ty = ptr_ty
-                    .fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
-                module.add_function("memcpy", fn_ty, None)
-            });
-            builder
-                .build_call(
-                    memcpy_fn,
-                    &[new_ptr.into(), old_ptr.into(), copy_len.into()],
-                    "",
-                )
-                .or_llvm_err()?;
-            let dealloc_fn = module
-                .get_function("verum_cbgr_deallocate")
-                .unwrap_or_else(|| {
-                    let fn_ty = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
-                    module.add_function("verum_cbgr_deallocate", fn_ty, None)
-                });
-            builder
-                .build_call(dealloc_fn, &[old_ptr.into()], "")
-                .or_llvm_err()?;
-            let (generation, epoch) = runtime.lower_header_gen_epoch(builder, new_ptr)?;
-            let ptr_int = builder
-                .build_ptr_to_int(new_ptr, i64_ty, "cbgr_re_user_int")
-                .or_llvm_err()?;
-            let tuple_ptr = runtime.lower_pack_typed(
-                builder,
-                module,
-                &[ptr_int, generation, epoch],
-                verum_vbc::types::TypeId::TUPLE.0,
-            )?;
-            let tuple_int = builder
-                .build_ptr_to_int(tuple_ptr, i64_ty, "cbgr_re_tuple_int")
-                .or_llvm_err()?;
-            let ok_variant = runtime.lower_make_variant(
-                builder,
-                module,
-                verum_common::well_known_types::result_success_tag(),
-                1,
-            )?;
-            runtime.lower_set_variant_data(builder, ok_variant, 0, tuple_int)?;
-            let ok_int = builder
-                .build_ptr_to_int(ok_variant, i64_ty, "cbgr_re_ok_int")
-                .or_llvm_err()?;
-            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
-            let ok_end_bb = builder
-                .get_insert_block()
-                .or_internal("cbgr_realloc: ok block vanished")?;
-
-            builder.position_at_end(done_bb);
-            let result = builder
-                .build_phi(i64_ty, "cbgr_re_result")
-                .or_llvm_err()?;
-            result.add_incoming(&[(&err_int, err_end_bb), (&ok_int, ok_end_bb)]);
-            let result_val = result.as_basic_value().into_int_value();
-            ctx.set_register(dst, result_val.into());
-            ctx.mark_variant_register(dst);
-            ctx.set_obj_alloc_size(dst, RuntimeLowering::OBJECT_HEADER_SIZE + 8 + 8);
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::CbgrAllocateUser) => {
-            // Format: dst, size, align — the runtime allocate takes only
-            // the size; alignment beyond the header's natural 8/16 is a
-            // documented bridge limitation (see cbgr.vr audit).
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let size_reg = op_reg(operands, 1);
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let alloc_fn = module.get_function("verum_cbgr_allocate").unwrap_or_else(|| {
-                let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
-                module.add_function("verum_cbgr_allocate", fn_ty, None)
-            });
-            let size_val = as_i64(ctx, ctx.get_register(size_reg)?, "cbgr_user_size")?;
-            let ptr = ctx
-                .builder()
-                .build_call(alloc_fn, &[size_val.into()], "cbgr_user_ptr")
-                .or_llvm_err()?
-                .basic_value_or("cbgr_allocate returned no value")?;
-            // The bridge returns a plain Int address — convert so downstream
-            // integer arithmetic (`p + i`, `p % align`) sees an i64.
-            let as_int = ctx
-                .builder()
-                .build_ptr_to_int(ptr.into_pointer_value(), i64_ty, "cbgr_user_addr")
-                .or_llvm_err()?;
-            ctx.set_register(dst, as_int.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::CbgrDeallocUser) => {
-            // Format: dst, ptr
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let _dst = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-            let module = ctx.get_module();
-            let ptr_ty = ctx.types().ptr_type();
-            let dealloc_fn = module
-                .get_function("verum_cbgr_deallocate")
-                .unwrap_or_else(|| {
-                    let fn_ty = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
-                    module.add_function("verum_cbgr_deallocate", fn_ty, None)
-                });
-            let ptr_val = as_ptr(ctx, ctx.get_register(ptr_reg)?, "cbgr_user_dealloc_ptr")?;
-            ctx.builder()
-                .build_call(dealloc_fn, &[ptr_val.into()], "")
-                .or_llvm_err()?;
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::CbgrReallocUser) => {
-            // Format: dst, ptr, new_size
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-            let new_size_reg = op_reg(operands, 2);
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let realloc_fn = module.get_function("verum_cbgr_realloc").unwrap_or_else(|| {
-                let fn_ty = ptr_ty.fn_type(
-                    &[ptr_ty.into(), i64_ty.into(), i64_ty.into()],
-                    false,
-                );
-                module.add_function("verum_cbgr_realloc", fn_ty, None)
-            });
-            let ptr_val = as_ptr(ctx, ctx.get_register(ptr_reg)?, "cbgr_user_realloc_ptr")?;
-            let new_size = as_i64(ctx, ctx.get_register(new_size_reg)?, "cbgr_user_realloc_size")?;
-            // The user-facing surface has no align parameter; its blocks
-            // come from the plain CBGR wrappers, whose alignment is 32.
-            let align_32 = i64_ty.const_int(32, false);
-            let new_ptr = ctx
-                .builder()
-                .build_call(
-                    realloc_fn,
-                    &[ptr_val.into(), new_size.into(), align_32.into()],
-                    "cbgr_user_realloc",
-                )
-                .or_llvm_err()?
-                .basic_value_or("cbgr_realloc returned no value")?;
-            let as_int = ctx
-                .builder()
-                .build_ptr_to_int(new_ptr.into_pointer_value(), i64_ty, "cbgr_user_realloc_addr")
-                .or_llvm_err()?;
-            ctx.set_register(dst, as_int.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::CbgrValidateBool) => {
-            // Format: dst, ref.  Tier-2 semantics: an AOT reference that
-            // reaches this op is compiler-checked; the residual dynamic
-            // question is null-ness.  (Full generational validation is the
-            // interpreter's Tier-0 job — see handlers/cbgr.rs.)
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let ref_reg = op_reg(operands, 1);
-            let ptr = as_ptr(ctx, ctx.get_register(ref_reg)?, "cbgr_validate_ref")?;
-            let is_null = ffi.lower_ptr_is_null(ctx.builder(), ptr)?;
-            let one = is_null.get_type().const_int(1, false);
-            let live = ctx
-                .builder()
-                .build_xor(is_null, one, "cbgr_validate_live")
-                .or_llvm_err()?;
-            ctx.set_register(dst, live.into());
-            Ok(())
-        }
-
         // ================================================================
         // Synchronization Primitives (0xB0-0xB2)
         // ================================================================
@@ -33543,100 +33628,6 @@ fn lower_ffi_extended<'ctx>(
         // (declared and bodied later in this file at lines ~10034+).
         // The interpreter implements these directly via park/unpark
         // on a shared address keyed by the lock cell.
-        Some(SystemSubOpcode::FutexWait) => {
-            if operands.len() < 4 {
-                return Err(LlvmLoweringError::internal(
-                    "FutexWait: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let addr_reg = op_reg(operands, 1);
-            let expected_reg = op_reg(operands, 2);
-            let timeout_reg = op_reg(operands, 3);
-
-            let i64_type = ctx.types().i64_type();
-            let module = ctx.get_module();
-            let fn_type =
-                i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
-            let wait_fn = module
-                .get_function("verum_futex_wait")
-                .unwrap_or_else(|| module.add_function("verum_futex_wait", fn_type, None));
-
-            let addr_val = as_i64(ctx, ctx.get_register(addr_reg)?, "futex_addr")?;
-            let expected_val = as_i64(ctx, ctx.get_register(expected_reg)?, "futex_expected")?;
-            let timeout_val = as_i64(ctx, ctx.get_register(timeout_reg)?, "futex_timeout")?;
-
-            let result = ctx
-                .builder()
-                .build_call(
-                    wait_fn,
-                    &[addr_val.into(), expected_val.into(), timeout_val.into()],
-                    "futex_wait",
-                )
-                .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .unwrap_or_else(|| i64_type.const_int(0, false).into());
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::FutexWake) => {
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "FutexWake: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let addr_reg = op_reg(operands, 1);
-            let count_reg = op_reg(operands, 2);
-
-            let i64_type = ctx.types().i64_type();
-            let module = ctx.get_module();
-            let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            let wake_fn = module
-                .get_function("verum_futex_wake")
-                .unwrap_or_else(|| module.add_function("verum_futex_wake", fn_type, None));
-
-            let addr_val = as_i64(ctx, ctx.get_register(addr_reg)?, "futex_addr")?;
-            let count_val = as_i64(ctx, ctx.get_register(count_reg)?, "futex_count")?;
-
-            let result = ctx
-                .builder()
-                .build_call(wake_fn, &[addr_val.into(), count_val.into()], "futex_wake")
-                .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .unwrap_or_else(|| i64_type.const_int(0, false).into());
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::SpinlockLock) => {
-            if operands.len() < 2 {
-                return Err(LlvmLoweringError::internal(
-                    "SpinlockLock: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let addr_reg = op_reg(operands, 1);
-
-            let i64_type = ctx.types().i64_type();
-            let module = ctx.get_module();
-            let void_type = ctx.types().void_type();
-            let fn_type = void_type.fn_type(&[i64_type.into()], false);
-            let lock_fn = module
-                .get_function("verum_spinlock_lock")
-                .unwrap_or_else(|| module.add_function("verum_spinlock_lock", fn_type, None));
-
-            let addr_val = as_i64(ctx, ctx.get_register(addr_reg)?, "spinlock_addr")?;
-            ctx.builder()
-                .build_call(lock_fn, &[addr_val.into()], "")
-                .or_llvm_err()?;
-            ctx.set_register(dst_reg, i64_type.const_int(0, false).into());
-            Ok(())
-        }
-
         None => Err(LlvmLoweringError::internal(format!(
             "Unknown FFI sub-opcode: 0x{:02X}",
             sub_op
@@ -43012,16 +43003,16 @@ mod ffi_placeholder_arms_never_fake_success {
     use verum_llvm::targets::TargetTriple;
     use verum_vbc::module::{FfiSignature, FfiSymbol, VbcModule};
 
-    const MACH_SUB_OPCODES: &[SystemSubOpcode] = &[
-        SystemSubOpcode::MachVmAllocate,
-        SystemSubOpcode::MachVmDeallocate,
-        SystemSubOpcode::MachVmProtect,
-        SystemSubOpcode::MachSemCreate,
-        SystemSubOpcode::MachSemDestroy,
-        SystemSubOpcode::MachSemSignal,
-        SystemSubOpcode::MachSemWait,
-        SystemSubOpcode::MachErrorString,
-        SystemSubOpcode::MachSleepUntil,
+    const MACH_SUB_OPCODES: &[MachSubOpcode] = &[
+        MachSubOpcode::VmAllocate,
+        MachSubOpcode::VmDeallocate,
+        MachSubOpcode::VmProtect,
+        MachSubOpcode::SemCreate,
+        MachSubOpcode::SemDestroy,
+        MachSubOpcode::SemSignal,
+        MachSubOpcode::SemWait,
+        MachSubOpcode::ErrorString,
+        MachSubOpcode::SleepUntil,
     ];
 
     /// Lower one `FfiExtended` sub-op into a fresh `void()` function on a
@@ -43038,6 +43029,21 @@ mod ffi_placeholder_arms_never_fake_success {
         let mut ctx = FunctionContext::new(&context, &module, function, "t0110_probe_fn");
         ctx.builder().position_at_end(entry);
         lower_ffi_extended(&mut ctx, sub_op as u8, operands).map_err(|e| e.to_string())
+    }
+
+    /// Mach twin of `lower_outcome` — the family moved to its own
+    /// gateway under T0852.
+    fn lower_mach_outcome(sub_op: MachSubOpcode, operands: &[u8], triple: &str) -> std::result::Result<(), String> {
+        let context = Context::create();
+        let module = context.create_module("t0110_probe");
+        module.set_triple(&TargetTriple::create(triple));
+        let fn_type = context.void_type().fn_type(&[], false);
+        let function = module.add_function("t0110_probe_fn", fn_type, None);
+        let entry = context.append_basic_block(function, "entry");
+
+        let mut ctx = FunctionContext::new(&context, &module, function, "t0110_probe_fn");
+        ctx.builder().position_at_end(entry);
+        lower_mach_extended(&mut ctx, sub_op as u8, operands).map_err(|e| e.to_string())
     }
 
     /// `GetLibrary` used to store `ptr null` into the destination and report
@@ -43177,11 +43183,11 @@ mod ffi_placeholder_arms_never_fake_success {
     #[test]
     fn every_mach_sub_opcode_fails_loudly_on_darwin() {
         for &sub_op in MACH_SUB_OPCODES {
-            let err = lower_outcome(sub_op, &[0, 1, 2], "arm64-apple-darwin").expect_err(
+            let err = lower_mach_outcome(sub_op, &[0, 1, 2], "arm64-apple-darwin").expect_err(
                 "a Mach op with no Tier-1 lowering must not report KERN_SUCCESS on Darwin",
             );
             assert!(
-                err.contains(sub_op.meta().mnemonic) && err.contains("core.sys.darwin.mach"),
+                err.contains(&format!("{sub_op:?}")) && err.contains("core.sys.darwin.mach"),
                 "the Darwin diagnostic must name the op and the path that works, got: {err}"
             );
         }
@@ -43194,11 +43200,11 @@ mod ffi_placeholder_arms_never_fake_success {
     #[test]
     fn every_mach_sub_opcode_fails_loudly_on_a_non_darwin_target() {
         for &sub_op in MACH_SUB_OPCODES {
-            let err = lower_outcome(sub_op, &[0, 1, 2], "x86_64-unknown-linux-gnu").expect_err(
+            let err = lower_mach_outcome(sub_op, &[0, 1, 2], "x86_64-unknown-linux-gnu").expect_err(
                 "a Mach op must not report KERN_SUCCESS on a target with no Mach kernel",
             );
             assert!(
-                err.contains(sub_op.meta().mnemonic) && err.contains("x86_64-unknown-linux-gnu"),
+                err.contains(&format!("{sub_op:?}")) && err.contains("x86_64-unknown-linux-gnu"),
                 "the non-Darwin diagnostic must name the op and the target, got: {err}"
             );
         }
@@ -43210,10 +43216,10 @@ mod ffi_placeholder_arms_never_fake_success {
     /// that had none).
     #[test]
     fn mach_diagnostics_differ_by_target_triple() {
-        let darwin = lower_outcome(SystemSubOpcode::MachSemWait, &[0, 1], "arm64-apple-darwin")
+        let darwin = lower_mach_outcome(MachSubOpcode::SemWait, &[0, 1], "arm64-apple-darwin")
             .expect_err("Darwin branch is loud");
-        let linux = lower_outcome(
-            SystemSubOpcode::MachSemWait,
+        let linux = lower_mach_outcome(
+            MachSubOpcode::SemWait,
             &[0, 1],
             "x86_64-unknown-linux-gnu",
         )

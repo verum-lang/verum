@@ -27,7 +27,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 
 use verum_vbc::bytecode;
-use verum_vbc::instruction::{AtomicRmwOp, Instruction, Reg, SystemSubOpcode};
+use verum_vbc::instruction::{AtomicRmwOp, Instruction, Reg, SyncSubOpcode};
 use verum_vbc::interpreter::Interpreter;
 use verum_vbc::module::{FunctionDescriptor, FunctionId, VbcModule};
 use verum_vbc::types::StringId;
@@ -390,8 +390,8 @@ fn atomic_fetch_intrinsics_lower_to_one_indivisible_opcode() {
             .filter(|i| {
                 matches!(
                     i,
-                    Instruction::FfiExtended { sub_op, .. }
-                        if *sub_op == SystemSubOpcode::AtomicRmw as u8
+                    Instruction::SyncExtended { sub_op, .. }
+                        if *sub_op == SyncSubOpcode::AtomicRmw as u8
                 )
             })
             .count();

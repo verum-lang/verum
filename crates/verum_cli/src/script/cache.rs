@@ -157,7 +157,7 @@ impl std::fmt::Display for CacheKey {
 /// Still bump this on a deliberate wire-format change — it is the portable,
 /// cross-machine signal (a binary copied to another host keeps its bytes but
 /// gets a new mtime; the schema version travels with the source).
-pub const WIRE_SCHEMA_VERSION: u32 = 3; // 2: GPU GpuExtended [dst][args...] realign (T0177); 3: simd reduce-trio emission LoadNil→SimdExtended (T0116 — same stale-replay class). T0387 added a build-unique compiler identity to the key so a codegen-output change for fixed source now auto-invalidates; this manual bump remains the portable belt-and-suspenders signal.
+pub const WIRE_SCHEMA_VERSION: u32 = 4; // 2: GPU GpuExtended [dst][args...] realign (T0177); 3: simd reduce-trio emission LoadNil→SimdExtended (T0116 — same stale-replay class); 4: T0852 opcode-map re-homing — Time/Sys/Mach/Sync family gateways at 0xF0-0xF3 and the CbgrExtended 0x60-0x6A band replace ~58 FfiExtended SystemSubOpcode squatters. T0387 added a build-unique compiler identity to the key so a codegen-output change for fixed source now auto-invalidates; this manual bump remains the portable belt-and-suspenders signal.
 
 pub fn key_for(source: &[u8], compiler_version: &str, flags: &[&str]) -> CacheKey {
     key_with_identity(source, compiler_version, flags, compiler_identity())
