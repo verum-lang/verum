@@ -2995,6 +2995,7 @@ impl ArchiveCtxCache {
                 .extend(collect_mount_alias_triples(module, pruned_remap));
         }
         install_mount_alias_archive_names(&primary_alias_triples, codegen);
+        let t_types = std::time::Instant::now();
         for (entry_name, pruned_remap) in &pruned_remaps {
             let Some(module) = module_by_name.get(entry_name.as_str()).copied() else {
                 continue;
@@ -3015,6 +3016,7 @@ impl ArchiveCtxCache {
             // which the keep set includes by construction).
             replay_mount_aliases(module, entry_name, pruned_remap, codegen);
         }
+        loadcost::record("types_import", t_types.elapsed());
         // Phase 2: body merges now see every loaded archive's name
         // bindings in `archive_func_name_to_fid`, so cross-module
         // Calls inside A's bodies resolve to B's functions via
@@ -3040,6 +3042,7 @@ impl ArchiveCtxCache {
         // resolvable by closure construction; everything pruned away
         // is unreachable from the registered surface, the BFS-reached
         // set, and the live type surface.
+        let t_merge = std::time::Instant::now();
         for (entry_name, pruned_remap) in &pruned_remaps {
             if let Some(module) = module_by_name.get(entry_name.as_str()).copied() {
                 codegen.merge_archive_function_bodies(module, pruned_remap);
@@ -3048,6 +3051,7 @@ impl ArchiveCtxCache {
                 self.note_merged_ids(entry_name, pruned_remap.keys());
             }
         }
+        loadcost::record("merge_bodies", t_merge.elapsed());
         // T0711: everything below this index is archive-merged; the
         // post-codegen dispatch-name collector scans only past it.
         codegen.archive_merged_fn_watermark = codegen.function_count() as usize;
