@@ -12,6 +12,13 @@ use crate::playbook::session::{Cell, CellKind, CellOutput};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Widget};
 
+/// The most source lines a cell renders in the NOTEBOOK view.  A
+/// megabyte-class cell is edited in the (windowed) editor; the
+/// notebook shows the head and a truncation notice.  Without the cap,
+/// `count() as u16` wrapped past 65 535 lines and the u16 height sum
+/// overflowed — a 70k-line cell broke the whole layout.
+pub const CELL_VIEW_MAX_LINES: usize = 400;
+
 /// Calculate the height needed to render a cell (including borders and output).
 pub fn cell_height(cell: &Cell, collapsed: bool) -> u16 {
     let border = 2u16; // top + bottom border
@@ -23,7 +30,20 @@ pub fn cell_height(cell: &Cell, collapsed: bool) -> u16 {
     let source_lines = if cell.source.is_empty() {
         1
     } else {
-        cell.source.as_str().lines().count().max(1)
+        // `take(cap + 1)` bounds the scan itself — a 1 MB cell costs
+        // O(cap), not O(buffer), per layout pass.
+        let counted = cell
+            .source
+            .as_str()
+            .lines()
+            .take(CELL_VIEW_MAX_LINES + 1)
+            .count()
+            .max(1);
+        if counted > CELL_VIEW_MAX_LINES {
+            CELL_VIEW_MAX_LINES + 1 // +1 for the truncation notice line
+        } else {
+            counted
+        }
     } as u16;
 
     let output_lines = if cell.output_collapsed {
@@ -36,7 +56,7 @@ pub fn cell_height(cell: &Cell, collapsed: bool) -> u16 {
         }) as u16
     };
 
-    border + source_lines + output_lines
+    (border as u32 + source_lines as u32 + output_lines as u32).min(u16::MAX as u32) as u16
 }
 
 /// Status indicator for a cell.
@@ -579,8 +599,13 @@ impl<'a> Widget for CellWidget<'a> {
         let code_width = inner.width.saturating_sub(gutter_width);
 
         if self.cell.is_code() {
+            let mut truncated = false;
             for (line_num, line) in source.lines().enumerate() {
                 if y >= max_y {
+                    break;
+                }
+                if line_num >= CELL_VIEW_MAX_LINES {
+                    truncated = true;
                     break;
                 }
                 // Line number gutter
@@ -594,6 +619,18 @@ impl<'a> Widget for CellWidget<'a> {
                 let spans = highlight_verum_line(line);
                 let styled_line = Line::from(spans);
                 buf.set_line(inner.x + gutter_width, y, &styled_line, code_width);
+                y += 1;
+            }
+            if truncated && y < max_y {
+                buf.set_string(
+                    inner.x,
+                    y,
+                    format!(
+                        "  … {} more lines — Enter opens the editor",
+                        source_line_count.saturating_sub(CELL_VIEW_MAX_LINES)
+                    ),
+                    Style::default().fg(Color::DarkGray),
+                );
                 y += 1;
             }
             if source.is_empty() && y < max_y {
