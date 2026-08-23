@@ -5022,6 +5022,15 @@ pub enum MemSubOpcode {
     PtrRead = 0x1A,
     /// Plain machine-semantics pointer write (addr, value, size-imm) — T0108.
     PtrWrite = 0x1B,
+    /// Width-aware pointer add — `ptr + count × width` (T0108
+    /// byte-stride law).  Emitted at CALL SITES where `ptr_add<T>`'s
+    /// pointee is a concrete scalar; the baked generic wrapper keeps
+    /// the legacy ×8 `PtrAdd` body for erased `T`.
+    /// Format: `dst:reg, ptr:reg, count:reg, width:imm-u8`
+    PtrAddT = 0x1C,
+    /// Width-aware pointer sub — `ptr - count × width` (T0108).
+    /// Format: `dst:reg, ptr:reg, count:reg, width:imm-u8`
+    PtrSubT = 0x1D,
     // -- Raw fixed-width leaves (0x20-0x2F), carried over from
     //    SystemSubOpcode 0x53-0x58.
     /// Load u8 (dst, addr).
@@ -5085,6 +5094,8 @@ impl MemSubOpcode {
             0x19 => Some(Self::PtrWriteVolatile),
             0x1A => Some(Self::PtrRead),
             0x1B => Some(Self::PtrWrite),
+            0x1C => Some(Self::PtrAddT),
+            0x1D => Some(Self::PtrSubT),
             0x20 => Some(Self::RawLoadU8),
             0x21 => Some(Self::RawStoreU8),
             0x22 => Some(Self::RawLoadI32),
@@ -17069,7 +17080,7 @@ mod tests {
         );
         assert_eq!(
             sweep(MemSubOpcode::from_byte, MemSubOpcode::to_byte),
-            35,
+            37,
             "MemSubOpcode variant count drift"
         );
     }

@@ -1043,6 +1043,26 @@ unsafe {
             Ok(DispatchResult::Continue)
         }
 
+        0x1C | 0x1D => {
+            // PtrAddT / PtrSubT — width-aware pointer arithmetic
+            // (T0108 byte-stride law): `ptr ± count × width`.
+            // Format: dst, ptr, count, width:imm-u8.
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let count_reg = read_reg(state)?;
+            let width = read_u8(state)? as i64;
+            let ptr = state.get_reg(ptr_reg).as_integer_compatible();
+            let count = state.get_reg(count_reg).as_integer_compatible();
+            let delta = count.wrapping_mul(width);
+            let out = if sub_op == 0x1C {
+                ptr.wrapping_add(delta)
+            } else {
+                ptr.wrapping_sub(delta)
+            };
+            state.set_reg(dst, Value::from_i64(out));
+            Ok(DispatchResult::Continue)
+        }
+
         0x20 => {
             let dst = read_reg(state)?;
             let addr_reg = read_reg(state)?;

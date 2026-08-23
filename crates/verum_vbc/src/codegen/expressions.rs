@@ -5719,7 +5719,11 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, dest.0);
                     Self::write_reg(&mut operands, inner_reg.0);
                     operands.push(size);
-                    self.ctx.emit(Instruction::FfiExtended {
+                    // MemExtended carrier — typed_primitive_pointee_deref
+                    // returns MemSubOpcode bytes since the T0852 Mem wave
+                    // (0x10/0x17 on the old FfiExtended channel would
+                    // decode as CallFfiC/CallFfiWin64Arm64).
+                    self.ctx.emit(Instruction::MemExtended {
                         sub_op: sub_op as u8,
                         operands,
                     });
@@ -32452,12 +32456,24 @@ impl VbcCodegen {
         // `&unsafe ` spelling guarantees no false positive can mis-scale
         // a Value pointer (which would corrupt List/slice raw-ptr walks
         // — the one regression this fix must never introduce).
-        let pointee = match type_name.trim().strip_prefix("&unsafe ") {
-            Some(rest) => rest.trim(),
-            None => return DEFAULT_STRIDE,
+        let trimmed = type_name.trim();
+        let pointee = if let Some(rest) = trimmed.strip_prefix("&unsafe ") {
+            rest.trim()
+        } else if let Some(rest) = trimmed.strip_prefix("*const ") {
+            // T0108 stride leg: every stdlib producer of a `*const T` /
+            // `*mut T` is a RAW byte address (bridge allocations cast
+            // with `as`, auxv/TLS/async raw handles) — List/slice
+            // backings surface as `&unsafe T`, handled above, and are
+            // the only Value-array carriers.  So the raw-star spelling
+            // is safe to width-dispatch for 1-byte scalars too.
+            rest.trim()
+        } else if let Some(rest) = trimmed.strip_prefix("*mut ") {
+            rest.trim()
+        } else {
+            return DEFAULT_STRIDE;
         };
         match pointee {
-            "Byte" | "U8" | "UInt8" | "I8" | "Int8" => 1,
+            "Byte" | "U8" | "UInt8" | "I8" | "Int8" | "Bool" => 1,
             _ => DEFAULT_STRIDE,
         }
     }

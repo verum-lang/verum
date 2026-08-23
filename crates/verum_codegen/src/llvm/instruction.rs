@@ -26783,6 +26783,39 @@ fn lower_mem_extended<'ctx>(
             Ok(())
         }
 
+        0x1C | 0x1D => {
+            // PtrAddT / PtrSubT — width-aware pointer arithmetic
+            // (T0108 byte-stride law): `ptr ± count × width` over i64
+            // address bits.  Operands: dst, ptr, count regs + width
+            // imm byte (positional varlen walk — the grow_pod lesson).
+            let mut pos = 0usize;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let ptr_reg = read_reg_varlen(operands, &mut pos)?;
+            let count_reg = read_reg_varlen(operands, &mut pos)?;
+            if pos >= operands.len() {
+                return Ok(());
+            }
+            let width = operands[pos] as u64;
+            let i64_ty = ctx.types().i64_type();
+            let ptr = as_i64(ctx, ctx.get_register(ptr_reg)?, "ptrt_ptr")?;
+            let count = as_i64(ctx, ctx.get_register(count_reg)?, "ptrt_count")?;
+            let delta = ctx
+                .builder()
+                .build_int_mul(count, i64_ty.const_int(width, false), "ptrt_delta")
+                .or_llvm_err()?;
+            let out = if sub_op == 0x1C {
+                ctx.builder()
+                    .build_int_add(ptr, delta, "ptrt_add")
+                    .or_llvm_err()?
+            } else {
+                ctx.builder()
+                    .build_int_sub(ptr, delta, "ptrt_sub")
+                    .or_llvm_err()?
+            };
+            ctx.set_register(dst, out.into());
+            Ok(())
+        }
+
         0x20 | 0x22 | 0x24 => {
             // Raw fixed-width loads over an Int address (mem_raw's
             // load family): inttoptr + width-typed load.  u8 loads

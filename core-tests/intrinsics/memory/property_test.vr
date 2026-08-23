@@ -185,7 +185,13 @@ fn law_ptr_add_is_strictly_monotonic() {
     cbgr_deallocate(a);
 }
 
-@ignore("T0108 — ptr arithmetic is Value-slot-strided (×8) for every T; the contract is count × T.size. NOT a call-site width channel: the archive bakes `core.intrinsics.memory.ptr_add` with type_params=0 and ONE shared body (a single FfiExtended 0x63) for every T, and the call site emits `Call func_id` rather than inlining @intrinsic — so no site sees a concrete pointee. Blocked on the erased generic, plus `ptr_add(bp, 1)` not type-checking (Int literal vs USize param).")
+// Live since T0108 (stride leg): the call-site width channel
+// (`ptr_intrinsic_byte_stride`) recognises the raw-star spellings
+// (`*const Byte` — bridge/auxv/TLS raw addresses) alongside the
+// `&unsafe Byte` idiom, so a byte pointer advances by 1 on BOTH
+// tiers.  The old blockers died along the way: the Int-literal
+// count type-checks against USize now, and the baked ×8 wrapper
+// body is bypassed at sites where the pointee is concrete.
 @test
 fn law_ptr_add_byte_stride_is_one() {
     let a = cbgr_allocate(16, 8);
