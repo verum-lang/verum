@@ -2411,6 +2411,30 @@ fn get_or_declare_internal_strcmp<'ctx>(
 
 /// Safely extract a pointer value from a register, converting int-to-ptr if needed.
 /// This handles the case where registers store i64 values that represent pointers.
+/// T0845 — the ONE receiver decode for container fastpaths: a method
+/// receiver may be a &mut-SLOT (RefMut over a register whose
+/// container-ness the heuristic could not see, e.g. an unwrap()'s
+/// dynamic return). The slot carries the T0332 shape mark; deref IFF
+/// marked — a blanket deref is the documented contains/index_of
+/// regression, and a blind as_ptr on a marked slot reads len/cap out
+/// of the STACK (LLVM proves the tail undef and folds it into brk).
+fn deref_marked_receiver<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    reg: u16,
+    name: &str,
+) -> Result<verum_llvm::values::BasicValueEnum<'ctx>> {
+    let raw = ctx.get_register(reg)?;
+    if ctx.is_ref_param_register(reg) {
+        let slot_ptr = as_ptr(ctx, raw, name)?;
+        Ok(ctx
+            .builder()
+            .build_load(ctx.types().i64_type(), slot_ptr, "recv_ref_deref")
+            .or_llvm_err()?)
+    } else {
+        Ok(raw)
+    }
+}
+
 fn as_ptr<'ctx>(
     ctx: &FunctionContext<'_, 'ctx>,
     val: BasicValueEnum<'ctx>,
@@ -4527,7 +4551,9 @@ pub fn lower_instruction<'ctx>(
         }
 
         Instruction::ListPush { list, val } => {
-            let list_ptr = as_ptr(ctx, ctx.get_register(list.0)?, "list_ptr")?;
+            // T0845: deref-iff-marked (see deref_marked_receiver).
+            let recv_val = deref_marked_receiver(ctx, list.0, "recv_slot")?;
+            let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
             let value = ctx.get_register(val.0)?;
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             runtime.lower_list_push(ctx.builder(), ctx.get_module(), list_ptr, value)?;
@@ -4635,7 +4661,9 @@ pub fn lower_instruction<'ctx>(
         }
 
         Instruction::ListPop { dst, list } => {
-            let list_ptr = as_ptr(ctx, ctx.get_register(list.0)?, "list_ptr")?;
+            // T0845: deref-iff-marked (see deref_marked_receiver).
+            let recv_val = deref_marked_receiver(ctx, list.0, "recv_slot")?;
+            let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             let popped = runtime.lower_list_pop(ctx.builder(), list_ptr)?;
             ctx.set_register(dst.0, popped.into());
@@ -15687,7 +15715,8 @@ fn lower_call_method<'ctx>(
         match bare_method_early {
             "contains" if args.count == 1 => {
                 // Inline linear scan: iterate backing array, compare with value
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
                 let search_val_ref = as_i64(ctx, ctx.get_register(args.start.0)?, "search_val_ref")?;
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
@@ -15887,7 +15916,8 @@ fn lower_call_method<'ctx>(
             }
             "index_of" if args.count == 1 => {
                 // Same as contains but returns index or -1
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
                 let search_val_ref = as_i64(ctx, ctx.get_register(args.start.0)?, "search_val_ref")?;
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
@@ -16109,7 +16139,8 @@ fn lower_call_method<'ctx>(
             }
             "sort" if args.count == 0 => {
                 // Inline insertion sort on the backing array
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
                 let ptr_type = ctx.types().ptr_type();
@@ -16235,7 +16266,8 @@ fn lower_call_method<'ctx>(
             }
             "first" if args.count == 0 => {
                 // Return Maybe<T>: Some(first_elem) if non-empty, None if empty
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
                 let ptr_type = ctx.types().ptr_type();
@@ -16363,7 +16395,8 @@ fn lower_call_method<'ctx>(
             }
             "last" if args.count == 0 => {
                 // Return Maybe<T>: Some(last_elem) if non-empty, None if empty
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
                 let ptr_type = ctx.types().ptr_type();
@@ -16497,7 +16530,8 @@ fn lower_call_method<'ctx>(
             }
             "clone" if args.count == 0 => {
                 // Clone: allocate new list, copy backing array
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
                 let i64_type = ctx.types().i64_type();
                 let ptr_type = ctx.types().ptr_type();
                 let _module = ctx.get_module();
@@ -16527,7 +16561,8 @@ fn lower_call_method<'ctx>(
             }
             "clear" if args.count == 0 => {
                 // Clear: set len to 0 (keep backing array)
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
                 // SAFETY: GEP into the list object header to access the length field at a fixed offset; the list pointer is non-null and valid
@@ -16569,7 +16604,8 @@ fn lower_call_method<'ctx>(
                 let i64_type = ctx.types().i64_type();
                 let ptr_type = ctx.types().ptr_type();
                 let module = ctx.get_module();
-                let list_i64 = as_i64(ctx, ctx.get_register(receiver.0)?, "list_as_i64")?;
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_i64 = as_i64(ctx, recv_val, "list_as_i64")?;
                 let text_get_ptr_fn = { let fn_type = ptr_type.fn_type(&[i64_type.into()], false); super::error::get_or_declare_function(module, "verum_text_get_ptr", fn_type) };
                 let sep_i64 = as_i64(ctx, ctx.get_register(args.start.0)?, "sep_i64")?;
                 let sep_ptr = ctx
@@ -16618,7 +16654,17 @@ fn lower_call_method<'ctx>(
                 // AOT `Text.push` silently corrupted/no-op'd (builder
                 // pattern produced empty output). Text receivers now fall
                 // through to the compiled `Text.push` stdlib body.
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                //
+                // T0845: the receiver may be a &mut-SLOT (RefMut over a
+                // register whose list-ness the heuristic could not see —
+                // e.g. `m.unwrap()`'s dynamic return took lower_ref_mut's
+                // alloca branch). The slot carries the T0332 shape mark;
+                // deref IFF marked — the pre-fix code treated the slot
+                // address as the list object and read len/cap/data out
+                // of the STACK, which LLVM proved undef and folded the
+                // whole tail into a brk trap.
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
                 let push_val = ctx.get_register(args.start.0)?;
                 let runtime = RuntimeLowering::new(ctx.llvm_context());
                 runtime.lower_list_push(ctx.builder(), ctx.get_module(), list_ptr, push_val)?;
@@ -16702,7 +16748,8 @@ fn lower_call_method<'ctx>(
             }
             "insert" if args.count == 2 => {
                 // Insert at index via LLVM IR helper (emitted by define_list_ir_helpers)
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
                 let index = as_i64(ctx, ctx.get_register(args.start.0)?, "insert_idx")?;
                 let val_i64 = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "insert_val")?;
                 let i64_type = ctx.types().i64_type();
@@ -16723,7 +16770,8 @@ fn lower_call_method<'ctx>(
             }
             "remove" if args.count == 1 => {
                 // Remove at index via LLVM IR helper (emitted by define_list_ir_helpers)
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
                 let index = as_i64(ctx, ctx.get_register(args.start.0)?, "remove_idx")?;
                 let i64_type = ctx.types().i64_type();
                 let ptr_type = ctx.types().ptr_type();
@@ -16750,7 +16798,8 @@ fn lower_call_method<'ctx>(
                 // with the runtime emitter's `(ptr) -> void`.  Routing
                 // through `get_or_declare_function` with the canonical
                 // signature locks them in agreement.
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
                 let i64_type = ctx.types().i64_type();
                 let ptr_type = ctx.types().ptr_type();
                 let module = ctx.get_module();
@@ -16769,7 +16818,8 @@ fn lower_call_method<'ctx>(
             }
             "swap" if args.count == 2 => {
                 // Swap via LLVM IR helper (emitted by define_list_ir_helpers)
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
                 // Swap via LLVM IR helper.  Canonical signature per
                 // `syscall_registry::VERUM_RUNTIME_SYMBOLS`:
                 //   `verum_list_swap(list: ptr, i: i64, j: i64) -> void`
@@ -19723,7 +19773,8 @@ fn lower_call_method<'ctx>(
                 let fn_type = ptr_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
                 let join_fn = super::error::get_or_declare_function(module, "verum_string_join", fn_type);
                 // receiver is a List — pass as i64 (the registry-canonical first-arg shape)
-                let list_i64 = as_i64(ctx, ctx.get_register(receiver.0)?, "list_as_i64")?;
+                let recv_val = deref_marked_receiver(ctx, receiver.0, "recv_slot")?;
+                let list_i64 = as_i64(ctx, recv_val, "list_as_i64")?;
                 let sep_ptr = text_extract_cptr!(args.start.0, "join_sep");
                 let char_result = ctx
                     .builder()
