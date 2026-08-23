@@ -737,7 +737,37 @@ pub(in super::super) fn handle_call_method(
     // `can_write`, `can_read`, `capabilities`, `epoch_caps_raw`, `stored_generation`,
     // `is_valid` operate on the reference metadata, not the referent. Unwrapping
     // to the referent would hide the mutability bit and break the dispatch.
-    if is_cbgr_ref(&receiver)
+    //
+    // T0277 tail: the pre-unwrap gate used to fire ONLY for register-
+    // encoded CBGR refs.  A HEAP-pointer receiver (`&*heap_value` — a
+    // carrier cell) fell through to the Heap-carrier auto-deref, which
+    // unwrapped it to the Int PAYLOAD before dispatch_primitive_method
+    // ever saw the pointer — so the reference-metadata arms in the
+    // is_ptr zone (epoch_caps/epoch/generation/…) were unreachable for
+    // exactly the receivers they describe, and `ref.epoch_caps()`
+    // panicked "not found on runtime kind Object" (allocation_header
+    // L0 spec).  The metadata family is answered pre-unwrap for ANY
+    // receiver shape; the whitelist keeps every other method on the
+    // established carrier-unwrap path bit-for-bit.
+    let is_ref_metadata_method = matches!(
+        method_name
+            .rsplit('.')
+            .next()
+            .unwrap_or(method_name.as_str()),
+        "epoch_caps"
+            | "epoch_caps_raw"
+            | "raw_epoch_caps"
+            | "capabilities"
+            | "stored_generation"
+            | "generation"
+            | "epoch"
+            | "can_read"
+            | "can_write"
+            | "is_valid"
+            | "is_epoch_valid"
+    );
+    if (is_cbgr_ref(&receiver)
+        || (is_ref_metadata_method && receiver.is_ptr() && !receiver.is_nil()))
         && let Some(result) = dispatch_primitive_method(state, &receiver, &method_name, &args)?
     {
         state.set_reg(dst, result);
