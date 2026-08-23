@@ -32,6 +32,7 @@ pub fn parse_interpolated_content(
     content: &str,
     file_id: verum_ast::FileId,
     raw: bool,
+    span_base: u32,
 ) -> ParseResult<(Vec<Text>, Vec<Expr>)> {
     let mut parts = Vec::new();
     let mut exprs = Vec::new();
@@ -110,8 +111,12 @@ pub fn parse_interpolated_content(
                 // Parse the expression
                 // Note: We need to unescape the expression string because escape sequences like \"
                 // inside interpolations represent actual quotes in the Verum code to be parsed
-                let expr =
-                    parse_interpolation_expr(parser, expr_str.trim(), file_id, expr_start_pos)?;
+                let expr = parse_interpolation_expr(
+                    parser,
+                    expr_str.trim(),
+                    file_id,
+                    span_base as usize + expr_start_pos,
+                )?;
                 exprs.push(expr);
             }
             '}' => {
@@ -202,8 +207,14 @@ fn parse_interpolation_expr(
     // represent literal characters in the Verum code to be parsed.
     let unescaped_expr = unescape_interpolation_expr(actual_expr_str);
 
-    // Create a new lexer for this expression
-    let lexer = Lexer::new(&unescaped_expr, file_id);
+    // Lex the fragment AT its absolute file position (T0845 kin):
+    // zero-based fragment lexing gave equal-shaped interpolations
+    // IDENTICAL spans, and every span-keyed map (resolved call
+    // targets, diagnostics) collapsed them — the second entry
+    // silently overwrote the first. Escape unfolding can shift the
+    // positions by a few bytes; uniqueness and ordering — which the
+    // maps need — survive exactly.
+    let lexer = Lexer::new_at(&unescaped_expr, file_id, start_pos as u32);
 
     // Collect tokens (Result types need to be handled)
     let tokens_result: Result<Vec<_>, _> = lexer.collect();
@@ -765,7 +776,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -781,7 +792,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
 
             assert_eq!(parts.len(), 4);
             assert_eq!(exprs.len(), 3);
@@ -799,7 +810,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -815,7 +826,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -832,7 +843,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -849,7 +860,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -865,7 +876,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
 
             assert_eq!(parts.len(), 1);
             assert_eq!(exprs.len(), 0);
@@ -879,7 +890,7 @@ mod tests {
         let file_id = FileId::new(0);
 
         with_parser("", |parser| {
-            let result = parse_interpolated_content(parser, content, file_id, false);
+            let result = parse_interpolated_content(parser, content, file_id, false, 0);
             assert!(result.is_err());
         });
     }
@@ -890,7 +901,7 @@ mod tests {
         let file_id = FileId::new(0);
 
         with_parser("", |parser| {
-            let result = parse_interpolated_content(parser, content, file_id, false);
+            let result = parse_interpolated_content(parser, content, file_id, false, 0);
             assert!(result.is_err());
         });
     }

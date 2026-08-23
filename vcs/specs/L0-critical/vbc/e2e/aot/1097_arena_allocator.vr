@@ -121,12 +121,17 @@ fn test_basic_allocation() -> Int {
     // Allocation returns non-zero pointer
     let p1 = arena.alloc(64);
     assert(p1 != 0);
-    print(f"alloc(64) -> ptr={p1}");
+    // Print PROPERTIES of the pointer, never the raw address: an
+    // address is nondeterministic across runs AND across tiers (the
+    // interpreter normalises handles, AOT returns real addresses),
+    // so a raw print makes the tier-identity judge diverge on
+    // correct behaviour (caught by diff-tiers under T0845's sweep).
+    print(f"alloc(64) -> nonzero={p1 != 0}");
 
     let p2 = arena.alloc(128);
     assert(p2 != 0);
     assert(p2 != p1);
-    print(f"alloc(128) -> ptr={p2}");
+    print(f"alloc(128) -> distinct={p2 != p1}");
 
     // Used counter increases
     assert(arena.used() > 0);

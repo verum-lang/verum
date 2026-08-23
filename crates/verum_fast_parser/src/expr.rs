@@ -3494,11 +3494,16 @@ impl<'a> RecursiveParser<'a> {
         // Parse the interpolated content to extract parts and expressions.
         // `raw` (triple-quoted `f"""…"""`) suppresses escape decoding of
         // the literal segments (T0151).
+        // Absolute base of the CONTENT inside the literal token: past
+        // the prefix (`f` / `sh` / …) and the opening quote(s).
+        let content_base =
+            span.start + prefix.len() as u32 + if raw { 3 } else { 1 };
         let (parts, exprs) = crate::safe_interpolation::parse_interpolated_content(
             self,
             content.as_str(),
             file_id,
             raw,
+            content_base,
         )?;
 
         // Create an InterpolatedString expression with parsed parts and expressions

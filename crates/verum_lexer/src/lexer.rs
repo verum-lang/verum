@@ -96,9 +96,22 @@ impl<'source> Lexer<'source> {
     /// per token on contemporary CPUs — well within noise of the logos
     /// DFA's per-token cost (~30-100 ns depending on token kind).
     pub fn new(source: &'source str, file_id: FileId) -> Self {
+        Self::new_at(source, file_id, 0)
+    }
+
+    /// As [`Self::new`], but every produced span is additionally
+    /// shifted by `span_base` — for lexing a FRAGMENT of a larger
+    /// source at its true file position. The canonical consumer is
+    /// f-string interpolation (T0845 kin): sub-expressions used to be
+    /// lexed from zero, so `{c.n_val()}` and `{c.m_val()}` in one
+    /// literal produced IDENTICAL spans and every span-keyed map
+    /// (resolved call targets, diagnostics) collapsed them onto one
+    /// entry — the second resolution silently overwrote the first and
+    /// BOTH calls dispatched to the last target.
+    pub fn new_at(source: &'source str, file_id: FileId, span_base: u32) -> Self {
         let (after_bom, had_bom) = strip_utf8_bom(source);
         let (body, shebang_text) = strip_shebang(after_bom);
-        let offset = (source.len() - body.len()) as u32;
+        let offset = (source.len() - body.len()) as u32 + span_base;
         Self {
             inner: TokenKind::lexer(body),
             file_id,
