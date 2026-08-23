@@ -1,8 +1,10 @@
 # Async semantics: one law for docs, checker, and both tiers
 
-Status: IMPLEMENTED per §4's recommendation (candidate A — V0
-legalized), pending owner ratification; reverting is one change in
-`wrap_return_type_for_sig_full` if (B) is ruled instead. The law is
+Status: RATIFIED (owner, 2026-08-23 — «подтверждаю все
+направления»). Candidate A is the law of the language: V0 eager
+semantics on both tiers, `Future<T>` only for explicit futures,
+`async fn*` keeps the generator wrap. Lazy futures (B) would be a
+new epoch with its own ADR. The law is
 executable: `vcs/specs/L2-standard/async/eager_async_law.vr`
 (differential — both tiers must agree), and by-example/12 documents
 it (that chapter COMPILES AND RUNS for the first time; it was
