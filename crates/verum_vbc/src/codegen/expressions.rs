@@ -36636,6 +36636,55 @@ impl VbcCodegen {
                     operands: Vec::new(),
                 });
             }
+
+            // T0846 five-surface completion: the public cbgr.vr bridge.
+            // One generic emission — dst-first iff the .vr signature
+            // returns a value (mirrors the registry return_count), then
+            // the argument registers.  A void id that wrote a dst byte
+            // would desync the operand stream (the INVALIDATE-OPERAND-
+            // SHAPE-1 class), so the split is explicit here.
+            InlineSequenceId::CbgrValidateRefUser
+            | InlineSequenceId::CbgrInvalidateUser
+            | InlineSequenceId::CbgrEpochBegin
+            | InlineSequenceId::CbgrNewGenerationValue
+            | InlineSequenceId::CbgrRevokeUser
+            | InlineSequenceId::CbgrRegisterRootUser
+            | InlineSequenceId::CbgrCheckThin
+            | InlineSequenceId::CbgrCheckFat
+            | InlineSequenceId::CbgrCheckWrite
+            | InlineSequenceId::CbgrRefCount
+            | InlineSequenceId::CbgrRefRelease => {
+                use crate::instruction::CbgrSubOpcode as C;
+                let (sub_op, takes_dst) = match seq_id {
+                    InlineSequenceId::CbgrValidateRefUser => (C::ValidateRef, true),
+                    InlineSequenceId::CbgrInvalidateUser => (C::Invalidate, false),
+                    InlineSequenceId::CbgrEpochBegin => (C::EpochBegin, true),
+                    InlineSequenceId::CbgrNewGenerationValue => (C::NewGeneration, true),
+                    InlineSequenceId::CbgrRevokeUser => (C::Revoke, false),
+                    InlineSequenceId::CbgrRegisterRootUser => (C::RegisterRoot, false),
+                    InlineSequenceId::CbgrCheckThin => (C::IsValid, true),
+                    InlineSequenceId::CbgrCheckFat => (C::CheckFat, true),
+                    InlineSequenceId::CbgrCheckWrite => (C::CheckWrite, true),
+                    InlineSequenceId::CbgrRefCount => (C::RefCount, true),
+                    _ => (C::RefRelease, true),
+                };
+                let mut operands = Vec::<u8>::new();
+                if takes_dst {
+                    Self::write_reg(&mut operands, dest.0);
+                }
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: sub_op as u8,
+                    operands,
+                });
+                if !takes_dst {
+                    // Keep the call's value slot defined for any
+                    // `let _ = ...` binding downstream.
+                    self.ctx.emit(Instruction::LoadUnit { dst: dest });
+                }
+            }
             InlineSequenceId::MemcmpBytes => {
                 // Compare memory regions byte-by-byte
                 let mut operands = Vec::<u8>::new();

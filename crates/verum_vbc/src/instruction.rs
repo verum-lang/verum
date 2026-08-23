@@ -8607,6 +8607,13 @@ pub enum CbgrSubOpcode {
     /// Format: `dst:reg, src:reg`
     PinToEpoch = 0x25,
 
+    /// Begin a new epoch: advance the global epoch counter and return
+    /// the NEW value — the read-modify-write twin of `AdvanceEpoch`
+    /// (which returns nothing) + `CurrentEpoch` (which reads only),
+    /// atomic as one step.  Carrier of `cbgr_epoch_begin()` (T0846).
+    /// Format: `dst:reg`
+    EpochBegin = 0x26,
+
     // ========================================================================
     // Reference Conversion (0x30-0x3F)
     // ========================================================================
@@ -8661,6 +8668,21 @@ pub enum CbgrSubOpcode {
     /// Format: `dst:reg, src:reg`
     RefCount = 0x43,
 
+    /// Validate a FAT reference (32-byte: thin + metadata + offset),
+    /// including the slice-bounds metadata.  Byte value 0x44 matches
+    /// the pre-existing AOT lowering arm — the interpreter and enum
+    /// joined it under T0846 (the byte was Tier-1-only before).
+    /// Carrier of `cbgr_check_fat(fat_ref_ptr) -> Int`.
+    /// Format: `dst:reg, src:reg`
+    CheckFat = 0x44,
+
+    /// Validate WRITE capability: reference is valid AND its
+    /// capability set permits mutation.  Read-only references pass
+    /// `IsValid` but fail this.  Byte matches the pre-existing AOT
+    /// arm (T0846).  Carrier of `cbgr_check_write(thin_ref_ptr) -> Int`.
+    /// Format: `dst:reg, src:reg`
+    CheckWrite = 0x45,
+
     // ========================================================================
     // CBGR Management (0x50-0x5F)
     // ========================================================================
@@ -8700,6 +8722,37 @@ pub enum CbgrSubOpcode {
     /// Returns statistics about CBGR operations.
     /// Format: `dst:reg`
     GetStats = 0x55,
+
+    /// Revoke an allocation: invalidate every outstanding reference
+    /// (generation bump) AND deallocate, as one step — the .vr-doc'd
+    /// semantics of `cbgr_revoke(user_ptr)` (core/intrinsics/runtime/
+    /// cbgr.vr).  Byte value matches the pre-existing AOT arm (T0846).
+    /// Format: `ptr:reg` (no dst — void)
+    Revoke = 0x56,
+
+    /// Register a pointer as a long-lived root.  No collector
+    /// consumes roots on either tier today, so the DEFINED observable
+    /// behaviour is: operand is evaluated, no crash, no value — the
+    /// registration is an accounting no-op until an epoch-based
+    /// reclaimer exists.  Byte matches the pre-existing AOT arm.
+    /// Format: `ptr:reg` (no dst — void)
+    RegisterRoot = 0x57,
+
+    /// Decrement the refcount at the canonical rc@24 header slot and
+    /// return the NEW count; frees the allocation when it reaches 0.
+    /// Carrier of `cbgr_ref_release(user_ptr) -> Int` (T0846 — the
+    /// rc@24 field is canonical on BOTH tiers: Tier-0 stamps 1 at
+    /// allocation, this op is the decrement side).
+    /// Format: `dst:reg, ptr:reg`
+    RefRelease = 0x58,
+
+    /// Validate `user_ptr` against an expected generation+epoch pair
+    /// packed as `generation | (epoch << 32)` (low 32: generation,
+    /// mid 16: epoch — the packing documented in cbgr.vr).  Returns
+    /// 1 when both match the allocation header, else 0.
+    /// Carrier of `cbgr_validate_ref(user_ptr, expected) -> Int`.
+    /// Format: `dst:reg, ptr:reg, expected:reg`
+    ValidateRef = 0x59,
 
     // ========================================================================
     // CBGR Allocator (0x60-0x6F) — added 2026-05-02 per sub-opcode
@@ -8744,7 +8797,7 @@ pub enum CbgrSubOpcode {
 }
 
 // =========================================================================
-// CbgrSubOpcode metadata — single source of truth for the 43 variants.
+// CbgrSubOpcode metadata — single source of truth for the 50 variants.
 //
 // The legacy implementation maintained five parallel match-arm
 // methods (`mnemonic`, `category`, `creates_reference`,
@@ -8865,6 +8918,7 @@ impl CbgrSubOpcode {
             0x23 => Some(Self::AdvanceEpoch),
             0x24 => Some(Self::CurrentEpoch),
             0x25 => Some(Self::PinToEpoch),
+            0x26 => Some(Self::EpochBegin),
             // Reference Conversion
             0x30 => Some(Self::ThinToFat),
             0x31 => Some(Self::FatToThin),
@@ -8876,6 +8930,8 @@ impl CbgrSubOpcode {
             0x41 => Some(Self::GetTier),
             0x42 => Some(Self::IsValid),
             0x43 => Some(Self::RefCount),
+            0x44 => Some(Self::CheckFat),
+            0x45 => Some(Self::CheckWrite),
             // CBGR Management
             0x50 => Some(Self::NewGeneration),
             0x51 => Some(Self::Invalidate),
@@ -8883,6 +8939,10 @@ impl CbgrSubOpcode {
             0x53 => Some(Self::BypassBegin),
             0x54 => Some(Self::BypassEnd),
             0x55 => Some(Self::GetStats),
+            0x56 => Some(Self::Revoke),
+            0x57 => Some(Self::RegisterRoot),
+            0x58 => Some(Self::RefRelease),
+            0x59 => Some(Self::ValidateRef),
 
             // Allocator (0x60-0x6F) — added 2026-05-02 per refactor plan
             0x60 => Some(Self::Alloc),
@@ -8965,6 +9025,7 @@ impl CbgrSubOpcode {
             Self::AdvanceEpoch       => m!("CBGR_ADVANCE_EPOCH",     GenerationEpoch,         cref=false, mcaps=false, val=false),
             Self::CurrentEpoch       => m!("CBGR_CURRENT_EPOCH",     GenerationEpoch,         cref=false, mcaps=false, val=false),
             Self::PinToEpoch         => m!("CBGR_PIN_EPOCH",         GenerationEpoch,         cref=false, mcaps=false, val=false),
+            Self::EpochBegin         => m!("CBGR_EPOCH_BEGIN",       GenerationEpoch,         cref=false, mcaps=false, val=false),
 
             // ===== Reference Conversion (0x30-0x3F) =====
             // FatToThin produces a new thin reference value —
@@ -8980,6 +9041,8 @@ impl CbgrSubOpcode {
             Self::GetTier            => m!("CBGR_GET_TIER",          DebugIntrospection,      cref=false, mcaps=false, val=false),
             Self::IsValid            => m!("CBGR_IS_VALID",          DebugIntrospection,      cref=false, mcaps=false, val=true),
             Self::RefCount           => m!("CBGR_REF_COUNT",         DebugIntrospection,      cref=false, mcaps=false, val=false),
+            Self::CheckFat           => m!("CBGR_CHECK_FAT",         DebugIntrospection,      cref=false, mcaps=false, val=true),
+            Self::CheckWrite         => m!("CBGR_CHECK_WRITE",       DebugIntrospection,      cref=false, mcaps=false, val=true),
 
             // ===== CBGR Management (0x50-0x5F) =====
             Self::NewGeneration      => m!("CBGR_NEW_GEN",           Management,              cref=false, mcaps=false, val=false),
@@ -8988,6 +9051,10 @@ impl CbgrSubOpcode {
             Self::BypassBegin        => m!("CBGR_BYPASS_BEGIN",      Management,              cref=false, mcaps=false, val=false),
             Self::BypassEnd          => m!("CBGR_BYPASS_END",        Management,              cref=false, mcaps=false, val=false),
             Self::GetStats           => m!("CBGR_GET_STATS",         Management,              cref=false, mcaps=false, val=false),
+            Self::Revoke             => m!("CBGR_REVOKE",            Management,              cref=false, mcaps=false, val=false),
+            Self::RegisterRoot       => m!("CBGR_REGISTER_ROOT",     Management,              cref=false, mcaps=false, val=false),
+            Self::RefRelease         => m!("CBGR_REF_RELEASE",       Management,              cref=false, mcaps=false, val=false),
+            Self::ValidateRef        => m!("CBGR_VALIDATE_REF",      Management,              cref=false, mcaps=false, val=true),
 
             // ===== CBGR Allocator (0x60-0x6F) =====
             Self::Alloc              => m!("CBGR_ALLOC",             Allocator,               cref=false, mcaps=false, val=false),

@@ -16266,7 +16266,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 verum_llvm::AtomicOrdering::Monotonic,
             )
             .or_llvm_err()?;
-        builder.build_return(Some(&old)).or_llvm_err()?;
+        // Return the NEW id (old + 1) — `cbgr_new_generation` advances
+        // and reports the advanced value on both tiers (T0846; the
+        // Tier-0 twin is state.cbgr_generation_counter, also starting
+        // at 1 and answering 2, 3, … in call order).
+        let new_id = builder
+            .build_int_add(old, i64_type.const_int(1, false), "new_gen_id")
+            .or_llvm_err()?;
+        builder.build_return(Some(&new_id)).or_llvm_err()?;
         Ok(())
     }
 
@@ -16386,7 +16393,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
-    /// verum_cbgr_ref_release(ptr: i8*) -> void
+    /// verum_cbgr_ref_release(ptr: i8*) -> i64
+    ///
+    /// Returns the NEW refcount (old - 1); frees the allocation when it
+    /// reaches 0.  The return value carries `cbgr_ref_release`'s .vr
+    /// contract (T0846) — pre-fix this was void and the intrinsic had
+    /// no way to report the count.  Null answers 0.
     fn emit_cbgr_ref_release(&self, module: &Module<'ctx>) -> Result<()> {
         let name = "verum_cbgr_ref_release";
         if let Some(f) = module.get_function(name) {
@@ -16399,8 +16411,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i32_type = self.context.i32_type();
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let void_type = self.context.void_type();
-        let fn_type = void_type.fn_type(&[ptr_type.into()], false);
+        let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
         let func = module
             .get_function(name)
             .unwrap_or_else(|| module.add_function(name, fn_type, None));
@@ -16415,7 +16426,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_internal("missing param 0")?
             .into_pointer_value();
 
-        // if (!ptr) return
+        // if (!ptr) return 0
         let is_null = builder.build_is_null(ptr, "is_null").or_llvm_err()?;
         let do_release = self.context.append_basic_block(func, "do_release");
         let ret_bb = self.context.append_basic_block(func, "ret");
@@ -16424,7 +16435,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?;
 
         builder.position_at_end(ret_bb);
-        builder.build_return(None).or_llvm_err()?;
+        builder
+            .build_return(Some(&i64_type.const_zero()))
+            .or_llvm_err()?;
 
         builder.position_at_end(do_release);
         let header = self.emit_cbgr_get_header(&builder, ptr)?;
@@ -16443,6 +16456,15 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 i32_type.const_int(1, false),
                 verum_llvm::AtomicOrdering::AcquireRelease,
             )
+            .or_llvm_err()?;
+
+        // new_count = old_count - 1, zero-extended to the i64 return —
+        // computed BEFORE the branch (this block's terminator).
+        let new_count32 = builder
+            .build_int_sub(old_count, i32_type.const_int(1, false), "new_count32")
+            .or_llvm_err()?;
+        let new_count = builder
+            .build_int_z_extend(new_count32, i64_type, "new_count")
             .or_llvm_err()?;
 
         // if (old_count == 1) deallocate(ptr)
@@ -16467,10 +16489,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder
             .build_call(dealloc_fn, &[ptr.into()], "")
             .or_llvm_err()?;
-        builder.build_return(None).or_llvm_err()?;
+        builder
+            .build_return(Some(&i64_type.const_zero()))
+            .or_llvm_err()?;
 
         builder.position_at_end(done_bb);
-        builder.build_return(None).or_llvm_err()?;
+        builder.build_return(Some(&new_count)).or_llvm_err()?;
         Ok(())
     }
 

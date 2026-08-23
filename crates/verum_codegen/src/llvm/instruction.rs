@@ -25488,40 +25488,35 @@ fn lower_cbgr_extended<'ctx>(
             Ok(())
         }
         0x56 => {
-            // Revoke — invalidate all references to an allocation
+            // Revoke — `cbgr_revoke(user_ptr)`: invalidate (generation
+            // bump via verum_cbgr_invalidate) + deallocate, in that
+            // order — the cbgr.vr contract and the Tier-0 arm's exact
+            // sequence (T0846).  The pre-fix arm preferred a
+            // `ThinRef.revoke` .vr symbol that expects the ADDRESS OF A
+            // THINREF STRUCTURE — with the user-pointer operand this
+            // sub-op actually carries, that path read 16 bytes of user
+            // DATA as ref fields; and neither path ever freed, while
+            // the .vr doc promises "combined invalidate + deallocate".
             if operands.is_empty() {
                 return Ok(());
             }
             let src = ctx.get_register(op_reg(operands, 0))?;
             let module = ctx.get_module();
-
-            // Try compiled .vr: ThinRef.revoke(i64 ref_ptr) -> i64 (Result)
-            // ThinRef.revoke validates, increments generation, notifies epoch.
-            // Semantically richer than C verum_cbgr_revoke which just zeroes generation.
-            if let Some(revoke_fn) = module.get_function("ThinRef.revoke") {
-                let ref_as_i64 = as_i64(ctx, src, "revoke_ref_i64")?;
-                // Call revoke — return value (Result) is ignored
-                ctx.builder()
-                    .build_call(revoke_fn, &[ref_as_i64.into()], "")
-                    .or_llvm_err()?;
-            } else {
-                // C fallback: verum_cbgr_revoke(void* ptr) -> void
-                let ptr_ty = ctx.types().ptr_type();
-                let fn_type = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
-                let revoke_fn = module
-                    .get_function("verum_cbgr_revoke")
-                    .unwrap_or_else(|| module.add_function("verum_cbgr_revoke", fn_type, None));
-                let ptr_val = if src.is_pointer_value() {
-                    src.into_pointer_value()
-                } else {
-                    ctx.builder()
-                        .build_int_to_ptr(src.into_int_value(), ptr_ty, "revoke_ptr")
-                        .or_llvm_err()?
-                };
-                ctx.builder()
-                    .build_call(revoke_fn, &[ptr_val.into()], "")
-                    .or_llvm_err()?;
-            }
+            let ptr_ty = ctx.types().ptr_type();
+            let void_fn = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
+            let ptr_val = as_ptr(ctx, src, "revoke_ptr")?;
+            let invalidate_fn = module
+                .get_function("verum_cbgr_invalidate")
+                .unwrap_or_else(|| module.add_function("verum_cbgr_invalidate", void_fn, None));
+            ctx.builder()
+                .build_call(invalidate_fn, &[ptr_val.into()], "")
+                .or_llvm_err()?;
+            let dealloc_fn = module
+                .get_function("verum_cbgr_deallocate")
+                .unwrap_or_else(|| module.add_function("verum_cbgr_deallocate", void_fn, None));
+            ctx.builder()
+                .build_call(dealloc_fn, &[ptr_val.into()], "")
+                .or_llvm_err()?;
             Ok(())
         }
         0x57 => {
@@ -25547,6 +25542,93 @@ fn lower_cbgr_extended<'ctx>(
             ctx.builder()
                 .build_call(root_fn, &[ptr_val.into()], "")
                 .or_llvm_err()?;
+            Ok(())
+        }
+
+        0x26 => {
+            // EpochBegin — advance the global epoch and return the NEW
+            // value (T0846; Tier-0 twin: state.cbgr_epoch += 1).  The
+            // runtime advance (verum_cbgr_epoch_begin) is void, so the
+            // new value is read back with verum_cbgr_get_epoch.
+            if operands.is_empty() {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let advance_ty = ctx.types().void_type().fn_type(&[], false);
+            let advance_fn = module
+                .get_function("verum_cbgr_epoch_begin")
+                .unwrap_or_else(|| module.add_function("verum_cbgr_epoch_begin", advance_ty, None));
+            ctx.builder()
+                .build_call(advance_fn, &[], "")
+                .or_llvm_err()?;
+            let read_ty = i64_ty.fn_type(&[], false);
+            let read_fn = module
+                .get_function("verum_cbgr_get_epoch")
+                .unwrap_or_else(|| module.add_function("verum_cbgr_get_epoch", read_ty, None));
+            let result = ctx
+                .builder()
+                .build_call(read_fn, &[], "epoch_begun")
+                .or_llvm_err()?
+                .basic_value_or("EpochBegin: expected return value")?;
+            ctx.set_register(dst, result);
+            Ok(())
+        }
+
+        0x58 => {
+            // RefRelease — decrement rc@24 and return the NEW count
+            // (T0846).  verum_cbgr_ref_release(ptr) -> i64: performs
+            // the atomicrmw-sub and frees at 0, returning old-1.
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let fn_type = i64_ty.fn_type(&[ptr_ty.into()], false);
+            let release_fn = module
+                .get_function("verum_cbgr_ref_release")
+                .unwrap_or_else(|| module.add_function("verum_cbgr_ref_release", fn_type, None));
+            let ptr_val = as_ptr(ctx, src, "release_ptr")?;
+            let result = ctx
+                .builder()
+                .build_call(release_fn, &[ptr_val.into()], "new_rc")
+                .or_llvm_err()?
+                .basic_value_or("RefRelease: expected return value")?;
+            ctx.set_register(dst, result);
+            Ok(())
+        }
+
+        0x59 => {
+            // ValidateRef — compare the allocation header's
+            // gen@8/epoch@12 against a packed `gen | (epoch << 32)`
+            // pair (T0846).  verum_cbgr_validate_ref(i64, i64) -> i1.
+            if operands.len() < 3 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let user = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "vr_user")?;
+            let expected = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "vr_expected")?;
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let i1_ty = ctx.llvm_context().bool_type();
+            let fn_type = i1_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
+            let validate_fn = module
+                .get_function("verum_cbgr_validate_ref")
+                .unwrap_or_else(|| module.add_function("verum_cbgr_validate_ref", fn_type, None));
+            let verdict = ctx
+                .builder()
+                .build_call(validate_fn, &[user.into(), expected.into()], "vr_valid")
+                .or_llvm_err()?
+                .basic_value_or("ValidateRef: expected return value")?;
+            let extended = ctx
+                .builder()
+                .build_int_z_extend(verdict.into_int_value(), i64_ty, "vr_i64")
+                .or_llvm_err()?;
+            ctx.set_register(dst, extended.into());
             Ok(())
         }
 

@@ -255,6 +255,21 @@ pub const ALLOCATION_HEADER_TYPE_ID_OFFSET: u64 = 16;
 pub const ALLOCATION_HEADER_FLAGS_OFFSET: u64 = 20;
 
 /// Offset of the atomic `ref_count` u32 field.
+///
+/// **rc@24 contract (T0846)** — the field is CANONICAL on both tiers:
+///
+/// * every allocation stamps it `1` (Tier-0:
+///   `cbgr_user_allocate`; Tier-1: `verum_cbgr_allocate_aligned`);
+/// * `cbgr_ref_count(user_ptr)` reads it (Tier-0: the
+///   `CbgrSubOpcode::RefCount` arm; Tier-1: `verum_cbgr_ref_count`);
+/// * `cbgr_ref_release(user_ptr)` decrements it and FREES the
+///   allocation when the new count reaches 0, returning the new
+///   count (Tier-0: the `RefRelease` arm; Tier-1:
+///   `verum_cbgr_ref_release`'s atomicrmw-sub).
+///
+/// No other operation writes the field.  Executable pin:
+/// `vcs/specs/L1-core/mem/cbgr_full_surface.vr` (differential —
+/// both tiers must print identical counts).
 pub const ALLOCATION_HEADER_REF_COUNT_OFFSET: u64 = 24;
 
 /// Offset of the `total` u32 field (full malloc extent).

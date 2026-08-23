@@ -4785,7 +4785,7 @@ fn cbgr_header_generation_epoch(user: i64) -> (i64, i64) {
 
 /// Free a `cbgr_user_allocate` block.  Defensive no-op on 0, on unknown
 /// pointers, and on double-free (the tracked-set removal is the gate).
-fn cbgr_user_deallocate(state: &mut InterpreterState, user: i64) {
+pub(super) fn cbgr_user_deallocate(state: &mut InterpreterState, user: i64) {
     use verum_common::layout as l;
     let hdr = l::ALLOCATION_HEADER_SIZE as usize;
     if user <= 0 || (user as usize) < hdr {

@@ -887,6 +887,34 @@ pub enum InlineSequenceId {
     CbgrCurrentEpoch,
     /// cbgr_advance_epoch: bump the live CBGR epoch (no operands, no result)
     CbgrAdvanceEpoch,
+    // -- T0846 five-surface completion: the public cbgr.vr bridge names
+    // below all emit `Instruction::CbgrExtended` DIRECTLY (dst-first when
+    // the .vr signature returns a value, then args) — no name-dispatched
+    // library-call hop.  The CAPS-named legacy ids above (CbgrNewGeneration
+    // / CbgrInvalidate / …) keep their register-model semantics; these are
+    // the USER-POINTER model of core/intrinsics/runtime/cbgr.vr.
+    /// cbgr_validate_ref(user_ptr, gen|epoch<<32) → 1/0 — CbgrSubOpcode::ValidateRef
+    CbgrValidateRefUser,
+    /// cbgr_invalidate(user_ptr) — CbgrSubOpcode::Invalidate (ptr-model arm)
+    CbgrInvalidateUser,
+    /// cbgr_epoch_begin() → new epoch — CbgrSubOpcode::EpochBegin
+    CbgrEpochBegin,
+    /// cbgr_new_generation() → new generation id — CbgrSubOpcode::NewGeneration
+    CbgrNewGenerationValue,
+    /// cbgr_revoke(user_ptr) — CbgrSubOpcode::Revoke (invalidate + free)
+    CbgrRevokeUser,
+    /// cbgr_register_root(user_ptr) — CbgrSubOpcode::RegisterRoot
+    CbgrRegisterRootUser,
+    /// cbgr_check(thin_ref_ptr) → 1/0 — CbgrSubOpcode::IsValid
+    CbgrCheckThin,
+    /// cbgr_check_fat(fat_ref_ptr) → 1/0 — CbgrSubOpcode::CheckFat
+    CbgrCheckFat,
+    /// cbgr_check_write(thin_ref_ptr) → 1/0 — CbgrSubOpcode::CheckWrite
+    CbgrCheckWrite,
+    /// cbgr_ref_count(user_ptr) → rc@24 — CbgrSubOpcode::RefCount
+    CbgrRefCount,
+    /// cbgr_ref_release(user_ptr) → new count — CbgrSubOpcode::RefRelease
+    CbgrRefRelease,
     /// memcmp_bytes: compare memory regions byte-by-byte
     MemcmpBytes,
     /// get_header_from_ptr: get CBGR allocation header from pointer
@@ -11900,6 +11928,121 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrReallocUser),
         mlir_op: Some("verum.cbgr_realloc_user"),
         doc: "Reallocate a cbgr_allocate allocation preserving min(old, new) bytes",
+    },
+    // -- T0846 five-surface completion.  Pre-fix, the eleven names below
+    // had NO registry entry at all: their cbgr.vr declarations compiled to
+    // empty forward-decl bodies, so every call silently returned Unit on
+    // Tier-0 and a patched-in zero on Tier-1 ("bodyless-decl safety net").
+    // The executable gate is vcs/specs/L1-core/mem/cbgr_full_surface.vr.
+    Intrinsic {
+        name: "cbgr_validate_ref",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::Unsafe],
+        param_count: 2,  // user_ptr, expected gen|epoch<<32
+        return_count: 1, // 1 live / 0 dangling
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrValidateRefUser),
+        mlir_op: Some("verum.cbgr_validate_ref"),
+        doc: "Validate user_ptr generation+epoch against a packed expected pair",
+    },
+    Intrinsic {
+        name: "cbgr_invalidate",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::SideEffect, IntrinsicHint::Unsafe],
+        param_count: 1, // user_ptr
+        return_count: 0,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrInvalidateUser),
+        mlir_op: Some("verum.cbgr_invalidate_user"),
+        doc: "Bump the allocation generation of user_ptr, revoking outstanding refs",
+    },
+    Intrinsic {
+        name: "cbgr_epoch_begin",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 0,
+        return_count: 1, // the new epoch
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrEpochBegin),
+        mlir_op: Some("verum.cbgr_epoch_begin"),
+        doc: "Advance the global epoch and return the new value",
+    },
+    Intrinsic {
+        name: "cbgr_new_generation",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 0,
+        return_count: 1, // the new generation id
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrNewGenerationValue),
+        mlir_op: Some("verum.cbgr_new_generation_value"),
+        doc: "Advance the global generation counter and return the new id",
+    },
+    Intrinsic {
+        name: "cbgr_revoke",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::SideEffect, IntrinsicHint::Unsafe],
+        param_count: 1, // user_ptr
+        return_count: 0,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrRevokeUser),
+        mlir_op: Some("verum.cbgr_revoke"),
+        doc: "Invalidate + deallocate user_ptr in one step",
+    },
+    Intrinsic {
+        name: "cbgr_register_root",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::SideEffect, IntrinsicHint::Unsafe],
+        param_count: 1, // user_ptr
+        return_count: 0,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrRegisterRootUser),
+        mlir_op: Some("verum.cbgr_register_root"),
+        doc: "Register user_ptr as a long-lived root (accounting no-op until a reclaimer exists)",
+    },
+    Intrinsic {
+        name: "cbgr_check",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::Unsafe],
+        param_count: 1,  // thin_ref_ptr
+        return_count: 1, // 1 valid / 0 invalid
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrCheckThin),
+        mlir_op: Some("verum.cbgr_check"),
+        doc: "Validate a thin reference (generation + FREED flag)",
+    },
+    Intrinsic {
+        name: "cbgr_check_fat",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::Unsafe],
+        param_count: 1,  // fat_ref_ptr
+        return_count: 1, // 1 valid / 0 invalid
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrCheckFat),
+        mlir_op: Some("verum.cbgr_check_fat"),
+        doc: "Validate a fat reference including slice metadata",
+    },
+    Intrinsic {
+        name: "cbgr_check_write",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::Unsafe],
+        param_count: 1,  // thin_ref_ptr
+        return_count: 1, // 1 writable / 0 not
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrCheckWrite),
+        mlir_op: Some("verum.cbgr_check_write"),
+        doc: "Validate a reference's write capability",
+    },
+    Intrinsic {
+        name: "cbgr_ref_count",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::Unsafe],
+        param_count: 1,  // user_ptr
+        return_count: 1, // current refcount
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrRefCount),
+        mlir_op: Some("verum.cbgr_ref_count"),
+        doc: "Read the canonical rc@24 refcount of a user_ptr allocation",
+    },
+    Intrinsic {
+        name: "cbgr_ref_release",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::SideEffect, IntrinsicHint::Unsafe],
+        param_count: 1,  // user_ptr
+        return_count: 1, // new refcount (0 = freed)
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrRefRelease),
+        mlir_op: Some("verum.cbgr_ref_release"),
+        doc: "Decrement rc@24 and return the new count; frees the allocation at 0",
     },
     Intrinsic {
         name: "memcmp_bytes",

@@ -1,0 +1,126 @@
+// @test: differential
+// @level: L1
+// @tier: all
+// @expected-exit: 0
+// @description: The EXECUTABLE five-surface gate for the cbgr_*
+//   family (T0846 layer 3): every intrinsic below runs LIVE with a
+//   verifiable property — both polarities where the operation has
+//   two — so a drift in ANY of the five surfaces (.vr decl /
+//   registry / sub-opcode / Tier-0 handler / Tier-1 lowering) breaks
+//   the compile, the run, or the bit-for-bit tier identity this
+//   differential spec demands.  Pre-gate, ELEVEN of the eighteen
+//   family members had no registry entry at all: their calls
+//   compiled to empty forward-decl bodies and silently returned Unit
+//   (Tier-0) / a patched-in zero (Tier-1).  The static arity gate
+//   (intrinsic_key_resolution_gate) holds the declaration layer;
+//   this spec holds the EXECUTION layers.  Prints are properties and
+//   small deterministic values — never addresses.
+//   rc@24 ruling (T0846 layer-2 tail): the refcount field is
+//   CANONICAL on both tiers — allocation stamps 1, cbgr_ref_count
+//   reads it, cbgr_ref_release decrements and frees at 0.
+
+mount core.mem.allocator.cbgr_alloc;
+mount core.intrinsics.runtime.cbgr.{
+    cbgr_allocate, cbgr_deallocate, cbgr_realloc,
+    cbgr_get_generation,
+    cbgr_validate, cbgr_current_epoch, cbgr_advance_epoch,
+    cbgr_epoch_begin, cbgr_new_generation,
+    cbgr_validate_ref, cbgr_invalidate,
+    cbgr_ref_count, cbgr_ref_release,
+    cbgr_register_root, cbgr_revoke,
+    cbgr_check, cbgr_check_fat, cbgr_check_write,
+};
+mount core.intrinsics.runtime.mem_raw.{store_i32, store_i64};
+
+fn main() {
+    // --- allocate / observe / realloc / deallocate ------------------
+    let p = unsafe { cbgr_allocate(64, 8) };
+    print(f"alloc nonzero={p != 0}");
+    let g1 = unsafe { cbgr_get_generation(p as *const Byte) };
+    print(f"gen nonzero={(g1 as Int) != 0}");
+    let p2 = unsafe { cbgr_realloc(p, 128) };
+    print(f"realloc nonzero={p2 != 0}");
+    let g2 = unsafe { cbgr_get_generation(p2 as *const Byte) };
+    print(f"gen after realloc nonzero={(g2 as Int) != 0}");
+    unsafe { cbgr_deallocate(p2) };
+    print("dealloc ok");
+
+    // --- rc@24: canonical on BOTH tiers -----------------------------
+    // Allocation stamps 1; release decrements to 0 and frees.
+    let q = unsafe { cbgr_allocate(32, 8) };
+    let rc1 = unsafe { cbgr_ref_count(q) };
+    print(f"rc after alloc={rc1}");
+    let rc0 = unsafe { cbgr_ref_release(q) };
+    print(f"rc after release={rc0}");
+    // q is freed now — not deallocated again, not dereferenced.
+
+    // --- epochs: begin/advance move the counter, reads agree --------
+    let e0 = cbgr_current_epoch();
+    cbgr_advance_epoch();
+    let e1 = cbgr_current_epoch();
+    print(f"epoch advanced={(e1 as Int) > (e0 as Int)}");
+    let eb1 = cbgr_epoch_begin();
+    let eb2 = cbgr_epoch_begin();
+    print(f"epoch_begin monotone={eb2 > eb1}");
+    let e_read = cbgr_current_epoch();
+    print(f"epoch read agrees={(e_read as Int) == eb2}");
+
+    // --- generations: fresh ids, monotone ---------------------------
+    let ng1 = cbgr_new_generation();
+    let ng2 = cbgr_new_generation();
+    print(f"new_generation monotone={ng2 > ng1}");
+
+    // --- validation on a live value reference -----------------------
+    let value = 42;
+    let live_ok = cbgr_validate(&value);
+    print(f"validate live={live_ok}");
+
+    // --- validate_ref: BOTH polarities via the honest (p,g,e)
+    //     channel — cbgr_alloc returns the allocator's own
+    //     bookkeeping, validate_ref re-reads the header.
+    match cbgr_alloc(64, 8) {
+        Result.Ok(t) => {
+            let (vp, vg, ve) = t;
+            let packed = (vg as Int) | ((ve as Int) << 32);
+            let vr_live = unsafe { cbgr_validate_ref(vp, packed) };
+            print(f"validate_ref live={vr_live}");
+            unsafe { cbgr_invalidate(vp) };
+            let vr_stale = unsafe { cbgr_validate_ref(vp, packed) };
+            print(f"validate_ref after invalidate={vr_stale}");
+            let re_gen = unsafe { cbgr_get_generation(vp as *const Byte) };
+            let repacked = (re_gen as Int) | ((ve as Int) << 32);
+            let vr_again = unsafe { cbgr_validate_ref(vp, repacked) };
+            print(f"validate_ref repacked={vr_again}");
+
+            // --- check / check_fat / check_write: a ThinRef built
+            //     by hand over the live allocation.  Layout:
+            //     user_ptr@0 (i64), generation@8 (u32),
+            //     epoch_caps@12 = epoch(low16) | caps(high16);
+            //     caps: READ=0x01, WRITE=0x02.
+            let tr = unsafe { cbgr_allocate(16, 8) };
+            unsafe { store_i64(tr, vp) };
+            unsafe { store_i32(tr + 8, re_gen as Int) };
+            unsafe { store_i32(tr + 12, (3 << 16) | (ve as Int)) };
+            let chk = unsafe { cbgr_check(tr) };
+            print(f"check live={chk}");
+            let chk_fat = unsafe { cbgr_check_fat(tr) };
+            print(f"check_fat live={chk_fat}");
+            let chk_w = unsafe { cbgr_check_write(tr) };
+            print(f"check_write rw={chk_w}");
+            unsafe { store_i32(tr + 12, (1 << 16) | (ve as Int)) };
+            let chk_ro = unsafe { cbgr_check_write(tr) };
+            print(f"check_write ro={chk_ro}");
+            unsafe { store_i32(tr + 8, (re_gen as Int) + 7) };
+            let chk_stale = unsafe { cbgr_check(tr) };
+            print(f"check stale gen={chk_stale}");
+            unsafe { cbgr_deallocate(tr) };
+
+            // --- roots and revoke -------------------------------------
+            unsafe { cbgr_register_root(vp) };
+            print("register_root ok");
+            unsafe { cbgr_revoke(vp) };
+            print("revoke ok");
+        },
+        Result.Err(_) => panic("cbgr_alloc failed"),
+    };
+}

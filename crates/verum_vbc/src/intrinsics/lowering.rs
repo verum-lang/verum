@@ -3780,6 +3780,50 @@ impl IntrinsicLowering {
                 operands: operands.to_vec(),
                 region: None,
             }),
+            // T0846 five-surface completion — the public cbgr.vr bridge.
+            // The mlir_op strings match the registry entries; value-
+            // returning ids yield I64 (the .vr signatures return Int),
+            // void ids yield nothing.
+            InlineSequenceId::CbgrValidateRefUser
+            | InlineSequenceId::CbgrEpochBegin
+            | InlineSequenceId::CbgrNewGenerationValue
+            | InlineSequenceId::CbgrCheckThin
+            | InlineSequenceId::CbgrCheckFat
+            | InlineSequenceId::CbgrCheckWrite
+            | InlineSequenceId::CbgrRefCount
+            | InlineSequenceId::CbgrRefRelease => self.emit(MlirOp {
+                name: match seq_id {
+                    InlineSequenceId::CbgrValidateRefUser => "verum.cbgr_validate_ref",
+                    InlineSequenceId::CbgrEpochBegin => "verum.cbgr_epoch_begin",
+                    InlineSequenceId::CbgrNewGenerationValue => {
+                        "verum.cbgr_new_generation_value"
+                    }
+                    InlineSequenceId::CbgrCheckThin => "verum.cbgr_check",
+                    InlineSequenceId::CbgrCheckFat => "verum.cbgr_check_fat",
+                    InlineSequenceId::CbgrCheckWrite => "verum.cbgr_check_write",
+                    InlineSequenceId::CbgrRefCount => "verum.cbgr_ref_count",
+                    _ => "verum.cbgr_ref_release",
+                }
+                .to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CbgrInvalidateUser
+            | InlineSequenceId::CbgrRevokeUser
+            | InlineSequenceId::CbgrRegisterRootUser => self.emit(MlirOp {
+                name: match seq_id {
+                    InlineSequenceId::CbgrInvalidateUser => "verum.cbgr_invalidate_user",
+                    InlineSequenceId::CbgrRevokeUser => "verum.cbgr_revoke",
+                    _ => "verum.cbgr_register_root",
+                }
+                .to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
         }
     }
 

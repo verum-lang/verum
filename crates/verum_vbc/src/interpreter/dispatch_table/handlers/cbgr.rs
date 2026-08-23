@@ -1451,6 +1451,57 @@ pub(in super::super) fn handle_cbgr_extended(
 /// sub-op byte, the operand-length envelope and the pc reposition — an arm may
 /// read any number of operands, and may `return` early, without desynchronising
 /// the instruction stream.
+/// Validate a ThinRef/FatRef STRUCTURE by its address (T0846) — the
+/// Tier-0 twin of the AOT's `verum_cbgr_check` / `verum_cbgr_check_write`
+/// / `verum_cbgr_check_fat` (a FatRef begins with its ThinRef, so the
+/// thin fields sit at the same offsets).
+///
+/// Layout at `ref_addr`: `{user_ptr@0: u64, generation@8: u32,
+/// epoch_caps@12: u32}` with `epoch_caps = epoch(low16) | caps(high16)`.
+/// The verdict is: the referenced allocation is live (tracked) AND its
+/// header's gen@8/epoch@12 match the ThinRef's — plus, when
+/// `require_write`, the WRITE bit (0x02) in the caps half.
+///
+/// Reading the structure itself is the caller's unsafe contract (the
+/// .vr intrinsics are `unsafe fn`); the HEADER read is gated on
+/// `cbgr_allocations` membership like every other header access here.
+fn thin_ref_struct_check(state: &InterpreterState, ref_addr: i64, require_write: bool) -> bool {
+    use verum_common::layout as l;
+    if ref_addr <= 0 {
+        return false;
+    }
+    // SAFETY: dereferencing the caller-supplied structure address is the
+    // documented contract of the `unsafe fn cbgr_check*` intrinsics.
+    let (user_ptr, ref_gen, epoch_caps) = unsafe {
+        let base = ref_addr as usize;
+        (
+            *(base as *const u64),
+            *((base + l::THIN_REF_GENERATION_OFFSET as usize) as *const u32),
+            *((base + l::THIN_REF_EPOCH_CAPS_OFFSET as usize) as *const u32),
+        )
+    };
+    let hdr = l::ALLOCATION_HEADER_SIZE as usize;
+    if user_ptr == 0 || (user_ptr as usize) < hdr {
+        return false;
+    }
+    let header_addr = user_ptr as usize - hdr;
+    if !state.cbgr_allocations.contains(&header_addr) {
+        return false;
+    }
+    // SAFETY: liveness gated by the membership check above.
+    let (actual_gen, actual_epoch) = unsafe {
+        (
+            *((header_addr + l::ALLOCATION_HEADER_GENERATION_OFFSET as usize) as *const u32),
+            *((header_addr + l::ALLOCATION_HEADER_EPOCH_OFFSET as usize) as *const u16),
+        )
+    };
+    let ref_epoch = (epoch_caps & 0xFFFF) as u16;
+    let caps = (epoch_caps >> 16) as u16;
+    actual_gen == ref_gen
+        && actual_epoch == ref_epoch
+        && (!require_write || caps & 0x02 != 0)
+}
+
 fn cbgr_extended_body(
     state: &mut InterpreterState,
     sub_op_byte: u8,
@@ -2802,10 +2853,24 @@ fn cbgr_extended_body(
         Some(CbgrSubOpcode::IsValid) => {
             // Check if reference is valid (not dangling)
             // Format: dst:reg, src:reg
+            //
+            // TWO models, disambiguated by the VALUE (T0846):
+            //  * Int — `cbgr_check(thin_ref_ptr)`: the ADDRESS of a
+            //    ThinRef structure; validate its generation+epoch
+            //    against the allocation header, exactly like the AOT's
+            //    verum_cbgr_check.  Yields Int 1/0 (the .vr signature
+            //    returns Int).
+            //  * pointer / register-ref — the legacy value model
+            //    (FREED flag / register generation), yielding Bool.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
 
             let src = state.get_reg(src_reg);
+            if src.is_int() {
+                let verdict = thin_ref_struct_check(state, src.as_i64(), false);
+                state.set_reg(dst, Value::from_i64(verdict as i64));
+                return Ok(DispatchResult::Continue);
+            }
             let is_valid = if src.is_ptr() && !src.is_nil() {
                 // Check CBGR FREED flag for data pointers — see
                 // `verum_common::cbgr::flags::FREED` and the
@@ -2842,13 +2907,54 @@ fn cbgr_extended_body(
         }
 
         Some(CbgrSubOpcode::RefCount) => {
-            // Get reference count (for shared references)
+            // Read the canonical rc@24 refcount from the allocation
+            // header of a user pointer (T0846: rc@24 is canonical on
+            // BOTH tiers — allocation stamps 1, RefRelease decrements).
+            // The pre-fix arm ignored src and returned a constant 1,
+            // which diverged from the AOT's header read.
+            // Register-model refs have no header — they answer 1
+            // (single owner), and so does an untracked address (the
+            // AOT twin reads whatever is at ptr-32; the interpreter
+            // will not dereference memory it does not own).
             // Format: dst:reg, src:reg
             let dst = read_reg(state)?;
-            let _src_reg = read_reg(state)?;
+            let src_reg = read_reg(state)?;
+            let user = state.get_reg(src_reg).as_integer_compatible();
+            let hdr = verum_common::layout::ALLOCATION_HEADER_SIZE as usize;
+            let rc = if user > 0
+                && (user as usize) >= hdr
+                && state.cbgr_allocations.contains(&((user as usize) - hdr))
+            {
+                // SAFETY: membership in cbgr_allocations gates liveness;
+                // rc@24 was written by cbgr_user_allocate.
+                unsafe {
+                    *(((user as usize) - hdr
+                        + verum_common::layout::ALLOCATION_HEADER_REF_COUNT_OFFSET as usize)
+                        as *const u32) as i64
+                }
+            } else {
+                1
+            };
+            state.set_reg(dst, Value::from_i64(rc));
+            Ok(DispatchResult::Continue)
+        }
 
-            // Simplified: return 1 (single owner)
-            state.set_reg(dst, Value::from_i64(1));
+        Some(CbgrSubOpcode::CheckFat) | Some(CbgrSubOpcode::CheckWrite) => {
+            // cbgr_check_fat(fat_ref_ptr) / cbgr_check_write(thin_ref_ptr).
+            // The operand is the ADDRESS of a ThinRef/FatRef STRUCTURE
+            // (a FatRef begins with its ThinRef, so the thin fields sit
+            // at the same offsets): {user_ptr@0, generation@8,
+            // epoch_caps@12 = epoch(low16) | caps(high16)}.  Mirrors
+            // the AOT's verum_cbgr_check_fat / verum_cbgr_check_write:
+            // validate generation+epoch against the allocation header;
+            // CheckWrite additionally requires the WRITE bit (0x02) in
+            // the caps half.  Format: dst:reg, ref_ptr:reg
+            let is_write = matches!(sub_op, Some(CbgrSubOpcode::CheckWrite));
+            let dst = read_reg(state)?;
+            let ref_reg = read_reg(state)?;
+            let ref_addr = state.get_reg(ref_reg).as_integer_compatible();
+            let verdict = thin_ref_struct_check(state, ref_addr, is_write);
+            state.set_reg(dst, Value::from_i64(verdict as i64));
             Ok(DispatchResult::Continue)
         }
 
@@ -2856,23 +2962,173 @@ fn cbgr_extended_body(
         // CBGR Management (0x50-0x5F)
         // ================================================================
         Some(CbgrSubOpcode::NewGeneration) => {
-            // Create new generation counter
+            // Advance the global generation counter and return the NEW
+            // id — the Tier-0 twin of the AOT's
+            // verum_ir_generation_counter (both start at 1; both hand
+            // out 2, 3, … in call order).  The pre-fix arm returned
+            // `epoch + 1`, which repeated the same id until an epoch
+            // advance and could collide with epoch numbering (T0846).
             // Format: dst:reg
             let dst = read_reg(state)?;
-            // Allocate new generation ID (simple counter-based)
-            let new_gen = state.cbgr_epoch.wrapping_add(1) as i64;
-            state.set_reg(dst, Value::from_i64(new_gen));
+            state.cbgr_generation_counter = state.cbgr_generation_counter.wrapping_add(1);
+            state.set_reg(dst, Value::from_i64(state.cbgr_generation_counter as i64));
             Ok(DispatchResult::Continue)
         }
 
         Some(CbgrSubOpcode::Invalidate) => {
-            // Invalidate a register slot by bumping its CBGR generation.
             // Format: src:reg
-            // After this, any references captured with the old generation will
-            // fail validation on dereference (use-after-free detection).
+            // TWO models, disambiguated by the VALUE (T0846):
+            //  * user pointer into a live bridge allocation → bump the
+            //    canonical gen@8 header slot, revoking every
+            //    outstanding heap reference (the cbgr.vr semantics of
+            //    `cbgr_invalidate(user_ptr)`; the AOT twin is
+            //    verum_cbgr_invalidate);
+            //  * anything else → the legacy register-slot generation
+            //    bump (references captured with the old generation
+            //    fail validation on dereference).
             let src_reg = read_reg(state)?;
-            let abs_index = (state.reg_base() + src_reg.0 as u32) as u32;
-            state.registers.bump_generation(abs_index);
+            let user = state.get_reg(src_reg).as_integer_compatible();
+            let hdr = verum_common::layout::ALLOCATION_HEADER_SIZE as usize;
+            if user > 0
+                && (user as usize) >= hdr
+                && state.cbgr_allocations.contains(&((user as usize) - hdr))
+            {
+                // SAFETY: membership in cbgr_allocations gates liveness;
+                // gen@8 was written by cbgr_user_allocate.
+                unsafe {
+                    let gen_ptr = ((user as usize) - hdr
+                        + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
+                        as *mut u32;
+                    *gen_ptr = (*gen_ptr).wrapping_add(1);
+                }
+            } else {
+                let abs_index = state.reg_base() + src_reg.0 as u32;
+                state.registers.bump_generation(abs_index);
+            }
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::EpochBegin) => {
+            // Advance the global epoch and return the NEW value — the
+            // read-modify-write twin of AdvanceEpoch (returns nothing)
+            // + CurrentEpoch (reads only).  Carrier of
+            // `cbgr_epoch_begin()`; the AOT twin advances the
+            // global_epoch global.  Format: dst:reg
+            let dst = read_reg(state)?;
+            state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
+            state.set_reg(dst, Value::from_i64(state.cbgr_epoch as i64));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::Revoke) => {
+            // cbgr_revoke(user_ptr): invalidate + deallocate in one
+            // step (cbgr.vr).  Generation bump FIRST — the dealloc
+            // sets FREED and releases the block.  Untracked pointers
+            // are a no-op on both halves.  Format: ptr:reg (void)
+            let src_reg = read_reg(state)?;
+            let user = state.get_reg(src_reg).as_integer_compatible();
+            let hdr = verum_common::layout::ALLOCATION_HEADER_SIZE as usize;
+            if user > 0
+                && (user as usize) >= hdr
+                && state.cbgr_allocations.contains(&((user as usize) - hdr))
+            {
+                // SAFETY: membership gates liveness; gen@8 was written
+                // by cbgr_user_allocate.
+                unsafe {
+                    let gen_ptr = ((user as usize) - hdr
+                        + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
+                        as *mut u32;
+                    *gen_ptr = (*gen_ptr).wrapping_add(1);
+                }
+                super::ffi_extended::cbgr_user_deallocate(state, user);
+            }
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::RegisterRoot) => {
+            // cbgr_register_root(user_ptr): accounting no-op — no
+            // collector consumes roots on either tier (the AOT twin
+            // verum_cbgr_register_root is an empty body).  The DEFINED
+            // observable behaviour is: operand evaluated, no crash,
+            // no value.  Format: ptr:reg (void)
+            let src_reg = read_reg(state)?;
+            let _ = state.get_reg(src_reg);
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::RefRelease) => {
+            // cbgr_ref_release(user_ptr) → new refcount: decrement the
+            // canonical rc@24 slot; at 0 the allocation is freed (the
+            // AOT twin's atomicrmw-sub + dealloc-on-old==1).  Untracked
+            // pointers answer 0 without touching memory.
+            // Format: dst:reg, ptr:reg
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let user = state.get_reg(ptr_reg).as_integer_compatible();
+            let hdr = verum_common::layout::ALLOCATION_HEADER_SIZE as usize;
+            let new_count = if user > 0
+                && (user as usize) >= hdr
+                && state.cbgr_allocations.contains(&((user as usize) - hdr))
+            {
+                // SAFETY: membership gates liveness; rc@24 was written
+                // by cbgr_user_allocate.
+                let new = unsafe {
+                    let rc_ptr = ((user as usize) - hdr
+                        + verum_common::layout::ALLOCATION_HEADER_REF_COUNT_OFFSET as usize)
+                        as *mut u32;
+                    let new = (*rc_ptr).saturating_sub(1);
+                    *rc_ptr = new;
+                    new
+                };
+                if new == 0 {
+                    super::ffi_extended::cbgr_user_deallocate(state, user);
+                }
+                new as i64
+            } else {
+                0
+            };
+            state.set_reg(dst, Value::from_i64(new_count));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::ValidateRef) => {
+            // cbgr_validate_ref(user_ptr, expected): compare the
+            // allocation header's gen@8/epoch@12 against the packed
+            // `generation | (epoch << 32)` pair, field by field —
+            // exactly the AOT's verum_cbgr_validate_ref (which
+            // truncates each half before comparing, so junk above
+            // bit 47 is ignored on both tiers).
+            // Format: dst:reg, ptr:reg, expected:reg
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let exp_reg = read_reg(state)?;
+            let user = state.get_reg(ptr_reg).as_integer_compatible();
+            let expected = state.get_reg(exp_reg).as_integer_compatible();
+            let hdr = verum_common::layout::ALLOCATION_HEADER_SIZE as usize;
+            let live = if user > 0
+                && (user as usize) >= hdr
+                && state.cbgr_allocations.contains(&((user as usize) - hdr))
+            {
+                // SAFETY: membership gates liveness; the fields were
+                // written by cbgr_user_allocate.
+                let (actual_gen, actual_epoch) = unsafe {
+                    let base = (user as usize) - hdr;
+                    (
+                        *((base
+                            + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET
+                                as usize) as *const u32),
+                        *((base
+                            + verum_common::layout::ALLOCATION_HEADER_EPOCH_OFFSET as usize)
+                            as *const u16),
+                    )
+                };
+                let expected_gen = expected as u32;
+                let expected_epoch = ((expected as u64) >> 32) as u16;
+                actual_gen == expected_gen && actual_epoch == expected_epoch
+            } else {
+                false
+            };
+            state.set_reg(dst, Value::from_i64(live as i64));
             Ok(DispatchResult::Continue)
         }
 

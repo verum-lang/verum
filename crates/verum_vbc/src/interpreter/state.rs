@@ -710,6 +710,15 @@ pub struct InterpreterState {
     /// Incremented by BypassBegin, decremented by BypassEnd.
     pub cbgr_bypass_depth: u32,
 
+    /// Global generation-id counter — the Tier-0 twin of the AOT's
+    /// `verum_ir_generation_counter` global (runtime.rs
+    /// `emit_cbgr_new_generation`): starts at 1, and
+    /// `CbgrSubOpcode::NewGeneration` returns a fresh monotone id per
+    /// call.  Distinct from `cbgr_epoch` — the historical arm returned
+    /// `epoch + 1`, which repeated the same id until an epoch advance
+    /// and could COLLIDE with epoch numbering (T0846).
+    pub cbgr_generation_counter: u64,
+
     /// Tracks base addresses of raw CBGR allocations (AllocationHeader starts).
     ///
     /// When `Heap.new(value)` allocates a CBGR object, the raw allocation base
@@ -2699,6 +2708,7 @@ impl InterpreterState {
             static_mut_wide_cells: HashMap::new(),
             cbgr_epoch: 1,
             cbgr_bypass_depth: 0,
+            cbgr_generation_counter: 1,
             cbgr_allocations: HashSet::new(),
             cbgr_bridge_extents: std::collections::BTreeMap::new(),
             user_tls_slots: std::collections::HashMap::new(),
