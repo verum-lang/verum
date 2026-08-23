@@ -1,0 +1,49 @@
+// @test: run
+// @level: L1
+// @tier: all
+// @expected-exit: 0
+// @description: The canonical allocation header is OBSERVABLE and the
+//   observation channel agrees with the allocator across BOTH tiers
+//   (T0846 mem_raw acceptance). cbgr_alloc returns (ptr, gen, epoch)
+//   from the allocator's own bookkeeping; cbgr_get_generation reads
+//   the header AT THE CANONICAL OFFSET (gen@8, verum_common::layout).
+//   If either tier reads a different arrangement, the two values
+//   disagree and this spec fails loudly — this is the first LIVE
+//   caller of the observation channel (the older cbgr_test only
+//   resolved the name, which is nameability, not coverage).
+
+mount core.mem.allocator.{cbgr_alloc, cbgr_dealloc, cbgr_realloc};
+mount core.intrinsics.runtime.cbgr.cbgr_get_generation;
+
+fn main() {
+    match cbgr_alloc(64, 8) {
+        Result.Ok(t) => {
+            let (p, g, _e) = t;
+            let observed = unsafe { cbgr_get_generation(p as *const Byte) };
+            if (observed as Int) == (g as Int) {
+                print("alloc gen observation agrees");
+            } else {
+                print(f"DISAGREE alloc: returned={g} observed={observed}");
+                panic("header observation diverged from the allocator");
+            }
+            match cbgr_realloc(p, 64, 256, 8) {
+                Result.Ok(t2) => {
+                    let (p2, g2, _e2) = t2;
+                    let observed2 = unsafe { cbgr_get_generation(p2 as *const Byte) };
+                    if (observed2 as Int) == (g2 as Int) {
+                        print("realloc gen observation agrees");
+                    } else {
+                        print(f"DISAGREE realloc: returned={g2} observed={observed2}");
+                        panic("header observation diverged after realloc");
+                    }
+                    match cbgr_dealloc(p2) {
+                        Result.Ok(_) => print("dealloc ok"),
+                        Result.Err(_) => panic("dealloc must succeed"),
+                    }
+                }
+                Result.Err(_) => panic("realloc must succeed"),
+            }
+        }
+        Result.Err(_) => panic("alloc must succeed"),
+    }
+}

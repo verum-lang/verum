@@ -15849,9 +15849,17 @@ impl VbcCodegen {
             }
             return base_ref;
         }
+        // A Tier-2 raw reference IS a machine word — descriptor says
+        // PTR, never the pointee (same T0846 law as
+        // ast_type_to_type_ref; THIS is the mapper the function-param
+        // registration actually uses). `&unsafe Byte` serialized as U8
+        // made the AOT parameter i8-wide and the caller truncated the
+        // pointer to its low byte.
+        if matches!(&ty.kind, TypeKind::UnsafeReference { .. }) {
+            return TypeRef::Concrete(TypeId::PTR);
+        }
         if let TypeKind::Reference { inner, .. }
-        | TypeKind::CheckedReference { inner, .. }
-        | TypeKind::UnsafeReference { inner, .. } = &ty.kind
+        | TypeKind::CheckedReference { inner, .. } = &ty.kind
         {
             return self.resolve_field_type_ref(inner, generic_param_map);
         }
@@ -16210,12 +16218,23 @@ impl VbcCodegen {
                     base_ref
                 }
             }
+            // A Tier-2 raw reference IS a machine word — its descriptor
+            // must say PTR, never the pointee. Serializing `&unsafe Byte`
+            // as U8 made the AOT parameter i8-wide: the caller TRUNCATED
+            // the pointer to its low byte (an aligned allocation truncates
+            // to 32 = header size), and cbgr_dealloc dereferenced 32-24
+            // (T0846 acceptance probe — the first LIVE observation caller;
+            // the whole 677-site `&unsafe` syscall/FFI belt shares this
+            // shape). Raw pointers are opaque by definition: no consumer
+            // legitimately reads a pointee width out of them.
+            TypeKind::UnsafeReference { .. } | TypeKind::Pointer { .. } => {
+                TypeRef::Concrete(TypeId::PTR)
+            }
             TypeKind::Reference { inner, .. }
-            | TypeKind::CheckedReference { inner, .. }
-            | TypeKind::UnsafeReference { inner, .. }
-            | TypeKind::Pointer { inner, .. } => {
-                // References/pointers — resolve to the inner type's TypeRef
-                // (VBC doesn't distinguish reference types at the bytecode level)
+            | TypeKind::CheckedReference { inner, .. } => {
+                // Managed/checked references — resolve to the inner type's
+                // TypeRef (the NaN-box world carries them as values; the
+                // T0332 slot-shape machinery keys off these).
                 self.ast_type_to_type_ref(inner)
             }
             TypeKind::Tuple(elements) => {
@@ -16360,11 +16379,14 @@ impl VbcCodegen {
     ) -> TypeRef {
         use verum_ast::ty::{PathSegment, TypeKind};
         match &ty.kind {
-            // Peel reference/pointer wrappers, preserving Self-awareness.
+            // Raw pointers are machine words (see the primary mapper's
+            // T0846 note) — same law here.
+            TypeKind::UnsafeReference { .. } | TypeKind::Pointer { .. } => {
+                TypeRef::Concrete(TypeId::PTR)
+            }
+            // Peel managed/checked wrappers, preserving Self-awareness.
             TypeKind::Reference { inner, .. }
-            | TypeKind::CheckedReference { inner, .. }
-            | TypeKind::UnsafeReference { inner, .. }
-            | TypeKind::Pointer { inner, .. } => {
+            | TypeKind::CheckedReference { inner, .. } => {
                 self.ast_type_to_type_ref_self_aware(inner, self_type_name)
             }
             TypeKind::Path(path) => {
