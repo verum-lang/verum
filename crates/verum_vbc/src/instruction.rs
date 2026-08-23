@@ -4722,87 +4722,13 @@ pub enum SystemSubOpcode {
 
 
 
-    /// Allocate a byte array (contiguous bytes, not Values).
-    ///
-    /// Format: `dst:reg, size:reg, init:reg`
-    /// Allocates `size` bytes of contiguous memory with TypeId::U8.
-    /// Each byte is initialized to `init` value.
-    ///
-    /// This is used for `let buf: [Byte; N] = uninit();` or `[Byte; N] = zeroed();`
-    /// where we need true byte arrays, not Value arrays.
-    NewByteArray = 0x49,
 
-    /// Get element address in a byte array.
-    ///
-    /// Format: `dst:reg, arr:reg, idx:reg`
-    /// Computes the memory address of the element at index `idx` in byte array `arr`.
-    /// Returns: `dst = arr_ptr + OBJECT_HEADER_SIZE + idx`
-    ///
-    /// This is used for `&mut buf[idx] as *mut Byte` to get the actual memory address
-    /// of a byte array element, rather than fetching its value (which GetE does).
-    ByteArrayElementAddr = 0x4A,
 
-    /// Load a byte from a byte array.
-    ///
-    /// Format: `dst:reg, arr:reg, idx:reg`
-    /// Loads the byte at index `idx` from byte array `arr` into `dst`.
-    ///
-    /// This provides efficient single-byte access to byte arrays without
-    /// computing element addresses.
-    ByteArrayLoad = 0x4B,
 
-    /// Store a byte to a byte array.
-    ///
-    /// Format: `arr:reg, idx:reg, val:reg`
-    /// Stores the low 8 bits of `val` to byte array `arr` at index `idx`.
-    ///
-    /// This provides efficient single-byte writes to byte arrays without
-    /// computing element addresses.
-    ByteArrayStore = 0x4C,
 
-    /// Get element address for typed array (with element size).
-    ///
-    /// Format: `dst:reg, arr:reg, idx:reg, elem_size:u8`
-    /// Returns: Pointer to arr[idx] = base_addr + (idx * elem_size)
-    ///
-    /// This is a generalization of ByteArrayElementAddr for arrays with
-    /// elements larger than 1 byte (e.g., [UInt64; N] where elem_size=8).
-    TypedArrayElementAddr = 0x4D,
 
-    /// Create new typed array with element size.
-    ///
-    /// Format: `dst:reg, count:reg, elem_size:u8, init:reg`
-    /// Allocates: count * elem_size bytes of memory
-    /// Initializes: All elements to init value (cast to element type)
-    NewTypedArray = 0x4E,
 
-    /// Store one element into a typed (packed) array, UNBOXING the value.
-    ///
-    /// Format: `arr:reg, idx:reg, val:reg, elem_size:u8`
-    /// Writes `val.as_i64()` truncated to `elem_size` raw bytes at
-    /// `HEADER + idx*elem_size`. The typed-array analogue of
-    /// `ByteArrayStore` (which is the `elem_size == 1` case) — and the
-    /// twin of `NewTypedArray`'s raw fill. The prior path
-    /// (`TypedArrayElementAddr` + `DerefMutRaw`) stored the FULL 64-bit
-    /// NaN-boxed `Value` bits (deliberate, for `*ptr = Some(v)` pointer
-    /// round-trips, task #40), so a `[Int; N]` element read back as the
-    /// tag pattern (`0x7FF9…000A` for `10`) — silent garbage (TYPED-
-    /// ARRAY-REPR-1 #27). Raw store + the existing raw load
-    /// (`GetE`/`SliceGet reserved=elem_size` → `from_i64`) are coherent.
-    TypedArrayStore = 0x5E,
 
-    /// Load one element from a typed (packed) array, DECODING by width.
-    ///
-    /// Format: `dst:reg, arr:reg, idx:reg, elem_size:u8`
-    /// Reads `elem_size` (bit 0x80 = float) raw bytes at
-    /// `HEADER + idx*(elem_size & 0x7F)` and boxes the result: integer
-    /// widths zero-extend (`from_i64`), F32 widens `from_bits` → f64, F64
-    /// round-trips its IEEE bits (`from_f64`). The read twin of
-    /// `TypedArrayStore` and the typed analogue of `ByteArrayLoad` (the
-    /// `elem_size == 1` case) — closes the T0356 Tier-1 typed store/load
-    /// leg (there was NO typed load opcode; `[Int; N]`/`[Float; N]` index
-    /// reads crashed or read garbage at AOT via the packed container-view).
-    TypedArrayLoad = 0x5F,
 
     /// Get raw address of a struct field.
     ///
@@ -4843,53 +4769,7 @@ pub enum SystemSubOpcode {
     /// Frees resources associated with callback.
     FreeCallback = 0x51,
 
-    /// Static-mut backing-cell address — Task #26 [E2] enabler.
-    ///
-    /// Format: `dst:reg, slot_lo:u8, slot_hi:u8`
-    /// Returns: dst = stable u64 pointer to the process-wide cell backing
-    /// the `static mut` named by `slot` (the same id used by `TlsGet/TlsSet`).
-    ///
-    /// Codegen sibling of `StructFieldAddr`: the existing
-    /// `compile_cast::try_compile_struct_field_addr` handles `&recv.field
-    /// as *T`, this opcode is the bottom of the parallel
-    /// `try_compile_static_mut_addr` chain that handles `&STATIC_MUT as
-    /// *T`. Without it, `compile_cast` falls through to the generic
-    /// pass-through arm and returns a register-encoded CBGR-Ref
-    /// bit-pattern that `handle_atomic_store`'s `as_i64() as usize`
-    /// dereferences as a meaningless ~0xFFFFFFFD_FFFFFFFD garbage
-    /// address — every Tier-0 atomic op on a static mut SIGSEGVs.
-    ///
-    /// The runtime allocates a `Box<UnsafeCell<u64>>` on first dispatch
-    /// (lazy, keyed by `slot`) — Box's heap allocation gives a stable
-    /// process-wide address for the cell's lifetime. The cell starts at
-    /// zero; non-zero `static mut` initializers should write through
-    /// the cell via `DerefMutRaw` in the `__tls_init_<X>` ctor (follow-up).
-    ///
-    /// # Safety
-    /// The returned pointer is valid for the lifetime of the
-    /// `InterpreterState` and properly aligned for `u64`. Callers must
-    /// use it only for atomic / raw-pointer ops on bytes within the
-    /// 8-byte cell.
-    StaticMutAddr = 0x52,
 
-    /// Raw byte/word load/store over Int addresses — the table-authoritative
-    /// route for `core/intrinsics/runtime/mem_raw.vr`'s leaf ops on BOTH
-    /// tiers.  History: the leaves were bodyless decls dispatched by NAME on
-    /// the interpreter only; AOT lowered the declaration stubs, so every
-    /// load returned 0 and every store was a no-op under AOT (26-test
-    /// cluster in the 2026-07-03 sweep).  Formats: load `dst:reg, addr:reg`,
-    /// store `dst:reg, addr:reg, value:reg` (dst receives 0).
-    RawLoadU8 = 0x53,
-    /// Store one byte at a raw address: `dst, addr, value` (dst receives 0).
-    RawStoreU8 = 0x54,
-    /// Load a 32-bit integer from a raw address: `dst, addr`.
-    RawLoadI32 = 0x55,
-    /// Store a 32-bit integer at a raw address: `dst, addr, value`.
-    RawStoreI32 = 0x56,
-    /// Load a 64-bit integer from a raw address: `dst, addr`.
-    RawLoadI64 = 0x57,
-    /// Store a 64-bit integer at a raw address: `dst, addr, value`.
-    RawStoreI64 = 0x58,
 
 
     // ========================================================================
@@ -4908,118 +4788,13 @@ pub enum SystemSubOpcode {
 
     // These are semantically equivalent to Rust's `*const T` and `*mut T`.
     // ========================================================================
-    /// Read value through raw pointer (no CBGR validation).
-    ///
-    /// Format: `dst:reg, ptr:reg, size:u8`
-    /// size: 1=i8, 2=i16, 4=i32, 8=i64 (interpreted as signed)
-    ///
-    /// Reads a primitive value from the memory address in `ptr`.
-    /// This bypasses CBGR validation and directly accesses memory.
-    ///
-    /// # Safety
-    /// The pointer must be valid and properly aligned.
-    DerefRaw = 0x60,
 
-    /// Write value through raw pointer (no CBGR validation).
-    ///
-    /// Format: `ptr:reg, value:reg, size:u8`
-    /// size: 1=i8, 2=i16, 4=i32, 8=i64
-    ///
-    /// Writes a primitive value to the memory address in `ptr`.
-    /// This bypasses CBGR validation and directly accesses memory.
-    ///
-    /// # Safety
-    /// The pointer must be valid and properly aligned.
-    /// The memory must be writable.
-    DerefMutRaw = 0x61,
 
-    /// Read pointer through raw pointer (for pointer-to-pointer).
-    ///
-    /// Format: `dst:reg, ptr:reg`
-    ///
-    /// Reads a pointer value from the memory address in `ptr`.
-    DerefRawPtr = 0x62,
 
-    /// Pointer arithmetic: add offset.
-    ///
-    /// Format: `dst:reg, ptr:reg, offset:reg`
-    ///
-    /// Computes `ptr + offset` for raw pointer arithmetic.
-    /// The offset is in bytes.
-    PtrAdd = 0x63,
 
-    /// Pointer arithmetic: subtract offset.
-    ///
-    /// Format: `dst:reg, ptr:reg, offset:reg`
-    ///
-    /// Computes `ptr - offset` for raw pointer arithmetic.
-    PtrSub = 0x64,
 
-    /// Pointer difference.
-    ///
-    /// Format: `dst:reg, ptr1:reg, ptr2:reg`
-    ///
-    /// Computes `ptr1 - ptr2` (difference in bytes).
-    PtrDiff = 0x65,
 
-    /// Check if pointer is null.
-    ///
-    /// Format: `dst:reg, ptr:reg`
-    ///
-    /// Sets `dst` to true if `ptr` is null, false otherwise.
-    PtrIsNull = 0x66,
 
-    /// Read signed primitive through raw pointer (sign-extending variant
-    /// of [`DerefRaw`]).
-    ///
-    /// Format: `dst:reg, ptr:reg, size:u8`
-    /// size: 1=i8, 2=i16, 4=i32, 8=i64
-    ///
-    /// Reads `size` bytes from `ptr` and **sign-extends** to i64.
-    /// Mirror of `DerefRaw` for code paths that need precise C-typed
-    /// pointer reads of `int8_t` / `int16_t` / `int32_t` slots.
-    ///
-    /// Why a separate opcode rather than a flag on `DerefRaw`:
-    /// `DerefRaw` deliberately chose zero-extension as its default
-    /// (CRC32 / unsigned-byte-array invariant — see comment at the
-    /// `DerefRaw` handler). Adding a sign-extending opcode keeps
-    /// both semantics explicit at the bytecode level and lets
-    /// codegen pick the right one based on the static type of the
-    /// pointee (signed C type → `DerefRawSigned`, unsigned C type
-    /// or byte-array element → `DerefRaw`).
-    ///
-    /// # Safety
-    /// The pointer must be valid for reads of `size` bytes. Bypasses
-    /// CBGR validation; caller takes responsibility per the FFI
-    /// contract.
-    DerefRawSigned = 0x67,
-    /// Volatile pointer READ (T0188): the AOT arm emits an LLVM load
-    /// with the volatile flag set — never elided/reordered; the Tier-0
-    /// arm is the plain DerefRaw twin (documented equivalence: the
-    /// interpreter performs every operation, so plain reads already
-    /// satisfy the volatile contract there). Wire: [dst][ptr][width].
-    PtrReadVolatile = 0x68,
-    /// Volatile pointer WRITE (T0188) — store + volatile flag at AOT;
-    /// DerefMutRaw twin at Tier-0. Wire: [ptr][value][width].
-    PtrWriteVolatile = 0x69,
-    /// Sized static-mut cell address (T0133): the wide twin of
-    /// `StaticMutAddr` for statics wider than 8 bytes (`[Int; 64]`,
-    /// packed byte arrays). Wire: [dst][slot_lo][slot_hi][size_lo][size_hi]
-    /// (size in BYTES; the interpreter allocates a stable 8-aligned cell
-    /// of ceil(size/8) words, zero-initialised, lazily per slot).
-    /// Additive beside 0x52 so pre-existing bytecode keeps its exact
-    /// operand shape — the encoder/decoder-drift class stays closed.
-    StaticMutAddrSized = 0x6A,
-    /// Plain raw-pointer READ with MACHINE semantics (T0108): reads the
-    /// raw bytes at the address — the non-volatile twin of
-    /// PtrReadVolatile. Distinct from DerefRaw only in family intent;
-    /// distinct from DerefMutRaw's 8-byte policy on the WRITE side,
-    /// which stores the full NaN-boxed Value bit-pattern for
-    /// deref-assign — the intrinsic pair speaks machine representation
-    /// (an `*mut Int` cell holds 11, not 0x7FF9…000B).
-    PtrRead = 0x6B,
-    /// Plain raw-pointer WRITE with MACHINE semantics — see PtrRead.
-    PtrWrite = 0x6C,
 
 
 
@@ -5197,6 +4972,144 @@ pub type FfiSubOpcode = SystemSubOpcode;
 //
 // Until Phase 4, the same operations remain reachable via the
 // corresponding `SystemSubOpcode` byte values (0x70-0xBF range).
+
+/// Memory-operation sub-opcodes for `Opcode::MemExtended` (0xBF) —
+/// the heap/pointer family's honest home (T0852).  Bands:
+/// 0x00-0x0F allocator verbs (the original七 residents), 0x10-0x1F
+/// pointer arithmetic + deref leaves, 0x20-0x2F raw fixed-width
+/// load/store, 0x30-0x3F byte/typed array primitives, 0x40-0x4F
+/// static-mut cells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum MemSubOpcode {
+    /// Allocate heap memory (dst, size, align).
+    Alloc = 0x00,
+    /// Allocate zeroed heap memory (dst, size, align).
+    AllocZeroed = 0x01,
+    /// Deallocate heap memory (ptr, size, align).
+    Dealloc = 0x02,
+    /// Reallocate heap memory (dst, ptr, old_size, new_size, align).
+    Realloc = 0x03,
+    /// Swap two values in place (a, b).
+    Swap = 0x04,
+    /// Replace value, returning the old one (dst, place, value).
+    Replace = 0x05,
+    /// Packed byte-list allocator (red-team §4).
+    NewByteList = 0x06,
+    // -- Pointer arithmetic + deref leaves (0x10-0x1F), carried over
+    //    from SystemSubOpcode 0x60-0x6C (T0852).
+    /// Unsigned raw-pointer load (dst, addr, size-imm).
+    DerefRaw = 0x10,
+    /// Raw-pointer store (addr, value, size-imm).
+    DerefMutRaw = 0x11,
+    /// Pointer-of-pointer load (dst, addr).
+    DerefRawPtr = 0x12,
+    /// `ptr + byte_offset` (dst, ptr, offset).
+    PtrAdd = 0x13,
+    /// `ptr - byte_offset` (dst, ptr, offset).
+    PtrSub = 0x14,
+    /// `ptr_a - ptr_b` byte distance (dst, a, b).
+    PtrDiff = 0x15,
+    /// Null test (dst, ptr).
+    PtrIsNull = 0x16,
+    /// Sign-extending raw load (dst, addr, size-imm).
+    DerefRawSigned = 0x17,
+    /// Volatile read (dst, addr, size-imm) — T0188.
+    PtrReadVolatile = 0x18,
+    /// Volatile write (addr, value, size-imm) — T0188.
+    PtrWriteVolatile = 0x19,
+    /// Plain machine-semantics pointer read (dst, addr, size-imm) — T0108.
+    PtrRead = 0x1A,
+    /// Plain machine-semantics pointer write (addr, value, size-imm) — T0108.
+    PtrWrite = 0x1B,
+    // -- Raw fixed-width leaves (0x20-0x2F), carried over from
+    //    SystemSubOpcode 0x53-0x58.
+    /// Load u8 (dst, addr).
+    RawLoadU8 = 0x20,
+    /// Store u8 (addr, value).
+    RawStoreU8 = 0x21,
+    /// Load i32 (dst, addr).
+    RawLoadI32 = 0x22,
+    /// Store i32 (addr, value).
+    RawStoreI32 = 0x23,
+    /// Load i64 (dst, addr).
+    RawLoadI64 = 0x24,
+    /// Store i64 (addr, value).
+    RawStoreI64 = 0x25,
+    // -- Byte/typed array primitives (0x30-0x3F), carried over from
+    //    SystemSubOpcode 0x49-0x4E / 0x5E / 0x5F.
+    /// Allocate a packed byte array (dst, len).
+    NewByteArray = 0x30,
+    /// Element address of a byte array (dst, arr, idx).
+    ByteArrayElementAddr = 0x31,
+    /// Load a byte-array element (dst, arr, idx).
+    ByteArrayLoad = 0x32,
+    /// Store a byte-array element (arr, idx, value).
+    ByteArrayStore = 0x33,
+    /// Allocate a typed array (dst, len, elem_size).
+    NewTypedArray = 0x34,
+    /// Element address of a typed array (dst, arr, idx, elem_size).
+    TypedArrayElementAddr = 0x35,
+    /// Load a typed-array element (dst, arr, idx, width-imm).
+    TypedArrayLoad = 0x36,
+    /// Store a typed-array element (arr, idx, value, width-imm).
+    TypedArrayStore = 0x37,
+    // -- Static-mut cells (0x40-0x4F), carried over from
+    //    SystemSubOpcode 0x52 / 0x6A.
+    /// Address of a static-mut cell (dst, static-id operands).
+    StaticMutAddr = 0x40,
+    /// Sized variant carrying the cell width (T0133).
+    StaticMutAddrSized = 0x41,
+}
+
+impl MemSubOpcode {
+    /// Creates a mem sub-opcode from a byte value.
+    pub fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0x00 => Some(Self::Alloc),
+            0x01 => Some(Self::AllocZeroed),
+            0x02 => Some(Self::Dealloc),
+            0x03 => Some(Self::Realloc),
+            0x04 => Some(Self::Swap),
+            0x05 => Some(Self::Replace),
+            0x06 => Some(Self::NewByteList),
+            0x10 => Some(Self::DerefRaw),
+            0x11 => Some(Self::DerefMutRaw),
+            0x12 => Some(Self::DerefRawPtr),
+            0x13 => Some(Self::PtrAdd),
+            0x14 => Some(Self::PtrSub),
+            0x15 => Some(Self::PtrDiff),
+            0x16 => Some(Self::PtrIsNull),
+            0x17 => Some(Self::DerefRawSigned),
+            0x18 => Some(Self::PtrReadVolatile),
+            0x19 => Some(Self::PtrWriteVolatile),
+            0x1A => Some(Self::PtrRead),
+            0x1B => Some(Self::PtrWrite),
+            0x20 => Some(Self::RawLoadU8),
+            0x21 => Some(Self::RawStoreU8),
+            0x22 => Some(Self::RawLoadI32),
+            0x23 => Some(Self::RawStoreI32),
+            0x24 => Some(Self::RawLoadI64),
+            0x25 => Some(Self::RawStoreI64),
+            0x30 => Some(Self::NewByteArray),
+            0x31 => Some(Self::ByteArrayElementAddr),
+            0x32 => Some(Self::ByteArrayLoad),
+            0x33 => Some(Self::ByteArrayStore),
+            0x34 => Some(Self::NewTypedArray),
+            0x35 => Some(Self::TypedArrayElementAddr),
+            0x36 => Some(Self::TypedArrayLoad),
+            0x37 => Some(Self::TypedArrayStore),
+            0x40 => Some(Self::StaticMutAddr),
+            0x41 => Some(Self::StaticMutAddrSized),
+            _ => None,
+        }
+    }
+
+    /// Returns the byte value of this sub-opcode.
+    pub fn to_byte(self) -> u8 {
+        self as u8
+    }
+}
 
 /// Time clock operations — extracted from `SystemSubOpcode::Time*`.
 ///
@@ -5636,39 +5549,11 @@ impl SystemSubOpcode {
             0x44 => Some(Self::CMemset),
             0x45 => Some(Self::CMemmove),
             0x46 => Some(Self::CMemcmp),
-            0x49 => Some(Self::NewByteArray),
-            0x4A => Some(Self::ByteArrayElementAddr),
-            0x4B => Some(Self::ByteArrayLoad),
-            0x4C => Some(Self::ByteArrayStore),
-            0x4D => Some(Self::TypedArrayElementAddr),
-            0x4E => Some(Self::NewTypedArray),
-            0x5E => Some(Self::TypedArrayStore),
-            0x5F => Some(Self::TypedArrayLoad),
             0x4F => Some(Self::StructFieldAddr),
             // Callback Support
             0x50 => Some(Self::CreateCallback),
             0x51 => Some(Self::FreeCallback),
-            0x52 => Some(Self::StaticMutAddr),
-            0x53 => Some(Self::RawLoadU8),
-            0x54 => Some(Self::RawStoreU8),
-            0x55 => Some(Self::RawLoadI32),
-            0x56 => Some(Self::RawStoreI32),
-            0x57 => Some(Self::RawLoadI64),
-            0x58 => Some(Self::RawStoreI64),
             // Raw Pointer Operations
-            0x60 => Some(Self::DerefRaw),
-            0x61 => Some(Self::DerefMutRaw),
-            0x62 => Some(Self::DerefRawPtr),
-            0x67 => Some(Self::DerefRawSigned),
-            0x68 => Some(Self::PtrReadVolatile),
-            0x69 => Some(Self::PtrWriteVolatile),
-            0x6A => Some(Self::StaticMutAddrSized),
-            0x6B => Some(Self::PtrRead),
-            0x6C => Some(Self::PtrWrite),
-            0x63 => Some(Self::PtrAdd),
-            0x64 => Some(Self::PtrSub),
-            0x65 => Some(Self::PtrDiff),
-            0x66 => Some(Self::PtrIsNull),
             // Time Operations
             // System Call Operations
             // Mach Kernel Operations
@@ -5692,7 +5577,7 @@ impl SystemSubOpcode {
     pub const fn meta(self) -> SystemOpMeta {
         use SystemCategory::{
             CallbackSupport, CallingConvention, ErrorHandling, Marshalling, MemoryOperations,
-            RawPointerOperations, SymbolResolution,
+            SymbolResolution,
         };
 
         // Field order: mnemonic, category, is_call, is_marshal,
@@ -5760,41 +5645,13 @@ impl SystemSubOpcode {
             Self::CMemset                => m!("FFI_C_MEMSET",               MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
             Self::CMemmove               => m!("FFI_C_MEMMOVE",              MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
             Self::CMemcmp                => m!("FFI_C_MEMCMP",               MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
-            Self::NewByteArray           => m!("FFI_NEW_BYTE_ARRAY",         MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::ByteArrayElementAddr   => m!("FFI_BYTE_ARRAY_ELEM_ADDR",   MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
-            Self::ByteArrayLoad          => m!("FFI_BYTE_ARRAY_LOAD",        MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
-            Self::ByteArrayStore         => m!("FFI_BYTE_ARRAY_STORE",       MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
-            Self::TypedArrayElementAddr  => m!("FFI_TYPED_ARRAY_ELEM_ADDR",  MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
-            Self::NewTypedArray          => m!("FFI_NEW_TYPED_ARRAY",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::TypedArrayStore        => m!("FFI_TYPED_ARRAY_STORE",      MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
-            Self::TypedArrayLoad         => m!("FFI_TYPED_ARRAY_LOAD",       MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
             Self::StructFieldAddr        => m!("FFI_STRUCT_FIELD_ADDR",      MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
 
             // ===== Callback Support (0x50-0x5F) =====
             Self::CreateCallback         => m!("FFI_CREATE_CALLBACK",        CallbackSupport,          call=false, marshal=false, alloc=true,  dealloc=false),
             Self::FreeCallback           => m!("FFI_FREE_CALLBACK",          CallbackSupport,          call=false, marshal=false, alloc=false, dealloc=true),
-            Self::StaticMutAddr          => m!("FFI_STATIC_MUT_ADDR",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
-            Self::RawLoadU8          => m!("RAW_LOAD_U8",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
-            Self::RawStoreU8          => m!("RAW_STORE_U8",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
-            Self::RawLoadI32          => m!("RAW_LOAD_I32",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
-            Self::RawStoreI32          => m!("RAW_STORE_I32",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
-            Self::RawLoadI64          => m!("RAW_LOAD_I64",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
-            Self::RawStoreI64          => m!("RAW_STORE_I64",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
 
             // ===== Raw Pointer Operations (0x60-0x6F) =====
-            Self::DerefRaw               => m!("FFI_DEREF_RAW",              RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::DerefMutRaw            => m!("FFI_DEREF_MUT_RAW",          RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::DerefRawPtr            => m!("FFI_DEREF_RAW_PTR",          RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::DerefRawSigned         => m!("FFI_DEREF_RAW_SIGNED",       RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::PtrReadVolatile        => m!("FFI_PTR_READ_VOLATILE",      RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::PtrWriteVolatile       => m!("FFI_PTR_WRITE_VOLATILE",     RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::StaticMutAddrSized     => m!("FFI_STATIC_MUT_ADDR_SIZED",  RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::PtrRead                => m!("FFI_PTR_READ",              RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::PtrWrite               => m!("FFI_PTR_WRITE",             RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::PtrAdd                 => m!("FFI_PTR_ADD",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::PtrSub                 => m!("FFI_PTR_SUB",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::PtrDiff                => m!("FFI_PTR_DIFF",               RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::PtrIsNull              => m!("FFI_PTR_IS_NULL",            RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
 
             // ===== Time Operations (0x70-0x7F) =====
 
@@ -16382,16 +16239,17 @@ mod tests {
     }
 
     #[test]
-    fn system_meta_count_pinned_at_sixty_one() {
-        // T0852 re-homed 58 squatters (Time 7, Sys/Env/Random/Tier 13,
-        // Mach 9, Sync/TLS/WG/AtomicRmw 18, Cbgr 11) into their family
-        // gateways, leaving the honest FFI surface here.  Bumping this
-        // assertion is the explicit signal that a new SystemSubOpcode
-        // entry has landed with its meta() arm in place.
+    fn system_meta_count_pinned_at_thirty_three() {
+        // T0852 re-homed 86 squatters (Time 7, Sys/Env/Random/Tier 13,
+        // Mach 9, Sync/TLS/WG/AtomicRmw 18, Cbgr 11, Mem: ptr/raw/
+        // arrays/static-mut 28) into their family gateways, leaving the
+        // honest FFI surface here.  Bumping this assertion is the
+        // explicit signal that a new SystemSubOpcode entry has landed
+        // with its meta() arm in place.
         let mut count = 0;
         for_every_system_sub_opcode(|_| count += 1);
-        assert_eq!(count, 61,
-            "SystemSubOpcode variant count drift: expected 61, got {}",
+        assert_eq!(count, 33,
+            "SystemSubOpcode variant count drift: expected 33, got {}",
             count);
     }
 
@@ -16412,19 +16270,11 @@ mod tests {
         // here requires the same conscious decision as bumping a
         // count pin: new variants land INSIDE their band; this list
         // only ever shrinks (via a schema bump).
-        let band_exceptions: &[(u8, SystemCategory)] = &[
-            // (T0852: the TLS-slot family rows moved to SyncSubOpcode
-            // 0x50-0x54 and left this list.)
-            (0x52, SystemCategory::MemoryOperations),          // StaticMutAddr
-            (0x53, SystemCategory::MemoryOperations),          // RawLoadU8
-            (0x54, SystemCategory::MemoryOperations),          // RawStoreU8
-            (0x55, SystemCategory::MemoryOperations),          // RawLoadI32
-            (0x56, SystemCategory::MemoryOperations),          // RawStoreI32
-            (0x57, SystemCategory::MemoryOperations),          // RawLoadI64
-            (0x58, SystemCategory::MemoryOperations),          // RawStoreI64
-            (0x5E, SystemCategory::MemoryOperations),          // TypedArrayStore
-            (0x5F, SystemCategory::MemoryOperations),          // TypedArrayLoad
-        ];
+        // T0852: the whole wire-landed 0x52-0x5F memory annex moved to
+        // MemSubOpcode — the exception list is EMPTY, and stays a
+        // structure (not deleted) so the discipline note above keeps
+        // its enforcement point.
+        let band_exceptions: &[(u8, SystemCategory)] = &[];
         let mut exceptions_hit = 0usize;
         for_every_system_sub_opcode(|op| {
             let byte = op.to_byte();
@@ -16525,11 +16375,11 @@ mod tests {
             if op.allocates()   { alloc += 1; }
             if op.deallocates() { dealloc += 1; }
         });
-        // T0852: the Cbgr / Mach / Waitgroup allocators moved to their
-        // family gateways; the honest FFI surface allocates via CAlloc,
-        // CRealloc, NewByteArray, NewTypedArray, CreateCallback and
-        // frees via CFree, FreeCallback.
-        assert_eq!(alloc, 5, "allocator count drift");
+        // T0852: the Cbgr / Mach / Waitgroup / byte-array allocators
+        // moved to their family gateways; the honest FFI surface
+        // allocates via CAlloc, CRealloc, CreateCallback and frees via
+        // CFree, FreeCallback.
+        assert_eq!(alloc, 3, "allocator count drift");
         assert_eq!(dealloc, 2, "deallocator count drift");
     }
 
@@ -16544,9 +16394,9 @@ mod tests {
                 "duplicate mnemonic {:?} on variant {:?}", m, op);
             seen.push(m);
         });
-        // Mirrors the system_meta_count pin (T0852: 61 honest-FFI
+        // Mirrors the system_meta_count pin (T0852: 33 honest-FFI
         // variants after the family re-homing).
-        assert_eq!(seen.len(), 61);
+        assert_eq!(seen.len(), 33);
     }
 
     // ========================================================================

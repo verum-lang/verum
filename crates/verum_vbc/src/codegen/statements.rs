@@ -796,8 +796,8 @@ impl VbcCodegen {
                 // Emit NewByteArray instruction via FfiExtended
                 // Format: dst:reg, size:reg, init:reg
                 let operands = vec![result.0 as u8, size_reg.0 as u8, init_reg.0 as u8];
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x49, // NewByteArray sub-opcode (SystemSubOpcode::NewByteArray)
+                self.ctx.emit(Instruction::MemExtended {
+                    sub_op: 0x30, // MemSubOpcode::NewByteArray
                     operands,
                 });
 
@@ -837,8 +837,8 @@ impl VbcCodegen {
 
                 // Emit NewByteArray instruction
                 let operands = vec![result.0 as u8, size_reg.0 as u8, init_reg.0 as u8];
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x49, // NewByteArray sub-opcode
+                self.ctx.emit(Instruction::MemExtended {
+                    sub_op: 0x30, // MemSubOpcode::NewByteArray
                     operands,
                 });
 
@@ -861,8 +861,8 @@ impl VbcCodegen {
 
                     // Emit ByteArrayStore: arr[idx] = val
                     let operands = vec![result.0 as u8, idx_reg.0 as u8, val_reg.0 as u8];
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x4C, // ByteArrayStore sub-opcode
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: 0x33, // MemSubOpcode::ByteArrayStore
                         operands,
                     });
 
@@ -903,8 +903,8 @@ impl VbcCodegen {
 
                 // Emit NewByteArray instruction
                 let operands = vec![result.0 as u8, size_reg.0 as u8, init_reg.0 as u8];
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x49, // NewByteArray sub-opcode
+                self.ctx.emit(Instruction::MemExtended {
+                    sub_op: 0x30, // MemSubOpcode::NewByteArray
                     operands,
                 });
 
@@ -926,8 +926,8 @@ impl VbcCodegen {
 
                     // Emit ByteArrayStore: arr[idx] = val
                     let operands = vec![result.0 as u8, idx_reg.0 as u8, val_reg.0 as u8];
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x4C, // ByteArrayStore sub-opcode
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: 0x33, // MemSubOpcode::ByteArrayStore
                         operands,
                     });
 
@@ -996,8 +996,8 @@ impl VbcCodegen {
                 elem_size_byte,
                 init_reg.0 as u8,
             ];
-            self.ctx.emit(Instruction::FfiExtended {
-                sub_op: 0x4E, // NewTypedArray sub-opcode (SystemSubOpcode::NewTypedArray)
+            self.ctx.emit(Instruction::MemExtended {
+                sub_op: 0x34, // MemSubOpcode::NewTypedArray
                 operands,
             });
 
@@ -1030,8 +1030,8 @@ impl VbcCodegen {
                         val_reg.0 as u8,
                         elem_size as u8,
                     ];
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x5E, // TypedArrayStore
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: 0x37, // MemSubOpcode::TypedArrayStore
                         operands: store_operands,
                     });
 
@@ -1059,8 +1059,8 @@ impl VbcCodegen {
                             val_reg.0 as u8,
                             elem_size as u8,
                         ];
-                        self.ctx.emit(Instruction::FfiExtended {
-                            sub_op: 0x5E, // TypedArrayStore
+                        self.ctx.emit(Instruction::MemExtended {
+                            sub_op: 0x37, // MemSubOpcode::TypedArrayStore
                             operands: store_operands,
                         });
 
@@ -1092,8 +1092,8 @@ impl VbcCodegen {
                             val_reg.0 as u8,
                             elem_size as u8,
                         ];
-                        self.ctx.emit(Instruction::FfiExtended {
-                            sub_op: 0x5E, // TypedArrayStore
+                        self.ctx.emit(Instruction::MemExtended {
+                            sub_op: 0x37, // MemSubOpcode::TypedArrayStore
                             operands: store_operands,
                         });
                         self.ctx.free_temp(idx_reg);

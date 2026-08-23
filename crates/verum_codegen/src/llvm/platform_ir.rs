@@ -2560,7 +2560,7 @@ impl<'ctx> PlatformIR<'ctx> {
         // Sibling of the Tier-0 `InterpreterState::static_mut_cell_addr`
         // method: gives `&STATIC_MUT as *T` a stable byte-addressable cell
         // backing for AOT-compiled code.  The Tier-1 LLVM lowering of
-        // `SystemSubOpcode::StaticMutAddr` (0x52) in
+        // `MemSubOpcode::StaticMutAddr` (0x52) in
         // `crates/verum_codegen/src/llvm/instruction.rs` emits a call to
         // this helper; without it, AOT builds linking any `static mut` +
         // atomic-op code (cap_audit_ring, allocator::PAGE_MANAGER_LOCK,

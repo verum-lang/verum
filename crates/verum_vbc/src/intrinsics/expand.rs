@@ -439,15 +439,15 @@ fn expand_sequence(
         // stride-1 refinement is call-site-only by design.
         InlineSequenceId::PtrOffset | InlineSequenceId::PtrSubSeq if args.len() >= 2 => {
             let sub_op = if matches!(seq, InlineSequenceId::PtrOffset) {
-                0x63 // PtrAdd (element-scaled ×8)
+                0x13 // MemSubOpcode::PtrAdd (element-scaled ×8)
             } else {
-                0x64 // PtrSub (element-scaled ×8)
+                0x14 // MemSubOpcode::PtrSub (element-scaled ×8)
             };
             let mut operands = Vec::<u8>::new();
             write_reg(&mut operands, dest.0);
             write_reg(&mut operands, args[0].0);
             write_reg(&mut operands, args[1].0);
-            e.emit(Instruction::FfiExtended { sub_op, operands });
+            e.emit(Instruction::MemExtended { sub_op, operands });
         }
         InlineSequenceId::CheckedAdd
         | InlineSequenceId::CheckedSub
@@ -868,8 +868,8 @@ mod tests {
         assert_eq!(
             body.instructions,
             vec![
-                Instruction::FfiExtended {
-                    sub_op: 0x63,
+                Instruction::MemExtended {
+                    sub_op: 0x13, // MemSubOpcode::PtrAdd
                     operands: vec![2, 0, 1],
                 },
                 Instruction::Ret { value: Reg(2) },

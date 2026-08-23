@@ -5,7 +5,7 @@ top-level opcode carries it, which sub-op enum names it, which files
 handle it on each tier.  `crates/verum_vbc/src/instruction.rs` is the
 code authority; this document is the map and the allocation
 discipline.  History: `FfiExtended`'s `SystemSubOpcode` pocket had
-grown to 119 variants of which ~58 had nothing to do with FFI (owner
+grown to 119 variants of which 86 had nothing to do with FFI (owner
 mandate 2026-08-22, T0852) — Time, Sys, Mach, Sync, CBGR and memory
 operations all squatted in the FFI byte space, which is how the
 T0425/T0429 byte collisions and the 0x68 cross-session race happened.
@@ -30,7 +30,7 @@ All family gateways share one wire shape, decoded by
 | `FfiExtended` | 0xBC | `SystemSubOpcode` | `ffi_extended.rs` | `lower_ffi_extended` |
 | `ArithExtended` | 0xBD | `ArithSubOpcode` | `arith_extended.rs` | `lower_arith_extended` |
 | `LogExtended` | 0xBE | `LogSubOpcode` | `log_extended.rs` | `lower_log_extended` |
-| `MemExtended` | 0xBF | (raw bytes 0x00-0x06) | `log_extended.rs`² | `lower_mem_extended` |
+| `MemExtended` | 0xBF | `MemSubOpcode` | `mem_extended.rs` | `lower_mem_extended` |
 | `CubicalExtended` | 0xDE | `CubicalSubOpcode` | `cubical.rs` | — (proof kernel) |
 | **`TimeExtended`** | **0xF0** | `TimeSubOpcode` | `time_extended.rs` | `lower_time_extended` |
 | **`SysExtended`** | **0xF1** | `SysSubOpcode` | `sys_extended.rs` | `lower_sys_extended` |
@@ -43,7 +43,6 @@ All family gateways share one wire shape, decoded by
 ¹ `TensorExtended`/`GpuExtended` use per-sub_op structural decoding
 without the length prefix; every other gateway is a length-prefixed
 blob (`decode_extended_operands`).
-² Known misnaming, tracked by the Mem wave below.
 
 Free top-level bytes: **0xF4-0xF7, 0xFE, 0xFF** — the growth reserve.
 Allocating one is a pool-visible decision (file a task naming the
@@ -52,7 +51,7 @@ grew the same pocket blind).
 
 ## The T0852 re-homing (what moved where)
 
-58 `SystemSubOpcode` squatters moved to family gateways.  The wire
+86 `SystemSubOpcode` squatters moved to family gateways.  The wire
 bytes changed (dev-stage: no compatibility obligation; the bake and
 all `.vbca` archives regenerate from source):
 
@@ -71,16 +70,18 @@ all `.vbca` archives regenerate from source):
 | TLS slots (5) | 0x59-0x5D `TlsSlot*F` | `SyncExtended` 0x50-0x54 |
 | CBGR allocator (5) | 0xA0-0xA4 `CbgrAlloc*` | `CbgrExtended` 0x60-0x64 |
 | CBGR bridge (6) | 0xA5-0xAA + 0xA3 | `CbgrExtended` 0x63, 0x65-0x6A |
+| Pointer/deref (12) | 0x60-0x6C `DerefRaw`/`Ptr*` | `MemExtended` 0x10-0x1B |
+| Raw load/store (6) | 0x53-0x58 `Raw*` | `MemExtended` 0x20-0x25 |
+| Byte/typed arrays (8) | 0x49-0x4E/0x5E/0x5F | `MemExtended` 0x30-0x37 |
+| Static-mut cells (2) | 0x52/0x6A `StaticMut*` | `MemExtended` 0x40-0x41 |
 
-What legitimately REMAINS in `FfiExtended` (61 variants — the honest
+What legitimately REMAINS in `FfiExtended` (33 variants — the honest
 FFI surface): symbol resolution (`LoadSymbol`/`GetLibrary`/
 `IsSymbolResolved`), the `CallFfi*` calling conventions, marshalling
 (`*ToC`/`*FromC`), errno handling, the C heap (`CAlloc`..`CMemcmp`),
-callbacks, struct/array element addressing, raw load/store leaves,
-static-mut cells and the typed-array constructors — the last three
-groups pending the **Mem wave** (their honest home is `MemExtended`;
-they sit in FFI's 0x49-0x6C band until that migration, guarded by the
-`band_exceptions` list in the meta pins).
+callbacks and `StructFieldAddr` (C-struct field addressing).  The Mem
+wave completed the re-homing: pointer/raw/array/static-mut all live
+in `MemExtended`, and the meta-pin `band_exceptions` list is empty.
 
 ## Discipline
 

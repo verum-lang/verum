@@ -3936,8 +3936,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, base_reg.0);
                     Self::write_reg(&mut operands, index_reg.0);
                     Self::write_reg(&mut operands, value_reg.0);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: crate::instruction::SystemSubOpcode::ByteArrayStore.to_byte(),
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: crate::instruction::MemSubOpcode::ByteArrayStore.to_byte(),
                         operands,
                     });
                     self.ctx.free_temp(base_reg);
@@ -3970,8 +3970,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, index_reg.0);
                     Self::write_reg(&mut operands, value_reg.0);
                     operands.push(sz as u8);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: crate::instruction::SystemSubOpcode::TypedArrayStore.to_byte(),
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: crate::instruction::MemSubOpcode::TypedArrayStore.to_byte(),
                         operands,
                     });
                     self.ctx.free_temp(base_reg);
@@ -4091,8 +4091,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, value_reg.0);
                     operands.push(8); // Default to 8-byte write
 
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x61, // DerefMutRaw
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: 0x11, // crate::instruction::MemSubOpcode::DerefMutRaw
                         operands,
                     });
                 } else {
@@ -4561,8 +4561,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, current_val.0);
                     Self::write_reg(&mut operands, arr_reg.0);
                     Self::write_reg(&mut operands, idx_reg.0);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: crate::instruction::SystemSubOpcode::ByteArrayLoad.to_byte(),
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: crate::instruction::MemSubOpcode::ByteArrayLoad.to_byte(),
                         operands,
                     });
                 } else if let Some((sz, is_float)) = typed_spec {
@@ -4571,8 +4571,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, arr_reg.0);
                     Self::write_reg(&mut operands, idx_reg.0);
                     operands.push(if is_float { (sz as u8) | 0x80 } else { sz as u8 });
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: crate::instruction::SystemSubOpcode::TypedArrayLoad.to_byte(),
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: crate::instruction::MemSubOpcode::TypedArrayLoad.to_byte(),
                         operands,
                     });
                 } else {
@@ -4618,8 +4618,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, arr_reg.0);
                     Self::write_reg(&mut operands, idx_reg.0);
                     Self::write_reg(&mut operands, result.0);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: crate::instruction::SystemSubOpcode::ByteArrayStore.to_byte(),
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: crate::instruction::MemSubOpcode::ByteArrayStore.to_byte(),
                         operands,
                     });
                 } else if let Some((sz, _)) = typed_spec {
@@ -4630,8 +4630,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, idx_reg.0);
                     Self::write_reg(&mut operands, result.0);
                     operands.push(sz as u8);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: crate::instruction::SystemSubOpcode::TypedArrayStore.to_byte(),
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: crate::instruction::MemSubOpcode::TypedArrayStore.to_byte(),
                         operands,
                     });
                 } else {
@@ -4768,8 +4768,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, result.0);
                     operands.push(8); // Default to 8-byte write
 
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x61, // DerefMutRaw
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: 0x11, // crate::instruction::MemSubOpcode::DerefMutRaw
                         operands,
                     });
                 } else {
@@ -11860,7 +11860,7 @@ impl VbcCodegen {
                     // `List<Byte>::new()` → packed-byte list with
                     // default capacity 16 (red-team §4 ergonomic
                     // auto-routing).  Mirrors the runtime
-                    // `MemSubOpcode::NewByteList = 0x06` path.
+                    // `crate::instruction::MemSubOpcode::NewByteList = 0x06` path.
                     let cap_reg = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadI {
                         dst: cap_reg,
@@ -11906,7 +11906,7 @@ impl VbcCodegen {
         {
             // `List<Byte>::with_capacity(N)` → packed-byte list with
             // honoured capacity (red-team §4 ergonomic auto-routing).
-            // Routes to `MemSubOpcode::NewByteList = 0x06` rather than
+            // Routes to `crate::instruction::MemSubOpcode::NewByteList = 0x06` rather than
             // `NewList`, so the heap actually allocates a
             // `[u8; cap]` backing instead of a Value-per-element one.
             if tn == type_names::LIST && static_receiver_first_arg_is_byte {
@@ -22657,8 +22657,8 @@ impl VbcCodegen {
             Self::write_reg(&mut operands, result.0);
             Self::write_reg(&mut operands, base_reg.0);
             Self::write_reg(&mut operands, idx_reg.0);
-            self.ctx.emit(Instruction::FfiExtended {
-                sub_op: crate::instruction::SystemSubOpcode::ByteArrayLoad.to_byte(),
+            self.ctx.emit(Instruction::MemExtended {
+                sub_op: crate::instruction::MemSubOpcode::ByteArrayLoad.to_byte(),
                 operands,
             });
             self.ctx.free_temp(base_reg);
@@ -22691,8 +22691,8 @@ impl VbcCodegen {
             Self::write_reg(&mut operands, base_reg.0);
             Self::write_reg(&mut operands, idx_reg.0);
             operands.push(if is_float { (sz as u8) | 0x80 } else { sz as u8 });
-            self.ctx.emit(Instruction::FfiExtended {
-                sub_op: crate::instruction::SystemSubOpcode::TypedArrayLoad.to_byte(),
+            self.ctx.emit(Instruction::MemExtended {
+                sub_op: crate::instruction::MemSubOpcode::TypedArrayLoad.to_byte(),
                 operands,
             });
             self.ctx.free_temp(base_reg);
@@ -22859,8 +22859,8 @@ impl VbcCodegen {
                 }
             };
             let operands = vec![result.0 as u8, count_reg.0 as u8, init_reg.0 as u8];
-            self.ctx.emit(Instruction::FfiExtended {
-                sub_op: SystemSubOpcode::NewByteArray.to_byte(),
+            self.ctx.emit(Instruction::MemExtended {
+                sub_op: crate::instruction::MemSubOpcode::NewByteArray.to_byte(),
                 operands,
             });
             self.ctx.free_temp(init_reg);
@@ -22876,8 +22876,8 @@ impl VbcCodegen {
                         value: idx as i64,
                     });
                     let store = vec![result.0 as u8, idx_reg.0 as u8, val_reg.0 as u8];
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: SystemSubOpcode::ByteArrayStore.to_byte(),
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: crate::instruction::MemSubOpcode::ByteArrayStore.to_byte(),
                         operands: store,
                     });
                     self.ctx.free_temp(idx_reg);
@@ -22915,8 +22915,8 @@ impl VbcCodegen {
                 elem_size_byte,
                 init_reg.0 as u8,
             ];
-            self.ctx.emit(Instruction::FfiExtended {
-                sub_op: SystemSubOpcode::NewTypedArray.to_byte(),
+            self.ctx.emit(Instruction::MemExtended {
+                sub_op: crate::instruction::MemSubOpcode::NewTypedArray.to_byte(),
                 operands,
             });
             self.ctx.free_temp(init_reg);
@@ -22937,8 +22937,8 @@ impl VbcCodegen {
                         val_reg.0 as u8,
                         elem_size as u8,
                     ];
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: SystemSubOpcode::TypedArrayStore.to_byte(),
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: crate::instruction::MemSubOpcode::TypedArrayStore.to_byte(),
                         operands: store,
                     });
                     self.ctx.free_temp(idx_reg);
@@ -25151,7 +25151,7 @@ impl VbcCodegen {
     /// usize` dereferences as a meaningless ~0xFFFFFFFD_FFFFFFFD garbage
     /// address — every Tier-0 atomic op on a static mut SIGSEGVs.
     ///
-    /// Lowers to `SystemSubOpcode::StaticMutAddr` which returns the
+    /// Lowers to `crate::instruction::MemSubOpcode::StaticMutAddr` which returns the
     /// stable byte address of a process-wide `Box<UnsafeCell<u64>>`
     /// cell allocated lazily on first access (see
     /// `InterpreterState::static_mut_cell_addr`).
@@ -25240,8 +25240,8 @@ impl VbcCodegen {
             let w = width.min(u16::MAX as u32) as u16;
             operands.push((w & 0xFF) as u8);
             operands.push(((w >> 8) & 0xFF) as u8);
-            self.ctx.emit(Instruction::FfiExtended {
-                sub_op: SystemSubOpcode::StaticMutAddrSized.to_byte(),
+            self.ctx.emit(Instruction::MemExtended {
+                sub_op: crate::instruction::MemSubOpcode::StaticMutAddrSized.to_byte(),
                 operands,
             });
             self.ctx.mark_raw_pointer(dst);
@@ -25251,8 +25251,8 @@ impl VbcCodegen {
         Self::write_reg(&mut operands, dst.0);
         operands.push((slot & 0xFF) as u8);
         operands.push(((slot >> 8) & 0xFF) as u8);
-        self.ctx.emit(Instruction::FfiExtended {
-            sub_op: SystemSubOpcode::StaticMutAddr.to_byte(),
+        self.ctx.emit(Instruction::MemExtended {
+            sub_op: crate::instruction::MemSubOpcode::StaticMutAddr.to_byte(),
             operands,
         });
         self.ctx.mark_raw_pointer(dst);
@@ -25363,8 +25363,8 @@ impl VbcCodegen {
             Self::write_reg(&mut operands, arr_reg.0);
             Self::write_reg(&mut operands, idx_reg.0);
 
-            self.ctx.emit(Instruction::FfiExtended {
-                sub_op: SystemSubOpcode::ByteArrayElementAddr.to_byte(),
+            self.ctx.emit(Instruction::MemExtended {
+                sub_op: crate::instruction::MemSubOpcode::ByteArrayElementAddr.to_byte(),
                 operands,
             });
         } else {
@@ -25375,8 +25375,8 @@ impl VbcCodegen {
             Self::write_reg(&mut operands, idx_reg.0);
             operands.push(elem_size as u8);
 
-            self.ctx.emit(Instruction::FfiExtended {
-                sub_op: SystemSubOpcode::TypedArrayElementAddr.to_byte(),
+            self.ctx.emit(Instruction::MemExtended {
+                sub_op: crate::instruction::MemSubOpcode::TypedArrayElementAddr.to_byte(),
                 operands,
             });
         }
@@ -29781,8 +29781,8 @@ impl VbcCodegen {
             Self::write_reg(&mut operands, ref_reg.0);
             operands.push(8); // Default to 8-byte (64-bit) dereference
 
-            self.ctx.emit(Instruction::FfiExtended {
-                sub_op: 0x60, // DerefRaw
+            self.ctx.emit(Instruction::MemExtended {
+                sub_op: 0x10, // crate::instruction::MemSubOpcode::DerefRaw
                 operands,
             });
             return;
@@ -33240,8 +33240,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, dest.0);
                     Self::write_reg(&mut operands, ptr.0);
                     operands.push(8);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x6B, // PtrRead (machine semantics)
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: 0x1a, // crate::instruction::MemSubOpcode::PtrRead
                         operands,
                     });
                 } else {
@@ -33254,8 +33254,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, args[0].0);
                     Self::write_reg(&mut operands, args[1].0);
                     operands.push(8);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x6C, // PtrWrite (machine semantics)
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: 0x1b, // crate::instruction::MemSubOpcode::PtrWrite
                         operands,
                     });
                 }
@@ -33267,8 +33267,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, dest.0);
                     Self::write_reg(&mut operands, ptr.0);
                     operands.push(8);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x68, // PtrReadVolatile
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: 0x18, // crate::instruction::MemSubOpcode::PtrReadVolatile
                         operands,
                     });
                 } else {
@@ -33281,8 +33281,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, args[0].0);
                     Self::write_reg(&mut operands, args[1].0);
                     operands.push(8);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x69, // PtrWriteVolatile
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: 0x19, // crate::instruction::MemSubOpcode::PtrWriteVolatile
                         operands,
                     });
                 }
@@ -33345,8 +33345,8 @@ impl VbcCodegen {
                         Self::write_reg(&mut operands, dest.0);
                         Self::write_reg(&mut operands, args[0].0);
                         Self::write_reg(&mut operands, args[1].0);
-                        self.ctx.emit(Instruction::FfiExtended {
-                            sub_op: 0x63, // PtrAdd (element-scaled ×8)
+                        self.ctx.emit(Instruction::MemExtended {
+                            sub_op: 0x13, // crate::instruction::MemSubOpcode::PtrAdd
                             operands,
                         });
                     }
@@ -33359,7 +33359,7 @@ impl VbcCodegen {
             }
 
             // ptr_sub: same shape as PtrOffset but the count SUBTRACTS —
-            // SystemSubOpcode::PtrSub (0x64) does the checked negative walk.
+            // crate::instruction::MemSubOpcode::PtrSub (0x64) does the checked negative walk.
             InlineSequenceId::PtrSubSeq => {
                 if args.len() >= 2 {
                     if byte_width == 1 {
@@ -33377,8 +33377,8 @@ impl VbcCodegen {
                         Self::write_reg(&mut operands, dest.0);
                         Self::write_reg(&mut operands, args[0].0);
                         Self::write_reg(&mut operands, args[1].0);
-                        self.ctx.emit(Instruction::FfiExtended {
-                            sub_op: 0x64, // PtrSub (element-scaled ×8)
+                        self.ctx.emit(Instruction::MemExtended {
+                            sub_op: 0x14, // crate::instruction::MemSubOpcode::PtrSub
                             operands,
                         });
                     }
@@ -36493,15 +36493,16 @@ impl VbcCodegen {
                     // Time family — its honest home (T0852).
                     self.ctx.emit(Instruction::TimeExtended { sub_op, operands });
                 } else {
+                    use crate::instruction::MemSubOpcode as M;
                     let sub_op: u8 = match seq_id {
-                        InlineSequenceId::RawLoadU8 => 0x53,
-                        InlineSequenceId::RawStoreU8 => 0x54,
-                        InlineSequenceId::RawLoadI32 => 0x55,
-                        InlineSequenceId::RawStoreI32 => 0x56,
-                        InlineSequenceId::RawLoadI64 => 0x57,
-                        _ => 0x58, // RawStoreI64
+                        InlineSequenceId::RawLoadU8 => M::RawLoadU8 as u8,
+                        InlineSequenceId::RawStoreU8 => M::RawStoreU8 as u8,
+                        InlineSequenceId::RawLoadI32 => M::RawLoadI32 as u8,
+                        InlineSequenceId::RawStoreI32 => M::RawStoreI32 as u8,
+                        InlineSequenceId::RawLoadI64 => M::RawLoadI64 as u8,
+                        _ => M::RawStoreI64 as u8,
                     };
-                    self.ctx.emit(Instruction::FfiExtended { sub_op, operands });
+                    self.ctx.emit(Instruction::MemExtended { sub_op, operands });
                 }
             }
 
@@ -42351,7 +42352,7 @@ impl FreeVarAnalyzer {
 /// Map a typed-reference's pointee name to the matching typed-deref
 /// `(SystemSubOpcode, size)` pair. Returns `Some` when the pointee is a
 /// C primitive smaller than 8 bytes — signals that `*ptr` should emit
-/// a typed deref (`SystemSubOpcode::DerefRawSigned` / `DerefRaw`) rather
+/// a typed deref (`crate::instruction::MemSubOpcode::DerefRawSigned` / `DerefRaw`) rather
 /// than the generic Value-sized `Deref`.
 ///
 /// `t` is the inner expression's static type as text, e.g.
@@ -42371,8 +42372,7 @@ impl FreeVarAnalyzer {
 /// code derefs an `&Float32`, the upper 4 bytes leak — but that is
 /// an extremely rare FFI shape (most C `float` returns come back via
 /// register, not pointer).
-fn typed_primitive_pointee_deref(t: &str) -> Option<(crate::instruction::SystemSubOpcode, u8)> {
-    use crate::instruction::SystemSubOpcode;
+fn typed_primitive_pointee_deref(t: &str) -> Option<(crate::instruction::MemSubOpcode, u8)> {
     let t = t.trim();
     // Strip the reference prefix. The order matters: longer prefixes
     // (e.g. `&unsafe mut`) must be tested before shorter ones
@@ -42395,17 +42395,17 @@ fn typed_primitive_pointee_deref(t: &str) -> Option<(crate::instruction::SystemS
     let pointee = pointee.trim();
     match pointee {
         // Signed C primitives — sign-extend.
-        "Int8" | "i8" => Some((SystemSubOpcode::DerefRawSigned, 1)),
-        "Int16" | "i16" => Some((SystemSubOpcode::DerefRawSigned, 2)),
-        "Int32" | "i32" => Some((SystemSubOpcode::DerefRawSigned, 4)),
+        "Int8" | "i8" => Some((crate::instruction::MemSubOpcode::DerefRawSigned, 1)),
+        "Int16" | "i16" => Some((crate::instruction::MemSubOpcode::DerefRawSigned, 2)),
+        "Int32" | "i32" => Some((crate::instruction::MemSubOpcode::DerefRawSigned, 4)),
         // Unsigned C primitives + bool/char — zero-extend. `DerefRaw`'s
         // existing default semantics match the unsigned-byte-array
         // invariant (CRC32 / wire-format reads).
-        "UInt8" | "u8" | "Byte" => Some((SystemSubOpcode::DerefRaw, 1)),
-        "UInt16" | "u16" => Some((SystemSubOpcode::DerefRaw, 2)),
-        "UInt32" | "u32" => Some((SystemSubOpcode::DerefRaw, 4)),
-        "Bool" => Some((SystemSubOpcode::DerefRaw, 1)),
-        "Char" => Some((SystemSubOpcode::DerefRaw, 4)),
+        "UInt8" | "u8" | "Byte" => Some((crate::instruction::MemSubOpcode::DerefRaw, 1)),
+        "UInt16" | "u16" => Some((crate::instruction::MemSubOpcode::DerefRaw, 2)),
+        "UInt32" | "u32" => Some((crate::instruction::MemSubOpcode::DerefRaw, 4)),
+        "Bool" => Some((crate::instruction::MemSubOpcode::DerefRaw, 1)),
+        "Char" => Some((crate::instruction::MemSubOpcode::DerefRaw, 4)),
         // 8-byte primitives — generic `Deref` is already correct.
         // Float32 punted (would need typed load-and-fpext path).
         _ => None,

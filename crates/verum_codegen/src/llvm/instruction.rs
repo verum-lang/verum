@@ -10,7 +10,7 @@ use verum_llvm::{AtomicOrdering, AtomicRMWBinOp, FloatPredicate, IntPredicate};
 use verum_vbc::instruction::{
     ArithSubOpcode, AtomicRmwOp, BinaryFloatOp, BinaryGenericOp, BinaryIntOp, BitwiseOp,
     CmpSubOpcode, CompareOp, SystemSubOpcode, FloatToIntMode, Instruction, MachSubOpcode,
-    MathSubOpcode, Reg, SyncSubOpcode, SysSubOpcode, TimeSubOpcode,
+    MathSubOpcode, MemSubOpcode, Reg, SyncSubOpcode, SysSubOpcode, TimeSubOpcode,
     SimdSubOpcode, UnaryFloatOp, UnaryIntOp,
 };
 use verum_vbc::module::{CType, ConstId, Constant, FfiSymbolId, FunctionId};
@@ -26227,6 +26227,7 @@ fn lower_mem_extended<'ctx>(
     sub_op: u8,
     operands: &[u8],
 ) -> Result<()> {
+    let mut ffi = FfiLowering::new(ctx.llvm_context());
     // Sub-op numbering MUST match VBC codegen (expressions.rs) and interpreter:
     // 0x00=Alloc, 0x01=AllocZeroed, 0x02=Dealloc, 0x03=Realloc, 0x04=Swap,
     // 0x05=Replace, 0x06=NewByteList (red-team §4 packed-byte list allocator).
@@ -26478,6 +26479,805 @@ fn lower_mem_extended<'ctx>(
             ctx.set_register(dst, result);
             Ok(())
         }
+        // ================================================================
+        // T0852 Mem wave: pointer/deref (0x10-0x1B), raw leaves
+        // (0x20-0x25), byte/typed arrays (0x30-0x37), static-mut
+        // (0x40-0x41) — migrated from lower_ffi_extended.
+        // ================================================================
+        0x10 => {
+            // Format: dst:reg, ptr:reg, size:u8
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "DerefRaw: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let size_bytes = operands[2];
+
+            // Pass-through ref: Heap<T> is transparent in AOT — no actual allocation.
+            // DerefRaw on a pass-through register should just forward the value.
+            if ctx.is_pass_through_ref(ptr_reg) {
+                let val = ctx.get_register(ptr_reg)?;
+                ctx.set_register(dst_reg, val);
+                // Propagate type tracking
+                if ctx.is_list_register(ptr_reg) {
+                    ctx.mark_list_register(dst_reg);
+                }
+                if ctx.is_map_register(ptr_reg) {
+                    ctx.mark_map_register(dst_reg);
+                }
+                if ctx.is_set_register(ptr_reg) {
+                    ctx.mark_set_register(dst_reg);
+                }
+                if let Some(tn) = ctx.get_obj_register_type(ptr_reg).map(|s| s.to_string()) {
+                    ctx.set_obj_register_type(dst_reg, tn);
+                }
+                return Ok(());
+            }
+
+            // Generic ptr register: value-as-pointer from compiled module generic params.
+            // The ptr holds a value (via inttoptr), not a real memory address.
+            // DerefRaw on such registers should extract the value, not load through ptr.
+            if ctx.is_generic_ptr_register(ptr_reg) {
+                let val = ctx.get_register(ptr_reg)?;
+                let i64_val = match val {
+                    BasicValueEnum::PointerValue(pv) => ctx
+                        .builder()
+                        .build_ptr_to_int(pv, ctx.types().i64_type(), "deref_generic")
+                        .or_llvm_err()?
+                        .into(),
+                    _ => val, // Already i64 (from alloca load) — pass through
+                };
+                ctx.set_register(dst_reg, i64_val);
+                return Ok(());
+            }
+
+            // Inline struct register: pointer from offset() into array of multi-field structs.
+            // The address IS the struct base — loading through it would read just the first
+            // field, losing the struct pointer. Pass through and propagate inline marking.
+            if ctx.is_inline_struct_register(ptr_reg) {
+                let val = ctx.get_register(ptr_reg)?;
+                ctx.set_register(dst_reg, val);
+                ctx.mark_inline_struct_register(dst_reg);
+                // Propagate element stride and obj type through DerefRaw
+                let stride = ctx.get_element_stride(ptr_reg);
+                if stride != 8 {
+                    ctx.set_element_stride(dst_reg, stride);
+                }
+                if let Some(tn) = ctx.get_obj_register_type(ptr_reg).map(|s| s.to_string()) {
+                    ctx.set_obj_register_type(dst_reg, tn);
+                }
+                return Ok(());
+            }
+
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
+            let value = ffi.lower_deref_raw(ctx.builder(), ptr, size_bytes)?;
+
+            // Sign-extend to i64
+            let i64_type = ctx.types().i64_type();
+            let value_i64 = if value.get_type().get_bit_width() < 64 {
+                ctx.builder()
+                    .build_int_s_extend(value, i64_type, "deref_sext")
+                    .or_llvm_err()?
+            } else {
+                value
+            };
+
+            ctx.set_register(dst_reg, value_i64.into());
+            Ok(())
+        }
+
+        0x11 => {
+            // Format: ptr:reg, value:reg, size:u8
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "DerefMutRaw: insufficient operands",
+                ));
+            }
+            let ptr_reg = op_reg(operands, 0);
+            let value_reg = op_reg(operands, 1);
+            let size_bytes = operands[2];
+
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
+            let value = as_i64(ctx, ctx.get_register(value_reg)?, "value")?;
+
+            ffi.lower_deref_mut_raw(ctx.builder(), ptr, value, size_bytes)?;
+            Ok(())
+        }
+
+        0x12 => {
+            // Format: dst:reg, ptr:reg
+            if operands.len() < 2 {
+                return Err(LlvmLoweringError::internal(
+                    "DerefRawPtr: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
+            let result = ffi.lower_deref_raw_ptr(ctx.builder(), ptr)?;
+
+            ctx.set_register(dst_reg, result.into());
+            Ok(())
+        }
+
+        0x13 => {
+            // Format: dst:reg, ptr:reg, offset:reg
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal("PtrAdd: insufficient operands"));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let offset_reg = op_reg(operands, 2);
+
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
+            let offset = as_i64(ctx, ctx.get_register(offset_reg)?, "offset")?;
+
+            // TEXT-AOT-CHARS-PUSH-1 (print-truncation leg): ptr_offset
+            // is ELEMENT-scaled — 8 for NaN-boxed List slots (the
+            // historic default), but 1 for raw BYTE buffers
+            // (Text.push_byte's `ptr_offset(self.ptr, self.len)` wrote
+            // 'y' at +8 and the NUL at +8/+16, so a builder-built
+            // "xy" printed as "x": len field said 2 while the bytes
+            // were x,0,...,y). The stride is tracked per-register
+            // (Text.ptr field loads mark stride 1); default stays 8 —
+            // every List/slice path lowers exactly as before.
+            let stride = ctx.get_element_stride(ptr_reg);
+            let result = if stride == 8 {
+                ffi.lower_ptr_add(ctx.builder(), ptr, offset)?
+            } else {
+                let i8_ty = ctx.types().i8_type();
+                let i64_ty = ctx.types().i64_type();
+                let scaled = ctx
+                    .builder()
+                    .build_int_mul(
+                        offset,
+                        i64_ty.const_int(stride, false),
+                        "ptr_add_scaled",
+                    )
+                    .or_llvm_err()?;
+                // SAFETY: byte-scaled GEP within the buffer the caller
+                // guarantees (same contract as the 8-stride path).
+                unsafe {
+                    ctx.builder()
+                        .build_gep(i8_ty, ptr, &[scaled], "ptr_add_b")
+                        .or_llvm_err()?
+                }
+            };
+            if stride != 8 {
+                ctx.set_element_stride(dst_reg, stride);
+            }
+
+            ctx.set_register(dst_reg, result.into());
+            Ok(())
+        }
+
+        0x14 => {
+            // Format: dst:reg, ptr:reg, offset:reg
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal("PtrSub: insufficient operands"));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let offset_reg = op_reg(operands, 2);
+
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
+            let offset = as_i64(ctx, ctx.get_register(offset_reg)?, "offset")?;
+
+            let result = ffi.lower_ptr_sub(ctx.builder(), ptr, offset)?;
+
+            ctx.set_register(dst_reg, result.into());
+            Ok(())
+        }
+
+        0x15 => {
+            // Format: dst:reg, ptr1:reg, ptr2:reg
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "PtrDiff: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr1_reg = op_reg(operands, 1);
+            let ptr2_reg = op_reg(operands, 2);
+
+            let ptr1 = as_ptr(ctx, ctx.get_register(ptr1_reg)?, "ptr1")?;
+            let ptr2 = as_ptr(ctx, ctx.get_register(ptr2_reg)?, "ptr2")?;
+
+            let diff = ffi.lower_ptr_diff(ctx.builder(), ptr1, ptr2)?;
+
+            ctx.set_register(dst_reg, diff.into());
+            Ok(())
+        }
+
+        0x16 => {
+            // Format: dst:reg, ptr:reg
+            if operands.len() < 2 {
+                return Err(LlvmLoweringError::internal(
+                    "PtrIsNull: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
+            let is_null = ffi.lower_ptr_is_null(ctx.builder(), ptr)?;
+
+            ctx.set_register(dst_reg, is_null.into());
+            Ok(())
+        }
+
+        0x17 => {
+            // The AOT `DerefRaw` lowering above already emits a
+            // `build_int_s_extend` for sub-i64 reads, so the AOT
+            // semantics match `DerefRawSigned`'s contract (the
+            // interpreter is the one that historically chose
+            // zero-extension as `DerefRaw`'s default — see comment
+            // there). Reuse the same path: parse the same
+            // `(dst, ptr, size)` operand layout and recurse into the
+            // existing handler.
+            return lower_mem_extended(ctx, MemSubOpcode::DerefRaw as u8, operands);
+        }
+
+        0x18 => {
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "PtrReadVolatile: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let size_bytes = operands[2];
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "vol_read_ptr")?;
+            let mut ffi = FfiLowering::new(ctx.llvm_context());
+            let value = ffi.lower_deref_raw_volatile(ctx.builder(), ptr, size_bytes)?;
+            ctx.set_register(dst_reg, value.into());
+            Ok(())
+        }
+        0x19 => {
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "PtrWriteVolatile: insufficient operands",
+                ));
+            }
+            let ptr_reg = op_reg(operands, 0);
+            let value_reg = op_reg(operands, 1);
+            let size_bytes = operands[2];
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "vol_write_ptr")?;
+            let value = as_i64(ctx, ctx.get_register(value_reg)?, "vol_write_val")?;
+            let mut ffi = FfiLowering::new(ctx.llvm_context());
+            ffi.lower_deref_mut_raw_volatile(ctx.builder(), ptr, value, size_bytes)?;
+            Ok(())
+        }
+
+        0x1A => {
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "PtrRead: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let size_bytes = operands[2];
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "raw_read_ptr")?;
+            let mut ffi = FfiLowering::new(ctx.llvm_context());
+            let value = ffi.lower_deref_raw(ctx.builder(), ptr, size_bytes)?;
+            ctx.set_register(dst_reg, value.into());
+            Ok(())
+        }
+        0x1B => {
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "PtrWrite: insufficient operands",
+                ));
+            }
+            let ptr_reg = op_reg(operands, 0);
+            let value_reg = op_reg(operands, 1);
+            let size_bytes = operands[2];
+            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "raw_write_ptr")?;
+            let value = as_i64(ctx, ctx.get_register(value_reg)?, "raw_write_val")?;
+            let mut ffi = FfiLowering::new(ctx.llvm_context());
+            ffi.lower_deref_mut_raw(ctx.builder(), ptr, value, size_bytes)?;
+            Ok(())
+        }
+
+        0x20 | 0x22 | 0x24 => {
+            // Raw fixed-width loads over an Int address (mem_raw's
+            // load family): inttoptr + width-typed load.  u8 loads
+            // zero-extend, i32 loads sign-extend (C `int` contract),
+            // i64 loads pass through.
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "raw_addr")?;
+            let ptr_ty = ctx.types().ptr_type();
+            let i64_ty = ctx.types().i64_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(addr, ptr_ty, "raw_ptr")
+                .or_llvm_err()?;
+            let out = match sub_op {
+                0x20 => {
+                    let i8_ty = ctx.llvm_context().i8_type();
+                    let v = ctx
+                        .builder()
+                        .build_load(i8_ty, p, "raw_load_u8")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    ctx.builder()
+                        .build_int_z_extend(v, i64_ty, "raw_load_u8_z")
+                        .or_llvm_err()?
+                }
+                0x22 => {
+                    let i32_ty = ctx.llvm_context().i32_type();
+                    let v = ctx
+                        .builder()
+                        .build_load(i32_ty, p, "raw_load_i32")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    ctx.builder()
+                        .build_int_s_extend(v, i64_ty, "raw_load_i32_s")
+                        .or_llvm_err()?
+                }
+                _ => ctx
+                    .builder()
+                    .build_load(i64_ty, p, "raw_load_i64")
+                    .or_llvm_err()?
+                    .into_int_value(),
+            };
+            ctx.set_register(dst, out.into());
+            Ok(())
+        }
+
+        0x21 | 0x23 | 0x25 => {
+            // Raw fixed-width stores over an Int address: inttoptr +
+            // width-truncated store.  Wire format is dst-first
+            // ([dst, addr, value] — the .vr store_* signatures return
+            // Int 0), matching the Tier-0 arm and the emitter.
+            if operands.len() < 3 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "raw_addr")?;
+            let value = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "raw_val")?;
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(addr, ptr_ty, "raw_ptr")
+                .or_llvm_err()?;
+            match sub_op {
+                0x21 => {
+                    let i8_ty = ctx.llvm_context().i8_type();
+                    let v = ctx
+                        .builder()
+                        .build_int_truncate(value, i8_ty, "raw_store_u8_t")
+                        .or_llvm_err()?;
+                    ctx.builder().build_store(p, v).or_llvm_err()?;
+                }
+                0x23 => {
+                    let i32_ty = ctx.llvm_context().i32_type();
+                    let v = ctx
+                        .builder()
+                        .build_int_truncate(value, i32_ty, "raw_store_i32_t")
+                        .or_llvm_err()?;
+                    ctx.builder().build_store(p, v).or_llvm_err()?;
+                }
+                _ => {
+                    ctx.builder().build_store(p, value).or_llvm_err()?;
+                }
+            }
+            let i64_ty = ctx.types().i64_type();
+            ctx.set_register(dst, i64_ty.const_int(0, false).into());
+            Ok(())
+        }
+
+        0x30 => {
+            // Allocate byte array: dst = verum_alloc_bytes(size)
+            if operands.len() < 2 {
+                return Err(LlvmLoweringError::internal(
+                    "NewByteArray: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let size = ctx.get_register(op_reg(operands, 1))?;
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = ptr_ty.fn_type(&[i64_ty.into()], false);
+            let alloc_fn = module
+                .get_function("verum_cbgr_allocate")
+                .unwrap_or_else(|| module.add_function("verum_cbgr_allocate", fn_type, None));
+            let result = ctx
+                .builder()
+                .build_call(alloc_fn, &[size.into()], "new_byte_array")
+                .or_llvm_err()?
+            .basic_value_or("NewByteArray: expected return value")?;
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        0x31 => {
+            // Get pointer to element: dst = base_ptr + index
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "ByteArrayElementAddr: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ba_base")?;
+            let index = ctx.get_register(op_reg(operands, 2))?;
+            let i8_ty = ctx.llvm_context().i8_type();
+            // SAFETY: GEP into a byte array at the given index to get the element address; bounds checking is caller's responsibility
+            let elem_ptr = unsafe {
+                ctx.builder()
+                    .build_gep(i8_ty, base_ptr, &[index.into_int_value()], "ba_elem_ptr")
+                    .or_llvm_err()?
+            };
+            ctx.set_register(dst_reg, elem_ptr.into());
+            Ok(())
+        }
+
+        0x32 => {
+            // Load byte: dst = *(base_ptr + index) as i64
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "ByteArrayLoad: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ba_base")?;
+            let index = ctx.get_register(op_reg(operands, 2))?;
+            let i8_ty = ctx.llvm_context().i8_type();
+            // SAFETY: GEP into a byte array at the given index to load a single byte; bounds checking is caller's responsibility
+            let elem_ptr = unsafe {
+                ctx.builder()
+                    .build_gep(i8_ty, base_ptr, &[index.into_int_value()], "ba_load_ptr")
+                    .or_llvm_err()?
+            };
+            let byte_val = ctx
+                .builder()
+                .build_load(i8_ty, elem_ptr, "ba_byte")
+                .or_llvm_err()?;
+            let i64_ty = ctx.types().i64_type();
+            let extended = ctx
+                .builder()
+                .build_int_z_extend(byte_val.into_int_value(), i64_ty, "ba_ext")
+                .or_llvm_err()?;
+            ctx.set_register(dst_reg, extended.into());
+            Ok(())
+        }
+
+        0x33 => {
+            // Store byte: *(base_ptr + index) = value & 0xFF
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "ByteArrayStore: insufficient operands",
+                ));
+            }
+            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 0))?, "ba_base")?;
+            let index = ctx.get_register(op_reg(operands, 1))?;
+            let value = ctx.get_register(op_reg(operands, 2))?;
+            let i8_ty = ctx.llvm_context().i8_type();
+            // SAFETY: GEP into a byte array at the given index to store a single byte; bounds checking is caller's responsibility
+            let elem_ptr = unsafe {
+                ctx.builder()
+                    .build_gep(i8_ty, base_ptr, &[index.into_int_value()], "ba_store_ptr")
+                    .or_llvm_err()?
+            };
+            let truncated = ctx
+                .builder()
+                .build_int_truncate(value.into_int_value(), i8_ty, "ba_trunc")
+                .or_llvm_err()?;
+            ctx.builder()
+                .build_store(elem_ptr, truncated)
+                .or_llvm_err()?;
+            Ok(())
+        }
+
+        0x36 => {
+            // Tier-1 twin of the interpreter's TypedArrayLoad (T0356): read
+            // one element from a PACKED typed array, DECODING by width — the
+            // read twin of TypedArrayStore and typed analogue of
+            // ByteArrayLoad. Format: dst:reg, arr:reg, idx:reg, elem_size:u8
+            // (bit 0x80 = float). Integer widths zero-extend to i64; F32
+            // bit-reinterprets then widens; F64 bit-reinterprets — AOT floats
+            // are f64 FloatValues (see LoadF / F64FromBits). Mirrors the interp
+            // `heap::typed_array_element` decode so the tiers agree. The
+            // elem_size byte sits after three (possibly wide) register operands.
+            if operands.len() < 4 {
+                return Err(LlvmLoweringError::internal(
+                    "TypedArrayLoad: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "tal_base")?;
+            let index = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "tal_idx")?;
+            let mut cursor = 0usize;
+            for _ in 0..3 {
+                cursor += if operands[cursor] & 0x80 != 0 { 2 } else { 1 };
+            }
+            let elem_byte = *operands.get(cursor).unwrap_or(&8);
+            let elem: u64 = match elem_byte & 0x7F {
+                w @ (1 | 2 | 4 | 8) => w as u64,
+                _ => 8,
+            };
+            let is_float = elem_byte & 0x80 != 0;
+            let i64_ty = ctx.types().i64_type();
+            let i8_ty = ctx.llvm_context().i8_type();
+            let off = ctx
+                .builder()
+                .build_int_mul(index, i64_ty.const_int(elem, false), "tal_off")
+                .or_llvm_err()?;
+            // SAFETY: GEP into the packed array at idx*elem (bytes); bounds are
+            // the caller's contract (mirrors TypedArrayStore).
+            let eptr = unsafe {
+                ctx.builder()
+                    .build_gep(i8_ty, base_ptr, &[off], "tal_ptr")
+                    .or_llvm_err()?
+            };
+            let llvm_ctx = ctx.llvm_context();
+            let int_ty = match elem {
+                1 => llvm_ctx.i8_type(),
+                2 => llvm_ctx.i16_type(),
+                4 => llvm_ctx.i32_type(),
+                _ => i64_ty,
+            };
+            let raw = ctx
+                .builder()
+                .build_load(int_ty, eptr, "tal_raw")
+                .or_llvm_err()?
+                .into_int_value();
+            if is_float {
+                let f64_ty = ctx.types().f64_type();
+                let fval = if elem == 4 {
+                    // F32: the 4 raw bytes are IEEE single bits → bitcast to
+                    // f32, then widen to the f64 register representation.
+                    let f32_ty = ctx.llvm_context().f32_type();
+                    let f32v = ctx
+                        .builder()
+                        .build_bit_cast(raw, f32_ty, "tal_f32")
+                        .or_llvm_err()?
+                        .into_float_value();
+                    ctx.builder()
+                        .build_float_ext(f32v, f64_ty, "tal_fpext")
+                        .or_llvm_err()?
+                } else {
+                    // F64: bit-reinterpret the 8 raw bytes as a double.
+                    ctx.builder()
+                        .build_bit_cast(raw, f64_ty, "tal_f64")
+                        .or_llvm_err()?
+                        .into_float_value()
+                };
+                ctx.set_register(dst_reg, fval.into());
+                ctx.mark_float_register(dst_reg);
+            } else {
+                // Integer widths zero-extend to i64 (u8/u16/u32 zext; an
+                // 8-byte read is already the i64 value).
+                let ext = if elem == 8 {
+                    raw
+                } else {
+                    ctx.builder()
+                        .build_int_z_extend(raw, i64_ty, "tal_zext")
+                        .or_llvm_err()?
+                };
+                ctx.set_register(dst_reg, ext.into());
+            }
+            Ok(())
+        }
+
+        0x37 => {
+            // Tier-1 twin of the interpreter's TypedArrayStore (peer
+            // opcode, ffi_extended.rs): store one element into a PACKED
+            // typed array, unboxing the value — raw `elem_size` integer,
+            // never a NaN-boxed Value. Store/load coherence with the
+            // width-switched readers (GetE / SliceGet reserved=elem).
+            // Format: arr:reg, idx:reg, val:reg, elem_size:u8 — the
+            // stride byte sits after three (possibly wide) regs.
+            if operands.len() < 4 {
+                return Err(LlvmLoweringError::internal(
+                    "TypedArrayStore: insufficient operands",
+                ));
+            }
+            let arr_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 0))?, "tas_base")?;
+            let index = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "tas_idx")?;
+            let mut cursor = 0usize;
+            for _ in 0..3 {
+                cursor += if operands[cursor] & 0x80 != 0 { 2 } else { 1 };
+            }
+            let elem: u64 = match operands.get(cursor) {
+                Some(w @ (1 | 2 | 4 | 8)) => *w as u64,
+                _ => 8,
+            };
+            let i64_ty = ctx.types().i64_type();
+            // Unbox the value to the raw `elem`-byte integer to store. Ints /
+            // F64 bit-reinterpret via `as_i64` (an f64 register keeps all 8
+            // bytes). A `[Float32; N]` slot (elem == 4 + float register) must
+            // NARROW the f64 to f32 IEEE bits first — the interp stores
+            // `(f as f32).to_bits()`; `as_i64` alone would keep the LOW half
+            // of the f64 pattern, silent garbage on read-back (T0356).
+            let val_raw = ctx.get_register(op_reg(operands, 2))?;
+            let value = if elem == 4 && scalar_reg_is_float(ctx, op_reg(operands, 2), val_raw) {
+                let f64v = as_f64(ctx, val_raw, "tas_f64src")?;
+                let f32_ty = ctx.llvm_context().f32_type();
+                let f32v = ctx
+                    .builder()
+                    .build_float_trunc(f64v, f32_ty, "tas_f32narrow")
+                    .or_llvm_err()?;
+                let i32_ty = ctx.llvm_context().i32_type();
+                let i32v = ctx
+                    .builder()
+                    .build_bit_cast(f32v, i32_ty, "tas_f32bits")
+                    .or_llvm_err()?
+                    .into_int_value();
+                ctx.builder()
+                    .build_int_z_extend(i32v, i64_ty, "tas_f32zext")
+                    .or_llvm_err()?
+            } else {
+                as_i64(ctx, val_raw, "tas_val")?
+            };
+            let i8_ty = ctx.llvm_context().i8_type();
+            let off = ctx
+                .builder()
+                .build_int_mul(index, i64_ty.const_int(elem, false), "tas_off")
+                .or_llvm_err()?;
+            // SAFETY: GEP into the packed array at idx*elem; bounds are
+            // the caller's contract (mirrors ByteArrayStore).
+            let eptr = unsafe {
+                ctx.builder()
+                    .build_gep(i8_ty, arr_ptr, &[off], "tas_ptr")
+                    .or_llvm_err()?
+            };
+            emit_slice_cell_elem_store(ctx, i64_ty.const_int(elem, false), eptr, value, "tas")?;
+            Ok(())
+        }
+
+        0x40 => {
+            // Static-mut backing-cell address — Task #26 [E2] Tier-1 lowering.
+            //
+            // Format: dst:reg, slot_lo:u8, slot_hi:u8
+            //
+            // Tier-1 path: call into a runtime helper
+            // `verum_static_mut_cell_addr(slot: u16) -> *mut u8` that
+            // returns the stable byte address of a process-wide cell.
+            // The helper is declared lazily (extern) and resolved at
+            // link time against the verum_runtime library — same
+            // pattern as `verum_time_monotonic_nanos` above.  Mirrors
+            // the Tier-0 `handle_static_mut_addr` semantics so the
+            // user-side `&STATIC_MUT as *T` lowering is byte-identical
+            // across tiers.
+            //
+            // The Tier-0 implementation lives in `InterpreterState::
+            // static_mut_cell_addr`; the Tier-1 runtime symbol must be
+            // implemented before any AOT path exercises this opcode.
+            // Currently no AOT consumer hits it (audit-ring tests run
+            // via `verum test --interp`); when a consumer lands, add
+            // the C symbol to `verum_runtime` and `syscall_registry`.
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "StaticMutAddr: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let slot_lo = operands[1] as u64;
+            let slot_hi = operands[2] as u64;
+            let slot = (slot_hi << 8) | slot_lo;
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let fn_type = ptr_ty.fn_type(&[i64_ty.into()], false);
+            let helper_fn = super::error::get_or_declare_function(
+                module,
+                "verum_static_mut_cell_addr",
+                fn_type,
+            );
+            let slot_arg = i64_ty.const_int(slot, false);
+            let result = ctx
+                .builder()
+                .build_call(helper_fn, &[slot_arg.into()], "static_mut_addr")
+                .or_llvm_err()?
+                .basic_value_or("StaticMutAddr: expected return value")?;
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        0x41 => {
+            // Wide twin (T0133): same runtime-helper pattern with the
+            // declared byte size as the second arg —
+            // `verum_static_mut_cell_addr_sized(slot, size) -> *mut u8`.
+            // Mirrors Tier-0's `static_mut_cell_addr_sized`.
+            if operands.len() < 5 {
+                return Err(LlvmLoweringError::internal(
+                    "StaticMutAddrSized: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let slot = ((operands[2] as u64) << 8) | (operands[1] as u64);
+            let size = ((operands[4] as u64) << 8) | (operands[3] as u64);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let fn_type = ptr_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
+            let helper_fn = super::error::get_or_declare_function(
+                module,
+                "verum_static_mut_cell_addr_sized",
+                fn_type,
+            );
+            let result = ctx
+                .builder()
+                .build_call(
+                    helper_fn,
+                    &[
+                        i64_ty.const_int(slot, false).into(),
+                        i64_ty.const_int(size, false).into(),
+                    ],
+                    "static_mut_addr_sized",
+                )
+                .or_llvm_err()?
+                .basic_value_or("StaticMutAddrSized: expected return value")?;
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        0x35 | 0x34 => {
+            // Typed arrays use same allocation as byte arrays with stride
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "TypedArray: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            if sub_op == 0x34 {
+                // Allocate: same as NewByteArray but size = count * element_size
+                let size = if operands.len() >= 2 {
+                    ctx.get_register(op_reg(operands, 1))?
+                } else {
+                    ctx.types().i64_type().const_int(0, false).into()
+                };
+                let module = ctx.get_module();
+                let ptr_ty = ctx.types().ptr_type();
+                let i64_ty = ctx.types().i64_type();
+                let fn_type = ptr_ty.fn_type(&[i64_ty.into()], false);
+                let alloc_fn = module
+                    .get_function("verum_cbgr_allocate")
+                    .unwrap_or_else(|| module.add_function("verum_cbgr_allocate", fn_type, None));
+                let result = ctx
+                    .builder()
+                    .build_call(alloc_fn, &[size.into()], "new_typed_array")
+                    .or_llvm_err()?
+            .basic_value_or("NewTypedArray: expected return value")?;
+                ctx.set_register(dst_reg, result);
+            } else {
+                // Element addr: base + index * 8 (assuming 8-byte elements)
+                let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ta_base")?;
+                let index = ctx.get_register(op_reg(operands, 2))?;
+                let i64_ty = ctx.types().i64_type();
+                // Task #23 — coerce `index` through `ptr_to_int` when
+                // the VBC frontend handed us a generic-typed pointer
+                // slot (NaN-boxed dynamic dispatch).  Without this
+                // guard `into_int_value()` panics for every async
+                // / Poll-using callee whose poll-indices land in a
+                // `load ptr` slot.
+                let index_i = if index.is_int_value() {
+                    index.into_int_value()
+                } else {
+                    ctx.builder()
+                        .build_ptr_to_int(index.into_pointer_value(), i64_ty, "ta_idx_i")
+                        .or_llvm_err()?
+                };
+                // SAFETY: GEP into a typed array at the given index to compute the element address; bounds checking is caller's responsibility
+                let elem_ptr = unsafe {
+                    ctx.builder()
+                        .build_gep(i64_ty, base_ptr, &[index_i], "ta_elem_ptr")
+                        .or_llvm_err()?
+                };
+                ctx.set_register(dst_reg, elem_ptr.into());
+            }
+            Ok(())
+        }
+
         _ => {
             ctx.emit_unimplemented_sub_op("MemExtended", sub_op);
             Ok(())
@@ -31861,310 +32661,11 @@ fn lower_ffi_extended<'ctx>(
         // ================================================================
         // Raw Pointer Operations (0x60-0x6F)
         // ================================================================
-        Some(SystemSubOpcode::DerefRaw) => {
-            // Format: dst:reg, ptr:reg, size:u8
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "DerefRaw: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-            let size_bytes = operands[2];
-
-            // Pass-through ref: Heap<T> is transparent in AOT — no actual allocation.
-            // DerefRaw on a pass-through register should just forward the value.
-            if ctx.is_pass_through_ref(ptr_reg) {
-                let val = ctx.get_register(ptr_reg)?;
-                ctx.set_register(dst_reg, val);
-                // Propagate type tracking
-                if ctx.is_list_register(ptr_reg) {
-                    ctx.mark_list_register(dst_reg);
-                }
-                if ctx.is_map_register(ptr_reg) {
-                    ctx.mark_map_register(dst_reg);
-                }
-                if ctx.is_set_register(ptr_reg) {
-                    ctx.mark_set_register(dst_reg);
-                }
-                if let Some(tn) = ctx.get_obj_register_type(ptr_reg).map(|s| s.to_string()) {
-                    ctx.set_obj_register_type(dst_reg, tn);
-                }
-                return Ok(());
-            }
-
-            // Generic ptr register: value-as-pointer from compiled module generic params.
-            // The ptr holds a value (via inttoptr), not a real memory address.
-            // DerefRaw on such registers should extract the value, not load through ptr.
-            if ctx.is_generic_ptr_register(ptr_reg) {
-                let val = ctx.get_register(ptr_reg)?;
-                let i64_val = match val {
-                    BasicValueEnum::PointerValue(pv) => ctx
-                        .builder()
-                        .build_ptr_to_int(pv, ctx.types().i64_type(), "deref_generic")
-                        .or_llvm_err()?
-                        .into(),
-                    _ => val, // Already i64 (from alloca load) — pass through
-                };
-                ctx.set_register(dst_reg, i64_val);
-                return Ok(());
-            }
-
-            // Inline struct register: pointer from offset() into array of multi-field structs.
-            // The address IS the struct base — loading through it would read just the first
-            // field, losing the struct pointer. Pass through and propagate inline marking.
-            if ctx.is_inline_struct_register(ptr_reg) {
-                let val = ctx.get_register(ptr_reg)?;
-                ctx.set_register(dst_reg, val);
-                ctx.mark_inline_struct_register(dst_reg);
-                // Propagate element stride and obj type through DerefRaw
-                let stride = ctx.get_element_stride(ptr_reg);
-                if stride != 8 {
-                    ctx.set_element_stride(dst_reg, stride);
-                }
-                if let Some(tn) = ctx.get_obj_register_type(ptr_reg).map(|s| s.to_string()) {
-                    ctx.set_obj_register_type(dst_reg, tn);
-                }
-                return Ok(());
-            }
-
-            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
-            let value = ffi.lower_deref_raw(ctx.builder(), ptr, size_bytes)?;
-
-            // Sign-extend to i64
-            let i64_type = ctx.types().i64_type();
-            let value_i64 = if value.get_type().get_bit_width() < 64 {
-                ctx.builder()
-                    .build_int_s_extend(value, i64_type, "deref_sext")
-                    .or_llvm_err()?
-            } else {
-                value
-            };
-
-            ctx.set_register(dst_reg, value_i64.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::DerefRawSigned) => {
-            // The AOT `DerefRaw` lowering above already emits a
-            // `build_int_s_extend` for sub-i64 reads, so the AOT
-            // semantics match `DerefRawSigned`'s contract (the
-            // interpreter is the one that historically chose
-            // zero-extension as `DerefRaw`'s default — see comment
-            // there). Reuse the same path: parse the same
-            // `(dst, ptr, size)` operand layout and recurse into the
-            // existing handler.
-            return lower_ffi_extended(ctx, SystemSubOpcode::DerefRaw as u8, operands);
-        }
-
-        Some(SystemSubOpcode::DerefMutRaw) => {
-            // Format: ptr:reg, value:reg, size:u8
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "DerefMutRaw: insufficient operands",
-                ));
-            }
-            let ptr_reg = op_reg(operands, 0);
-            let value_reg = op_reg(operands, 1);
-            let size_bytes = operands[2];
-
-            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
-            let value = as_i64(ctx, ctx.get_register(value_reg)?, "value")?;
-
-            ffi.lower_deref_mut_raw(ctx.builder(), ptr, value, size_bytes)?;
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::DerefRawPtr) => {
-            // Format: dst:reg, ptr:reg
-            if operands.len() < 2 {
-                return Err(LlvmLoweringError::internal(
-                    "DerefRawPtr: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-
-            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
-            let result = ffi.lower_deref_raw_ptr(ctx.builder(), ptr)?;
-
-            ctx.set_register(dst_reg, result.into());
-            Ok(())
-        }
-
         // T0188 volatile qualified-access arms — same operand layout as
         // DerefRaw/DerefMutRaw; the ffi lowerers stamp the LLVM volatile
         // flag, which is the whole point of the dedicated sub-ops.
-        Some(SystemSubOpcode::PtrReadVolatile) => {
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "PtrReadVolatile: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-            let size_bytes = operands[2];
-            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "vol_read_ptr")?;
-            let mut ffi = FfiLowering::new(ctx.llvm_context());
-            let value = ffi.lower_deref_raw_volatile(ctx.builder(), ptr, size_bytes)?;
-            ctx.set_register(dst_reg, value.into());
-            Ok(())
-        }
-        Some(SystemSubOpcode::PtrWriteVolatile) => {
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "PtrWriteVolatile: insufficient operands",
-                ));
-            }
-            let ptr_reg = op_reg(operands, 0);
-            let value_reg = op_reg(operands, 1);
-            let size_bytes = operands[2];
-            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "vol_write_ptr")?;
-            let value = as_i64(ctx, ctx.get_register(value_reg)?, "vol_write_val")?;
-            let mut ffi = FfiLowering::new(ctx.llvm_context());
-            ffi.lower_deref_mut_raw_volatile(ctx.builder(), ptr, value, size_bytes)?;
-            Ok(())
-        }
-
         // T0108 machine-semantics plain pair — non-volatile mirrors of
         // the volatile arms above (same operand shape, plain load/store).
-        Some(SystemSubOpcode::PtrRead) => {
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "PtrRead: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-            let size_bytes = operands[2];
-            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "raw_read_ptr")?;
-            let mut ffi = FfiLowering::new(ctx.llvm_context());
-            let value = ffi.lower_deref_raw(ctx.builder(), ptr, size_bytes)?;
-            ctx.set_register(dst_reg, value.into());
-            Ok(())
-        }
-        Some(SystemSubOpcode::PtrWrite) => {
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "PtrWrite: insufficient operands",
-                ));
-            }
-            let ptr_reg = op_reg(operands, 0);
-            let value_reg = op_reg(operands, 1);
-            let size_bytes = operands[2];
-            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "raw_write_ptr")?;
-            let value = as_i64(ctx, ctx.get_register(value_reg)?, "raw_write_val")?;
-            let mut ffi = FfiLowering::new(ctx.llvm_context());
-            ffi.lower_deref_mut_raw(ctx.builder(), ptr, value, size_bytes)?;
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::PtrAdd) => {
-            // Format: dst:reg, ptr:reg, offset:reg
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal("PtrAdd: insufficient operands"));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-            let offset_reg = op_reg(operands, 2);
-
-            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
-            let offset = as_i64(ctx, ctx.get_register(offset_reg)?, "offset")?;
-
-            // TEXT-AOT-CHARS-PUSH-1 (print-truncation leg): ptr_offset
-            // is ELEMENT-scaled — 8 for NaN-boxed List slots (the
-            // historic default), but 1 for raw BYTE buffers
-            // (Text.push_byte's `ptr_offset(self.ptr, self.len)` wrote
-            // 'y' at +8 and the NUL at +8/+16, so a builder-built
-            // "xy" printed as "x": len field said 2 while the bytes
-            // were x,0,...,y). The stride is tracked per-register
-            // (Text.ptr field loads mark stride 1); default stays 8 —
-            // every List/slice path lowers exactly as before.
-            let stride = ctx.get_element_stride(ptr_reg);
-            let result = if stride == 8 {
-                ffi.lower_ptr_add(ctx.builder(), ptr, offset)?
-            } else {
-                let i8_ty = ctx.types().i8_type();
-                let i64_ty = ctx.types().i64_type();
-                let scaled = ctx
-                    .builder()
-                    .build_int_mul(
-                        offset,
-                        i64_ty.const_int(stride, false),
-                        "ptr_add_scaled",
-                    )
-                    .or_llvm_err()?;
-                // SAFETY: byte-scaled GEP within the buffer the caller
-                // guarantees (same contract as the 8-stride path).
-                unsafe {
-                    ctx.builder()
-                        .build_gep(i8_ty, ptr, &[scaled], "ptr_add_b")
-                        .or_llvm_err()?
-                }
-            };
-            if stride != 8 {
-                ctx.set_element_stride(dst_reg, stride);
-            }
-
-            ctx.set_register(dst_reg, result.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::PtrSub) => {
-            // Format: dst:reg, ptr:reg, offset:reg
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal("PtrSub: insufficient operands"));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-            let offset_reg = op_reg(operands, 2);
-
-            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
-            let offset = as_i64(ctx, ctx.get_register(offset_reg)?, "offset")?;
-
-            let result = ffi.lower_ptr_sub(ctx.builder(), ptr, offset)?;
-
-            ctx.set_register(dst_reg, result.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::PtrDiff) => {
-            // Format: dst:reg, ptr1:reg, ptr2:reg
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "PtrDiff: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let ptr1_reg = op_reg(operands, 1);
-            let ptr2_reg = op_reg(operands, 2);
-
-            let ptr1 = as_ptr(ctx, ctx.get_register(ptr1_reg)?, "ptr1")?;
-            let ptr2 = as_ptr(ctx, ctx.get_register(ptr2_reg)?, "ptr2")?;
-
-            let diff = ffi.lower_ptr_diff(ctx.builder(), ptr1, ptr2)?;
-
-            ctx.set_register(dst_reg, diff.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::PtrIsNull) => {
-            // Format: dst:reg, ptr:reg
-            if operands.len() < 2 {
-                return Err(LlvmLoweringError::internal(
-                    "PtrIsNull: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-
-            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
-            let is_null = ffi.lower_ptr_is_null(ctx.builder(), ptr)?;
-
-            ctx.set_register(dst_reg, is_null.into());
-            Ok(())
-        }
-
         // ================================================================
         // FFI Calls (0x10-0x1F) - zero-cost FFI via LLVM native calls
         // ================================================================
@@ -32950,323 +33451,6 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(SystemSubOpcode::NewByteArray) => {
-            // Allocate byte array: dst = verum_alloc_bytes(size)
-            if operands.len() < 2 {
-                return Err(LlvmLoweringError::internal(
-                    "NewByteArray: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let size = ctx.get_register(op_reg(operands, 1))?;
-            let module = ctx.get_module();
-            let ptr_ty = ctx.types().ptr_type();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = ptr_ty.fn_type(&[i64_ty.into()], false);
-            let alloc_fn = module
-                .get_function("verum_cbgr_allocate")
-                .unwrap_or_else(|| module.add_function("verum_cbgr_allocate", fn_type, None));
-            let result = ctx
-                .builder()
-                .build_call(alloc_fn, &[size.into()], "new_byte_array")
-                .or_llvm_err()?
-            .basic_value_or("NewByteArray: expected return value")?;
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::ByteArrayElementAddr) => {
-            // Get pointer to element: dst = base_ptr + index
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "ByteArrayElementAddr: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ba_base")?;
-            let index = ctx.get_register(op_reg(operands, 2))?;
-            let i8_ty = ctx.llvm_context().i8_type();
-            // SAFETY: GEP into a byte array at the given index to get the element address; bounds checking is caller's responsibility
-            let elem_ptr = unsafe {
-                ctx.builder()
-                    .build_gep(i8_ty, base_ptr, &[index.into_int_value()], "ba_elem_ptr")
-                    .or_llvm_err()?
-            };
-            ctx.set_register(dst_reg, elem_ptr.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::ByteArrayLoad) => {
-            // Load byte: dst = *(base_ptr + index) as i64
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "ByteArrayLoad: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ba_base")?;
-            let index = ctx.get_register(op_reg(operands, 2))?;
-            let i8_ty = ctx.llvm_context().i8_type();
-            // SAFETY: GEP into a byte array at the given index to load a single byte; bounds checking is caller's responsibility
-            let elem_ptr = unsafe {
-                ctx.builder()
-                    .build_gep(i8_ty, base_ptr, &[index.into_int_value()], "ba_load_ptr")
-                    .or_llvm_err()?
-            };
-            let byte_val = ctx
-                .builder()
-                .build_load(i8_ty, elem_ptr, "ba_byte")
-                .or_llvm_err()?;
-            let i64_ty = ctx.types().i64_type();
-            let extended = ctx
-                .builder()
-                .build_int_z_extend(byte_val.into_int_value(), i64_ty, "ba_ext")
-                .or_llvm_err()?;
-            ctx.set_register(dst_reg, extended.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::ByteArrayStore) => {
-            // Store byte: *(base_ptr + index) = value & 0xFF
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "ByteArrayStore: insufficient operands",
-                ));
-            }
-            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 0))?, "ba_base")?;
-            let index = ctx.get_register(op_reg(operands, 1))?;
-            let value = ctx.get_register(op_reg(operands, 2))?;
-            let i8_ty = ctx.llvm_context().i8_type();
-            // SAFETY: GEP into a byte array at the given index to store a single byte; bounds checking is caller's responsibility
-            let elem_ptr = unsafe {
-                ctx.builder()
-                    .build_gep(i8_ty, base_ptr, &[index.into_int_value()], "ba_store_ptr")
-                    .or_llvm_err()?
-            };
-            let truncated = ctx
-                .builder()
-                .build_int_truncate(value.into_int_value(), i8_ty, "ba_trunc")
-                .or_llvm_err()?;
-            ctx.builder()
-                .build_store(elem_ptr, truncated)
-                .or_llvm_err()?;
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::TypedArrayLoad) => {
-            // Tier-1 twin of the interpreter's TypedArrayLoad (T0356): read
-            // one element from a PACKED typed array, DECODING by width — the
-            // read twin of TypedArrayStore and typed analogue of
-            // ByteArrayLoad. Format: dst:reg, arr:reg, idx:reg, elem_size:u8
-            // (bit 0x80 = float). Integer widths zero-extend to i64; F32
-            // bit-reinterprets then widens; F64 bit-reinterprets — AOT floats
-            // are f64 FloatValues (see LoadF / F64FromBits). Mirrors the interp
-            // `heap::typed_array_element` decode so the tiers agree. The
-            // elem_size byte sits after three (possibly wide) register operands.
-            if operands.len() < 4 {
-                return Err(LlvmLoweringError::internal(
-                    "TypedArrayLoad: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "tal_base")?;
-            let index = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "tal_idx")?;
-            let mut cursor = 0usize;
-            for _ in 0..3 {
-                cursor += if operands[cursor] & 0x80 != 0 { 2 } else { 1 };
-            }
-            let elem_byte = *operands.get(cursor).unwrap_or(&8);
-            let elem: u64 = match elem_byte & 0x7F {
-                w @ (1 | 2 | 4 | 8) => w as u64,
-                _ => 8,
-            };
-            let is_float = elem_byte & 0x80 != 0;
-            let i64_ty = ctx.types().i64_type();
-            let i8_ty = ctx.llvm_context().i8_type();
-            let off = ctx
-                .builder()
-                .build_int_mul(index, i64_ty.const_int(elem, false), "tal_off")
-                .or_llvm_err()?;
-            // SAFETY: GEP into the packed array at idx*elem (bytes); bounds are
-            // the caller's contract (mirrors TypedArrayStore).
-            let eptr = unsafe {
-                ctx.builder()
-                    .build_gep(i8_ty, base_ptr, &[off], "tal_ptr")
-                    .or_llvm_err()?
-            };
-            let llvm_ctx = ctx.llvm_context();
-            let int_ty = match elem {
-                1 => llvm_ctx.i8_type(),
-                2 => llvm_ctx.i16_type(),
-                4 => llvm_ctx.i32_type(),
-                _ => i64_ty,
-            };
-            let raw = ctx
-                .builder()
-                .build_load(int_ty, eptr, "tal_raw")
-                .or_llvm_err()?
-                .into_int_value();
-            if is_float {
-                let f64_ty = ctx.types().f64_type();
-                let fval = if elem == 4 {
-                    // F32: the 4 raw bytes are IEEE single bits → bitcast to
-                    // f32, then widen to the f64 register representation.
-                    let f32_ty = ctx.llvm_context().f32_type();
-                    let f32v = ctx
-                        .builder()
-                        .build_bit_cast(raw, f32_ty, "tal_f32")
-                        .or_llvm_err()?
-                        .into_float_value();
-                    ctx.builder()
-                        .build_float_ext(f32v, f64_ty, "tal_fpext")
-                        .or_llvm_err()?
-                } else {
-                    // F64: bit-reinterpret the 8 raw bytes as a double.
-                    ctx.builder()
-                        .build_bit_cast(raw, f64_ty, "tal_f64")
-                        .or_llvm_err()?
-                        .into_float_value()
-                };
-                ctx.set_register(dst_reg, fval.into());
-                ctx.mark_float_register(dst_reg);
-            } else {
-                // Integer widths zero-extend to i64 (u8/u16/u32 zext; an
-                // 8-byte read is already the i64 value).
-                let ext = if elem == 8 {
-                    raw
-                } else {
-                    ctx.builder()
-                        .build_int_z_extend(raw, i64_ty, "tal_zext")
-                        .or_llvm_err()?
-                };
-                ctx.set_register(dst_reg, ext.into());
-            }
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::TypedArrayStore) => {
-            // Tier-1 twin of the interpreter's TypedArrayStore (peer
-            // opcode, ffi_extended.rs): store one element into a PACKED
-            // typed array, unboxing the value — raw `elem_size` integer,
-            // never a NaN-boxed Value. Store/load coherence with the
-            // width-switched readers (GetE / SliceGet reserved=elem).
-            // Format: arr:reg, idx:reg, val:reg, elem_size:u8 — the
-            // stride byte sits after three (possibly wide) regs.
-            if operands.len() < 4 {
-                return Err(LlvmLoweringError::internal(
-                    "TypedArrayStore: insufficient operands",
-                ));
-            }
-            let arr_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 0))?, "tas_base")?;
-            let index = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "tas_idx")?;
-            let mut cursor = 0usize;
-            for _ in 0..3 {
-                cursor += if operands[cursor] & 0x80 != 0 { 2 } else { 1 };
-            }
-            let elem: u64 = match operands.get(cursor) {
-                Some(w @ (1 | 2 | 4 | 8)) => *w as u64,
-                _ => 8,
-            };
-            let i64_ty = ctx.types().i64_type();
-            // Unbox the value to the raw `elem`-byte integer to store. Ints /
-            // F64 bit-reinterpret via `as_i64` (an f64 register keeps all 8
-            // bytes). A `[Float32; N]` slot (elem == 4 + float register) must
-            // NARROW the f64 to f32 IEEE bits first — the interp stores
-            // `(f as f32).to_bits()`; `as_i64` alone would keep the LOW half
-            // of the f64 pattern, silent garbage on read-back (T0356).
-            let val_raw = ctx.get_register(op_reg(operands, 2))?;
-            let value = if elem == 4 && scalar_reg_is_float(ctx, op_reg(operands, 2), val_raw) {
-                let f64v = as_f64(ctx, val_raw, "tas_f64src")?;
-                let f32_ty = ctx.llvm_context().f32_type();
-                let f32v = ctx
-                    .builder()
-                    .build_float_trunc(f64v, f32_ty, "tas_f32narrow")
-                    .or_llvm_err()?;
-                let i32_ty = ctx.llvm_context().i32_type();
-                let i32v = ctx
-                    .builder()
-                    .build_bit_cast(f32v, i32_ty, "tas_f32bits")
-                    .or_llvm_err()?
-                    .into_int_value();
-                ctx.builder()
-                    .build_int_z_extend(i32v, i64_ty, "tas_f32zext")
-                    .or_llvm_err()?
-            } else {
-                as_i64(ctx, val_raw, "tas_val")?
-            };
-            let i8_ty = ctx.llvm_context().i8_type();
-            let off = ctx
-                .builder()
-                .build_int_mul(index, i64_ty.const_int(elem, false), "tas_off")
-                .or_llvm_err()?;
-            // SAFETY: GEP into the packed array at idx*elem; bounds are
-            // the caller's contract (mirrors ByteArrayStore).
-            let eptr = unsafe {
-                ctx.builder()
-                    .build_gep(i8_ty, arr_ptr, &[off], "tas_ptr")
-                    .or_llvm_err()?
-            };
-            emit_slice_cell_elem_store(ctx, i64_ty.const_int(elem, false), eptr, value, "tas")?;
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::TypedArrayElementAddr) | Some(SystemSubOpcode::NewTypedArray) => {
-            // Typed arrays use same allocation as byte arrays with stride
-            if operands.is_empty() {
-                return Err(LlvmLoweringError::internal(
-                    "TypedArray: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            if sub_op == SystemSubOpcode::NewTypedArray as u8 {
-                // Allocate: same as NewByteArray but size = count * element_size
-                let size = if operands.len() >= 2 {
-                    ctx.get_register(op_reg(operands, 1))?
-                } else {
-                    ctx.types().i64_type().const_int(0, false).into()
-                };
-                let module = ctx.get_module();
-                let ptr_ty = ctx.types().ptr_type();
-                let i64_ty = ctx.types().i64_type();
-                let fn_type = ptr_ty.fn_type(&[i64_ty.into()], false);
-                let alloc_fn = module
-                    .get_function("verum_cbgr_allocate")
-                    .unwrap_or_else(|| module.add_function("verum_cbgr_allocate", fn_type, None));
-                let result = ctx
-                    .builder()
-                    .build_call(alloc_fn, &[size.into()], "new_typed_array")
-                    .or_llvm_err()?
-            .basic_value_or("NewTypedArray: expected return value")?;
-                ctx.set_register(dst_reg, result);
-            } else {
-                // Element addr: base + index * 8 (assuming 8-byte elements)
-                let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ta_base")?;
-                let index = ctx.get_register(op_reg(operands, 2))?;
-                let i64_ty = ctx.types().i64_type();
-                // Task #23 — coerce `index` through `ptr_to_int` when
-                // the VBC frontend handed us a generic-typed pointer
-                // slot (NaN-boxed dynamic dispatch).  Without this
-                // guard `into_int_value()` panics for every async
-                // / Poll-using callee whose poll-indices land in a
-                // `load ptr` slot.
-                let index_i = if index.is_int_value() {
-                    index.into_int_value()
-                } else {
-                    ctx.builder()
-                        .build_ptr_to_int(index.into_pointer_value(), i64_ty, "ta_idx_i")
-                        .or_llvm_err()?
-                };
-                // SAFETY: GEP into a typed array at the given index to compute the element address; bounds checking is caller's responsibility
-                let elem_ptr = unsafe {
-                    ctx.builder()
-                        .build_gep(i64_ty, base_ptr, &[index_i], "ta_elem_ptr")
-                        .or_llvm_err()?
-                };
-                ctx.set_register(dst_reg, elem_ptr.into());
-            }
-            Ok(())
-        }
-
         Some(SystemSubOpcode::StructFieldAddr) => {
             // Get raw heap address of a struct field — task #37 closure.
             //
@@ -33305,93 +33489,6 @@ fn lower_ffi_extended<'ctx>(
                     .or_llvm_err()?
             };
             ctx.set_register(dst_reg, field_ptr.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::StaticMutAddr) => {
-            // Static-mut backing-cell address — Task #26 [E2] Tier-1 lowering.
-            //
-            // Format: dst:reg, slot_lo:u8, slot_hi:u8
-            //
-            // Tier-1 path: call into a runtime helper
-            // `verum_static_mut_cell_addr(slot: u16) -> *mut u8` that
-            // returns the stable byte address of a process-wide cell.
-            // The helper is declared lazily (extern) and resolved at
-            // link time against the verum_runtime library — same
-            // pattern as `verum_time_monotonic_nanos` above.  Mirrors
-            // the Tier-0 `handle_static_mut_addr` semantics so the
-            // user-side `&STATIC_MUT as *T` lowering is byte-identical
-            // across tiers.
-            //
-            // The Tier-0 implementation lives in `InterpreterState::
-            // static_mut_cell_addr`; the Tier-1 runtime symbol must be
-            // implemented before any AOT path exercises this opcode.
-            // Currently no AOT consumer hits it (audit-ring tests run
-            // via `verum test --interp`); when a consumer lands, add
-            // the C symbol to `verum_runtime` and `syscall_registry`.
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "StaticMutAddr: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let slot_lo = operands[1] as u64;
-            let slot_hi = operands[2] as u64;
-            let slot = (slot_hi << 8) | slot_lo;
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let fn_type = ptr_ty.fn_type(&[i64_ty.into()], false);
-            let helper_fn = super::error::get_or_declare_function(
-                module,
-                "verum_static_mut_cell_addr",
-                fn_type,
-            );
-            let slot_arg = i64_ty.const_int(slot, false);
-            let result = ctx
-                .builder()
-                .build_call(helper_fn, &[slot_arg.into()], "static_mut_addr")
-                .or_llvm_err()?
-                .basic_value_or("StaticMutAddr: expected return value")?;
-            ctx.set_register(dst_reg, result);
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::StaticMutAddrSized) => {
-            // Wide twin (T0133): same runtime-helper pattern with the
-            // declared byte size as the second arg —
-            // `verum_static_mut_cell_addr_sized(slot, size) -> *mut u8`.
-            // Mirrors Tier-0's `static_mut_cell_addr_sized`.
-            if operands.len() < 5 {
-                return Err(LlvmLoweringError::internal(
-                    "StaticMutAddrSized: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let slot = ((operands[2] as u64) << 8) | (operands[1] as u64);
-            let size = ((operands[4] as u64) << 8) | (operands[3] as u64);
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let fn_type = ptr_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
-            let helper_fn = super::error::get_or_declare_function(
-                module,
-                "verum_static_mut_cell_addr_sized",
-                fn_type,
-            );
-            let result = ctx
-                .builder()
-                .build_call(
-                    helper_fn,
-                    &[
-                        i64_ty.const_int(slot, false).into(),
-                        i64_ty.const_int(size, false).into(),
-                    ],
-                    "static_mut_addr_sized",
-                )
-                .or_llvm_err()?
-                .basic_value_or("StaticMutAddrSized: expected return value")?;
-            ctx.set_register(dst_reg, result);
             Ok(())
         }
 
@@ -33457,6 +33554,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        // Time sub-opcodes (0x70-0x75) — call runtime time functions
         Some(SystemSubOpcode::FreeCallback) => {
             // Format: trampoline:reg — there is NO destination register.
             //
@@ -33468,103 +33566,6 @@ fn lower_ffi_extended<'ctx>(
             // operand 0 as a DESTINATION and stored null into it — clobbering
             // the caller's live trampoline register on the way past. Consuming
             // no register is the whole behaviour.
-            Ok(())
-        }
-
-        // Time sub-opcodes (0x70-0x75) — call runtime time functions
-        // ================================================================
-        // Raw byte/word leaves (0x53-0x58) — mem_raw's load/store over Int
-        // addresses.  Pre-arm these lowered the bodyless declaration stubs:
-        // every AOT load read 0 and every store no-op'd (the 26-test
-        // mem_raw cluster + the byte-dependent cbgr cluster in the
-        // 2026-07-03 sweep).  inttoptr + width-typed load/store; u8 loads
-        // zero-extend, i32 loads sign-extend (C `int` contract).
-        // ================================================================
-        Some(SystemSubOpcode::RawLoadU8)
-        | Some(SystemSubOpcode::RawLoadI32)
-        | Some(SystemSubOpcode::RawLoadI64) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "raw_load_addr")?;
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let p = ctx
-                .builder()
-                .build_int_to_ptr(addr, ptr_ty, "raw_load_ptr")
-                .or_llvm_err()?;
-            let value = match sub_opcode {
-                Some(SystemSubOpcode::RawLoadU8) => {
-                    let i8_ty = ctx.types().i8_type();
-                    let v = ctx
-                        .builder()
-                        .build_load(i8_ty, p, "raw_load_u8")
-                        .or_llvm_err()?
-                        .into_int_value();
-                    ctx.builder()
-                        .build_int_z_extend(v, i64_ty, "raw_load_u8_z")
-                        .or_llvm_err()?
-                }
-                Some(SystemSubOpcode::RawLoadI32) => {
-                    let i32_ty = ctx.types().i32_type();
-                    let v = ctx
-                        .builder()
-                        .build_load(i32_ty, p, "raw_load_i32")
-                        .or_llvm_err()?
-                        .into_int_value();
-                    ctx.builder()
-                        .build_int_s_extend(v, i64_ty, "raw_load_i32_s")
-                        .or_llvm_err()?
-                }
-                _ => ctx
-                    .builder()
-                    .build_load(i64_ty, p, "raw_load_i64")
-                    .or_llvm_err()?
-                    .into_int_value(),
-            };
-            ctx.set_register(dst, value.into());
-            Ok(())
-        }
-
-        Some(SystemSubOpcode::RawStoreU8)
-        | Some(SystemSubOpcode::RawStoreI32)
-        | Some(SystemSubOpcode::RawStoreI64) => {
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "raw_store_addr")?;
-            let value = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "raw_store_val")?;
-            let i64_ty = ctx.types().i64_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let p = ctx
-                .builder()
-                .build_int_to_ptr(addr, ptr_ty, "raw_store_ptr")
-                .or_llvm_err()?;
-            match sub_opcode {
-                Some(SystemSubOpcode::RawStoreU8) => {
-                    let i8_ty = ctx.types().i8_type();
-                    let v = ctx
-                        .builder()
-                        .build_int_truncate(value, i8_ty, "raw_store_u8_t")
-                        .or_llvm_err()?;
-                    ctx.builder().build_store(p, v).or_llvm_err()?;
-                }
-                Some(SystemSubOpcode::RawStoreI32) => {
-                    let i32_ty = ctx.types().i32_type();
-                    let v = ctx
-                        .builder()
-                        .build_int_truncate(value, i32_ty, "raw_store_i32_t")
-                        .or_llvm_err()?;
-                    ctx.builder().build_store(p, v).or_llvm_err()?;
-                }
-                _ => {
-                    ctx.builder().build_store(p, value).or_llvm_err()?;
-                }
-            }
-            // The .vr contract returns Int 0.
-            ctx.set_register(dst, i64_ty.const_int(0, false).into());
             Ok(())
         }
 

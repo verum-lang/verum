@@ -278,14 +278,14 @@ pub enum InlineSequenceId {
     SecureZero,
     /// memcmp: compare with early exit
     Memcmp,
-    /// Volatile pointer read (T0188) — SystemSubOpcode::PtrReadVolatile.
+    /// Volatile pointer read (T0188) — crate::instruction::MemSubOpcode::PtrReadVolatile.
     PtrReadVolatile,
     /// Plain raw-pointer read — the NON-volatile twin (T0108): a
     /// dedicated sub-op carries the raw-address semantic in the
     /// INSTRUCTION, where generic Deref cannot (an int-tagged cell
     /// address is indistinguishable from an int VALUE at runtime).
     PtrReadRaw,
-    /// Volatile pointer write (T0188) — SystemSubOpcode::PtrWriteVolatile.
+    /// Volatile pointer write (T0188) — crate::instruction::MemSubOpcode::PtrWriteVolatile.
     PtrWriteVolatile,
     /// Plain raw-pointer write — non-volatile twin of the above.
     PtrWriteRaw,

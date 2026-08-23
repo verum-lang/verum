@@ -15266,8 +15266,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut a_ops, addr_reg.0);
                     a_ops.push((slot & 0xFF) as u8);
                     a_ops.push(((slot >> 8) & 0xFF) as u8);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: crate::instruction::SystemSubOpcode::StaticMutAddr
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: crate::instruction::MemSubOpcode::StaticMutAddr
                             .to_byte(),
                         operands: a_ops,
                     });
@@ -15275,8 +15275,8 @@ impl VbcCodegen {
                     Self::write_reg(&mut w_ops, addr_reg.0);
                     Self::write_reg(&mut w_ops, result_reg.0);
                     w_ops.push(8);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: crate::instruction::SystemSubOpcode::PtrWrite
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: crate::instruction::MemSubOpcode::PtrWrite
                             .to_byte(),
                         operands: w_ops,
                     });
