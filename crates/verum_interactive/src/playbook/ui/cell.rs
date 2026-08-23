@@ -81,8 +81,10 @@ fn exec_time_str(cell: &Cell) -> String {
     }
 }
 
-/// Verum syntax highlighting for a single line (simplified, reusable).
-fn highlight_verum_line(source: &str) -> Vec<Span<'_>> {
+/// Verum syntax highlighting for a single line — the ONE carrier for
+/// both the cell view and the editor (T0846-era redundancy rule: the
+/// editor used to keep its own diverging copy).
+pub(crate) fn highlight_verum_line(source: &str) -> Vec<Span<'_>> {
     // Keywords per grammar/verum.ebnf (reserved + primary + control + async + modifiers + ffi + module + additional + proof)
     let keywords = [
         // Reserved (3)

@@ -518,7 +518,17 @@ impl PlaybookApp {
     fn dispatch_edit(&mut self, key: KeyEvent) {
         let action = self.keybindings.edit_action(key);
         match action {
-            KeyAction::ExitEdit => self.exit_edit_mode(),
+            KeyAction::ExitEdit => {
+                // In the modal fullscreen editor, the first Esc collapses
+                // the modal back into the notebook; the second leaves
+                // edit mode — matching every editor's modal convention.
+                if self.layout_config.editor_fullscreen {
+                    self.layout_config.toggle_fullscreen();
+                    self.editor.fullscreen = false;
+                } else {
+                    self.exit_edit_mode();
+                }
+            }
             KeyAction::ExecuteCell => {
                 self.execute_current_cell();
                 self.refresh_lenses_if_active();
@@ -535,29 +545,66 @@ impl PlaybookApp {
                 // Forward to editor for text editing
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                 let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+                let alt = key.modifiers.contains(KeyModifiers::ALT);
                 match key.code {
-                    KeyCode::Left if ctrl => self.editor.move_word_left(shift),
-                    KeyCode::Right if ctrl => self.editor.move_word_right(shift),
+                    KeyCode::Left if ctrl || alt => self.editor.move_word_left(shift),
+                    KeyCode::Right if ctrl || alt => self.editor.move_word_right(shift),
                     KeyCode::Left => self.editor.move_left(shift),
                     KeyCode::Right => self.editor.move_right(shift),
+                    KeyCode::Up if alt => self.editor.move_lines_up(),
+                    KeyCode::Down if alt => self.editor.move_lines_down(),
                     KeyCode::Up => self.editor.move_up(shift),
                     KeyCode::Down => self.editor.move_down(shift),
+                    KeyCode::PageUp => self.editor.page_move(false, self.editor_page(), shift),
+                    KeyCode::PageDown => self.editor.page_move(true, self.editor_page(), shift),
                     KeyCode::Home if ctrl => self.editor.move_to_start(shift),
                     KeyCode::End if ctrl => self.editor.move_to_end(shift),
-                    KeyCode::Home => self.editor.move_home(shift),
+                    KeyCode::Home => self.editor.move_home_smart(shift),
                     KeyCode::End => self.editor.move_end(shift),
-                    KeyCode::Enter => self.editor.insert_char('\n'),
+                    KeyCode::Enter => self.editor.insert_newline_auto_indent(),
+                    KeyCode::Backspace if ctrl || alt => self.editor.delete_word_left(),
                     KeyCode::Backspace => self.editor.backspace(),
+                    KeyCode::Delete if ctrl || alt => self.editor.delete_word_right(),
                     KeyCode::Delete => self.editor.delete(),
+                    KeyCode::BackTab => self.editor.dedent_lines(),
+                    // Editing power keys (VS Code / JetBrains muscle memory):
+                    // Ctrl+D duplicate, Ctrl+Shift+K delete line,
+                    // Ctrl+/ (arrives as '/' or '_' per terminal) comment,
+                    // Ctrl+K kill-to-eol, Ctrl+J join lines.
+                    KeyCode::Char('d') if ctrl => self.editor.duplicate_lines(),
+                    KeyCode::Char('k') if ctrl && shift => self.editor.delete_lines(),
+                    KeyCode::Char('/') if ctrl => self.editor.toggle_comment(),
+                    KeyCode::Char('_') if ctrl => self.editor.toggle_comment(),
+                    KeyCode::Char('7') if ctrl => self.editor.toggle_comment(),
+                    KeyCode::Char('k') if ctrl => self.editor.kill_to_eol(),
+                    KeyCode::Char('j') if ctrl => self.editor.join_lines(),
+                    KeyCode::Tab if self
+                        .editor
+                        .selection
+                        .map(|s| {
+                            let n = s.normalize();
+                            !n.is_empty() && n.start.0 != n.end.0
+                        })
+                        .unwrap_or(false) =>
+                    {
+                        // A multi-line selection: Tab indents the block
+                        // (BackTab dedents) — completion only fires on a
+                        // bare cursor.
+                        self.editor.indent_lines();
+                    }
                     KeyCode::Tab => {
                         // Try inline completion if cursor is after a partial word
                         let (row, col) = self.editor.cursor;
                         let line = self.editor.lines.get(row).cloned().unwrap_or_default();
-                        let before_cursor = if col <= line.len() {
-                            &line[..col]
-                        } else {
-                            &line
-                        };
+                        // `col` is a CHAR index (editor cursor convention) —
+                        // slicing the String needs the BYTE offset, or any
+                        // non-ASCII line panics/garbles.
+                        let byte_col = line
+                            .char_indices()
+                            .nth(col)
+                            .map(|(i, _)| i)
+                            .unwrap_or(line.len());
+                        let before_cursor = &line[..byte_col];
                         // Extract partial word: sequence of alphanumeric/_ chars before cursor
                         let partial: String = before_cursor
                             .chars()
@@ -579,10 +626,11 @@ impl PlaybookApp {
                             let next = (idx + 1) % self.completions.len();
                             self.completion_index = Some(next);
                             // Replace: delete old completion, insert new one
-                            let old = &self.completions[idx];
-                            let new = &self.completions[next].clone();
-                            // Delete the old completion text (it replaced the partial already)
-                            for _ in 0..old.len() {
+                            // (backspace steps are CHARS, so count chars,
+                            // not bytes).
+                            let old_chars = self.completions[idx].chars().count();
+                            let new = self.completions[next].clone();
+                            for _ in 0..old_chars {
                                 self.editor.backspace();
                             }
                             for ch in new.chars() {
@@ -645,7 +693,7 @@ impl PlaybookApp {
                                 self.editor.insert_tab();
                             } else {
                                 // Replace partial with first completion
-                                for _ in 0..partial.len() {
+                                for _ in 0..partial.chars().count() {
                                     self.editor.backspace();
                                 }
                                 let first = candidates[0].clone();
@@ -673,10 +721,14 @@ impl PlaybookApp {
                     KeyCode::Char('z') if ctrl => {
                         self.editor.undo();
                     }
-                    KeyCode::Char(c) => {
+                    // A PLAIN character — the guard matters: without it,
+                    // every unbound Ctrl/Alt chord fell through here and
+                    // typed its letter into the buffer (Ctrl+G inserted a
+                    // literal 'g').
+                    KeyCode::Char(c) if !ctrl && !alt => {
                         self.completions.clear();
                         self.completion_index = None;
-                        self.editor.insert_char(c);
+                        self.editor.insert_char_smart(c);
                     }
                     _ => {
                         self.completions.clear();
@@ -685,12 +737,29 @@ impl PlaybookApp {
                 }
             }
         }
-        let visible = if self.layout_config.editor_fullscreen {
-            20
+        let (rows, cols) = self.editor_viewport();
+        self.editor.ensure_cursor_visible(rows);
+        self.editor.ensure_cursor_visible_h(cols);
+    }
+
+    /// The editor viewport in (rows, text columns), measured from the
+    /// real terminal size so fullscreen scrolling tracks the actual
+    /// window instead of a hard-coded guess.
+    fn editor_viewport(&self) -> (usize, usize) {
+        let (w, h) = crossterm::terminal::size().unwrap_or((100, 30));
+        let rows = if self.layout_config.editor_fullscreen {
+            (h as usize).saturating_sub(4).max(3)
         } else {
             8
         };
-        self.editor.ensure_cursor_visible(visible);
+        let gutter = self.editor.lines.len().to_string().len() + 3;
+        let cols = (w as usize).saturating_sub(gutter).max(10);
+        (rows, cols)
+    }
+
+    /// Page size for PageUp/PageDown inside the editor.
+    fn editor_page(&self) -> usize {
+        self.editor_viewport().0.saturating_sub(1).max(1)
     }
 
     /// Command/Search input mode.
@@ -1447,8 +1516,8 @@ impl PlaybookApp {
     fn render_help_overlay(&self, frame: &mut Frame) {
         use ratatui::widgets::Clear;
         let area = frame.area();
-        let w = area.width.min(74);
-        let h = area.height.min(24);
+        let w = area.width.min(78);
+        let h = area.height.min(28);
         let rect = Rect {
             x: area.x + (area.width.saturating_sub(w)) / 2,
             y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -1464,24 +1533,26 @@ impl PlaybookApp {
         let del_cell = if vim { "D" } else { "Del" };
         let text = format!(
             "
-  NAVIGATE            {nav}  move between cells
-                                  g / G  first / last cell
+  NAVIGATE   {nav}  cells      g / G  first / last cell
+  EDIT       {edit}  edit cell    Esc  leave editor / modal
+  RUN        {run}  run cell     {run_all}  run all    Ctrl+C  cancel
+  CELLS      {new_cell}  new    {del_cell}  delete    K / J  move cell
+  PANELS     Tab  sidebar tab   Ctrl+B  toggle   F11/Ctrl+F  modal editor
+  FILES      Ctrl+S  save       :w / :e  command forms
+  MODES      /  search    :  command    q  quit
 
-               EDIT               {edit}  edit the selected cell
-                                  Esc  leave the editor
-
-               RUN                {run}  run cell    {run_all}  run all
-                                  Ctrl+C  cancel a running cell
-
-               CELLS              {new_cell}  new cell    {del_cell}  delete
-                                  K / J  move cell up / down
-
-               PANELS             Tab  next sidebar tab
-                                  Ctrl+B  toggle sidebar   F11  fullscreen
-
-               FILES              Ctrl+S  save    :w / :e  command forms
-
-               MODES              /  search    :  command    q  quit
+  ── EDITOR (inside a cell) ──────────────────────────────────
+  MOVE       Ctrl+←/→  by word     Home  smart home   PgUp/PgDn  page
+  SELECT     Shift+move    Ctrl+A  all    type ( [ {{ \"  wraps selection
+  LINES      Ctrl+D  duplicate     Ctrl+Shift+K  delete line
+             Alt+↑/↓  move line    Ctrl+J  join    Ctrl+K  kill to eol
+  BLOCKS     Tab / Shift+Tab  indent / dedent selection
+             Ctrl+/  toggle // comment
+  PAIRS      auto-close ( [ {{ \"    Enter inside {{}}  opens a block
+  DELETE     Ctrl+Backspace / Ctrl+Del  word left / right
+  UNDO       Ctrl+Z / Ctrl+Shift+Z (word-level coalescing)
+  CLIPBOARD  Ctrl+C / X / V (system clipboard)
+  RUN        F5 / Ctrl+R / Alt+Enter    Tab  complete word
 
                                   press any key to close"
         );
@@ -1903,7 +1974,11 @@ impl PlaybookApp {
                 }
             },
             AppMode::Edit => {
-                " Esc:done  Ctrl+R:run  Ctrl+Z:undo  Ctrl+S:save"
+                if self.layout_config.editor_fullscreen {
+                    " Esc:back to notebook  Ctrl+R:run  Ctrl+D:dup  Ctrl+/:comment  ?-map via Esc"
+                } else {
+                    " Esc:done  Ctrl+R:run  Ctrl+F:modal editor  Ctrl+D:dup  Ctrl+/:comment  Ctrl+Z:undo"
+                }
             }
             AppMode::Command => {
                 " Esc:cancel  Enter:exec  Commands: w q wq e clear run set split merge help"
