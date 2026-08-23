@@ -10960,11 +10960,41 @@ impl VbcCodegen {
     /// which protocol names the vtable slot). Returns the substring so
     /// the caller can build `dyn:<proto>.<method>` without allocating.
     fn dyn_protocol_of(type_name: &str) -> Option<&str> {
-        let after = &type_name[type_name.find("dyn:")? + 4..];
-        let end = after
+        // T0277/T0378 leg: a `dyn:` ANYWHERE in the spelling used to
+        // match — so a method on a CONTAINER of protocol objects
+        // (`List<dyn:Shape>.push`) was rerouted into protocol dispatch
+        // (`dyn:Shape.push` — worse, the erased spelling `dyn:Any`),
+        // and the AOT dyn-switch then called the compiled `List.push`
+        // body whose &mut-copy ABI mutates a COPY: every push into a
+        // `List<dyn P>` silently vanished at Tier-1 (len stayed 0, the
+        // follow-up index SIGSEGV'd).  Protocol dispatch is only right
+        // when the RECEIVER ITSELF is the protocol object: a top-level
+        // `dyn:P`, `&dyn:P`, or a deref-carrier (`Heap<dyn:P>` /
+        // `Shared<dyn:P>` / `Box<dyn:P>` — the T0106 shapes, whose
+        // methods forward through Deref).  A container keeps its own
+        // methods.
+        let t = type_name.trim_start_matches('&').trim_start();
+        let t = t
+            .strip_prefix("mut ")
+            .or_else(|| t.strip_prefix("unsafe "))
+            .or_else(|| t.strip_prefix("checked "))
+            .unwrap_or(t)
+            .trim_start();
+        let inner = if let Some(rest) = t.strip_prefix("dyn:") {
+            rest
+        } else if let Some(open) = t.find('<') {
+            let carrier = &t[..open];
+            if !matches!(carrier, "Heap" | "Shared" | "Box") {
+                return None;
+            }
+            t[open + 1..].trim_start().strip_prefix("dyn:")?
+        } else {
+            return None;
+        };
+        let end = inner
             .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
-            .unwrap_or(after.len());
-        let proto = &after[..end];
+            .unwrap_or(inner.len());
+        let proto = &inner[..end];
         (!proto.is_empty()).then_some(proto)
     }
 

@@ -5173,6 +5173,7 @@ pub(super) fn dispatch_primitive_method(
             }
             "epoch" => {
                 // Return the epoch from the interpreter state (register refs don't store epoch inline)
+                if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceGvd) { eprintln!("[epoch-arm] REGREF -> {}", state.cbgr_epoch); }
                 return Ok(Some(Value::from_i64(state.cbgr_epoch as i64)));
             }
             "epoch_caps" | "epoch_caps_raw" | "raw_epoch_caps" => {
@@ -5379,6 +5380,7 @@ pub(super) fn dispatch_primitive_method(
                         .get(&data_ptr)
                         .map(|&e| e as u32)
                         .unwrap_or_else(|| unsafe { *((header_addr + 12) as *const u16) as u32 });
+                    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceGvd) { eprintln!("[epoch-arm] PTR-5375 tracked={:?} hdr={} -> {}", state.cbgr_ref_creation_epoch.get(&data_ptr), unsafe { *((header_addr + 12) as *const u16) }, epoch); }
                     return Ok(Some(Value::from_i64(epoch as i64)));
                 }
                 "is_epoch_valid" => {
@@ -5660,7 +5662,7 @@ pub(super) fn dispatch_primitive_method(
             "can_write" => Value::from_bool((v & 0x02) != 0),
             "can_extend" => Value::from_bool((v & 0x04) != 0),
             "is_unique" => Value::from_bool((v & 0x08) != 0),
-            "epoch" => Value::from_i64((v >> 8) & 0x00FF_FFFF), // Extract epoch from packed value
+            "epoch" => { if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceGvd) { eprintln!("[epoch-arm] INT v={v}"); } Value::from_i64((v >> 8) & 0x00FF_FFFF) }, // Extract epoch from packed value
             "raw" => Value::from_i64(v), // Identity: return raw integer value
             "to_hex_string" => {
                 let s = format!("{:x}", v);

@@ -762,30 +762,30 @@ public fn increment_epoch_for_tests() -> UInt64 {
 
 public type Epoch is ();
 
-/// Monotonically increasing global epoch counter.
-///
-
-/// `static mut` now routes through a thread-local slot in the Tier 0
-/// interpreter (matching `@thread_local` semantics), so writes from one
-/// frame are visible to reads from another. That gives us a real global
-/// counter without reaching into the heap-backed EpochManager (which
-/// allocates and would re-enter the CBGR bootstrap path).
-static mut EPOCH_COUNTER: Int = 1;
+// ONE epoch scale (T0277 leg, closing the reference_system reds).
+// This type used to keep its own `static mut EPOCH_COUNTER` — a THIRD
+// epoch authority alongside the runtime's live counter (Tier-0
+// `state.cbgr_epoch`, advanced by reference lifecycle events) and the
+// Tier-1 `global_epoch` global.  Allocation headers and references are
+// stamped from the RUNTIME scale, so `ref.epoch() <= Epoch.current()`
+// was false the moment any reference had been created and dropped —
+// the exact assertion the L0 reference_system specs make.  `Epoch` now
+// delegates to the `cbgr_current_epoch` / `cbgr_epoch_begin`
+// intrinsics: the same scale on both tiers, executable-pinned by
+// vcs/specs/L1-core/mem/cbgr_full_surface.vr.
+mount core.intrinsics.runtime.cbgr.{cbgr_current_epoch, cbgr_epoch_begin};
 
 implement Epoch {
     /// Return the current global epoch counter.
     @inline
     public fn current() -> Int {
-        unsafe { EPOCH_COUNTER }
+        cbgr_current_epoch() as Int
     }
 
     /// Advance the global epoch counter by one. Returns the new value.
     @inline
     public fn advance() -> Int {
-        unsafe {
-            EPOCH_COUNTER = EPOCH_COUNTER + 1;
-            EPOCH_COUNTER
-        }
+        cbgr_epoch_begin()
     }
 
     /// Whether the given (older) epoch is still considered live.
@@ -793,7 +793,7 @@ implement Epoch {
     /// 0x10_0000 ticks is treated as alive.
     @inline
     public fn is_valid(stored: Int) -> Bool {
-        let cur = unsafe { EPOCH_COUNTER };
+        let cur = cbgr_current_epoch() as Int;
         cur - stored < 0x10_0000
     }
 }

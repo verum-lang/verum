@@ -119,12 +119,10 @@ fn test_ref_generation_after_mutation() {
     assert(*alloc == 20);
 }
 
-// Supporting types
-
-type Epoch = u32;
-
-implement Epoch {
-    fn current() -> Epoch {
-        Runtime.current_epoch()
-    }
-}
+// (The historical "Supporting types" local `Epoch` twin is GONE —
+// T0277 leg.  It shadowed the stdlib `core.mem.epoch.Epoch` with a
+// delegate to the `Runtime.current_epoch` stub, whose
+// is_initialized() channel probe null-dereferenced in Sender.try_send
+// — the whole reference_system red cluster.  The stdlib Epoch is the
+// one authority, and it reads the SAME scale allocation headers are
+// stamped from (cbgr_current_epoch — both tiers).)

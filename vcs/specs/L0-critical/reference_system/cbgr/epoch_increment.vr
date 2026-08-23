@@ -144,14 +144,8 @@ type Container is {
     inner: Heap<Int>,
 };
 
-type Epoch = u32;
-
-implement Epoch {
-    fn current() -> Epoch {
-        Runtime.current_epoch()
-    }
-
-    fn max_value() -> Epoch {
-        0xFFFFFFFF
-    }
-}
+// (Local `Epoch` twin removed — T0277 leg: it shadowed the stdlib
+// `core.mem.epoch.Epoch` with a delegate to the Runtime.current_epoch
+// stub whose channel probe null-derefs in Sender.try_send.  The
+// stdlib Epoch reads the same scale allocation headers are stamped
+// from — cbgr_current_epoch, both tiers.)
