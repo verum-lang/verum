@@ -186,14 +186,22 @@ impl<'s> CompilationPipeline<'s> {
                     std::sync::Arc::new(mono_module)
                 }
                 Err(diagnostics) => {
-                    // #45: VERUM_STRICT_MONO=1 (CI) turns the silent
-                    // fallback-to-unspecialized into a hard error so
-                    // monomorphization drift cannot pass a green build.
-                    if std::env::var("VERUM_STRICT_MONO").is_ok() {
+                    // T0693: strict BY DEFAULT.  Falling back to the
+                    // unspecialised module ships a binary whose generic
+                    // call sites resolve to the erased body — the
+                    // "plausible wrong answer" class.  `--lenient`
+                    // (VERUM_LENIENT=1) restores the old fallback;
+                    // VERUM_STRICT_MONO=1 forces this one site strict
+                    // even under a process-wide lenient, so existing
+                    // A/B recipes keep measuring exactly this site.
+                    if verum_common::strictness::is_strict(
+                        verum_common::strictness::Site::Mono,
+                    ) {
                         return Err(anyhow::anyhow!(
-                            "monomorphization failed under VERUM_STRICT_MONO ({} diagnostics): {:?}",
+                            "monomorphization failed ({} diagnostics): {:?} — {}",
                             diagnostics.len(),
-                            diagnostics
+                            diagnostics,
+                            verum_common::strictness::ESCAPE_HINT
                         ));
                     }
                     // Log warnings but fall back to unspecialized module
@@ -1004,11 +1012,19 @@ impl<'s> CompilationPipeline<'s> {
             // calls resolve to garbage at runtime, and the degraded
             // tiered pass pipeline masks the drift.  Strict mode makes
             // the drift a build error so CI catches the class.
-            if has_ir_issues && std::env::var("VERUM_STRICT_SIGNATURES").is_ok() {
+            // T0693: strict BY DEFAULT — an arity-collided function is
+            // forward-declared without a body, so the binary links and
+            // the call resolves to garbage at runtime.  Shipping that
+            // silently is the class this policy exists to end.
+            if has_ir_issues
+                && verum_common::strictness::is_strict(
+                    verum_common::strictness::Site::Signatures,
+                )
+            {
                 return Err(anyhow::anyhow!(
-                    "signature drift under VERUM_STRICT_SIGNATURES: \
-                     arity_collisions={}",
+                    "signature drift: arity_collisions={} — {}",
                     lowering.has_arity_collisions(),
+                    verum_common::strictness::ESCAPE_HINT
                 ));
             }
 

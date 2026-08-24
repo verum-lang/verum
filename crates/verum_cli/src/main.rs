@@ -315,6 +315,17 @@ enum Commands {
         )]
         strict_codegen: bool,
 
+        /// T0693: the process-wide escape hatch from strict-by-default.
+        /// Silent degradations (monomorphisation fallback, signature
+        /// drift, skipped bodies, const-zero call stubs) are build
+        /// errors unless this is set; per-site `VERUM_STRICT_<SITE>=1`
+        /// still forces one site strict for A/B measurement.
+        #[clap(
+            long,
+            help = "Allow degraded builds: silent fallbacks warn instead of failing (T0693)"
+        )]
+        lenient: bool,
+
  /// Set a lint to deny level (e.g., -D missing_intrinsic)
         #[clap(short = 'D', long = "deny", value_name = "LINT")]
         deny_lint: Vec<Text>,
@@ -3085,6 +3096,7 @@ fn run_command(cli: Cli) -> Result<()> {
             deny_warnings,
             strict_intrinsics,
             strict_codegen,
+            lenient,
             deny_lint,
             warn_lint,
             allow_lint,
@@ -3097,6 +3109,15 @@ fn run_command(cli: Cli) -> Result<()> {
             // sub-process compilations — picks it up via `LintConfig::default()`
             // without needing to thread the field through every signature.
             // Mirrors `VERUM_FULL_STDLIB` (#109) and `VERUM_NO_PARALLEL_ANALYZE`.
+            // T0693: `--lenient` is the ONE escape from strict-by-default;
+            // the policy in `verum_common::strictness` reads this env var,
+            // so the flag and the variable cannot drift apart.
+            if lenient {
+                // SAFETY: same single-threaded CLI startup as below.
+                unsafe {
+                    std::env::set_var("VERUM_LENIENT", "1");
+                }
+            }
             if strict_codegen {
                 // SAFETY: writing to the process environment is safe in single-
                 // threaded CLI startup; the flag is set before the pipeline
