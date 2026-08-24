@@ -1578,6 +1578,21 @@ impl SymbolGraph {
             std::collections::HashSet::new();
         let mut capped_leaves: std::collections::HashSet<String> =
             std::collections::HashSet::new();
+        // Fixed-point cold start: literals construct these types with
+        // no name the harvest could see (`[1,2,3]` is a List, `0..n` a
+        // Range, `"s"` a Text, `map{}`/`set{}` their containers,
+        // Some/Ok their sums), so they are live BEFORE any function is
+        // reached.  Without this, a chain built purely from capped
+        // bare methods (`[..].iter().map(..).next()`) had an empty
+        // queue, no `type:` edge ever fired, and the pairing never
+        // started.  Pairs only form against capped leaves, so a
+        // program with none (hello-world) pays nothing.
+        for t in [
+            "List", "Text", "Range", "RangeInclusive", "Maybe", "Result",
+            "Map", "Set",
+        ] {
+            live_types.insert(t.to_string());
+        }
         for seed in seeds {
             if let Some(i) = self.baked.function_index(seed) {
                 enqueue!(i, None);
@@ -1604,8 +1619,19 @@ impl SymbolGraph {
                 // T0701: a capped SCRIPT seed (bare `.dedup()` in user
                 // code) joins the pairing set — live `type:` carriers
                 // discovered during the walk pair against it exactly
-                // like capped graph-edge leaves.
-                capped_leaves.insert(seed.clone());
+                // like capped graph-edge leaves, and it pairs
+                // IMMEDIATELY against the pre-seeded literal types.
+                if capped_leaves.insert(seed.clone()) {
+                    let pairs: Vec<u32> = live_types
+                        .iter()
+                        .filter_map(|t| {
+                            self.baked.function_index(&format!("{t}.{seed}"))
+                        })
+                        .collect();
+                    for i in pairs {
+                        enqueue!(i, None);
+                    }
+                }
             }
             if !capped
                 && let Some(matches) = self.baked.leaf_matches(seed)
