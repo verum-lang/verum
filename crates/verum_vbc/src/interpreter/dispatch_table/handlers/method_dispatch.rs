@@ -539,45 +539,7 @@ pub(in super::super) fn handle_call_method(
                 return Ok(DispatchResult::Continue);
             }
             _ => {
-                // T0701: a generator is a NaN-BOXED handle, not a heap
-                // object — the dispatchers below read a type-id header
-                // THROUGH the receiver pointer, so any method this zone
-                // does not intercept used to walk the boxed id as an
-                // address and die SIGBUS (`three().take(2)`).  The
-                // adapter surface exists in the archive as
-                // `Generator.<method>` (materialised Iterator
-                // defaults); resolve it BY NAME — the only channel a
-                // tagless value can dispatch through — and push it as
-                // an ordinary call with the handle as `self`.
-                let qualified = format!("Generator.{}", bare_method_name);
-                if let Some(fid) = state.module.find_function_by_name(&qualified)
-                    && let Some(func) = state.module.get_function(fid)
-                    && func.bytecode_length > 0
-                {
-                    let reg_count = func.register_count;
-                    let return_pc = state.pc();
-                    let caller_base = state.reg_base();
-                    let new_base = state
-                        .call_stack
-                        .push_frame(fid, reg_count, return_pc, dst)?;
-                    state.registers.push_frame(reg_count);
-                    if let Some(w) = call_witness_sidecar.take() {
-                        state.call_stack.set_generic_witnesses(w);
-                    }
-                    state.registers.set(new_base, Reg(0), receiver);
-                    for i in 0..args.count {
-                        let v = state
-                            .registers
-                            .get(caller_base, Reg(args.start.0 + i as u16));
-                        state.registers.set(new_base, Reg(i as u16 + 1), v);
-                    }
-                    state.set_pc(func.bytecode_offset);
-                    return Ok(DispatchResult::Continue);
-                }
-                // Fall through to other dispatchers (the name-resolved
-                // path above is the only sound one for a boxed handle,
-                // but an unknown name still gets the standard
-                // "method not found" diagnostic rather than a crash).
+                // Unknown generator method - fall through to other dispatchers
             }
         }
     }
