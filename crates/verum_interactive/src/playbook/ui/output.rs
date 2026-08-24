@@ -245,7 +245,12 @@ impl<'a> OutputWidget<'a> {
                 }
                 lines
             }
-            CellOutput::Empty => vec![],
+            CellOutput::Empty => vec![Line::from(Span::styled(
+                "  (no output)",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            ))],
         }
     }
 }
@@ -341,7 +346,10 @@ pub fn output_line_count(output: &CellOutput) -> usize {
 /// Calculate the number of lines an output will use
 pub fn output_height(output: &CellOutput) -> usize {
     match output {
-        CellOutput::Empty => 0,
+        // A cell that produced nothing SAYS so — an empty panel is
+        // indistinguishable from a broken one, and that ambiguity is
+        // what "it ran, showed OK, and printed nothing" reports.
+        CellOutput::Empty => 1,
         CellOutput::Value { .. } => 1,
         CellOutput::Tensor { stats, preview, .. } => {
             let mut height = 1; // header

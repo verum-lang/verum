@@ -45,6 +45,17 @@ fn vbc_lens_shows_the_notebook_bytecode() {
     app.handle_key(key(KeyCode::Tab));
     let text = draw(&app);
     assert!(text.contains(" VBC "), "VBC tab is active:\n{text}");
+
+    // The disassembly compiles the whole grown module, so it runs on a
+    // worker (a UI-thread compile froze the frame while the reader
+    // pressed Tab). Poll for the answer the way the event loop does.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let mut text = draw(&app);
+    while std::time::Instant::now() < deadline && !text.contains("VBC Module") {
+        app.poll_execution();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        text = draw(&app);
+    }
     assert!(
         text.contains("VBC Module"),
         "the disassembly header is on screen:\n{text}"

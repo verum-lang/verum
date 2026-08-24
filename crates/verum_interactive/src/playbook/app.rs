@@ -71,11 +71,22 @@ pub struct PlaybookApp {
     /// notebook-as-module, from the same artifact path the
     /// interpreter runs.
     vbc_lens_text: String,
+    /// Lines the host captured from the process's stdout/stderr while
+    /// the TUI was up (T0858 audit): a compiler `println!`, a tracing
+    /// line, a worker panic. They used to land on the drawn frame and
+    /// looked like "the UI broke"; now they are data the Console lens
+    /// shows.
+    console_log: Option<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
     /// Tiers lens: verdict lines from the LAST `diff-tiers` judgment.
     tiers_lens_lines: Vec<String>,
     /// In-flight tier judgment — result channel, its temp source
     /// file (kept alive until the child reads it), start time.
     tiers_rx: Option<std::sync::mpsc::Receiver<Vec<String>>>,
+    /// The VBC lens compiles the whole grown module. On the UI thread
+    /// that froze the frame for as long as the compile took — pressing
+    /// Tab through the sidebar felt like the app had hung. It runs on
+    /// a worker now; this is its result channel.
+    vbc_rx: Option<std::sync::mpsc::Receiver<String>>,
     tiers_tmp: Option<tempfile::NamedTempFile>,
     tiers_started: Option<Instant>,
     /// The session journal (T0858 slice 5): every question this
@@ -151,8 +162,10 @@ impl PlaybookApp {
             show_help_overlay: false,
             gallery: None,
             vbc_lens_text: String::new(),
+            console_log: None,
             tiers_lens_lines: Vec::new(),
             tiers_rx: None,
+            vbc_rx: None,
             tiers_tmp: None,
             tiers_started: None,
             journal: Vec::new(),
@@ -186,6 +199,24 @@ impl PlaybookApp {
         }
     }
 
+    /// Receive the host's captured stdout/stderr buffer (see
+    /// `console_log`). Called once by the host before the event loop.
+    pub fn attach_console_log(
+        &mut self,
+        log: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    ) {
+        self.console_log = Some(log);
+    }
+
+    /// The captured console lines, newest last. Empty when the host
+    /// installed no capture (non-unix, or a test harness).
+    pub fn console_lines(&self) -> Vec<String> {
+        self.console_log
+            .as_ref()
+            .and_then(|l| l.lock().ok().map(|g| g.clone()))
+            .unwrap_or_default()
+    }
+
     /// True if a cell is executing in background.
     pub fn is_executing(&self) -> bool {
         self.pending_rx.is_some()
@@ -194,6 +225,7 @@ impl PlaybookApp {
     /// Poll for background execution results. Called each UI tick.
     pub fn poll_execution(&mut self) {
         self.poll_tiers_judge();
+        self.poll_vbc_lens();
         let rx = match &self.pending_rx {
             Some(r) => r,
             None => return,
@@ -213,7 +245,18 @@ impl PlaybookApp {
                 self.last_exec_time_ms = time_ms;
                 match verdict {
                     Ok(()) => {
-                        self.status_message = Some(format!("Done ({time_ms:.1}ms)"));
+                        // Say how much output arrived: "Done" with an
+                        // empty panel reads as a broken run, and the
+                        // count settles it at a glance.
+                        let lines = self
+                            .session
+                            .cells
+                            .get(cell_idx)
+                            .and_then(|c| c.output.as_ref())
+                            .map(crate::playbook::ui::output_line_count)
+                            .unwrap_or(0);
+                        self.status_message =
+                            Some(format!("Done ({time_ms:.1}ms · {lines} output lines)"));
                         self.journal_push(format!(
                             "run cell {} ({time_ms:.1}ms)",
                             cell_idx + 1
@@ -1676,13 +1719,42 @@ impl PlaybookApp {
             self.vbc_lens_text = String::new();
             return;
         }
-        // The engine's compile IS the artifact path cells execute on
-        // (T0858 slice 5) — the lens disassembles that module, not a
-        // second derivation.
-        self.vbc_lens_text = match self.session.engine.compile(&source) {
-            Ok(module) => verum_vbc::disassemble::disassemble_module(&module),
-            Err(e) => format!("; compile failed:\n; {e:?}"),
-        };
+        if self.vbc_rx.is_some() {
+            return; // one compile at a time
+        }
+        self.vbc_lens_text = "; disassembling…".to_string();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // A throwaway engine on the worker: the lens must not
+            // disturb the session's engine, and the compiler caches
+            // are process-wide so this is cheap.  The compile IS the
+            // artifact path cells execute on — the lens disassembles
+            // that module, never a second derivation.
+            let mut engine = verum_vbc::interpreter::ScriptEngine::new();
+            let text = match engine.compile(&source) {
+                Ok(module) => verum_vbc::disassemble::disassemble_module(&module),
+                Err(e) => format!("; compile failed:\n; {e:?}"),
+            };
+            let _ = tx.send(text);
+        });
+        self.vbc_rx = Some(rx);
+    }
+
+    /// Collect a finished VBC disassembly (see `refresh_vbc_lens`).
+    fn poll_vbc_lens(&mut self) {
+        let Some(rx) = &self.vbc_rx else { return };
+        match rx.try_recv() {
+            Ok(text) => {
+                self.vbc_lens_text = text;
+                self.vbc_rx = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.vbc_lens_text =
+                    "; disassembly worker stopped without an answer".to_string();
+                self.vbc_rx = None;
+            }
+        }
     }
 
     /// Start a background `verum diff-tiers --json` over the growing
@@ -1885,6 +1957,9 @@ impl PlaybookApp {
             last_peak_stack: self.last_peak_stack,
         };
 
+        // Snapshot the captured console once per frame (the reader
+        // thread appends concurrently).
+        let console = self.console_lines();
         let sidebar = SidebarWidget::new()
             .tab(self.sidebar_tab)
             .variables(&vars)
@@ -1894,7 +1969,8 @@ impl PlaybookApp {
             .arch_lines(&self.arch_lens_lines)
             .vbc_text(&self.vbc_lens_text)
             .tiers_lines(&self.tiers_lens_lines)
-            .journal_lines(&self.journal);
+            .journal_lines(&self.journal)
+            .console_lines(&console);
 
         frame.render_widget(sidebar, area);
     }

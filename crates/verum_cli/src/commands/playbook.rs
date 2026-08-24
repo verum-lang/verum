@@ -110,11 +110,23 @@ pub fn execute(options: PlaybookOptions) -> Result<()> {
 
 /// Run the TUI event loop
 fn run_tui(mut app: PlaybookApp, export_path: Option<PathBuf>, _no_color: bool) -> io::Result<()> {
+    // Stray writes (a compiler `println!`, a `tracing` line, a worker
+    // panic message) go to the same terminal ratatui draws on and
+    // shred the frame. Redirect them into a buffer the session can
+    // show, and draw on the duplicated real stdout — the screen
+    // becomes structurally unbreakable by other writers instead of
+    // depending on every writer's good behaviour.
+    let capture = super::tui_capture::TuiCapture::install();
+    app.attach_console_log(capture.log());
+
     // Setup terminal
     enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
+    let mut screen: Box<dyn io::Write + Send> = match capture.screen() {
+        Some(f) => Box::new(f.try_clone()?),
+        None => Box::new(io::stdout()),
+    };
+    execute!(screen, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(screen);
     let mut terminal = Terminal::new(backend)?;
 
     // Run the event loop
@@ -128,6 +140,7 @@ fn run_tui(mut app: PlaybookApp, export_path: Option<PathBuf>, _no_color: bool) 
         DisableMouseCapture
     )?;
     terminal.show_cursor()?;
+    drop(capture);
 
     // Export if requested
     if let Some(export_path) = export_path {
@@ -245,6 +258,15 @@ pub fn replay(file: &str, freeze_to: Option<&str>) -> Result<()> {
     use verum_interactive::playbook::persistence::{
         ReplayVerdict, chain_of_cells, load_playbook_file, replay_book,
     };
+
+    // The replay path runs cells through the SAME script engine the
+    // interactive session uses, and that engine gets its compiler
+    // through the process-wide hook.  `execute` installs it; this
+    // entry point is reached directly from the CLI dispatch and used
+    // to run without it — every replay answered
+    // "replay execution failed: CompilerUnavailable", which reads as
+    // a broken book rather than a missing install.  Idempotent.
+    verum_compiler::api::ensure_scripting_compiler_installed();
 
     let path = PathBuf::from(file);
     let book = load_playbook_file(&path)

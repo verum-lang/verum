@@ -27,6 +27,11 @@ pub enum SidebarTab {
     /// every question the session asked (runs, lens queries, tier
     /// judgments) with its chain address and price, append-only.
     Journal,
+    /// The Console lens: whatever the process wrote to stdout/stderr
+    /// while the TUI was up. Those writes used to land ON the drawn
+    /// frame; captured, they become readable diagnostics instead of
+    /// a smeared screen.
+    Console,
     DevTools,
 }
 
@@ -38,7 +43,8 @@ impl SidebarTab {
             Self::Arch => Self::Vbc,
             Self::Vbc => Self::Tiers,
             Self::Tiers => Self::Journal,
-            Self::Journal => Self::DevTools,
+            Self::Journal => Self::Console,
+            Self::Console => Self::DevTools,
             Self::DevTools => Self::Variables,
         }
     }
@@ -50,7 +56,8 @@ impl SidebarTab {
             Self::Vbc => Self::Arch,
             Self::Tiers => Self::Vbc,
             Self::Journal => Self::Tiers,
-            Self::DevTools => Self::Journal,
+            Self::Console => Self::Journal,
+            Self::DevTools => Self::Console,
         }
     }
     pub fn index(self) -> usize {
@@ -61,7 +68,8 @@ impl SidebarTab {
             Self::Vbc => 3,
             Self::Tiers => 4,
             Self::Journal => 5,
-            Self::DevTools => 6,
+            Self::Console => 6,
+            Self::DevTools => 7,
         }
     }
 }
@@ -127,6 +135,8 @@ pub struct SidebarWidget<'a> {
     tiers_lines: &'a [String],
     /// Pre-rendered Journal lines, append-only, newest last.
     journal_lines: &'a [String],
+    /// Captured stdout/stderr lines (the Console lens).
+    console_lines: &'a [String],
 }
 
 impl<'a> SidebarWidget<'a> {
@@ -141,6 +151,7 @@ impl<'a> SidebarWidget<'a> {
             vbc_text: "",
             tiers_lines: &[],
             journal_lines: &[],
+            console_lines: &[],
         }
     }
 
@@ -176,6 +187,11 @@ impl<'a> SidebarWidget<'a> {
         self.tiers_lines = lines;
         self
     }
+    pub fn console_lines(mut self, lines: &'a [String]) -> Self {
+        self.console_lines = lines;
+        self
+    }
+
     pub fn journal_lines(mut self, lines: &'a [String]) -> Self {
         self.journal_lines = lines;
         self
@@ -487,6 +503,7 @@ impl<'a> Widget for SidebarWidget<'a> {
             SidebarTab::Outline => " Cells ",
             SidebarTab::Arch => " Arch ",
             SidebarTab::Vbc => " VBC ",
+            SidebarTab::Console => " CONSOLE ",
             SidebarTab::Tiers => " Tiers ",
             SidebarTab::Journal => " Journal ",
             SidebarTab::DevTools => " Session ",
@@ -509,7 +526,9 @@ impl<'a> Widget for SidebarWidget<'a> {
         }
 
         // Tab bar — rename to meaningful labels
-        let tabs = Tabs::new(vec!["Vars", "Cells", "Arch", "VBC", "Tiers", "Jrnl", "Session"])
+        let tabs = Tabs::new(vec![
+            "Vars", "Cells", "Arch", "VBC", "Tiers", "Jrnl", "Con", "Session",
+        ])
             .select(self.tab.index())
             .style(Style::default().fg(Color::DarkGray))
             .highlight_style(
@@ -534,6 +553,7 @@ impl<'a> Widget for SidebarWidget<'a> {
             SidebarTab::Vbc => self.render_vbc(content, buf),
             SidebarTab::Tiers => self.render_tiers(content, buf),
             SidebarTab::Journal => self.render_journal(content, buf),
+            SidebarTab::Console => self.render_console(content, buf),
             SidebarTab::DevTools => self.render_devtools(content, buf),
         }
     }
@@ -594,6 +614,37 @@ impl SidebarWidget<'_> {
                 Style::default().fg(Color::Gray)
             };
             lines.push(Line::from(Span::styled(raw.to_string(), style)));
+        }
+        Paragraph::new(lines).render(area, buf);
+    }
+
+    /// Paint the Console lens: what the process wrote to stdout /
+    /// stderr while the session was up, newest at the bottom. This is
+    /// the diagnostic channel that used to be lost by landing on the
+    /// drawn frame.
+    fn render_console(&self, area: Rect, buf: &mut Buffer) {
+        let mut lines: Vec<Line> = Vec::new();
+        if self.console_lines.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  (quiet — nothing written outside the notebook)",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+        }
+        // Show the tail: a diagnostic burst is read from its end.
+        let height = area.height.max(1) as usize;
+        let start = self.console_lines.len().saturating_sub(height);
+        for raw in &self.console_lines[start..] {
+            let lower = raw.to_ascii_lowercase();
+            let style = if lower.contains("error") || lower.contains("panic") {
+                Style::default().fg(Color::Red)
+            } else if lower.contains("warn") {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            lines.push(Line::from(Span::styled(raw.clone(), style)));
         }
         Paragraph::new(lines).render(area, buf);
     }

@@ -77,6 +77,7 @@ pub mod llm_tactic;
 pub mod lsp;
 pub mod new;
 pub mod playbook;
+pub mod tui_capture;
 pub mod profile;
 /// `verum proof-draft` subcommand — surfaces the
 /// `verum_verification::proof_drafting::SuggestionEngine` for
