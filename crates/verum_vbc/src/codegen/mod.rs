@@ -17285,11 +17285,22 @@ impl VbcCodegen {
                 }
                 _ => false,
             };
-            if tail_is_gen
-                && matches!(
-                    func.return_type.as_ref().map(|t| &t.kind),
-                    Some(TypeKind::Existential { .. })
-                )
+            // T0701: a GENERATOR FUNCTION (`fn* fibonacci() -> Int`)
+            // declares its ITEM type in return position — the value it
+            // actually returns is a `Generator<Item>`.  The carried
+            // return name took the declaration literally, so
+            // `fibonacci().take(10)` dispatched `Int.take` on a
+            // NaN-boxed generator handle and panicked "not found".
+            // Same nominal patch as the existential arm below: the
+            // name channel says Generator, the item type stays in the
+            // descriptor's structural return.
+            let is_gen_fn = func.is_generator;
+            if is_gen_fn
+                || (tail_is_gen
+                    && matches!(
+                        func.return_type.as_ref().map(|t| &t.kind),
+                        Some(TypeKind::Existential { .. })
+                    ))
             {
                 let gen_tid = self.type_name_to_id.get("Generator").copied();
                 if std::env::var_os("VERUM_TRACE_RETMARK").is_some() {

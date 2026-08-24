@@ -4339,6 +4339,16 @@ pub(in super::super) fn handle_call_method(
                 .call_stack
                 .push_frame(fid, reg_count, return_pc, dst)?;
             state.registers.push_frame(reg_count);
+            // T0701: this resolved-by-name frame was the ONE CallM push
+            // that dropped the SetCallWitness sidecar — a
+            // `range(0,10).partition(..)` executed `Range.partition`
+            // here with an empty witness table, its `LoadT(Generic(C))`
+            // materialised a garbage type object, and the collected
+            // elements came back Some-wrapped (`peek` on the same shape
+            // walked a foreign fmt body and SIGSEGV'd).
+            if let Some(w) = call_witness_sidecar.take() {
+                state.call_stack.set_generic_witnesses(w);
+            }
             let arg_offset = if takes_self {
                 state.registers.set(new_base, Reg(0), receiver);
                 1u16
@@ -11719,6 +11729,27 @@ pub(super) fn dispatch_array_method(
                 return Ok(Some(Value::unit()));
             }
             let other_header = unsafe { heap::ObjectHeader::ref_or_stub(other_ptr) };
+            // T0701: the argument must actually BE an array-shaped
+            // collection.  `Extend.extend<I: Iterator<Item>>` takes ANY
+            // iterator, and this intercept read whatever it was handed
+            // through `get_array_length`/`get_array_element` — which,
+            // on an iterator STRUCT, walks the struct's fields: a
+            // `range(5, 7)` argument extended the list with
+            // `[5, 7, false]` (current/end/inclusive), a `MappedIter`
+            // pushed its inner iterator and its closure, and
+            // `extend_one(x)` — declared as `extend(once(x))` — pushed
+            // the `Maybe` field itself, so every `partition` /
+            // `unzip` / `extend_one` result came back Some-wrapped.
+            // Non-collections now fall through to the baked `.vr` body
+            // (`for item in iter { self.push(item) }`), which drives
+            // the iterator honestly.  Same closed-set discipline the
+            // `dedup` arm below already applies.
+            if !matches!(
+                other_header.type_id,
+                TypeId::LIST | TypeId::BYTE_LIST | TypeId::ARRAY | TypeId::BYTE_SLICE
+            ) {
+                return Ok(None);
+            }
             let other_len = get_array_length(other_ptr, other_header)?;
             // Collect elements from the other list first
             let mut other_elems = Vec::with_capacity(other_len);

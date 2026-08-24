@@ -14579,14 +14579,60 @@ impl VbcCodegen {
         // still-unbound slots of the sidecar vector (extending it to
         // the bound pid when the chains produced a shorter one).
         let sidecar_args: Option<Vec<crate::types::TypeRef>> = {
-            let ret_bindings: std::collections::BTreeMap<u32, crate::types::TypeRef> =
-                match (
+            // Descriptor selection MUST match the runtime dispatch
+            // target: `resolvable_fid` is a name-first lookup, so on
+            // `range(0,10).partition(..)` it handed back
+            // `MappedIter.partition` ([I,F,C#2,P]) while the runtime
+            // executes `Range.partition` ([T,C#1,P]) — the staged
+            // vector then filled slot 2 and left slot 1 a placeholder,
+            // and the body's `LoadT(Generic(1))` materialised a garbage
+            // type object (elements came back Some-wrapped; `peek` on
+            // the same shape walked into a foreign fmt body and
+            // SIGSEGV'd).  Prefer the RECEIVER-qualified descriptor
+            // (`<StaticRecvBase>.<method>`) and only then fall back to
+            // the bare-name resolution.
+            let ret_leg_desc_ret: Option<crate::types::TypeRef> = {
+                let recv_qualified = self
+                    .infer_expr_type_name(receiver)
+                    .map(|n| {
+                        let base = n
+                            .trim_start_matches('&')
+                            .trim_start_matches("mut ")
+                            .split('<')
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        let leaf = effective_method_name
+                            .rsplit('.')
+                            .next()
+                            .unwrap_or(effective_method_name.as_str());
+                        format!("{}.{}", base, leaf)
+                    })
+                    .and_then(|qname| {
+                        self.functions.iter().find_map(|f| {
+                            self.ctx
+                                .strings
+                                .get(f.descriptor.name.0 as usize)
+                                .filter(|n| {
+                                    n.as_str() == qname
+                                        || n.ends_with(&format!(".{qname}"))
+                                })
+                                .map(|_| f.descriptor.return_type.clone())
+                        })
+                    });
+                recv_qualified.or_else(|| {
                     resolvable_fid.and_then(|fid| {
                         self.functions
                             .iter()
                             .find(|f| f.descriptor.id.0 == fid)
                             .map(|f| f.descriptor.return_type.clone())
-                    }),
+                    })
+                })
+            };
+            let ret_bindings: std::collections::BTreeMap<u32, crate::types::TypeRef> =
+                match (
+                    ret_leg_desc_ret,
                     self.ctx.current_return_type_name.clone(),
                 ) {
                     (Some(ret_tr), Some(expected_name)) if ret_tr.is_generic() => {
