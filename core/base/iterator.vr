@@ -963,6 +963,75 @@ public type Iterator is protocol {
         }
         (left, right)
     }
+
+    // =========================================================================
+    // Transducers (T0701): these lived in a blanket inherent impl
+    // (`implement<I: Iterator> I { ... }`), which the compiler parses but
+    // never dispatches — the bake recorded the methods under the literal
+    // owner "I", so `range.transduce(...)` was "no method named" on every
+    // receiver.  The protocol body is the one canonical home for Iterator
+    // default methods (same as map/filter/fold above).
+    // =========================================================================
+    /// Apply a transducer to this iterator.
+    ///
+
+    /// Returns a new iterator that applies the transducer's transformations
+    /// in a single pass without intermediate collections.
+    ///
+
+    /// # Example
+    /// ```verum
+    /// let xform = Transducer.compose([
+    ///  Transducer.filter(|x| *x > 0),
+    ///  Transducer.map(|x| x * 2),
+    /// ]);
+    ///
+
+    /// let result = numbers.iter()
+    ///  .transduce(xform)
+    ///  .collect();
+    /// ```
+    fn transduce<B>(self, xform: Transducer<Self.Item, B>) -> TransducedIter<Self, B> {
+        TransducedIter {
+            source: self,
+            transform: xform.transform,
+            buffer: List.new(),
+        }
+    }
+
+    /// Apply a stateful transducer to this iterator.
+    fn transduce_stateful<B, S>(
+        self,
+        xform: StatefulTransducer<Self.Item, B, S>
+    ) -> StatefulTransducedIter<Self, B, S> {
+        StatefulTransducedIter {
+            source: self,
+            state: xform.initial_state,
+            transform: xform.transform,
+            buffer: List.new(),
+            done: false,
+        }
+    }
+
+    /// Fold with early termination support.
+    ///
+
+    /// Like regular fold, but the reducer can signal early termination
+    /// by returning `Reduced(acc)`.
+    fn reduce_with<R, F: fn(R, Self.Item) -> ReduceResult<R>>(
+        mut self,
+        init: R,
+        f: F
+    ) -> R {
+        let mut acc = init;
+        while let Maybe.Some(x) = self.next() {
+            match f(acc, x) {
+                ReduceResult.Continue(new_acc) => acc = new_acc,
+                ReduceResult.Reduced(final_acc) => return final_acc,
+            }
+        }
+        acc
+    }
 };
 
 // =============================================================================
@@ -4180,70 +4249,6 @@ public type StatefulTransducer<A, B, S> is {
     initial_state: S,
     transform: fn<R>(Reducer<B, R>, &mut S) -> Reducer<A, R>,
 };
-
-/// Extension methods for applying transducers to iterators.
-implement<I: Iterator> I {
-    /// Apply a transducer to this iterator.
-    ///
-
-    /// Returns a new iterator that applies the transducer's transformations
-    /// in a single pass without intermediate collections.
-    ///
-
-    /// # Example
-    /// ```verum
-    /// let xform = Transducer.compose([
-    ///  Transducer.filter(|x| *x > 0),
-    ///  Transducer.map(|x| x * 2),
-    /// ]);
-    ///
-
-    /// let result = numbers.iter()
-    ///  .transduce(xform)
-    ///  .collect();
-    /// ```
-    fn transduce<B>(self, xform: Transducer<Self.Item, B>) -> TransducedIter<Self, B> {
-        TransducedIter {
-            source: self,
-            transform: xform.transform,
-            buffer: List.new(),
-        }
-    }
-
-    /// Apply a stateful transducer to this iterator.
-    fn transduce_stateful<B, S>(
-        self,
-        xform: StatefulTransducer<Self.Item, B, S>
-    ) -> StatefulTransducedIter<Self, B, S> {
-        StatefulTransducedIter {
-            source: self,
-            state: xform.initial_state,
-            transform: xform.transform,
-            buffer: List.new(),
-            done: false,
-        }
-    }
-
-    /// Fold with early termination support.
-    ///
-
-    /// Like regular fold, but the reducer can signal early termination
-    /// by returning `Reduced(acc)`.
-    fn reduce_with<R, F: fn(R, Self.Item) -> ReduceResult<R>>(
-        mut self,
-        init: R,
-        f: F
-    ) -> R {
-        let mut acc = init;
-        while let Maybe.Some(x) = self.next() {
-            match f(acc, x) {
-                ReduceResult.Continue(new_acc) => acc = new_acc,
-                ReduceResult.Reduced(final_acc) => return final_acc,
-            }
-        }
-        acc
-    }
-}
 
 /// Iterator adapter for transduced iteration.
 ///

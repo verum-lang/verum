@@ -16586,6 +16586,29 @@ impl VbcCodegen {
                     Some(format!("dyn:{}", names.join("+")))
                 }
             }
+            // T0701: associated-type projections (`I.Item`,
+            // `Self.Item`) render in the canonical parseable spelling
+            // `::Item<Base>` (the same form `archive_metadata`'s
+            // TypeRef render and `parse_descriptor_type_string` agree
+            // on).  This arm used to fall through to `None`, which
+            // nulled the WHOLE carried name for any signature nesting
+            // a projection (`-> Maybe<&mut I.Item>` carried nothing,
+            // so the baked scheme lost the `&mut` that only the
+            // verbatim channel preserves — `peek_mut()` handed back a
+            // value where the caller expected a slot).
+            TypeKind::AssociatedType { base, assoc } => {
+                let b = self.extract_type_name_at(base, false)?;
+                Some(format!("::{}<{}>", assoc.name, b))
+            }
+            // The fast parser spells `I.Item` as Qualified (its
+            // AssociatedType twin appears on other paths) — same
+            // canonical render.
+            TypeKind::Qualified {
+                self_ty, assoc_name, ..
+            } => {
+                let b = self.extract_type_name_at(self_ty, false)?;
+                Some(format!("::{}<{}>", assoc_name.name, b))
+            }
             _ => None,
         }
     }
@@ -18079,7 +18102,8 @@ impl VbcCodegen {
             // scope; impl-level bounds render in the DENSE scope —
             // same layering as the signature rendering above.
             let fn_bound_for = |gname: &str,
-                                is_method_level: bool|
+                                is_method_level: bool,
+                                name_is_banded: bool|
              -> Option<TypeRef> {
                 use verum_ast::ty::{GenericParamKind, TypeBoundKind, TypeKind};
                 let probe = |gps: &verum_common::List<verum_ast::ty::GenericParam>|
@@ -18112,6 +18136,15 @@ impl VbcCodegen {
                 };
                 let ast_bound = if is_method_level {
                     probe(&func.generics)
+                } else if name_is_banded {
+                    // T0701 (inspect leg): the dense slot of a
+                    // COLLIDING name must never read the method's
+                    // bound — with no impl-scope generics in reach
+                    // (materialised protocol default methods) it
+                    // carries NO bound rather than the wrong one.
+                    self.current_impl_ast_generics
+                        .as_ref()
+                        .and_then(|gps| probe(gps))
                 } else {
                     self.current_impl_ast_generics
                         .as_ref()
@@ -18140,12 +18173,25 @@ impl VbcCodegen {
                 .collect();
             // Two phases: bound rendering borrows `self` immutably
             // (resolve_field_type_ref), interning needs `&mut self`.
+            // T0701 (inspect leg): a DENSE pid whose name has a shadow-band
+            // twin is the IMPL-level param BY CONSTRUCTION — the band exists
+            // exactly because the method redeclared the name.  The bare
+            // `fn_own_names.contains` test marked impl-F#1 method-level too,
+            // so BOTH F slots serialised the METHOD's `fn(..) -> B` bound;
+            // the extraction rule then pulled B from the RECEIVER'S stored
+            // impl-F value (`inspect`'s `fn(&Item) -> Unit` closure) and
+            // every `.inspect(..).map(|x| ..)` failed "expected Unit".
+            let banded_names: std::collections::HashSet<&str> = method_shadow_band
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect();
             let rendered: Vec<(String, u16, Option<TypeRef>)> = pid_ordered
                 .into_iter()
                 .map(|(gname, pid)| {
-                    let is_method_level =
-                        pid >= 0x8000 || fn_own_names.contains(&gname);
-                    let tb = fn_bound_for(&gname, is_method_level);
+                    let name_is_banded = banded_names.contains(gname.as_str());
+                    let is_method_level = pid >= 0x8000
+                        || (fn_own_names.contains(&gname) && !name_is_banded);
+                    let tb = fn_bound_for(&gname, is_method_level, name_is_banded);
                     (gname, pid, tb)
                 })
                 .collect();

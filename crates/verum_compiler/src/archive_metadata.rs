@@ -1128,6 +1128,14 @@ fn register_module_metadata(
                         || s.starts_with("&mut ")
                         || (s.starts_with('&') && !s.starts_with("&<")))
                         && !rendered_return.starts_with('&'))
+                    // T0701: a NESTED reference the TypeRef render
+                    // collapsed (`-> Maybe<&mut I.Item>` renders as
+                    // `Maybe<::Item<_>>`) is the same lossy class as
+                    // the top-level T0705 arm above — the scheme
+                    // consumer needs the `&mut` to type the payload as
+                    // a slot, and only the verbatim spelling still has
+                    // it.
+                    || (s.contains('&') && !rendered_return.contains('&'))
             });
         let return_type = match carried_return {
             Some(verbatim) => Text::from(verbatim),

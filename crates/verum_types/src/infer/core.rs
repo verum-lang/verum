@@ -873,7 +873,7 @@ impl TypeChecker {
     ///
     /// Only language primitives (Bool, Unit) and compiler intrinsics are included.
     pub fn new() -> Self {
-        Self {
+        let mut checker = Self {
             ctx: TypeContext::new(),
             unifier: Unifier::new(),
             refinement: RefinementChecker::new(Default::default()),
@@ -996,7 +996,29 @@ impl TypeChecker {
             inference_depth: Cell::new(0),
             resolved_call_targets: std::collections::HashMap::new(),
             deref_adjustments: std::collections::HashMap::new(),
-        }
+        };
+        checker.install_projection_resolver();
+        checker
+    }
+
+    /// T0701: give the unifier its associated-type projection resolver
+    /// (unify_inner case 3 — projection with a concrete base).  The
+    /// closure captures the SHARED protocol checker, so every impl
+    /// registered later (source decls, metadata lazy loads) is visible
+    /// at resolution time; `try_find_associated_type` carries its own
+    /// cycle detection.
+    fn install_projection_resolver(&mut self) {
+        let checker = self.protocol_checker.clone();
+        self.unifier.set_projection_resolver(std::sync::Arc::new(
+            move |base: &Type, assoc: &str| {
+                let assoc_text: Text = assoc.into();
+                let out = checker.read().try_find_associated_type(base, &assoc_text);
+                if std::env::var_os("VERUM_TRACE_PROJ").is_some() {
+                    eprintln!("[proj] {}::{} -> {:?}", base.to_text(), assoc, out.as_ref().map(|t| t.to_text()));
+                }
+                out
+            },
+        ));
     }
 
     /// Create a new type checker with stdlib metadata loaded from stdlib.vbc.
@@ -3240,11 +3262,15 @@ impl TypeChecker {
                         let p0 = if let crate::ty::Type::Function { params, .. } = &fn_ty {
                             params.first().map(|p| format!("{:?}", p)).unwrap_or_default()
                         } else { String::new() };
+                        let ret = if let crate::ty::Type::Function { return_type, .. } = &fn_ty {
+                            format!("{}", return_type.to_text())
+                        } else { String::new() };
                         eprintln!(
-                            "[implvc-set] site=core.rs:metadata method={} impl_count={} k={} p0={}",
+                            "[implvc-set] site=core.rs:metadata method={} impl_count={} k={} ret={} p0={}",
                             method_name.as_str(),
                             impl_count,
                             impl_k,
+                            &ret[..ret.len().min(90)],
                             &p0[..p0.len().min(120)]
                         );
                     }
@@ -3328,7 +3354,7 @@ impl TypeChecker {
     ///
     /// For compiling user code, use `new_with_core()` instead.
     pub fn with_minimal_context() -> Self {
-        Self {
+        let mut checker = Self {
             ctx: TypeContext::new_minimal(),
             unifier: Unifier::new(),
             refinement: RefinementChecker::new(Default::default()),
@@ -3450,7 +3476,9 @@ impl TypeChecker {
             inference_depth: Cell::new(0),
             resolved_call_targets: std::collections::HashMap::new(),
             deref_adjustments: std::collections::HashMap::new(),
-        }
+        };
+        checker.install_projection_resolver();
+        checker
     }
 
     /// Load stdlib types from metadata into the type context.

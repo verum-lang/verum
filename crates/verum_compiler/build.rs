@@ -1983,6 +1983,19 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         // also owns the TypeId constants and the TypeRef wire shape, both
         // of which the precompiler emits directly.
         "crates/verum_vbc/src/types.rs",
+        // T0701: the symbol-graph SIDECAR is part of the published
+        // artefact set (runtime.symbol_graph rides alongside
+        // runtime.vbca), and these two files decide what the graph
+        // CONTAINS — scan_module_symbols harvests the edge rows
+        // (including the `type:` return-carry markers) and
+        // symbol_graph_baked owns the wire encoding.  An edge-harvest
+        // change without this entry produced a fresh binary whose
+        // walker looked for `type:` edges in a sidecar baked before
+        // they existed — measured: `strings` found only the two code
+        // literals, zero data rows, and `.dedup()` on an adapter chain
+        // kept dying "method not found" through THREE rebuilds.
+        "crates/verum_compiler/src/archive_ctx_loader.rs",
+        "crates/verum_compiler/src/symbol_graph_baked.rs",
         // T0711 (measured trap, 2026-08-03): the VBC WIRE layer itself.
         // v2.10 PARAMNAME-CARRY changed serialize/deserialize/module/
         // format — none were in this list, so FOUR writer commits

@@ -134,6 +134,21 @@ pub struct Unifier {
     /// `transport (refl A) x ≡ x`, which is the point — they pay zero
     /// normalization cost in return.
     cubical_enabled: bool,
+    /// T0701: associated-type projection resolver hook.
+    ///
+    /// The projection arms of `unify_inner` promised three cases in
+    /// their comment; case 3 ("projection has concrete base → try to
+    /// resolve, then unify result") was never implemented, so
+    /// `::Item[Range<Int>]` vs `Int` fell through to the plain
+    /// Generic-vs-other mismatch (rendered `expected 'Item<Range<Int>>',
+    /// found 'Int'`) at every call site that used bare `unify` instead
+    /// of `unify_with_projections` — i.e. most of them.  The unifier
+    /// has no ProtocolChecker of its own, so InferenceContext installs
+    /// this closure at construction (over its shared checker); the
+    /// checker's `try_find_associated_type` carries its own cycle
+    /// detection.
+    projection_resolver:
+        Option<std::sync::Arc<dyn Fn(&Type, &str) -> Option<Type> + Send + Sync>>,
 }
 
 /// Default `unify_inner` recursion budget (#304). 50 frames ×
@@ -217,6 +232,7 @@ impl Unifier {
             self_type: None,
             context_bindings: IndexMap::new(),
             cubical_enabled: true,
+            projection_resolver: None,
         }
     }
 
@@ -1302,6 +1318,15 @@ impl Unifier {
     ///
     /// This ensures that type variables resolved in earlier unifications are
     /// properly reflected in later type comparisons.
+    /// T0701: install the associated-type projection resolver (see the
+    /// field doc).  Called once by InferenceContext construction.
+    pub fn set_projection_resolver(
+        &mut self,
+        resolver: std::sync::Arc<dyn Fn(&Type, &str) -> Option<Type> + Send + Sync>,
+    ) {
+        self.projection_resolver = Some(resolver);
+    }
+
     pub fn unify(&mut self, t1: &Type, t2: &Type, span: Span) -> Result<Substitution> {
         self.unify_count += 1;
 
@@ -3051,6 +3076,54 @@ impl Unifier {
                 let projection_var = TypeVar::fresh();
                 let subst = self.bind_var(projection_var, other, span)?;
                 Ok(subst)
+            }
+
+            // Case 3 (T0701): projection with a CONCRETE base — the case the
+            // comment above always promised and no arm implemented.  Resolve
+            // `::Item[Range<Int>]` → `Int` through the installed resolver and
+            // unify the result in place of the projection.  Two arms (not an
+            // or-pattern) so expected/found positions in a downstream
+            // mismatch stay honest.  No resolver installed, or the resolver
+            // answering None (no impl provides the associated type), falls
+            // through to the ordinary arms — the same honest mismatch as
+            // before.
+            (Generic { name, args }, other)
+                if name.as_str().starts_with("::")
+                    && !args.is_empty()
+                    && !Self::has_type_vars(&args[0])
+                    && self.projection_resolver.is_some() =>
+            {
+                let assoc = name.as_str().trim_start_matches("::").to_string();
+                let resolver = self.projection_resolver.clone();
+                if let Some(resolved) =
+                    resolver.and_then(|r| r(&args[0], &assoc))
+                {
+                    return self.unify_inner(&resolved, other, span);
+                }
+                Err(TypeError::Mismatch {
+                    expected: t2.to_text(),
+                    actual: t1.to_text(),
+                    span,
+                })
+            }
+            (other, Generic { name, args })
+                if name.as_str().starts_with("::")
+                    && !args.is_empty()
+                    && !Self::has_type_vars(&args[0])
+                    && self.projection_resolver.is_some() =>
+            {
+                let assoc = name.as_str().trim_start_matches("::").to_string();
+                let resolver = self.projection_resolver.clone();
+                if let Some(resolved) =
+                    resolver.and_then(|r| r(&args[0], &assoc))
+                {
+                    return self.unify_inner(other, &resolved, span);
+                }
+                Err(TypeError::Mismatch {
+                    expected: t2.to_text(),
+                    actual: t1.to_text(),
+                    span,
+                })
             }
 
             // Generic types (stdlib types like List<T>, Map<K,V>, Box<T>, etc.)

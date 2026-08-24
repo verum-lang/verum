@@ -1574,6 +1574,10 @@ impl SymbolGraph {
         // Seed expansion: a seed can be (1) an exact qualified
         // descriptor name, (2) a bare leaf shared by multiple
         // qualifieds, or (3) a bare type prefix. Walk all three.
+        let mut live_types: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        let mut capped_leaves: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         for seed in seeds {
             if let Some(i) = self.baked.function_index(seed) {
                 enqueue!(i, None);
@@ -1596,6 +1600,13 @@ impl SymbolGraph {
             let capped = !no_seed_method_cap
                 && bare_method_seeds.contains(seed.as_str())
                 && self.baked.leaf_match_count(seed) > max_bare_leaf_fanout;
+            if capped {
+                // T0701: a capped SCRIPT seed (bare `.dedup()` in user
+                // code) joins the pairing set — live `type:` carriers
+                // discovered during the walk pair against it exactly
+                // like capped graph-edge leaves.
+                capped_leaves.insert(seed.clone());
+            }
             if !capped
                 && let Some(matches) = self.baked.leaf_matches(seed)
             {
@@ -1647,14 +1658,41 @@ impl SymbolGraph {
         // program, only slow it.
         let no_exact_shortcut = std::env::var_os("VERUM_NO_EXACT_SHORTCUT").is_some();
 
+        // T0701 (adapter-method reachability): the bare-leaf cap's own
+        // grounding says "the receiver type's module is always reached
+        // … and register_module_filtered loads its impl methods" — but
+        // that register step is wanted-FILTERED, so a method reached
+        // ONLY as a capped bare leaf on a type reached ONLY as a
+        // return value (`.map()…​.dedup()`) was never loaded and died
+        // "method not found" at runtime.  Close exactly that
+        // intersection: `live_types` collects the `type:` return-carry
+        // marker edges (scan_module_symbols), `capped_leaves` collects
+        // the bare leaves the cap refused to fan, and every (T, m)
+        // pair with an exact `T.m` row is enqueued.  Bounded by
+        // |live types| × |capped leaves| O(1) lookups — no prefix
+        // fanout, so the hello-world closure stays untouched
+        // (measured: a naive `T.*` prefix fan here ballooned cold
+        // start 0.5 s → 36 s).
+
         macro_rules! fan_leaf {
             ($leaf:expr, $via:expr) => {{
                 let leaf: &str = $leaf;
-                if self.baked.leaf_match_count(leaf) <= max_bare_leaf_fanout
-                    && let Some(matches) = self.baked.leaf_matches(leaf)
-                {
-                    let ids: Vec<u32> = matches.collect();
-                    for i in ids {
+                if self.baked.leaf_match_count(leaf) <= max_bare_leaf_fanout {
+                    if let Some(matches) = self.baked.leaf_matches(leaf) {
+                        let ids: Vec<u32> = matches.collect();
+                        for i in ids {
+                            enqueue!(i, $via);
+                        }
+                    }
+                } else if !leaf.contains('.') && capped_leaves.insert(leaf.to_string()) {
+                    // New capped leaf: pair it against every live type.
+                    let pairs: Vec<u32> = live_types
+                        .iter()
+                        .filter_map(|t| {
+                            self.baked.function_index(&format!("{t}.{leaf}"))
+                        })
+                        .collect();
+                    for i in pairs {
                         enqueue!(i, $via);
                     }
                 }
@@ -1665,6 +1703,25 @@ impl SymbolGraph {
             modules.insert(self.baked.module_of_index(fidx));
             let callees: Vec<&str> = self.baked.callees(fidx).collect();
             for callee in callees {
+                // T0701: `type:T` marker edge (see scan_module_symbols)
+                // — the function RETURNS a T; pair the newly-live type
+                // against every capped bare leaf seen so far (and
+                // future leaves pair against it in fan_leaf!).
+                if let Some(tbase) = callee.strip_prefix("type:") {
+                    if live_types.insert(tbase.to_string()) {
+                        let pairs: Vec<u32> = capped_leaves
+                            .iter()
+                            .filter_map(|m| {
+                                self.baked
+                                    .function_index(&format!("{tbase}.{m}"))
+                            })
+                            .collect();
+                        for i in pairs {
+                            enqueue!(i, Some(fidx));
+                        }
+                    }
+                    continue;
+                }
                 // Direct qualified resolution — always exact, never
                 // fans, so it stays unconditional.
                 //
@@ -1891,6 +1948,40 @@ fn scan_module_symbols(module: &VbcModule) -> ModuleSymbolView {
             None => continue,
         };
         let mut callees: Vec<String> = Vec::new();
+        // T0701 (adapter-method reachability): record the RETURN type's
+        // base as a `type:` marker edge.  The bare-leaf fanout cap is
+        // grounded in "the receiver type's defining module is always
+        // reached, and its impl methods register with it" — but the
+        // register step is wanted-FILTERED, and a type reached only
+        // through a return value (`.map()` → MappedIter) never put its
+        // methods in `wanted`, so `.dedup()` on the adapter chain died
+        // "method not found" at runtime while the body sat in the
+        // decoded module.  The walker turns this edge into a
+        // `T.`-prefix fan (one type's methods — bounded), closing the
+        // ctor-invisibility gap without re-opening the 585-module
+        // blow-up the cap exists to prevent.
+        if let Some(ret_sid) = fn_desc.return_type_name
+            && let Some(ret_raw) = name_by_id.get(&ret_sid)
+        {
+            let base = ret_raw
+                .trim_start_matches('&')
+                .trim_start_matches("mut ")
+                .trim_start_matches("unsafe ")
+                .trim_start_matches("checked ")
+                .split('<')
+                .next()
+                .unwrap_or("")
+                .trim();
+            if !base.is_empty()
+                && base
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && base.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                && !verum_common::well_known_types::type_names::is_primitive_value_type(base)
+            {
+                callees.push(format!("type:{base}"));
+            }
+        }
         let body_start = fn_desc.bytecode_offset as usize;
         let body_end = body_start.saturating_add(fn_desc.bytecode_length as usize);
         if body_end <= module.bytecode.len() && body_end > body_start {
