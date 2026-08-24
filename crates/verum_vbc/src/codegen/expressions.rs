@@ -8036,34 +8036,9 @@ impl VbcCodegen {
         // (optionally behind references), so every method whose type
         // param sits inside the receiver's instantiation derived
         // nothing and the call never carried witnesses.
-        fn bind_generic(
-            param: &crate::types::TypeRef,
-            arg: &crate::types::TypeRef,
-            bindings: &mut std::collections::BTreeMap<u32, crate::types::TypeRef>,
-        ) {
-            use crate::types::TypeRef as TR;
-            match (param, arg) {
-                (TR::Generic(tp), concrete) => {
-                    if !matches!(concrete, TR::Generic(_)) {
-                        bindings.entry(tp.0 as u32).or_insert_with(|| concrete.clone());
-                    }
-                }
-                (TR::Reference { inner: pi, .. }, TR::Reference { inner: ai, .. }) => {
-                    bind_generic(pi, ai, bindings)
-                }
-                (TR::Reference { inner: pi, .. }, a) => bind_generic(pi, a, bindings),
-                (p, TR::Reference { inner: ai, .. }) => bind_generic(p, ai, bindings),
-                (
-                    TR::Instantiated { base: pb, args: pa },
-                    TR::Instantiated { base: ab, args: aa },
-                ) if pb == ab => {
-                    for (pp, aa_) in pa.iter().zip(aa.iter()) {
-                        bind_generic(pp, aa_, bindings);
-                    }
-                }
-                _ => {}
-            }
-        }
+        // bind_generic hoisted to module scope as `bind_generic_free`
+        use bind_generic_free as bind_generic;
+
         let mut bindings: std::collections::BTreeMap<u32, crate::types::TypeRef> =
             std::collections::BTreeMap::new();
         for (i, ptr) in param_trs.iter().enumerate() {
@@ -8163,7 +8138,7 @@ impl VbcCodegen {
             // Archive callees have no self.functions descriptor — the
             // carry-derived name (or empty) plus the raw id keeps the
             // bind outcome visible for them too.
-            if nm.contains("poll_sync") || nm.contains("ready") || nm.is_empty() || nm.contains("fmt") || nm.contains("collect") {
+            if nm.contains("poll_sync") || nm.contains("ready") || nm.is_empty() || nm.contains("fmt") || nm.contains("collect") || nm.contains("partition") {
                 eprintln!(
                     "[mono-record] '{}' id={} param_trs={:?} nargs={} bindings={:?}",
                     nm, func_id, param_trs, args.len(), bindings
@@ -8226,6 +8201,25 @@ impl VbcCodegen {
             && let Ok(v) = name.parse::<i64>()
         {
             return Some(crate::types::TypeRef::ConstValue(v));
+        }
+        // T0701: tuple spellings (`(List<Int>, List<Int>)` from the
+        // widened let-annotation stash) parse structurally so the
+        // return-vs-annotation witness leg can bind a `-> (C, C)`
+        // descriptor return against them.  A single parenthesised part
+        // is transparent; any unparseable element fails the WHOLE
+        // tuple (arity honesty — same rule as the descriptor-string
+        // parser).
+        if name.starts_with('(') && name.ends_with(')') && name.len() > 2 {
+            let inner = &name[1..name.len() - 1];
+            let parts = Self::split_top_level_commas(inner);
+            if parts.len() == 1 {
+                return self.type_name_to_type_ref_mono(parts[0].trim());
+            }
+            let elems: Option<Vec<crate::types::TypeRef>> = parts
+                .into_iter()
+                .map(|p| self.type_name_to_type_ref_mono(p.trim()))
+                .collect();
+            return elems.map(crate::types::TypeRef::Tuple);
         }
         if let Some(lt) = name.find('<') {
             let base_name = name[..lt].trim();
@@ -14570,6 +14564,83 @@ impl VbcCodegen {
                         .iter()
                         .any(|t| !matches!(t, crate::types::TypeRef::Generic(_)))
             });
+
+        // T0701 (return-only method witnesses): a protocol method whose
+        // generic appears ONLY in its return (`partition<C: Default +
+        // Extend<..>>(..) -> (C, C)` — `C.default()` in the body) gets
+        // nothing from the chains above: the receiver instantiation
+        // carries [I, F] and the args carry P, so the C slot stays a
+        // placeholder, the callee's `LoadT(Generic(C))` loads nil, and
+        // the legacy default fabricates an Int — `extend_one` then
+        // "not found on Int".  The merged archive descriptor carries
+        // the STRUCTURAL return (`Tuple([Generic(2), Generic(2)])`),
+        // and `compile_let` stashes the annotation in
+        // `current_return_type_name`; bind them and fill ONLY the
+        // still-unbound slots of the sidecar vector (extending it to
+        // the bound pid when the chains produced a shorter one).
+        let sidecar_args: Option<Vec<crate::types::TypeRef>> = {
+            let ret_bindings: std::collections::BTreeMap<u32, crate::types::TypeRef> =
+                match (
+                    resolvable_fid.and_then(|fid| {
+                        self.functions
+                            .iter()
+                            .find(|f| f.descriptor.id.0 == fid)
+                            .map(|f| f.descriptor.return_type.clone())
+                    }),
+                    self.ctx.current_return_type_name.clone(),
+                ) {
+                    (Some(ret_tr), Some(expected_name)) if ret_tr.is_generic() => {
+                        let stripped = expected_name
+                            .trim_start_matches('&')
+                            .trim_start_matches("mut ")
+                            .trim();
+                        let mut b = std::collections::BTreeMap::new();
+                        let expected_tr = self.type_name_to_type_ref_mono(stripped);
+                        if let Some(ref etr) = expected_tr {
+                            bind_generic_free(&ret_tr, etr, &mut b);
+                        }
+                        if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
+                            eprintln!(
+                                "[tpcall] ret-leg ret={:?} expected='{}' parsed={} bound={:?}",
+                                ret_tr,
+                                stripped,
+                                expected_tr.is_some(),
+                                b.keys().collect::<Vec<_>>()
+                            );
+                        }
+                        b
+                    }
+                    other => {
+                        if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
+                            eprintln!(
+                                "[tpcall] ret-leg SKIP have_ret={} have_expected={}",
+                                other.0.is_some(),
+                                other.1.is_some()
+                            );
+                        }
+                        std::collections::BTreeMap::new()
+                    }
+                };
+            if ret_bindings.is_empty() {
+                sidecar_args
+            } else {
+                let max_pid = *ret_bindings.keys().next_back().unwrap() as usize;
+                let mut v = sidecar_args.unwrap_or_default();
+                while v.len() <= max_pid {
+                    let i = v.len();
+                    v.push(crate::types::TypeRef::Generic(
+                        crate::types::TypeParamId(i as u16),
+                    ));
+                }
+                for (pid, tr) in ret_bindings {
+                    let slot = &mut v[pid as usize];
+                    if matches!(slot, crate::types::TypeRef::Generic(_)) {
+                        *slot = tr;
+                    }
+                }
+                Some(v)
+            }
+        };
 
         if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
             eprintln!(
@@ -42764,5 +42835,45 @@ mod function_type_arity_tests {
         assert_eq!(VbcCodegen::function_type_arity(""), None);
         // Unterminated — a truncated type name must not be read as an arity.
         assert_eq!(VbcCodegen::function_type_arity("fn(Int"), None);
+    }
+}
+
+/// Structural generic binder: walk `param` against `arg`, binding
+///每 `Generic(pid)` to the concrete counterpart (first-wins).  Hoisted
+/// from `derive_callsite_type_args` so the CallM sidecar's
+/// return-vs-annotation leg (T0701) shares the ONE binder.
+fn bind_generic_free(
+    param: &crate::types::TypeRef,
+    arg: &crate::types::TypeRef,
+    bindings: &mut std::collections::BTreeMap<u32, crate::types::TypeRef>,
+        ) {
+    use crate::types::TypeRef as TR;
+    match (param, arg) {
+        (TR::Generic(tp), concrete) => {
+            if !matches!(concrete, TR::Generic(_)) {
+                bindings.entry(tp.0 as u32).or_insert_with(|| concrete.clone());
+            }
+}
+        // T0701: tuple returns (`partition -> (C, C)`) bind
+        // element-wise against a tuple annotation.
+        (TR::Tuple(pe), TR::Tuple(ae)) if pe.len() == ae.len() => {
+            for (p, a) in pe.iter().zip(ae.iter()) {
+                bind_generic_free(p, a, bindings);
+            }
+        }
+        (TR::Reference { inner: pi, .. }, TR::Reference { inner: ai, .. }) => {
+            bind_generic_free(pi, ai, bindings)
+}
+        (TR::Reference { inner: pi, .. }, a) => bind_generic_free(pi, a, bindings),
+        (p, TR::Reference { inner: ai, .. }) => bind_generic_free(p, ai, bindings),
+        (
+            TR::Instantiated { base: pb, args: pa },
+            TR::Instantiated { base: ab, args: aa },
+        ) if pb == ab => {
+            for (pp, aa_) in pa.iter().zip(aa.iter()) {
+                bind_generic_free(pp, aa_, bindings);
+            }
+}
+        _ => {}
     }
 }

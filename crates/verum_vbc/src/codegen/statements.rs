@@ -1183,11 +1183,22 @@ impl VbcCodegen {
             }
         }
         let saved_return_type = if let Some(ty) = ty {
-            extract_let_variant_hint(self, ty).map(|base| {
-                let saved = self.ctx.current_return_type_name.clone();
-                self.ctx.current_return_type_name = Some(base);
-                saved
-            })
+            extract_let_variant_hint(self, ty)
+                // T0701 (return-only method witnesses): annotations with
+                // no BASE name (`let (l, r): (List<Int>, List<Int>) =
+                // …partition(..)`) stashed nothing, so the CallM
+                // sidecar's return-vs-annotation leg had no expected
+                // type and the callee's return-only generic (`C` in
+                // `-> (C, C)`) defaulted at runtime.  Fall back to the
+                // full structural render — variant-disambig consumers
+                // match variant/parent names and simply never match a
+                // tuple spelling, so the wider stash is inert for them.
+                .or_else(|| self.extract_type_name(ty))
+                .map(|base| {
+                    let saved = self.ctx.current_return_type_name.clone();
+                    self.ctx.current_return_type_name = Some(base);
+                    saved
+                })
         } else {
             None
         };

@@ -3293,10 +3293,39 @@ impl VbcCodegen {
                 }
             }
 
-            // Compile the function body
+            // Compile the function body.
+            //
+            // T0701 (LoadT pid desync): the descriptor numbers generics
+            // impl-first ([I#0, F#1, C#2, P#3] on `MappedIter.partition`
+            // — GENERICNAME-CARRY), but this loop cleared the impl
+            // prefix, so `compile_function` numbered the METHOD's own
+            // generics from 0 and the body's `C.default()` emitted
+            // `LoadT(Generic(0))` — reading the I slot of the witness
+            // vector the call site staged against the descriptor's
+            // numbering.  Pre-seed the parent type's own params exactly
+            // as `compile_item` does for real impl blocks
+            // (compile_function APPENDS the method's generics after
+            // them).
             self.ctx.generic_type_params.clear();
             self.ctx.generic_type_params_ordered.clear();
             self.ctx.const_generic_params.clear();
+            if let Some(&parent_tid) = self.type_name_to_id.get(type_name.as_str()) {
+                let impl_names: Vec<String> = self
+                    .type_by_id(parent_tid)
+                    .map(|td| {
+                        td.type_params
+                            .iter()
+                            .filter_map(|tp| {
+                                self.ctx.strings.get(tp.name.0 as usize).cloned()
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                for n in impl_names {
+                    self.ctx.generic_type_params.insert(n.clone());
+                    self.ctx.generic_type_params_ordered.push(n);
+                }
+            }
             if let Err(e) = self.compile_function(&default_func, Some(&type_name)) {
                 // Skip - some default methods may have unresolvable dependencies
                 // (e.g., FFI functions, external symbols not available in VBC).

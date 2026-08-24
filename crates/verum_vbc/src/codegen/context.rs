@@ -897,6 +897,13 @@ pub struct ClosureCompilationContext {
     pub defer_stack: Vec<Vec<DeferInfo>>,
     /// Saved variable type names (critical for method resolution).
     pub variable_type_names: HashMap<String, String>,
+    /// T0701: the let-annotation / return-context stash.  Closure
+    /// compilation runs begin_function/end_function INSIDE an
+    /// expression, and end_function nulls this channel — the sidecar's
+    /// return-vs-annotation witness leg then saw nothing for any call
+    /// AFTER a closure argument in the same chain
+    /// (`…map(|x| ..).partition(..)`).
+    pub current_return_type_name: Option<String>,
     /// Saved reference-binding names (for the `*reference` Deref lowering).
     pub reference_bindings: std::collections::HashSet<String>,
     /// Saved object-ref param registers (Pillar 1 typed-ref emission) —
@@ -4200,6 +4207,7 @@ impl CodegenContext {
             loop_stack: self.loop_stack.clone(),
             defer_stack: self.defer_stack.clone(),
             variable_type_names: self.variable_type_names.clone(),
+            current_return_type_name: self.current_return_type_name.clone(),
             reference_bindings: self.reference_bindings.clone(),
             object_ref_param_regs: self.object_ref_param_regs.clone(),
         }
@@ -4211,6 +4219,7 @@ impl CodegenContext {
     /// labels, forward_jumps, loop_stack, and defer_stack.
     pub fn restore_closure_context(&mut self, saved: ClosureCompilationContext) {
         self.label_counter = saved.label_counter;
+        self.current_return_type_name = saved.current_return_type_name;
         self.labels = saved.labels;
         self.forward_jumps = saved.forward_jumps;
         self.loop_stack = saved.loop_stack;
