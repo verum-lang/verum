@@ -1141,6 +1141,18 @@ pub struct VbcCodegen {
     ///
     /// Stored as (func_decl, type_name) pairs.
     pending_default_methods: Vec<(verum_ast::FunctionDecl, String)>,
+    /// T0701 (default-steals-slot class): default-method
+    /// MATERIALISATION registrations, deferred to
+    /// `compile_pending_default_methods` (which runs after the WHOLE
+    /// collect phase).  Registering them inline during the impl-block
+    /// walk let a no-override sibling block's materialised default
+    /// claim the unsuffixed `<Type>.<method>` slot before the explicit
+    /// override in a LATER block was seen — `Range.size_hint`
+    /// dispatched to the `(0, None)` stub while the real body sat
+    /// under `#impl10`.  Deferral makes slot assignment
+    /// declaration-order-independent: every explicit body registers
+    /// first, and a default only fills a still-empty slot.
+    pending_default_registrations: Vec<(verum_ast::FunctionDecl, String)>,
 
     /// Blanket protocol implementations: `implement<T: BaseProto> DerivedProto for T {}`.
     ///
@@ -2335,6 +2347,7 @@ impl VbcCodegen {
             context_names: Vec::new(),
             // Pending default protocol methods for deferred compilation
             pending_default_methods: Vec::new(),
+            pending_default_registrations: Vec::new(),
             blanket_impls: Vec::new(),
             // Static variable initializer functions (become global constructors)
             static_init_functions: Vec::new(),
@@ -3119,8 +3132,10 @@ impl VbcCodegen {
                     if self.ctx.lookup_function(&full_method_name).is_some() {
                         continue;
                     }
-                    self.register_impl_function(body_func, type_name)?;
-                    self.pending_default_methods
+                    // T0701: deferred like the plain default-method
+                    // materialisation below — explicit bodies from
+                    // LATER blocks must win the unsuffixed slot.
+                    self.pending_default_registrations
                         .push((body_func.clone(), type_name.to_string()));
                 }
                 per_proto_overrides
@@ -3165,8 +3180,13 @@ impl VbcCodegen {
                         continue;
                     }
 
-                    self.register_impl_function(default_func, type_name)?;
-                    self.pending_default_methods
+                    // T0701: registration DEFERRED (see
+                    // `pending_default_registrations`) so an explicit
+                    // override in a LATER sibling impl block still
+                    // claims the unsuffixed dispatch slot; the default
+                    // only fills slots still empty after the whole
+                    // collect phase.
+                    self.pending_default_registrations
                         .push((default_func.clone(), type_name.to_string()));
                 }
             }
@@ -3236,6 +3256,22 @@ impl VbcCodegen {
     /// external symbols (FFI, intrinsics not yet available in VBC) that
     /// can't compile in every load context.
     pub fn compile_pending_default_methods(&mut self) -> CodegenResult<()> {
+        // T0701: late-register the deferred default-method
+        // materialisations FIRST — the whole collect phase has run, so
+        // every explicit impl body already owns its unsuffixed slot
+        // and a default only fills slots that are still empty.
+        let deferred = std::mem::take(&mut self.pending_default_registrations);
+        for (default_func, type_name) in deferred {
+            let full_method_name =
+                format!("{}.{}", type_name, default_func.name.name);
+            if self.ctx.lookup_function(&full_method_name).is_some() {
+                continue;
+            }
+            self.register_impl_function(&default_func, &type_name)?;
+            self.pending_default_methods
+                .push((default_func, type_name));
+        }
+
         // Take ownership of pending methods to avoid borrow conflicts
         let pending = std::mem::take(&mut self.pending_default_methods);
 
