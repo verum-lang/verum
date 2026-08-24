@@ -8163,7 +8163,7 @@ impl VbcCodegen {
             // Archive callees have no self.functions descriptor — the
             // carry-derived name (or empty) plus the raw id keeps the
             // bind outcome visible for them too.
-            if nm.contains("poll_sync") || nm.contains("ready") || nm.is_empty() || nm.contains("fmt") {
+            if nm.contains("poll_sync") || nm.contains("ready") || nm.is_empty() || nm.contains("fmt") || nm.contains("collect") {
                 eprintln!(
                     "[mono-record] '{}' id={} param_trs={:?} nargs={} bindings={:?}",
                     nm, func_id, param_trs, args.len(), bindings
@@ -22877,7 +22877,6 @@ impl VbcCodegen {
         repeat_init: Option<&Expr>,
         list_elems: Option<&verum_common::List<Expr>>,
     ) -> CodegenResult<Reg> {
-        use crate::instruction::SystemSubOpcode;
         let result = self.ctx.alloc_temp();
 
         if elem_size == 1 {
@@ -25196,7 +25195,6 @@ impl VbcCodegen {
     /// references through fields, method calls, or qualified paths
     /// fall through to the existing helpers.
     fn try_compile_static_mut_addr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
-        use crate::instruction::SystemSubOpcode;
 
         // Unwrap parenthesized expressions.
         let expr = {
@@ -25303,7 +25301,6 @@ impl VbcCodegen {
     ///
     /// Returns `Some(reg)` if the pattern was detected and compiled, `None` otherwise.
     fn try_compile_byte_array_element_addr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
-        use crate::instruction::SystemSubOpcode;
 
         // Unwrap parenthesized expressions: (&arr[idx]) -> &arr[idx]
         let expr = {
@@ -39277,6 +39274,25 @@ impl VbcCodegen {
         descriptor.locals_count = captures.len() as u16;
         descriptor.is_generator = true;
         descriptor.suspend_point_count = suspend_points;
+        // T0658: the captures ARE the parameters — the body reads them
+        // as r0..r(k-1) and GenCreate passes them as the arg range.
+        // Tier 0 never consults `params` (it copies the arg registers
+        // straight into the generator frame), but Tier 1 derives the
+        // LLVM signature from `params`: with this vector empty the body
+        // compiled as `void ()`, every capture read collapsed to
+        // constant 0, and `gen{ i for i in 0..n }` iterated 0..0 —
+        // a silently EMPTY generator for any capturing body.  INT is
+        // the honest type here (NaN-boxed i64 carries every value).
+        for cname in captures {
+            let pname_id = crate::types::StringId(self.intern_string(cname));
+            descriptor.params.push(crate::module::ParamDescriptor {
+                name: pname_id,
+                type_ref: crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
+                is_mut: false,
+                default: None,
+                type_name: crate::types::StringId::EMPTY,
+            });
+        }
 
         let vbc_func = crate::module::VbcFunction::new(descriptor, gen_instructions);
         self.functions.push(vbc_func);

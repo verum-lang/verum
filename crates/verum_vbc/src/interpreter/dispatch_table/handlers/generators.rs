@@ -42,6 +42,12 @@ pub(in super::super) fn handle_generator_create(
     let gen_id = state
         .generators
         .create_with_args(func_id, reg_count, initial_args);
+    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCalls) {
+        eprintln!(
+            "[gen-create] func_id={} reg_count={} gen_id={}",
+            func_id.0, reg_count, gen_id.0
+        );
+    }
 
     // Return generator as a Value
     state.set_reg(dst, Value::from_generator(gen_id.0));

@@ -490,106 +490,25 @@ pub(in super::super) fn handle_call_method(
         let gen_id = GeneratorId(receiver.as_generator_id());
         match bare_method_name.as_str() {
             "next" => {
-                // Generator.next() -> Option<T>
-                // Reuse the GenNext handler logic
-                let _gen_val = receiver;
-
-                // Check generator status
-                let (func_id, status, reg_count) = {
-                    let generator = state.generators.get(gen_id).ok_or(
-                        InterpreterError::InvalidGeneratorId {
-                            generator_id: gen_id,
-                        },
-                    )?;
-
-                    if generator.is_completed() {
-                        // Return None - generator exhausted
-                        state.set_reg(dst, Value::nil());
-                        return Ok(DispatchResult::Continue);
-                    }
-
-                    (generator.func_id, generator.status, generator.reg_count)
+                // Generator.next() -> Maybe<T>, via the ONE resume
+                // carrier (`resume_generator_step`): run the body in a
+                // NESTED dispatch loop until it yields or completes,
+                // then wrap the outcome as Some(v)/None.
+                //
+                // T0658: the old arm pushed the frame with `return_pc =
+                // resume_pc` and returned Continue, so the body ran in
+                // the CALLER's loop — its first Yield propagated
+                // `DispatchResult::Yield` out of the top-level loop and
+                // silently ENDED THE PROGRAM (exit 0 mid-main) on
+                // `for v in make_gen(n)`.  It also answered exhaustion
+                // with `Value::nil()`, which the desugared while-let's
+                // `IsVar tag=None` cannot match.
+                let stepped = resume_generator_step(state, gen_id, dst)?;
+                let out = match stepped {
+                    Some(v) => make_some_value(state, v)?,
+                    None => make_none_value(state)?,
                 };
-
-                // Get function info
-                let func = state
-                    .module
-                    .get_function(func_id)
-                    .ok_or(InterpreterError::FunctionNotFound(func_id))?;
-                let bytecode_offset = func.bytecode_offset;
-
-                use crate::interpreter::state::GeneratorStatus;
-
-                // Check if we need to restore state from a previous yield
-                let (resume_pc, restore_registers, restore_contexts): (
-                    u32,
-                    Vec<Value>,
-                    Vec<crate::interpreter::state::ContextEntry>,
-                ) = match status {
-                    GeneratorStatus::Created => {
-                        // First resume - restore initial arguments
-                        let generator = state.generators.get(gen_id).ok_or(
-                            InterpreterError::InvalidGeneratorId {
-                                generator_id: gen_id,
-                            },
-                        )?;
-                        let initial_args = generator.saved_registers.clone();
-                        (bytecode_offset, initial_args, Vec::new())
-                    }
-                    GeneratorStatus::Yielded => {
-                        let generator = state.generators.get(gen_id).ok_or(
-                            InterpreterError::InvalidGeneratorId {
-                                generator_id: gen_id,
-                            },
-                        )?;
-                        let resume_pc = if generator.saved_pc > 0 {
-                            generator.saved_pc
-                        } else {
-                            bytecode_offset
-                        };
-                        let restore_registers = generator.saved_registers.clone();
-                        let restore_contexts = generator.saved_contexts.clone();
-                        (resume_pc, restore_registers, restore_contexts)
-                    }
-                    GeneratorStatus::Running => {
-                        return Err(InterpreterError::GeneratorNotResumable {
-                            generator_id: gen_id,
-                            status: "Running",
-                        });
-                    }
-                    GeneratorStatus::Completed => {
-                        state.set_reg(dst, Value::nil());
-                        return Ok(DispatchResult::Continue);
-                    }
-                };
-
-                // Push generator frame
-                state
-                    .call_stack
-                    .push_frame(func_id, reg_count, resume_pc, dst)?;
-                state.registers.push_frame(reg_count);
-                if let Some(w) = call_witness_sidecar.take() {
-                    state.call_stack.set_generic_witnesses(w);
-                }
-
-                // Restore registers
-                let new_reg_base = state.reg_base();
-                for (i, val) in restore_registers.iter().enumerate() {
-                    state.registers.set(new_reg_base, Reg(i as u16), *val);
-                }
-
-                // Restore contexts
-                if !restore_contexts.is_empty() {
-                    state.context_stack.restore_entries(restore_contexts);
-                }
-
-                // Mark generator as running
-                if let Some(g) = state.generators.get_mut(gen_id) {
-                    g.status = GeneratorStatus::Running;
-                }
-                state.current_generator = Some(gen_id);
-                state.set_pc(resume_pc);
-
+                state.set_reg(dst, out);
                 return Ok(DispatchResult::Continue);
             }
             "has_next" => {
@@ -607,124 +526,16 @@ pub(in super::super) fn handle_call_method(
             }
             "collect" => {
                 // Generator.collect() -> List<T>
-                // Run the generator to completion, collecting all yielded values into a list.
-                use crate::interpreter::state::GeneratorStatus;
-                let mut values = Vec::new();
-                let entry_depth = state.call_stack.depth();
-
-                loop {
-                    // Check if generator can resume
-                    if !state
-                        .generators
-                        .get(gen_id)
-                        .map(|g| g.can_resume())
-                        .unwrap_or(false)
-                    {
-                        break;
-                    }
-
-                    let (func_id, status, reg_count) = {
-                        let generator = state.generators.get(gen_id).ok_or(
-                            InterpreterError::InvalidGeneratorId {
-                                generator_id: gen_id,
-                            },
-                        )?;
-                        (generator.func_id, generator.status, generator.reg_count)
-                    };
-
-                    let (resume_pc, restore_regs, restore_contexts) = match status {
-                        GeneratorStatus::Created => {
-                            let generator = state.generators.get(gen_id).ok_or(
-                                InterpreterError::InvalidGeneratorId {
-                                    generator_id: gen_id,
-                                },
-                            )?;
-                            (0u32, generator.saved_registers.clone(), Vec::new())
-                        }
-                        GeneratorStatus::Yielded => {
-                            let generator = state.generators.get(gen_id).ok_or(
-                                InterpreterError::InvalidGeneratorId {
-                                    generator_id: gen_id,
-                                },
-                            )?;
-                            (
-                                generator.saved_pc,
-                                generator.saved_registers.clone(),
-                                generator.saved_contexts.clone(),
-                            )
-                        }
-                        _ => break,
-                    };
-
-                    // Mark as Running
-                    if let Some(g) = state.generators.get_mut(gen_id) {
-                        g.status = GeneratorStatus::Running;
-                    }
-
-                    // Set up the generator's frame (mirroring IterNext generator path)
-                    let return_pc = state.pc();
-                    state
-                        .call_stack
-                        .push_frame(func_id, reg_count, return_pc, dst)?;
-                    state.registers.push_frame(reg_count);
-                    if let Some(w) = call_witness_sidecar.take() {
-                        state.call_stack.set_generic_witnesses(w);
-                    }
-
-                    let new_reg_base = state.reg_base();
-                    for (i, val) in restore_regs.iter().enumerate() {
-                        state.registers.set(new_reg_base, Reg(i as u16), *val);
-                    }
-                    if !restore_contexts.is_empty() {
-                        state.context_stack.restore_entries(restore_contexts);
-                    }
-
-                    state.current_generator = Some(gen_id);
-                    state.set_pc(resume_pc);
-
-                    // Run until yield or return
-                    let _result = dispatch_loop_table_with_entry_depth(state, entry_depth);
-
-                    // Check if the generator yielded a value
-                    if let Some(gen_ref) = state.generators.get(gen_id) {
-                        if gen_ref.status == GeneratorStatus::Yielded {
-                            if let Some(val) = gen_ref.yielded_value {
-                                values.push(val);
-                            }
-                        } else {
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-
-                // Build a heap-allocated list from collected values
-                let count = values.len();
-                let header_size = 3 * std::mem::size_of::<i64>();
-                let obj = state.heap.alloc(TypeId::LIST, header_size)?;
-                state.record_allocation();
-                let data_ptr =
-                    unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut i64 };
-                let backing_layout = std::alloc::Layout::from_size_align(
-                    count.max(1) * std::mem::size_of::<Value>(),
-                    8,
-                )
-                .map_err(|_| InterpreterError::Panic {
-                    message: "collect list layout overflow".into(),
-                })?;
-                let backing_ptr = unsafe { std::alloc::alloc_zeroed(backing_layout) };
-                let value_ptr = backing_ptr as *mut Value;
-                for (i, val) in values.iter().enumerate() {
-                    unsafe { *value_ptr.add(i) = *val };
-                }
-                unsafe {
-                    *data_ptr = count as i64;
-                    *data_ptr.add(1) = count as i64;
-                    *data_ptr.add(2) = backing_ptr as i64;
-                }
-
-                state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
+                // Run the generator to completion, collecting all
+                // yielded values into a list.  ONE drive carrier
+                // (`drain_generator_values`) + ONE list finaliser
+                // (`alloc_list_from_values`) — this arm used to
+                // hand-roll both and got the list layout wrong three
+                // ways (raw-i64 header slots, foreign `std::alloc`
+                // backing, elements at offset 0); see T0658.
+                let values = drain_generator_values(state, gen_id, dst)?;
+                let out = super::super::alloc_list_from_values(state, values)?;
+                state.set_reg(dst, out);
                 return Ok(DispatchResult::Continue);
             }
             _ => {
@@ -2678,6 +2489,19 @@ pub(in super::super) fn handle_call_method(
         };
         let mut drain_target: Option<(Value, String, FunctionId)> = None;
         for cand in [Some(receiver), arg0].into_iter().flatten() {
+            // T0658: a generator receiver (`fn f(..) -> Generator<T>`
+            // return values reach the baked `Iterator.collect` body
+            // rather than the CallM intercept) is drained by the same
+            // drive carrier the intercept uses — the heap-object probe
+            // below would misread the NaN-boxed generator id as a
+            // pointer and fall through to the bogus-owner panic.
+            if cand.is_generator() {
+                let gen_id = GeneratorId(cand.as_generator_id());
+                let drained = drain_generator_values(state, gen_id, dst)?;
+                let out = super::super::alloc_list_from_values(state, drained)?;
+                state.set_reg(dst, out);
+                return Ok(DispatchResult::Continue);
+            }
             if !cand.is_ptr() || cand.is_nil() {
                 continue;
             }
@@ -12388,3 +12212,139 @@ mod hash_value_pin_tests {
     }
 }
 
+
+/// Drive a generator to completion, returning every yielded value in
+/// order.  THE one drive carrier for eager collection — used by the
+/// `Generator.collect` intercept above and by the COLLECT-FROMITER-2
+/// recovery when the miscompiled `C.from_iter(self)` shape arrives
+/// with a generator receiver (T0658: `fn make_gen(..) -> Generator<T>`
+/// receivers reach the baked `Iterator.collect` body instead of the
+/// intercept, and the pre-fix recovery only knew how to drain
+/// heap-object iterators with their own `.next`).
+///
+/// Mirrors the resume protocol of the GenNext handler: restore the
+/// saved frame, run until yield or return via
+/// `dispatch_loop_table_with_entry_depth`, harvest `yielded_value`.
+/// `frame_dst` is only a plumbing detail of `push_frame` (the frame's
+/// return-value register); the caller writes the real result itself.
+/// The outer `current_generator` is parked and restored so collect can
+/// run inside another generator's body, and a body error propagates
+/// instead of silently truncating the list.
+fn drain_generator_values(
+    state: &mut InterpreterState,
+    gen_id: GeneratorId,
+    frame_dst: Reg,
+) -> InterpreterResult<Vec<Value>> {
+    let mut values = Vec::new();
+    while let Some(val) = resume_generator_step(state, gen_id, frame_dst)? {
+        values.push(val);
+    }
+    Ok(values)
+}
+
+/// Resume a generator for ONE step: run its body in a NESTED dispatch
+/// loop until it yields (`Ok(Some(value))`) or completes/cannot resume
+/// (`Ok(None)`).  THE one resume carrier for eager consumption — the
+/// `Generator.next` CallM intercept and `drain_generator_values` both
+/// drive through it.
+///
+/// T0658: the old `next` intercept instead pushed the generator frame
+/// with `return_pc = resume_pc` and returned `Continue`, letting the
+/// body run in the CALLER's dispatch loop — the body's first `Yield`
+/// then propagated `DispatchResult::Yield` all the way out of the
+/// top-level loop, silently ENDING THE PROGRAM (exit 0 mid-`main`) on
+/// the first `for v in make_gen(n)` iteration.
+///
+/// The outer `current_generator` is parked and restored so stepping
+/// works inside another generator's body, and a body error propagates
+/// instead of being swallowed.
+fn resume_generator_step(
+    state: &mut InterpreterState,
+    gen_id: GeneratorId,
+    frame_dst: Reg,
+) -> InterpreterResult<Option<Value>> {
+    use crate::interpreter::state::GeneratorStatus;
+
+    if !state
+        .generators
+        .get(gen_id)
+        .map(|g| g.can_resume())
+        .unwrap_or(false)
+    {
+        return Ok(None);
+    }
+
+    let (func_id, status, reg_count) = {
+        let generator = state.generators.get(gen_id).ok_or(
+            InterpreterError::InvalidGeneratorId {
+                generator_id: gen_id,
+            },
+        )?;
+        (generator.func_id, generator.status, generator.reg_count)
+    };
+
+    let (resume_pc, restore_regs, restore_contexts) = match status {
+        GeneratorStatus::Created => {
+            let generator = state.generators.get(gen_id).ok_or(
+                InterpreterError::InvalidGeneratorId {
+                    generator_id: gen_id,
+                },
+            )?;
+            (0u32, generator.saved_registers.clone(), Vec::new())
+        }
+        GeneratorStatus::Yielded => {
+            let generator = state.generators.get(gen_id).ok_or(
+                InterpreterError::InvalidGeneratorId {
+                    generator_id: gen_id,
+                },
+            )?;
+            (
+                generator.saved_pc,
+                generator.saved_registers.clone(),
+                generator.saved_contexts.clone(),
+            )
+        }
+        _ => return Ok(None),
+    };
+
+    if let Some(g) = state.generators.get_mut(gen_id) {
+        g.status = GeneratorStatus::Running;
+    }
+
+    let entry_depth = state.call_stack.depth();
+    let outer_generator = state.current_generator.take();
+
+    // Set up the generator's frame (mirroring the GenNext path).
+    let return_pc = state.pc();
+    state
+        .call_stack
+        .push_frame(func_id, reg_count, return_pc, frame_dst)?;
+    state.registers.push_frame(reg_count);
+
+    let new_reg_base = state.reg_base();
+    for (i, val) in restore_regs.iter().enumerate() {
+        state.registers.set(new_reg_base, Reg(i as u16), *val);
+    }
+    if !restore_contexts.is_empty() {
+        state.context_stack.restore_entries(restore_contexts);
+    }
+
+    state.current_generator = Some(gen_id);
+    state.set_pc(resume_pc);
+
+    // Run until yield or return.  A body error (panic, trap) must
+    // surface, not silently truncate the stream.
+    if let Err(e) = dispatch_loop_table_with_entry_depth(state, entry_depth) {
+        state.current_generator = outer_generator;
+        return Err(e);
+    }
+
+    state.current_generator = outer_generator;
+
+    match state.generators.get(gen_id) {
+        Some(gen_ref) if gen_ref.status == GeneratorStatus::Yielded => {
+            Ok(gen_ref.yielded_value)
+        }
+        _ => Ok(None),
+    }
+}

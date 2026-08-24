@@ -17049,7 +17049,7 @@ impl VbcCodegen {
         // register_impl_function stored, so an equality scan over the
         // plain + ordinal candidates recovers OUR registration without
         // replaying walk order.  No siblings → zero extra work.
-        let func_info = if let Some(type_name) = impl_type_name {
+        let mut func_info = if let Some(type_name) = impl_type_name {
             let qualified = format!("{}.{}", type_name, base_name);
             if self.ctx.lookup_function(&format!("{}#impl2", qualified)).is_some() {
                 let decl_param_types: Vec<String> = func
@@ -17169,6 +17169,67 @@ impl VbcCodegen {
         // leak across functions.
         self.current_return_ast_type = func.return_type.clone();
         self.current_fn_lookup_name = Some(lookup_name.clone());
+
+        // T0658: an existential return (`-> some I: Iterator<Int>`) has
+        // no arm in `ast_type_to_type_ref`, so the registered
+        // FunctionInfo carries return_type=None → the descriptor bakes
+        // UNIT and Tier 1 leaves the call result UNMARKED — a returned
+        // generator handle then falls into the generic list-iterator
+        // lowering, which reads the raw GenState pointer as a list
+        // header (stable garbage elements).  When the body's tail
+        // expression IS a generator comprehension the witness type is
+        // known exactly: patch the info to the nominal Generator so
+        // the return-mark channel classifies the result (obj-type
+        // "Generator" → custom-iter path → the honest
+        // `Generator.next`/`has_next` bodies).  Narrow by design: any
+        // other existential body shape keeps the old behaviour.
+        {
+            use verum_ast::ty::TypeKind;
+            let tail_is_gen = match &func.body {
+                Some(verum_ast::decl::FunctionBody::Block(b)) => {
+                    matches!(
+                        b.expr.as_ref().map(|e| &e.kind),
+                        Some(verum_ast::expr::ExprKind::GeneratorComprehension { .. })
+                    )
+                }
+                Some(verum_ast::decl::FunctionBody::Expr(e)) => {
+                    matches!(e.kind, verum_ast::expr::ExprKind::GeneratorComprehension { .. })
+                }
+                _ => false,
+            };
+            if tail_is_gen
+                && matches!(
+                    func.return_type.as_ref().map(|t| &t.kind),
+                    Some(TypeKind::Existential { .. })
+                )
+            {
+                let gen_tid = self.type_name_to_id.get("Generator").copied();
+                if std::env::var_os("VERUM_TRACE_RETMARK").is_some() {
+                    eprintln!(
+                        "[retmark] existential-gen patch fn='{}' gen_tid={:?} info={}",
+                        lookup_name,
+                        gen_tid,
+                        self.ctx.functions.contains_key(&lookup_name)
+                    );
+                }
+                // NAME channel only (RETNAME-CARRY): a script-side
+                // TypeId is NOT stable across the bake merge — stamping
+                // `Concrete(gen_tid)` classified the call result as a
+                // random runtime type (whatever landed on that id) and
+                // its obj-mark then short-circuited the name-based
+                // retname channel.  The name survives the merge.
+                //
+                // BOTH carriers must see it: the descriptor is built
+                // from the LOCAL `func_info` clone taken above (the
+                // registry write alone never reached the archive), and
+                // later call sites consult the registry.
+                let _ = gen_tid;
+                func_info.return_type_name = Some("Generator".to_string());
+                if let Some(info) = self.ctx.functions.get_mut(&lookup_name) {
+                    info.return_type_name = Some("Generator".to_string());
+                }
+            }
+        }
 
         // Set `self` type name for method calls within impl methods.
         // This MUST be after begin_function which clears variable_type_names.

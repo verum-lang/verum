@@ -46,9 +46,11 @@ use verum_llvm::context::Context;
 use verum_llvm::debug_info::{
     AsDIScope, DICompileUnit, DIFile, DIFlags, DIFlagsConstants, DIScope, DIType, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder,
 };
+use crate::llvm::runtime::RuntimeLowering;
 use verum_llvm::builder::Builder;
 use verum_llvm::module::{Linkage, Module};
 use verum_llvm::values::{BasicValueEnum, FunctionValue};
+use verum_llvm::IntPredicate;
 use verum_vbc::instruction::Instruction;
 use verum_vbc::module::{
     CallingConvention, InlineHint, OptLevel, OptimizationHints, VbcFunction,
@@ -2415,6 +2417,204 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
     }
 
     /// Lower a single VBC function to LLVM IR.
+    /// T0658: honest bodies for the built-in Generator's four methods,
+    /// emitted over the bodyless metadata forward declarations (see the
+    /// call site in `lower_vbc_function`).  Layouts mirror the
+    /// Strategy 4a-gen inline arms in `instruction.rs`: `next` returns
+    /// a 40-byte Maybe variant (header 24 + tag:i32@24 + pad + payload
+    /// :i64@32), `has_next` an i64 0/1, `close` unit, `collect` a
+    /// runtime list drained via `verum_gen_next_maybe`.
+    fn emit_builtin_generator_method_body(
+        &mut self,
+        llvm_fn: FunctionValue<'ctx>,
+        fname: &str,
+    ) -> Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let i32_type = ctx.i32_type();
+        let i8_type = ctx.i8_type();
+        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let void_type = ctx.void_type();
+        let module = &self.module;
+
+        let get_fn = |name: &str, ty: verum_llvm::types::FunctionType<'ctx>| {
+            module
+                .get_function(name)
+                .unwrap_or_else(|| module.add_function(name, ty, None))
+        };
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(llvm_fn, "entry");
+        builder.position_at_end(entry);
+        let handle = llvm_fn
+            .get_first_param()
+            .ok_or_else(|| LlvmLoweringError::internal("generator method missing self param"))?
+            .into_int_value();
+
+        match fname {
+            "Generator.next" => {
+                let next_maybe_fn = get_fn(
+                    "verum_gen_next_maybe",
+                    void_type.fn_type(
+                        &[i64_type.into(), ptr_type.into(), ptr_type.into()],
+                        false,
+                    ),
+                );
+                let malloc_fn = get_fn(
+                    "verum_checked_malloc",
+                    ptr_type.fn_type(&[i64_type.into()], false),
+                );
+                let memset_fn = get_fn(
+                    "verum_internal_memset",
+                    ptr_type.fn_type(
+                        &[ptr_type.into(), i32_type.into(), i64_type.into()],
+                        false,
+                    ),
+                );
+                let tag_alloca = builder.build_alloca(i64_type, "tag_out").or_llvm_err()?;
+                let val_alloca = builder.build_alloca(i64_type, "val_out").or_llvm_err()?;
+                builder
+                    .build_call(
+                        next_maybe_fn,
+                        &[handle.into(), tag_alloca.into(), val_alloca.into()],
+                        "",
+                    )
+                    .or_llvm_err()?;
+                let tag_i64 = builder
+                    .build_load(i64_type, tag_alloca, "tag")
+                    .or_llvm_err()?
+                    .into_int_value();
+                let val_i64 = builder
+                    .build_load(i64_type, val_alloca, "val")
+                    .or_llvm_err()?
+                    .into_int_value();
+                // Maybe variant: header(24) + tag:i32@24 + pad + payload:i64@32.
+                let variant_size = i64_type.const_int(40, false);
+                let variant_ptr = builder
+                    .build_call(malloc_fn, &[variant_size.into()], "maybe_variant")
+                    .or_llvm_err()?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| LlvmLoweringError::internal("malloc returned no value"))?
+                    .into_pointer_value();
+                builder
+                    .build_call(
+                        memset_fn,
+                        &[
+                            variant_ptr.into(),
+                            i32_type.const_zero().into(),
+                            variant_size.into(),
+                        ],
+                        "",
+                    )
+                    .or_llvm_err()?;
+                let tag_i32 = builder
+                    .build_int_truncate(tag_i64, i32_type, "tag_i32")
+                    .or_llvm_err()?;
+                // SAFETY: GEP at fixed offsets inside the 40-byte variant just allocated.
+                let tag_ptr = unsafe {
+                    builder
+                        .build_in_bounds_gep(
+                            i8_type,
+                            variant_ptr,
+                            &[i64_type.const_int(24, false)],
+                            "tag_ptr",
+                        )
+                        .or_llvm_err()?
+                };
+                builder.build_store(tag_ptr, tag_i32).or_llvm_err()?;
+                // SAFETY: as above — payload slot at offset 32 of the 40-byte variant.
+                let payload_ptr = unsafe {
+                    builder
+                        .build_in_bounds_gep(
+                            i8_type,
+                            variant_ptr,
+                            &[i64_type.const_int(32, false)],
+                            "payload_ptr",
+                        )
+                        .or_llvm_err()?
+                };
+                builder.build_store(payload_ptr, val_i64).or_llvm_err()?;
+                let ret = builder
+                    .build_ptr_to_int(variant_ptr, i64_type, "variant_i64")
+                    .or_llvm_err()?;
+                builder.build_return(Some(&ret)).or_llvm_err()?;
+            }
+            "Generator.has_next" => {
+                let has_next_fn = get_fn(
+                    "verum_gen_has_next",
+                    i64_type.fn_type(&[i64_type.into()], false),
+                );
+                let r = builder
+                    .build_call(has_next_fn, &[handle.into()], "has_next")
+                    .or_llvm_err()?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| LlvmLoweringError::internal("has_next returned no value"))?;
+                builder.build_return(Some(&r)).or_llvm_err()?;
+            }
+            "Generator.close" => {
+                let close_fn = get_fn(
+                    "verum_gen_close",
+                    void_type.fn_type(&[i64_type.into()], false),
+                );
+                builder
+                    .build_call(close_fn, &[handle.into()], "")
+                    .or_llvm_err()?;
+                let unit = i64_type.const_int(verum_vbc::value::nanbox::NAN_UNIT_HEADER, false);
+                builder.build_return(Some(&unit)).or_llvm_err()?;
+            }
+            "Generator.collect" => {
+                let next_maybe_fn = get_fn(
+                    "verum_gen_next_maybe",
+                    void_type.fn_type(
+                        &[i64_type.into(), ptr_type.into(), ptr_type.into()],
+                        false,
+                    ),
+                );
+                let runtime = RuntimeLowering::new(ctx);
+                let list_ptr = runtime.lower_new_list(&builder, module)?;
+                let tag_alloca = builder.build_alloca(i64_type, "tag_out").or_llvm_err()?;
+                let val_alloca = builder.build_alloca(i64_type, "val_out").or_llvm_err()?;
+                let head_bb = ctx.append_basic_block(llvm_fn, "drain_head");
+                let body_bb = ctx.append_basic_block(llvm_fn, "drain_body");
+                let done_bb = ctx.append_basic_block(llvm_fn, "drain_done");
+                builder.build_unconditional_branch(head_bb).or_llvm_err()?;
+                builder.position_at_end(head_bb);
+                builder
+                    .build_call(
+                        next_maybe_fn,
+                        &[handle.into(), tag_alloca.into(), val_alloca.into()],
+                        "",
+                    )
+                    .or_llvm_err()?;
+                let tag = builder
+                    .build_load(i64_type, tag_alloca, "tag")
+                    .or_llvm_err()?
+                    .into_int_value();
+                let has = builder
+                    .build_int_compare(IntPredicate::NE, tag, i64_type.const_zero(), "has")
+                    .or_llvm_err()?;
+                builder
+                    .build_conditional_branch(has, body_bb, done_bb)
+                    .or_llvm_err()?;
+                builder.position_at_end(body_bb);
+                let item = builder
+                    .build_load(i64_type, val_alloca, "item")
+                    .or_llvm_err()?;
+                runtime.lower_list_push(&builder, module, list_ptr, item)?;
+                builder.build_unconditional_branch(head_bb).or_llvm_err()?;
+                builder.position_at_end(done_bb);
+                let ret = builder
+                    .build_ptr_to_int(list_ptr, i64_type, "list_i64")
+                    .or_llvm_err()?;
+                builder.build_return(Some(&ret)).or_llvm_err()?;
+            }
+            _ => unreachable!("emit_builtin_generator_method_body: unexpected {fname}"),
+        }
+        Ok(())
+    }
+
     fn lower_vbc_function(&mut self, vbc_module: &VbcModule, vbc_func: &VbcFunction) -> Result<()> {
         let func_id = vbc_func.descriptor.id.0;
         let llvm_fn = self.functions.get(&func_id).copied().ok_or_else(|| {
@@ -2441,6 +2641,35 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     .unwrap_or("<unknown>")
             );
             return Ok(());
+        }
+
+        // T0658: the stdlib metadata ships BODYLESS forward
+        // declarations for the built-in Generator's methods; compiling
+        // them as-is produces an empty `ret` stub, and every dispatch
+        // path that resolves `Generator.next` / `.collect` by NAME
+        // (opaque `some I: Iterator` returns, mono'd protocol bodies,
+        // dyn fallbacks) then reads garbage or an eternally-empty
+        // stream where Tier 0's intercept answers correctly.  Give the
+        // four methods their honest coroutine-primitive bodies here —
+        // the single place every name-resolved call lands.
+        {
+            let fname = vbc_module
+                .strings
+                .get(vbc_func.descriptor.name)
+                .unwrap_or("");
+            if vbc_func.instructions.len() <= 1
+                && matches!(
+                    fname,
+                    "Generator.next"
+                        | "Generator.has_next"
+                        | "Generator.close"
+                        | "Generator.collect"
+                )
+                && llvm_fn.count_params() == 1
+            {
+                self.emit_builtin_generator_method_body(llvm_fn, fname)?;
+                return Ok(());
+            }
         }
 
         // Set calling convention based on function descriptor

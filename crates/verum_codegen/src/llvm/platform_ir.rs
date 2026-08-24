@@ -18094,71 +18094,57 @@ impl<'ctx> PlatformIR<'ctx> {
         let args_ptr = builder
             .build_int_to_ptr(args_val, ptr_type, "argsp2")
             .or_llvm_err()?;
-        // Call generator function with stored args (up to 6 args via i64 array)
-        // Build args from the args array: args_ptr[0], args_ptr[1], ...
-        // For simplicity, support 0-6 args by loading from the array
-        // Most generators use 0-2 args
-        let gen_fn_ty_0 = i64_type.fn_type(&[], false);
-        let gen_fn_ty_1 = i64_type.fn_type(&[i64_type.into()], false);
-        let gen_fn_ty_2 = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-
-        let is_0 = builder
-            .build_int_compare(IntPredicate::EQ, num_args, i64_type.const_zero(), "is0")
-            .or_llvm_err()?;
-        let call0 = ctx.append_basic_block(func, "call0");
-        let call_with_args = ctx.append_basic_block(func, "call_with_args");
+        // Call generator function with stored args (0-6 args via the
+        // i64 array).  T0658: this used to honestly implement only
+        // 0/1/2 while its comment promised six — a 3+-capture
+        // generator body called through the 2-arg shape read garbage
+        // for every later capture.  One dispatch switch, one arm per
+        // arity, each loading exactly num_args values.
+        use verum_llvm::values::BasicMetadataValueEnum;
+        const MAX_GEN_ARGS: u64 = 6;
         let after_call = ctx.append_basic_block(func, "after_call");
+        let arity_bbs: Vec<_> = (0..=MAX_GEN_ARGS)
+            .map(|k| ctx.append_basic_block(func, &format!("call{}", k)))
+            .collect();
+        // num_args beyond MAX collapses to the MAX arm (the emitter
+        // never produces more; a corrupt count must not walk off the
+        // args array by more than the supported width).
+        let switch_cases: Vec<_> = (0..=MAX_GEN_ARGS)
+            .map(|k| (i64_type.const_int(k, false), arity_bbs[k as usize]))
+            .collect();
         builder
-            .build_conditional_branch(is_0, call0, call_with_args)
+            .build_switch(num_args, arity_bbs[MAX_GEN_ARGS as usize], &switch_cases)
             .or_llvm_err()?;
 
-        builder.position_at_end(call0);
-        builder
-            .build_indirect_call(gen_fn_ty_0, fn_as_ptr, &[], "")
-            .or_llvm_err()?;
-        builder
-            .build_unconditional_branch(after_call)
-            .or_llvm_err()?;
-
-        builder.position_at_end(call_with_args);
-        // Load first arg (most generators have 1 arg)
-        let a0 = builder.build_load(i64_type, args_ptr, "a0").or_llvm_err()?;
-        let is_1 = builder
-            .build_int_compare(
-                IntPredicate::EQ,
-                num_args,
-                i64_type.const_int(1, false),
-                "is1",
-            )
-            .or_llvm_err()?;
-        let call1 = ctx.append_basic_block(func, "call1");
-        let call2plus = ctx.append_basic_block(func, "call2plus");
-        builder
-            .build_conditional_branch(is_1, call1, call2plus)
-            .or_llvm_err()?;
-
-        builder.position_at_end(call1);
-        builder
-            .build_indirect_call(gen_fn_ty_1, fn_as_ptr, &[a0.into()], "")
-            .or_llvm_err()?;
-        builder
-            .build_unconditional_branch(after_call)
-            .or_llvm_err()?;
-
-        builder.position_at_end(call2plus);
-        // SAFETY: GEP at a fixed offset within a known struct layout; the pointer is valid from prior allocation
-        let a1_ptr = unsafe {
+        for k in 0..=MAX_GEN_ARGS {
+            builder.position_at_end(arity_bbs[k as usize]);
+            let mut call_args: Vec<BasicMetadataValueEnum> = Vec::new();
+            for i in 0..k {
+                // SAFETY: GEP within the args array; verum_gen_create
+                // allocated it with num_args slots and k <= num_args.
+                let a_ptr = unsafe {
+                    builder
+                        .build_gep(
+                            i64_type,
+                            args_ptr,
+                            &[i64_type.const_int(i, false)],
+                            &format!("a{}p", i),
+                        )
+                        .or_llvm_err()?
+                };
+                let a = builder
+                    .build_load(i64_type, a_ptr, &format!("a{}", i))
+                    .or_llvm_err()?;
+                call_args.push(a.into());
+            }
+            let fn_ty = i64_type.fn_type(&vec![i64_type.into(); k as usize], false);
             builder
-                .build_gep(i64_type, args_ptr, &[i64_type.const_int(1, false)], "a1p")
-                .or_llvm_err()?
-        };
-        let a1 = builder.build_load(i64_type, a1_ptr, "a1").or_llvm_err()?;
-        builder
-            .build_indirect_call(gen_fn_ty_2, fn_as_ptr, &[a0.into(), a1.into()], "")
-            .or_llvm_err()?;
-        builder
-            .build_unconditional_branch(after_call)
-            .or_llvm_err()?;
+                .build_indirect_call(fn_ty, fn_as_ptr, &call_args, "")
+                .or_llvm_err()?;
+            builder
+                .build_unconditional_branch(after_call)
+                .or_llvm_err()?;
+        }
 
         builder.position_at_end(after_call);
         builder

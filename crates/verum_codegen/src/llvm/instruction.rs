@@ -6788,6 +6788,16 @@ pub fn lower_instruction<'ctx>(
             // borrows ctx immutably via vbc_module()).
             let func_name_owned = func_name.to_string();
             let return_type = func_desc.return_type.clone();
+            // T0658: id-stable generator classification.  The
+            // existential-return patch (`-> some I: Iterator` over a
+            // gen{} tail) records the NOMINAL Generator in
+            // return_type_name; the TypeRef id channel is NOT stable
+            // across the bake merge (the script-side TypeId lands on a
+            // different runtime type), so classify by NAME here.
+            let returns_generator = func_desc
+                .return_type_name
+                .and_then(|n| vbc_mod.get_string(n))
+                .is_some_and(|n| n == "Generator" || n.starts_with("Generator<"));
 
             let module = ctx.get_module();
 
@@ -6830,6 +6840,9 @@ pub fn lower_instruction<'ctx>(
             // heap-reference ≡ object-pointer coherence between tiers.
             if produced_value {
                 mark_register_from_return_type(ctx, dst.0, &return_type);
+                if returns_generator {
+                    ctx.mark_gen_register(dst.0);
+                }
             }
             let _ = type_args; // Consumed by monomorphization phase
             Ok(())
@@ -14581,6 +14594,96 @@ fn emit_listiter_eager_walk<'ctx>(
     Ok(())
 }
 
+/// T0658: `Generator.collect()` on Tier 1 — drain the coroutine
+/// through the SAME primitive the `for`-loop path uses
+/// (`verum_gen_next_maybe`) and push every yielded value into a
+/// runtime list.  THE one Tier-1 generator-collect carrier, called
+/// from the pre-Strategy collect gate (gen-marked receivers must not
+/// fall into the `<Type>.next` cdrain: the metadata's bodyless
+/// `Generator.next` forward declaration compiles to an empty `ret`
+/// stub, so that path returned a silent EMPTY list) and from
+/// Strategy 4a-gen (unresolved method names on gen-marked
+/// receivers, which previously hit runtime type dispatch — no type
+/// header on a NaN-boxed handle → rts guard abort).
+fn emit_generator_collect_drain<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    dst: Reg,
+    receiver: Reg,
+) -> Result<()> {
+    let i64_type = ctx.types().i64_type();
+    let ptr_type = ctx.types().ptr_type();
+    let module = ctx.get_module();
+    let void_type = ctx.types().void_type();
+    let next_maybe_fn = {
+        let fn_type = void_type.fn_type(
+            &[i64_type.into(), ptr_type.into(), ptr_type.into()],
+            false,
+        );
+        super::error::get_or_declare_function(module, "verum_gen_next_maybe", fn_type)
+    };
+    let gen_val = as_i64(ctx, ctx.get_register(receiver.0)?, "gen_handle")?;
+
+    let runtime = RuntimeLowering::new(ctx.llvm_context());
+    let list_ptr = runtime.lower_new_list(ctx.builder(), ctx.get_module())?;
+
+    // Allocas live in the current builder position; the drain loop
+    // re-reads them every iteration.
+    let tag_alloca = ctx
+        .builder()
+        .build_alloca(i64_type, "gen_col_tag")
+        .or_llvm_err()?;
+    let val_alloca = ctx
+        .builder()
+        .build_alloca(i64_type, "gen_col_val")
+        .or_llvm_err()?;
+
+    let current_fn = ctx.function();
+    let llvm_cx = ctx.llvm_context();
+    let head_bb = llvm_cx.append_basic_block(current_fn, "gen_col_head");
+    let body_bb = llvm_cx.append_basic_block(current_fn, "gen_col_body");
+    let done_bb = llvm_cx.append_basic_block(current_fn, "gen_col_done");
+
+    ctx.builder()
+        .build_unconditional_branch(head_bb)
+        .or_llvm_err()?;
+
+    ctx.builder().position_at_end(head_bb);
+    ctx.builder()
+        .build_call(
+            next_maybe_fn,
+            &[gen_val.into(), tag_alloca.into(), val_alloca.into()],
+            "",
+        )
+        .or_llvm_err()?;
+    let tag = ctx
+        .builder()
+        .build_load(i64_type, tag_alloca, "gen_col_tag_v")
+        .or_llvm_err()?
+        .into_int_value();
+    let has_item = ctx
+        .builder()
+        .build_int_compare(IntPredicate::NE, tag, i64_type.const_zero(), "gen_col_has")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(has_item, body_bb, done_bb)
+        .or_llvm_err()?;
+
+    ctx.builder().position_at_end(body_bb);
+    let item = ctx
+        .builder()
+        .build_load(i64_type, val_alloca, "gen_col_item")
+        .or_llvm_err()?;
+    runtime.lower_list_push(ctx.builder(), ctx.get_module(), list_ptr, item)?;
+    ctx.builder()
+        .build_unconditional_branch(head_bb)
+        .or_llvm_err()?;
+
+    ctx.builder().position_at_end(done_bb);
+    ctx.set_register(dst.0, list_ptr.into());
+    ctx.mark_list_register(dst.0);
+    Ok(())
+}
+
 /// COLLECT-DRAIN-AOT-1: drain an iterator whose concrete type is
 /// statically tracked into a fresh List by repeatedly calling the
 /// type's own `<IterType>.next(iter)` until the returned `Maybe` is
@@ -18795,6 +18898,21 @@ fn lower_call_method<'ctx>(
             }
 
             if is_collect_shape || is_from_iter_shape {
+                // T0658: a GEN-marked candidate drains through the
+                // coroutine primitive, never through `<Type>.next`
+                // cdrain — the metadata's bodyless `Generator.next`
+                // forward declaration compiles to an empty `ret` stub,
+                // so the name-probed path below "resolved" and
+                // returned a silent empty list.
+                if ctx.is_gen_register(receiver.0) {
+                    return emit_generator_collect_drain(ctx, dst, receiver);
+                }
+                if is_from_iter_shape
+                    && args.count >= 1
+                    && ctx.is_gen_register(args.start.0)
+                {
+                    return emit_generator_collect_drain(ctx, dst, Reg(args.start.0));
+                }
                 // The iterator travels as the RECEIVER (instance form) or
                 // as ARG 0 with a placeholder receiver (the static/bogus-
                 // owner from_iter form) — probe both, receiver first,
@@ -18813,6 +18931,17 @@ fn lower_call_method<'ctx>(
                         return Ok(());
                     }
                     let Some(base) = cbase else { continue };
+                    // T0658: inside the monomorphized `Iterator.collect`
+                    // body (renamed `Generator.collect`), `self` is a
+                    // tracked GENERATOR — but not gen-marked (it is a
+                    // parameter, not a GenCreate result), so the
+                    // register gate above missed it.  The name says
+                    // what the mark could not; the `<Type>.next` probe
+                    // below would find the bodyless `Generator.next`
+                    // stub and drain nothing.
+                    if base == "Generator" {
+                        return emit_generator_collect_drain(ctx, dst, creg);
+                    }
                     // A type with its OWN collect/from_iter is a
                     // legitimate static target — never intercept it.
                     if ctx
@@ -19994,10 +20123,19 @@ fn lower_call_method<'ctx>(
         }
     }
 
-    // Strategy 4a-gen: Generator methods (next, has_next, close)
+    // Strategy 4a-gen: Generator methods (next, has_next, close, collect)
     // gen.next() returns Maybe<T> via verum_gen_next_maybe (atomic check+advance).
     // Variant layout: [24-byte header][tag:i32 at 24][pad:4][payload:i64 at 32]
-    if resolved_func_name.is_none() && ctx.is_gen_register(receiver.0) {
+    //
+    // T0658: NOT gated on `resolved_func_name.is_none()` — the stdlib
+    // bake ships a bodyless `Generator.next` forward declaration that
+    // compiles to an empty `ret` stub, so Strategies 1-3 "resolve"
+    // `for v in make_gen(n)`'s desugared `.next()` to that stub and
+    // the loop silently sees an exhausted generator.  A gen-marked
+    // receiver ALWAYS dispatches through the coroutine primitives,
+    // mirroring the Tier-0 intercept which answers these methods
+    // before any name-based dispatch.
+    if ctx.is_gen_register(receiver.0) {
         let i64_type = ctx.types().i64_type();
         let i32_type = ctx.types().i32_type();
         let i8_type = ctx.types().i8_type();
@@ -20138,7 +20276,53 @@ fn lower_call_method<'ctx>(
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
+            "collect" if args.count == 0 => {
+                return emit_generator_collect_drain(ctx, dst, receiver);
+            }
             _ => {}
+        }
+    }
+
+    // T0658: an OBJ-typed "Generator" receiver (an existential
+    // `some I: Iterator` return resolved to the nominal Generator by
+    // the codegen return-type patch) is a generator too, but carries
+    // no gen-register mark.  Its `next`/`has_next`/`close`/`collect`
+    // must not fall into name-based dispatch: at `main`'s lowering
+    // time the metadata's `Generator.next` is still a bodyless
+    // declaration, so Strategy 4b rejects it and the call aborts in
+    // the runtime type switch (no readable type header on a GenState
+    // pointer).  Call the honest bodies directly by name —
+    // `lower_vbc_function` emits them over the bodyless forwards
+    // (emit_builtin_generator_method_body), so the symbol is always
+    // defined by link time.
+    if ctx.get_obj_register_type(receiver.0) == Some("Generator") && args.count == 0 {
+        let i64_type = ctx.types().i64_type();
+        let module = ctx.get_module();
+        let target = match bare_method {
+            "next" => Some("Generator.next"),
+            "has_next" => Some("Generator.has_next"),
+            "close" => Some("Generator.close"),
+            "collect" => Some("Generator.collect"),
+            _ => None,
+        };
+        if let Some(fname) = target {
+            let fn_ty = i64_type.fn_type(&[i64_type.into()], false);
+            let callee = super::error::get_or_declare_function(module, fname, fn_ty);
+            let handle = as_i64(ctx, ctx.get_register(receiver.0)?, "gen_obj_handle")?;
+            let result = ctx
+                .builder()
+                .build_call(callee, &[handle.into()], "gen_obj_call")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .unwrap_or_else(|| i64_type.const_int(0, false).into());
+            ctx.set_register(dst.0, result);
+            match bare_method {
+                "has_next" => ctx.mark_bool_register(dst.0),
+                "collect" => ctx.mark_list_register(dst.0),
+                _ => {}
+            }
+            return Ok(());
         }
     }
 
@@ -31861,7 +32045,7 @@ fn lower_sys_extended<'ctx>(
 fn lower_mach_extended<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     sub_op: u8,
-    operands: &[u8],
+    _operands: &[u8],
 ) -> Result<()> {
     let sub_opcode = MachSubOpcode::from_byte(sub_op);
     match sub_opcode {
@@ -36778,6 +36962,17 @@ fn mark_call_result_from_retname<'ctx>(
     {
         return;
     }
+    // T0658: the built-in Generator gets the GEN mark, not an obj-type
+    // string — the gen mark survives Mov propagation (obj-type does
+    // not), and Strategy 4a-gen / IterNew / IterNext key off it.  This
+    // is the id-stable channel for `-> some I: Iterator` returns whose
+    // existential was resolved to the nominal Generator by the codegen
+    // return patch (the TypeRef id is NOT stable across the bake
+    // merge, but the NAME is).
+    if base == "Generator" {
+        ctx.mark_gen_register(dst);
+        return;
+    }
     ctx.set_obj_register_type(dst, base.to_string());
 }
 
@@ -36938,6 +37133,21 @@ fn mark_register_from_return_type<'ctx>(
                 }
             }
         }
+        // T0658: a declared `-> Generator<T>` return must carry the
+        // generator marking across the call — Strategy 4a-gen
+        // (collect / next / has_next / close) keys off
+        // `is_gen_register`, and an unmarked handle fell through to
+        // runtime type dispatch, which cannot read a type header off
+        // the NaN-boxed handle (silent empty collect / rts abort).
+        // Name-based: VBC TypeIds are non-deterministic.
+        TypeRef::Instantiated { base, .. }
+            if ctx
+                .vbc_module()
+                .and_then(|m| m.get_type_name(*base))
+                .is_some_and(|n| n == "Generator") =>
+        {
+            ctx.mark_gen_register(reg);
+        }
         TypeRef::Tuple(elems) => {
             // Tuple return type — store element types for Unpack to use later
             ctx.set_tuple_element_types(reg, elems.clone());
@@ -36990,7 +37200,11 @@ fn mark_register_from_return_type<'ctx>(
                 ctx.set_result_arm_types(reg, args.clone());
             }
         }
-        _ => {}
+        _ => {
+            if std::env::var_os("VERUM_TRACE_RETMARK").is_some() {
+                eprintln!("[retmark] r{} unclassified ret_type={:?}", reg, ret_type);
+            }
+        }
     }
 }
 

@@ -1,0 +1,110 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: generators, comprehensions, collect, T0658
+// @timeout: 30000
+// @description: T0658 — a generator expression `gen{ i*i for i in 0..5 }`
+//   yields exactly what the equivalent direct loop and list comprehension
+//   produce over the same range (sum 30), pinned side by side in ONE
+//   file.  Also pins the two collect faces the fix closed: the CallM
+//   intercept path (local `gen{}` receiver) used to hand-roll a List
+//   with raw-i64 header slots / foreign backing / elements at offset 0
+//   ("Expected int, got None" ICE on the first `.len()`, garbage
+//   elements at correct length), and the baked `Iterator.collect` path
+//   (declared `-> Generator<Int>` receivers erase the from_iter target
+//   C at codegen) used to panic with a bogus owner
+//   (`FFIAbi.from_iter not found`).
+// @expected-stdout: loop=30
+// @expected-stdout: listcomp=30
+// @expected-stdout: gen=30
+// @expected-stdout: local_collect_len=5
+// @expected-stdout: local_collect_sum=30
+// @expected-stdout: fn_collect_len=5
+// @expected-stdout: fn_collect_sum=30
+// @expected-stdout: array_gen_len=3
+// @expected-stdout: array_gen_sum=12
+// @expected-stdout: empty_collect_len=0
+// @expected-stdout: some_sum=6
+
+fn make_gen(n: Int) -> Generator<Int> {
+    gen { i * i for i in 0..n }
+}
+
+// The original docs repro shape (T0658 genesis): an opaque
+// `some I: Iterator<Int>` return over a generator expression that
+// captures `n` — the historical "Cannot iterate over type in
+// generator: Range<Int>" refusal, later the silently-empty form.
+fn make_opaque(n: Int) -> some I: Iterator<Int> {
+    gen { i for i in 0..n }
+}
+
+fn main() {
+    // Form 1: direct loop.
+    let mut s_loop = 0;
+    for i in 0..5 {
+        s_loop = s_loop + i * i;
+    }
+    print(f"loop={s_loop}");
+
+    // Form 2: list comprehension.
+    let squares = [i * i for i in 0..5];
+    let mut s_comp = 0;
+    for v in squares.iter() {
+        s_comp = s_comp + *v;
+    }
+    print(f"listcomp={s_comp}");
+
+    // Form 3: generator expression, consumed by a for loop.  Bound
+    // through a `let` — a bare `gen { … }` in for-header position is
+    // ambiguous with the loop body's `{` (same class as struct
+    // literals in `if` conditions).
+    let squares_gen = gen { i * i for i in 0..5 };
+    let mut s_gen = 0;
+    for v in squares_gen {
+        s_gen = s_gen + v;
+    }
+    print(f"gen={s_gen}");
+
+    // Collect face A: local generator binding — CallM intercept path.
+    let g = gen { i * i for i in 0..5 };
+    let collected: List<Int> = g.collect();
+    print(f"local_collect_len={collected.len()}");
+    let mut s_col = 0;
+    for v in collected.iter() {
+        s_col = s_col + *v;
+    }
+    print(f"local_collect_sum={s_col}");
+
+    // Collect face B: declared `-> Generator<Int>` return — reaches the
+    // baked `Iterator.collect` body (`C.from_iter(self)`), recovered by
+    // the generator drain in COLLECT-FROMITER-2.
+    let items: List<Int> = make_gen(5).collect();
+    print(f"fn_collect_len={items.len()}");
+    let mut s_fn = 0;
+    for v in items.iter() {
+        s_fn = s_fn + *v;
+    }
+    print(f"fn_collect_sum={s_fn}");
+
+    // Collect face C: non-range iterable inside the generator body.
+    let ga = gen { i * 2 for i in [1, 2, 3] };
+    let doubled: List<Int> = ga.collect();
+    print(f"array_gen_len={doubled.len()}");
+    let mut s_arr = 0;
+    for v in doubled.iter() {
+        s_arr = s_arr + *v;
+    }
+    print(f"array_gen_sum={s_arr}");
+
+    // Collect face D: empty generator — len 0, no ICE on `.len()`.
+    let ge = gen { i for i in 0..0 };
+    let none: List<Int> = ge.collect();
+    print(f"empty_collect_len={none.len()}");
+
+    // Face E: the docs-genesis opaque-return form, consumed by `for`.
+    let mut s_some = 0;
+    for v in make_opaque(4) {
+        s_some = s_some + v;
+    }
+    print(f"some_sum={s_some}");
+}
