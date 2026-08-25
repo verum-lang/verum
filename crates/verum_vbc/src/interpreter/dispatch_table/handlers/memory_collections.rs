@@ -1538,6 +1538,18 @@ pub(in super::super) fn handle_array_len(
         return Err(InterpreterError::NullPointer);
     }
 
+    // A `Shared<T>` carrier answers for the value it holds, here as
+    // everywhere else. `xs.len()` compiles to this opcode directly — it
+    // never becomes a method call, so the auto-deref the method
+    // dispatcher performs never ran. The carrier is a two-slot cell
+    // (`[header][rc][inner]`), so `Shared.new(list).len()` answered a
+    // constant 2 for every list: a plausible number, reported by nothing.
+    // Same authority as the GetF/SetF deref, so the three cannot drift.
+    let ptr = {
+        let carrier_header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+        shared_carrier_inner(carrier_header, ptr)?
+    };
+
     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     let header_size = header.size as usize;
 

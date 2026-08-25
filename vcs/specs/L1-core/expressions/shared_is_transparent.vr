@@ -1,0 +1,51 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: shared, deref, transparency, T0872
+// @timeout: 30000
+// @description: T0872 — a `Shared<T>` answers for the value it holds.
+//   `len` and `is_empty` do not become method calls: they lower to
+//   direct opcodes, so the auto-deref the method dispatcher performs
+//   for a `Shared` carrier never ran for them. A carrier cell is
+//   `[header][rc][inner]` — two slots — so `Shared.new(list).len()`
+//   answered a constant 2 for EVERY list it wrapped. Not a crash: a
+//   plausible number, reported by nothing, in the ordinary way to
+//   share a value.
+//
+//   Both poles are pinned here. The transparent reads must agree with
+//   the same reads on the unwrapped value, AND `strong_count` — one of
+//   Shared's OWN methods — must still answer about the carrier rather
+//   than being forwarded to the value. A fix that peels unconditionally
+//   passes the first half and breaks the second.
+// @expect_stdout: direct_len=3
+// @expect_stdout: shared_len=3
+// @expect_stdout: direct_empty=false
+// @expect_stdout: shared_empty=false
+// @expect_stdout: wide_len=7
+// @expect_stdout: empty_len=0
+// @expect_stdout: empty_is_empty=true
+// @expect_stdout: strong=1
+
+fn main() {
+    let xs: List<Int> = [1, 2, 3];
+    print(f"direct_len={xs.len()}");
+    print(f"direct_empty={xs.is_empty()}");
+
+    let s = Shared.new(xs);
+    print(f"shared_len={s.len()}");
+    print(f"shared_empty={s.is_empty()}");
+
+    // A different length, so a constant answer cannot pass by luck.
+    let wide: List<Int> = [1, 2, 3, 4, 5, 6, 7];
+    let sw = Shared.new(wide);
+    print(f"wide_len={sw.len()}");
+
+    // The empty pole: the carrier has slots even when the value has none.
+    let none: List<Int> = [];
+    let se = Shared.new(none);
+    print(f"empty_len={se.len()}");
+    print(f"empty_is_empty={se.is_empty()}");
+
+    // Shared's own method still answers about the CARRIER.
+    print(f"strong={se.strong_count()}");
+}
