@@ -14,17 +14,19 @@
 //   (declared `-> Generator<Int>` receivers erase the from_iter target
 //   C at codegen) used to panic with a bogus owner
 //   (`FFIAbi.from_iter not found`).
-// @expected-stdout: loop=30
-// @expected-stdout: listcomp=30
-// @expected-stdout: gen=30
-// @expected-stdout: local_collect_len=5
-// @expected-stdout: local_collect_sum=30
-// @expected-stdout: fn_collect_len=5
-// @expected-stdout: fn_collect_sum=30
-// @expected-stdout: array_gen_len=3
-// @expected-stdout: array_gen_sum=12
-// @expected-stdout: empty_collect_len=0
-// @expected-stdout: some_sum=6
+// @expected-stdout-begin
+// loop=30
+// listcomp=30
+// gen=30
+// local_collect_len=5
+// local_collect_sum=30
+// fn_collect_len=5
+// fn_collect_sum=30
+// array_gen_len=3
+// array_gen_sum=12
+// empty_collect_len=0
+// some_sum=6
+// @expected-stdout-end
 
 fn make_gen(n: Int) -> Generator<Int> {
     gen { i * i for i in 0..n }

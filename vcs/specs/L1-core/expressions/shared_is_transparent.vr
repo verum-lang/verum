@@ -17,14 +17,16 @@
 //   Shared's OWN methods — must still answer about the carrier rather
 //   than being forwarded to the value. A fix that peels unconditionally
 //   passes the first half and breaks the second.
-// @expect_stdout: direct_len=3
-// @expect_stdout: shared_len=3
-// @expect_stdout: direct_empty=false
-// @expect_stdout: shared_empty=false
-// @expect_stdout: wide_len=7
-// @expect_stdout: empty_len=0
-// @expect_stdout: empty_is_empty=true
-// @expect_stdout: strong=1
+// @expected-stdout-begin
+// direct_len=3
+// direct_empty=false
+// shared_len=3
+// shared_empty=false
+// wide_len=7
+// empty_len=0
+// empty_is_empty=true
+// strong=1
+// @expected-stdout-end
 
 fn main() {
     let xs: List<Int> = [1, 2, 3];

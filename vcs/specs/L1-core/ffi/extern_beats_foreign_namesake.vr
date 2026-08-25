@@ -24,9 +24,11 @@
 //   bodied function declared in this file must still win over an extern
 //   of the same name — the guard that was too broad exists for that
 //   case and must keep working.
-// @expect_stdout: pid_positive=true
-// @expect_stdout: opened_tmp=true
-// @expect_stdout: local_wins=42
+// @expected-stdout-begin
+// pid_positive=true
+// opened_tmp=true
+// local_wins=42
+// @expected-stdout-end
 
 @ffi("libSystem.B.dylib")
 extern {
