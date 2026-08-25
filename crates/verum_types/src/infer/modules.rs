@@ -4898,22 +4898,11 @@ impl TypeChecker {
                     let is_static = func
                         .params
                         .first()
-                        .map(|p| {
-                            !matches!(
-                                p.kind,
-                                FunctionParamKind::SelfValue
-                                    | FunctionParamKind::SelfValueMut
-                                    | FunctionParamKind::SelfRef
-                                    | FunctionParamKind::SelfRefMut
-                                    | FunctionParamKind::SelfRefChecked
-                                    | FunctionParamKind::SelfRefCheckedMut
-                                    | FunctionParamKind::SelfRefUnsafe
-                                    | FunctionParamKind::SelfRefUnsafeMut
-                                    | FunctionParamKind::SelfOwn
-                                    | FunctionParamKind::SelfOwnMut
-                            )
-                        })
-                        .unwrap_or(true);
+                        // One authority for "is there a receiver" — this copy
+                        // happened to list all ten variants while its two
+                        // siblings in `decls.rs` listed six, and only the
+                        // siblings were on the path user code takes.
+                        .is_none_or(|p| !p.is_self());
 
                     // Track self-by-value methods for affine type consumption
                     if !is_static {

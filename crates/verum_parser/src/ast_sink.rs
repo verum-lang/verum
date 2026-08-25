@@ -2424,6 +2424,43 @@ impl AstSink {
         params
     }
 
+    /// The receiver kind a `self` parameter node declares.
+    ///
+    /// One carrier for both places a receiver is read. The two copies
+    /// this replaces each recognised only `&`/`mut`/`%`, so `&checked
+    /// self` and `&unsafe self` — the zero-overhead reference tiers —
+    /// arrived as a plain `&self`, and every tool reading this tree was
+    /// told the wrong tier.
+    fn self_param_kind(&self, node: &SyntaxNode) -> FunctionParamKind {
+        let has_ref = self.has_token(node, SyntaxKind::AMP);
+        let has_mut = self.has_token(node, SyntaxKind::MUT_KW);
+        let has_own = self.has_token(node, SyntaxKind::PERCENT);
+        let is_checked = self.has_token(node, SyntaxKind::CHECKED_KW);
+        let is_unsafe = self.has_token(node, SyntaxKind::UNSAFE_KW);
+        if has_ref && is_checked {
+            return if has_mut {
+                FunctionParamKind::SelfRefCheckedMut
+            } else {
+                FunctionParamKind::SelfRefChecked
+            };
+        }
+        if has_ref && is_unsafe {
+            return if has_mut {
+                FunctionParamKind::SelfRefUnsafeMut
+            } else {
+                FunctionParamKind::SelfRefUnsafe
+            };
+        }
+        match (has_ref, has_mut, has_own) {
+            (true, true, false) => FunctionParamKind::SelfRefMut,
+            (true, false, false) => FunctionParamKind::SelfRef,
+            (false, true, true) => FunctionParamKind::SelfOwnMut,
+            (false, false, true) => FunctionParamKind::SelfOwn,
+            (false, true, false) => FunctionParamKind::SelfValueMut,
+            _ => FunctionParamKind::SelfValue,
+        }
+    }
+
     /// Convert a PARAM_LIST node to a list of FunctionParam.
     fn convert_param_list(&mut self, node: &SyntaxNode) -> List<FunctionParam> {
         let mut params = List::new();
@@ -2433,17 +2470,7 @@ impl AstSink {
             }
             let span = self.range_to_span(child.text_range());
             if child.kind() == SyntaxKind::SELF_PARAM {
-                let has_ref = self.has_token(&child, SyntaxKind::AMP);
-                let has_mut = self.has_token(&child, SyntaxKind::MUT_KW);
-                let has_own = self.has_token(&child, SyntaxKind::PERCENT);
-                let param_kind = match (has_ref, has_mut, has_own) {
-                    (true, true, false) => FunctionParamKind::SelfRefMut,
-                    (true, false, false) => FunctionParamKind::SelfRef,
-                    (false, true, true) => FunctionParamKind::SelfOwnMut,
-                    (false, false, true) => FunctionParamKind::SelfOwn,
-                    (false, true, false) => FunctionParamKind::SelfValueMut,
-                    _ => FunctionParamKind::SelfValue,
-                };
+                let param_kind = self.self_param_kind(&child);
                 params.push(FunctionParam::new(param_kind, span));
                 continue;
             }
@@ -2453,17 +2480,7 @@ impl AstSink {
                 match elem {
                     SyntaxElement::Token(token) => {
                         if token.kind() == SyntaxKind::SELF_VALUE_KW {
-                            let has_ref = self.has_token(&child, SyntaxKind::AMP);
-                            let has_mut = self.has_token(&child, SyntaxKind::MUT_KW);
-                            let has_own = self.has_token(&child, SyntaxKind::PERCENT);
-                            let param_kind = match (has_ref, has_mut, has_own) {
-                                (true, true, false) => FunctionParamKind::SelfRefMut,
-                                (true, false, false) => FunctionParamKind::SelfRef,
-                                (false, true, true) => FunctionParamKind::SelfOwnMut,
-                                (false, false, true) => FunctionParamKind::SelfOwn,
-                                (false, true, false) => FunctionParamKind::SelfValueMut,
-                                _ => FunctionParamKind::SelfValue,
-                            };
+                            let param_kind = self.self_param_kind(&child);
                             params.push(FunctionParam::new(param_kind, span));
                             pattern = None;
                             break;

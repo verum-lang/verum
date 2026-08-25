@@ -8750,15 +8750,12 @@ impl TypeChecker {
                     let param_count = method
                         .params
                         .iter()
-                        .filter(|p| {
-                            !matches!(
-                                p.kind,
-                                verum_ast::decl::FunctionParamKind::SelfRef
-                                    | verum_ast::decl::FunctionParamKind::SelfRefMut
-                                    | verum_ast::decl::FunctionParamKind::SelfValue
-                                    | verum_ast::decl::FunctionParamKind::SelfValueMut
-                            )
-                        })
+                        // `is_self` is the authority on what a receiver is —
+                        // re-listing the variants here missed the tiered
+                        // (`&checked self`, `&unsafe self`) and owning
+                        // (`%self`) receivers, counting each of those methods
+                        // as taking one parameter more than it does.
+                        .filter(|p| !p.is_self())
                         .count();
                     let params = (0..param_count).map(|_| Type::Unknown).collect();
                     let method_type = Type::Function {

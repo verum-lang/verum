@@ -5331,21 +5331,14 @@ impl TypeChecker {
                             // in the impl block from being registered.
                             let method_result: Result<()> = {
                                 // Check if this is a static method (no self parameter)
-                                let is_static = func
-                                    .params
-                                    .first()
-                                    .map(|p| {
-                                        !matches!(
-                                            p.kind,
-                                            FunctionParamKind::SelfValue
-                                                | FunctionParamKind::SelfValueMut
-                                                | FunctionParamKind::SelfRef
-                                                | FunctionParamKind::SelfRefMut
-                                                | FunctionParamKind::SelfOwn
-                                                | FunctionParamKind::SelfOwnMut
-                                        )
-                                    })
-                                    .unwrap_or(true);
+                                // `is_self` is the authority on what counts as a
+                                // receiver. Re-listing the variants here left out
+                                // the reference tiers (`&checked self`,
+                                // `&unsafe self`), so a method declared with one
+                                // was registered as an ASSOCIATED FUNCTION: it
+                                // answered to `T.m(&v)` and was invisible to
+                                // `v.m()`, which is how every call site spells it.
+                                let is_static = !func.params.first().is_some_and(|p| p.is_self());
 
                                 // Track self-by-value methods for affine type consumption
                                 if !is_static {
@@ -5843,21 +5836,10 @@ impl TypeChecker {
                     for item in &impl_decl.items {
                         if let ImplItemKind::Function(func) = &item.kind {
                             // Check if this is a static method (no self parameter)
-                            let is_static = func
-                                .params
-                                .first()
-                                .map(|p| {
-                                    !matches!(
-                                        p.kind,
-                                        FunctionParamKind::SelfValue
-                                            | FunctionParamKind::SelfValueMut
-                                            | FunctionParamKind::SelfRef
-                                            | FunctionParamKind::SelfRefMut
-                                            | FunctionParamKind::SelfOwn
-                                            | FunctionParamKind::SelfOwnMut
-                                    )
-                                })
-                                .unwrap_or(true);
+                            // Same authority as the sibling site above — see the
+                            // note there on why re-listing the variants dropped
+                            // the tiered receivers.
+                            let is_static = !func.params.first().is_some_and(|p| p.is_self());
 
                             if !is_static {
                                 // Track self-by-value methods for affine type consumption
