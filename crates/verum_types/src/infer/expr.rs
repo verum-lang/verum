@@ -81,6 +81,20 @@ fn expected_parent_head(ty: &Type) -> Option<String> {
     }
 }
 
+/// Peel refinement wrappers to reach the type that decides indexability.
+///
+/// A refinement says WHICH values inhabit a type; it never removes an
+/// operation the base type supports.  `&List<Int>{len > 0}` is indexable
+/// exactly when `&List<Int>` is.  Both nestings occur — a refinement can
+/// sit outside the reference or inside it — so callers peel on both sides
+/// of the reference rather than assuming one spelling.
+fn peel_refinement(ty: &Type) -> &Type {
+    match ty {
+        Type::Refined { base, .. } => peel_refinement(base),
+        other => other,
+    }
+}
+
 
 impl TypeChecker {
     pub fn synth_expr(&mut self, expr: &Expr) -> Result<InferResult> {
@@ -9484,11 +9498,11 @@ impl TypeChecker {
         // If we have a reference to a type, check the inner type
         // This handles cases like &List<T>, &mut List<T>, &checked List<T>, &Heap<T>, etc.
         // CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #auto-dereference
-        let inner_ty = match &arr_result.ty {
-            Type::Reference { inner, .. } => Some(inner.as_ref()),
-            Type::CheckedReference { inner, .. } => Some(inner.as_ref()),
-            Type::UnsafeReference { inner, .. } => Some(inner.as_ref()),
-            Type::Ownership { inner, .. } => Some(inner.as_ref()),
+        let inner_ty = match peel_refinement(&arr_result.ty) {
+            Type::Reference { inner, .. } => Some(peel_refinement(inner)),
+            Type::CheckedReference { inner, .. } => Some(peel_refinement(inner)),
+            Type::UnsafeReference { inner, .. } => Some(peel_refinement(inner)),
+            Type::Ownership { inner, .. } => Some(peel_refinement(inner)),
             // Heap<T> auto-deref to T for indexing
             Type::Generic { name, args }
                 if WKT::Heap.matches(name.as_str()) && !args.is_empty() =>
