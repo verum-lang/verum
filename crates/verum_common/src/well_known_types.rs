@@ -1997,6 +1997,71 @@ pub mod type_names {
             None => name,
         }
     }
+
+    /// The exact value of an integer type's limit constant, e.g.
+    /// `integer_limit("Int", "MAX")`.
+    ///
+    /// This is the language's own knowledge about its primitive types —
+    /// width and signedness come from [`numeric_bit_width`] and
+    /// [`is_signed_integer_type`], so a new integer alias is recognised
+    /// here the moment it is added there.
+    ///
+    /// Every consumer that needs the VALUE must read it here rather than
+    /// re-deriving it. A consumer that instead treats `Int.MAX` as an
+    /// opaque symbol does not merely lose precision: a solver handed an
+    /// unconstrained symbol will happily pick a negative model for it and
+    /// report a proof failure on correct code.
+    pub fn integer_limit(type_name: &str, konst: &str) -> Option<i128> {
+        let bits = numeric_bit_width(type_name)? as i128;
+        let is_signed = is_signed_integer_type(type_name);
+        if !is_signed && !is_unsigned_integer_type(type_name) {
+            return None;
+        }
+        match konst {
+            "BITS" => Some(bits),
+            "MIN" | "min_value" if !is_signed => Some(0),
+            "MIN" | "min_value" if bits == 128 => Some(i128::MIN),
+            "MIN" | "min_value" => Some(-(1i128 << (bits - 1))),
+            "MAX" | "max_value" if bits == 128 && is_signed => Some(i128::MAX),
+            // The unsigned 128-bit maximum does not fit in i128; callers
+            // that need it must widen. Reporting None is honest, whereas a
+            // truncated value would be a wrong answer wearing a right shape.
+            "MAX" | "max_value" if bits == 128 => None,
+            "MAX" | "max_value" if is_signed => Some((1i128 << (bits - 1)) - 1),
+            "MAX" | "max_value" => Some((1i128 << bits) - 1),
+            _ => None,
+        }
+    }
+
+    /// The exact value of a float type's named constant, e.g.
+    /// `float_constant("Float", "EPSILON")`.
+    ///
+    /// Returns the REAL value. Encodings (such as the f64 bit pattern the
+    /// bytecode stores) are the caller's business — a shared table that
+    /// returned a bit pattern would be unusable by any consumer that
+    /// reasons about magnitude, which is most of them.
+    pub fn float_constant(type_name: &str, konst: &str) -> Option<f64> {
+        if !is_float_type(type_name) {
+            return None;
+        }
+        let bits = numeric_bit_width(type_name)?;
+        match konst {
+            "BITS" => Some(bits as f64),
+            "MIN" | "min_value" if bits == 32 => Some(f32::MIN as f64),
+            "MIN" | "min_value" => Some(f64::MIN),
+            "MAX" | "max_value" if bits == 32 => Some(f32::MAX as f64),
+            "MAX" | "max_value" => Some(f64::MAX),
+            "EPSILON" | "epsilon" if bits == 32 => Some(f32::EPSILON as f64),
+            "EPSILON" | "epsilon" => Some(f64::EPSILON),
+            "INFINITY" | "infinity" => Some(f64::INFINITY),
+            "NEG_INFINITY" | "neg_infinity" => Some(f64::NEG_INFINITY),
+            "NAN" | "nan" => Some(f64::NAN),
+            "MIN_POSITIVE" | "min_positive" if bits == 64 => Some(f64::MIN_POSITIVE),
+            "PI" | "pi" if bits == 64 => Some(std::f64::consts::PI),
+            "E" | "e" if bits == 64 => Some(std::f64::consts::E),
+            _ => None,
+        }
+    }
 }
 
 // =============================================================================

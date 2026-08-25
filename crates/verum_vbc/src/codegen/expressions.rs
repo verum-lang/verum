@@ -183,34 +183,21 @@ fn resolve_type_property(type_name: &str, property: &str) -> Option<TypeProperty
 }
 
 fn resolve_type_static_constant(type_name: &str, method: &str) -> Option<i128> {
-    // Float types route through their own constant table (the
-    // language-defined `MIN_POSITIVE` / `EPSILON` / `PI` / etc. don't
-    // generalise to integers).  Integer width / signedness comes
-    // from the canonical `type_names` registry — no per-type match
-    // arms here.
+    // Values come from the language's own numeric-limit tables in
+    // `verum_common::well_known_types::type_names` — the single carrier
+    // shared with the SMT translator, so a constant cannot mean one
+    // thing to codegen and another to the verifier.
+    //
+    // What is local to bytecode is the ENCODING: a float constant is
+    // stored as its f64 bit pattern (the interpreter / codegen narrows
+    // when the slot is 32-bit), while `BITS` is a plain count and must
+    // not be bit-cast.
     if type_names::is_float_type(type_name) {
-        let bits = type_names::numeric_bit_width(type_name)?;
-        return match method {
-            "BITS" => Some(bits as i128),
-            // 64-bit float surface (every float constant is encoded
-            // as the f64 bit pattern; the interpreter / codegen
-            // narrows when storing into a 32-bit slot).
-            "MIN" | "min_value" if bits == 32 => Some((f32::MIN as f64).to_bits() as i128),
-            "MIN" | "min_value" => Some(f64::MIN.to_bits() as i128),
-            "MAX" | "max_value" if bits == 32 => Some((f32::MAX as f64).to_bits() as i128),
-            "MAX" | "max_value" => Some(f64::MAX.to_bits() as i128),
-            "EPSILON" | "epsilon" if bits == 32 => Some((f32::EPSILON as f64).to_bits() as i128),
-            "EPSILON" | "epsilon" => Some(f64::EPSILON.to_bits() as i128),
-            "INFINITY" | "infinity" => Some(f64::INFINITY.to_bits() as i128),
-            "NEG_INFINITY" | "neg_infinity" => Some(f64::NEG_INFINITY.to_bits() as i128),
-            "NAN" | "nan" => Some(f64::NAN.to_bits() as i128),
-            "MIN_POSITIVE" | "min_positive" if bits == 64 => {
-                Some(f64::MIN_POSITIVE.to_bits() as i128)
-            }
-            "PI" | "pi" if bits == 64 => Some(std::f64::consts::PI.to_bits() as i128),
-            "E" | "e" if bits == 64 => Some(std::f64::consts::E.to_bits() as i128),
-            _ => None,
-        };
+        if method == "BITS" {
+            return type_names::numeric_bit_width(type_name).map(|b| b as i128);
+        }
+        return type_names::float_constant(type_name, method)
+            .map(|v| v.to_bits() as i128);
     }
 
     // Stdlib newtype constants — Duration is a transparent newtype
@@ -224,39 +211,7 @@ fn resolve_type_static_constant(type_name: &str, method: &str) -> Option<i128> {
         };
     }
 
-    // Integer types — width + signedness from the canonical registry.
-    let bits = type_names::numeric_bit_width(type_name)? as i128;
-    let is_signed = type_names::is_signed_integer_type(type_name);
-    let is_unsigned = type_names::is_unsigned_integer_type(type_name);
-    if !is_signed && !is_unsigned {
-        return None;
-    }
-    match method {
-        "MIN" | "min_value" => {
-            if !is_signed {
-                Some(0)
-            } else if bits == 128 {
-                Some(i128::MIN)
-            } else {
-                Some(-(1i128 << (bits - 1)))
-            }
-        }
-        "MAX" | "max_value" => {
-            if is_signed {
-                if bits == 128 {
-                    Some(i128::MAX)
-                } else {
-                    Some((1i128 << (bits - 1)) - 1)
-                }
-            } else if bits == 128 {
-                Some(u128::MAX as i128)
-            } else {
-                Some((1i128 << bits) - 1)
-            }
-        }
-        "BITS" => Some(bits),
-        _ => None,
-    }
+    type_names::integer_limit(type_name, method)
 }
 
 /// Resolves a well-known stdlib constant name to its integer value

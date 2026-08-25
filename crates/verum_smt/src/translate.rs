@@ -67,6 +67,7 @@ use verum_ast::{
     BinOp, Expr, ExprKind, Literal, LiteralKind, Pattern, PatternKind, Type, TypeKind,
 };
 use verum_common::ToText;
+use verum_common::well_known_types::type_names as wkt_type_names;
 use verum_common::{List, Map, Maybe, Text};
 use z3::ast::{
     Array, Ast, BV, Bool, Dynamic, Float, Int, Real, RoundingMode, String as Z3String,
@@ -1199,6 +1200,37 @@ impl<'ctx> Translator<'ctx> {
                                 },
                                 _ => String::new(),
                             };
+                            // A primitive's limit constant has a VALUE, and
+                            // the language knows it. Translating `Int.MAX`
+                            // to a free symbol let the solver choose a
+                            // negative model for it and report a violation
+                            // on code that returns it under a `>= 0`
+                            // refinement — a false red produced entirely by
+                            // the translation.
+                            if let Some(v) = wkt_type_names::integer_limit(&type_name, field_name) {
+                                if let Ok(v64) = i64::try_from(v) {
+                                    return Ok(Dynamic::from_ast(&Int::from_i64(v64)));
+                                }
+                                // Wider than i64 (the 128-bit limits): Z3
+                                // numerals are unbounded, so go through the
+                                // decimal spelling rather than truncating to
+                                // fit the i64 constructor. `from_real` on an
+                                // integral rational is exact.
+                                if let Some(r) = Real::from_rational_str(&v.to_string(), "1") {
+                                    return Ok(Dynamic::from_ast(&Int::from_real(&r)));
+                                }
+                            }
+                            if let Some(f) = wkt_type_names::float_constant(&type_name, field_name) {
+                                // NAN / ±INFINITY have no rational value; a
+                                // free symbol is the honest translation for
+                                // them, and the guards downstream already
+                                // treat an untied binder as "not proven".
+                                if f.is_finite() {
+                                    if let Some(r) = Real::from_rational_str(&f.to_string(), "1") {
+                                        return Ok(Dynamic::from_ast(&r));
+                                    }
+                                }
+                            }
                             let key = format!("path_{}.{}", type_name, field_name);
                             let int_var = Int::new_const(key.as_str());
                             return Ok(Dynamic::from_ast(&int_var));
