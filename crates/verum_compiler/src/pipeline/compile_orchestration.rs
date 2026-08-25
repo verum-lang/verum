@@ -1020,6 +1020,23 @@ impl<'s> CompilationPipeline<'s> {
                 // because the lazy load never fires.
                 if let Some(metadata) = self.stdlib_metadata.get() {
                     checker.set_core_metadata(std::sync::Arc::clone(metadata));
+                    // T0865: the single-file path pre-registers the
+                    // stdlib types this module names AND the stdlib
+                    // VARIANT CONSTRUCTORS (`register_stdlib_types_for_module`
+                    // ends by registering them); the project path
+                    // handed over the metadata and skipped that step.
+                    // The receiver-driven lazy loader above covers
+                    // types reached through a method call, but a
+                    // constructor in VALUE position has no receiver:
+                    // bare `Ok(x)` / `Some(x)` resolved to the parent
+                    // variant TYPE instead of its constructor and the
+                    // call handler said "not a function: Ok".
+                    //
+                    // Measured on the registry corpus: 110 of 334
+                    // project errors were this, and the SAME file
+                    // checked directly reported none — one source,
+                    // two verdicts, decided by which command ran.
+                    checker.register_stdlib_types_for_module(&module);
                 }
 
                 // Configure type checker with module registry for cross-file resolution
