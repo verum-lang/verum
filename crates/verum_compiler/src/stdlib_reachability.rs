@@ -65,6 +65,17 @@ pub fn compute_reachable_stdlib_modules(user: &Module) -> Option<HashSet<String>
     // core.collections`, so the BFS must seed them unconditionally.
     let mut seeds = collect_user_mount_seeds(user);
     seeds.extend(prelude_seeds(index));
+    // A qualified path used in an expression — `core.time.Duration.from_secs(30)`,
+    // the documented spelling for a one-off use — names a module just as a
+    // `mount` does, and must seed the closure the same way.
+    //
+    // It did not, and the consequence was not a resolution failure but a
+    // COST CLIFF: the late resolver picked the symbol up by walking far
+    // more than the closure would have, and a one-line program took
+    // 6 min 19 s where the mounted spelling took about a second. A
+    // 400× cliff attached to a documented idiom reads as a hang, and
+    // the program's own correctness gives no hint that anything is wrong.
+    seeds.extend(collect_qualified_path_seeds(user, index));
 
     if seeds.is_empty() {
         return Some(HashSet::new());
@@ -111,6 +122,80 @@ fn collect_user_mount_seeds(user: &Module) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::with_capacity(out.len());
     out.retain(|p| seen.insert(p.clone()));
     out
+}
+
+/// Collect module seeds from qualified paths written in expressions.
+///
+/// The walk is over-approximate in the same spirit as the mount walk: a
+/// dotted expression contributes the LONGEST prefix that the module index
+/// recognises, and contributes nothing at all when no prefix resolves. A
+/// record field chain (`config.server.port`) therefore costs one index
+/// lookup per prefix and adds no seed.
+fn collect_qualified_path_seeds(user: &Module, index: &StdlibModuleIndex) -> Vec<String> {
+    use verum_ast::visitor::{Visitor, walk_expr};
+
+    struct Collect {
+        dotted: Vec<String>,
+    }
+
+    impl Visitor for Collect {
+        fn visit_expr(&mut self, expr: &verum_ast::expr::Expr) {
+            if let Some(d) = dotted_of(expr) {
+                self.dotted.push(d);
+            }
+            walk_expr(self, expr);
+        }
+    }
+
+    let mut collect = Collect {
+        dotted: Vec::new(),
+    };
+    for item in user.items.iter() {
+        collect.visit_item(item);
+    }
+
+    let mut out = Vec::new();
+    for dotted in collect.dotted {
+        let mut current = dotted.as_str();
+        loop {
+            // `core` alone is never a seed: `core/mod.vr`'s glob
+            // re-exports would drag in the whole stdlib, which is the
+            // pessimisation this pass exists to prevent.
+            if current == "core" || !current.contains('.') {
+                break;
+            }
+            if index.module_to_file(current).is_some() {
+                push_with_parent(current.to_string(), &mut out);
+                break;
+            }
+            match current.rfind('.') {
+                Some(dot) => current = &current[..dot],
+                None => break,
+            }
+        }
+    }
+    out
+}
+
+/// The dotted spelling of an expression that names a path, if it does.
+///
+/// Covers both shapes the parser produces for a qualified reference: a
+/// multi-segment `Path`, and a field chain rooted at one (which is how
+/// `core.time.Duration.from_secs` arrives once the tail is a method).
+fn dotted_of(expr: &verum_ast::expr::Expr) -> Option<String> {
+    use verum_ast::expr::ExprKind;
+
+    match &expr.kind {
+        ExprKind::Path(p) if p.segments.len() >= 2 => {
+            let joined = combine("", p);
+            (!joined.is_empty()).then_some(joined)
+        }
+        ExprKind::Field { expr: base, field } => {
+            let head = dotted_of(base)?;
+            Some(format!("{head}.{}", field.as_str()))
+        }
+        _ => None,
+    }
 }
 
 fn collect_seeds_from_item(item: &Item, out: &mut Vec<String>) {

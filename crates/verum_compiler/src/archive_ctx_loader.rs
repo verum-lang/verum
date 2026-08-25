@@ -2608,11 +2608,17 @@ impl ArchiveCtxCache {
                 .iter()
                 .filter(|n| n.contains("format_debug"))
                 .collect();
+            let mut all: Vec<&String> = wanted.iter().collect();
+            all.sort();
             eprintln!(
                 "[wanted] apply_lazy_with_types fmt-related: {:?} (total {})",
                 dbg,
                 wanted.len()
             );
+            eprintln!("[wanted] names: {:?}", all);
+            let mut seeds: Vec<&String> = bare_method_seeds.iter().collect();
+            seeds.sort();
+            eprintln!("[wanted] bare-method seeds ({}): {:?}", seeds.len(), seeds);
         }
         if wanted.is_empty() {
             loadcost::report("apply_lazy_with_types (empty wanted)", t_load.elapsed());
@@ -3535,6 +3541,13 @@ impl ArchiveCtxCache {
             }
         }
         loadcost::report("apply_lazy_with_types", t_load.elapsed());
+        if std::env::var("VERUM_TRACE_WANTED").is_ok() {
+            eprintln!(
+                "[wanted] loaded fn_modules={fn_modules} type_modules={type_modules} \
+                 registered_fns={}",
+                codegen.function_count()
+            );
+        }
         (fn_modules, type_modules)
     }
 }
@@ -5018,10 +5031,19 @@ fn harvest_names_in_expr(
             // and `register_module_filtered` registers it only if
             // either `simple_name` itself is in `wanted` OR the
             // parent type is.  Push BOTH to handle either gate.
-            if let ExprKind::Path(path) = &receiver.kind {
-                if let Some(last) = last_path_name(path) {
-                    out.insert(format!("{}.{}", last, method.name));
-                }
+            //
+            // The receiver reaches here in TWO shapes and the rule must
+            // cover both: `Duration.from_secs(30)` parses as a Path, but
+            // the fully-qualified `core.time.Duration.from_secs(30)`
+            // parses as a FIELD CHAIN, and this test saw only the first.
+            // The qualified call therefore contributed no
+            // `Duration.from_secs` — only the bare leaf `from_secs`,
+            // which the loader must then pair against every live type.
+            // Same program, same answer, 400x the compile time; the
+            // documented "qualified path for a one-off" idiom read as a
+            // hang.
+            if let Some(last) = receiver_type_name(receiver) {
+                out.insert(format!("{}.{}", last, method.name));
             }
             // INSTANCE-METHOD keep seed (ARCHIVE-MERGE-MISSING-FN /
             // task #24 leg 2): `r.unwrap_err()` on a VARIABLE receiver
@@ -5055,13 +5077,36 @@ fn harvest_names_in_expr(
             // unrelated SQL-lexer `KwAll` variant, its tag shifting with
             // the interned-string layout). Harvest both the qualified
             // `Type.CONST` form and the bare `CONST` simple alias.
-            if let ExprKind::Path(path) = &expr.kind
-                && let Some(last) = last_path_name(path)
-            {
-                out.insert(format!("{}.{}", last, field.name));
-                out.insert(field.name.to_string());
+            //
+            // The chain is harvested as ONE dotted name rather than link
+            // by link. Recursing used to file every link as a candidate
+            // symbol name, so `core.time.Duration.from_secs(30)`
+            // contributed bare `core` and `time` — and the unqualified
+            // fallback scan below walks the whole archive for any bare
+            // name the symbol graph carries, decoding every module whose
+            // strings merely mention it. Every stdlib module's strings
+            // mention `core`.
+            //
+            // A bare link is kept only when it is capitalised, which is
+            // Verum's spelling for a type or a constant; lower-case links
+            // are module path, and a record chain (`config.server.port`)
+            // is likewise road rather than destination.
+            if let Some(head) = dotted_expr_path(expr) {
+                let fname = field.name.to_string();
+                let full = format!("{}.{}", head, fname);
+                out.insert(full.clone());
+                if fname.chars().next().is_some_and(char::is_uppercase) {
+                    out.insert(fname.clone());
+                }
+                // The two-segment tail is the form a `mount` of the same
+                // item produces (`time.Duration`), and the archive gates
+                // on it.
+                if let Some(dot) = full[..full.len() - fname.len() - 1].rfind('.') {
+                    out.insert(full[dot + 1..].to_string());
+                }
+            } else {
+                harvest_names_in_expr(expr, out);
             }
-            harvest_names_in_expr(expr, out);
         }
         ExprKind::OptionalChain { expr, .. }
         | ExprKind::TupleIndex { expr, .. } => harvest_names_in_expr(expr, out),
@@ -5223,8 +5268,30 @@ fn harvest_names_in_path(
             _ => None,
         })
         .collect();
-    for s in &segs {
-        out.insert(s.clone());
+    // Which segments are NAMES, and which are just the road to one.
+    //
+    // Every segment used to be inserted as a bare wanted name. For a
+    // qualified expression like `core.time.Duration.from_secs(30)` that
+    // filed `core` and `time` as candidate symbol names — and the
+    // unqualified fallback scan below walks the WHOLE archive for any
+    // bare name the symbol graph carries, decoding each module whose
+    // string table merely mentions it. Every stdlib module's strings
+    // mention `core`. Measured on a one-line program: the mounted
+    // spelling loaded 11 modules and 9,886 functions, the qualified one
+    // 582 modules and 48,815 — same program, same answer, minutes
+    // instead of a second.
+    //
+    // Verum's own convention separates the two: module path components
+    // are lower-case, types and items are capitalised. So a segment is a
+    // name when it is the LAST one (the item actually referenced) or it
+    // is capitalised (a type, which may need its module gated in);
+    // lower-case interior segments are road, not destination.
+    for (i, s) in segs.iter().enumerate() {
+        let is_last = i + 1 == segs.len();
+        let is_capitalised = s.chars().next().is_some_and(char::is_uppercase);
+        if is_last || is_capitalised {
+            out.insert(s.clone());
+        }
     }
     if segs.len() > 1 {
         out.insert(segs.join("."));
@@ -5252,6 +5319,50 @@ fn looks_like_type_name(name: &str) -> bool {
     // Must be entirely alphanumeric (rejects sigils/operators,
     // `__type_params_*` registry tokens, etc.).
     name.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// The dotted spelling of an expression that names a path, if it does.
+///
+/// `Some` for a multi- or single-segment `Path` and for a chain of field
+/// accesses rooted at one; `None` for anything else (a call result, an
+/// index, a literal), which is the signal to fall back to the ordinary
+/// recursive harvest.
+fn dotted_expr_path(expr: &verum_ast::Expr) -> Option<String> {
+    use verum_ast::expr::ExprKind;
+    match &expr.kind {
+        ExprKind::Path(path) => {
+            let segs: Vec<String> = path
+                .segments
+                .iter()
+                .filter_map(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.to_string()),
+                    _ => None,
+                })
+                .collect();
+            (!segs.is_empty()).then(|| segs.join("."))
+        }
+        ExprKind::Field { expr: base, field } => {
+            Some(format!("{}.{}", dotted_expr_path(base)?, field.name))
+        }
+        _ => None,
+    }
+}
+
+/// The TYPE NAME a static-method receiver denotes, in either spelling.
+///
+/// `Duration.from_secs(30)` gives the receiver as a `Path`; the
+/// fully-qualified `core.time.Duration.from_secs(30)` gives it as a
+/// chain of field accesses. Both name the same type, and the archive
+/// keys the inherent method as `Duration.from_secs` either way — so
+/// both must produce that key, or the qualified spelling falls back to
+/// bare-leaf fanout.
+fn receiver_type_name(receiver: &verum_ast::Expr) -> Option<String> {
+    use verum_ast::expr::ExprKind;
+    match &receiver.kind {
+        ExprKind::Path(path) => last_path_name(path),
+        ExprKind::Field { field, .. } => Some(field.name.to_string()),
+        _ => None,
+    }
 }
 
 fn last_path_name(path: &verum_ast::ty::Path) -> Option<String> {
