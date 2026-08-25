@@ -6399,6 +6399,21 @@ impl VbcCodegen {
                 self.ctx.stage5_stub_counter += 1;
                 crate::module::FunctionId(crate::stub_ranges::STAGE5_BASE - c)
             };
+            // The sibling mint site (`synthesize_qualified_call_stub`)
+            // has carried this trace since it was written; this one did
+            // not, so a stub minted HERE surfaced at run time as a bare
+            // id with no way to learn its name — the diagnostic told the
+            // reader to look for warnings that the other site emits.
+            if std::env::var_os("VERUM_TRACE_QCALL").is_some() {
+                eprintln!(
+                    "[qcall] stage-5 mount-miss stub '{}' → '{}' (arity={}) id={} in {}",
+                    func_name,
+                    qualified,
+                    args.len(),
+                    stub_id.0,
+                    self.ctx.current_function.as_deref().unwrap_or("<top>"),
+                );
+            }
             let info = FunctionInfo {
                 id: stub_id,
                 param_count: args.len(),
@@ -6931,13 +6946,16 @@ impl VbcCodegen {
                     && func_name.contains(&filter)
                 {
                     eprintln!(
-                        "[callbind] call '{}' (argc={}) → bound '{}' id={} | arm={} scope={:?}",
+                        "[callbind] call '{}' (argc={}) → bound '{}' id={} | arm={} scope={:?} \
+                         unit_declared={} ffi={}",
                         func_name,
                         args.len(),
                         result.0,
                         result.1.id.0,
                         callbind_arm,
-                        self.ctx.current_source_module
+                        self.ctx.current_source_module,
+                        self.ctx.unit_declared_fns.contains(&func_name),
+                        self.is_ffi_function(&func_name),
                     );
                 }
                 result
@@ -7555,9 +7573,28 @@ impl VbcCodegen {
         // arity-aware lookup at the top of compile_call (line 2658) has already
         // resolved `func_info` to the user's function; we just need to guard
         // the FFI dispatch here so we don't flip back to the extern.
+        //
+        // …but "user-defined function" must mean one THIS file declares.
+        // The guard also fired for an unrelated module's function that
+        // merely shares the name, and then the extern lost its own call:
+        // a file declaring `extern { fn open(path, oflag, mode) }` and
+        // calling `open(...)` bound to `core.sys.linux.syscall.open` —
+        // another platform's wrapper, bodyless on this target, so the
+        // call became an unresolved stub and the program panicked.
+        // `getpid`, whose name nothing else declares, worked; the C
+        // names people actually bind (open/read/write/close/select) are
+        // exactly the contested ones.
+        //
+        // The discriminator is that the winner arrived under a QUALIFIED
+        // foreign key while the call was written bare, and this file
+        // declares that bare name as an extern.
+        let unit_declares_extern =
+            self.ctx.unit_declared_fns.contains(&func_name) && self.is_ffi_function(&func_name);
+        let resolved_is_foreign = resolved_name.contains('.') && !func_name.contains('.');
         let user_fn_matches_arity = func_info.param_count == args.len()
             && func_info.intrinsic_name.is_none()
-            && func_info.id.0 != u32::MAX;
+            && func_info.id.0 != u32::MAX
+            && !(unit_declares_extern && resolved_is_foreign);
         if !user_fn_matches_arity && let Some(ffi_symbol_id) = self.get_ffi_symbol_id(&func_name) {
             // Emit FfiExtended.CallFfiC instruction
             // Format: symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],

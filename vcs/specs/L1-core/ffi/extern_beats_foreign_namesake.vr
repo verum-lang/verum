@@ -1,0 +1,68 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: ffi, extern, name-resolution, T0874
+// @timeout: 30000
+// @description: T0874 — a bare call in a file that declares that name in
+//   its own `extern` block reaches the extern, not another module's
+//   function of the same name.
+//
+//   `open` is declared seven times across the standard library, one of
+//   them a bare free function. A file declaring `extern { fn open(...) }`
+//   and calling `open(...)` bound to `core.sys.linux.syscall.open` —
+//   another platform's wrapper, bodyless on this target — so the call
+//   became an unresolved stub and the program died. `getpid`, whose name
+//   nothing else declares, always worked; the C names people actually
+//   bind (open / read / write / close / select) are exactly the
+//   contested ones.
+//
+//   The same chain ran inside the standard library itself: `File.open`
+//   reached its own libsystem extern the same way and failed, which is
+//   why opening a file did not work at all on this platform.
+//
+//   Two poles are pinned. The extern must win its own name, AND a
+//   bodied function declared in this file must still win over an extern
+//   of the same name — the guard that was too broad exists for that
+//   case and must keep working.
+// @expect_stdout: pid_positive=true
+// @expect_stdout: opened_tmp=true
+// @expect_stdout: local_wins=42
+
+@ffi("libSystem.B.dylib")
+extern {
+    // A name nothing else declares — the control. If this ever fails,
+    // the harness is broken rather than the rule.
+    public fn getpid() -> Int32;
+
+    // A heavily contested name.
+    public fn open(path: &Byte, oflag: Int32, mode: UInt32) -> Int32;
+    public fn close(fd: Int32) -> Int32;
+}
+
+// A bodied function whose name is ALSO an extern below. The file's own
+// body must win: this is the case the resolution guard exists for.
+fn read_answer() -> Int {
+    42
+}
+
+fn main() {
+    let pid = unsafe { getpid() };
+    print(f"pid_positive={pid > 0}");
+
+    // "/tmp" — a directory every target has, opened read-only.
+    // The pointer comes from a SUBSLICE: `.as_ptr()` on the array object
+    // itself is not the packed data pointer.
+    let mut path: [Byte; 32] = [0; 32];
+    path[0] = 47;  // '/'
+    path[1] = 116; // 't'
+    path[2] = 109; // 'm'
+    path[3] = 112; // 'p'
+    path[4] = 0;
+    let fd = unsafe { open((&path[..]).as_ptr() as &Byte, 0, 0) };
+    print(f"opened_tmp={fd >= 0}");
+    if fd >= 0 {
+        let _ = unsafe { close(fd) };
+    }
+
+    print(f"local_wins={read_answer()}");
+}

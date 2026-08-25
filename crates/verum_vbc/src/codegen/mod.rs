@@ -10260,6 +10260,30 @@ impl VbcCodegen {
                 param_closure_return_type_names: Vec::new(),
         };
 
+        // An extern declaration is this unit's OWN binding for the name,
+        // and it claims unit-level precedence exactly like a bodied
+        // declaration does. Registering only into `functions` left the
+        // name outside `unit_declared_fns`, so the `unit_decl_lookup`
+        // gate never opened for it and a foreign free function of the
+        // same name captured the call.
+        //
+        // Measured: a file declaring `extern { fn open(path, oflag, mode) }`
+        // and calling `open(...)` bound to `core.sys.linux.syscall.open`
+        // — another platform's wrapper, with no body on this target, so
+        // the call became an unresolved stub and the program panicked.
+        // `getpid`, whose name nothing else declares, worked. The C
+        // names people actually bind (`open`, `read`, `write`, `close`,
+        // `select`) are exactly the contested ones.
+        //
+        // Not gated on `prefer_existing_functions`: that flag exists so
+        // a later module's bodied declaration does not displace an
+        // earlier one during the bake, and an extern is not a body. The
+        // lookup this feeds is scope-aware — a module that declares no
+        // such extern finds nothing under its own scope and falls
+        // through unchanged.
+        if !name.contains('.') && !name.contains("::") {
+            self.ctx.unit_declared_fns.insert(name.clone());
+        }
         self.ctx.register_function(name, info);
         Ok(())
     }
