@@ -9644,8 +9644,38 @@ impl TypeChecker {
         use ExprKind::*;
         let ExprKind::Return(val) = &expr.kind else { unreachable!() };
         if let Some(v) = val {
-            // Type check the return value (for error messages)
-            let val_result = self.synth_expr(v)?;
+            // CHECK against the declared return type, do not synthesise
+            // blind.
+            //
+            // Synthesis has no expectation to hand down, so a `match`
+            // in return position unified its arms with EACH OTHER:
+            //
+            //     return match b {
+            //         true  => Result.Ok(1),
+            //         false => Result.Err("bad"),
+            //     };
+            //
+            // collapsed `Int` against `Text` and reported "expected
+            // 'Int', found 'Text'" at the Err arm, plus "expected
+            // 'Ok(Int) | Err(Text)', found 'Unit'" at the signature.
+            // The SAME match as a tail expression checked clean, because
+            // that path does hand the expectation down. `return match`
+            // is an ordinary spelling — two of the four errors that
+            // `core/io/buffer.vr` reported were exactly this shape.
+            //
+            // Falls back to synthesis when the function's return type is
+            // not known (a closure being inferred, a signature still
+            // open): checking against nothing is what synthesis is.
+            let declared_return = match &self.current_function_return_type {
+                verum_common::Maybe::Some(ty) => Some(ty.clone()),
+                verum_common::Maybe::None => None,
+            };
+            let val_result = match declared_return {
+                Some(expected) if !matches!(expected, Type::Unknown | Type::Var(_)) => {
+                    self.check_expr(v, &expected)?
+                }
+                _ => self.synth_expr(v)?,
+            };
 
             // ============================================================
             // Return Value Lifetime Validation
