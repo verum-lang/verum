@@ -213,7 +213,10 @@ implement Channel<T> {
 
 // Shared state for channel.
 type ChannelInner<T> is {
-    queue: Deque<T>,
+    // Held behind a mutex: every reader and writer below takes the
+    // lock, and the bounded-capacity check shares that lock with the
+    // push so there is no window between deciding and doing.
+    queue: Mutex<Deque<T>>,
     capacity: Maybe<Int>,  // Maybe.None = unbounded
     closed: AtomicBool,
     sender_count: AtomicInt,
@@ -968,7 +971,7 @@ public fn channel<T>() -> (Sender<T>, Receiver<T>) {
     let no_waker: Maybe<Waker> = Maybe.None;
     let no_wakers: List<Waker> = List.new();
     let inner = Shared.new(ChannelInner {
-        queue: Deque.new(),
+        queue: Mutex.new(Deque.new()),
         capacity: Maybe.None,
         closed: AtomicBool.new(false),
         sender_count: AtomicInt.new(1),
@@ -987,7 +990,7 @@ public fn bounded<T>(capacity: Int) -> (Sender<T>, Receiver<T>) {
     let no_waker: Maybe<Waker> = Maybe.None;
     let no_wakers: List<Waker> = List.new();
     let inner = Shared.new(ChannelInner {
-        queue: Deque.with_capacity(capacity),
+        queue: Mutex.new(Deque.with_capacity(capacity)),
         capacity: Maybe.Some(capacity),
         closed: AtomicBool.new(false),
         sender_count: AtomicInt.new(1),
@@ -1075,7 +1078,7 @@ implement<T> Future for OneshotReceiver<T> {
 
         // Check if sender was dropped without sending
         if self.inner.sent.load(MemoryOrdering.Acquire) {
-            return Poll.Ready(Result.Err(RecvError()));
+            return Poll.Ready(Result.Err(RecvError));
         }
 
         // Register waker
