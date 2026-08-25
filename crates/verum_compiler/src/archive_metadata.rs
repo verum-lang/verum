@@ -639,6 +639,38 @@ fn register_module_metadata(
                     })
                     .collect();
 
+                // A DEFINITION must not lose the name to a SHELL.
+                //
+                // The map is keyed by simple name, and a protocol is
+                // re-exported under many module paths: `core::Debug`,
+                // `core.sys::Debug`, `core.mem::Debug`, … each arrive as
+                // a type descriptor with ZERO variants, while the one
+                // real declaration (`core.base::Debug`) carries
+                // `fmt_debug`. First-wins therefore parked an empty
+                // shell in the slot, and EVERY protocol in the baked
+                // metadata reported zero methods — measured across
+                // Debug, Display, Iterator, Read, Write, Clone and Ord.
+                //
+                // Downstream that looked like unrelated defects: the
+                // type checker had no protocol signatures at all, so
+                // `e.fmt_debug(f)?` came back typed as a bare `Result`
+                // and `?` rejected it with "`Result` does not implement
+                // `Try`".
+                //
+                // The rule is structural, not a list of names: an entry
+                // that carries methods replaces one that carries none.
+                // Two entries that both carry methods keep first-wins,
+                // which is the existing behaviour for genuine
+                // duplicates.
+                let incoming_has_methods = !required_methods.is_empty();
+                if incoming_has_methods
+                    && meta
+                        .protocols
+                        .get(&type_name)
+                        .is_some_and(|existing| existing.required_methods.is_empty())
+                {
+                    meta.protocols.remove(&type_name);
+                }
                 meta.protocols.entry(type_name.clone()).or_insert_with(|| {
                     ProtocolDescriptor {
                         name: type_name.clone(),
