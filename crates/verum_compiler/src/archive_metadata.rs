@@ -1170,7 +1170,37 @@ fn register_module_metadata(
                     || (s.contains('&') && !rendered_return.contains('&'))
             });
         let return_type = match carried_return {
-            Some(verbatim) => Text::from(verbatim),
+            Some(verbatim) => {
+                // The carried spelling wins because the RENDER lost
+                // something — but it can be lossy in the other
+                // direction: it is a bare name, while the descriptor
+                // still holds the instantiation.
+                //
+                // `StreamError.fmt_debug` is declared
+                // `-> Result<(), FormatError>`. The descriptor records
+                // `Instantiated { base, args: [Unit, FormatError] }`,
+                // the render came back `__opaque_type_516<…>` (the base
+                // id is not in this module's name table), so the filter
+                // above preferred the carried `Result` — and the type
+                // arguments were dropped on the floor. The checker then
+                // typed every such call as a bare `Result`, and `?`
+                // rejected it: "`Result` does not implement `Try`".
+                //
+                // When both halves are lossy, take the good half of
+                // each: the carried BASE name with the rendered ARGS.
+                // Structural — it reads the descriptor's own shape and
+                // names no type.
+                let args_suffix = rendered_return
+                    .find('<')
+                    .filter(|_| rendered_return.ends_with('>'))
+                    .map(|i| &rendered_return[i..]);
+                match args_suffix {
+                    Some(args) if !verbatim.contains('<') && !verbatim.contains('[') => {
+                        Text::from(format!("{verbatim}{args}"))
+                    }
+                    _ => Text::from(verbatim),
+                }
+            }
             None => Text::from(rendered_return),
         };
 

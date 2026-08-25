@@ -1,0 +1,75 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: protocols, try, result, metadata, T0878
+// @timeout: 30000
+// @description: T0878 — `?` works on a protocol method that returns a
+//   Result, the way every Debug or Display implementation delegating to
+//   a field is written.
+//
+//   It did not, and the cause was three layers from the symptom. Every
+//   protocol in the baked metadata carried ZERO methods, because the
+//   protocol map is keyed by simple name and a dozen empty re-export
+//   shells (`core::Debug`, `core.sys::Debug`, …) displaced the one real
+//   declaration. Separately, a function's recorded return type dropped
+//   its arguments whenever the type-ref render was lossy in its base:
+//   the descriptor held `Instantiated { base, args: [Unit,
+//   FormatError] }`, the render came back opaque, and the carried
+//   spelling was the bare name `Result`. The checker then saw a Result
+//   with no arguments and rejected `?` with "`Result` does not
+//   implement `Try`".
+//
+//   Both poles are pinned: `?` must work THROUGH a protocol method, and
+//   the value it produces must be the right one — a fix that made `?`
+//   succeed while losing the payload would pass a bare compile check.
+// @expected-stdout-begin
+// delegated=ok
+// doubled=14
+// err_propagates=true
+// @expected-stdout-end
+
+type Code is { value: Int };
+
+implement Debug for Code {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Code")
+    }
+}
+
+// A field's Debug reached through `?` — the shape that failed.
+type Holder is { code: Code };
+
+implement Debug for Holder {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Holder { ")?;
+        self.code.fmt_debug(f)?;
+        f.write_str(" }")
+    }
+}
+
+// `?` must also carry the VALUE, not merely typecheck.
+fn doubled(s: &Text) -> Result<Int, ParseError> {
+    let n = s.parse_int()?;
+    Result.Ok(n * 2)
+}
+
+fn main() {
+    let h = Holder { code: Code { value: 1 } };
+    let rendered = f"{h:?}";
+    if rendered == "Holder { Code }" {
+        print("delegated=ok");
+    } else {
+        print(f"delegated={rendered}");
+    }
+
+    match doubled(&"7".to_text()) {
+        Ok(v)  => print(f"doubled={v}"),
+        Err(_) => print("doubled=FAILED"),
+    }
+
+    // And the Err path must still propagate rather than being swallowed.
+    match doubled(&"not a number".to_text()) {
+        Ok(_)  => print("err_propagates=false"),
+        Err(_) => print("err_propagates=true"),
+    }
+}
