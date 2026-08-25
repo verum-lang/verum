@@ -1,46 +1,59 @@
 // docs/by-example/16-context-system/main.vr
 // Context system: explicit dependency injection without globals.
 
-mount core.context.{provide, using};
 mount core.io.println;
 
-type Logger is { prefix: Text };
-type Database is { url: Text };
+// A `context` declares an interface that callers must satisfy — the
+// methods are called statically (`Logger.log(...)`), and the runtime
+// resolves them against whatever backend is installed in scope.
+public context Logger {
+    fn log(message: Text);
+}
 
-implement Logger {
-    public fn log(&self, msg: &Text) {
-        println(f"[{self.prefix}] {msg}");
+public context Database {
+    fn query(sql: Text) -> Text;
+}
+
+// The backends. Nothing marks them as special: any type implementing
+// the context's methods can be provided for it.
+type ConsoleLogger is { prefix: Text };
+type SqliteDatabase is { url: Text };
+
+implement ConsoleLogger {
+    public fn log(&self, message: Text) {
+        println(f"[{self.prefix}] {message}");
     }
 }
 
-implement Database {
-    public fn query(&self, sql: &Text) -> Text {
+implement SqliteDatabase {
+    public fn query(&self, sql: Text) -> Text {
         f"({self.url}) -> {sql}"
     }
 }
 
 // `using` declares the function's context dependencies — explicit,
-// not pulled from a global registry. Callers must `provide` matching
-// values within the call's scope.
-fn process_request using [Logger, Database](id: Int) -> Text {
-    Logger.log(&f"processing {id}");
-    let row = Database.query(&f"SELECT * FROM users WHERE id = {id}");
-    Logger.log(&f"got: {row}");
+// not pulled from a global registry. It comes after the return type.
+// Callers must `provide` a backend for each one.
+fn process_request(id: Int) -> Text using [Logger, Database] {
+    Logger.log(f"processing {id}");
+    let row = Database.query(f"SELECT * FROM users WHERE id = {id}");
+    Logger.log(f"got: {row}");
     row
 }
 
 fn main() {
-    let logger = Logger { prefix: "demo".clone() };
-    let db = Database { url: "sqlite://local.db".clone() };
+    let logger = ConsoleLogger { prefix: "demo" };
+    let db = SqliteDatabase { url: "sqlite://local.db" };
 
-    // `provide` binds context values for the dynamic scope of the
-    // block. The `process_request` call resolves `Logger` and
-    // `Database` from this scope at compile time.
-    provide logger, db {
+    // `provide Context = value` binds a backend. The `in { ... }` form
+    // limits the binding to that block; without `in`, the binding lasts
+    // to the end of the enclosing scope.
+    provide Logger = logger;
+    provide Database = db in {
         let result = process_request(42);
         println(f"final result: {result}");
-    }
+    };
 
-    // Outside the `provide` block, `process_request(42)` would be
-    // a compile error — its `using` declaration is unsatisfied.
+    // Outside a scope providing both, `process_request(42)` is a
+    // compile error — its `using` declaration is unsatisfied.
 }

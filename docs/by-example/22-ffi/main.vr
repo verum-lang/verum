@@ -3,36 +3,52 @@
 
 mount core.io.println;
 
-// `extern { ... }` declares C-ABI symbols the linker resolves at
-// build time. Each fn signature is the contract — Verum trusts the
-// caller to maintain it.
+// `extern { ... }` declares C-ABI symbols. A block that names no
+// library resolves against the process's default search scope.
 extern {
     /// libc strlen — `size_t strlen(const char *s)`.
-    /// SAFETY: `s` must be a NUL-terminated valid pointer.
-    fn strlen(s: &Byte) -> Int;
+    /// SAFETY: `s` must point at NUL-terminated bytes.
+    ///
+    /// The parameter is a RAW pointer (`&unsafe Byte`), which is what
+    /// the C signature actually says. A Verum slice is a fat reference
+    /// carrying bounds — a different thing, and not what C reads.
+    fn strlen(s: &unsafe Byte) -> Int;
 }
 
-// Public Verum-side wrapper. `unsafe` because we can't prove the
-// caller's `&Byte` actually NUL-terminates without walking the bytes
-// ourselves.
-unsafe fn libc_strlen(s: &Byte) -> Int {
-    strlen(s)
+// The one place `unsafe` lives: a wrapper that takes a bounded slice
+// and produces the raw pointer C wants. `.as_ptr()` yields the packed
+// data pointer when called on a SUBSLICE — never on the array object.
+unsafe fn c_strlen(bytes: &[Byte]) -> Int {
+    strlen(bytes.as_ptr() as &unsafe Byte)
 }
 
-// Safe wrapper — accepts a Verum Text, copies into a NUL-terminated
-// buffer, calls strlen, then returns. Allocates and copies; for
-// performance-critical code use the unsafe path with a
-// caller-maintained NUL invariant.
+// The one rule that decides whether an FFI byte buffer works:
+//
+//   A buffer crossing to C must be a PACKED `[Byte; N]` — written with
+//   its type annotation, which is what makes it contiguous bytes. A
+//   `List<Byte>` is a list of tagged values, each occupying a full
+//   slot, so C reading it sees one byte and then a zero: `strlen`
+//   answers 1 for every input. That is a wrong answer, not a crash,
+//   which is what makes the distinction worth stating plainly.
+//
+// Pass the buffer as a SUBSLICE (`&buf[..]`) — the pointer to the
+// packed data comes from the slice, not from the array object.
+const BUF: Int = 64;
+
 fn ascii_byte_count(s: &Text) -> Int {
     let bytes = s.as_bytes();
-    let mut buf: List<Byte> = List.with_capacity(bytes.len() + 1);
+    let n = bytes.len();
+    if n + 1 > BUF {
+        return -1;   // too long for this fixed buffer
+    }
+    let mut buf: [Byte; 64] = [0; 64];
     let mut i: Int = 0;
-    while i < bytes.len() {
-        buf.push(bytes[i]);
+    while i < n {
+        buf[i] = bytes[i];
         i = i + 1;
     }
-    buf.push(0);   // NUL terminator
-    unsafe { libc_strlen(&buf[0]) }
+    buf[n] = 0;      // NUL terminator — Verum text is not NUL-terminated
+    unsafe { c_strlen(&buf[..]) }
 }
 
 fn main() {
@@ -40,11 +56,13 @@ fn main() {
     let len = ascii_byte_count(&s.to_text());
     println(f"strlen('{s}') = {len}");
 
+    let empty = "";
+    println(f"strlen('') = {ascii_byte_count(&empty.to_text())}");
+
     // Notes:
-    // - Verum strings are NOT NUL-terminated. The `Text` type is a
-    //   {ptr, len, cap} triple; passing `s.as_bytes().as_ptr()`
-    //   directly to strlen would walk into adjacent memory.
-    // - For a real FFI binding to a C library, prefer to write the
-    //   safe wrapper once and document its SAFETY invariant. Avoid
-    //   spreading `unsafe` blocks throughout user code.
+    // - Verum text is a {ptr, len, cap} triple and is NOT
+    //   NUL-terminated; handing `s.as_bytes()` straight to strlen
+    //   would walk into adjacent memory.
+    // - Write the safe wrapper once and document its SAFETY
+    //   invariant, rather than spreading `unsafe` through call sites.
 }

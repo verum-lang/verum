@@ -5133,6 +5133,7 @@ dependencies = [
  "hyper-util",
  "indicatif",
  "is-terminal",
+ "libc",
  "notify",
  "num_cpus",
  "petgraph",

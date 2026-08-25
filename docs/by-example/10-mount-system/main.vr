@@ -10,8 +10,10 @@ mount core.text.*;
 // Bring a single name with an alias to avoid a collision.
 mount core.io.println as outln;
 
-// Bring a single function — the most surgical form.
-mount core.time.duration.from_secs;
+// Bring a single type — the most surgical form. `from_secs` is a
+// static method ON `Duration`, so mounting the type brings it along;
+// there is no free function of that name to mount by itself.
+mount core.time.Duration;
 
 fn main() {
     // List + Map work because we mounted them.
@@ -31,7 +33,7 @@ fn main() {
     let unique = core.collections.Set.from(names.clone());
     outln(f"unique = {unique}");
 
-    // Function-level mount.
-    let timeout = from_secs(30);
+    // Type-level mount: the static method comes with the type.
+    let timeout = Duration.from_secs(30);
     outln(f"timeout = {timeout}");
 }

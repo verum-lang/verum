@@ -1,44 +1,54 @@
 // docs/by-example/13-channels/main.vr
-// Channels: bounded, async, multi-producer / single-consumer.
+// Channels: bounded capacity, backpressure, multi-producer.
 
 mount core.async.channel.{bounded, Sender, Receiver};
-mount core.async.spawn;
 mount core.io.println;
 
-async fn producer(tx: Sender<Int>, start: Int, count: Int) {
+// `send` reports failure rather than panicking: it returns
+// `Result<(), SendError<T>>`, and the Err case means the receiving
+// end is gone. Discarding that answer is how a lost message becomes
+// invisible, so this producer reports it.
+fn produce(tx: &Sender<Int>, start: Int, count: Int) -> Int {
     let mut i = 0;
+    let mut sent = 0;
     while i < count {
-        tx.send(start + i).await;
+        match tx.send(start + i) {
+            Ok(()) => { sent = sent + 1; }
+            Err(_) => { break; }
+        }
         i = i + 1;
     }
+    sent
 }
 
-async fn consumer(rx: Receiver<Int>) {
-    while let Some(v) = rx.recv().await {
+// `recv` answers `Maybe<T>`: `None` once the channel is empty and
+// every Sender is gone. No sentinel value, no separate Done flag.
+fn drain(rx: &mut Receiver<Int>) -> Int {
+    let mut total = 0;
+    while let Some(v) = rx.recv() {
         println(f"got {v}");
+        total = total + v;
     }
+    total
 }
 
 fn main() {
-    // Bounded channel with capacity 4 — `send` blocks when the
-    // buffer is full, `recv` blocks when it's empty. Backpressure
-    // is automatic.
-    let (tx, rx) = bounded::<Int>(4);
+    // Bounded channel with capacity 16 — `send` refuses when the
+    // buffer is full, which is what makes backpressure observable
+    // instead of unbounded memory growth.
+    let (tx, rx) = bounded<Int>(16);
 
-    // Two producers feed the same channel. Each gets a clone of
-    // the Sender; the receiver is a single owned handle.
+    // Two producers feed the same channel; each holds its own handle.
     let tx2 = tx.clone();
-    let p1 = spawn(producer(tx, 0, 5));
-    let p2 = spawn(producer(tx2, 100, 5));
+    let a = produce(&tx, 0, 5);
+    let b = produce(&tx2, 100, 5);
+    println(f"sent {a + b} values");
 
-    // The consumer drains until both senders are dropped.
-    let c = spawn(consumer(rx));
+    // Dropping every Sender is what lets the drain below terminate.
+    drop(tx);
+    drop(tx2);
 
-    p1.join();
-    p2.join();
-    // After both producers finish, the channel closes (last Sender
-    // drops). The consumer's `recv()` returns None and the task
-    // ends cleanly — no Done flag, no sentinel value.
-    c.join();
-    println("done");
+    let mut receiver = rx;
+    let total = drain(&mut receiver);
+    println(f"total = {total}");
 }

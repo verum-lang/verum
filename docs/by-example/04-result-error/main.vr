@@ -1,37 +1,40 @@
 // docs/by-example/04-result-error/main.vr
 // Result<T, E>, Maybe<T>, and `?` propagation.
 
-type ParseError is
+type NumberError is
     | EmptyInput
     | NotANumber(Text)
     | OutOfRange(Int);
 
-fn parse_positive(s: &Text) -> Result<Int, ParseError> {
+fn parse_positive(s: &Text) -> Result<Int, NumberError> {
     if s.is_empty() {
-        return Err(ParseError.EmptyInput);
+        return Err(NumberError.EmptyInput);
     }
-    // Try to parse as integer.
-    let n = match s.to_int() {
-        Some(v) => v,
-        None    => return Err(ParseError.NotANumber(s.clone())),
+    // `parse_int` is the FALLIBLE reading: it reports what went wrong.
+    // (`to_int` is the infallible one — it answers 0 for text that is
+    // not a number, which is the wrong tool when you need to tell the
+    // two cases apart.)
+    let n = match s.parse_int() {
+        Ok(v)  => v,
+        Err(_) => return Err(NumberError.NotANumber(s.clone())),
     };
     if n <= 0 {
-        return Err(ParseError.OutOfRange(n));
+        return Err(NumberError.OutOfRange(n));
     }
     Ok(n)
 }
 
-fn double_positive(s: &Text) -> Result<Int, ParseError> {
+fn double_positive(s: &Text) -> Result<Int, NumberError> {
     let n = parse_positive(s)?;          // ? propagates Err early
     Ok(n * 2)
 }
 
 fn report(s: &Text) {
     match double_positive(s) {
-        Ok(n)                      => print(f"  {s} -> {n}"),
-        Err(ParseError.EmptyInput)        => print(f"  {s} -> empty input rejected"),
-        Err(ParseError.NotANumber(t))     => print(f"  {s} -> not a number: {t}"),
-        Err(ParseError.OutOfRange(n))     => print(f"  {s} -> out of range: {n}"),
+        Ok(n)                          => print(f"  {s} -> {n}"),
+        Err(NumberError.EmptyInput)    => print(f"  {s} -> empty input rejected"),
+        Err(NumberError.NotANumber(t)) => print(f"  {s} -> not a number: {t}"),
+        Err(NumberError.OutOfRange(n)) => print(f"  {s} -> out of range: {n}"),
     }
 }
 

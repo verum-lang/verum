@@ -20,8 +20,10 @@ fn main() {
 
     // Searching: case-sensitive equality, case-insensitive equality,
     // substring search. All UTF-8-native.
-    println(f"contains 'World': {greeting.contains(&'World')}");
-    println(f"starts with 'Hello': {greeting.starts_with(&'Hello')}");
+    let needle = "World";
+    let head = "Hello";
+    println(f"contains {needle}: {greeting.contains(&needle)}");
+    println(f"starts with {head}: {greeting.starts_with(&head)}");
 
     // Format literals — f"..." interpolates expressions.
     let name = "alice";
