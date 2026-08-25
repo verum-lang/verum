@@ -2783,9 +2783,16 @@ mod debug_assert_cfg_tests {
         }
     }
 
-    /// debug_assert(cond) compiles with an Assert opcode in interpreter mode.
-    /// The codegen special-case at expressions.rs always emits Assert because
-    /// is_debug() returns true in Tier 0 (interpreter is always a debug build).
+    /// `debug_assert(cond)` emits an Assert when debug assertions are ON,
+    /// and does not when they are OFF.
+    ///
+    /// This used to read the flag from `TargetConfig::host()`, which
+    /// mirrors how the COMPILER ITSELF was built (`cfg!(debug_assertions)`).
+    /// The test therefore passed under `cargo test` and failed under
+    /// `cargo test --release`, while the compiler was behaving correctly in
+    /// both — verified at run time, where `debug_assert(false)` fires. A
+    /// test whose verdict depends on the host profile measures the build,
+    /// not the contract, so both poles are now stated explicitly.
     #[test]
     fn debug_assert_emits_assert_in_debug_mode() {
         let source = r#"
@@ -2794,24 +2801,49 @@ mod debug_assert_cfg_tests {
             }
         "#;
         let module = parse_source(source).expect("parse");
-        let vbc = compile_module(&module).expect("compile");
+        let mut debug_target = verum_ast::cfg::TargetConfig::host();
+        debug_target.debug_assertions = true;
+        let vbc = {
+            let config = CodegenConfig::new("e2e_test")
+                .with_validation()
+                .with_target(debug_target);
+            let mut codegen = VbcCodegen::with_config(config);
+            codegen.compile_module(&module).expect("compile")
+        };
         // Match the QUALIFIED name, not a substring.  Function names carry
         // their module (`e2e_test.check`), and a `contains("check")` probe
         // matches `Text.from_utf8_unchecked` first — a stdlib forward
         // declaration with an EMPTY body, so the assertion below was reading
         // a zero-length slice and could never see an Assert.  The compiler was
         // emitting one correctly all along.
+        // Match the qualified name AND require a BODY. The previous
+        // revision fixed the name predicate but kept `find`, which
+        // returns the FIRST match — and the function table also carries
+        // stdlib forward declarations, whose bodies are zero-length. One
+        // of those answered to `.check` and the assertion below read an
+        // empty slice, so this test failed while `debug_assert` was
+        // working correctly (verified at run time: it fires on `false`).
+        // A body-less declaration is never the function under test.
         let func = vbc.functions.iter().find(|f| {
-            vbc.get_string(f.name)
-                .map(|n| n == "check" || n.ends_with(".check"))
-                .unwrap_or(false)
+            f.bytecode_length > 0
+                && vbc
+                    .get_string(f.name)
+                    .map(|n| n == "check" || n.ends_with(".check"))
+                    .unwrap_or(false)
         });
         let func = func.expect("check function not found");
         let body = &vbc.bytecode[func.bytecode_offset as usize
             ..(func.bytecode_offset + func.bytecode_length) as usize];
         assert!(
             has_assert_opcode(body),
-            "debug_assert should emit Assert (0xD6) in debug mode (VBC interpreter = always debug)"
+            "debug_assert should emit Assert (0xD6) in debug mode (VBC interpreter =              always debug); selected fn={:?} body_len={} candidates={:?}",
+            vbc.get_string(func.name),
+            body.len(),
+            vbc.functions
+                .iter()
+                .filter_map(|f| vbc.get_string(f.name).map(|n| (n.to_string(), f.bytecode_length)))
+                .filter(|(n, _)| n == "check" || n.ends_with(".check"))
+                .collect::<Vec<_>>()
         );
     }
 

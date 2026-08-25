@@ -226,7 +226,7 @@ public async fn* stream_lines(cmd_text: &Text)
 
     let mut reader = BufReader.from_fd(stdout_fd, 8192);
     loop {
-        match reader.read_line_async().await {
+        match reader.next_line_async().await {
             Result.Ok(Maybe.None)       => break,
             Result.Ok(Maybe.Some(line)) => yield Result.Ok(strip_trailing_newline(line)),
             Result.Err(e)         => {
@@ -298,7 +298,7 @@ pub async fn stream_lines_bounded(
         let mut sample_counter: Int = 0;
         loop {
             select {
-                line = reader.read_line_async().await => match line {
+                line = reader.next_line_async().await => match line {
                     Result.Ok(Maybe.None)       => break,
                     Result.Ok(Maybe.Some(s))    => {
                         let stripped = strip_trailing_newline(s);

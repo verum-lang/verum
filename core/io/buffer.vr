@@ -332,7 +332,14 @@ implement<R: Read> BufReader<R> {
     /// Read a single line (up to and including '\n'), returning `Maybe.None` at EOF.
     /// The returned `Text` includes the trailing newline; callers strip it
     /// if they need to (`core.shell.stream.strip_trailing_newline`).
-    public fn read_line(&mut self) -> IoResult<Maybe<Text>> {
+    ///
+    /// NOT named `read_line`: `BufRead` declares a `read_line(&mut Text)
+    /// -> IoResult<Int>` that fills a caller-owned buffer, and an
+    /// inherent method of the same name on the same type made every call
+    /// ambiguous — `r.read_line(&mut line)` reported "Ambiguous type",
+    /// and `LinesIter`, which calls the protocol form, silently produced
+    /// EMPTY lines. Two methods, two names.
+    public fn next_line(&mut self) -> IoResult<Maybe<Text>> {
         let mut bytes: List<Byte> = [];
         loop {
             // Ensure buffer has data
@@ -340,7 +347,7 @@ implement<R: Read> BufReader<R> {
                 let n = self.fill_buf_internal()?;
                 if n == 0 {
                     if bytes.is_empty() { return Result.Ok(Maybe.None); }
-                    return match Text.from_utf8(bytes) {
+                    return match Text.from_utf8(&bytes[..]) {
                         Result.Ok(t)  => Result.Ok(Maybe.Some(t)),
                         Result.Err(_) => Result.Err(IoError.new(IoErrorKind.InvalidData)),
                     };
@@ -358,7 +365,7 @@ implement<R: Read> BufReader<R> {
             }
             self.pos = i;
             if found {
-                return match Text.from_utf8(bytes) {
+                return match Text.from_utf8(&bytes[..]) {
                     Result.Ok(t)  => Result.Ok(Maybe.Some(t)),
                     Result.Err(_) => Result.Err(IoError.new(IoErrorKind.InvalidData)),
                 };
@@ -371,8 +378,8 @@ implement<R: Read> BufReader<R> {
     /// — the runtime keeps blocking syscalls on a worker thread so the
     /// async executor stays responsive. Future iteration will dispatch
     /// through `core.io.engine` (io_uring / kqueue / IOCP).
-    public async fn read_line_async(&mut self) -> IoResult<Maybe<Text>> {
-        self.read_line()
+    public async fn next_line_async(&mut self) -> IoResult<Maybe<Text>> {
+        self.next_line()
     }
 }
 
