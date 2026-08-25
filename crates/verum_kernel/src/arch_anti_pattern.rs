@@ -858,6 +858,35 @@ pub fn check_lifecycle_regression(
     })
 }
 
+impl AntiPatternCode {
+    /// Is this verdict an unmet OBLIGATION rather than a false CLAIM?
+    ///
+    /// T0866. The two read alike in a catalogue and are utterly
+    /// different in kind:
+    ///
+    /// * A false claim states something the system can show is not so
+    ///   — a stratum a theorem proves empty, a declared shape the code
+    ///   contradicts, a capability laundered through a boundary. The
+    ///   declaration is WRONG, and a wrong declaration is a defect of
+    ///   the same order as a type error: compilation refuses it.
+    /// * An unmet obligation states something true that is not yet
+    ///   DISCHARGED — a `Theorem` lifecycle whose CVE triple is
+    ///   incomplete, a proof debt. Nothing here is false; work is
+    ///   owed. Refusing to compile over owed work stops a project
+    ///   from running because of a promise about its future, and (as
+    ///   the registry corpus showed) one such module cascades: its
+    ///   registration fails, dependents lose its names, and a hundred
+    ///   spurious errors bury the real ones.
+    ///
+    /// Obligations are judged by `verum arch check --strict` and
+    /// `verum audit`, which own the exit code CI gates on. The
+    /// compiler still SHOWS them, as warnings carrying the same
+    /// stable code.
+    pub fn is_unmet_obligation(self) -> bool {
+        matches!(self, AntiPatternCode::CveIncomplete)
+    }
+}
+
 /// ATS-V-AP-010 — CveIncomplete (strict mode only).
 /// Public theorem without complete CVE-closure (all 3 axes).
 ///

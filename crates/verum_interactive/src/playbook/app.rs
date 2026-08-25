@@ -1730,7 +1730,7 @@ impl PlaybookApp {
             // are process-wide so this is cheap.  The compile IS the
             // artifact path cells execute on — the lens disassembles
             // that module, never a second derivation.
-            let mut engine = verum_vbc::interpreter::ScriptEngine::new();
+            let engine = verum_vbc::interpreter::ScriptEngine::new();
             let text = match engine.compile(&source) {
                 Ok(module) => verum_vbc::disassemble::disassemble_module(&module),
                 Err(e) => format!("; compile failed:\n; {e:?}"),

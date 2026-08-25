@@ -108,8 +108,18 @@ fn main() { print("ok"); }
     Ok(())
 }
 
+/// An unmet OBLIGATION is judged by the audit, not by the compiler
+/// (T0866). `Lifecycle.Theorem` without CVE closure owes work; it does
+/// not state anything false, so the module still compiles — and the
+/// verdict is still visible, carrying its stable code, so the debt
+/// cannot hide (the failure mode behind 2311 boilerplate `Theorem`
+/// claims in core/, T0834).
+///
+/// The teeth live in `verum arch check --strict` / `verum audit`,
+/// which own CI's exit code; `arch_check_strict_refuses_unclosed_theorem`
+/// below is the other polarity of this pair.
 #[test]
-fn theorem_without_cve_closure_errors_on_check() -> Result<()> {
+fn theorem_without_cve_closure_warns_on_check_but_compiles() -> Result<()> {
     let (errors, text) = check_source(
         r#"
 @arch_module(
@@ -122,10 +132,39 @@ fn main() { print("ok"); }
 "#,
     )?;
     assert!(
-        errors > 0 && text.contains("ATS-V-AP-010"),
-        "AT-2 must be live on the user path: Lifecycle.Theorem without CVE closure \
-         is AP-010 CveIncomplete — this firing NOWHERE is how 2311 boilerplate \
-         Theorem claims accumulated in core/ (T0834); diags: {text}"
+        text.contains("ATS-V-AP-010"),
+        "the debt must still be SHOWN, with its stable code; diags: {text}"
+    );
+    assert_eq!(
+        errors, 0,
+        "owed work must not stop the build — one such module used to \
+         cascade: its registration failed, dependents lost its names, and \
+         a hundred spurious errors buried the real ones; diags: {text}"
+    );
+    Ok(())
+}
+
+/// A false CLAIM stays a compile error: `MsfsStratum.LAbs` names a
+/// stratum a theorem proves empty, so the declaration is wrong, not
+/// merely unfinished. (Pinned separately from the obligation case
+/// above so a future change cannot quietly collapse the two.)
+#[test]
+fn false_claim_still_refuses_to_compile() -> Result<()> {
+    let (errors, text) = check_source(
+        r#"
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LAbs,
+    lifecycle: Lifecycle.Definition,
+)
+module probe.false_claim;
+fn main() { print("ok"); }
+"#,
+    )?;
+    assert!(
+        errors > 0 && text.contains("ATS-V-AP-011"),
+        "a declaration the system can show is FALSE is a defect of the \
+         same order as a type error; diags: {text}"
     );
     Ok(())
 }

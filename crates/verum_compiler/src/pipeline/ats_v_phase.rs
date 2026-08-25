@@ -301,7 +301,30 @@ fn build_violation_diagnostic(
     module: &Module,
     pipeline: &CompilationPipeline<'_>,
 ) -> verum_diagnostics::Diagnostic {
+    // T0866: an architectural verdict is a JUDGMENT, not a type
+    // error. Compilation answers "is this program meaningful?";
+    // the architecture audit answers "does this program hold the
+    // shape it claims?". Conflating them gave the worst of both: a
+    // module whose only fault was an unclosed CVE obligation became
+    // UNCOMPILABLE, its registration failed, and every dependent
+    // module lost the failed module's names — 49 architectural
+    // verdicts in the registry corpus cascaded into 110 spurious
+    // "not a function" errors that hid the real ones.
+    //
+    // The strictness does not go away, it moves to the instance that
+    // owns it: `verum arch` / `verum audit` judge the shape and carry
+    // the exit code CI gates on. Here the verdict is a warning that
+    // names its stable code, so the reader still sees it in place.
+    // (T0834's lesson — 2311 unearned `Theorem` stamps — is answered
+    // by making that audit mandatory and machine-readable, not by
+    // making the compiler refuse.)
     let severity = match v.severity {
+        // An unmet OBLIGATION (see `is_unmet_obligation`) is judged by
+        // the audit, which owns CI's exit code; the compiler shows it
+        // without refusing the build. A false CLAIM stays an error
+        // here — a declaration the system can show is wrong is a
+        // defect of the same order as a type error.
+        KernelSeverity::Error if v.code.is_unmet_obligation() => Severity::Warning,
         KernelSeverity::Error => Severity::Error,
         KernelSeverity::Warning => Severity::Warning,
         KernelSeverity::Hint => Severity::Help,
