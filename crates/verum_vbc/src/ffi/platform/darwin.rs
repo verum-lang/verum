@@ -166,7 +166,15 @@ impl FfiPlatform for DarwinPlatform {
             library: "<unknown>".to_string(),
         })?;
 
-        let symbol = unsafe { libc::dlsym(handle.as_raw(), cname.as_ptr()) };
+        // A null handle is the runtime's spelling of "search the default
+        // scope" — what an `extern { }` block with no library named
+        // resolves against. macOS does NOT spell that scope as NULL:
+        // `dlsym(NULL, …)` is rejected outright as an invalid handle, so
+        // every unqualified extern symbol failed here while the same
+        // program worked on Linux, where the default scope IS NULL.
+        let raw = handle.as_raw();
+        let scope = if raw.is_null() { libc::RTLD_DEFAULT } else { raw };
+        let symbol = unsafe { libc::dlsym(scope, cname.as_ptr()) };
 
         // Check for error - dlsym can return NULL for valid symbols
         let error = unsafe { libc::dlerror() };

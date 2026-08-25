@@ -132,7 +132,14 @@ impl FfiPlatform for LinuxPlatform {
             library: "<unknown>".to_string(),
         })?;
 
-        let symbol = unsafe { libc::dlsym(handle.as_raw(), cname.as_ptr()) };
+        // A null handle means "search the default scope" — an `extern { }`
+        // block that names no library. Here that passes through unchanged
+        // only because this platform spells RTLD_DEFAULT as NULL; it is
+        // stated rather than relied on, since macOS spells it `-2` and the
+        // same code silently rejected every unqualified symbol there.
+        let raw = handle.as_raw();
+        let scope = if raw.is_null() { libc::RTLD_DEFAULT } else { raw };
+        let symbol = unsafe { libc::dlsym(scope, cname.as_ptr()) };
 
         // Check for error - dlsym can return NULL for valid symbols
         let error = unsafe { libc::dlerror() };
