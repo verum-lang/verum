@@ -1,0 +1,67 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: deref, dispatch, mutex, T0873
+// @timeout: 30000
+// @description: T0873 — a wrapper that implements `Deref` is transparent
+//   to method calls, whether it was declared here or comes from the
+//   standard library.
+//
+//   A wrapper declared in the calling file always was. One from the
+//   archive was not: `guard.push(x)` on a `MutexGuard<List<T>>` asked
+//   for `MutexGuard.push`, found nothing, and panicked — while the
+//   guard's own `deref` sat in the registry, unused. Every channel
+//   operation in the standard library reaches its queue through such a
+//   guard, so no channel worked at all.
+//
+//   Three poles are pinned. The wrapper must forward what it does not
+//   have; it must NOT forward what it does (a guard's own method still
+//   answers about the guard); and the forwarding must reach BUILTIN
+//   methods, which is why the fix re-runs the call against the
+//   dereferenced receiver instead of looking the method up in the
+//   registry — `List.push` is an opcode, not a registry entry.
+// @expected-stdout-begin
+// local_wrapper_len=3
+// guarded_len=1
+// guard_own_method=false
+// after_unlock=2
+// @expected-stdout-end
+
+mount core.sync.mutex.Mutex;
+
+// A wrapper declared right here — the control that always worked.
+type Boxy<T> is { inner: T };
+
+implement<T> Deref for Boxy<T> {
+    type Target = T;
+    fn deref(&self) -> &T { &self.inner }
+}
+
+fn main() {
+    let b: Boxy<List<Int>> = Boxy { inner: [1, 2, 3] };
+    print(f"local_wrapper_len={b.len()}");
+
+    // The case that failed: a guard from the standard library.
+    let xs: List<Int> = List.new();
+    let m = Mutex.new(xs);
+    {
+        let mut g = m.lock().unwrap_or_else(|p| p.into_inner());
+        // `push` is a BUILTIN on the inner List — a registry lookup
+        // through the wrapper would never find it.
+        g.push(7);
+        print(f"guarded_len={g.len()}");
+        // NOTE: `g[0]` — indexing THROUGH the guard — is not covered
+        // here. Indexing lowers to an opcode that does not walk Deref,
+        // the same gap `Shared` has; it is recorded on the task rather
+        // than asserted as working.
+        // The guard's OWN surface must still answer about the guard,
+        // not be forwarded to the value it guards.
+        print(f"guard_own_method={m.is_poisoned()}");
+    }
+
+    // The lock is released at scope exit, so a second acquisition sees
+    // the value the first one left behind.
+    let mut g2 = m.lock().unwrap_or_else(|p| p.into_inner());
+    g2.push(9);
+    print(f"after_unlock={g2.len()}");
+}

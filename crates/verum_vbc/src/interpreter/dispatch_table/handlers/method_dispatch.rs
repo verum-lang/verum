@@ -312,6 +312,16 @@ fn transparent_wrapper_inner_matches_receiver(
 pub(in super::super) fn handle_call_method(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
+    // Where this INSTRUCTION begins — one byte back, because the
+    // dispatch loop has already consumed the opcode byte. The Deref
+    // last-resort at the foot of this function rewinds here after
+    // substituting the receiver, so the same call re-runs against the
+    // dereferenced value and takes whatever route it deserves —
+    // including the builtin opcodes, which a direct registry call could
+    // never reach. Rewinding to the OPERANDS instead makes the loop read
+    // an operand as an opcode; that mistake announces itself as an
+    // unimplemented sub-opcode from an unrelated family.
+    let instruction_pc = state.pc().saturating_sub(1);
     let dst = read_reg(state)?;
     let receiver_reg = read_reg(state)?;
     let method_id = read_varint(state)? as u32;
@@ -4461,6 +4471,59 @@ pub(in super::super) fn handle_call_method(
             receiver_type_name,
             frame_info.join("\n")
         );
+    }
+
+    // LAST RESORT — walk ONE `Deref` hop.
+    //
+    // A wrapper that implements `Deref` is transparent to method calls;
+    // the reference documentation says so, and a wrapper declared in the
+    // calling file behaves that way. A wrapper whose implementation comes
+    // from the archive did not: `guard.push(x)` on a `MutexGuard<List<T>>`
+    // asked for `MutexGuard.push`, found nothing, and panicked — while the
+    // guard's own `deref` sat in the registry, unused. Every channel
+    // operation in the standard library reaches its queue through such a
+    // guard.
+    //
+    // The rule reads the REGISTRY, not a list of type names: if the
+    // receiver's type declares `<Type>.deref` taking just a receiver, call
+    // it and re-dispatch the original method on what it returns. ONE hop,
+    // and only after every other route has missed, so nothing that
+    // resolves today changes route.
+    if let Some(ty_name) = receiver_type_name.as_deref() {
+        let deref_key = format!("{ty_name}.deref");
+        let deref_id = state.module.functions.iter().enumerate().find_map(|(i, f)| {
+            let name = state.module.strings.get(f.name).unwrap_or("");
+            (name == deref_key && f.params.len() == 1).then_some(FunctionId(i as u32))
+        });
+        if let Some(deref_id) = deref_id {
+            let inner = super::super::call_function_sync(state, deref_id, &[dispatch_receiver])?;
+            if inner != dispatch_receiver {
+                if crate::interpreter::env_flags::is_set(
+                    crate::interpreter::env_flags::Flag::TraceCallmFlow,
+                ) {
+                    eprintln!(
+                        "[callm-flow] Y-deref-hop {} -> inner, retrying '{}'",
+                        deref_key, bare
+                    );
+                }
+                // Substitute the receiver and RE-RUN this instruction.
+                //
+                // Resolving the method on the inner type and calling it
+                // directly does not work: the inner method is often a
+                // BUILTIN (`List.push` is an opcode, not a registry
+                // entry), and a registry lookup misses every one of
+                // them. Re-running the instruction lets the dereferenced
+                // receiver take whatever route it deserves.
+                //
+                // Terminates: the rewind happens only when `deref`
+                // returned a DIFFERENT value, so a chain of wrappers
+                // unwraps one layer per pass and a `deref` that answers
+                // itself stops immediately.
+                state.set_reg(receiver_reg, inner);
+                state.set_pc(instruction_pc);
+                return Ok(DispatchResult::Continue);
+            }
+        }
     }
 
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
