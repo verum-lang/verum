@@ -37,4 +37,10 @@ fn main() {
     if !found {
         println!("protocol {protocol} not in metadata");
     }
+    // Also: what does the metadata record for a FUNCTION of that name?
+    for (name, f) in meta.functions.iter() {
+        if name.as_str().ends_with(protocol.as_str()) || name.as_str() == protocol.as_str() {
+            println!("  fn {name} -> {:?}", f.return_type.as_str());
+        }
+    }
 }

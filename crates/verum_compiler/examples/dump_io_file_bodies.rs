@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut nonempty = 0usize;
     for f in module.functions.iter() {
         let name = module.strings.get(f.name).unwrap_or("<?>");
-        let len = f.code.len();
+        let len = f.bytecode_length;
         if len == 0 {
             empty += 1;
         } else {

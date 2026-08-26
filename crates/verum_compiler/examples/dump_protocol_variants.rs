@@ -21,6 +21,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let Ok(module) = archive.load_module(&entry.name) else {
             continue;
         };
+        for f in module.functions.iter() {
+            let fname = module.strings.get(f.name).unwrap_or("<?>");
+            if fname == wanted {
+                println!(
+                    "{}::fn {fname}  return_type={:?}  return_type_name={:?}",
+                    entry.name,
+                    f.return_type,
+                    f.return_type_name.and_then(|sid| module.strings.get(sid)).unwrap_or("")
+                );
+            }
+        }
         for ty in module.types.iter() {
             let name = module.strings.get(ty.name).unwrap_or("<?>");
             if name != wanted {
