@@ -6946,6 +6946,11 @@ impl VbcCodegen {
                     && func_name.contains(&filter)
                 {
                     eprintln!(
+                        "[callbind] carried={:?} ladder={:?}",
+                        self.ctx.carried_mount_bindings.get(&func_name),
+                        self.ctx.mounted_fns.get(&func_name),
+                    );
+                    eprintln!(
                         "[callbind] call '{}' (argc={}) → bound '{}' id={} | arm={} scope={:?} \
                          unit_declared={} ffi={}",
                         func_name,
