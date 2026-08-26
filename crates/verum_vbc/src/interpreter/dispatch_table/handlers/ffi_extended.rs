@@ -13,6 +13,8 @@ use crate::instruction::{SystemSubOpcode, Reg};
 use crate::module::FfiSymbolId;
 #[allow(unused_imports)]
 use crate::types::StringId;
+// Used only inside the `ffi`-gated arms below, like the imports above.
+#[allow(unused_imports)]
 use crate::types::TypeId;
 use crate::value::Value;
 

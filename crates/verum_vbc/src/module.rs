@@ -554,7 +554,22 @@ impl VbcModule {
             // exactly one entry. The qualified form this rule exists
             // for is the `module X;` header prefix, which is a MODULE
             // path, not a type.
-            if func.parent_type.is_some() {
+            if func.is_method() {
+                continue;
+            }
+            // An entry point takes no arguments, because that is how
+            // the runtime calls it. A `main` that REQUIRES parameters
+            // could not be invoked as the entry even if chosen, so it
+            // is not a candidate to choose between.
+            //
+            // The standard library's platform shim is exactly that
+            // shape: `darwin_entry.main(argc: Int32, argv: &&Byte)` is
+            // the C-ABI process entry that dyld calls, and it forwards
+            // to the user's program. Counting it as a candidate made
+            // every program that declares `module X;` ambiguous —
+            // "2 qualified candidates: darwin_entry.main, X.main.main"
+            // — with the platform's own shim as the rival.
+            if func.arity() != 0 {
                 continue;
             }
             if name == "main" {
