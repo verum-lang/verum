@@ -26153,22 +26153,6 @@ impl VbcCodegen {
                 }
                 VbcCodegen::tuple_element_type_name(&base_type, *index as usize)
             }
-            // Indexing a container yields its ELEMENT type.
-            //
-            // Without this arm the extractor answered `None` for
-            // `handles[0]`, and every consumer that decides on a type
-            // name fell through to its default. The await gate is the
-            // one that made it visible: a future taken out of a
-            // `List<Future<Int>>` was not recognised as a handle, so
-            // `handles[0].await` passed the raw sentinel through as if
-            // it were the result and printed a large negative integer
-            // instead of the task's value (T0894). Fan-out over a
-            // collection is the shape structured concurrency is FOR, so
-            // the gap was not a corner.
-            ExprKind::Index { expr: base, .. } => {
-                let base_type = self.extract_expr_type_name(base)?;
-                VbcCodegen::element_type_name(&base_type)
-            }
             // Array/List literal: [1, 2, 3] or [0; 10]
             ExprKind::Array(array_expr) => {
                 // Try to infer element type from first element for List<T> tracking
