@@ -678,6 +678,116 @@ pub fn extract_params(func: &verum_ast::FunctionDecl) -> Vec<(String, String)> {
 /// Context-free wrapper over [`try_reflect_function_with_env`]:
 /// member expressions in the body (field access, method calls) are
 /// refused without an env.
+/// Fold straight-line `let` bindings into the tail expression.
+///
+/// `let m = n; m == n` becomes `n == n`. Returns `None` — declining the
+/// whole reflection — for anything the fold cannot carry: a statement
+/// that is not a `let`, a destructuring or otherwise non-identifier
+/// pattern, a `let` with no initialiser, or a chain long enough that
+/// substitution would blow the term up.
+///
+/// Declining is the point. Producing a PARTIAL fold would hand the
+/// solver a body that is not the function's, and a proof about the
+/// wrong body is worse than no proof.
+fn fold_let_bindings(
+    stmts: &[verum_ast::stmt::Stmt],
+    tail: &Expr,
+) -> Option<Expr> {
+    use verum_ast::stmt::StmtKind;
+
+    // Bounded: each substitution can duplicate its bound expression
+    // once per use, so a long chain multiplies. Eight is far past any
+    // predicate anyone writes and short enough that the worst case
+    // stays small.
+    const MAX_BINDINGS: usize = 8;
+    if stmts.len() > MAX_BINDINGS {
+        return None;
+    }
+
+    let mut bindings: Vec<(String, Expr)> = Vec::with_capacity(stmts.len());
+    for stmt in stmts {
+        let StmtKind::Let { pattern, value, .. } = &stmt.kind else {
+            return None;
+        };
+        let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind else {
+            return None;
+        };
+        let verum_common::Maybe::Some(init) = value else {
+            return None;
+        };
+        // Substitute the bindings already seen INTO this initialiser,
+        // so `let a = n; let b = a + 1; b` folds to `n + 1` rather than
+        // leaving a dangling `a`.
+        let mut init = init.clone();
+        for (bound, replacement) in bindings.iter() {
+            init = substitute_ident(&init, bound, replacement);
+        }
+        bindings.push((name.name.as_str().to_string(), init));
+    }
+
+    let mut folded = tail.clone();
+    for (bound, replacement) in bindings.iter() {
+        folded = substitute_ident(&folded, bound, replacement);
+    }
+    Some(folded)
+}
+
+/// Replace every bare-path reference to `name` with `replacement`.
+///
+/// Structural and total: an expression kind this does not know is
+/// returned unchanged, which is safe because an unsubstituted binding
+/// then shows up as a free variable and the reflection's own
+/// translation declines it — a miss becomes "not proved", never
+/// "proved about something else".
+fn substitute_ident(expr: &Expr, name: &str, replacement: &Expr) -> Expr {
+    let sub = |e: &Expr| substitute_ident(e, name, replacement);
+    let kind = match &expr.kind {
+        ExprKind::Path(path) => {
+            if path.segments.len() == 1
+                && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+                && ident.name.as_str() == name
+            {
+                return replacement.clone();
+            }
+            return expr.clone();
+        }
+        ExprKind::Binary { op, left, right } => ExprKind::Binary {
+            op: *op,
+            left: verum_common::Heap::new(sub(left)),
+            right: verum_common::Heap::new(sub(right)),
+        },
+        ExprKind::Unary { op, expr: inner } => ExprKind::Unary {
+            op: *op,
+            expr: verum_common::Heap::new(sub(inner)),
+        },
+        ExprKind::Paren(inner) => ExprKind::Paren(verum_common::Heap::new(sub(inner))),
+        ExprKind::Field { expr: base, field } => ExprKind::Field {
+            expr: verum_common::Heap::new(sub(base)),
+            field: field.clone(),
+        },
+        ExprKind::Call { func, args, type_args } => ExprKind::Call {
+            func: verum_common::Heap::new(sub(func)),
+            args: args.iter().map(&sub).collect(),
+            type_args: type_args.clone(),
+        },
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            type_args,
+        } => ExprKind::MethodCall {
+            receiver: verum_common::Heap::new(sub(receiver)),
+            method: method.clone(),
+            args: args.iter().map(&sub).collect(),
+            type_args: type_args.clone(),
+        },
+        _ => return expr.clone(),
+    };
+    let mut out = expr.clone();
+    out.kind = kind;
+    out
+}
+
 pub fn try_reflect_function(
     func: &verum_ast::FunctionDecl,
 ) -> Option<crate::refinement_reflection::ReflectedFunction> {
@@ -710,16 +820,33 @@ pub fn try_reflect_function_with_env(
         verum_common::Maybe::None => return None,
     };
 
-    // Gate: body must be a Block with a tail expression and no
-    // statements (single-expression function).
+    // Gate: body must be a Block with a tail expression. STRAIGHT-LINE
+    // `let` bindings are folded into that tail by substitution;
+    // anything else in the statement list still declines.
+    //
+    // Refusing every body with a statement made `let m = n; m == n`
+    // unprovable while `n == n` proved — the SAME claim, refused for
+    // its shape. And naming an intermediate value is the first thing
+    // anyone does when a predicate stops fitting on one line, so the
+    // fragment excluded exactly the properties worth writing down.
+    //
+    // Substitution is sound here without further conditions because
+    // reflection already refuses impure functions (the context gate
+    // above), so a bound expression has no effects to duplicate or
+    // reorder — only solver work, which is why the fold is bounded
+    // below.
+    let folded_tail: Expr;
     let tail_expr = match body {
         verum_ast::decl::FunctionBody::Block(block) => {
-            if !block.stmts.is_empty() {
-                return None;
-            }
-            match &block.expr {
+            let tail = match &block.expr {
                 verum_common::Maybe::Some(e) => e,
                 verum_common::Maybe::None => return None,
+            };
+            if block.stmts.is_empty() {
+                tail
+            } else {
+                folded_tail = fold_let_bindings(&block.stmts, tail)?;
+                &folded_tail
             }
         }
         verum_ast::decl::FunctionBody::Expr(e) => e,

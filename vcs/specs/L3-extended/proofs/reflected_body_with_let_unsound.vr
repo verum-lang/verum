@@ -1,0 +1,51 @@
+// @test: verify-fail
+// @level: L3
+// @tier: 0
+// @tags: verification, smt, refinement-reflection, soundness
+// @description: Folding `let` bindings into a reflected body does not
+//   make false claims provable.
+//
+// The soundness pole of `reflected_body_with_let.vr`. That spec shows
+// the fold makes TRUE claims with bindings provable; this one shows it
+// does not make FALSE ones provable, which is the direction that would
+// matter.
+//
+// A fold is a substitution into an axiom the solver then trusts
+// completely. Get it wrong — drop a binding, apply them in the wrong
+// order, leave one dangling — and the axiom describes a function nobody
+// wrote, so goals about it are decided against the wrong body. The
+// failure would not look like a crash; it would look like a proof.
+//
+// The chained case is the one a naive fold gets wrong: `b` is defined
+// in terms of `a`, so a substitution that does not first fold `a` into
+// `b`'s initialiser leaves a free variable, and a free variable is
+// exactly what an SMT solver will happily choose a value for.
+
+/// `m` is `n + 1`, so this is false for every `n`.
+public fn off_by_one(n: Int) -> Bool {
+    let m = n + 1;
+    m == n
+}
+
+@verify(formal)
+public theorem off_by_one_must_not_prove(n: Int)
+    ensures off_by_one(n)
+    proof by auto;
+
+/// False only after the chain is followed: `b` is `n + 2`, not `n + 3`.
+/// A fold that lost the first binding would leave `b` unconstrained and
+/// the solver could satisfy this.
+public fn chain_off_by_one(n: Int) -> Bool {
+    let a = n + 1;
+    let b = a + 1;
+    b == n + 3
+}
+
+@verify(formal)
+public theorem chain_must_not_prove(n: Int)
+    ensures chain_off_by_one(n)
+    proof by auto;
+
+fn main() {
+    print("unsound-controls");
+}

@@ -1,0 +1,82 @@
+// @test: verify-pass
+// @level: L3
+// @tier: 0
+// @tags: verification, smt, refinement-reflection, proofs
+// @description: A predicate that names an intermediate value is still
+//   provable.
+//
+// A user function reaches the solver as an uninterpreted symbol plus a
+// DEFINING AXIOM, and the axiom is only emitted for functions the
+// reflector accepts. It refused any body with a statement in it, so
+//
+//     fn b(n: Int) -> Bool { let m = n; m == n }
+//
+// was unprovable while
+//
+//     fn a(n: Int) -> Bool { n == n }
+//
+// proved — the same claim, refused for its SHAPE. And naming an
+// intermediate value is the first thing anyone does when a predicate
+// stops fitting on one line, so the provable fragment excluded exactly
+// the properties worth writing down.
+//
+// Straight-line `let` bindings are now folded into the tail by
+// substitution, which is sound without further conditions because
+// reflection already refuses impure functions: a bound expression has
+// no effects to duplicate or reorder. Anything else in a statement list
+// still declines the whole reflection — a PARTIAL fold would hand the
+// solver a body that is not the function's, and a proof about the wrong
+// body is worse than no proof.
+//
+// The single-expression case is here as the control: it proved before
+// and must keep proving, since a change that broke it would still leave
+// the new cases passing.
+
+/// The control — one expression, no bindings.
+public fn direct(n: Int) -> Bool {
+    n + 0 == n
+}
+
+@verify(formal)
+public theorem direct_holds(n: Int)
+    ensures direct(n)
+    proof by auto;
+
+/// One binding.
+public fn one_binding(n: Int) -> Bool {
+    let m = n;
+    m == n
+}
+
+@verify(formal)
+public theorem one_binding_holds(n: Int)
+    ensures one_binding(n)
+    proof by auto;
+
+/// A CHAIN of bindings, where the second names the first — the case a
+/// naive fold gets wrong by leaving a dangling reference.
+public fn chained(n: Int) -> Bool {
+    let a = n + 1;
+    let b = a + 1;
+    b == n + 2
+}
+
+@verify(formal)
+public theorem chained_holds(n: Int)
+    ensures chained(n)
+    proof by auto;
+
+/// A binding used TWICE, so the substitution duplicates it.
+public fn used_twice(n: Int) -> Bool {
+    let d = n + n;
+    d == d
+}
+
+@verify(formal)
+public theorem used_twice_holds(n: Int)
+    ensures used_twice(n)
+    proof by auto;
+
+fn main() {
+    print("reflected-let");
+}
