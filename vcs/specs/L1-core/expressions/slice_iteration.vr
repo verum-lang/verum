@@ -1,0 +1,80 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: slices, iterators, dispatch, T0879
+// @timeout: 30000
+// @description: T0879 — a subslice iterates, and yields the elements the
+//   slice covers rather than the whole container's.
+//
+//   `xs.iter()` worked; `(&xs[1..3]).iter()` panicked reading field 2 of
+//   an object that was never the iterator. The slice's own `len` and
+//   `is_empty` answered correctly throughout — those come from the fat
+//   reference's metadata and need no lookup — so a slice looked healthy
+//   right up to iteration, which is the least likely place to look.
+//
+//   The cause was a NAME: the standard library declares slice methods as
+//   `implement<T> [T] { … }` and the archive keys them `Slice.iter`,
+//   while a call site qualified by the receiver's TYPE SPELLING asked
+//   for `&[Byte].iter`. Nothing held that name.
+//
+//   Everything line-oriented went down with it: `BufRead.read_until`
+//   iterates the subslice `fill_buf` returns, so reading a file line by
+//   line died on the first line.
+//
+//   The poles: iteration must cover the slice's RANGE (not the whole
+//   list — a fix that iterated the container would pass a "does it
+//   crash" check), and `len` must keep agreeing with what iteration
+//   yields.
+// @expected-stdout-begin
+// whole_sum=100
+// slice_sum=50
+// slice_len=2
+// slice_count=2
+// tail_sum=70
+// empty_count=0
+// @expected-stdout-end
+
+fn main() {
+    let mut xs: List<Byte> = List.new();
+    xs.push(10 as Byte);
+    xs.push(20 as Byte);
+    xs.push(30 as Byte);
+    xs.push(40 as Byte);
+
+    // The control: iterating the container itself always worked.
+    let mut whole = 0;
+    for b in xs.iter() {
+        whole = whole + (*b as Int);
+    }
+    print(f"whole_sum={whole}");
+
+    // The case that failed — and the sum proves the RANGE, not merely
+    // that iteration ran.
+    let mid = &xs[1..3];
+    let mut sum = 0;
+    let mut count = 0;
+    for b in mid.iter() {
+        sum = sum + (*b as Int);
+        count = count + 1;
+    }
+    print(f"slice_sum={sum}");
+    print(f"slice_len={mid.len()}");
+    print(f"slice_count={count}");
+
+    // A slice reaching the end of the container.
+    let tail = &xs[2..4];
+    let mut tail_sum = 0;
+    for b in tail.iter() {
+        tail_sum = tail_sum + (*b as Int);
+    }
+    print(f"tail_sum={tail_sum}");
+
+    // The empty pole: an empty slice yields nothing rather than falling
+    // back to the container.
+    let none = &xs[2..2];
+    let mut empty_count = 0;
+    for _b in none.iter() {
+        empty_count = empty_count + 1;
+    }
+    print(f"empty_count={empty_count}");
+}

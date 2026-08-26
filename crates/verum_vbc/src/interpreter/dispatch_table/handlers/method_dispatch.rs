@@ -2449,7 +2449,9 @@ pub(in super::super) fn handle_call_method(
     }
     let was_dyn_dispatch = was_dyn_dispatch;
     let dyn_protocol = dyn_protocol;
-    let method_name = method_name;
+    // Mutable from here: the slice-spelling normalisation below rewrites
+    // a receiver-type prefix to the registry's canonical name.
+    let mut method_name = method_name;
 
     // COLLECT-FROMITER-2 (runtime leg): the generic `collect` body
     // `C.from_iter(self)` miscompiles to an INSTANCE call of bare
@@ -2562,6 +2564,34 @@ pub(in super::super) fn handle_call_method(
                 state.set_reg(dst, out);
                 return Ok(DispatchResult::Continue);
             }
+        }
+    }
+
+    // A slice receiver's TYPE SPELLING is not its registry name.
+    //
+    // The stdlib declares slice methods as `implement<T> [T] { … }`, and
+    // the archive keys them `Slice.iter`, `Slice.first`, … A call site
+    // whose receiver is statically a slice arrives here qualified by the
+    // spelling instead — `&[Byte].iter` — and no registry holds that, so
+    // dispatch fell through to the catch-all. `len` and `is_empty` hid
+    // it: those are answered from FatRef metadata without any lookup, so
+    // a slice looked healthy right up to `.iter()`, which panicked
+    // reading field 2 of an object that was never the iterator. Every
+    // line-oriented read went down with it, since `BufRead.read_until`
+    // iterates the subslice `fill_buf` returns.
+    //
+    // Normalise the prefix here, where every producer of a qualified
+    // name converges, rather than in each one. The shape is read, not a
+    // list of type names: an optional `&` / `&mut `, then `[`…`]`.
+    if let Some(dot) = method_name.rfind('.') {
+        let (prefix, rest) = method_name.split_at(dot);
+        let bare = prefix
+            .strip_prefix("&mut ")
+            .or_else(|| prefix.strip_prefix('&'))
+            .unwrap_or(prefix)
+            .trim();
+        if bare.starts_with('[') && bare.ends_with(']') {
+            method_name = format!("Slice{rest}");
         }
     }
 

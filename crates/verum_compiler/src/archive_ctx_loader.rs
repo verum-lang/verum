@@ -1587,9 +1587,20 @@ impl SymbolGraph {
         // queue, no `type:` edge ever fired, and the pairing never
         // started.  Pairs only form against capped leaves, so a
         // program with none (hello-world) pays nothing.
+        // `Slice` belongs here for the same reason and is the sharpest
+        // case of it: a slice has NO name a program ever writes.
+        // `&xs[1..3]` produces one, the runtime classifies the receiver
+        // as `Slice` and looks up `Slice.iter` — a name the harvest
+        // could not have seen, because the source says `sl.iter()`.
+        // `len` and `is_empty` on a slice are interpreter builtins and
+        // answered anyway, so the gap showed up only on iteration:
+        // `for b in (&xs[1..3]).iter()` panicked reading field 2 of an
+        // object that was never the iterator. That took down every
+        // line-oriented read, since `BufRead.read_until` iterates the
+        // subslice `fill_buf` returns.
         for t in [
             "List", "Text", "Range", "RangeInclusive", "Maybe", "Result",
-            "Map", "Set",
+            "Map", "Set", "Slice",
         ] {
             live_types.insert(t.to_string());
         }
