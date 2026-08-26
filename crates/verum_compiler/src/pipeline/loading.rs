@@ -867,7 +867,18 @@ impl<'s> CompilationPipeline<'s> {
 
         // Only treat as a project if there's a mod.vr in the directory
         let mod_file = input_dir.join("mod.vr");
+        let trace_load = std::env::var_os("VERUM_TRACE_PROJECT_LOAD").is_some();
+        if trace_load {
+            eprintln!(
+                "[project-load] root={} mod.vr={}",
+                input_dir.display(),
+                mod_file.exists()
+            );
+        }
         if !mod_file.exists() {
+            if trace_load {
+                eprintln!("[project-load] EARLY RETURN: no mod.vr at the project root");
+            }
             return Ok(());
         }
 
@@ -889,7 +900,20 @@ impl<'s> CompilationPipeline<'s> {
         let mut project_files: Vec<PathBuf> = Vec::new();
         Self::discover_vr_files_recursive(&input_dir, &canonical_input, &mut project_files);
 
+        if trace_load {
+            eprintln!(
+                "[project-load] discovered {} file(s): {:?}",
+                project_files.len(),
+                project_files
+                    .iter()
+                    .map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                    .collect::<Vec<_>>()
+            );
+        }
         if project_files.is_empty() {
+            if trace_load {
+                eprintln!("[project-load] EARLY RETURN: discovery found nothing");
+            }
             return Ok(());
         }
 
