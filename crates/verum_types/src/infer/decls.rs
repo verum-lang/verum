@@ -63,6 +63,91 @@ use verum_common::{Heap, List, Map, Maybe, Set, Shared, Text, ToText};
 use verum_modules::{ModulePath, ModuleRegistry, NameResolver, resolve_import, resolver::NameKind};
 
 impl TypeChecker {
+    /// Record the arity a type declaration establishes for its own name.
+    ///
+    /// Called for EVERY type declaration — generic or not. A declaration
+    /// with no parameters writes an EMPTY record rather than nothing,
+    /// because `__type_params_<Name>` is a flat namespace shared by every
+    /// module: staying silent leaves whatever a SAME-NAMED type wrote
+    /// there earlier, and the next reader takes that stale arity for this
+    /// type's.
+    ///
+    /// A project record named `Slice` inherited the standard library's
+    /// `Slice<T>` arity exactly that way. Its fields resolved to the
+    /// project's record while its arity came from the stdlib namesake, so
+    /// every literal typed as `Slice<_>` and every annotation stayed
+    /// `Slice` — one name answered by two types, half a question each.
+    ///
+    /// Writing the empty record also CLAIMS the slot: the lazy stdlib
+    /// loaders that populate this key guard on `is_none()`, so a
+    /// declaration that says "no parameters" is not overwritten later by
+    /// a namesake being loaded on demand.
+    ///
+    /// One carrier. Four registrars — record, alias, variant, protocol —
+    /// each held a copy of this loop, and the copies had already drifted:
+    /// only one of them counted a `KindAnnotated` parameter.
+    /// The arity currently recorded for `type_name`, or `None` when the
+    /// key is absent.
+    ///
+    /// Absence is a distinct answer from zero: it means no declaration has
+    /// claimed the name, which is the state a namesake's stale entry used
+    /// to be read out of. Exposed so a test can assert the recorded FACT
+    /// rather than a symptom several inference steps downstream of it.
+    pub fn recorded_type_arity(&self, type_name: &str) -> Option<usize> {
+        let key = format!("__type_params_{}", type_name);
+        match self.ctx.lookup_type(key.as_str()) {
+            verum_common::Maybe::Some(Type::Record(params)) => Some(params.len()),
+            _ => None,
+        }
+    }
+
+    /// Returns the arity it recorded, for callers that also register a
+    /// kind for the type constructor.
+    pub(crate) fn register_declared_type_arity(
+        &mut self,
+        type_name: &verum_common::Text,
+        generics: &List<verum_ast::ty::GenericParam>,
+    ) -> usize {
+        use verum_ast::ty::GenericParamKind;
+
+        // Every positional parameter that carries a user-visible name —
+        // Type, HigherKinded, KindAnnotated, Const, Meta, Context. The
+        // arity counter and the user-facing "type T expects N arguments"
+        // check in `compile_type_path` read this map's length, so
+        // skipping a kind makes a declaration look narrower than it is:
+        // omitting Meta/Const made `type Matrix<T, Rows: meta Int, Cols:
+        // meta Int>` count as arity 1, and `Matrix<Float, 2, 3>` was
+        // refused as "expects 1 type argument(s), but 3 were provided".
+        //
+        // Lifetimes are deliberately absent: they are not written at use
+        // sites, so counting them would inflate the expected argument
+        // count.
+        let mut param_record: indexmap::IndexMap<verum_common::Text, Type> =
+            indexmap::IndexMap::new();
+        for param in generics.iter() {
+            let name_opt = match &param.kind {
+                GenericParamKind::Type { name, .. }
+                | GenericParamKind::HigherKinded { name, .. }
+                | GenericParamKind::KindAnnotated { name, .. }
+                | GenericParamKind::Const { name, .. }
+                | GenericParamKind::Meta { name, .. }
+                | GenericParamKind::Context { name } => Some(name.name.clone()),
+                GenericParamKind::Lifetime { .. } => None,
+                _ => None,
+            };
+            if let Some(n) = name_opt {
+                param_record.insert(n, Type::Int);
+            }
+        }
+
+        let arity = param_record.len();
+        let type_params_key: verum_common::Text =
+            format!("__type_params_{}", type_name).into();
+        self.ctx
+            .define_type(type_params_key, Type::Record(param_record));
+        arity
+    }
+
     /// Register a type declaration (type alias, ADT, etc.)
     /// This should be called before other passes to make types available.
     ///
@@ -160,11 +245,14 @@ impl TypeChecker {
 
         // Track number of generic parameters for this type.
         // This enables proper type inference when the type is used without explicit type args.
+        //
+        // Recorded UNCONDITIONALLY, zero included, for the reason set out
+        // on `register_declared_type_arity`: this map is keyed by simple
+        // name across every module, so a declaration that stays silent
+        // leaves a same-named type's count to answer for it.
         let generics_count = type_decl.generics.len();
-        if generics_count > 0 {
-            self.type_generics_count
-                .insert(type_name.clone(), generics_count);
-        }
+        self.type_generics_count
+            .insert(type_name.clone(), generics_count);
 
         // CRITICAL: Prevent infinite recursion when registering mutually recursive types.
         // If we're already in the process of registering this type, return early.
@@ -397,37 +485,10 @@ impl TypeChecker {
                 // This enables proper substitution when the alias is instantiated with concrete types
                 // E.g., for `type Reducer<A, R> is fn(R, A) -> R;`, we need __type_params_Reducer
                 // so that `Reducer<Int, Bool>` correctly substitutes A=Int, R=Bool
-                if !type_decl.generics.is_empty() {
-                    let mut param_record: indexmap::IndexMap<verum_common::Text, Type> =
-                        indexmap::IndexMap::new();
-                    for param in type_decl.generics.iter() {
-                        use verum_ast::ty::GenericParamKind;
-                        // Record every positional parameter that carries a user-visible
-                        // name — Type, HigherKinded, Const, Meta, Context, and Level.
-                        // The arity counter (below, and the user-facing
-                        // "type T expects N arguments" check in compile_type_path)
-                        // reads `param_record.len()`; skipping Meta/Const/HKT/etc.
-                        // made `type Matrix<T, Rows: meta Int, Cols: meta Int>`
-                        // look like it only takes 1 argument, so `Matrix<Float, 2, 3>`
-                        // raised "expects 1 type argument(s), but 3 were provided".
-                        let name_opt = match &param.kind {
-                            GenericParamKind::Type { name, .. } => Some(name.name.clone()),
-                            GenericParamKind::HigherKinded { name, .. } => Some(name.name.clone()),
-                            GenericParamKind::Const { name, .. } => Some(name.name.clone()),
-                            GenericParamKind::Meta { name, .. } => Some(name.name.clone()),
-                            GenericParamKind::Context { name } => Some(name.name.clone()),
-                            GenericParamKind::Lifetime { .. } => None,
-                            _ => None,
-                        };
-                        if let Some(n) = name_opt {
-                            param_record.insert(n, Type::Int);
-                        }
-                    }
-                    let type_params_key: Text = format!("__type_params_{}", type_name).into();
-                    self.ctx
-                        .define_type(type_params_key.clone(), Type::Record(param_record.clone()));
+                {
+                    let arity = self
+                        .register_declared_type_arity(&type_name, &type_decl.generics);
                     // Register kind for this type constructor (stdlib-agnostic)
-                    let arity = param_record.len();
                     if arity > 0 {
                         use crate::kind_inference::KindInference;
                         let kind = if arity == 1 {
@@ -1103,6 +1164,12 @@ impl TypeChecker {
                     let type_var_order_key: Text = format!("__type_var_order_{}", type_name).into();
                     self.ctx
                         .define_type(type_var_order_key, Type::Tuple(type_vars_in_order));
+                } else {
+                    // No parameters. Say so in the shared key rather than
+                    // staying silent, which would leave a same-named type's
+                    // arity to answer for this one — see
+                    // `register_declared_type_arity`.
+                    self.register_declared_type_arity(&type_name, &type_decl.generics);
                 }
 
                 // CRITICAL: Register variant type to name mapping for instance method lookup
@@ -1708,38 +1775,7 @@ impl TypeChecker {
                     // when checking record literals like `Box { value: 42 }` against `Box<Int>`,
                     // and the arity checker in `compile_type_path` uses `param_record.len()`
                     // to validate `expected_count == provided_count`.
-                    //
-
-                    // Every positional parameter must be included — not just `Type` kinds —
-                    // otherwise a declaration like
-                    //  type Matrix<T, Rows: meta Int, Cols: meta Int> is { ... };
-                    // registers as arity=1 and every `Matrix<Float, 2, 3>` usage errors
-                    // out with "expects 1 type argument(s), but 3 were provided".
-                    if !type_decl.generics.is_empty() {
-                        let mut param_record: indexmap::IndexMap<verum_common::Text, Type> =
-                            indexmap::IndexMap::new();
-                        for (idx, param) in type_decl.generics.iter().enumerate() {
-                            let _ = idx;
-                            use verum_ast::ty::GenericParamKind;
-                            let name_opt = match &param.kind {
-                                GenericParamKind::Type { name, .. } => Some(name.name.clone()),
-                                GenericParamKind::HigherKinded { name, .. } => {
-                                    Some(name.name.clone())
-                                }
-                                GenericParamKind::Const { name, .. } => Some(name.name.clone()),
-                                GenericParamKind::Meta { name, .. } => Some(name.name.clone()),
-                                GenericParamKind::Context { name } => Some(name.name.clone()),
-                                GenericParamKind::Lifetime { .. } => None,
-                                _ => None,
-                            };
-                            if let Some(n) = name_opt {
-                                param_record.insert(n, Type::Int);
-                            }
-                        }
-                        let type_params_key: Text = format!("__type_params_{}", type_name).into();
-                        self.ctx
-                            .define_type(type_params_key, Type::Record(param_record));
-                    }
+                    self.register_declared_type_arity(&type_name, &type_decl.generics);
                 }
         Ok(())
     }
@@ -2577,39 +2613,8 @@ impl TypeChecker {
                 // resolve their own types first, regardless of load order.
                 self.define_type_in_current_module(type_name.clone(), named_type);
 
-                // CRITICAL FIX: Register type parameters for generic type aliases.
-                // Include EVERY positional parameter (Type, HigherKinded, Const,
-                // Meta, Context, Level) — not just `Type` — because the arity
-                // check in `compile_type_path` reads `param_record.len()` to
-                // validate `expected_count == provided_count`. A declaration
-                // like `type SquareMatrix<T, N: meta Int> is Matrix<T, N, N>`
-                // otherwise registers arity=1 and `SquareMatrix<Float, 3>`
-                // fails "expects 1 type argument(s), but 2 were provided".
-                // Keep in sync with the matching loop in
-                // `register_type_declaration_inner` (line ~46540).
-                if !type_decl.generics.is_empty() {
-                    use verum_ast::ty::GenericParamKind;
-                    let mut param_record: indexmap::IndexMap<verum_common::Text, Type> =
-                        indexmap::IndexMap::new();
-                    for param in type_decl.generics.iter() {
-                        let name_opt = match &param.kind {
-                            GenericParamKind::Type { name, .. } => Some(name.name.clone()),
-                            GenericParamKind::HigherKinded { name, .. } => Some(name.name.clone()),
-                            GenericParamKind::KindAnnotated { name, .. } => Some(name.name.clone()),
-                            GenericParamKind::Const { name, .. } => Some(name.name.clone()),
-                            GenericParamKind::Meta { name, .. } => Some(name.name.clone()),
-                            GenericParamKind::Context { name } => Some(name.name.clone()),
-                            GenericParamKind::Lifetime { .. } => None,
-                            _ => None,
-                        };
-                        if let Some(n) = name_opt {
-                            param_record.insert(n, Type::Int);
-                        }
-                    }
-                    let type_params_key: Text = format!("__type_params_{}", type_name).into();
-                    self.ctx
-                        .define_type(type_params_key, Type::Record(param_record));
-                }
+                // Register the arity this alias declares for its own name.
+                self.register_declared_type_arity(&type_name, &type_decl.generics);
             }
             TypeDeclBody::Variant(_) => self.resolve_variant_type_body(type_decl, type_name)?,
             TypeDeclBody::Record(_) => self.resolve_record_type_body(type_decl, type_name)?,
@@ -3424,37 +3429,7 @@ impl TypeChecker {
                     self.ctx.define_type(struct_key, Type::Record(record_map));
 
                     // Store type parameters for bidirectional inference.
-                    // Count every positional kind (Type, HigherKinded, Const, Meta,
-                    // Context), not just `Type`. The arity check in compile_type_path
-                    // reads `param_record.len()`; filtering down to `Type` broke
-                    // declarations like
-                    //  type Matrix<T, Rows: meta Int, Cols: meta Int> is { … };
-                    // where the Meta slots would otherwise vanish and
-                    // `Matrix<Float, 2, 3>` reported "expects 1 type argument, got 3".
-                    if !type_decl.generics.is_empty() {
-                        let mut param_record: indexmap::IndexMap<verum_common::Text, Type> =
-                            indexmap::IndexMap::new();
-                        for param in type_decl.generics.iter() {
-                            use verum_ast::ty::GenericParamKind;
-                            let name_opt = match &param.kind {
-                                GenericParamKind::Type { name, .. } => Some(name.name.clone()),
-                                GenericParamKind::HigherKinded { name, .. } => {
-                                    Some(name.name.clone())
-                                }
-                                GenericParamKind::Const { name, .. } => Some(name.name.clone()),
-                                GenericParamKind::Meta { name, .. } => Some(name.name.clone()),
-                                GenericParamKind::Context { name } => Some(name.name.clone()),
-                                GenericParamKind::Lifetime { .. } => None,
-                                _ => None,
-                            };
-                            if let Some(n) = name_opt {
-                                param_record.insert(n, Type::Int);
-                            }
-                        }
-                        let type_params_key: Text = format!("__type_params_{}", type_name).into();
-                        self.ctx
-                            .define_type(type_params_key, Type::Record(param_record));
-                    }
+                    self.register_declared_type_arity(&type_name, &type_decl.generics);
                 }
         Ok(())
     }

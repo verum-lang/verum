@@ -4080,7 +4080,17 @@ impl TypeChecker {
                     // explicit type arguments, create fresh type variables for the missing params.
                     // This enables proper inference for types like `PendingFuture<T>` used as `PendingFuture`.
                     let type_name_text = verum_common::Text::from(name);
-                    if let Some(&generics_count) = self.type_generics_count.get(&type_name_text) {
+                    // `> 0`, not merely "recorded": a declaration records
+                    // its parameter count even when that count is zero
+                    // (see `register_declared_type_arity` — silence would
+                    // leave a namesake's count to answer for it). Zero
+                    // means the same thing here as no entry did before,
+                    // and must take the same branch: opening a
+                    // non-generic type into a bare `Named` would discard
+                    // the record or variant structure `ty` carries.
+                    if let Some(&generics_count) = self.type_generics_count.get(&type_name_text)
+                        && generics_count > 0
+                    {
                         // Type requires generic arguments - create Named type with fresh type vars
                         let fresh_args: List<Type> = (0..generics_count)
                             .map(|_| Type::Var(TypeVar::fresh()))

@@ -1,0 +1,76 @@
+// @test: run-pass
+// @level: L0
+// @tier: 0
+// @tags: modules, name-resolution, shadowing, arity, generics
+// @description: A declaration is the authority on its OWN arity — a type
+//   named after a standard-library generic is not silently given that
+//   generic's parameters.
+//
+// `Slice` is a standard-library generic (`Slice<T>`). A program that
+// declares its own non-generic `Slice` used to be typed by BOTH: the
+// record literal took its FIELDS from the program's declaration and its
+// ARITY from the stdlib's, then instantiated a fresh type variable for a
+// parameter the type does not have. The program was refused against
+// itself:
+//
+//     error<E400>: Type mismatch: expected 'Slice', found 'Slice<_>'
+//
+// The cause was silence, not a wrong answer. `__type_params_<Name>` is a
+// flat namespace shared by every module, and the registrars wrote it only
+// when a declaration HAD parameters — so a declaration with none left
+// whatever a same-named type had written there to answer for it.
+//
+// The name here is deliberately one the standard library already uses.
+// The point of the spec is that using it is allowed: the sibling
+// `glob_origin_project_beats_stdlib.vr` states that a project's
+// declaration wins over a stdlib namesake, and an arity is part of what
+// "wins" has to mean.
+//
+// @expected-stdout-begin
+// count=3
+// widened=2
+// knob=42
+// @expected-stdout-end
+
+module holder {
+    // Same simple name as the stdlib generic, and no parameters.
+    public type Slice is { count: Int };
+
+    // A generic of our own, to keep the negative pole in the program:
+    // a fix that recorded "no parameters" for every declaration would
+    // break this one, and the program would stop compiling.
+    public type Pair<A> is { left: A, right: A };
+
+    public fn build(n: Int) -> Slice {
+        Slice { count: n }
+    }
+
+    public fn widen(a: Int) -> Pair<Int> {
+        Pair { left: a, right: a }
+    }
+
+    // An ALIAS body, which reaches its arity write on a different pass
+    // from a record's. `Knob<T>` is declared first so the non-generic
+    // `Knob` has a namesake's arity to inherit if the write is skipped.
+    public type Knob<T> is { held: T };
+    public type Knob is Int;
+
+    public fn bump(k: Knob) -> Int { k + 1 }
+}
+
+mount holder.{Knob, Pair, Slice, build, bump, widen};
+
+fn main() {
+    // The literal is built in the MOUNTING module — the position where
+    // the two answers used to disagree, since the annotation resolved
+    // one way and the literal the other.
+    let s: Slice = Slice { count: 3 };
+    let _ = build(s.count);
+    print(f"count={s.count}");
+
+    let p: Pair<Int> = widen(2);
+    print(f"widened={p.left}");
+
+    let k: Knob = 41;
+    print(f"knob={bump(k)}");
+}
