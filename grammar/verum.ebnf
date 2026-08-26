@@ -111,7 +111,7 @@ module_keywords = 'module' | 'mount' | 'implement' | 'context' | 'protocol' | 'e
 
 (* Additional keywords *)
 (* 'some' for existential types *)
-additional_keywords = 'self' | 'super' | 'crate' | 'static' | 'meta'
+additional_keywords = 'self' | 'super' | 'cog' | crate_alias | 'static' | 'meta'
                     | 'provide' | 'finally' | 'recover' | 'invariant'
                     | 'decreases' | 'stream' | 'tensor' | 'affine' | 'linear'
                     | 'public' | 'internal' | 'protected'
@@ -409,11 +409,20 @@ item            = function_def
 (* AUDIT 2026-08-01: the parser has always accepted the full surface
    below (fast_parser decl.rs parse_visibility): `pub` as an alias of
    `public`, restriction forms `(cog)` / `(super)` / `(in path)`, and
-   an explicit `private`. Bare declarations are private. Note the
-   restriction argument is `cog` — Verum has no `crate` token.        *)
+   an explicit `private`. Bare declarations are private.
+
+   The restriction argument is `cog`.  `crate` LEXES TO THE SAME TOKEN
+   (verum_lexer token.rs: `Cog` carries both `#[token("cog")]` and
+   `#[token("crate")]`), so `public(crate)` and `crate.a.b` parse — a
+   Rust spelling that survived the cog rename.  `cog` is the canonical
+   name: it is what diagnostics print and what this grammar specifies.
+   Stating the alias here rather than denying it, because an earlier
+   version of this note read "Verum has no `crate` token" while the
+   token list two screens up and `path_segment` below both named one.
+   See `crate_alias` in the keyword section.                          *)
 visibility      = ( 'public' | 'pub' ) , [ visibility_restriction ]
                 | 'internal' | 'protected' | 'private' | epsilon ;
-visibility_restriction = '(' , ( 'cog' | 'super' | 'in' , path ) , ')' ;
+visibility_restriction = '(' , ( 'cog' | crate_alias | 'super' | 'in' , path ) , ')' ;
 epsilon         = ;
 
 attribute_item  = '@' , attribute , item ;
@@ -561,7 +570,15 @@ module_path     = identifier , { '.' , identifier } ;
 module_body     = '{' , { program_item } , '}' | ';' ;
 
 path            = [ '.' ] , path_segment , { '.' , path_segment } ;
-path_segment    = identifier | 'self' | 'super' | 'crate' ;
+path_segment    = identifier | 'self' | 'super' | 'cog' | crate_alias ;
+
+(* One concept, two spellings.  `cog` is canonical — it is the name of
+   the unit, what diagnostics print, and what `public(cog)` restricts
+   to.  `crate` is the Rust spelling, accepted by the lexer as the SAME
+   token, so every position that takes `cog` takes it.  Written as a
+   named production so the alias is stated once and every use site
+   points at this note instead of repeating the terminal.             *)
+crate_alias     = 'crate' ;
 
 (* 2.3 Type Definitions - Unified 'is' syntax *)
 (* Spec: docs/detailed/05-syntax-grammar.md Section 3.1 - Unified type definitions *)
