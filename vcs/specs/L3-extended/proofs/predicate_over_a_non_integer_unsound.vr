@@ -1,0 +1,58 @@
+// @test: verify-fail
+// @level: L3
+// @tier: 0
+// @tags: verification, smt, refinement-reflection, sorts, soundness
+// @timeout: 30000
+// @description: Giving a predicate its declared sort does not make false
+//   claims provable.
+//
+// The soundness pole of `predicate_over_a_non_integer.vr`. That spec
+// shows a predicate over `Bool`, `Text` or a record now proves; this one
+// shows the same machinery still REFUSES the false version of each.
+//
+// The direction matters because the fix works by making a goal's
+// application match an axiom that was previously inert. An inert axiom
+// cannot prove anything false — it also cannot prove anything true,
+// which is why the claims failed — so switching it on is exactly the
+// moment to check that what it now proves is only what it should.
+//
+// Each claim below is false for at least one value of its parameter, so
+// each must FAIL. A run where any of them proves means the axiom
+// describes a function nobody wrote.
+
+/// False whenever `b` is `false`.
+public fn bool_is_always_true(b: Bool) -> Bool {
+    b
+}
+
+@verify(formal)
+public theorem bool_must_not_prove(b: Bool)
+    ensures bool_is_always_true(b)
+    proof by auto;
+
+/// False for any text that is not the empty one.
+public fn text_is_empty(s: Text) -> Bool {
+    s == ""
+}
+
+@verify(formal)
+public theorem text_must_not_prove(s: Text)
+    ensures text_is_empty(s)
+    proof by auto;
+
+public type Box is { a: Int, b: Int };
+
+/// False whenever the two fields differ — the record case, where the
+/// projections are what the axiom talks about.
+public fn fields_agree(x: Box) -> Bool {
+    x.a == x.b
+}
+
+@verify(formal)
+public theorem fields_must_not_prove(x: Box)
+    ensures fields_agree(x)
+    proof by auto;
+
+fn main() {
+    print("predicate-sorts-unsound");
+}

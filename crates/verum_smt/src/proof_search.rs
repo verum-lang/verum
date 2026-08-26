@@ -2363,6 +2363,10 @@ pub struct ProofSearchEngine {
     >,
     /// Declared types of values in scope, same lifetime as the layouts.
     value_type_bindings: std::collections::HashMap<Text, Text>,
+    /// The SORT NAME of a value in scope — a different question from its
+    /// TYPE NAME, which `value_type_bindings` answers for record
+    /// layouts. A primitive has the first and not the second.
+    value_sort_bindings: std::collections::HashMap<Text, Text>,
 
     /// Callee signatures for functions that aren't in the
     /// reflection registry but still need a sort-correct
@@ -2445,6 +2449,7 @@ impl ProofSearchEngine {
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
             record_layouts: std::collections::HashMap::new(),
             value_type_bindings: std::collections::HashMap::new(),
+            value_sort_bindings: std::collections::HashMap::new(),
             callee_signatures: std::collections::HashMap::new(),
             module_axioms: Vec::new(),
             variant_map: std::collections::HashMap::new(),
@@ -2466,6 +2471,7 @@ impl ProofSearchEngine {
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
             record_layouts: std::collections::HashMap::new(),
             value_type_bindings: std::collections::HashMap::new(),
+            value_sort_bindings: std::collections::HashMap::new(),
             callee_signatures: std::collections::HashMap::new(),
             module_axioms: Vec::new(),
             variant_map: std::collections::HashMap::new(),
@@ -2539,6 +2545,11 @@ impl ProofSearchEngine {
     /// access on it can be resolved.
     pub fn register_value_type(&mut self, value: Text, type_name: Text) {
         self.value_type_bindings.insert(value, type_name);
+    }
+
+    /// Register the SORT a value in scope carries.
+    pub fn register_value_sort(&mut self, value: Text, sort_name: Text) {
+        self.value_sort_bindings.insert(value, sort_name);
     }
 
     /// Register a module-level axiom expression that will be
@@ -5042,6 +5053,9 @@ impl ProofSearchEngine {
         }
         for (value, type_name) in &self.value_type_bindings {
             translator.register_value_type(value.as_str(), type_name.as_str());
+        }
+        for (value, sort_name) in &self.value_sort_bindings {
+            translator.register_value_sort(value.as_str(), sort_name.as_str());
         }
 
         // Push the variant registry into the translator so

@@ -298,24 +298,51 @@ impl<'s> VerifyCommand<'s> {
             verum_smt::expr_to_smtlib::ReflectionTypeEnv::from_module(&module);
         for item in &module.items {
             if let ItemKind::Function(fd) = &item.kind {
-                if let Some(rf) = verum_smt::expr_to_smtlib::try_reflect_function_with_env(
+                let reflected = verum_smt::expr_to_smtlib::try_reflect_function_with_env(
                     fd,
                     &reflection_env,
-                ) {
+                );
+                let is_reflected = reflected.is_some();
+                if let Some(rf) = reflected {
                     let _ = reflection_registry.register(rf);
                 }
+
+                // A signature spells the reflector's sorts ONLY for a
+                // function the reflector accepted. Everything else keeps
+                // the Int default.
+                //
+                // The sorts exist so a goal's application matches the
+                // AXIOM the reflector wrote. A function with no axiom
+                // has nothing to match, and giving it a distinct sort
+                // only splits it from the rest of the query: an
+                // `axiom`-style declaration over a non-primitive
+                // parameter (`compose(f, id)`) stopped proving that way,
+                // and so did a `cases` proof, while everything was
+                // uniformly Int and consistent before (T0901).
+                let sort_of = |ty: &verum_ast::ty::Type| -> Text {
+                    if is_reflected {
+                        Text::from(verum_smt::expr_to_smtlib::type_to_sort(ty))
+                    } else {
+                        Text::from("Int")
+                    }
+                };
                 let param_sorts: Vec<Text> = fd
                     .params
                     .iter()
                     .filter_map(|p| {
                         if let FunctionParamKind::Regular { ty, .. } = &p.kind {
-                            Some(Text::from(verum_smt::expr_to_smtlib::type_to_sort(ty)))
+                            Some(sort_of(ty))
                         } else {
                             None
                         }
                     })
                     .collect();
                 let ret_sort = match &fd.return_type {
+                    // The RETURN sort always comes from the declaration,
+                    // reflected or not: a Bool-returning predicate that
+                    // became an Int would leave the goal not a
+                    // proposition at all, which is a different and worse
+                    // failure than an unmatched argument.
                     verum_common::Maybe::Some(t) => {
                         Text::from(verum_smt::expr_to_smtlib::type_to_sort(t))
                     }
@@ -635,6 +662,36 @@ impl<'s> VerifyCommand<'s> {
         // an Int constant, so a `Bool` field could not be stated as a
         // proposition at all, and the goal side named the field
         // differently from the reflection side so the two never met.
+        // The theorem's own parameters. The SORT is registered for a
+        // type whose SHAPE is known — one with a record layout — and the
+        // TYPE NAME wherever there is one, for member access to resolve
+        // a layout against.
+        //
+        // Narrow on purpose. Giving every unrecognised type name its own
+        // sort made `theorem add_zero_right(n: Nat): n + 0 == n`
+        // ill-typed, and a bare type parameter `T` broke every
+        // comparison the same way; both were measured (T0901).
+        for p in &theorem.params {
+            if let verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } = &p.kind
+                && let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind
+            {
+                let (sort_name, type_name) =
+                    verum_smt::expr_to_smtlib::type_to_sort_and_name(ty);
+                let opaque = sort_name.starts_with("Verum!");
+                let known_shape = type_name
+                    .as_deref()
+                    .is_some_and(|n| record_layouts.contains_key(n));
+                if !opaque || known_shape {
+                    proof_engine
+                        .register_value_sort(name.name.clone(), Text::from(sort_name.as_str()));
+                }
+                if let Some(tn) = type_name {
+                    proof_engine
+                        .register_value_type(name.name.clone(), Text::from(tn.as_str()));
+                }
+            }
+        }
+
         for (type_name, fields) in record_layouts.iter() {
             proof_engine.register_record_type(Text::from(type_name.as_str()), fields.clone());
         }

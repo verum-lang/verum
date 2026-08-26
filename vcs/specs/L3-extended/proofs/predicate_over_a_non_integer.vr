@@ -1,0 +1,89 @@
+// @test: verify-pass
+// @level: L3
+// @tier: 0
+// @tags: verification, smt, refinement-reflection, sorts
+// @timeout: 30000
+// @description: A predicate proves over the type it was written for —
+//   not only over `Int`.
+//
+// A user function reaches the solver as a declared symbol plus a
+// defining axiom, and the two are written by DIFFERENT code: the axiom
+// by the reflector, the goal's application by the Z3-AST translator.
+// They disagreed about what sort a parameter has. Read verbatim out of
+// a dumped query:
+//
+//     (declare-fun p_two (Verum!Box) Bool)   from the axiom
+//     (declare-fun p_two (Int) Bool)         from the goal
+//
+// Z3 sees two unrelated symbols that happen to share a name, so the
+// axiom never bears on the goal and the claim is unprovable — no error,
+// no diagnostic, just a theorem that will not close. The translator
+// made every variable an `Int` and coerced every argument to one,
+// which is why `Int` predicates were the only ones that worked.
+//
+// A `Bool` parameter was worse than unprovable: the coercion handed
+// `FuncDecl::apply` an argument of the wrong sort, the binding unwraps
+// the `None` that comes back, and the process ABORTED — an internal
+// compiler error where a proof belonged.
+//
+// The two sides now read the same authority for a parameter's sort, and
+// an application whose argument does not carry the declared sort is a
+// named refusal rather than an abort. `Int` cases are the control:
+// they proved before and must keep proving.
+
+/// The control: nothing here is unusual, and it must stay provable.
+public fn over_int(n: Int) -> Bool {
+    n + 0 == n
+}
+
+@verify(formal)
+public theorem over_int_holds(n: Int)
+    ensures over_int(n)
+    proof by auto;
+
+/// `Bool` — the case that aborted the compiler.
+public fn over_bool(b: Bool) -> Bool {
+    b == b
+}
+
+@verify(formal)
+public theorem over_bool_holds(b: Bool)
+    ensures over_bool(b)
+    proof by auto;
+
+/// `Text` — an opaque sort with no arithmetic at all.
+public fn over_text(s: Text) -> Bool {
+    s == s
+}
+
+@verify(formal)
+public theorem over_text_holds(s: Text)
+    ensures over_text(s)
+    proof by auto;
+
+public type Box is { a: Int, b: Int };
+
+/// A record parameter, used only as a whole.
+public fn over_record(x: Box) -> Bool {
+    true
+}
+
+@verify(formal)
+public theorem over_record_holds(x: Box)
+    ensures over_record(x)
+    proof by auto;
+
+/// A record parameter whose fields are READ — the claim is about the
+/// projections, so both the sort and the field symbols have to line up.
+public fn fields_commute(x: Box) -> Bool {
+    x.a + x.b == x.b + x.a
+}
+
+@verify(formal)
+public theorem fields_commute_holds(x: Box)
+    ensures fields_commute(x)
+    proof by auto;
+
+fn main() {
+    print("predicate-sorts");
+}

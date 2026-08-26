@@ -345,6 +345,8 @@ pub struct Translator<'ctx> {
     /// Value name → its named type. Populated from the declared
     /// parameter types of the obligation under proof.
     value_types: std::cell::RefCell<std::collections::HashMap<String, String>>,
+    /// The SORT NAME of a value in scope — see `register_value_sort`.
+    value_sorts: std::cell::RefCell<std::collections::HashMap<String, String>>,
 
     /// Variant-type registry — variant type name → constructor
     /// names. Used by the quantifier translator to emit
@@ -392,6 +394,7 @@ impl<'ctx> Translator<'ctx> {
             callee_signatures: std::cell::RefCell::new(std::collections::HashMap::new()),
             record_fields: std::cell::RefCell::new(std::collections::HashMap::new()),
             value_types: std::cell::RefCell::new(std::collections::HashMap::new()),
+            value_sorts: std::cell::RefCell::new(std::collections::HashMap::new()),
             variant_registry: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
@@ -407,6 +410,7 @@ impl<'ctx> Translator<'ctx> {
             callee_signatures: std::cell::RefCell::new(std::collections::HashMap::new()),
             record_fields: std::cell::RefCell::new(std::collections::HashMap::new()),
             value_types: std::cell::RefCell::new(std::collections::HashMap::new()),
+            value_sorts: std::cell::RefCell::new(std::collections::HashMap::new()),
             variant_registry: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
@@ -503,6 +507,13 @@ impl<'ctx> Translator<'ctx> {
 
     /// Register the named type of a value in scope (a parameter of the
     /// obligation under proof).
+    /// Register the SORT a value in scope carries, by name.
+    pub fn register_value_sort(&self, value: &str, sort_name: &str) {
+        self.value_sorts
+            .borrow_mut()
+            .insert(value.to_string(), sort_name.to_string());
+    }
+
     pub fn register_value_type(&self, value: &str, type_name: &str) {
         self.value_types
             .borrow_mut()
@@ -619,10 +630,24 @@ impl<'ctx> Translator<'ctx> {
     /// Resolve an SMT-LIB sort name to a Z3 `Sort` object.
     /// Anything not recognised becomes `Int` — matching what the
     /// reflection registry does when it has no better information.
+    /// The Z3 sort a sort NAME denotes.
+    ///
+    /// The names come from `expr_to_smtlib::type_to_sort`, which is what
+    /// writes them into a reflected function's defining axiom. When the
+    /// two disagree, the same function is declared twice under
+    /// different signatures and the axiom never bears on the goal —
+    /// read verbatim out of a dumped query (T0901):
+    ///
+    ///     (declare-fun p_two (Verum!Box) Bool)   from the axiom
+    ///     (declare-fun p_two (Int) Bool)         from the goal
     fn sort_from_name(name: &str) -> z3::Sort {
+        if name.starts_with("Verum!") {
+            return z3::Sort::uninterpreted(z3::Symbol::String(name.to_string()));
+        }
         match name {
             "Bool" => z3::Sort::bool(),
             "Real" => z3::Sort::real(),
+            "String" => z3::Sort::string(),
             _ => z3::Sort::int(),
         }
     }
@@ -1086,8 +1111,14 @@ impl<'ctx> Translator<'ctx> {
                         _ => {}
                     }
 
-                    // Otherwise create a fresh variable based on inferred type
-                    // For now, default to integer
+                    // A value whose sort this obligation registered gets
+                    // THAT sort. Every variable used to be an Int, so a
+                    // goal applied a function declared over `Verum!Box`
+                    // to an Int and Z3 aborted the process (T0901).
+                    if let Some(sort_name) = self.value_sorts.borrow().get(name).cloned() {
+                        let sort = Self::sort_from_name(&sort_name);
+                        return Ok(z3::ast::Dynamic::new_const(name, &sort));
+                    }
                     let int_var = Int::new_const(name);
                     Ok(Dynamic::from_ast(&int_var))
                 } else {
@@ -2745,8 +2776,17 @@ impl<'ctx> Translator<'ctx> {
                         // declaration. Without it, the two emit
                         // conflicting symbols and Z3 sees them as
                         // distinct uninterpreted functions.
-                        let (arg_sorts_vec, ret_sort) = if let Some((p, r)) =
-                            self.callee_signatures.borrow().get(func_name).cloned()
+                        let (arg_sorts_vec, ret_sort) = if let Some((p, r)) = self
+                            .callee_signatures
+                            .borrow()
+                            .get(func_name)
+                            .cloned()
+                            // A signature of a DIFFERENT arity is not this
+                            // call's signature. Applying a decl built from
+                            // it aborts the process inside Z3, so the
+                            // arity is checked where the signature is
+                            // chosen rather than where it is used.
+                            .filter(|(p, _)| p.len() == args.len())
                         {
                             let ps: Vec<z3::Sort> =
                                 p.iter().map(|n| Self::sort_from_name(n)).collect();
@@ -2763,12 +2803,42 @@ impl<'ctx> Translator<'ctx> {
                             &ret_sort,
                         );
                         let mut z3_args: Vec<Dynamic> = Vec::with_capacity(args.len());
-                        for a in args {
+                        for (i, a) in args.iter().enumerate() {
                             let v = self.translate_expr(a)?;
-                            // Coerce non-Int args to Int via as_int; if
-                            // that fails we bail because the FuncDecl
-                            // sort signature is Int-only.
-                            if v.as_int().is_some() {
+                            // The DECLARED sort decides, and an argument
+                            // that ALREADY has it needs nothing done to
+                            // it. This used to coerce unconditionally,
+                            // with a comment saying the signature is
+                            // "Int-only" — which stopped being true once
+                            // signatures came from the reflection
+                            // registry, and a record argument was then
+                            // refused as an "unsupported argument sort".
+                            //
+                            // The equality is checked rather than
+                            // assumed: `FuncDecl::apply` does not report
+                            // a sort mismatch, it returns `None` and the
+                            // binding unwraps it, so a wrong argument
+                            // ABORTS THE PROCESS instead of failing the
+                            // proof. Every path out of this loop is
+                            // therefore an application or a named
+                            // refusal.
+                            let declared = arg_sorts_vec.get(i);
+                            let declared_is_int =
+                                declared.map(|s| *s == z3::Sort::int()).unwrap_or(true);
+                            if declared.is_some_and(|s| v.get_sort() == *s) {
+                                z3_args.push(v);
+                            } else if !declared_is_int {
+                                return Err(TranslationError::UnsupportedFunction(
+                                    format!(
+                                        "{} (argument {} is {:?}, declared {:?})",
+                                        func_name,
+                                        i,
+                                        v.get_sort(),
+                                        declared.map(|s| s.to_string()).unwrap_or_default(),
+                                    )
+                                    .into(),
+                                ));
+                            } else if v.as_int().is_some() {
                                 z3_args.push(v);
                             } else if let Some(b) = v.as_bool() {
                                 // Bool args coerced to 0/1.
