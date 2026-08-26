@@ -882,12 +882,38 @@ impl<'s> CompilationPipeline<'s> {
             return Ok(());
         }
 
-        // Determine the project module prefix from the directory name
-        let project_prefix = input_dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("project")
-            .to_string();
+        // The project's module root is its COG NAME, not its directory
+        // name.
+        //
+        // The directory name is an accident of the checkout; the cog name
+        // is what every `module` declaration and every `mount` in the
+        // project is written against. Deriving from the directory worked
+        // only for `core/`, where the two happen to coincide — and quietly
+        // registered every other project's modules under a root nobody
+        // spells. A two-file program declaring `module demo.helper;` in a
+        // directory called `projC` registered it as `projC.helper`, so
+        // `mount demo.helper` reported "module not found" through `verum
+        // run` while `verum check` — which derives the path differently —
+        // accepted the same project. One source, two commands, two
+        // verdicts.
+        //
+        // Manifest names carry hyphens (`verum-registry`); module paths
+        // are dotted identifiers, so the conversion is the same one the
+        // rest of the toolchain makes.
+        let project_prefix = {
+            let manifest = input_dir.join("verum.toml");
+            let from_manifest = crate::linker_config::ProjectConfig::load_from_file(&manifest)
+                .ok()
+                .map(|cfg| cfg.cog.name.replace('-', "_"))
+                .filter(|n| !n.is_empty());
+            from_manifest.unwrap_or_else(|| {
+                input_dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("project")
+                    .to_string()
+            })
+        };
 
         info!(
             "Detected multi-file project '{}' in {}",
@@ -946,10 +972,24 @@ impl<'s> CompilationPipeline<'s> {
                     .and_then(|p| p.strip_prefix(&input_dir).ok())
                     .unwrap_or(std::path::Path::new(""));
                 let mut parts = vec![project_prefix.clone()];
+                let mut first = true;
                 for component in rel.components() {
                     if let std::path::Component::Normal(seg) = component {
-                        if let Some(s) = seg.to_str() {
-                            parts.push(s.to_string());
+                        if let Some(sname) = seg.to_str() {
+                            // `src/` is the SOURCE ROOT, not a module
+                            // segment. Every project that keeps its code
+                            // under `src/` was registering
+                            // `<cog>.src.<module>`, a path no `module`
+                            // declaration and no `mount` ever spells —
+                            // so a two-file project resolved nothing.
+                            // `core/` has no `src`, which is why the
+                            // stdlib never showed this.
+                            if first && sname == "src" {
+                                first = false;
+                                continue;
+                            }
+                            first = false;
+                            parts.push(sname.to_string());
                         }
                     }
                 }
@@ -1052,6 +1092,13 @@ impl<'s> CompilationPipeline<'s> {
                     module_registry.write().register(module_info);
                     self.register_inline_modules(&module, &module_path, file_id);
                     let module_rc = Arc::new(module);
+                    if std::env::var_os("VERUM_TRACE_PROJECT_LOAD").is_some() {
+                        eprintln!(
+                            "[project-load] registered '{}' from {}",
+                            module_path_str.as_str(),
+                            file_path.display()
+                        );
+                    }
                     self.modules
                         .insert(module_path_str.clone(), module_rc.clone());
                     // Also store in project_modules so they survive self.modules.clear()

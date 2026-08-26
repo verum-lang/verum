@@ -546,6 +546,17 @@ impl VbcModule {
             let Some(name) = self.get_string(func.name) else {
                 continue;
             };
+            // An entry point takes no receiver. A METHOD named `main`
+            // is not a candidate — `EnvTaskId.main` in the standard
+            // library was competing with a project's own
+            // `<cog>.main.main` and the runner refused to choose,
+            // reporting "ambiguous entry point" on a program with
+            // exactly one entry. The qualified form this rule exists
+            // for is the `module X;` header prefix, which is a MODULE
+            // path, not a type.
+            if func.parent_type.is_some() {
+                continue;
+            }
             if name == "main" {
                 bare = Some(idx);
             } else if name.ends_with(".main") {

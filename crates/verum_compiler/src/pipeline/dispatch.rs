@@ -121,6 +121,29 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// Note: For complex type checking scenarios, ensure RUST_MIN_STACK is set
     /// appropriately (e.g., 16MB) in the build/test environment.
+    /// Test hook: run ONLY the project-module load, so a test can read
+    /// the module paths the loader derives without compiling anything.
+    ///
+    /// The derivation is what three separate defects were about — the
+    /// root taken from the directory name, `src` becoming a segment, and
+    /// a method accepted as an entry point — and each was invisible in
+    /// `core/`, where directory and cog name coincide and there is no
+    /// `src`. A test that only ran a project would report "it works"
+    /// without pinning the fact that made it stop working.
+    #[doc(hidden)]
+    pub fn load_project_modules_for_testing(&mut self) -> Result<()> {
+        self.load_project_modules()
+    }
+
+    /// Test hook: the module paths the project load registered.
+    #[doc(hidden)]
+    pub fn loaded_project_module_paths_for_testing(&self) -> Vec<String> {
+        self.project_modules
+            .keys()
+            .map(|k| k.as_str().to_string())
+            .collect()
+    }
+
     pub fn run_check_only(&mut self) -> Result<()> {
         let start = Instant::now();
 
