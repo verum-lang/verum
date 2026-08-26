@@ -1,0 +1,87 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: async, futures, spawn, concurrency, collections
+// @description: A future survives being put in a collection, and being
+//   given a type annotation.
+//
+// Fan-out over a collection — spawn N tasks, keep the handles, await
+// them — is the shape structured concurrency exists for. Two of its
+// spellings answered with GARBAGE rather than an error:
+//
+//     let mut hs: List<Future<Int>> = List.new();
+//     hs.push(spawn(async { one(1).await }));
+//     hs[0].await        // -6511079161270894592, deterministically
+//
+//     let h: Future<Int> = spawn(async { one(1).await });
+//     h.await            // the same garbage
+//
+// The second is the sharper one: WRITING THE TYPE DOWN broke the
+// program. `let h = spawn(…)` recorded the name `TaskHandle` and was
+// awaited; the annotation replaced that with `Future<Int>`, which the
+// await gate did not recognise, so the raw task sentinel was passed
+// through as if it were the result.
+//
+// Both came from deciding "is this a handle" by the SHAPE of the
+// expression and one type name. The gate now accepts `Future` as well
+// as `TaskHandle`, and indexing a container reports its element type
+// instead of nothing.
+//
+// `hs.iter()` is deliberately NOT here: awaiting consumes a future, so
+// `&Future<T>` is correctly refused with a message saying so. `for h in
+// hs` — by value — is the spelling that consumes, and it is covered.
+//
+// @expected-stdout-begin
+// annotated=2
+// indexed=2 4
+// iterated=6
+// while-loop=6
+// plain=6
+// @expected-stdout-end
+
+mount core.async.{spawn};
+
+async fn double(i: Int) -> Int {
+    i * 2
+}
+
+fn main() {
+    // A handle with its type written down.
+    let annotated: Future<Int> = spawn(async { double(1).await });
+    print(f"annotated={annotated.await}");
+
+    // Handles in a collection, reached by index.
+    let mut indexed: List<Future<Int>> = List.new();
+    indexed.push(spawn(async { double(1).await }));
+    indexed.push(spawn(async { double(2).await }));
+    print(f"indexed={indexed[0].await} {indexed[1].await}");
+
+    // The same collection consumed by a `for` loop — awaiting takes the
+    // future, which is why this form is by value and not by reference.
+    let mut iterated: List<Future<Int>> = List.new();
+    iterated.push(spawn(async { double(1).await }));
+    iterated.push(spawn(async { double(2).await }));
+    let mut total = 0;
+    for h in iterated {
+        total = total + h.await;
+    }
+    print(f"iterated={total}");
+
+    // And by index in a counted loop, the shape a bounded fan-out uses.
+    let mut counted: List<Future<Int>> = List.new();
+    counted.push(spawn(async { double(1).await }));
+    counted.push(spawn(async { double(2).await }));
+    let mut sum = 0;
+    let mut i = 0;
+    while i < counted.len() {
+        sum = sum + counted[i].await;
+        i = i + 1;
+    }
+    print(f"while-loop={sum}");
+
+    // The control: the spelling that always worked. Without it, a
+    // change that awaited nothing at all would satisfy none of the
+    // above but might look like a narrowing rather than a break.
+    let plain = spawn(async { double(3).await });
+    print(f"plain={plain.await}");
+}

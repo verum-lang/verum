@@ -24041,11 +24041,30 @@ impl VbcCodegen {
         // the surrounding code: match arms ran IsVar/GetVariantData on an
         // int and every spawn-result match printed the catch-all arm with
         // a nil payload (test_async_errors "Spawn N Error: nil", #51).
+        //
+        // `Future` counts as well as `TaskHandle`, and leaving it out was
+        // a silent wrong answer that WRITING THE TYPE DOWN caused:
+        //
+        //     let h = spawn(async { one(1).await });        // 2
+        //     let h: Future<Int> = spawn(async { … });      // garbage
+        //
+        // The annotation replaced the recorded `TaskHandle` with the
+        // declared `Future<Int>`, the gate stopped recognising a handle,
+        // and the raw sentinel was passed through as the result. Being
+        // more explicit about a type must not change what a program
+        // computes. `Future<T>` is the type of EXPLICIT futures — spawn
+        // handles, timers, the Future protocol's own implementors — so
+        // it is precisely the case that needs awaiting; a direct
+        // async-fn call, which must NOT be awaited, does not have it.
+        let is_handle_type = |t: &str| {
+            let base = t.split('<').next().unwrap_or(t);
+            base == "TaskHandle" || base == "Future"
+        };
         let needs_runtime_await = matches!(inner.kind, ExprKind::Spawn { .. })
             || self
                 .extract_expr_type_name(inner)
                 .as_deref()
-                .map(|t| t.split('<').next().unwrap_or(t) == "TaskHandle")
+                .map(is_handle_type)
                 .unwrap_or(false);
 
         if !needs_runtime_await {
@@ -26104,6 +26123,22 @@ impl VbcCodegen {
                     return Some(inner.clone());
                 }
                 VbcCodegen::tuple_element_type_name(&base_type, *index as usize)
+            }
+            // Indexing a container yields its ELEMENT type.
+            //
+            // Without this arm the extractor answered `None` for
+            // `handles[0]`, and every consumer that decides on a type
+            // name fell through to its default. The await gate is the
+            // one that made it visible: a future taken out of a
+            // `List<Future<Int>>` was not recognised as a handle, so
+            // `handles[0].await` passed the raw sentinel through as if
+            // it were the result and printed a large negative integer
+            // instead of the task's value (T0894). Fan-out over a
+            // collection is the shape structured concurrency is FOR, so
+            // the gap was not a corner.
+            ExprKind::Index { expr: base, .. } => {
+                let base_type = self.extract_expr_type_name(base)?;
+                VbcCodegen::element_type_name(&base_type)
             }
             // Array/List literal: [1, 2, 3] or [0; 10]
             ExprKind::Array(array_expr) => {
