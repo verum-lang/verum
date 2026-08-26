@@ -7595,7 +7595,36 @@ impl VbcCodegen {
         // declares that bare name as an extern.
         let unit_declares_extern =
             self.ctx.unit_declared_fns.contains(&func_name) && self.is_ffi_function(&func_name);
-        let resolved_is_foreign = resolved_name.contains('.') && !func_name.contains('.');
+        // FOREIGN means "belongs to another module", not "is qualified".
+        //
+        // `resolved_name.contains('.')` alone called THIS module's own
+        // function foreign — every user function is registered under
+        // `<module>.<name>` — so an ordinary `fn read(x: &Big) -> Int`
+        // in a file that also happens to be named-after-a-libc-symbol
+        // satisfied both halves of the guard, the guard turned itself
+        // off, and the call was emitted as the POSIX `read`. It failed
+        // with "argument count mismatch: expected 3, got 1", naming an
+        // extern the author never wrote. Renaming the function to
+        // anything not in libc fixed it, which is not a property a
+        // program should have to know about.
+        // Falls back to the unit's configured name, the way every other
+        // module-scoped decision in codegen does: a file with no
+        // `module X;` header still HAS a module, and without the
+        // fallback the own-module test could not fire for it — which is
+        // exactly the single-file script a newcomer writes.
+        let own_module_prefix = {
+            let m = self
+                .ctx
+                .current_source_module
+                .as_deref()
+                .unwrap_or(&self.config.module_name);
+            (!m.is_empty()).then(|| format!("{m}."))
+        };
+        let resolved_is_foreign = resolved_name.contains('.')
+            && !func_name.contains('.')
+            && !own_module_prefix
+                .as_deref()
+                .is_some_and(|p| resolved_name.starts_with(p));
         let user_fn_matches_arity = func_info.param_count == args.len()
             && func_info.intrinsic_name.is_none()
             && func_info.id.0 != u32::MAX

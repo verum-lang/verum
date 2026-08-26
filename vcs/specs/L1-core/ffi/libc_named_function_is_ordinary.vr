@@ -1,0 +1,75 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: ffi, name-resolution, externs
+// @description: A function whose name happens to be a libc symbol is an
+//   ordinary function.
+//
+// It was not. The guard that stops an extern's own call from being
+// stolen by another module's same-named wrapper tested "the winner
+// arrived under a QUALIFIED name" — and every user function is
+// registered as `<module>.<name>`, so this module's own function
+// counted as foreign. The guard switched itself off and the call was
+// emitted as the POSIX symbol:
+//
+//     fn read(x: &Boxed) -> Int { x.a }
+//     read(&v)
+//     error: FFI runtime error: argument count mismatch: expected 3, got 1
+//
+// naming an extern the author never wrote. Renaming the function to
+// anything outside libc fixed it, which is not a property a program
+// should have to know about — `read`, `write` and `open` are ordinary
+// names for ordinary functions, and no program can be asked to avoid
+// every POSIX symbol.
+//
+// FOREIGN now means "belongs to another module" rather than "is
+// qualified".
+//
+// THIS FILE DECLARES A MODULE, and that is load-bearing rather than
+// decoration. A file with no `module X;` header has no scope to prefer
+// its own declarations by, and there the call is bound to the standard
+// library's `read` before the FFI decision is ever reached — a
+// different defect, in name resolution rather than in FFI emission,
+// filed separately. Writing the header here keeps this spec measuring
+// one thing.
+//
+// This file declares NO externs, which is the case under test. The
+// sibling `extern_beats_foreign_namesake.vr` covers the opposite
+// polarity — a file that DOES declare an extern must reach it — and the
+// two must both hold, since a fix for either alone breaks the other.
+//
+// @expected-stdout-begin
+// read=7
+// write=7
+// open=x
+// close=1
+// @expected-stdout-end
+
+module libc_named;
+
+public type Boxed is { a: Int };
+
+/// Every name here is a libc symbol and none of them is an extern.
+fn read(x: &Boxed) -> Int {
+    x.a
+}
+
+fn write(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn open(p: Text) -> Text {
+    p.clone()
+}
+
+fn close(n: Int) -> Int {
+    n
+}
+
+fn main() {
+    let v = Boxed { a: 7 };
+    print(f"read={read(&v)}");
+    print(f"write={write(3, 4)}");
+    print(f"open={open("x")}");
+    print(f"close={close(1)}");
+}
