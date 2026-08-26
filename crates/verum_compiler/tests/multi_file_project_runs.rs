@@ -128,6 +128,46 @@ fn src_is_a_source_root_not_a_module_segment() {
     );
 }
 
+/// `verum check` derives the SAME module paths as the run path.
+///
+/// It used to derive them from the file path alone — `src/helper.vr`
+/// became `helper` — while the run path derived `demo.helper` from the
+/// cog name. So a `mount demo.helper.{…}` under `verum check` resolved
+/// against a registry that had never heard that name. The two
+/// derivations are now one carrier; this pins that they agree.
+#[test]
+fn the_check_path_derives_the_same_module_paths() {
+    use verum_compiler::{CompilationPipeline, CompilerOptions, Session};
+
+    let root = scaffold("check-path-parity", "demo", true);
+    let options = CompilerOptions {
+        input: root.join("src"),
+        output: std::env::temp_dir().join("verum-check-parity-out"),
+        ..Default::default()
+    };
+    let mut session = Session::new(options);
+    let mut pipeline = CompilationPipeline::new_check(&mut session);
+    pipeline.check_project().expect("check_project should complete");
+
+    let mut paths: Vec<String> = pipeline
+        .loaded_modules_for_testing()
+        .into_iter()
+        .map(|(p, _)| p)
+        .filter(|p| !p.starts_with("core"))
+        .collect();
+    paths.sort();
+
+    assert!(
+        paths.iter().any(|p| p == "demo.helper"),
+        "the check path must register `demo.helper`, the name the file \
+         declares and every mount spells; got {paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p == "helper" || p.contains(".src.")),
+        "neither the bare file stem nor a `src` segment may appear: {paths:?}"
+    );
+}
+
 /// The negative pole. Without it, a derivation that answered
 /// `demo.helper` for everything would pass every assertion above.
 #[test]

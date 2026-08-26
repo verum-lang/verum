@@ -666,6 +666,27 @@ impl<'s> CompilationPipeline<'s> {
 
         info!("Found {} .vr file(s) to check", project_files.len());
 
+        // The project root is the directory holding `verum.toml`, which
+        // is what the module-path derivation measures paths against. The
+        // loader's root may already point INTO `src/`, so walk up from a
+        // discovered file until the manifest is found and fall back to
+        // the loader's root when there is none.
+        let project_root: PathBuf = project_files
+            .first()
+            .and_then(|f| {
+                let mut dir = f.parent();
+                while let Some(d) = dir {
+                    if d.join("verum.toml").is_file() {
+                        return Some(d.to_path_buf());
+                    }
+                    dir = d.parent();
+                }
+                None
+            })
+            .unwrap_or_else(|| self.module_loader.root_path().to_path_buf());
+        let project_prefix = Self::project_prefix_for(&project_root);
+        let project_root = project_root.as_path();
+
         // 2. Load all source files
         let mut sources = Map::new();
         // E_MODULE_PATH_COLLISION detector: track which file produced each
@@ -684,22 +705,22 @@ impl<'s> CompilationPipeline<'s> {
             let source_text = std::fs::read_to_string(file_path)
                 .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
 
-            // Convert path to module path
-            let mut module_path_str = file_path
-                .strip_prefix(self.module_loader.root_path())
-                .unwrap_or(file_path)
-                .with_extension("")
-                .to_string_lossy()
-                .replace(std::path::MAIN_SEPARATOR, ".");
-
-            // Handle "mod" files - they represent their parent directory
-            // e.g., "domain.mod" -> "domain", "services.mod" -> "services"
-            if module_path_str.ends_with(".mod") {
-                module_path_str = module_path_str.trim_end_matches(".mod").to_string();
-            } else if module_path_str == "mod" {
-                // Root mod.vr -> empty string (root module)
-                module_path_str = String::new();
-            }
+            // The module path this file DECLARES, derived the one way
+            // (T0891/T0882/T0884). This pass used to derive it from the
+            // file path alone — `src/lib.vr` became `lib` — while the
+            // run path derived `demo.lib` from the cog name. So under
+            // `verum check` a `mount demo.lib.{…}` resolved against a
+            // registry that had never heard that name: every call into a
+            // sibling stayed untyped, and the consequences surfaced as
+            // unrelated-looking diagnostics — a complete match reported
+            // non-exhaustive, a field reported missing on the wrong
+            // type, a result rendered through a stdlib namesake's
+            // return type.
+            let module_path_str = Self::project_module_path_for(
+                project_root,
+                &project_prefix,
+                file_path,
+            );
 
             if let Some(prev) = path_to_source.get(&module_path_str) {
                 eprintln!(

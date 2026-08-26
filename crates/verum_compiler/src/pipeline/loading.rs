@@ -900,20 +900,7 @@ impl<'s> CompilationPipeline<'s> {
         // Manifest names carry hyphens (`verum-registry`); module paths
         // are dotted identifiers, so the conversion is the same one the
         // rest of the toolchain makes.
-        let project_prefix = {
-            let manifest = input_dir.join("verum.toml");
-            let from_manifest = crate::linker_config::ProjectConfig::load_from_file(&manifest)
-                .ok()
-                .map(|cfg| cfg.cog.name.replace('-', "_"))
-                .filter(|n| !n.is_empty());
-            from_manifest.unwrap_or_else(|| {
-                input_dir
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("project")
-                    .to_string()
-            })
-        };
+        let project_prefix = Self::project_prefix_for(&input_dir);
 
         info!(
             "Detected multi-file project '{}' in {}",
@@ -966,38 +953,12 @@ impl<'s> CompilationPipeline<'s> {
             //  project_dir/sub/mod.vr -> "project.sub"
             //  project_dir/foo.vr -> "project.foo"
             //  project_dir/mod.vr -> "project"
-            let module_path_str = {
-                let rel = file_path
-                    .parent()
-                    .and_then(|p| p.strip_prefix(&input_dir).ok())
-                    .unwrap_or(std::path::Path::new(""));
-                let mut parts = vec![project_prefix.clone()];
-                let mut first = true;
-                for component in rel.components() {
-                    if let std::path::Component::Normal(seg) = component {
-                        if let Some(sname) = seg.to_str() {
-                            // `src/` is the SOURCE ROOT, not a module
-                            // segment. Every project that keeps its code
-                            // under `src/` was registering
-                            // `<cog>.src.<module>`, a path no `module`
-                            // declaration and no `mount` ever spells —
-                            // so a two-file project resolved nothing.
-                            // `core/` has no `src`, which is why the
-                            // stdlib never showed this.
-                            if first && sname == "src" {
-                                first = false;
-                                continue;
-                            }
-                            first = false;
-                            parts.push(sname.to_string());
-                        }
-                    }
-                }
-                if stem != "mod" {
-                    parts.push(stem.to_string());
-                }
-                Text::from(parts.join("."))
-            };
+            let module_path_str = Text::from(Self::project_module_path_for(
+                &input_dir,
+                &project_prefix,
+                file_path,
+            ));
+            let _ = stem;
 
             // Detect E_MODULE_PATH_COLLISION: two files reach the same
             // dotted module path. The most-common shape is `foo.vr` (Rule 2,
@@ -1131,6 +1092,81 @@ impl<'s> CompilationPipeline<'s> {
     /// directories (names starting with `.`), `target/`, and `node_modules/`.
     /// The main input file (identified by `canonical_input`) and test files
     /// (names starting with `test_`) are also excluded.
+    /// The module-path prefix a project's files sit under.
+    ///
+    /// The COG NAME from `verum.toml`, not the checkout directory: a
+    /// project cloned into `work-copy/` declares `module demo.helper;`
+    /// and must register `demo.helper`, or nothing it mounts resolves.
+    /// Manifest names carry hyphens (`verum-registry`); module paths are
+    /// dotted identifiers, so the conversion is the same one the rest of
+    /// the toolchain makes.
+    pub(crate) fn project_prefix_for(input_dir: &std::path::Path) -> String {
+        let manifest = input_dir.join("verum.toml");
+        crate::linker_config::ProjectConfig::load_from_file(&manifest)
+            .ok()
+            .map(|cfg| cfg.cog.name.replace('-', "_"))
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| {
+                input_dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("project")
+                    .to_string()
+            })
+    }
+
+    /// The dotted module path a project file declares.
+    ///
+    ///   `<dir>/src/sub/foo.vr`  ->  `<cog>.sub.foo`
+    ///   `<dir>/src/sub/mod.vr`  ->  `<cog>.sub`
+    ///   `<dir>/mod.vr`          ->  `<cog>`
+    ///
+    /// ONE carrier, because the run path and the check path each had
+    /// their own and the two disagreed. `check_project` derived the path
+    /// from the FILE PATH alone (`lib`, or `src.lib`) while the run path
+    /// derived `demo.lib` — so under `verum check` a `mount demo.lib.{…}`
+    /// resolved against a registry that had never heard the name, every
+    /// call into a sibling stayed untyped, and the consequences surfaced
+    /// as unrelated-looking diagnostics: a complete match reported as
+    /// non-exhaustive, a field reported missing on the wrong type, a
+    /// result rendered through a stdlib namesake's return type.
+    ///
+    /// `src/` is the SOURCE ROOT, not a module segment. `core/` has no
+    /// `src`, which is why the standard library never showed either
+    /// half of this.
+    pub(crate) fn project_module_path_for(
+        input_dir: &std::path::Path,
+        project_prefix: &str,
+        file_path: &std::path::Path,
+    ) -> String {
+        let rel = file_path
+            .parent()
+            .and_then(|p| p.strip_prefix(input_dir).ok())
+            .unwrap_or(std::path::Path::new(""));
+        let mut parts = vec![project_prefix.to_string()];
+        let mut first = true;
+        for component in rel.components() {
+            if let std::path::Component::Normal(seg) = component {
+                if let Some(sname) = seg.to_str() {
+                    if first && sname == "src" {
+                        first = false;
+                        continue;
+                    }
+                    first = false;
+                    parts.push(sname.to_string());
+                }
+            }
+        }
+        let stem = file_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
+        if stem != "mod" {
+            parts.push(stem.to_string());
+        }
+        parts.join(".")
+    }
+
     fn discover_vr_files_recursive(
         dir: &std::path::Path,
         canonical_input: &Option<PathBuf>,

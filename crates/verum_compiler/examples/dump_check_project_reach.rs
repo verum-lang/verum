@@ -53,5 +53,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("warnings        = {}", result.warnings);
     println!("types_inferred  = {}", result.types_inferred);
     println!("session errors  = {}", session.error_count());
+    let _ = session.display_diagnostics();
     Ok(())
 }
