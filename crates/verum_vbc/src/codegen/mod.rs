@@ -924,6 +924,18 @@ pub struct VbcCodegen {
     /// the four field-write emission sites in expressions.rs.
     type_field_refinements: std::collections::HashMap<(String, String), FieldRefinementInfo>,
 
+    /// The `module X.Y.Z;` path of every file this compilation unit
+    /// collects, known before any of them is walked.
+    ///
+    /// A mount naming one of these must not be resolved by GUESSING
+    /// while the naming file is still ahead in the walk: the qualified
+    /// probe misses for an ordinary reason (not collected yet) and the
+    /// bare-name fallback then binds whichever same-named library
+    /// function won the first-wins race (T0882). The set tells the two
+    /// misses apart — "not registered YET" waits for the deferred pass,
+    /// "not in this unit at all" keeps the fallback.
+    unit_module_paths: std::collections::HashSet<String>,
+
     /// Declared type-name for every `static mut NAME: T = init;` slot.
     /// Populated when an `ItemKind::Static` with `is_mut == true` is
     /// processed; consulted by `extract_expr_type_name`'s Path arm so a
@@ -2163,6 +2175,7 @@ impl VbcCodegen {
             user_claimed_type_names: std::collections::HashSet::new(),
             type_field_type_names: std::collections::HashMap::new(),
             type_field_refinements: std::collections::HashMap::new(),
+            unit_module_paths: std::collections::HashSet::new(),
             static_mut_type_names: std::collections::HashMap::new(),
             // Pending constants for deferred compilation
             pending_constants: Vec::new(),
@@ -7259,6 +7272,20 @@ impl VbcCodegen {
     /// Items are filtered by `@cfg` throughout, so a `mount` for the
     /// wrong target never pulls its file's declarations into the build.
     pub fn collect_unit_declarations(&mut self, files: &[&Module]) -> CodegenResult<()> {
+        // Which module paths this unit will register, known BEFORE any
+        // file is walked. A mount naming one of them must not be
+        // resolved by guessing while the naming file is still ahead in
+        // the walk — see the unit-module guard in the mount ladder
+        // (T0882). Additive across calls: a project's entry file and its
+        // siblings arrive as separate units today, and the guard needs
+        // to know about a sibling collected in an earlier call.
+        for module in files {
+            if let Some(path) =
+                Self::resolve_full_module_path(module, &self.config.module_name)
+            {
+                self.unit_module_paths.insert(path);
+            }
+        }
         // Protocols first: a blanket impl monomorphises onto a concrete
         // implementor at the moment that implementor is collected, so
         // the protocol has to exist by then.
@@ -11070,7 +11097,34 @@ impl VbcCodegen {
 
                 // Try just the function name (it might be already registered without qualification)
                 //
-                if let Some(func_info) = self.ctx.lookup_function(&func_name).cloned() {
+                // NOT when the mount names a module of THIS UNIT (T0882).
+                // Files are collected one at a time, so a mount in the
+                // first file runs before the second file's declarations
+                // exist — every qualified probe above misses for an
+                // ordinary reason, and this fallback then takes the BARE
+                // slot, which whichever library function won the
+                // first-wins race owns.
+                //
+                // Measured: a two-file project whose own `resolve` takes
+                // two references bound `core.encoding.json_pointer.resolve`
+                // instead, and died inside it on `Map.keys` — an error
+                // naming nothing the author wrote. A DIFFERENT arity was
+                // fine, which is what kept this looking niche.
+                //
+                // Falling through leaves the mount PENDING, and the
+                // deferred pass runs after every file in the unit is
+                // collected — by which point the named path resolves.
+                // The guard is narrow on purpose: a mount naming a module
+                // OUTSIDE this unit (the standard library, an archive)
+                // has no later registration to wait for, so it keeps the
+                // fallback and its existing loud warning.
+                let names_a_unit_module = full_path.len() >= 2
+                    && self
+                        .unit_module_paths
+                        .contains(&full_path[..full_path.len() - 1].join("."));
+                if !names_a_unit_module
+                    && let Some(func_info) = self.ctx.lookup_function(&func_name).cloned()
+                {
                     let bare_key = func_name.clone();
                     self.bind_mounted_function(&alias_name, &func_name, &bare_key, func_info);
                     return Ok(());

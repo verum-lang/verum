@@ -493,16 +493,19 @@ impl<'s> CompilationPipeline<'s> {
             codegen.collect_protocol_definitions(sib);
         }
         step_mark!("collect_non_protocol_declarations");
-        codegen
-            .collect_non_protocol_declarations(module)
-            .map_err(|e| {
-                anyhow::anyhow!("VBC codegen error (user declarations): {}", e)
-            })?;
-        for sib in &sibling_modules {
-            codegen.collect_non_protocol_declarations(sib).map_err(|e| {
-                anyhow::anyhow!("VBC codegen error (project-module declarations): {}", e)
-            })?;
-        }
+        // ONE unit, all files. Collected file-by-file, a mount in the
+        // entry module runs before a sibling's declarations exist, so
+        // every qualified probe for `demo.lib.resolve` misses and the
+        // ladder falls back to the bare name — which whichever library
+        // function won the first-wins race owns (T0882). Handing the
+        // whole set to the unit collector lets it know the unit's module
+        // paths before it walks any of them.
+        let unit_files: Vec<&verum_ast::Module> = std::iter::once(module)
+            .chain(sibling_modules.iter().map(|m| m.as_ref()))
+            .collect();
+        codegen.collect_unit_declarations(&unit_files).map_err(|e| {
+            anyhow::anyhow!("VBC codegen error (unit declarations): {}", e)
+        })?;
         step_mark!("mark_user_defined_types");
         codegen.mark_user_defined_types(module);
         for sib in &sibling_modules {
