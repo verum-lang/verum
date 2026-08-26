@@ -641,6 +641,16 @@ impl TypeChecker {
                             let msg =
                                 format!("non-exhaustive patterns: `{}` not covered", witness_str);
                             if crate::ctor_trace_enabled() {
+                                // BEFORE expansion as well as after: the
+                                // post-expansion form shows unresolved
+                                // payloads without saying whether the
+                                // arguments were lost at the call or
+                                // dropped by the expansion. The two
+                                // together name which.
+                                eprintln!(
+                                    "[ctor-trace] E0601(check) pre={:?}",
+                                    applied_scrut_chk
+                                );
                                 eprintln!(
                                     "[ctor-trace] E0601(check) scrut={:?} unresolved={}",
                                     resolved_scrut,
