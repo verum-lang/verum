@@ -1211,93 +1211,45 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Extract all exports from a module regardless of visibility.
     /// Used for project-internal modules where all items should be accessible.
+    /// A project file's whole surface, as the export table.
+    ///
+    /// A project's own files are compiled together and see each other
+    /// whether or not each item said `public` — that is what a
+    /// compilation unit means, and it is the ONE way this differs from
+    /// a stdlib module's export table.
+    ///
+    /// It used to differ in a second way nobody intended. This was a
+    /// COPY of `extract_exports_from_module` with the visibility check
+    /// removed, and the copy had drifted: it knew Function, Type,
+    /// Protocol, Const and Static, and swallowed everything else in a
+    /// `_ => Ok(())`. An explicit `context` declaration was in that
+    /// everything-else, so `public context Clock` was absent from the
+    /// table and `mount demo.lib.{Clock}` reported "cannot find `Clock`"
+    /// — which made the whole dependency-injection system unusable
+    /// across module boundaries, the one place it is needed (T0892).
+    ///
+    /// The difference is now a POLICY on the single walk, so a future
+    /// item kind cannot be added to one and missed by the other.
     fn extract_all_exports(
         module: &Module,
         module_id: ModuleId,
         module_path: &ModulePath,
     ) -> verum_modules::exports::ExportTable {
-        use verum_ast::ItemKind;
-        use verum_ast::Visibility;
-        use verum_modules::exports::{ExportKind, ExportTable, ExportedItem};
+        use verum_modules::exports::{ExportVisibilityPolicy, extract_exports_with_policy};
 
-        let mut export_table = ExportTable::new();
-        export_table.set_module_id(module_id);
-        export_table.set_module_path(module_path.clone());
-
-        for item in &module.items {
-            let result = match &item.kind {
-                ItemKind::Function(func) => {
-                    let kind = if func.is_meta {
-                        ExportKind::Meta
-                    } else {
-                        ExportKind::Function
-                    };
-                    export_table.add_export(ExportedItem::new(
-                        func.name.name.as_str(),
-                        kind,
-                        Visibility::Public,
-                        module_id,
-                        item.span,
-                    ))
-                }
-                ItemKind::Type(type_decl) => {
-                    let _ = export_table.add_export(ExportedItem::new(
-                        type_decl.name.name.as_str(),
-                        ExportKind::Type,
-                        Visibility::Public,
-                        module_id,
-                        item.span,
-                    ));
-                    // Also export variant constructors
-                    if let verum_ast::decl::TypeDeclBody::Variant(variants) = &type_decl.body {
-                        for variant in variants {
-                            let _ = export_table.add_export(ExportedItem::new(
-                                variant.name.name.as_str(),
-                                ExportKind::Function,
-                                Visibility::Public,
-                                module_id,
-                                variant.span,
-                            ));
-                        }
-                    }
-                    Ok(())
-                }
-                ItemKind::Protocol(proto) => {
-                    let kind = if proto.is_context {
-                        ExportKind::Context
-                    } else {
-                        ExportKind::Protocol
-                    };
-                    export_table.add_export(ExportedItem::new(
-                        proto.name.name.as_str(),
-                        kind,
-                        Visibility::Public,
-                        module_id,
-                        item.span,
-                    ))
-                }
-                ItemKind::Const(const_decl) => export_table.add_export(ExportedItem::new(
-                    const_decl.name.name.as_str(),
-                    ExportKind::Const,
-                    Visibility::Public,
-                    module_id,
-                    item.span,
-                )),
-                ItemKind::Static(static_decl) => export_table.add_export(ExportedItem::new(
-                    static_decl.name.name.as_str(),
-                    ExportKind::Const,
-                    Visibility::Public,
-                    module_id,
-                    item.span,
-                )),
-                _ => Ok(()), // Skip impl blocks, modules, imports, etc.
-            };
-            if let Err(e) = result {
-                debug!("Failed to add export in project module: {:?}", e);
-            }
-        }
-
-        export_table
+        extract_exports_with_policy(
+            module,
+            module_id,
+            module_path,
+            ExportVisibilityPolicy::WholeSurface,
+        )
+        .unwrap_or_else(|e| {
+            debug!("Failed to extract project-module exports: {:?}", e);
+            let mut empty = verum_modules::exports::ExportTable::new();
+            empty.set_module_id(module_id);
+            empty.set_module_path(module_path.clone());
+            empty
+        })
     }
 
     /// `true` when there is no scope at all (load everything) or

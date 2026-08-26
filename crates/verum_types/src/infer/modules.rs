@@ -4253,6 +4253,27 @@ impl TypeChecker {
                             &resolved_module_path,
                             registry,
                         ) {
+                            // The DECLARATION itself, not only its type.
+                            //
+                            // `provide Ctx = backend;` looks the context up in
+                            // the context CHECKER's declaration map; everything
+                            // below registers it with the RESOLVER. A mounted
+                            // context therefore resolved as a name, answered
+                            // method calls, and still reported
+                            // "undefined context" at the `provide` that would
+                            // have installed a backend for it (T0892) — so the
+                            // whole dependency-injection system stopped at the
+                            // module boundary, which is the one place it is
+                            // needed.
+                            //
+                            // Same Step 4 the stdlib path already performs in
+                            // `register_stdlib_context_full`; a mounted context
+                            // is not a weaker kind of context.
+                            self.context_checker.register_context(
+                                verum_common::Text::from(register_name),
+                                ctx_decl.clone(),
+                            );
+
                             // Found a context declaration - build Record type with methods.
                             // Module-aware: pin the checker's module path to the SOURCE
                             // module while resolving the context body so that bare type

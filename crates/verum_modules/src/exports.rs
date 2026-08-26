@@ -657,13 +657,64 @@ impl Default for ExportTable {
 ///
 /// Extracts exports from module AST items based on visibility modifiers.
 /// Re-exports (public import) flatten module hierarchy for public API.
+/// Whose visibility decides what a module exports.
+///
+/// A project's own files are compiled together and see each other's
+/// surface whether or not each item said `public` — that is what a
+/// compilation unit means. The standard library, loaded module by
+/// module, exports exactly what it declared.
+///
+/// A POLICY rather than a second function, because the second function
+/// is what this replaced: `extract_all_exports` in the compiler's
+/// project loader was a copy of this walk with the visibility check
+/// removed, and it had drifted — it knew nothing about `context`
+/// declarations, so a `public context Clock` was silently absent from
+/// the export table and `mount demo.lib.{Clock}` reported "cannot find
+/// `Clock`" (T0892). One walk cannot drift from itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportVisibilityPolicy {
+    /// Export what the declaration says. The stdlib and any module
+    /// loaded on its own.
+    AsDeclared,
+    /// Export everything the module declares. A project's own files,
+    /// which are one unit.
+    WholeSurface,
+}
+
 pub fn extract_exports_from_module(
     module: &verum_ast::Module,
     module_id: ModuleId,
     module_path: &crate::path::ModulePath,
 ) -> ModuleResult<ExportTable> {
+    extract_exports_with_policy(
+        module,
+        module_id,
+        module_path,
+        ExportVisibilityPolicy::AsDeclared,
+    )
+}
+
+pub fn extract_exports_with_policy(
+    module: &verum_ast::Module,
+    module_id: ModuleId,
+    module_path: &crate::path::ModulePath,
+    policy: ExportVisibilityPolicy,
+) -> ModuleResult<ExportTable> {
     use verum_ast::ItemKind;
     use verum_ast::decl::Visibility as AstVisibility;
+
+    // Under `WholeSurface` every declaration is exported, and exported
+    // AS public — a unit-mate mounting a name must find it visible, not
+    // merely present.
+    let exports_it = |vis: &AstVisibility| -> bool {
+        policy == ExportVisibilityPolicy::WholeSurface || *vis == AstVisibility::Public
+    };
+    let effective = |vis: &AstVisibility| -> Visibility {
+        match policy {
+            ExportVisibilityPolicy::WholeSurface => Visibility::Public,
+            ExportVisibilityPolicy::AsDeclared => convert_visibility(vis),
+        }
+    };
 
     let mut export_table = ExportTable::new();
     export_table.set_module_id(module_id);
@@ -672,7 +723,7 @@ pub fn extract_exports_from_module(
     for item in &module.items {
         match &item.kind {
             ItemKind::Function(func) => {
-                if func.visibility == AstVisibility::Public {
+                if exports_it(&func.visibility) {
                     let kind = if func.is_meta {
                         ExportKind::Meta
                     } else {
@@ -681,7 +732,7 @@ pub fn extract_exports_from_module(
                     let exported = ExportedItem::new(
                         func.name.name.as_str(),
                         kind,
-                        convert_visibility(&func.visibility),
+                        effective(&func.visibility),
                         module_id,
                         item.span,
                     );
@@ -690,12 +741,12 @@ pub fn extract_exports_from_module(
             }
 
             ItemKind::Type(type_decl) => {
-                if type_decl.visibility == AstVisibility::Public {
+                if exports_it(&type_decl.visibility) {
                     // Export the type itself
                     let exported = ExportedItem::new(
                         type_decl.name.name.as_str(),
                         ExportKind::Type,
-                        convert_visibility(&type_decl.visibility),
+                        effective(&type_decl.visibility),
                         module_id,
                         item.span,
                     );
@@ -744,7 +795,7 @@ pub fn extract_exports_from_module(
                             let variant_exported = ExportedItem::new(
                                 variant.name.name.as_str(),
                                 ExportKind::Function, // Constructors are functions
-                                convert_visibility(&type_decl.visibility),
+                                effective(&type_decl.visibility),
                                 module_id,
                                 variant.span,
                             );
@@ -755,7 +806,7 @@ pub fn extract_exports_from_module(
             }
 
             ItemKind::Protocol(proto) => {
-                if proto.visibility == AstVisibility::Public {
+                if exports_it(&proto.visibility) {
                     // Context protocols (declared with `context protocol`) are exported
                     // as ExportKind::Context so they can be registered with the context
                     // resolver when imported via `using [...]` clauses.
@@ -774,7 +825,7 @@ pub fn extract_exports_from_module(
                     let exported = ExportedItem::new(
                         proto.name.name.as_str(),
                         kind,
-                        convert_visibility(&proto.visibility),
+                        effective(&proto.visibility),
                         module_id,
                         item.span,
                     );
@@ -783,11 +834,11 @@ pub fn extract_exports_from_module(
             }
 
             ItemKind::Const(const_decl) => {
-                if const_decl.visibility == AstVisibility::Public {
+                if exports_it(&const_decl.visibility) {
                     let exported = ExportedItem::new(
                         const_decl.name.name.as_str(),
                         ExportKind::Const,
-                        convert_visibility(&const_decl.visibility),
+                        effective(&const_decl.visibility),
                         module_id,
                         item.span,
                     );
@@ -796,11 +847,11 @@ pub fn extract_exports_from_module(
             }
 
             ItemKind::Static(static_decl) => {
-                if static_decl.visibility == AstVisibility::Public {
+                if exports_it(&static_decl.visibility) {
                     let exported = ExportedItem::new(
                         static_decl.name.name.as_str(),
                         ExportKind::Static,
-                        convert_visibility(&static_decl.visibility),
+                        effective(&static_decl.visibility),
                         module_id,
                         item.span,
                     );
@@ -809,11 +860,11 @@ pub fn extract_exports_from_module(
             }
 
             ItemKind::Module(mod_decl) => {
-                if mod_decl.visibility == AstVisibility::Public {
+                if exports_it(&mod_decl.visibility) {
                     let exported = ExportedItem::new(
                         mod_decl.name.name.as_str(),
                         ExportKind::Module,
-                        convert_visibility(&mod_decl.visibility),
+                        effective(&mod_decl.visibility),
                         module_id,
                         item.span,
                     );
@@ -852,11 +903,11 @@ pub fn extract_exports_from_module(
             }
 
             ItemKind::Context(ctx_decl) => {
-                if ctx_decl.visibility == AstVisibility::Public {
+                if exports_it(&ctx_decl.visibility) {
                     let exported = ExportedItem::new(
                         ctx_decl.name.name.as_str(),
                         ExportKind::Context,
-                        convert_visibility(&ctx_decl.visibility),
+                        effective(&ctx_decl.visibility),
                         module_id,
                         item.span,
                     );
@@ -865,11 +916,11 @@ pub fn extract_exports_from_module(
             }
 
             ItemKind::ContextGroup(group_decl) => {
-                if group_decl.visibility == AstVisibility::Public {
+                if exports_it(&group_decl.visibility) {
                     let exported = ExportedItem::new(
                         group_decl.name.name.as_str(),
                         ExportKind::ContextGroup,
-                        convert_visibility(&group_decl.visibility),
+                        effective(&group_decl.visibility),
                         module_id,
                         item.span,
                     );
@@ -879,11 +930,11 @@ pub fn extract_exports_from_module(
 
             // Meta declarations (macros) - export separately
             ItemKind::Meta(meta_decl) => {
-                if meta_decl.visibility == AstVisibility::Public {
+                if exports_it(&meta_decl.visibility) {
                     let exported = ExportedItem::new(
                         meta_decl.name.name.as_str(),
                         ExportKind::Meta,
-                        convert_visibility(&meta_decl.visibility),
+                        effective(&meta_decl.visibility),
                         module_id,
                         item.span,
                     );
@@ -893,11 +944,11 @@ pub fn extract_exports_from_module(
 
             // Predicates
             ItemKind::Predicate(pred_decl) => {
-                if pred_decl.visibility == AstVisibility::Public {
+                if exports_it(&pred_decl.visibility) {
                     let exported = ExportedItem::new(
                         pred_decl.name.name.as_str(),
                         ExportKind::Predicate,
-                        convert_visibility(&pred_decl.visibility),
+                        effective(&pred_decl.visibility),
                         module_id,
                         item.span,
                     );
@@ -925,11 +976,11 @@ pub fn extract_exports_from_module(
             // Export as Function so callers can resolve `mount …{ua}` the
             // same way as regular functions.
             ItemKind::Axiom(axiom_decl) => {
-                if axiom_decl.visibility == AstVisibility::Public {
+                if exports_it(&axiom_decl.visibility) {
                     let exported = ExportedItem::new(
                         axiom_decl.name.name.as_str(),
                         ExportKind::Function,
-                        convert_visibility(&axiom_decl.visibility),
+                        effective(&axiom_decl.visibility),
                         module_id,
                         item.span,
                     );
@@ -953,11 +1004,11 @@ pub fn extract_exports_from_module(
             ItemKind::Theorem(theorem_decl)
             | ItemKind::Lemma(theorem_decl)
             | ItemKind::Corollary(theorem_decl) => {
-                if theorem_decl.visibility == AstVisibility::Public {
+                if exports_it(&theorem_decl.visibility) {
                     let exported = ExportedItem::new(
                         theorem_decl.name.name.as_str(),
                         ExportKind::Function,
-                        convert_visibility(&theorem_decl.visibility),
+                        effective(&theorem_decl.visibility),
                         module_id,
                         item.span,
                     );
@@ -978,7 +1029,7 @@ pub fn extract_exports_from_module(
             // via `mount core.sys.darwin.libsystem.{mach_absolute_time}`.
             ItemKind::ExternBlock(extern_block) => {
                 for func in &extern_block.functions {
-                    if func.visibility == AstVisibility::Public {
+                    if exports_it(&func.visibility) {
                         let exported = ExportedItem::new(
                             func.name.name.as_str(),
                             ExportKind::Function,
