@@ -32,6 +32,7 @@
 // hs` — by value — is the spelling that consumes, and it is covered.
 //
 // @expected-stdout-begin
+// keyword-spawn=10
 // annotated=2
 // indexed=2 4
 // iterated=6
@@ -45,7 +46,21 @@ async fn double(i: Int) -> Int {
     i * 2
 }
 
+/// Deliberately named after a standard-library function. `core/` has
+/// several zero-argument `one()`s, and `spawn one(5)` used to bind one
+/// of THEM — the task ran `CancellationFlag.new` and the await answered
+/// with its value. A unique name worked, which is what made this look
+/// like an async defect rather than a name-resolution one.
+async fn one(i: Int) -> Int {
+    i * 5
+}
+
 fn main() {
+    // The keyword form, from the grammar's own `spawn_expr`. It must
+    // call the function a plain `one(2)` would call.
+    let kw = spawn one(2);
+    print(f"keyword-spawn={kw.await}");
+
     // A handle with its type written down.
     let annotated: Future<Int> = spawn(async { double(1).await });
     print(f"annotated={annotated.await}");

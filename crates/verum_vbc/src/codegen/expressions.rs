@@ -30637,8 +30637,28 @@ impl VbcCodegen {
                     .collect::<Vec<_>>()
                     .join("::")
             };
+            // Resolved the way a CALL resolves it — by name AND arity,
+            // and preferring this module's scope.
+            //
+            // `spawn f(x)` used to bind by bare name alone, so a
+            // standard-library namesake won and the task ran a different
+            // function than `f(x)` would have: `spawn one(5)` with a
+            // local `async fn one(i: Int) -> Int` executed
+            // `CancellationFlag.new` — zero-arg, unrelated — and the
+            // await answered with its value. The same name, in the same
+            // file, resolved two ways depending on whether it was
+            // spawned. A UNIQUE name worked, which is what kept this
+            // looking like an async defect rather than a name one.
+            //
+            // Arity is the discriminator that matters here: the stdlib
+            // `one()` takes none and the program's takes one, so asking
+            // for the arity the call site actually passes separates them
+            // without knowing anything about either.
             if !func_name.is_empty()
-                && let Some(func) = self.ctx.lookup_function_in_scope(&func_name)
+                && let Some(func) = self
+                    .ctx
+                    .lookup_function_with_arity_in_scope(&func_name, args.len())
+                    .or_else(|| self.ctx.lookup_function_in_scope(&func_name))
             {
                 let func_id = func.id.0;
 
