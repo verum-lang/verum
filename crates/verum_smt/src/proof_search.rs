@@ -2848,6 +2848,22 @@ impl ProofSearchEngine {
         let solver = context.solver();
         solver.assert(z3_bool.not());
 
+        // The AST path's query, on the SAME side channel the SMT-LIB
+        // path uses.
+        //
+        // `--dump-smt` fired only for the text path, while `auto` —
+        // which is what almost every `proof by auto` reaches — builds
+        // its query through the Z3-AST API and printed nothing. Two
+        // attempts at aligning the argument and declaration sorts were
+        // therefore made blind, and each ENLARGED the crash surface
+        // instead of shrinking it (T0901). A sort question cannot be
+        // answered without seeing the declarations.
+        //
+        // `to_smt2` renders everything asserted so far — the axioms,
+        // the hypotheses and the negated goal — which is exactly the
+        // pair of declarations that has to agree.
+        crate::solver_diagnostics::dump_smt_query("ast-goal", &solver.to_smt2());
+
         match solver.check() {
             z3::SatResult::Unsat => {
                 // No counterexample to the goal — proven valid.
@@ -5065,7 +5081,24 @@ impl ProofSearchEngine {
 
         let z3_bool = match option_to_maybe(z3_formula.as_bool()) {
             Maybe::Some(b) => b,
-            Maybe::None => return Err(ProofError::TacticFailed("Goal is not boolean".into())),
+            Maybe::None => {
+                // Say WHAT the goal translated to. A goal that is not a
+                // proposition never reaches the solver, so it is
+                // reported as "unproved" alongside goals the solver
+                // actually considered and could not settle — two very
+                // different situations under one word, and the first is
+                // usually a sort that did not line up rather than a
+                // hard problem.
+                return Err(ProofError::TacticFailed(
+                    format!(
+                        "goal did not translate to a proposition — it became \
+                         `{z3_formula}`; a user function applied here declares a \
+                         non-Bool return sort, or an argument's sort does not match \
+                         its declaration"
+                    )
+                    .into(),
+                ));
+            }
         };
 
         // Create solver and check
@@ -5146,6 +5179,7 @@ impl ProofSearchEngine {
         // it, not that every assignment does. That is a satisfiability
         // oracle, not a validity oracle.
         solver.assert(z3_bool.not());
+        crate::solver_diagnostics::dump_smt_query("ast-goal", &solver.to_smt2());
 
         match solver.check() {
             z3::SatResult::Unsat => {

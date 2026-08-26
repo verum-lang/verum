@@ -1913,9 +1913,14 @@ pub fn verify_proof_body_with_aliases_and_graph(
                 }
                 Err(e) => {
                     let mut unproved = List::new();
-                    let mut suggestions =
-                        heuristic_suggestions(&proposition, &hypotheses, pv_error_tactic_name(&e));
-                    suggestions.extend(build_suggestions_from_pv_error(&e));
+                    // What happened first, guesses after — the report
+                    // shows the leading suggestion.
+                    let mut suggestions = build_suggestions_from_pv_error(&e);
+                    suggestions.extend(heuristic_suggestions(
+                        &proposition,
+                        &hypotheses,
+                        pv_error_tactic_name(&e),
+                    ));
                     unproved.push(UnprovedSubgoal {
                         goal: format_expr(&proposition),
                         hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
@@ -1960,9 +1965,14 @@ pub fn verify_proof_body_with_aliases_and_graph(
                 }
                 Err(e) => {
                     let mut unproved = List::new();
-                    let mut suggestions =
-                        heuristic_suggestions(&proposition, &hypotheses, pv_error_tactic_name(&e));
-                    suggestions.extend(build_suggestions_from_pv_error(&e));
+                    // What happened first, guesses after — the report
+                    // shows the leading suggestion.
+                    let mut suggestions = build_suggestions_from_pv_error(&e);
+                    suggestions.extend(heuristic_suggestions(
+                        &proposition,
+                        &hypotheses,
+                        pv_error_tactic_name(&e),
+                    ));
                     unproved.push(UnprovedSubgoal {
                         goal: format_expr(&proposition),
                         hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
@@ -2323,19 +2333,32 @@ fn build_suggestions_from_error(err: &VerificationError) -> List<Text> {
 }
 
 /// Build suggestions from a `ProofVerificationError`.
+/// Suggestions derived from what ACTUALLY happened.
+///
+/// These lead, and the machine-generated heuristics follow, because the
+/// report shows the first one. It used to be the other way round: a
+/// goal that never reached the solver — an untranslatable formula, a
+/// non-proposition, a sort that did not line up — was reported as
+/// "unproved" with a guess appended ("try `smt`"), identical to a goal
+/// the solver had considered and could not settle. Two very different
+/// situations under one word, and the guess is useless for the first.
+///
+/// The `reason` was carried on the error the whole time and discarded
+/// by a `..` in this match. Two sort-alignment attempts were made blind
+/// because of it, and each made things worse (T0901).
 fn build_suggestions_from_pv_error(err: &ProofVerificationError) -> List<Text> {
     let mut suggestions = List::new();
     match err {
-        ProofVerificationError::TacticFailed { tactic, .. } => {
+        ProofVerificationError::TacticFailed { tactic, reason } => {
             suggestions.push(Text::from(format!(
-                "Tactic '{}' failed — try 'simp', 'auto', or 'omega'",
-                tactic
+                "tactic '{}' failed: {}",
+                tactic, reason
             )));
         }
-        ProofVerificationError::StepFailed { step, .. } => {
+        ProofVerificationError::StepFailed { step, reason } => {
             suggestions.push(Text::from(format!(
-                "Step '{}' could not be justified — check the justification tactic",
-                step
+                "step '{}' could not be justified: {}",
+                step, reason
             )));
         }
         ProofVerificationError::CalcStepFailed {
