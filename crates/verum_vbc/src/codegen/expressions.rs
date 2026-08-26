@@ -10399,9 +10399,22 @@ impl VbcCodegen {
         });
         self.emit_make_variant(result, tag, args.len() as u32, parent.as_deref());
         if !args.is_empty() {
+            // The qualified variant, for the payload-refinement lookup:
+            // a variant name is unique only within its sum, so `Ok` of
+            // one type must not be asserted with another's predicate.
+            let variant_key = parent.as_deref().and_then(|p| {
+                variant_name.map(|v| {
+                    let simple = v.rsplit('.').next().unwrap_or(v);
+                    format!("{}.{}", p, simple)
+                })
+            });
+
             let data_val = self
                 .compile_expr(&args[0])?
                 .or_internal("variant constructor arg has no value")?;
+            if let Some(key) = variant_key.as_deref() {
+                self.emit_field_refinement_assert(data_val, key, "0");
+            }
             self.ctx.emit(Instruction::SetVariantData {
                 variant: result,
                 field: 0,
@@ -10412,6 +10425,9 @@ impl VbcCodegen {
                 let next_val = self.compile_expr(&args[i])?.ok_or_else(|| {
                     CodegenError::internal("variant constructor arg has no value")
                 })?;
+                if let Some(key) = variant_key.as_deref() {
+                    self.emit_field_refinement_assert(next_val, key, &i.to_string());
+                }
                 self.ctx.emit(Instruction::SetVariantData {
                     variant: result,
                     field: i as u32,

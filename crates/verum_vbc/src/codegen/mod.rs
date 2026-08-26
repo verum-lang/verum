@@ -9143,6 +9143,65 @@ impl VbcCodegen {
                         }
                     }
                 }
+
+                // A VARIANT PAYLOAD may carry a refinement too:
+                //
+                //     type Audit is Consistent(Int{it >= 0}) | ...;
+                //
+                // It reads as a guarantee, and before this it was one
+                // the compiler never made — `Audit.Consistent(-1)` built
+                // and printed happily. Capture the predicate here, the
+                // one point where the payload's AST type node is in
+                // hand, under the same carrier the record fields use.
+                //
+                // The key is the QUALIFIED variant (`Audit.Consistent`)
+                // against the payload's position, because a variant name
+                // is only unique within its sum: two types may both have
+                // a `Consistent`, and a bare key would let one type's
+                // predicate assert on the other's payload.
+                if let TypeDeclBody::Variant(variants) = &type_decl.body {
+                    for v in variants.iter() {
+                        let qualified =
+                            format!("{}.{}", type_decl.name.name, v.name.name);
+                        // A unit variant has no payload and therefore no
+                        // slot a refinement could describe.
+                        let payload_types: Vec<(String, &verum_ast::ty::Type)> =
+                            match &v.data {
+                                Some(verum_ast::decl::VariantData::Tuple(tys)) => tys
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, t)| (i.to_string(), t))
+                                    .collect(),
+                                Some(verum_ast::decl::VariantData::Record(fields)) => fields
+                                    .iter()
+                                    .map(|f| (f.name.name.to_string(), &f.ty))
+                                    .collect(),
+                                None => Vec::new(),
+                            };
+                        for (slot, ty) in payload_types {
+                            if let verum_ast::ty::TypeKind::Refined { base, predicate } =
+                                &ty.kind
+                            {
+                                let binding = match &predicate.binding {
+                                    verum_common::Maybe::Some(id) => id.name.to_string(),
+                                    verum_common::Maybe::None => "it".to_string(),
+                                };
+                                self.type_field_refinements.insert(
+                                    (qualified.clone(), slot),
+                                    FieldRefinementInfo {
+                                        pred_expr: predicate.expr.clone(),
+                                        binding,
+                                        base_type_name: Self::extract_type_name_from_ast(
+                                            base,
+                                        ),
+                                        base_var_type: self
+                                            .type_kind_to_var_type(&base.kind),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
             }
             ItemKind::Protocol(_) | ItemKind::Predicate(_) => {
                 // Protocols and predicates don't produce bytecode directly

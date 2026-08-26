@@ -1,0 +1,70 @@
+// @test: run-panic
+// @level: L0
+// @tier: 0
+// @tags: refinement, variants, codegen, assertions
+// @expected-panic: refinement violation: field `Audit.Consistent.0`
+// @description: A refinement on a VARIANT PAYLOAD is enforced.
+//
+// `Consistent(Int{it >= 0})` reads as a guarantee. It was not one:
+// `Audit.Consistent(0 - 1)` built and printed "over -1 heads" with no
+// complaint, while the same refinement on a RECORD FIELD or a RETURN
+// TYPE fired with a precise message. Two of four positions enforced, and
+// nothing at the declaration said which.
+//
+// The payload's predicate is now captured where the field's already was
+// — the one point holding the AST type node — and asserted at
+// construction.
+//
+// The key is the QUALIFIED variant, not the bare name: `Consistent` is
+// unique only within `Audit`, and `Untouched.Consistent` below is the
+// control for that. If the key were bare, the first declaration's
+// predicate would assert on the second's payload and the program would
+// die on the wrong line.
+
+/// The type under test: a count the program computes about itself, so
+/// halting on a negative one is right — that is what distinguishes a
+/// refinement from a typed refusal on untrusted input.
+type Audit is
+    | Consistent(Int{it >= 0})
+    | Contradicts(Text);
+
+/// Same variant NAME, no refinement. Must be unaffected.
+type Untouched is
+    | Consistent(Int)
+    | Other;
+
+fn describe(a: Audit) -> Text {
+    match a {
+        Consistent(n) => f"consistent over {n}",
+        Contradicts(why) => f"contradicts: {why}",
+    }
+}
+
+fn describe_untouched(u: Untouched) -> Text {
+    match u {
+        Consistent(n) => f"untouched {n}",
+        Other => "other",
+    }
+}
+
+/// Opaque to the constant folder: the value is only known once the
+/// program runs, so this exercises the RUNTIME assert rather than the
+/// static check. Both matter — see the sibling spec for the constant
+/// case, which is refused at compile time.
+fn from_the_world(seed: Int) -> Int { seed - 6 }
+
+fn main() {
+    // Satisfied: no assertion fires, and the value is intact.
+    print(describe(Audit.Consistent(2)));
+
+    // The unrefined namesake, with a value the OTHER type's predicate
+    // would reject. Reaching the next line proves the assert is keyed to
+    // the sum that declared it.
+    print(describe_untouched(Untouched.Consistent(from_the_world(0))));
+
+    // Violated, and not foldable: the payload refinement must stop this
+    // when the value arrives at run time.
+    print(describe(Audit.Consistent(from_the_world(5))));
+
+    print("unreachable: the refinement did not fire");
+}

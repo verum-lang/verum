@@ -1,0 +1,32 @@
+// @test: compile-fail
+// @level: L0
+// @tier: 0
+// @tags: refinement, variants, verification, static
+// @expected-error: E500
+// @description: A variant payload that violates its refinement AT
+//   COMPILE TIME is refused there, not at run time.
+//
+// Sibling of `variant_payload_refinement.vr`, which pins the runtime
+// assert for a value the compiler cannot see. Here the value is a
+// literal, so the refinement checker settles it before the program ever
+// runs — the earlier of the two answers, and the one a reader should get
+// when they wrote the mistake down in the source.
+//
+// Both spellings matter and they are easy to confuse for one another. A
+// change that moved enforcement entirely to run time would still pass
+// the sibling spec while making this program compile, which is why the
+// constant case has its own file rather than a second `main` in that one.
+
+type Audit is
+    | Consistent(Int{it >= 0})
+    | Contradicts(Text);
+
+fn main() {
+    // -1 is knowable here. `{it >= 0}` is not satisfiable for it, and
+    // saying so now beats saying it when the code runs.
+    let a = Audit.Consistent(0 - 1);
+    match a {
+        Consistent(n) => print(f"consistent over {n}"),
+        Contradicts(why) => print(why),
+    }
+}
