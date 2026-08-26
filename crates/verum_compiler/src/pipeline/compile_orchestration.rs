@@ -1322,6 +1322,36 @@ impl<'s> CompilationPipeline<'s> {
                     }
                 }
 
+                // The checker reports on TWO channels and this pass read
+                // only one. A hard `Err` stops the walk; a statement the
+                // checker can recover from pushes a DIAGNOSTIC and
+                // continues — and an annotation mismatch is exactly that
+                // shape. So `verum check` on a project reported ZERO
+                // errors for `let b: Int = "x";`, while
+                // `verum check <that same file>` refused it with E400:
+                // one source, two commands, two verdicts, and the
+                // project form is the one every real program uses.
+                //
+                // Rendered from the SOURCE errors rather than the
+                // pre-built diagnostics, for the reason the single-file
+                // path states: the checker owns no source-file table, so
+                // its own diagnostics carry no position, and going back
+                // through `type_error_to_diagnostic` with the session is
+                // what puts `file:line:col` on them. The fallback keeps
+                // any diagnostic that has no source form.
+                let sources = checker.diagnostic_sources();
+                if sources.len() == checker.diagnostics().len() {
+                    for error in sources.iter() {
+                        let diag = type_error_to_diagnostic(error, Some(self.session));
+                        self.session.emit_diagnostic(diag);
+                    }
+                } else {
+                    for diag in checker.diagnostics() {
+                        self.session.emit_diagnostic(diag.clone());
+                    }
+                }
+                checker.clear_diagnostics();
+
                 // Accumulate metrics
                 let metrics = checker.metrics();
                 total_types_inferred += metrics.synth_count + metrics.check_count;

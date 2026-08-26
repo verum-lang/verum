@@ -135,6 +135,22 @@ impl<'s> CompilationPipeline<'s> {
         self.load_project_modules()
     }
 
+    /// Test hook: every module the pipeline holds, with its AST.
+    ///
+    /// `check_project` reported zero errors for a file that
+    /// `verum check <that file>` refused, so the question "what does the
+    /// project path actually hold" needed an answer that is read rather
+    /// than inferred.
+    #[doc(hidden)]
+    pub fn loaded_modules_for_testing(
+        &self,
+    ) -> Vec<(String, std::sync::Arc<verum_ast::Module>)> {
+        self.modules
+            .iter()
+            .map(|(k, v)| (k.as_str().to_string(), std::sync::Arc::clone(v)))
+            .collect()
+    }
+
     /// Test hook: the module paths the project load registered.
     #[doc(hidden)]
     pub fn loaded_project_module_paths_for_testing(&self) -> Vec<String> {
