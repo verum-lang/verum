@@ -102,6 +102,34 @@ pub(in super::super) fn handle_get_field(
     // layered register-ref chains" — is exactly the shape that kept
     // reopening this gap one handler at a time. resolve_receiver loops
     // the same peel to a fixpoint with a bounded hop count.
+    // The generation is checked BEFORE the peel, because the peel is
+    // what makes a stale reference indistinguishable from a live one.
+    //
+    // `resolve_receiver` decodes `(abs_index, generation)` and uses only
+    // the index — its documented contract is that the CALLER validates
+    // — and this caller did not. So a `&T` held in a record field and
+    // read after its referent's scope ended produced whatever the
+    // register holds now:
+    //
+    //     let mut k = Keeper { held: &Big { a: 1 } };
+    //     { let v = Big { a: 7 }; k = Keeper { held: &v }; }
+    //     k.held.a        ->  Variant(196608)
+    //
+    // `verum check` reported nothing, and `&T` is the DEFAULT tier —
+    // the one whose whole purpose is that this cannot happen. The
+    // explicit `Deref` opcode has always validated; the implicit peel
+    // every field read performs did not, so which of two spellings a
+    // program used decided whether it was memory-safe.
+    //
+    // Only a register-ref pays for this: a plain object value is not
+    // one, and `validate_cbgr_generation` itself honours
+    // `cbgr_enabled`, so a build that proved its references safe
+    // upfront still skips it.
+    if super::cbgr_helpers::is_cbgr_ref(&obj_val) {
+        let (abs_index, generation) =
+            crate::interpreter::dispatch_table::handlers::cbgr_helpers::decode_cbgr_ref(obj_val);
+        super::cbgr_helpers::validate_cbgr_generation(state, abs_index, generation)?;
+    }
     let obj_val = super::cbgr_helpers::resolve_receiver(state, obj_val);
 
     // TEMP ground-truth oracle (#48): VERUM_TRACE_LISTREPR=1 dumps the

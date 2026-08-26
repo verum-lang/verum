@@ -1,0 +1,57 @@
+// @test: run-panic
+// @level: L0
+// @tier: 0
+// @tags: cbgr, references, use-after-free, memory-safety
+// @expected-panic: CBGR use-after-free detected
+// @description: A Tier-0 `&T` that outlives its referent is refused, not
+//   read.
+//
+// It was read. A reference held in a record field, used after the block
+// its referent was declared in had ended, produced whatever the
+// register held by then:
+//
+//     out=Variant(196608)
+//
+// and an earlier run of the same shape produced `out=Little`, an
+// interned string from elsewhere in the heap — the value depends on
+// what has been allocated since, which is what makes it a memory-safety
+// defect rather than a wrong answer. `verum check` reported nothing.
+//
+// `&T` is the DEFAULT tier, the one whose whole purpose is that this
+// cannot happen, and the machinery was all present: register-refs carry
+// a generation, the slot counter advances, and
+// `validate_cbgr_generation` compares them. The explicit `Deref` opcode
+// called it. The IMPLICIT peel that every field read performs did not —
+// its documented contract puts validation on the caller, and this
+// caller had none — so which of two spellings a program used decided
+// whether it was memory-safe.
+//
+// The control below is load-bearing: the same reference, used while its
+// referent is alive, must still read 7. A "fix" that refused every
+// reference would satisfy the panic expectation and destroy the tier.
+
+public type Big is { a: Int };
+
+public type Keeper is {
+    held: &Big,
+};
+
+fn main() {
+    // The control first, so its output proves the ordinary path works
+    // before the panic ends the program.
+    let alive = Big { a: 7 };
+    let ok = Keeper { held: &alive };
+    print(f"in-scope={ok.held.a}");
+
+    // Now the escape: `k` outlives the block that owns what it points
+    // at.
+    let mut k = Keeper { held: &Big { a: 1 } };
+    {
+        let v = Big { a: 7 };
+        k = Keeper { held: &v };
+    }
+
+    // Reading through it must be refused. Before this, it printed a
+    // value.
+    print(f"escaped={k.held.a}");
+}
