@@ -1,0 +1,69 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: contexts, generics, context-parameters
+// @description: PINS A GAP — a function can abstract over WHICH context
+//   it uses, and the checker does not bind the parameter.
+//
+// The grammar has it (`context_param = 'using' , identifier ;`), the
+// language documentation shows it, and the parser accepts it. The
+// checker then says:
+//
+//     error: undefined context: C
+//
+// so `C.emit(...)` inside the body resolves against nothing.
+//
+// This spec expects a PASS and is red until the parameter binds. The
+// control below is what makes it one narrow question: the same call
+// through a NAMED context works, so contexts, `provide`, and protocol
+// dispatch are all fine — only the abstraction over which one is
+// missing.
+//
+// WHY IT MATTERS: a rule that works against any sink is the shape a
+// registry wants for audit — the same publish path emitting to stderr
+// in a test, a file in a deployment and a remote collector in
+// production, without the rule naming any of them. Without the
+// parameter, either the rule names one context (and there are three
+// copies of it) or the sink becomes an argument (and an argument is a
+// thing some path forgets, which is the whole reason contexts exist).
+
+public context Audit {
+    fn emit(line: Text) -> Bool;
+}
+
+public context Mirror {
+    fn emit(line: Text) -> Bool;
+}
+
+public type Sink is { tag: Int };
+
+implement Audit for Sink {
+    fn emit(line: Text) -> Bool {
+        print(f"[audit] {line}");
+        true
+    }
+}
+
+implement Mirror for Sink {
+    fn emit(line: Text) -> Bool {
+        print(f"[mirror] {line}");
+        true
+    }
+}
+
+/// THE GAP: abstracting over which context.
+fn record<using C>(what: &Text) -> Bool using [C] {
+    C.emit(what.clone())
+}
+
+/// CONTROL — the same call through a named context. This works.
+fn record_named(what: &Text) -> Bool using [Audit] {
+    Audit.emit(what.clone())
+}
+
+fn main() {
+    provide Audit = Sink { tag: 1 };
+    provide Mirror = Sink { tag: 2 };
+    print(f"named={record_named(&\"one\")}");
+    print(f"param={record(&\"two\")}");
+}
