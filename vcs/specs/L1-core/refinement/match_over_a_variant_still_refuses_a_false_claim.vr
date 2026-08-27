@@ -1,0 +1,39 @@
+// @test: verify-fail
+// @level: L1
+// @tier: 0
+// @tags: refinement, verification, match, variants
+// @description: The negative pole — a match over a variant whose arms do
+//   NOT satisfy the declared refinement is still refused.
+//
+// The companion to `match_over_a_variant_carries_its_value`. That file
+// checks the prover can now see through a match; this one checks that
+// what it sees is the actual arms, and not something that would accept
+// anything.
+//
+// A fix for "the prover knows nothing about the result" can go wrong in
+// exactly one direction — by making the result satisfy every claim
+// instead of no claim — and the failure looks identical from the passing
+// side. Only a claim that must be REFUSED distinguishes them.
+//
+// One arm below returns `-1`, which the declared `Int{it >= 0}` forbids.
+
+public type Standing is
+    | Trusted
+    | Suspended(Text)
+    | Revoked(Text);
+
+/// The `Revoked` arm violates the return refinement. Nothing else here
+/// is wrong: the other two arms are fine, the match is exhaustive, and
+/// the type is ordinary — so the refusal must come from the one arm
+/// that earns it.
+public pure fn severity(s: &Standing) -> Int{it >= 0} {
+    match s {
+        Standing.Trusted      => 0,
+        Standing.Suspended(_) => 1,
+        Standing.Revoked(_)   => -1,
+    }
+}
+
+fn main() {
+    print(f"{severity(&Standing.Revoked(\"leaked\"))}");
+}

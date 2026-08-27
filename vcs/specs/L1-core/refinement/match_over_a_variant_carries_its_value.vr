@@ -1,0 +1,86 @@
+// @test: verify-pass
+// @level: L1
+// @tier: 0
+// @tags: refinement, verification, match, variants
+// @description: A function whose body is a match over a variant proves
+//   the refinement on its own return type — as the same body over a
+//   Bool already did.
+//
+// THE MOST ORDINARY FUNCTION A VARIANT HAS is "map the discriminant to a
+// number": a rank, a priority, a severity. Anything built on one
+// inherits whatever the prover knows about it, and for a long time that
+// was nothing:
+//
+//     ✗ severity: Failed
+//         Counterexample: result = (- 1)
+//
+// `result = (- 1)` is the prover saying the body told it nothing at all.
+// The tail expression's VALUE is what gets substituted for `result`, and
+// the translator that builds that value had a case for `if` and none for
+// `match` — so a match in tail position produced a term nothing
+// constrained.
+//
+// BOTH SPELLINGS ARE HERE, and that is the point rather than padding.
+// The Bool version proved from the beginning, because its arms are
+// LITERAL patterns, which the translator did handle. A spec that checked
+// only that spelling would have reported this feature as working while
+// every variant in the language went unproved.
+//
+// The `Int` payload is deliberately avoided as the only case: an
+// unconstrained integer falls back in ways that can pass by accident.
+// Each function below states a bound the arms actually have to satisfy.
+
+/// Three cases, three literals, and a bound every one of them meets.
+public type Standing is
+    | Trusted
+    | Suspended(Text)
+    | Revoked(Text);
+
+public pure fn severity(s: &Standing) -> Int{it >= 0} {
+    match s {
+        Standing.Trusted      => 0,
+        Standing.Suspended(_) => 1,
+        Standing.Revoked(_)   => 2,
+    }
+}
+
+/// The same claim with a tighter bound, so a body that returned the
+/// wrong arm's value would fail rather than pass on slack.
+public pure fn severity_is_small(s: &Standing) -> Int{it >= 0 && it <= 2} {
+    match s {
+        Standing.Trusted      => 0,
+        Standing.Suspended(_) => 1,
+        Standing.Revoked(_)   => 2,
+    }
+}
+
+/// The Bool spelling of the same construct — the pole that already
+/// worked, kept so a regression on either side is visible.
+public pure fn from_bool(b: Bool) -> Int{it >= 0} {
+    match b {
+        true  => 0,
+        false => 1,
+    }
+}
+
+/// And the `if` spelling, which is what `match` generalises.
+public pure fn from_if(b: Bool) -> Int{it >= 0} {
+    if b { 0 } else { 1 }
+}
+
+/// A nullary-only variant, because a payload-carrying case takes a
+/// different path through the arm builder.
+public type Colour is Red | Green | Blue;
+
+public pure fn channel(c: &Colour) -> Int{it >= 0 && it <= 2} {
+    match c {
+        Colour.Red   => 0,
+        Colour.Green => 1,
+        Colour.Blue  => 2,
+    }
+}
+
+fn main() {
+    let s = Standing.Suspended("under review");
+    print(f"{severity(&s)} {severity_is_small(&s)} {from_bool(true)} {from_if(false)} {channel(&Colour.Blue)}");
+}

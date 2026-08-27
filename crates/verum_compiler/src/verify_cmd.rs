@@ -540,6 +540,7 @@ impl<'s> VerifyCommand<'s> {
                     &reflection_registry,
                     &callee_signatures_for_module,
                     &contract_table,
+                    &variant_registry,
                 );
                 let elapsed = start_time.elapsed();
 
@@ -896,6 +897,7 @@ impl<'s> VerifyCommand<'s> {
         reflection_registry: &verum_smt::refinement_reflection::RefinementReflectionRegistry,
         callee_signatures_for_module: &[(Text, Vec<Text>, Text)],
         contract_table: &verum_verification::SymbolTable,
+        variant_registry: &[(Text, Vec<Text>)],
     ) -> Result<verum_smt::ProofResult, VerificationError> {
         let start = Instant::now();
 
@@ -1017,6 +1019,30 @@ impl<'s> VerifyCommand<'s> {
 
         // Create translator for AST -> Z3 conversion
         let mut translator = Translator::new(&ctx);
+
+        // THE SAME VARIANTS THE OTHER TWO REGISTRIES GET.
+        //
+        // `variant_registry` is already pushed into the reflection
+        // registry and into `ProofSearchEngine`. This translator — the
+        // one that binds `result` to the function body — was the third
+        // consumer and nobody told it, so a variant CONSTANT fell to the
+        // Int default while a variant-typed PARAMETER correctly carried
+        // its opaque sort. The arm test a `match` builds is an equality
+        // between exactly those two:
+        //
+        //     incompatible types for binary operation ==
+        //         (left is Verum!K, right is Int)
+        //
+        // The equality could not be built, so `translate_match` failed,
+        // so the body→result binding was skipped, so `result` was a free
+        // constant and every refined return over a `match` reported a
+        // counterexample that named no cause (T0914). Three registries
+        // for one fact; two of them were fed.
+        for (tname, ctors) in variant_registry {
+            let ctor_names: Vec<String> =
+                ctors.iter().map(|c| c.as_str().to_string()).collect();
+            translator.register_variant_type(tname.as_str(), ctor_names);
+        }
 
         // Bind function parameters as Z3 variables
         for param in &func.params {
@@ -1715,6 +1741,14 @@ impl<'s> VerifyCommand<'s> {
             }
         }
 
+        if std::env::var("VERUM_TRACE_RESULT_BIND").is_ok() {
+            eprintln!(
+                "[result-bind] enter: body_present={} ensures={}",
+                matches!(body, verum_common::Maybe::Some(_)),
+                ensures.len(),
+            );
+        }
+
         // Bind `result` to the function body's return expression.
         //
 
@@ -1803,7 +1837,42 @@ impl<'s> VerifyCommand<'s> {
             }
 
             if let Some(e) = tail_expr {
-                if let Ok(body_z3) = translator.translate_expr(e) {
+                // THE REASON, RESTORED. This binding is what makes a
+                // postcondition non-vacuous, and when the body cannot be
+                // translated the failure is silent: `result` stays a free
+                // constant and every refined return reports a
+                // counterexample that names no cause. A function whose
+                // body is `match s { K.A => 0, K.B => 1 }` failed
+                // `Int{it >= 0}` with `result = (- 1)` for exactly this
+                // reason, and nothing said so (T0914).
+                let translated = translator.translate_expr(e);
+                if let Err(why) = &translated {
+                    // ALWAYS AUDIBLE UNDER THE TRACE FLAG. This was a
+                    // `tracing::debug!` and printed nothing, because the
+                    // verify command installs no subscriber — so the one
+                    // reason that explains the whole failure was written
+                    // to a channel nobody reads.
+                    if std::env::var("VERUM_TRACE_RESULT_BIND").is_ok() {
+                        eprintln!(
+                            "[result-bind] SKIPPED: body did not translate: {:?}",
+                            why
+                        );
+                    }
+                    tracing::debug!(
+                        "result binding skipped: body did not translate: {:?}",
+                        why
+                    );
+                }
+                if let Ok(body_z3) = translated {
+                    if std::env::var("VERUM_TRACE_RESULT_BIND").is_ok() {
+                        eprintln!(
+                            "[result-bind] int={} bool={} real={}",
+                            body_z3.as_int().is_some(),
+                            body_z3.as_bool().is_some(),
+                            body_z3.as_real().is_some(),
+                        );
+                        eprintln!("[result-bind] body ast={}", body_z3);
+                    }
                     if let Some(body_int) = body_z3.as_int() {
                         let result_var = z3::ast::Int::new_const("result");
                         solver.assert(&result_var.eq(&body_int));
