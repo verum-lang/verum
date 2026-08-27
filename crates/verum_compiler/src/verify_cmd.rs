@@ -298,33 +298,29 @@ impl<'s> VerifyCommand<'s> {
             verum_smt::expr_to_smtlib::ReflectionTypeEnv::from_module(&module);
         for item in &module.items {
             if let ItemKind::Function(fd) = &item.kind {
-                let reflected = verum_smt::expr_to_smtlib::try_reflect_function_with_env(
+                if let Some(rf) = verum_smt::expr_to_smtlib::try_reflect_function_with_env(
                     fd,
                     &reflection_env,
-                );
-                let is_reflected = reflected.is_some();
-                if let Some(rf) = reflected {
+                ) {
                     let _ = reflection_registry.register(rf);
                 }
 
-                // A signature spells the reflector's sorts ONLY for a
-                // function the reflector accepted. Everything else keeps
-                // the Int default.
+                // A SIGNATURE ALWAYS SPELLS THE DECLARED SORTS.
                 //
-                // The sorts exist so a goal's application matches the
-                // AXIOM the reflector wrote. A function with no axiom
-                // has nothing to match, and giving it a distinct sort
-                // only splits it from the rest of the query: an
-                // `axiom`-style declaration over a non-primitive
-                // parameter (`compose(f, id)`) stopped proving that way,
-                // and so did a `cases` proof, while everything was
-                // uniformly Int and consistent before (T0901).
+                // This was briefly conditional on the reflector having
+                // accepted the function, because giving an unreflected
+                // one distinct sorts regressed an `axiom`-style
+                // declaration over a non-primitive parameter and a
+                // `cases` proof (T0901). Both regressions were caused by
+                // the OTHER half of that change — theorem parameters
+                // were getting sorts for type names nothing knew the
+                // shape of — and once that was narrowed to declared
+                // shapes, the condition made no difference: measured
+                // over the sort ladders and all L3 proof specs, every
+                // number is identical with and without it. One rule
+                // beats two.
                 let sort_of = |ty: &verum_ast::ty::Type| -> Text {
-                    if is_reflected {
-                        Text::from(verum_smt::expr_to_smtlib::type_to_sort(ty))
-                    } else {
-                        Text::from("Int")
-                    }
+                    Text::from(verum_smt::expr_to_smtlib::type_to_sort(ty))
                 };
                 let param_sorts: Vec<Text> = fd
                     .params
@@ -680,6 +676,16 @@ impl<'s> VerifyCommand<'s> {
         // sort made `theorem add_zero_right(n: Nat): n + 0 == n`
         // ill-typed, and a bare type parameter `T` broke every
         // comparison the same way; both were measured (T0901).
+        //
+        // A DECLARED SHAPE is a record layout or a variant's constructor
+        // list — the two things this module actually knows about a named
+        // type. Only records counted at first, so a theorem parameter
+        // typed as a variant kept the `Int` default while the predicate
+        // it was passed to was declared over the variant's own sort, and
+        // the application was refused as an "unsupported argument sort".
+        // The registry's `verify_accepts_exactly_agreeing_evidence`,
+        // whose fifth parameter is an `AuthorityRole`, could not be
+        // stated at all for that reason.
         for p in &theorem.params {
             if let verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } = &p.kind
                 && let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind
@@ -687,9 +693,10 @@ impl<'s> VerifyCommand<'s> {
                 let (sort_name, type_name) =
                     verum_smt::expr_to_smtlib::type_to_sort_and_name(ty);
                 let opaque = sort_name.starts_with("Verum!");
-                let known_shape = type_name
-                    .as_deref()
-                    .is_some_and(|n| record_layouts.contains_key(n));
+                let known_shape = type_name.as_deref().is_some_and(|n| {
+                    record_layouts.contains_key(n)
+                        || variant_registry.iter().any(|(t, _)| t.as_str() == n)
+                });
                 if !opaque || known_shape {
                     proof_engine
                         .register_value_sort(name.name.clone(), Text::from(sort_name.as_str()));

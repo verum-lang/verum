@@ -1,0 +1,76 @@
+// @test: verify-pass
+// @level: L3
+// @tier: 0
+// @tags: verification, smt, refinement-reflection, sorts, variants
+// @timeout: 30000
+// @description: A predicate over a variant type proves, and so does one
+//   that takes a variant alongside other things.
+//
+// A theorem parameter got a declared SORT only when its type had a
+// record layout. A variant type has no record layout — it has a
+// constructor list — so a variant-typed parameter kept the `Int`
+// default while the predicate it was passed to was declared over the
+// variant's own sort, and the application was refused outright:
+//
+//     verify_accepts_exactly_agreeing_evidence (unsupported argument sort)
+//
+// Not "unproved" — unstateable. The claim could not be put to the
+// solver at all, which is a worse failure than a counterexample because
+// it looks the same from the outside.
+//
+// `match_reflection.vr` covers the constant side of this: `Color.Red`
+// as a VALUE. This file covers the parameter side: `c: Colour` as a
+// BINDING, which is a different path through the same disagreement, and
+// the two-parameter case below is the one that was actually failing in
+// an application — a predicate whose OTHER arguments are ordinary and
+// whose variant argument is the one that cannot be spelled.
+
+public type Colour is Red | Green | Blue;
+
+/// The parameter case: the predicate is trivially true, so anything
+/// other than "proved" means it could not be stated.
+public fn any_colour_is_itself(c: Colour) -> Bool {
+    c == c
+}
+
+@verify(formal)
+public theorem colour_is_itself(c: Colour)
+    ensures any_colour_is_itself(c)
+    proof by auto;
+
+/// A variant ALONGSIDE a primitive — the shape an application actually
+/// has, and the one where a single mis-sorted argument sinks the whole
+/// application.
+public fn tagged_count_is_itself(c: Colour, n: Int) -> Bool {
+    c == c && n == n
+}
+
+@verify(formal)
+public theorem tagged_count_holds(c: Colour, n: Int)
+    ensures tagged_count_is_itself(c, n)
+    proof by auto;
+
+/// A variant used as a VALUE inside the body, which is the constant
+/// side meeting the parameter side: `Colour.Red` must denote the same
+/// solver constant that `c` could be equal to.
+public fn red_matches_red(c: Colour) -> Bool {
+    match c {
+        Colour.Red => true,
+        Colour.Green => false,
+        Colour.Blue => false,
+    }
+}
+
+@verify(formal)
+public theorem red_is_red_by_parameter()
+    ensures red_matches_red(Colour.Red)
+    proof by auto;
+
+@verify(formal)
+public theorem blue_is_not_red()
+    ensures !red_matches_red(Colour.Blue)
+    proof by auto;
+
+fn main() {
+    print("variant-sorts");
+}

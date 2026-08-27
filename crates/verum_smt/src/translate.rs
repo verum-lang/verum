@@ -2908,8 +2908,19 @@ impl<'ctx> Translator<'ctx> {
                                 let c = b.ite(&o, &z);
                                 z3_args.push(Dynamic::from_ast(&c));
                             } else {
+                                // Same shape as the mismatch above: an
+                                // argument this cannot pass names ITSELF
+                                // and what was expected of it. "unsupported
+                                // argument sort" alone left the reader to
+                                // guess which of six arguments it meant.
                                 return Err(TranslationError::UnsupportedFunction(
-                                    format!("{} (unsupported argument sort)", func_name).into(),
+                                    format!(
+                                        "{} (argument {} is {:?}, declared Int)",
+                                        func_name,
+                                        i,
+                                        v.get_sort(),
+                                    )
+                                    .into(),
                                 ));
                             }
                         }
