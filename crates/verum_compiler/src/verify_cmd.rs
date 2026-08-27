@@ -81,6 +81,40 @@ pub struct VerifyCommand<'s> {
     obligation_scratch: std::cell::RefCell<Vec<(Text, Duration)>>,
 }
 
+/// The SMT sort a declared type carries, and `Int` for everything else.
+///
+/// ONE rule, consulted by a function's SIGNATURE and by a theorem's
+/// PARAMETERS. Two copies of it is how a signature and its own argument
+/// came to disagree: one side spelled `Verum!AuthorityRole` and the
+/// other kept the `Int` default, so the application was refused and the
+/// claim could not be stated at all (T0902, T0904).
+///
+/// "Everything else" is the load-bearing half. `type_to_sort` answers
+/// `Verum!Generic` for `List<Authority>` — a SHAPE TAG rather than a
+/// type name, and one every generic shares, so two unrelated generics
+/// would become the same opaque sort. `Int` is the honest answer for a
+/// type nothing here knows the shape of, and it is what the goal side
+/// gives such a value, so the two agree.
+///
+/// A DECLARED SHAPE is a record layout or a variant's constructor list
+/// — the two things this command actually learns about a named type.
+fn declared_sort_of(
+    ty: &verum_ast::ty::Type,
+    record_layouts: &std::collections::HashMap<String, std::collections::HashMap<String, (String, Option<String>)>>,
+    variant_names: &[(Text, Vec<Text>)],
+) -> (Text, Option<String>) {
+    let (sort_name, type_name) = verum_smt::expr_to_smtlib::type_to_sort_and_name(ty);
+    let opaque = sort_name.starts_with("Verum!");
+    let known = type_name.as_deref().is_some_and(|n| {
+        record_layouts.contains_key(n) || variant_names.iter().any(|(t, _)| t.as_str() == n)
+    });
+    if !opaque || known {
+        (Text::from(sort_name.as_str()), type_name)
+    } else {
+        (Text::from("Int"), type_name)
+    }
+}
+
 impl<'s> VerifyCommand<'s> {
     /// Create new verification command
     pub fn new(session: &'s mut Session) -> Self {
@@ -159,7 +193,18 @@ impl<'s> VerifyCommand<'s> {
     }
 
     /// Run verification with cost reporting
-    pub fn run(mut self, function_name: Option<&str>) -> Result<()> {
+    /// Load, check and verify — and answer the REPORT rather than
+    /// printing it.
+    ///
+    /// `run` is this plus the rendering. Split because a verdict is
+    /// worth asserting on: a caller that wants to know whether a
+    /// theorem could be STATED had no way to ask without parsing
+    /// human-facing output, and "unstateable" and "unproved" print
+    /// almost the same.
+    pub fn run_to_report(
+        &mut self,
+        function_name: Option<&str>,
+    ) -> Result<VerificationReport> {
         info!(
             "SMT verification backend: {:?} (timeout: {}s)",
             self.session.options().smt_solver,
@@ -188,8 +233,11 @@ impl<'s> VerifyCommand<'s> {
             .map(|m| (*m).clone())
             .ok_or_else(|| anyhow::anyhow!("Module not found after parsing"))?;
 
-        // Run verification
-        let report = self.verify_module(&module, function_name)?;
+        self.verify_module(&module, function_name)
+    }
+
+    pub fn run(mut self, function_name: Option<&str>) -> Result<()> {
+        let report = self.run_to_report(function_name)?;
 
         // --lsp-mode short-circuit: emit one LSP-formatted JSON
         // diagnostic per line on stdout, then skip the human
@@ -294,8 +342,69 @@ impl<'s> VerifyCommand<'s> {
         let mut callee_signatures_for_module: Vec<(Text, Vec<Text>, Text)> = Vec::new();
         // Module type facts for member-bearing bodies (T0843) — the
         // same env the pipeline-side reflection scan builds.
-        let reflection_env =
+        //
+        // The file's OWN declarations first, so a name it declares
+        // itself wins; then every other module the check loaded, for
+        // the types this one MOUNTS. Without the second half a theorem
+        // parameter typed by a mounted record or variant had no
+        // declared shape, kept the `Int` default while the predicate it
+        // was passed to was declared over that type's own sort, and the
+        // application was refused — the claim could not be stated at
+        // all, which reads from the outside exactly like a claim that
+        // failed to prove (T0904).
+        let mut reflection_env =
             verum_smt::expr_to_smtlib::ReflectionTypeEnv::from_module(&module);
+        // The MODULE REGISTRY, not the session's parsed-file cache: the
+        // cache holds only the file the command was pointed at, while
+        // the registry is what cross-file resolution was built against
+        // and therefore holds every module the check actually loaded.
+        // Measured — the cache reported ONE module for a project whose
+        // mount had just resolved.
+        let sibling_modules: Vec<Module> = {
+            let registry = self.session.module_registry();
+            let reg = registry.read();
+            reg.all_modules()
+                .map(|(_id, info)| info.ast.clone())
+                .collect()
+        };
+        for other in &sibling_modules {
+            reflection_env.absorb_types_from(other);
+        }
+
+        // Variant-type registry — (name, ctor-names) for every
+        // `type T is A | B | C;`, from this module and every sibling,
+        // this module's own first so a local name wins. Built HERE
+        // rather than beside its other consumers because the signature
+        // rule below needs it: what counts as a DECLARED SHAPE has to
+        // be one predicate, or a signature and a theorem parameter
+        // disagree about the same type.
+        let mut variant_registry: Vec<(Text, Vec<Text>)> = Vec::new();
+        let collect_variants = |m: &Module, out: &mut Vec<(Text, Vec<Text>)>| {
+            for item in &m.items {
+                if let ItemKind::Type(td) = &item.kind
+                    && let verum_ast::decl::TypeDeclBody::Variant(vs) = &td.body
+                {
+                    let name = Text::from(td.name.name.as_str());
+                    if out.iter().any(|(t, _)| *t == name) {
+                        continue;
+                    }
+                    let ctors: Vec<Text> = vs
+                        .iter()
+                        .map(|v| Text::from(v.name.name.as_str()))
+                        .collect();
+                    out.push((name, ctors));
+                }
+            }
+        };
+        collect_variants(&module, &mut variant_registry);
+        for other in &sibling_modules {
+            collect_variants(other, &mut variant_registry);
+        }
+
+        let sort_of_declared = |ty: &verum_ast::ty::Type| -> Text {
+            declared_sort_of(ty, &reflection_env.record_fields, &variant_registry).0
+        };
+
         for item in &module.items {
             if let ItemKind::Function(fd) = &item.kind {
                 if let Some(rf) = verum_smt::expr_to_smtlib::try_reflect_function_with_env(
@@ -305,23 +414,21 @@ impl<'s> VerifyCommand<'s> {
                     let _ = reflection_registry.register(rf);
                 }
 
-                // A SIGNATURE ALWAYS SPELLS THE DECLARED SORTS.
+                // A SIGNATURE SPELLS THE SAME SORTS A THEOREM
+                // PARAMETER GETS — `sort_of_declared`, above.
                 //
                 // This was briefly conditional on the reflector having
                 // accepted the function, because giving an unreflected
                 // one distinct sorts regressed an `axiom`-style
                 // declaration over a non-primitive parameter and a
                 // `cases` proof (T0901). Both regressions were caused by
-                // the OTHER half of that change — theorem parameters
-                // were getting sorts for type names nothing knew the
-                // shape of — and once that was narrowed to declared
-                // shapes, the condition made no difference: measured
-                // over the sort ladders and all L3 proof specs, every
-                // number is identical with and without it. One rule
-                // beats two.
-                let sort_of = |ty: &verum_ast::ty::Type| -> Text {
-                    Text::from(verum_smt::expr_to_smtlib::type_to_sort(ty))
-                };
+                // the OTHER half of that change — parameters getting
+                // sorts for type names nothing knew the shape of — and
+                // once that was narrowed to declared shapes, the
+                // condition made no difference: measured over the sort
+                // ladders and all L3 proof specs, every number
+                // identical. One rule beats two.
+                let sort_of = &sort_of_declared;
                 let param_sorts: Vec<Text> = fd
                     .params
                     .iter()
@@ -334,14 +441,12 @@ impl<'s> VerifyCommand<'s> {
                     })
                     .collect();
                 let ret_sort = match &fd.return_type {
-                    // The RETURN sort always comes from the declaration,
-                    // reflected or not: a Bool-returning predicate that
-                    // became an Int would leave the goal not a
-                    // proposition at all, which is a different and worse
-                    // failure than an unmatched argument.
-                    verum_common::Maybe::Some(t) => {
-                        Text::from(verum_smt::expr_to_smtlib::type_to_sort(t))
-                    }
+                    // The same rule as the parameters. `Bool` is not
+                    // opaque, so a Bool-returning predicate keeps its
+                    // sort and the goal stays a proposition — which is
+                    // the property that matters here and the one an
+                    // Int default would destroy.
+                    verum_common::Maybe::Some(t) => sort_of_declared(t),
                     verum_common::Maybe::None => Text::from("Int"),
                 };
                 callee_signatures_for_module.push((
@@ -379,18 +484,6 @@ impl<'s> VerifyCommand<'s> {
         // Variant-type registry — (name, ctor-names) pairs for
         // every `type T is A | B | C;`. Threaded to each theorem
         // so the hypothesis layer can emit exhaustiveness claims.
-        let mut variant_registry: Vec<(Text, Vec<Text>)> = Vec::new();
-        for item in &module.items {
-            if let ItemKind::Type(td) = &item.kind {
-                if let verum_ast::decl::TypeDeclBody::Variant(vs) = &td.body {
-                    let ctors: Vec<Text> = vs
-                        .iter()
-                        .map(|v| Text::from(v.name.name.as_str()))
-                        .collect();
-                    variant_registry.push((Text::from(td.name.name.as_str()), ctors));
-                }
-            }
-        }
         // The reflection registry needs the same set: a `path_K.A`
         // constant inside a reflected body is declared with `K`'s sort,
         // and the goal side gives the same constant the same sort
@@ -401,7 +494,11 @@ impl<'s> VerifyCommand<'s> {
             reflection_registry.register_variant_type_name(tname.clone());
         }
         debug!(
-            "CLI verify: refinement={} signatures={} variant_axioms={}",
+            "CLI verify: siblings={} record_shapes={} variants={} \
+             refinement={} signatures={} variant_axioms={}",
+            sibling_modules.len(),
+            reflection_env.record_fields.len(),
+            variant_registry.len(),
             reflection_registry.len(),
             callee_signatures_for_module.len(),
             variant_axioms.len(),
@@ -690,17 +787,14 @@ impl<'s> VerifyCommand<'s> {
             if let verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } = &p.kind
                 && let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind
             {
+                // Registered unconditionally: `declared_sort_of`
+                // already answers `Int` for a type whose shape is
+                // unknown, and Int is what the translator would have
+                // defaulted to anyway — so writing it down changes
+                // nothing except that the sort now has ONE source.
                 let (sort_name, type_name) =
-                    verum_smt::expr_to_smtlib::type_to_sort_and_name(ty);
-                let opaque = sort_name.starts_with("Verum!");
-                let known_shape = type_name.as_deref().is_some_and(|n| {
-                    record_layouts.contains_key(n)
-                        || variant_registry.iter().any(|(t, _)| t.as_str() == n)
-                });
-                if !opaque || known_shape {
-                    proof_engine
-                        .register_value_sort(name.name.clone(), Text::from(sort_name.as_str()));
-                }
+                    declared_sort_of(ty, record_layouts, variant_registry);
+                proof_engine.register_value_sort(name.name.clone(), sort_name);
                 if let Some(tn) = type_name {
                     proof_engine
                         .register_value_type(name.name.clone(), Text::from(tn.as_str()));
@@ -2291,6 +2385,17 @@ impl VerificationReport {
     }
 
     /// Add a verification result for a function
+    /// The names of every obligation that did not verify — whatever
+    /// the reason. A caller asserting that a claim is STATEABLE reads
+    /// this: it must not contain the claim's name.
+    pub fn failed_names(&self) -> Vec<&str> {
+        self.results
+            .iter()
+            .filter(|(_, r)| !matches!(r, VerificationResult::Proved { .. }))
+            .map(|(n, _)| n.as_str())
+            .collect()
+    }
+
     pub fn add_result(&mut self, name: Text, result: VerificationResult) {
         self.results.push((name, result));
     }

@@ -112,11 +112,31 @@ impl ReflectionTypeEnv {
     /// a module — the same single-file scope the reflection scan
     /// itself walks.
     pub fn from_module(module: &verum_ast::Module) -> Self {
+        let mut env = Self::default();
+        env.absorb_types_from(module);
+        env
+    }
+
+    /// Add the TYPE SHAPES this module declares — record fields,
+    /// protocol and impl methods — to an env that already exists.
+    ///
+    /// Existing entries are kept, so the env's FIRST module wins any
+    /// name clash. That is the file under verification: a type it
+    /// declares itself is the one it means, whatever a sibling calls
+    /// the same name.
+    ///
+    /// This exists because a type a module MOUNTS is not in its
+    /// `items`, so a theorem parameter typed by one had no declared
+    /// shape and kept the `Int` default while the predicate it was
+    /// passed to was declared over that type's own sort — the
+    /// application was then refused and the claim could not be stated
+    /// at all (T0904).
+    pub fn absorb_types_from(&mut self, module: &verum_ast::Module) {
         use verum_ast::ItemKind;
         use verum_ast::decl::{ImplItemKind, ImplKind, ProtocolItemKind, TypeDeclBody};
-        let mut env = Self::default();
+        let mut env = &mut *self;
 
-        let mut add_methods =
+        let add_methods =
             |env: &mut Self, type_name: &str, funcs: &mut dyn Iterator<Item = &verum_ast::FunctionDecl>| {
                 for fd in funcs {
                     let arg_sorts: Vec<String> = fd
@@ -152,10 +172,12 @@ impl ReflectionTypeEnv {
             match &item.kind {
                 ItemKind::Type(td) => match &td.body {
                     TypeDeclBody::Record(fields) => {
-                        let m = env
-                            .record_fields
-                            .entry(td.name.name.as_str().to_string())
-                            .or_default();
+                        // First declarer wins — see `absorb_types_from`.
+                        let name = td.name.name.as_str().to_string();
+                        if env.record_fields.contains_key(&name) {
+                            continue;
+                        }
+                        let m = env.record_fields.entry(name).or_default();
                         for f in fields.iter() {
                             m.insert(
                                 f.name.name.as_str().to_string(),
@@ -195,7 +217,6 @@ impl ReflectionTypeEnv {
                 _ => {}
             }
         }
-        env
     }
 }
 
