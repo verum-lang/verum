@@ -365,6 +365,41 @@ the same way 194 times, is not 194 mistakes: it is a missing feature
 whose blast radius lands entirely on one shape is a message about the
 shape, not about the sites.
 
+### 16. Watch the sweep, do not just collect its result
+
+A full corpus sweep is usually run to answer one narrow question — "did
+my change break anything?" — and the temptation is to start it, walk
+away, and read the total at the end.
+
+The total is the least of what it produces. A sweep that was checking
+2560 stdlib files for affine regressions stopped advancing at file 1761.
+Two identical progress readings a few minutes apart were the whole
+signal; `sample <pid>` turned them into a stack ending in
+`RawRwLock::wait_for_readers`, and that was a P0 self-deadlock in the
+type-check phase — `verum check core/intrinsics/mod.vr` had never
+returned, for anyone, and nothing else had noticed because no gate runs
+that file on its own.
+
+WHAT TO ACTUALLY DO:
+
+* **Print progress, and read it twice.** A count that has not moved
+  between two checks is a hang, not slowness
+  (see the "slow suite" rule). Sample immediately — the stack is only
+  there while the process is stuck.
+* **Put a per-item timeout in the loop.** Without one, a single hang
+  costs the whole sweep; with one, the hang is a data point in the
+  results file and the sweep finishes.
+* **Read the FIRST few results, not only the last.** A sweep with a
+  broken invocation reports 2560 clean files just as convincingly as a
+  clean tree.
+* **Expect the sweep to answer questions you did not ask.** Its value is
+  the breadth, not the question — nothing else in the project runs every
+  stdlib file through the front door one at a time.
+
+The corollary is a cost: a broad sweep at ~2s/file is an hour or two,
+and a debug binary makes it eight. Build the release binary first. An
+instrument you will not run twice is not an instrument.
+
 ## What the proving ground must keep doing
 
 It has to stay ambitious. The moment it is trimmed to what already
