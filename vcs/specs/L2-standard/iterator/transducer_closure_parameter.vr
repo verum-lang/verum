@@ -8,41 +8,45 @@
 // filter 1
 // annotated 1
 // mapped 2
+// factory 1
+// inline 1
 // @expected-stdout-end
-// @description: A closure handed to a transducer factory needs its
-//   parameter type ANNOTATED, and every other spelling of the same
-//   predicate infers it.
+// @description: A closure handed to a transducer factory reads a field
+//   of its parameter — annotated or not.
 //
-// The unannotated form does not fail to compile. It compiles, and then:
+// The unannotated form used to compile and then die:
 //
 //     WARN [field-guess] 'n' has 9 position-disagreeing candidates;
 //          guessed AliasSampler.n idx 0 (most fields)
 //     Panic: GetFieldNamed: no TypeDescriptor for runtime type_id=0
 //
-// The closure's parameter type is lost, so `r.n` becomes a by-name
-// field guess that lands on an unrelated standard-library type. A
-// warning and a panic, where a type error belonged.
+// TWO THINGS were true at once and only together were they fatal.
 //
-// FOUR CASES HERE, and the two that are NOT here are what make them
-// mean something:
+// The closure's parameter type is not inferred — `Transducer.filter<A,
+// P: fn(&A) -> Bool>` leaves `A` unconstrained where the closure is
+// written, and it is fixed only where the transducer is CONSUMED. So
+// codegen falls back to a by-name field read, which is BY DESIGN: the
+// runtime resolves the position exactly from the object's descriptor,
+// and a miss is a loud typed error rather than a wrong-offset read.
+// The warning above is that fallback announcing itself, and it is still
+// emitted — correctly.
 //
-//   * `for r in rows.iter() { r.n … }`               works — `loop`
-//   * `.filter(|r| r.n …)` on the iterator           works — `filter`
-//   * `Transducer.filter(|r: &Row| r.n …)`           works — `annotated`
-//   * `Transducer.map(|r: Row| r.n …)`               works — `mapped`
+// The by-name read then took the header off whatever it was handed
+// WITHOUT peeling the reference, and a transducer hands its closure an
+// `&A`. So it read a header that is not an object's and reported
+// `type_id=0` for a perfectly good record. That half is fixed.
 //
-//   * `Transducer.filter(|r| r.n …)` in a factory    PANICS
-//   * `Transducer.filter(|r| r.n …)` inline at the
-//     use site, where the receiver determines the
-//     item type                                      PANICS
+// SIX CASES, so a regression in either half is visible:
 //
-// So the receiver determines the item type for `.filter` and does not
-// reach a closure inside a transducer factory: the type has to flow
-// backwards from where the transducer is eventually consumed, and it
-// does not. An annotation supplies it directly.
+//   * `for r in rows.iter() { r.n … }`               `loop`
+//   * `.filter(|r| r.n …)` on the iterator           `filter`
+//   * `Transducer.filter(|r: &Row| r.n …)`           `annotated`
+//   * `Transducer.map(|r: Row| r.n …)`               `mapped`
+//   * `Transducer.filter(|r| r.n …)` in a factory    `factory`
+//   * the same, inline at the use site               `inline`
 //
-// This spec pins the four that work. When the inference reaches the
-// other two, the unannotated forms belong here beside them.
+// The first four never needed the by-name path; the last two are the
+// ones that exercise it.
 
 mount core.base.iterator.{Transducer};
 
@@ -73,6 +77,12 @@ fn even_rows() -> Transducer<Row, Row> {
     Transducer.filter(|r: &Row| r.n % 2 == 0)
 }
 
+/// UNANNOTATED, in a factory: the closure's parameter type is not
+/// inferred, so this goes through the by-name field read.
+fn even_rows_unannotated() -> Transducer<Row, Row> {
+    Transducer.filter(|r| r.n % 2 == 0)
+}
+
 fn main() {
     let rs = rows();
     print(f"loop {by_loop(&rs)}");
@@ -80,4 +90,6 @@ fn main() {
     print(f"annotated {rs.iter().transduce(even_rows()).fold(0, |a, _r| a + 1)}");
     let doubled: List<Int> = rs.iter().transduce(Transducer.map(|r: Row| r.n * 2)).collect();
     print(f"mapped {doubled.len()}");
+    print(f"factory {rs.iter().transduce(even_rows_unannotated()).fold(0, |a, _r| a + 1)}");
+    print(f"inline {rs.iter().transduce(Transducer.filter(|r| r.n % 2 == 0)).fold(0, |a, _r| a + 1)}");
 }
