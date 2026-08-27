@@ -16136,9 +16136,21 @@ impl TypeChecker {
                         let mut substituted_variants = indexmap::IndexMap::new();
                         for (tag, payload_ty) in variants.iter() {
                             let subst_ty = self.substitute_type_params(payload_ty, &subst);
+                            if crate::ctor_trace_enabled() {
+                                eprintln!(
+                                    "[ctor-trace]   subst '{}': {:?} -> {:?} | keys={:?}",
+                                    tag.as_str(),
+                                    payload_ty,
+                                    subst_ty,
+                                    subst.keys().map(|k| k.as_str().to_string()).collect::<Vec<_>>(),
+                                );
+                            }
                             substituted_variants.insert(tag.clone(), subst_ty);
                         }
                         return Type::Variant(substituted_variants);
+                    }
+                    if crate::ctor_trace_enabled() {
+                        eprintln!("[ctor-trace]   subst EMPTY for '{}' args={}", name, args.len());
                     }
                 }
                 return Type::Variant(variants);

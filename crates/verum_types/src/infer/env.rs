@@ -97,43 +97,63 @@ impl TypeChecker {
             if let TypeDescriptorKind::Variant { cases } = &type_desc.kind {
                 let mut constructors = verum_common::List::new();
 
-                for case in cases.iter() {
-                    // PARAM↔RETURN LINKAGE (T0701 qctor root, the gap the
-                    // consumer-side A2 freshen works around): the return's
-                    // generic slots and the payload's occurrences of the
-                    // SAME declared param must share ONE var, or
-                    // `Maybe.Some(5)` binds the payload var while the
-                    // return keeps an unrelated forever-free one — the
-                    // binding then judges phantom-E404 under the value
-                    // restriction.  Same #126 discipline as
-                    // `register_variant_signature_for_lazy`.
-                    let param_to_var: indexmap::IndexMap<
-                        verum_common::Text,
-                        crate::ty::TypeVar,
-                    > = type_desc
-                        .generic_params
+                // PARAM↔RETURN LINKAGE (T0701 qctor root, the gap the
+                // consumer-side A2 freshen works around): the return's
+                // generic slots and the payload's occurrences of the
+                // SAME declared param must share ONE var, or
+                // `Maybe.Some(5)` binds the payload var while the
+                // return keeps an unrelated forever-free one — the
+                // binding then judges phantom-E404 under the value
+                // restriction.  Same #126 discipline as
+                // `register_variant_signature_for_lazy`.
+                //
+                // ONE VAR PER PARAMETER, FOR THE WHOLE TYPE — not per
+                // case. This mapping used to be minted inside the `for
+                // case` loop, which said that `Result`'s `T` in `Ok(T)`
+                // and `Result`'s `T` are two different variables that
+                // merely share a spelling. Two consequences, both real:
+                //
+                //   * `type Pair<T> is Both(T, T) | One(T)` could not
+                //     force its three payloads to agree, because only
+                //     the two inside `Both` shared a variable;
+                //   * the type's parameters had no representative to
+                //     record, so the `__type_params_<name>` write below
+                //     stored the placeholder `Type::Int` for every
+                //     parameter — and `T0891` is exactly what that costs
+                //     (see the write for the failure it produced).
+                //
+                // Safe against cross-site coupling because a constructor
+                // is a SCHEME: the resolver freshens at the
+                // instantiation boundary (`GENERIC-CTOR-FRESHNESS-1`,
+                // standard ML instantiate-at-use), so two call sites
+                // never share these variables.
+                let param_to_var: indexmap::IndexMap<
+                    verum_common::Text,
+                    crate::ty::TypeVar,
+                > = type_desc
+                    .generic_params
+                    .iter()
+                    .map(|gp| (gp.name.clone(), crate::ty::TypeVar::fresh()))
+                    .collect();
+                let result_type = if type_desc.generic_params.is_empty() {
+                    Type::Named {
+                        path: Self::text_to_path(type_name),
+                        args: verum_common::List::new(),
+                    }
+                } else {
+                    Type::Generic {
+                        name: type_name.clone(),
+                        args: param_to_var.values().map(|tv| Type::Var(*tv)).collect(),
+                    }
+                };
+                let link_subst: indexmap::IndexMap<verum_common::Text, Type> =
+                    param_to_var
                         .iter()
-                        .map(|gp| (gp.name.clone(), crate::ty::TypeVar::fresh()))
+                        .map(|(n, tv)| (n.clone(), Type::Var(*tv)))
                         .collect();
-                    let result_type = if type_desc.generic_params.is_empty() {
-                        Type::Named {
-                            path: Self::text_to_path(type_name),
-                            args: verum_common::List::new(),
-                        }
-                    } else {
-                        Type::Generic {
-                            name: type_name.clone(),
-                            args: param_to_var
-                                .values()
-                                .map(|tv| Type::Var(*tv))
-                                .collect(),
-                        }
-                    };
-                    let link_subst: indexmap::IndexMap<verum_common::Text, Type> =
-                        param_to_var
-                            .iter()
-                            .map(|(n, tv)| (n.clone(), Type::Var(*tv)))
-                            .collect();
+
+                for case in cases.iter() {
+                    let result_type = result_type.clone();
 
                     // Task #41 — Parse payload type strings via the
                     // structural parser so "List<Byte>" / "Result<T, E>"
@@ -228,6 +248,30 @@ impl TypeChecker {
                     // instantiation. Without it the ControlFlow<B,C>
                     // payload placeholders stay rigid `Named("C")` and
                     // positional fallbacks mis-bind (#47 class B).
+                    //
+                    // THE VALUES ARE THE TYPE'S OWN VARIABLES, and that
+                    // is the load-bearing half. This record used to
+                    // store `Type::Int` as a placeholder for every
+                    // parameter, on the reading that only the ordered
+                    // NAMES were ever consulted. They are not: the
+                    // consumer in `try_build_variant_from_constructors`
+                    // reads each VALUE and, when it is a variable, adds
+                    // the `T<id>` key that `substitute_type_params`
+                    // actually matches on — the payloads of a lazily
+                    // registered variant are anonymous variables, so the
+                    // name keys alone substitute nothing.
+                    //
+                    // What that cost (T0891): a sibling module's
+                    // `Result<Int, EA>` came back as
+                    //
+                    //     Variant({Ok: Int, Err: Var(18340)})
+                    //
+                    // with `EA`'s variant body sitting unused in the
+                    // arguments, so `match … { Ok(n) => …, Err(EA.Bad)
+                    // => …, Err(EA.Many(xs)) => … }` — a complete match
+                    // — was refused as non-exhaustive (E0601). A
+                    // placeholder is a fact stated wrongly, and a
+                    // consumer that reads it has no way to know.
                     let type_params_key: verum_common::Text =
                         format!("__type_params_{}", type_name).into();
                     if self.ctx.lookup_type(type_params_key.as_str()).is_none() {
@@ -235,8 +279,8 @@ impl TypeChecker {
                             verum_common::Text,
                             Type,
                         > = indexmap::IndexMap::new();
-                        for gp in type_desc.generic_params.iter() {
-                            param_record.insert(gp.name.clone(), Type::Int);
+                        for (pname, tv) in param_to_var.iter() {
+                            param_record.insert(pname.clone(), Type::Var(*tv));
                         }
                         self.ctx
                             .define_type(type_params_key, Type::Record(param_record));
@@ -1322,6 +1366,32 @@ impl TypeChecker {
     /// Lookup a type in context (for testing/debugging)
     pub fn lookup_type_for_testing(&self, name: &str) -> Option<Type> {
         self.ctx.lookup_type(name).cloned()
+    }
+
+    /// The payload types each of a variant type's constructors carries,
+    /// in declaration order (for testing/debugging).
+    ///
+    /// Exposed because a registered constructor's payload VARIABLES are
+    /// a fact a test needs to state: whether the type's parameter `T` is
+    /// one variable across every case, or a different one per case that
+    /// merely shares a spelling.
+    pub fn constructor_payloads_for_testing(
+        &self,
+        type_name: &str,
+    ) -> Vec<(String, Vec<Type>)> {
+        let key: verum_common::Text = type_name.into();
+        match self.ctx.get_constructors(&key) {
+            verum_common::Maybe::Some(ctors) => ctors
+                .iter()
+                .map(|c| {
+                    (
+                        c.name.as_str().to_string(),
+                        c.args.iter().map(|a| (**a).clone()).collect::<Vec<_>>(),
+                    )
+                })
+                .collect(),
+            verum_common::Maybe::None => Vec::new(),
+        }
     }
 
     /// Debug method: Check if a qualified name (like "File.open") is in the environment
