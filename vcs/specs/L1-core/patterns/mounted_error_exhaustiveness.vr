@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: patterns, exhaustiveness, generics, substitution
+// @description: A match covering every constructor of an error type is
+//   accepted, and the type's generic instantiation is fully substituted.
+//
+// This is the SINGLE-FILE pole. The defect it guards needs a project
+// and is pinned there; what this file protects is the substitution
+// itself — `Result<Int, E>` must bind BOTH parameters, and a regression
+// that bound only the first would show up here as `Err(_) not covered`
+// with `E`'s constructors sitting in the type.
+//
+// The trace of the failure, kept because it is what identified the
+// cause in one reading:
+//
+//     pre   = Result<Int, Variant({Bad: Unit, Worse: Text})>
+//     scrut = Variant({Ok: Int, Err: Var(17301)})  unresolved=true
+//
+// The error type's full body is present in the arguments and the
+// substitution stopped after the first one.
+//
+// WHY IT MATTERS beyond the noise: the workaround an author reaches for
+// is a catch-all `Err(_) => …`, and a catch-all silently absorbs a
+// constructor added later — exactly what exhaustiveness exists to
+// prevent. A false non-exhaustive report pushes people toward the
+// pattern the feature was built to stop.
+
+public type Why is
+    | Alpha
+    | Beta(Text);
+
+public fn attempt(n: Int) -> Result<Int, Why> {
+    if n > 0 {
+        return Result.Ok(n);
+    }
+    Result.Err(Why.Alpha)
+}
+
+/// Every constructor of `Why`, and no catch-all.
+public fn describe(n: Int) -> Text {
+    match attempt(n) {
+        Ok(v) => f"ok {v}",
+        Err(Why.Alpha) => "alpha",
+        Err(Why.Beta(t)) => f"beta {t}",
+    }
+}
+
+/// The payload BINDS, which is the other half: a substitution that
+/// produced the right shape but lost the payload type would pass the
+/// match above and fail here.
+public fn payload_of(n: Int) -> Int {
+    match attempt(n) {
+        Ok(v) => v,
+        Err(Why.Alpha) => 0,
+        Err(Why.Beta(t)) => t.len(),
+    }
+}
+
+fn main() {
+    print(f"{describe(1)} {payload_of(-1)}");
+}
