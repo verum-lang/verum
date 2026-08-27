@@ -1,9 +1,9 @@
 # The proving ground: how defects in Verum are found
 
 This describes how work on the language is driven, and it is a
-description of what worked rather than a proposal. One campaign found
-fifteen defects this way, eight of which are fixed; two of them made
-whole features inert without anyone noticing.
+description of what worked rather than a proposal. Two campaigns have
+now found twenty-odd defects this way; several made whole features inert
+without anyone noticing, and two were silent data loss.
 
 ## The shape
 
@@ -129,6 +129,71 @@ passes, and here is the two-file reproduction" starts them at the
 narrowing. Every measurement that RULED SOMETHING OUT belongs in the
 task too — a falsified hypothesis is expensive to establish and cheap to
 record.
+
+### 8. Before turning silence into an error, enumerate what else wears the syntax
+
+The hardest defects are the ones where the compiler accepts something it
+should refuse, and the fix is a new refusal. A new refusal is a
+liability: it can reject working code, and rejecting working code is
+worse than the hole it closes.
+
+`a.b.f()` was accepted whatever `a.b.f` named. Making it an error meant
+answering "is this a module member that does not exist", and three OTHER
+things wear exactly that syntax — a chained call whose receiver is
+reused by the chain handler, a variant constructor reached through a
+module path, a method on a type's associated constant. Each was found by
+measuring, none by reasoning, and each would have rejected code in the
+standard library.
+
+So the question to ask before writing the refusal is not "is this
+wrong". It is **"what else looks like this"** — and the answer comes
+from running the candidate refusal across the corpus and reading every
+new failure, not from thinking harder.
+
+### 9. A change to a shared rule is measured against a build of the parent commit
+
+"N files failed before, N after" is the only statement about a
+resolution or type-system change that means anything, and it costs one
+extra build:
+
+```
+git stash              # or copy the changed files aside
+cargo build            # the parent commit, same target dir
+<sweep the corpus>     # core_before.txt
+git stash pop
+cargo build
+<sweep the corpus>     # core_after.txt
+```
+
+Then diff by FILENAME, not by count — a change that fixes three files
+and breaks three has an unchanged count and is not neutral. Three
+attempts at one fix were reverted this way after the sweep showed each
+regressing a proof corpus the count alone would have hidden.
+
+The sweep itself must be parallel or it will not be run: 2560 files at
+0.6 s each is 26 minutes serially and 6 with `xargs -P 5`. An
+instrument nobody runs twice is not an instrument.
+
+### 10. What a run leaves behind is evidence
+
+A file-writing defect was diagnosed for an hour through the interpreter,
+the FFI marshaller and three intercepts. The answer had been sitting in
+the first directory listing of the session:
+
+```
+<ptr@0x9d4831cf8>
+<ptr@0xb74598df8>
+```
+
+Two files, one byte each, named after a pointer — which is exactly what
+`write(&record.field, …)` had been doing: rendering the field's slot
+ADDRESS as text and using the rendering as a filename. The symptom was
+"no file appears"; the evidence was "a file appears somewhere else".
+
+Before tracing a "nothing happened" report inward, look at what the run
+LEFT BEHIND — new files, a changed working directory, an unexpected
+mode, a stray byte on stdout. A defect that produces nothing is rarer
+than one that produces something in the wrong place.
 
 ## What the proving ground must keep doing
 
