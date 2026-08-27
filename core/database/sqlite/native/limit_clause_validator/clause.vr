@@ -27,12 +27,12 @@ public fn resolve(limit: &Maybe<Int64>, offset: &Maybe<Int64>) -> SqlLimitClause
     let (has, eff_limit) = match limit {
         Maybe.None    => (false, -1 as Int64),
         Maybe.Some(n) => {
-            if *n < 0_i64 { (false, -1 as Int64) } else { (true, *n) }
+            if n < 0_i64 { (false, -1 as Int64) } else { (true, n) }
         },
     };
     let eff_offset = match offset {
         Maybe.None    => 0 as Int64,
-        Maybe.Some(n) => if *n < 0_i64 { 0 as Int64 } else { *n },
+        Maybe.Some(n) => if n < 0_i64 { 0 as Int64 } else { n },
     };
     SqlLimitClause {
         has_limit: has,

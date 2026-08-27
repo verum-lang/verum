@@ -9,7 +9,7 @@
 module core.term.widget.spinner;
 
 mount super.protocol.{StatefulWidget, Styled};
-mount super.paragraph.Span;
+mount super.paragraph.TextSpan;
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;
@@ -111,7 +111,7 @@ implement SpinnerState {
 /// Automatically advances frames based on interval_ms and monotonic time.
 public type Spinner is {
     frames: SpinnerFrames,
-    label: Maybe<Span>,
+    label: Maybe<TextSpan>,
     style: Style,
 };
 
@@ -155,14 +155,14 @@ implement Spinner {
         Spinner.new(SpinnerFrames.blocks())
     }
 
-    /// Set the label as a styled Span displayed after the spinner character.
-    public fn label(self, label: Span) -> Spinner {
+    /// Set the label as a styled TextSpan displayed after the spinner character.
+    public fn label(self, label: TextSpan) -> Spinner {
         Spinner { label: Maybe.Some(label), ..self }
     }
 
     /// Set a plain text label.
     public fn label_text(self, text: Text) -> Spinner {
-        Spinner { label: Maybe.Some(Span.raw(text)), ..self }
+        Spinner { label: Maybe.Some(TextSpan.raw(text)), ..self }
     }
 
     /// Set the spinner style.

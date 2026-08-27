@@ -726,15 +726,6 @@ impl TypeChecker {
 
                 // Expand the scrutinee type and check if it's a variant
                 let mut expanded_ty = self.expand_generic_to_variant(&scheme.ty);
-                if crate::ctor_trace_enabled() {
-                    let st = format!("{:?}", scheme.ty);
-                    let et = format!("{:?}", expanded_ty);
-                    eprintln!(
-                        "[ctor-trace] bind_pattern expand: scheme.ty={} -> expanded={}",
-                        &st[..st.len().min(600)],
-                        &et[..et.len().min(600)]
-                    );
-                }
 
                 // If the pattern is explicitly qualified and the qualifier
                 // resolves to a known variant type in scope, prefer the
@@ -1022,7 +1013,43 @@ impl TypeChecker {
                     };
                     scrut_name == Some(q)
                 });
-                if let Some(q) = qualifier_name.filter(|_| !qualifier_is_scrutinee_type) {
+
+                // QUALIFIED-OVERRIDE GUARD — the same rule the RECORD
+                // pattern arm above already states in the same words:
+                // only take the override when the scrutinee-derived
+                // expansion is not already a variant set carrying this
+                // pattern's tag. When it is, the scrutinee expansion is
+                // authoritative, because its payloads carry the
+                // instance's own substituted types.
+                //
+                // Two paired implementations of one rule, and only one
+                // of them had it. The name test above catches a
+                // scrutinee that still LOOKS like a named type, but by
+                // the time a match arm reaches here the scrutinee has
+                // usually been expanded to a `Type::Variant` with no
+                // name left to compare — so `Maybe.Some(t)` against
+                // `Maybe<Text>` fell through to the override, which
+                // re-derives the variant set from the bare
+                // `lookup_type("Maybe")` and freshens it: a payload
+                // variable in place of the `Text` the expansion had
+                // already worked out.
+                //
+                // Nothing detected that, because a sibling ARM normally
+                // pins the variable anyway. Remove it — make the other
+                // arm `Maybe.None => return 0` — and the binding has
+                // nothing left to determine it:
+                //
+                //     error<E404>: Ambiguous type for `s`
+                //
+                // while the same match spelled `Some(t)` compiles.
+                let scrutinee_has_tag = match &expanded_ty {
+                    Type::Variant(variants) => variants.contains_key(tag),
+                    _ => false,
+                };
+
+                if let Some(q) = qualifier_name
+                    .filter(|_| !qualifier_is_scrutinee_type && !scrutinee_has_tag)
+                {
                     // Direct path: lookup_type returns Variant directly.
                     let direct: Option<Type> = self
                         .ctx
@@ -1089,6 +1116,24 @@ impl TypeChecker {
                             }
                         }
                     }
+                }
+
+                // Reported AFTER the qualifier override, because the
+                // override is the decision worth seeing — printing
+                // `expanded_ty` before it showed the substituted payload
+                // for a pattern that then had it replaced by a fresh
+                // variable, and read as proof the binding was fine.
+                if crate::ctor_trace_enabled() {
+                    let st = format!("{:?}", scheme.ty);
+                    let et = format!("{:?}", expanded_ty);
+                    eprintln!(
+                        "[ctor-trace] bind_pattern tag={} qualifier={:?}                          scrutinee_has_tag={} scheme.ty={} -> expanded={}",
+                        tag,
+                        qualifier_name,
+                        scrutinee_has_tag,
+                        &st[..st.len().min(400)],
+                        &et[..et.len().min(400)],
+                    );
                 }
 
                 // Handle unresolved associated type projections (e.g., Item<_>)

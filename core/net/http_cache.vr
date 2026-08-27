@@ -252,9 +252,9 @@ public fn freshness_lifetime_sec(
     shared_cache:  Bool,
 ) -> Maybe<UInt64> {
     if shared_cache {
-        match &resp_cc.s_maxage { Maybe.Some(n) => return Maybe.Some(*n), Maybe.None => {} }
+        match &resp_cc.s_maxage { Maybe.Some(n) => return Maybe.Some(n), Maybe.None => {} }
     }
-    match &resp_cc.max_age { Maybe.Some(n) => return Maybe.Some(*n), Maybe.None => {} }
+    match &resp_cc.max_age { Maybe.Some(n) => return Maybe.Some(n), Maybe.None => {} }
     match expires_unix {
         Maybe.Some(exp) => {
             if exp > date_unix { return Maybe.Some(exp - date_unix); }
@@ -295,7 +295,7 @@ public fn decide(di: &DecisionInputs) -> CacheDecision {
     // immutable never-revalidate optimisation (RFC 8246).
     if di.resp_cc.immutable {
         match &di.resp_cc.max_age {
-            Maybe.Some(n) => return CacheDecision.Fresh(*n),
+            Maybe.Some(n) => return CacheDecision.Fresh(n),
             Maybe.None    => {},
         }
     }
@@ -313,8 +313,8 @@ public fn decide(di: &DecisionInputs) -> CacheDecision {
             if di.upstream_error {
                 match &di.resp_cc.stale_if_error {
                     Maybe.Some(grace) => {
-                        if age < limit + *grace {
-                            return CacheDecision.StaleServable(limit + *grace - age);
+                        if age < limit + grace {
+                            return CacheDecision.StaleServable(limit + grace - age);
                         }
                     },
                     Maybe.None => {},
@@ -322,8 +322,8 @@ public fn decide(di: &DecisionInputs) -> CacheDecision {
             }
             match &di.resp_cc.stale_while_revalidate {
                 Maybe.Some(grace) => {
-                    if age < limit + *grace {
-                        return CacheDecision.StaleServable(limit + *grace - age);
+                    if age < limit + grace {
+                        return CacheDecision.StaleServable(limit + grace - age);
                     }
                 },
                 Maybe.None => {},

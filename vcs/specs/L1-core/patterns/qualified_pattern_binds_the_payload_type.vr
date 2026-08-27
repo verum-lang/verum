@@ -1,0 +1,81 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: patterns, inference, qualified-patterns, never-type
+// @expected-stdout-begin
+// 2 2 7 7
+// @expected-stdout-end
+// @description: A type-qualified variant pattern binds its payload to the
+//   same type the bare spelling does, including when no sibling arm
+//   would pin it.
+//
+// TWO SPELLINGS OF ONE PATTERN. `Maybe.Some(t)` and `Some(t)` mean the
+// same thing, and one of them used to lose the payload's type:
+//
+//     let s = match m { Maybe.Some(t) => t, Maybe.None => return 0 };
+//     error<E404>: Ambiguous type for `s`: the inferred type `_` is not
+//                  fully determined by this function
+//
+// while the same match spelled `Some(t)` compiled. The qualified form
+// re-derived the variant set from the qualifier NAME — a registry
+// template whose payload is a variable — instead of using the
+// scrutinee's own already-substituted `Maybe<Text>`.
+//
+// WHY IT HID FOR SO LONG, and why the diverging arm is not decoration:
+// a sibling arm that yields a value pins the variable anyway, so
+// `Maybe.None => ""` compiles and looks like proof the binding is fine.
+// Only when every other arm DIVERGES — `return`, `panic()` — does the
+// payload have nothing left to determine it. That is why both halves of
+// this file are written twice, once per spelling: a spec that checked
+// only the bare form would have reported this feature as working.
+//
+// The `Int` case is deliberately NOT the test. An unresolved variable
+// falls back to `Int`, so a payload of that type passes whether the
+// binding worked or not — the kind of input that lies about what it
+// covers. `Text` and a record type are the ones that answer.
+
+/// The bare spelling, with a returning sibling arm.
+fn text_bare(m: Maybe<Text>) -> Int {
+    let s = match m {
+        Some(t) => t,
+        None => return 0,
+    };
+    s.len()
+}
+
+/// The qualified spelling of the same match.
+fn text_qualified(m: Maybe<Text>) -> Int {
+    let s = match m {
+        Maybe.Some(t) => t,
+        Maybe.None => return 0,
+    };
+    s.len()
+}
+
+type Rec is { v: Int };
+
+/// A record payload, bare, with a panicking sibling arm — a different
+/// way to diverge, because the rule is about divergence and not about
+/// `return` in particular.
+fn rec_bare(m: Maybe<Rec>) -> Int {
+    let r = match m {
+        Some(t) => t,
+        None => panic("nothing to read"),
+    };
+    r.v
+}
+
+/// The same, qualified.
+fn rec_qualified(m: Maybe<Rec>) -> Int {
+    let r = match m {
+        Maybe.Some(t) => t,
+        Maybe.None => panic("nothing to read"),
+    };
+    r.v
+}
+
+fn main() {
+    let t = Maybe.Some("ab");
+    let r = Maybe.Some(Rec { v: 7 });
+    print(f"{text_bare(t)} {text_qualified(t)} {rec_bare(r)} {rec_qualified(r)}");
+}

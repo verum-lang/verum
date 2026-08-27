@@ -241,7 +241,7 @@ public fn encode(params: &TransportParams, out: &mut List<Byte>) {
         Maybe.None => {},
     }
     match &params.max_datagram_frame_size {
-        Maybe.Some(size) => encode_u64_param(out, PARAM_MAX_DATAGRAM_FRAME_SIZE, *size),
+        Maybe.Some(size) => encode_u64_param(out, PARAM_MAX_DATAGRAM_FRAME_SIZE, size),
         Maybe.None => {},
     }
     // Preferred address — serialised in full per RFC 9000 §18.2

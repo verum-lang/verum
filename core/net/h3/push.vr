@@ -191,7 +191,7 @@ implement PushEmitter {
         // GOAWAY check.
         match &self.client_goneaway_at {
             Maybe.Some(cap) => {
-                if self.next_push_id >= *cap {
+                if self.next_push_id >= cap {
                     return Result.Err(PushError.ClientGoneAway);
                 }
             },

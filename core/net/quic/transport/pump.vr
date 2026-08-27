@@ -545,7 +545,7 @@ implement ConnectionPump {
         // skip emission entirely — RFC 9002 §7.7 mandates the sender
         // respect the pacing delay before the next packet goes out.
         match &self.pacing_next_ok {
-            Maybe.Some(deadline) => if now < *deadline { return Result.Ok(()); },
+            Maybe.Some(deadline) => if now < deadline { return Result.Ok(()); },
             Maybe.None => {},
         }
 
@@ -560,7 +560,7 @@ implement ConnectionPump {
             // elapses. Coalescing (§12.2) will collapse these back to
             // one datagram in the optimisation commit.
             match &self.pacing_next_ok {
-                Maybe.Some(deadline) => if now < *deadline { break; },
+                Maybe.Some(deadline) => if now < deadline { break; },
                 Maybe.None => {},
             }
             j = j + 1;

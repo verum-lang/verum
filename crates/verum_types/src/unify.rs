@@ -4573,6 +4573,46 @@ impl Unifier {
                     Var(_) | Unknown => true,
                     // two placeholders unify only for the same forward-declared name
                     Placeholder { name: n2, .. } => n2 == name,
+                    // THE NAME'S OWN DEFINITION, ALREADY EXPANDED.
+                    //
+                    // A named type reaches this arm as a `Named`/`Generic`
+                    // and matches by name. The SAME type, expanded to its
+                    // variant body by any of the paths that do that, has no
+                    // name left to compare and was refused:
+                    //
+                    //     expected 'Simple(Unit) | Reserved(Unit) | …',
+                    //     found '<placeholder:ExprOp>'
+                    //
+                    // — a forward-declared type refusing to unify with
+                    // itself. The registry the unifier already carries
+                    // answers the question exactly: look the name up and
+                    // require the SAME set of constructors. That is a
+                    // name-checked identity, not the blanket
+                    // unify-with-everything that made leaked placeholders
+                    // unsound (tech-debt register A27, pool T0119).
+                    Variant(other_cases) => {
+                        // Two registries answer "which type is this
+                        // variant body?", and both are keyed by the
+                        // name, so neither is a blanket. The relaxed
+                        // signature is what the Generic↔Variant arms
+                        // already use, and it is populated for source
+                        // declarations as well as stdlib ones.
+                        let relaxed = Self::variant_type_signature_relaxed(other_cases);
+                        self.variant_type_names
+                            .get(&relaxed)
+                            .is_some_and(|registered| registered == name)
+                            || self.original_variant_types.get(name).is_some_and(
+                                |declared| match declared {
+                                    Variant(declared_cases) => {
+                                        declared_cases.len() == other_cases.len()
+                                            && declared_cases
+                                                .keys()
+                                                .all(|k| other_cases.contains_key(k))
+                                    }
+                                    _ => false,
+                                },
+                            )
+                    }
                     _ => false,
                 };
                 if compatible {

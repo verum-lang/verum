@@ -150,7 +150,7 @@ implement AggregateFn for MaxInt {
             _ => { return; }
         };
         match st {
-            Maybe.Some(cur) => { if v > *cur { *st = Maybe.Some(v); } }
+            Maybe.Some(cur) => { if v > cur { *st = Maybe.Some(v); } }
             Maybe.None      => { *st = Maybe.Some(v); }
         }
     }
