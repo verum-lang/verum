@@ -1,0 +1,45 @@
+// @test: typecheck-fail
+// @level: L1
+// @tier: 0
+// @tags: types, declarations, generics, arity
+// @expected-error: E407
+// @description: The interior of a type declaration is checked, so the
+//   same annotation gets the same verdict wherever it is written.
+//
+// ONE ANNOTATION, THREE POSITIONS, TWO VERDICTS — the reproduction:
+//
+//     let p: Pair<Int, Text, Bool> = …;           refused
+//     fn take(p: Pair<Int, Text, Bool>) -> Int    refused
+//     type Bad is { p: Pair<Int, Text, Bool> };   ACCEPTED
+//
+// Signatures and statements were checked; a record field was reached
+// through neither. Whatever the checker knows about a written type —
+// arity, kinds, meta-parameter refinements, alias saturation — it did
+// not apply where a type says what its data IS.
+//
+// THE RULE WAS ALREADY WRITTEN DOWN, one line above the code that broke
+// it: "the lenient fallback exists ONLY for resolution-order gaps
+// (forward references that a later pass closes)". The predicate
+// implementing it was a whitelist with a single member, so everything
+// except one arity error was swallowed. Naming the GAP instead — a
+// forward reference is `TypeNotFound` — is both shorter and total.
+//
+// The forward reference below is the half that must keep working: `Late`
+// is declared AFTER the type that uses it, which is a resolution-order
+// gap and not a defect. A fix that surfaced every error would refuse
+// this file for the wrong reason.
+
+public type Pair<A, B> is { a: A, b: B };
+
+/// Forward reference — declared below, and legal.
+public type Holder is { late: Late };
+
+public type Late is { n: Int };
+
+// ERROR: `Pair` takes two type arguments, three were supplied — and it
+// is an error HERE, in a field, exactly as it is in a signature.
+public type Bad is { p: Pair<Int, Text, Bool> };
+
+fn main() {
+    print("unreachable");
+}

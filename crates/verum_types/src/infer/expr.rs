@@ -2086,8 +2086,133 @@ impl TypeChecker {
                 Ok(InferResult::new(expected.clone()))
     }
 
+    /// Refuse an integer literal that cannot be represented by the sized
+    /// integer type it is being checked against.
+    ///
+    /// Handles the negated spelling too — `-300` is a `Unary` around the
+    /// literal, a separate shape in the AST and a separate pole in the
+    /// spec.
+    ///
+    /// Silent when the expected type is not a sized integer, when the
+    /// literal carries its own suffix (the suffix decides, and a mismatch
+    /// there is a different diagnostic), or when the expression is not a
+    /// literal at all.
+    fn check_integer_literal_fits(&mut self, expr: &Expr, expected: &Type) -> Result<()> {
+        let value: i128 = match &expr.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                verum_ast::literal::LiteralKind::Int(i) if i.suffix.is_none() => i.value,
+                _ => return Ok(()),
+            },
+            ExprKind::Unary { op, expr: inner } if op.as_str() == "-" => match &inner.kind {
+                ExprKind::Literal(lit) => match &lit.kind {
+                    verum_ast::literal::LiteralKind::Int(i) if i.suffix.is_none() => -i.value,
+                    _ => return Ok(()),
+                },
+                _ => return Ok(()),
+            },
+            _ => return Ok(()),
+        };
+
+        let name = match self.get_type_name(expected) {
+            Some(n) => n,
+            None => return Ok(()),
+        };
+        let (lo, hi) = match Self::integer_type_range(name.as_str()) {
+            Some(r) => r,
+            None => return Ok(()),
+        };
+        if value >= lo && value <= hi {
+            return Ok(());
+        }
+        Err(TypeError::OtherWithCodeSpanned {
+            // E410, NOT E408. E408 already names the
+            // explicit-type-argument arity error, and a code is a NAME:
+            // two meanings under one is how `E313` came to mean two
+            // things earlier the same day.
+            code: verum_common::Text::from("E410"),
+            msg: verum_common::Text::from(format!(
+                "the literal `{value}` does not fit in `{name}`\n  \
+                 note: `{name}` holds {lo} to {hi}"
+            )),
+            span: expr.span,
+        })
+    }
+
+    /// A capability set may only be GIVEN AWAY, never acquired.
+    ///
+    /// `Store with [Read, Write]` may be passed where `Store with [Read]`
+    /// is required — that is attenuation, and it is the direction the
+    /// feature exists to make ordinary. The reverse must be refused: a
+    /// caller holding only `[Read]` cannot satisfy a callee that needs to
+    /// write, and accepting it makes the annotation decoration.
+    ///
+    /// AN UNRESTRICTED VALUE IS NOT A DEFECT. A plain `Store` carries no
+    /// stated restriction, i.e. full rights, so passing it where any
+    /// restriction is required is itself an attenuation. Refusing that
+    /// would make every capability parameter unreachable from ordinary
+    /// code, which is how a feature gets declared and then never used.
+    ///
+    /// `unify` cannot host this rule: it peels the wrapper in BOTH
+    /// directions by design, because a capability does not change what a
+    /// value IS. The rule is directional, so it belongs where a direction
+    /// exists — checking an actual against an expected.
+    fn check_capability_attenuation(
+        &mut self,
+        actual: &Type,
+        expected: &Type,
+        span: verum_ast::Span,
+    ) -> Result<()> {
+        fn caps(ty: &Type) -> Option<&crate::capability::TypeCapabilitySet> {
+            match ty {
+                Type::CapabilityRestricted { capabilities, .. } => Some(capabilities),
+                Type::Reference { inner, .. }
+                | Type::CheckedReference { inner, .. }
+                | Type::UnsafeReference { inner, .. } => caps(inner),
+                _ => None,
+            }
+        }
+        let required = match caps(expected) {
+            Some(c) => c,
+            None => return Ok(()),
+        };
+        let applied = self.unifier.apply(actual);
+        let held = match caps(&applied) {
+            Some(c) => c,
+            // Unrestricted: full rights, so any restriction is a give-away.
+            None => return Ok(()),
+        };
+        if required.is_subset_of(held) {
+            return Ok(());
+        }
+        let want: Vec<String> = required.names().iter().map(|n| n.to_string()).collect();
+        let have: Vec<String> = held.names().iter().map(|n| n.to_string()).collect();
+        Err(TypeError::OtherWithCodeSpanned {
+            code: verum_common::Text::from("E411"),
+            msg: verum_common::Text::from(format!(
+                "capability cannot be widened: this value carries [{}], and [{}] is required\n  \
+                 note: a capability may be given away, never acquired",
+                have.join(", "),
+                want.join(", "),
+            )),
+            span,
+        })
+    }
+
     fn synth_and_check(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
+        // A LITERAL MUST FIT THE SIZED TYPE IT IS CHECKED AGAINST, and this
+        // has to be asked BEFORE synthesis.
+        //
+        // The literal's own type is `Int`, and `Int` UNIFIES with `Int8`
+        // through integer subtyping — so `let x: Int8 = 300` type-checks
+        // and returns long before the coercion block further down, which
+        // exists only for the case where unification would have failed.
+        // That is why the range comparison a few hundred lines below,
+        // which computes exactly this answer, never saw an out-of-range
+        // literal: by then the program had already been accepted.
+        self.check_integer_literal_fits(expr, expected)?;
+
         let result = self.synth_expr(expr)?;
+        self.check_capability_attenuation(&result.ty, expected, expr.span)?;
         if std::env::var("VERUM_TRACE_QUALPATH").is_ok()
             && matches!(&expr.kind, ExprKind::MethodCall { .. })
         {
@@ -8828,12 +8953,35 @@ impl TypeChecker {
             return Ok(InferResult::new(Type::Never));
         }
 
-        // Unwrap refined types to access base type for field access.
-        // A refined record { x: Int, y: Int }{predicate} should allow .x and .y access.
-        let normalized_ty = match &normalized_ty {
-            Type::Refined { base, .. } => (**base).clone(),
-            other => other.clone(),
-        };
+        // Unwrap refined AND capability-restricted types to access the base
+        // type for field access.
+        //
+        // A refined record `{ x: Int, y: Int }{predicate}` should allow `.x`,
+        // and so should `Store with [Read]` — A CAPABILITY RESTRICTS WHAT MAY
+        // BE DONE WITH A VALUE, IT DOES NOT CHANGE WHAT THE VALUE IS. The
+        // refinement arm was already here, with that reasoning; the
+        // capability is the same shape and was one arm away, so
+        // `Store with [Read]` reported
+        //
+        //     error<E103>: Cannot access field 'n' on non-record type:
+        //                  Store with [ReadOnly]
+        //
+        // which made attenuation unusable on any record — the shape the
+        // feature exists for. `unify.rs` has always read a capability as a
+        // wrapper; this reads it the same way.
+        //
+        // A LOOP, not two arms: `Store with [Read]` refined, or a refined
+        // record restricted, carries both wrappers and either order must
+        // reach the record underneath.
+        let mut normalized_ty = normalized_ty;
+        loop {
+            normalized_ty = match &normalized_ty {
+                Type::Refined { base, .. } => (**base).clone(),
+                Type::CapabilityRestricted { base, .. } => (**base).clone(),
+                _ => break,
+            };
+        }
+        let normalized_ty = normalized_ty;
 
         match &normalized_ty {
             Type::Record(fields) => {

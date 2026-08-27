@@ -1706,7 +1706,7 @@ fn substitute_refinement_binder(
                             // language should be defaulting. T0922 carries
                             // the design; flip `>` to `!=` once
                             // `type Result<T, E = Error>` is writable.
-                            if expected_count > 0 && provided > expected_count {
+                            if expected_count > 0 && provided != expected_count {
                                 return Err(TypeError::OtherWithCodeSpanned {
                                     code: verum_common::Text::from("E407"),
                                     msg: verum_common::Text::from(format!(

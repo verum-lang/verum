@@ -2234,10 +2234,24 @@ impl TypeChecker {
     /// Extend this predicate when new validation-class TypeErrors gain
     /// arms in `ast_to_type`.
     fn field_error_must_surface(e: &crate::TypeError) -> bool {
-        matches!(
-            e,
-            crate::TypeError::DependentValueArgArityMismatch { .. }
-        )
+        // INVERTED (T0924). This used to be a whitelist with ONE member,
+        // so every other defect in a field's type annotation was
+        // swallowed and replaced by a lenient re-resolution — and a
+        // record field became the one position in the language where an
+        // annotation is not checked:
+        //
+        //     let p: Pair<Int, Text, Bool>            refused
+        //     fn take(p: Pair<Int, Text, Bool>)       refused
+        //     type Bad is { p: Pair<Int, Text, Bool> } ACCEPTED
+        //
+        // The comment above the call site already stated the right rule —
+        // "the lenient fallback exists ONLY for resolution-order gaps
+        // (forward references that a later pass closes)" — and the
+        // predicate implemented a list instead of the rule. Naming the
+        // gap is both shorter and total: a forward reference is
+        // `TypeNotFound`, and everything else is a defect in what the
+        // author wrote.
+        !matches!(e, crate::TypeError::TypeNotFound { .. })
     }
 
     /// T0266 — ONE authority for recording a dependent family's declared

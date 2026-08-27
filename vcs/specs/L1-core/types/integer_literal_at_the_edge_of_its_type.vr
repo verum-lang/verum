@@ -1,0 +1,29 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: types, integers, literals, ranges
+// @expected-stdout-begin
+// 127 -128 0 255 32767 4294967295
+// @expected-stdout-end
+// @description: The positive pole of the literal-range rule — every
+//   edge value is accepted.
+//
+// Without this file, the `typecheck-fail` sibling reads as "refuse
+// integer literals", and the cheapest way to make it pass is an
+// off-by-one or a blanket refusal. Each value below sits exactly ON a
+// boundary, in both directions and in both signednesses, so a check that
+// is wrong by one anywhere fails here.
+
+public fn edges() -> Text {
+    let a: Int8 = 127;
+    let b: Int8 = -128;
+    let c: Byte = 0;
+    let d: Byte = 255;
+    let e: Int16 = 32767;
+    let f: UInt32 = 4294967295;
+    f"{a} {b} {c} {d} {e} {f}"
+}
+
+fn main() {
+    print(edges());
+}

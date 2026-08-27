@@ -1,0 +1,41 @@
+// @test: typecheck-fail
+// @level: L1
+// @tier: 0
+// @tags: types, integers, literals, ranges
+// @expected-error: E410
+// @description: An integer literal must fit the sized type it is
+//   checked against.
+//
+//     let x: Int8 = 300;   // was accepted, then truncated
+//
+// THE ANSWER WAS ALREADY COMPUTED. `synth_and_check` asks
+// `integer_type_range(expected)` and compares the literal against it —
+// and used the result only to take a fast path. When the literal did NOT
+// fit, the code fell through and the value was accepted anyway, so the
+// program ran and printed whatever the truncation produced.
+//
+// What made it invisible is that the TYPE is checked on the same line:
+// `let x: Int8 = "hello"` is refused with E400. Only the literal's RANGE
+// went unasked — and `check_literal_fits` in `integer_hierarchy`, the
+// function written for exactly this, has no caller in the compiler at
+// all.
+//
+// WHY THIS IS A SPEC AND NOT A UNIT TEST: a bare `TypeChecker` does not
+// know `Int8`, `Byte` or `UInt32` — the sized integer types arrive with
+// the core metadata — so a unit test naming them measures "type not
+// found: Int8" and passes for the wrong reason. `Int` is the only width
+// that harness can speak about, and `let x: Int = <literal>` never
+// reaches the coercion path at all, because the literal's own type
+// already IS `Int`. The rule lives on the path where the expected type
+// differs from the literal's default, which is exactly what a sized
+// annotation is.
+
+public fn too_big() -> Int8 {
+    // ERROR: `Int8` holds -128 to 127.
+    let x: Int8 = 300;
+    x
+}
+
+fn main() {
+    print(f"{too_big()}");
+}
