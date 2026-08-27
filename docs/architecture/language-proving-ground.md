@@ -273,6 +273,51 @@ Count `^error`. Use the same command on both sides. An instrument that
 under-reports is worse than no instrument, because it answers
 confidently.
 
+### 14. Break every claim the programme makes about the language
+
+A proving ground documents what the language guarantees. Those sentences
+are the first thing to go stale, and nothing in a passing build notices:
+a guarantee that quietly stopped being enforced reads exactly like one
+that still is.
+
+So break them, one edit each, and record what the compiler actually
+said. Seven claims, seven edits, seven reverts:
+
+| claim | the edit | what came back |
+|---|---|---|
+| refinement types | a `len` returning `-1` | `error<E500>: refinement constraint failed` |
+| contexts (DI) | `using [Clock]` removed from a function that reads the clock | `error<E400>: no method named 'now' found for type 'Clock'` |
+| `pure` is verified | a `print` in a pure function | `error<E503>: pure function … has side effects: IO` |
+| meta refinements | a width the protocol refuses | `error<E506>: meta argument 1 violates its refinement` |
+| `async` is inherited | `async` removed from a function that awaits | `Cannot await non-future type: …` |
+| affine resources | one token spent twice | `value 'slot' used after move` |
+| capability attenuation | a caller holding `[Evict]` calls `store` | **nothing; the project still checked clean** |
+
+THREE KINDS OF RESULT, and each is worth having:
+
+* **The claim holds.** Now it is checked rather than asserted, and the
+  document can say how to re-check it.
+* **The claim does NOT hold** — the last row. The programme was
+  asserting a guarantee the compiler does not keep, which is the
+  declared-but-unenforced shape rule 6 puts first, appearing in the
+  proving ground's own documentation. Mark it in place; do not delete
+  the signatures, because they are the honest shape of the rule and what
+  the fix will make real.
+* **The claim holds but the REPORT is weaker than the guarantee.** Two
+  of the six enforced refusals carried no error code, so a gate
+  filtering on `error<E…>` scores them zero; three named the symptom
+  instead of the cause (`async` removed reads as "the awaited value is
+  not a future"; the missing context reads as `Clock` having no method
+  `now`, when it has one). Both classes were filed.
+
+WHY THIS BEATS A GREP for diagnostic quality: it samples exactly the
+paths somebody thought were worth promising, and it costs one edit and
+one `verum check` each. It found two diagnostic defects and one
+unenforced guarantee in under an hour.
+
+A claim nobody has tried to falsify is worth what a scene that cannot
+fail is worth.
+
 ## What the proving ground must keep doing
 
 It has to stay ambitious. The moment it is trimmed to what already
