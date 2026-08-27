@@ -1,0 +1,33 @@
+// @test: typecheck-fail
+// @level: L1
+// @tier: 0
+// @tags: meta-parameters, type-identity
+// @expected-error: E400
+// @description: A meta parameter is part of TYPE IDENTITY — two widths
+//   are two types.
+//
+// The control for `meta_parameter_refinement.vr`. That spec pins what
+// does not work; this pins what does, so the pair says exactly how far
+// the feature reaches.
+//
+// Mixing digest widths is a real supply-chain bug class — a 32-byte
+// hash compared against the first 32 bytes of a 64-byte one matches
+// artefacts nobody signed. Here the language refuses it at the type
+// level rather than at a length check someone can forget.
+
+public type Digest<N: meta USize> is {
+    bytes: [Byte; N],
+};
+
+fn same(a: &Digest<4>, b: &Digest<4>) -> Bool {
+    a.bytes.len() == b.bytes.len()
+}
+
+fn main() {
+    let four: Digest<4> = Digest { bytes: [1_u8, 2_u8, 3_u8, 4_u8] };
+    let eight: Digest<8> = Digest {
+        bytes: [1_u8, 2_u8, 3_u8, 4_u8, 5_u8, 6_u8, 7_u8, 8_u8],
+    };
+    // An 8-wide digest where a 4-wide is required.
+    print(f"{same(&four, &eight)}");
+}

@@ -1,0 +1,38 @@
+// @test: typecheck-fail
+// @level: L1
+// @tier: 0
+// @tags: meta-parameters, refinement, declared-but-unenforced
+// @expected-error: E500
+// @description: PINS A GAP — a refinement on a META PARAMETER is
+//   accepted and constrains nothing.
+//
+// The grammar admits it:
+//
+//     meta_param = identifier , ':' , 'meta' , type_expr , [ refinement ] ;
+//
+// so a width can be declared to be one of a fixed set, at compile time,
+// and the compiler will say nothing when it is not. This spec expects
+// the refusal that does not happen yet; it is red on purpose and turns
+// green when the position is wired to the refinement emitter.
+//
+// The control below is what makes this one narrow question rather than
+// "meta parameters are unfinished": the width IS part of type identity,
+// and passing a `Digest<8>` where a `Digest<4>` is required IS refused.
+// So the parameter is real. Only its refinement is inert.
+//
+// This is the worst class of defect in this codebase's taxonomy — a
+// feature that is present, accepted, documented in the grammar, and
+// does nothing, so everything built on it inherits a guarantee that was
+// never made. A digest width is exactly the thing someone would lean
+// on: mixing a 32-byte and a 64-byte digest is a real supply-chain bug
+// class, and this reads like the language rules it out.
+
+public type Digest<N: meta USize {it == 4 || it == 8}> is {
+    bytes: [Byte; N],
+};
+
+fn main() {
+    // 5 is not admitted by the predicate. This must be refused.
+    let bad: Digest<5> = Digest { bytes: [1_u8, 2_u8, 3_u8, 4_u8, 5_u8] };
+    print(f"len={bad.bytes.len()}");
+}
