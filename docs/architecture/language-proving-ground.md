@@ -195,6 +195,34 @@ LEFT BEHIND — new files, a changed working directory, an unexpected
 mode, a stray byte on stdout. A defect that produces nothing is rarer
 than one that produces something in the wrong place.
 
+### 11. Check the whole project, not the file you are looking at
+
+The proving-ground registry ran for weeks with TEN unreported errors in
+it, because the commands anyone actually types do not reach a project's
+other modules:
+
+```
+verum run src/main.vr      the program runs
+verum check src/main.vr    0 errors
+verum check                10 errors
+```
+
+Three of those ten were language defects nobody had seen — a silently
+WRONG type for an `Ok` payload, a complete match refused as
+non-exhaustive, a purity violation executed. They were invisible not
+because they were subtle but because no command in the working loop
+looked at the file they were in.
+
+That the file-targeted commands miss them is itself a defect and is
+filed. Until it is fixed, **run the argument-less `verum check` at the
+end of every session on the proving ground**, and read what it says
+about modules you did not touch. It costs one command and it is the
+single highest-yield instrument in this document.
+
+The general form: when a tool has a broad mode and a narrow one, the
+narrow one is what gets typed and the broad one is where the findings
+are. Ask what the broad mode says before concluding a program is clean.
+
 ## What the proving ground must keep doing
 
 It has to stay ambitious. The moment it is trimmed to what already
