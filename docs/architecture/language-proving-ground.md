@@ -357,13 +357,28 @@ a record field, where nothing is checked at all, and would have been
 written up as a missing arity check instead of the separate, larger
 finding that a type declaration's interior is unchecked.
 
-AND MEASURE THE BLAST RADIUS BEFORE LANDING THE FIX. Turning the arity
-check two-sided refuses 194 uses of `Result<X>` across 31 stdlib files
-— and zero uses of any other multi-parameter type. One type, written
-the same way 194 times, is not 194 mistakes: it is a missing feature
-(a default type parameter) that the stdlib has been assuming. A fix
-whose blast radius lands entirely on one shape is a message about the
-shape, not about the sites.
+AND MEASURE THE BLAST RADIUS BEFORE LANDING THE FIX — BUT MEASURE IT,
+DO NOT GREP IT. Turning the arity check two-sided looked like it would
+refuse 194 uses of `Result<X>` across 31 stdlib files, which read as a
+missing feature the stdlib had been assuming. The filter was
+`Result<[A-Za-z_][A-Za-z0-9_.]*>`, and it matched `IoResult<Int>` — 118
+of them — along with every other alias ending in `Result`, each of which
+genuinely takes one parameter. With a word boundary the count is zero; a
+census over the declared arity of all 690 generic types finds 24
+under-applied occurrences in 7 files.
+
+The trap is that the wrong number was PLAUSIBLE and led somewhere
+productive: it motivated default type parameters, which turned out to be
+a real missing feature and landed. A number that explains everything and
+points at good work is the hardest kind to doubt.
+
+Two habits, and they are cheap:
+
+* **Bound the name.** A filter for a TYPE must not match a longer name
+  ending in it. `\bResult<` costs one character over `Result<`.
+* **Let the compiler count, not the regex.** The decisive measurement of
+  "what would this refuse" is to make the change and sweep the corpus. A
+  grep estimates; a build measures.
 
 ### 16. Watch the sweep, do not just collect its result
 
@@ -408,6 +423,37 @@ WHAT TO ACTUALLY DO:
 The corollary is a cost: a broad sweep at ~2s/file is an hour or two,
 and a debug binary makes it eight. Build the release binary first. An
 instrument you will not run twice is not an instrument.
+
+### 17. Your own recorded conclusion is a hypothesis, not a finding
+
+A task journal is the most trustworthy thing in this project and the
+easiest to over-trust. Three times in one session a conclusion written
+down by the same author, with reasoning attached, was simply wrong — and
+each time the instrument that refuted it was the one that same note had
+said to build.
+
+| what the note said | what the measurement said |
+|---|---|
+| "the rule is computed and discarded, so make the discard an error" | the path is not taken at all; the literal's own type unifies with the sized one and the program is accepted long before |
+| "the binding erases the capability, or the renderer does — establish which" | neither: the binding carries it, `Display` prints it, and the misleading message is raised inside the unifier's own deliberate peel |
+| "194 stdlib sites depend on a feature the language lacks" | 2 sites, and both are defects; the filter had matched `IoResult` |
+
+WHAT SEPARATES THE THREE FROM ORDINARY ERROR: every one of them was
+plausible, internally consistent, and pointed at productive work. That is
+what makes a written conclusion dangerous — it arrives with its reasoning
+already attached, so re-reading it feels like verifying it.
+
+THE HABIT: when a note ends with "the next step is an instrument, not a
+change", BUILD THE INSTRUMENT EVEN IF THE CONCLUSION NOW SEEMS OBVIOUS.
+The note was written by someone who could not see further than you can,
+and the reason it asked for a measurement is that a measurement was
+needed. Reading the note is not performing it.
+
+The corollary for writing them: state the OBSERVATION separately from
+the INFERENCE, so a later reader can keep the first and re-test the
+second. "`expected 'Int', found 'Store'` at three binding sites" is an
+observation and stayed true. "so the binding erases the capability" was
+an inference and did not.
 
 ## What the proving ground must keep doing
 
