@@ -591,12 +591,38 @@ impl TypeChecker {
                 // exhaustiveness see the concrete payload (`Poll<Unit>`).
                 let applied = self.unifier.apply(&scrutinee_ty);
                 let scrutinee_ty = self.resolve_assoc_projections_deep(&applied);
+                // The arms are ALTERNATIVES — the same rule, and the same
+                // code, as the arm loop in `infer_match_expr`. A `match` has
+                // TWO walkers, one per direction, exactly as `if` does; a fix
+                // applied to one of them is not applied to the other, and a
+                // `match` in tail position of a typed function comes through
+                // HERE, not through the synth path.
+                let affine_at_match = self.affine_tracker.snapshot_alternatives();
+                // A `match` has TWO walkers, one per direction. This probe
+                // names WHICH one ran: an instrument that can only see one of
+                // them reports a fix as inert when it is merely in the other
+                // half of the pair.
+                if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
+                    eprintln!("[affine] match walker=CHECK arm-loop, {} arms", arms.len());
+                }
+                let mut affine_per_arm: Vec<crate::affine::AffineAlternatives> = Vec::new();
                 for arm in arms.iter() {
+                    self.affine_tracker.restore_alternatives(&affine_at_match);
                     self.bind_pattern(&arm.pattern, &scrutinee_ty)?;
                     if let Some(ref guard) = arm.guard {
                         self.check_expr(guard, &Type::bool())?;
                     }
-                    self.check_expr(&arm.body, expected)?;
+                    let arm_result = self.check_expr(&arm.body, expected)?;
+                    // An arm that diverges never reaches the code after the
+                    // match, so what it consumed cannot reach it either.
+                    if !self.is_never_type(&arm_result.ty) {
+                        affine_per_arm.push(self.affine_tracker.snapshot_alternatives());
+                    }
+                }
+                if affine_per_arm.is_empty() {
+                    self.affine_tracker.restore_alternatives(&affine_at_match);
+                } else {
+                    self.affine_tracker.merge_alternatives(&affine_per_arm);
                 }
 
                 self.borrow_tracker.exit_scope(); // T0264: release scrutinee borrow at match end
@@ -1641,11 +1667,22 @@ impl TypeChecker {
                     }
                 }
 
+                // The two branches are ALTERNATIVES — see the match arms in
+                // `infer_match_expr` for the same rule. The condition itself
+                // runs on every path, so the snapshot is taken after it.
+                let affine_at_if = self.affine_tracker.snapshot_alternatives();
+
                 // Check then branch with evidence in scope
                 self.check_block(then_branch, expected)?;
 
                 // Check if then branch unconditionally exits
                 let then_exits = EvidencePropagator::block_unconditionally_exits(then_branch);
+
+                // A branch that unconditionally exits never reaches the code
+                // after the `if`, so what it consumed cannot reach it either.
+                let affine_then = (!then_exits)
+                    .then(|| self.affine_tracker.snapshot_alternatives());
+                self.affine_tracker.restore_alternatives(&affine_at_if);
 
                 self.ctx.env.pop_scope();
                 self.refinement_evidence.pop_scope();
@@ -1688,9 +1725,35 @@ impl TypeChecker {
                     self.check_expr(else_expr, expected)?;
                     self.ctx.env.pop_scope();
                     self.refinement_evidence.pop_scope();
+                    let affine_else = self.affine_tracker.snapshot_alternatives();
+                    self.merge_if_alternatives(affine_then, Some(affine_else), &affine_at_if);
+                } else {
+                    // No `else`: falling through IS the second alternative,
+                    // and it consumed nothing beyond the condition.
+                    self.merge_if_alternatives(affine_then, None, &affine_at_if);
                 }
 
                 Ok(InferResult::new(expected.clone()))
+    }
+
+    /// Fold the two alternatives of an `if` back together.
+    ///
+    /// `then_state` is `None` when the then-branch unconditionally exits, and
+    /// `else_state` is `None` when there is no `else` — in which case the
+    /// fall-through path is the second alternative and is exactly the state
+    /// at the construct.
+    fn merge_if_alternatives(
+        &mut self,
+        then_state: Option<crate::affine::AffineAlternatives>,
+        else_state: Option<crate::affine::AffineAlternatives>,
+        at_if: &crate::affine::AffineAlternatives,
+    ) {
+        let mut branches: Vec<crate::affine::AffineAlternatives> = Vec::new();
+        if let Some(s) = then_state {
+            branches.push(s);
+        }
+        branches.push(else_state.unwrap_or_else(|| at_if.clone()));
+        self.affine_tracker.merge_alternatives(&branches);
     }
 
     /// Bidirectional type-check a record literal expression against an expected type.
@@ -4830,10 +4893,17 @@ impl TypeChecker {
                         }
                     }
 
+                    // Alternatives, exactly as in `check_if_expr`.
+                    let affine_at_if = self.affine_tracker.snapshot_alternatives();
+
                     let then_result = self.infer_block(then_branch)?;
 
                     self.ctx.env.pop_scope();
                     self.refinement_evidence.pop_scope();
+
+                    let affine_then = (!self.is_never_type(&then_result.ty))
+                        .then(|| self.affine_tracker.snapshot_alternatives());
+                    self.affine_tracker.restore_alternatives(&affine_at_if);
 
                     let else_result = if let Some(else_expr) = else_branch {
                         self.ctx.env.push_scope();
@@ -4850,6 +4920,13 @@ impl TypeChecker {
                     } else {
                         InferResult::new(Type::unit())
                     };
+
+                    {
+                        let affine_else = else_branch
+                            .is_some()
+                            .then(|| self.affine_tracker.snapshot_alternatives());
+                        self.merge_if_alternatives(affine_then, affine_else, &affine_at_if);
+                    }
 
                     // Unify branch types
                     let span = expr.span;
@@ -5146,6 +5223,9 @@ impl TypeChecker {
         use crate::refinement_evidence::{PathCondition, PathConditionKind};
         let ExprKind::Match { expr: scrutinee, arms } = &expr.kind
             else { unreachable!() };
+        if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
+            eprintln!("[affine] match walker=SYNTH (infer_match_expr), {} arms", arms.len());
+        }
 
                     // NOTE: Affine tracking for scrutinee is handled by synth_expr
                     // Do NOT add explicit use_value here - it would cause double-consume errors
@@ -5193,6 +5273,9 @@ impl TypeChecker {
                     if self.dependent_enabled {
                         let is_dependent = self.is_dependent_type(&scrut_ty);
                         if is_dependent {
+                            if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
+                                eprintln!("[affine] match walker=SYNTH -> DEPENDENT, early return");
+                            }
                             let dep_result =
                                 self.check_dependent_match(&scrut_ty, arms, expr.span);
                             self.borrow_tracker.exit_scope(); // T0264: balance the match scope
@@ -5212,8 +5295,24 @@ impl TypeChecker {
                     let mut result_ty = Type::Never;
                     let mut all_arm_types: List<(Type, verum_ast::Span)> = List::new();
 
+                    // The arms are ALTERNATIVES: exactly one of them runs.
+                    // Walking them in sequence and carrying the affine state
+                    // from one into the next asks "was it consumed earlier in
+                    // this traversal" when the question is "can both
+                    // consumptions happen in one execution" — which refuses
+                    // the commit-or-rollback shape every affine resource
+                    // appears in. Each arm starts from the state AT the match;
+                    // `merge_alternatives` folds them back with the union, so
+                    // a value consumed in ONE arm is still gone afterwards.
+                    let affine_at_match = self.affine_tracker.snapshot_alternatives();
+                    if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
+                        eprintln!("[affine] match walker=SYNTH arm-loop, {} arms", arms.len());
+                    }
+                    let mut affine_per_arm: Vec<crate::affine::AffineAlternatives> = Vec::new();
+
                     // First pass: check all arms and collect their types
                     for arm in arms.iter() {
+                        self.affine_tracker.restore_alternatives(&affine_at_match);
                         self.ctx.enter_scope();
                         self.refinement_evidence.push_scope();
 
@@ -5255,6 +5354,20 @@ impl TypeChecker {
 
                         self.refinement_evidence.pop_scope();
                         self.ctx.exit_scope();
+                        // An arm of type Never — `panic()`, `return` — does
+                        // not reach the code after the match, so what it
+                        // consumed cannot reach it either. The arm's own type
+                        // is the authority, and it is already computed above.
+                        if !is_arm_never {
+                            affine_per_arm.push(self.affine_tracker.snapshot_alternatives());
+                        }
+                    }
+                    if affine_per_arm.is_empty() {
+                        // Every arm diverges: nothing follows the match, so
+                        // leave the state as it stood at the match.
+                        self.affine_tracker.restore_alternatives(&affine_at_match);
+                    } else {
+                        self.affine_tracker.merge_alternatives(&affine_per_arm);
                     }
 
                     // Second pass: unify all non-Never arm types with the result type
@@ -11900,7 +12013,9 @@ impl TypeChecker {
     /// — a type unrelated to anything at the call site. `slice_from_raw_parts`
     /// returning `&[fresh]` is why
     ///
-    ///     let rest = unsafe { slice_from_raw_parts(p, n) };
+    /// ```text
+    /// let rest = unsafe { slice_from_raw_parts(p, n) };
+    /// ```
     ///
     /// has no determined element type anywhere in core/collections/list.vr.
     /// The argument already carries the answer; read it instead of inventing

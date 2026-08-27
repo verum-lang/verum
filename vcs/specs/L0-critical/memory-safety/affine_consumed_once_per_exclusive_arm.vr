@@ -5,7 +5,6 @@
 // @expected-stdout-begin
 // 7 -7
 // @expected-stdout-end
-// @skip: T0920: consuming an affine value in each of two EXCLUSIVE arms is refused as a use after move. Remedy: each branch must start from the affine state that held AT the construct, with a union merge afterwards. Per-branch snapshot/restore was written for `infer_match_expr` and for `if`/`else` and measured INERT — a trace inside `restore` shows it is never called for this shape, so neither is the walk that reaches these arms. Find the caller of `borrow_value` for a match arm before writing a third per-branch fix.
 // @description: An affine value may be consumed in EACH of two mutually
 //   exclusive arms, because exactly one of them runs.
 //
@@ -16,8 +15,8 @@
 // consumed exactly once per execution — which is precisely what affinity
 // asks for.
 //
-// The checker used to walk the arms in sequence and carry the consumed
-// state from one into the next:
+// The checker walked the arms in sequence and carried the consumed state
+// from one into the next:
 //
 //     error: value `tx` used after move
 //       moved at: 7142
@@ -38,6 +37,17 @@
 // The companion file carries the negative pole, and it is what keeps
 // this fix from being a hole: consuming in ONE arm and using the value
 // after the match is still an error.
+//
+// WHERE THE RULE WAS: `AffineTracker` already had `enter_scope` and
+// `merge_branch`, written for exactly this — "after an if-expression or
+// match, we need to merge the affine states from all branches". Nothing
+// in the compiler called either one; the only caller was a unit test.
+// And that test pinned the merge in the WRONG DIRECTION, asserting the
+// value is still available when consumed in one branch of two — which is
+// the merge an exactly-once obligation needs, asked of the question of
+// whether the value may still be used. Availability is the UNION of the
+// arms; the `linear` obligation is their INTERSECTION. They now live on
+// separate bits.
 
 type affine Tx is { id: Int };
 

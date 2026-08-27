@@ -1,4 +1,4 @@
-// @test: parse-pass
+// @test: typecheck-pass
 // @tier: all
 // @level: L0
 // @tags: memory-safety, linear-types, resource-safety, cbgr
@@ -14,8 +14,20 @@
 /// - Unused linear values cause compile-time error
 /// - Double use of linear values is also an error
 ///
-/// Spec: docs/improvements.md Section 6 (Linear Types)
 /// Impl: crates/verum_types/src/affine.rs
+///
+/// THIS FILE USED TO BE `parse-pass`. Ten cases named for linear
+/// semantics, and the only thing verified was that the text parses —
+/// which it would have done with every rule in this file broken. The
+/// obligation it names was in fact unchecked: `check_linear_consumed`
+/// had no caller anywhere in the compiler, so `type linear` was parsed,
+/// registered, tracked, and never enforced.
+///
+/// It is `typecheck-pass` now, and every case below is a program that
+/// consumes its linear value on every path — so the file fails if the
+/// obligation stops being asked, and equally if it starts being asked
+/// too eagerly. TEST 3 is the one that needs the branch merge: a value
+/// consumed in each of two exclusive branches is consumed exactly once.
 
 // ============================================================================
 // TEST 1: Linear type consumed once (valid)

@@ -98,10 +98,24 @@ fn test_branch_merge() {
     // Branch 2: don't use the value
     let branch2 = tracker.enter_scope();
 
-    // After merge, value should NOT be marked as consumed
-    // (only consumed in one branch, not both)
+    // After the merge the value is GONE, because one execution consumed it.
+    //
+    // This assertion used to read the other way — "available, because it was
+    // not consumed in BOTH branches" — which is the merge a `linear`
+    // (exactly-once) obligation needs, applied to the question of whether the
+    // value may still be used. Read that way it accepts a double free: take
+    // `match ok { true => commit(t), false => 0 }` followed by `commit(t)`,
+    // and the second `commit` sees an available value on a path where the
+    // first already consumed it.
+    //
+    // Availability is the UNION of the branches; the exactly-once obligation
+    // is their INTERSECTION, and it lives on a separate bit
+    // (`definitely_consumed`) so neither question has to answer for the other.
     branch1.merge_branch(&branch2);
-    assert!(branch1.is_available("handle")); // merge keeps it available (not consumed in both branches)
+    assert!(
+        !branch1.is_available("handle"),
+        "a value consumed on one path is gone on that path, so it is gone after the merge"
+    );
 }
 
 // Test that verifies the full type checking flow with parsing

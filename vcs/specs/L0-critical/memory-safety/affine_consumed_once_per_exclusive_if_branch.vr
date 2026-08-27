@@ -1,0 +1,68 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-stdout-begin
+// 7 -7 5
+// @expected-stdout-end
+// @description: The same rule as `affine_consumed_once_per_exclusive_arm`,
+//   one construct over: an affine value may be consumed in EACH branch of
+//   an `if`/`else`, because exactly one of them runs.
+//
+// A `match` and an `if` are the same question asked twice, and a fix
+// written for one of them is not a fix for the other — the two are
+// separate functions in the checker, and each had to be told. This file
+// exists so that stays true: a regression that repairs only the match
+// still fails here.
+//
+// The third function is the case the merge cannot get wrong by
+// accident. `guard` consumes on the early-exit path and then uses the
+// value after the `if`, and it is CORRECT: the branch that consumed `t`
+// returns, so no execution reaches the later use with `t` already gone.
+// A merge that folded in a branch which cannot fall through would refuse
+// this program. The branch's own type is the authority — it is `Never`,
+// and the checker already computes that.
+
+type affine Tx is { id: Int };
+
+fn commit(t: Tx) -> Int {
+    t.id
+}
+
+fn rollback(t: Tx) -> Int {
+    0 - t.id
+}
+
+/// Both branches consume, exactly one runs.
+fn finish(t: Tx, ok: Bool) -> Int {
+    if ok {
+        commit(t)
+    } else {
+        rollback(t)
+    }
+}
+
+/// The same with the branches nested, so the merge has to survive being
+/// applied to its own result.
+fn settle(t: Tx, ok: Bool, retry: Bool) -> Int {
+    if ok {
+        commit(t)
+    } else {
+        if retry {
+            rollback(t)
+        } else {
+            commit(t)
+        }
+    }
+}
+
+/// The consuming branch cannot fall through, so the later use is fine.
+fn guard(t: Tx, bail: Bool) -> Int {
+    if bail {
+        return commit(t);
+    }
+    commit(t) - 2
+}
+
+fn main() {
+    print(f"{finish(Tx { id: 7 }, true)} {settle(Tx { id: 7 }, false, true)} {guard(Tx { id: 7 }, false)}");
+}

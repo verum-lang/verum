@@ -11180,6 +11180,49 @@ impl TypeChecker {
         self.current_function_stage = prev_function_stage;
         self.current_function_is_transparent = prev_function_is_transparent;
 
+        // A `linear` binding is EXACTLY once, and the function body is the
+        // scope its obligation is owed to: reaching the end with one
+        // unconsumed is the error the modifier exists to raise. This is the
+        // only place that can ask, because the tracker is replaced on the
+        // next line.
+        //
+        // The question is `definitely_consumed`, not `is_consumed` — see
+        // `AffineTracker::merge_alternatives`. Consuming the value in one
+        // arm of two leaves the obligation unmet on the other path, and the
+        // MAY bit cannot tell that from a consumption on every path.
+        //
+        // PARAMETERS ARE EXEMPT. The obligation belongs to a value the
+        // function still HOLDS at the end of its scope — a `let`-bound
+        // local it created or received a result into. A parameter arrived
+        // by being moved in, and its scope end IS its destruction site, so
+        // requiring it to be moved on again would make the canonical
+        // consumer — `fn close(h: Handle) { }`, the function whose whole
+        // job is to receive and destroy — the one thing a linear type
+        // could not have.
+        let linear_exempt: std::collections::HashSet<verum_common::Text> = func
+            .params
+            .iter()
+            .filter_map(|p| match &p.kind {
+                verum_ast::decl::FunctionParamKind::Regular { pattern, .. } => {
+                    match &pattern.kind {
+                        verum_ast::pattern::PatternKind::Ident { name, .. } => {
+                            Some(name.name.clone())
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+        for err in self.affine_tracker.check_linear_consumed(func.span) {
+            if let crate::TypeError::LinearNotConsumed { name, .. } = &err
+                && linear_exempt.contains(name)
+            {
+                continue;
+            }
+            self.push_diagnostic_for(err);
+        }
+
         // Restore the outer affine tracker scope
         // This ensures affine tracking is isolated per function
         self.affine_tracker = prev_affine_tracker;

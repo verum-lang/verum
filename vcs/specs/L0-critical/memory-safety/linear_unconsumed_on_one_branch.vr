@@ -1,0 +1,47 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: linear, affine, control-flow, branches
+// @description: A `linear` value must be consumed on EVERY path, so
+//   consuming it in one arm of two is not enough.
+//
+// THE OTHER HALF OF THE BRANCH MERGE. Its sibling files check that an
+// affine value consumed in each of two exclusive arms is accepted; this
+// one checks that the opposite question gets the opposite merge.
+//
+//   * "may I still use it?" — the UNION of the arms. A value gone on any
+//     one path is gone, or the program can free it twice.
+//   * "was it definitely used?" — the INTERSECTION. A `linear` value is
+//     exactly-once, so an arm that leaves it alone leaves the obligation
+//     unmet.
+//
+// One bit cannot answer both. Answer the second question with the first
+// bit and this program is accepted, leaking the handle whenever `ok` is
+// false; answer the first with the second and a double free is accepted.
+// The two live on separate bits for that reason, and this file is the
+// pole that fails if they are ever collapsed back together.
+
+type linear Handle is { fd: Int };
+
+fn close(h: Handle) -> Int {
+    h.fd
+}
+
+// ERROR: on the `false` path `h` is never consumed.
+//
+// `h` is a `let`-bound local, which is where the obligation lives. A
+// PARAMETER is exempt: it arrived by being moved in, and its scope end is
+// its destruction site — otherwise `close` below, the function whose whole
+// job is to receive a handle and destroy it, would itself be an error, and
+// a linear type could not have a consumer.
+fn maybe_close(ok: Bool) -> Int {
+    let h = Handle { fd: 3 };
+    match ok {
+        true  => close(h),
+        false => 0,
+    }
+}
+
+fn main() {
+    print(f"{maybe_close(false)}");
+}

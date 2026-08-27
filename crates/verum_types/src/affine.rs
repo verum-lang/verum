@@ -138,8 +138,21 @@ struct AffineBinding {
     binding_span: Span,
     /// Where it was first used (if used)
     first_use: Option<Span>,
-    /// Whether the value has been consumed
+    /// Whether the value MAY have been consumed — true if some execution
+    /// reaching this point consumed it. This is the bit a later use is
+    /// refused against: a value gone on any one path is gone.
     is_consumed: bool,
+    /// Whether the value MUST have been consumed — true only if EVERY
+    /// execution reaching this point consumed it. This is the bit a
+    /// `linear` (exactly-once) binding is required to have set by the
+    /// end of its scope.
+    ///
+    /// The two differ only after a branching construct, and they differ
+    /// in opposite directions: `is_consumed` is the UNION of the arms,
+    /// `definitely_consumed` their INTERSECTION. Collapsing them into
+    /// one bit forces a choice between accepting a double free and
+    /// rejecting a correct linear program. See `merge_alternatives`.
+    definitely_consumed: bool,
     /// Fields that have been moved out (for partial move tracking)
     /// When a field is moved, the struct is partially moved and cannot be used as a whole
     moved_fields: Set<Text>,
@@ -298,6 +311,7 @@ impl AffineTracker {
                     binding_span: span,
                     first_use: None,
                     is_consumed: false,
+                    definitely_consumed: false,
                     moved_fields: Set::new(),
                     moved_indices: Set::new(),
                 },
@@ -325,6 +339,7 @@ impl AffineTracker {
                     binding_span: span,
                     first_use: None,
                     is_consumed: false,
+                    definitely_consumed: false,
                     moved_fields: Set::new(),
                     moved_indices: Set::new(),
                 },
@@ -346,6 +361,7 @@ impl AffineTracker {
                 binding_span: span,
                 first_use: None,
                 is_consumed: false,
+                    definitely_consumed: false,
                 moved_fields: Set::new(),
                 moved_indices: Set::new(),
             },
@@ -394,10 +410,12 @@ impl AffineTracker {
     /// approximation, which is the opposite of what an affine type is
     /// for (T0915):
     ///
-    ///     loop {
-    ///         if i >= n { return take(t); }   // E302, and `t` is moved once
-    ///         i = i + 1;
-    ///     }
+    /// ```text
+    /// loop {
+    ///     if i >= n { return take(t); }   // E302, and `t` is moved once
+    ///     i = i + 1;
+    /// }
+    /// ```
     ///
     /// DELIBERATELY NARROW. `break` is not treated as leaving: it exits
     /// only the innermost loop, so under nesting the outer one can still
@@ -487,6 +505,10 @@ impl AffineTracker {
             // Mark as consumed on first use (move semantics for affine/linear)
             binding.first_use = Some(span);
             binding.is_consumed = true;
+            // A consumption on the straight-line path is both MAY and MUST:
+            // every execution that gets here goes through it. The two bits
+            // only come apart where the paths do — see `merge_alternatives`.
+            binding.definitely_consumed = true;
         }
         Ok(())
     }
@@ -729,7 +751,10 @@ impl AffineTracker {
     pub fn check_linear_consumed(&self, scope_end: Span) -> List<TypeError> {
         self.bindings
             .iter()
-            .filter(|(_, b)| b.resource_kind == ResourceKind::Linear && !b.is_consumed)
+            // `linear` is EXACTLY once, so the question is whether every
+            // path consumed it — the MUST bit, not the MAY bit. They are
+            // the same everywhere except after a branching construct.
+            .filter(|(_, b)| b.resource_kind == ResourceKind::Linear && !b.definitely_consumed)
             .map(|(name, b)| TypeError::LinearNotConsumed {
                 name: name.clone(),
                 binding_span: b.binding_span,
@@ -766,22 +791,154 @@ impl AffineTracker {
         self.clone()
     }
 
-    /// Merge bindings from a branch (for control flow)
+    /// Merge one alternative branch into `self`, treating the two as
+    /// mutually exclusive paths through the same construct.
     ///
-    /// After an if-expression or match, we need to merge the affine states
-    /// from all branches. A value is consumed if it's consumed in ALL branches.
+    /// Both lattices move, in opposite directions: a value is MAY-consumed
+    /// if either path consumed it (so a later use is refused), and
+    /// MUST-consumed only if both did (so a `linear` binding is satisfied).
     pub fn merge_branch(&mut self, other: &AffineTracker) {
-        // For each binding in self, check if it's also consumed in other
         for (name, binding) in self.bindings.iter_mut() {
-            if let Some(other_binding) = other.bindings.get(name) {
-                // Only keep as consumed if consumed in BOTH branches
-                binding.is_consumed = binding.is_consumed && other_binding.is_consumed;
-            } else {
-                // If not in other branch, it's not consistently consumed
-                binding.is_consumed = false;
+            let (other_may, other_must) = match other.bindings.get(name) {
+                Some(b) => (b.is_consumed, b.definitely_consumed),
+                // A path that does not know the binding did not consume it.
+                None => (false, false),
+            };
+            binding.is_consumed |= other_may;
+            binding.definitely_consumed &= other_must;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Branching constructs: arms are ALTERNATIVES, not a sequence
+    // ------------------------------------------------------------------
+
+    /// Take the consumption state of every binding.
+    ///
+    /// Taken once before the arms of a `match` or the branches of an
+    /// `if`/`else`, then handed back to each arm through
+    /// `restore_alternatives`, so an arm starts from the state that held
+    /// AT the construct rather than the state its sibling left behind.
+    #[must_use]
+    pub fn snapshot_alternatives(&self) -> AffineAlternatives {
+        let mut states = Map::new();
+        for (name, b) in self.bindings.iter() {
+            states.insert(
+                name.clone(),
+                ConsumptionState {
+                    is_consumed: b.is_consumed,
+                    definitely_consumed: b.definitely_consumed,
+                    first_use: b.first_use,
+                    moved_fields: b.moved_fields.clone(),
+                    moved_indices: b.moved_indices.clone(),
+                },
+            );
+        }
+        AffineAlternatives { states }
+    }
+
+    /// Put the bindings back to a snapshot, so the next alternative starts
+    /// where the construct did. Bindings introduced since the snapshot —
+    /// an arm's own pattern variables — are left alone; they are out of
+    /// scope by the time the merge runs.
+    pub fn restore_alternatives(&mut self, at: &AffineAlternatives) {
+        if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
+            eprintln!("[affine] restore {} states", at.states.len());
+        }
+        for (name, s) in at.states.iter() {
+            if let Some(b) = self.bindings.get_mut(name) {
+                b.is_consumed = s.is_consumed;
+                b.definitely_consumed = s.definitely_consumed;
+                b.first_use = s.first_use;
+                b.moved_fields = s.moved_fields.clone();
+                b.moved_indices = s.moved_indices.clone();
             }
         }
     }
+
+    /// Fold the alternatives back together.
+    ///
+    /// `branches` holds one snapshot per alternative, each taken AFTER
+    /// that alternative ran. Exactly one of them happens, so:
+    ///
+    /// * MAY-consumed is their UNION — a value gone on any path is gone,
+    ///   and a use after the construct must be refused. This is what
+    ///   keeps the fix from being a hole.
+    /// * MUST-consumed is their INTERSECTION — a `linear` binding is
+    ///   satisfied only if no path can leave it unconsumed.
+    ///
+    /// The `moved_fields` / `moved_indices` sets follow the MAY direction
+    /// for the same reason.
+    pub fn merge_alternatives(&mut self, branches: &[AffineAlternatives]) {
+        if branches.is_empty() {
+            return;
+        }
+        for (name, b) in self.bindings.iter_mut() {
+            let mut may = false;
+            let mut must = true;
+            let mut first_use: Option<Span> = None;
+            let mut moved_fields: Set<Text> = Set::new();
+            let mut moved_indices: Set<usize> = Set::new();
+            for branch in branches {
+                match branch.states.get(name) {
+                    Some(s) => {
+                        may |= s.is_consumed;
+                        must &= s.definitely_consumed;
+                        if first_use.is_none() {
+                            first_use = s.first_use;
+                        }
+                        for f in s.moved_fields.iter() {
+                            moved_fields.insert(f.clone());
+                        }
+                        for i in s.moved_indices.iter() {
+                            moved_indices.insert(*i);
+                        }
+                    }
+                    // A binding the branch never saw is one it never
+                    // consumed: neutral for MAY, fatal for MUST.
+                    None => must = false,
+                }
+            }
+            b.is_consumed = may;
+            b.definitely_consumed = must;
+            if b.first_use.is_none() {
+                b.first_use = first_use;
+            }
+            b.moved_fields = moved_fields;
+            b.moved_indices = moved_indices;
+        }
+        if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
+            eprintln!(
+                "[affine] merge {} alternatives -> {}",
+                branches.len(),
+                self.bindings
+                    .iter()
+                    .map(|(n, b)| format!("{}:may={},must={}", n, b.is_consumed, b.definitely_consumed))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+        }
+    }
+}
+
+/// The consumption state of one binding, as an alternative path leaves it.
+#[derive(Debug, Clone)]
+struct ConsumptionState {
+    is_consumed: bool,
+    definitely_consumed: bool,
+    first_use: Option<Span>,
+    moved_fields: Set<Text>,
+    moved_indices: Set<usize>,
+}
+
+/// The consumption state of every binding at one point in the walk.
+///
+/// This is the unit the branching constructs trade in: taken at the
+/// construct, restored into each arm, and collected per arm for the
+/// merge. See `AffineTracker::snapshot_alternatives`.
+#[derive(Debug, Clone)]
+pub struct AffineAlternatives {
+    states: Map<Text, ConsumptionState>,
 }
 
 impl Default for AffineTracker {

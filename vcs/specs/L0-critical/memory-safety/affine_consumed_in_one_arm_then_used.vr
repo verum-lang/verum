@@ -2,7 +2,6 @@
 // @level: L0
 // @tier: 0
 // @tags: affine, linearity, control-flow, branches
-// @skip: T0920 companion: this pole already PASSES (the value is correctly refused). It is skipped only so the pair lands and is read together — un-skip it with its positive twin, because per-branch restoration without the merge would turn this program green and introduce a double free.
 // @description: The negative pole — a value consumed in ONE arm may not
 //   be used after the match.
 //
