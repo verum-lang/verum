@@ -32,7 +32,8 @@
 //!
 //! [`RefinementReflectionRegistry`] holds the reflected definitions
 //! keyed by qualified function name. Proof verifiers obtain a borrow
-//! of the registry and call [`apply_to_solver`] before discharging
+//! of the registry and inject
+//! [`RefinementReflectionRegistry::to_smtlib_block`] before discharging
 //! a goal — this asserts every relevant axiom into the Z3 context.
 //!
 //! ## Why it matters
@@ -182,11 +183,51 @@ fn is_smtlib_builtin_symbol(tok: &str) -> bool {
 #[derive(Debug, Default, Clone)]
 pub struct RefinementReflectionRegistry {
     by_name: Map<Text, ReflectedFunction>,
+    /// Names of the module's VARIANT types.
+    ///
+    /// A `path_K.A` constant in a reflected body is a variant of `K`,
+    /// and its SORT is `K`'s — not `Int`, which is what every one of
+    /// them used to be declared as. A body that compares a parameter of
+    /// sort `Verum!K` against an `Int` constant is ill-sorted, so Z3
+    /// rejects the WHOLE block and every axiom in the module goes
+    /// quiet: `match_reflection.vr` claimed `verify-pass` and had never
+    /// proved a single one of its theorems (T0902).
+    ///
+    /// Only a name in this set gets the opaque sort. A multi-segment
+    /// path is not always a variant — `some_module.MAX` is a module
+    /// constant, and giving it an opaque sort would make arithmetic on
+    /// it ill-sorted in exactly the way this fixes elsewhere.
+    variant_types: std::collections::BTreeSet<Text>,
 }
 
 impl RefinementReflectionRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Tell the registry which of the module's types are variant types
+    /// — see `variant_types`. The goal side learns the same set through
+    /// `ProofSearchEngine::register_variant_type`, and the two must
+    /// agree or the axiom and the goal name differently-sorted
+    /// constants again.
+    pub fn register_variant_type_name(&mut self, type_name: Text) {
+        self.variant_types.insert(type_name);
+    }
+
+    /// The SMT sort a `path_…` constant carries: the opaque sort of its
+    /// variant type when the head names one, `Int` otherwise. ONE
+    /// authority, consulted by the declaration emitted here and — via
+    /// the same rule on the registered set — by the Z3-AST translator.
+    pub fn path_const_sort(&self, path_const: &str) -> String {
+        let Some(rest) = path_const.strip_prefix("path_") else {
+            return "Int".to_string();
+        };
+        let head = rest.split('.').next().unwrap_or("");
+        if !head.is_empty() && self.variant_types.contains(&Text::from(head)) {
+            crate::solver_symbols::opaque_sort(head)
+        } else {
+            "Int".to_string()
+        }
     }
 
     /// Register a reflected function. Returns `Err` if a function
@@ -245,13 +286,15 @@ impl RefinementReflectionRegistry {
             .collect();
         names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
 
-        // Declare the variant-path constants (`path_K.A`, sort Int) referenced
-        // by the reflected bodies BEFORE the function declarations, so Z3's
-        // `from_string` can resolve them. The block is injected before the
-        // goal/axiom side does `Int::new_const("path_K.A")` (verify_cmd.rs
-        // :1211-1220), so declaring here first means the later `new_const`
-        // reuses the same Int symbol — no double-declaration. A BTreeSet keeps
-        // the emission order deterministic for proof_stability.
+        // Collect the variant-path constants (`path_K.A`) the reflected
+        // bodies reference. They are declared below, after the sorts
+        // they name, and BEFORE the function declarations so Z3's
+        // `from_string` can resolve them. The block is injected before
+        // the goal side builds the same constant, so declaring here
+        // first means the goal's `new_const` reuses this symbol — which
+        // is only true if both sides give it the same SORT, hence
+        // `path_const_sort`. A BTreeSet keeps the emission order
+        // deterministic for proof_stability.
         let mut path_consts: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
         for n in &names {
@@ -264,21 +307,27 @@ impl RefinementReflectionRegistry {
                 path_consts.insert(tok.to_string());
             }
         }
-        for pc in &path_consts {
-            out.push_str("(declare-const ");
-            out.push_str(pc);
-            out.push_str(" Int)\n");
-        }
-
         // Auxiliary declarations the live entries depend on — opaque
         // type sorts and member-projection symbols — deduplicated
         // across entries, `declare-sort` lines strictly before the
         // `declare-fun` lines that use them (lexicographic order
         // would emit uses first: "(declare-fun" < "(declare-sort").
-        let mut aux: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        //
+        // A variant type named ONLY by a `path_K.A` constant has no
+        // entry here, so its sort is added to the same set rather than
+        // emitted separately: `declare-sort` twice for one name makes
+        // Z3 reject the whole block, which is the failure this fix
+        // exists to remove, not a new way to cause it.
+        let mut aux: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for n in &names {
             for d in self.by_name[*n].aux_decls.iter() {
-                aux.insert(d.as_str());
+                aux.insert(d.as_str().to_string());
+            }
+        }
+        for pc in &path_consts {
+            let sort = self.path_const_sort(pc);
+            if sort.starts_with("Verum!") {
+                aux.insert(format!("(declare-sort {} 0)", sort));
             }
         }
         for d in aux.iter().filter(|d| d.starts_with("(declare-sort")) {
@@ -288,6 +337,15 @@ impl RefinementReflectionRegistry {
         for d in aux.iter().filter(|d| !d.starts_with("(declare-sort")) {
             out.push_str(d);
             out.push('\n');
+        }
+        // Constants last among the declarations — every sort they name
+        // is declared by now.
+        for pc in &path_consts {
+            out.push_str("(declare-const ");
+            out.push_str(pc);
+            out.push(' ');
+            out.push_str(&self.path_const_sort(pc));
+            out.push_str(")\n");
         }
 
         for n in &names {
@@ -299,44 +357,6 @@ impl RefinementReflectionRegistry {
             out.push('\n');
         }
         Text::from(out)
-    }
-
-    /// Apply the entire registry to a solver via a callback.
-    /// The callback receives one assertion string per axiom; the
-    /// caller is responsible for parsing/asserting it into Z3.
-    pub fn apply_to_solver<F>(&self, mut sink: F)
-    where
-        F: FnMut(&str),
-    {
-        // Same closure gate as `to_smtlib_block` (T0489): only entries
-        // that are closed under the call graph are handed to the solver.
-        let (dropped, _drops) = self.dropped_entry_names();
-        let mut names: Vec<&Text> = self
-            .by_name
-            .keys()
-            .filter(|n| !dropped.contains(n.as_str()))
-            .collect();
-        names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-        // Same aux emission as `to_smtlib_block`: sorts before the
-        // projection symbols that use them, deduplicated.
-        let mut aux: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
-        for n in &names {
-            for d in self.by_name[*n].aux_decls.iter() {
-                aux.insert(d.as_str());
-            }
-        }
-        for d in aux.iter().filter(|d| d.starts_with("(declare-sort")) {
-            sink(d);
-        }
-        for d in aux.iter().filter(|d| !d.starts_with("(declare-sort")) {
-            sink(d);
-        }
-        for n in &names {
-            sink(self.by_name[*n].to_smtlib_decl().as_str());
-        }
-        for n in &names {
-            sink(self.by_name[*n].to_smtlib_axiom().as_str());
-        }
     }
 
     /// Compute the entries that must be dropped to close the registry
@@ -621,21 +641,7 @@ mod tests {
         assert!(add_decl_pos < dbl_decl_pos); // alphabetical
     }
 
-    #[test]
-    fn apply_to_solver_invokes_callback_per_assertion() {
-        let mut reg = RefinementReflectionRegistry::new();
-        reg.register(double_reflected()).unwrap();
-        reg.register(add_reflected()).unwrap();
-
-        let mut received: Vec<String> = Vec::new();
-        reg.apply_to_solver(|s| received.push(s.to_string()));
-
-        // 2 decls + 2 axioms = 4 lines
-        assert_eq!(received.len(), 4);
-        assert!(received[0].starts_with("(declare-fun"));
-        assert!(received[2].starts_with("(assert"));
-    }
-
+    
     #[test]
     fn reflectable_pure_total_closed_passes() {
         assert!(is_reflectable(&Text::from("f"), true, true, true).is_ok());

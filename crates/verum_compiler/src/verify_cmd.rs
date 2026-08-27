@@ -395,6 +395,15 @@ impl<'s> VerifyCommand<'s> {
                 }
             }
         }
+        // The reflection registry needs the same set: a `path_K.A`
+        // constant inside a reflected body is declared with `K`'s sort,
+        // and the goal side gives the same constant the same sort
+        // through `ProofSearchEngine::register_variant_type`. Two
+        // spellings of one constant is what silenced every axiom in a
+        // module that reflected a `match` (T0902).
+        for (tname, _) in &variant_registry {
+            reflection_registry.register_variant_type_name(tname.clone());
+        }
         debug!(
             "CLI verify: refinement={} signatures={} variant_axioms={}",
             reflection_registry.len(),

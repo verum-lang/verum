@@ -4,11 +4,30 @@
 // @tags: proofs, refinement, reflection, match
 // @timeout: 15000
 
-/// Enum-dispatch Bool predicate via `match`, reflected into SMT (T0597).
-/// Both theorems SHOULD prove: `is_red` unfolds to its reflected match body,
-/// so `is_red(Color.Red)` is true and `is_red(Color.Green)` is false.
-/// Before T0597 the match body was not reflected (`is_red` stayed an
-/// uninterpreted UF) and both theorems failed.
+/// An enum-dispatch `Bool` predicate written as a `match`, reflected into
+/// SMT: `is_red` unfolds to its reflected body, so `is_red(Color.Red)` is
+/// true and `is_red(Color.Green)` is false.
+///
+/// This file claimed a pass it had never delivered. Reflecting the match
+/// body (T0597) was necessary and was not sufficient — the axiom it wrote
+/// was ill-sorted against the goal, so it never applied and the two
+/// theorems went on failing for another campaign, with the spec asserting
+/// otherwise in its own header. Three things had to agree before it held
+/// (T0902):
+///
+///   * a `path_K.A` constant carries K's SORT, not `Int` — and THREE
+///     places build that constant, because `Color.Red` parses as a Path
+///     in one position and a Field in another;
+///   * the reflection registry declares it at the same sort, or Z3
+///     rejects the whole block and every axiom in the module goes quiet;
+///   * `!=` between two values of an uninterpreted sort translates — the
+///     variant-disjointness axiom stopped translating the moment the
+///     constants stopped being Ints, and was DROPPED from the solver
+///     context with a warning, which is why `green_is_not_red` was the
+///     last of the three to close.
+///
+/// `match_reflection_soundness.vr` is the pole that keeps this honest:
+/// the FALSE version of each claim must still fail.
 
 type Color is Red | Green;
 

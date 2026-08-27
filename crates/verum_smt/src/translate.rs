@@ -505,8 +505,31 @@ impl<'ctx> Translator<'ctx> {
             .insert(type_name.to_string(), fields);
     }
 
-    /// Register the named type of a value in scope (a parameter of the
-    /// obligation under proof).
+    /// The sort a `K.A`-shaped path constant carries: `K`'s opaque
+    /// sort when `K` is one of the module's variant types, and nothing
+    /// otherwise, which leaves the caller's `Int` default in place.
+    ///
+    /// A `K.A` path is a variant CONSTANT. Every one of them used to be
+    /// an `Int` constant, so a goal comparing a `Verum!K` parameter
+    /// against one was ill-sorted — and on the AXIOM side that made Z3
+    /// reject the entire reflection block, silencing every axiom in the
+    /// module (T0902). `RefinementReflectionRegistry::path_const_sort`
+    /// applies the same rule to the declaration, over the same set of
+    /// type names, because the two must spell one constant one way.
+    ///
+    /// The set is `variant_registry`, which the engine already fills
+    /// for quantifier exhaustiveness — a second copy would be one more
+    /// thing to keep in step.
+    fn variant_path_sort(&self, segments: &[String]) -> Option<z3::Sort> {
+        let head = segments.first()?;
+        if segments.len() < 2 || !self.variant_registry.borrow().contains_key(head) {
+            return None;
+        }
+        Some(Self::sort_from_name(&crate::solver_symbols::opaque_sort(
+            head,
+        )))
+    }
+
     /// Register the SORT a value in scope carries, by name.
     pub fn register_value_sort(&self, value: &str, sort_name: &str) {
         self.value_sorts
@@ -514,6 +537,8 @@ impl<'ctx> Translator<'ctx> {
             .insert(value.to_string(), sort_name.to_string());
     }
 
+    /// Register the named type of a value in scope (a parameter of the
+    /// obligation under proof).
     pub fn register_value_type(&self, value: &str, type_name: &str) {
         self.value_types
             .borrow_mut()
@@ -1143,6 +1168,9 @@ impl<'ctx> Translator<'ctx> {
                         })
                         .collect();
                     let key = format!("path_{}", segs.join("."));
+                    if let Some(sort) = self.variant_path_sort(&segs) {
+                        return Ok(z3::ast::Dynamic::new_const(key.as_str(), &sort));
+                    }
                     let int_var = Int::new_const(key.as_str());
                     Ok(Dynamic::from_ast(&int_var))
                 }
@@ -1262,7 +1290,18 @@ impl<'ctx> Translator<'ctx> {
                                     }
                                 }
                             }
+                            // The same constant the Path arm builds, and
+                            // it takes its sort from the same authority:
+                            // `Color.Red` parses as a FIELD here and as a
+                            // PATH there depending on the surrounding
+                            // expression, and a constant whose sort
+                            // depends on how it was parsed is two
+                            // constants.
                             let key = format!("path_{}.{}", type_name, field_name);
+                            let segs = vec![type_name.clone(), field_name.to_string()];
+                            if let Some(sort) = self.variant_path_sort(&segs) {
+                                return Ok(z3::ast::Dynamic::new_const(key.as_str(), &sort));
+                            }
                             let int_var = Int::new_const(key.as_str());
                             return Ok(Dynamic::from_ast(&int_var));
                         }
@@ -2191,10 +2230,32 @@ impl<'ctx> Translator<'ctx> {
         {
             // Boolean operations
             self.translate_bool_binop(op, &left_bool, &right_bool)
+        } else if matches!(op, BinOp::Eq | BinOp::Ne)
+            && left_z3.get_sort() == right_z3.get_sort()
+        {
+            // EQUALITY needs no arithmetic. Two values of the SAME sort
+            // can always be compared, whatever that sort is, and an
+            // uninterpreted one is the case that matters: the
+            // variant-disjointness axiom `Color.Red != Color.Green`
+            // stopped translating the moment those constants got their
+            // type's sort instead of `Int`, and it was DROPPED from the
+            // solver context with a warning — so `is_red(Color.Green)`
+            // became unprovable because nothing said Green is not Red
+            // (T0902).
+            //
+            // The arms above stay ahead of this one: an Int equality
+            // wants the Int comparison, not this generic one, because
+            // the Int arm also handles the mixed-numeric coercions.
+            let eq = left_z3._eq(&right_z3);
+            let result = if matches!(op, BinOp::Ne) { eq.not() } else { eq };
+            Ok(Dynamic::from_ast(&result))
         } else {
             Err(TranslationError::TypeMismatch(Text::from(format!(
-                "incompatible types for binary operation {}",
-                op.as_str()
+                "incompatible types for binary operation {} \
+                 (left is {:?}, right is {:?})",
+                op.as_str(),
+                left_z3.get_sort(),
+                right_z3.get_sort(),
             ))))
         }
     }
@@ -4951,6 +5012,9 @@ impl<'ctx> Translator<'ctx> {
                         })
                         .collect();
                     let path_str = format!("path_{}", segs.join("."));
+                    if let Some(sort) = self.variant_path_sort(&segs) {
+                        return Ok(z3::ast::Dynamic::new_const(path_str.as_str(), &sort));
+                    }
                     let int_var = Int::new_const(path_str.as_str());
                     Ok(Dynamic::from_ast(&int_var))
                 }

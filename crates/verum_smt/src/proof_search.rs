@@ -6210,8 +6210,20 @@ impl ProofSearchEngine {
         // Try to discharge goal using SMT
         match self.try_smt_discharge(&z3_context, goal) {
             Ok(Maybe::Some(_proof)) => Ok(List::new()), // Goal proven by SMT
+            // `None` means the solver found a MODEL of the goal's
+            // negation — a counterexample — or could not decide. Either
+            // way the goal is not proven; what it is NOT is
+            // "unsatisfiable", which is the verdict on the negation and
+            // the one that would mean PROVED. The message said the
+            // opposite of what happened, and read as "your claim is
+            // contradictory" while the solver was saying "your claim
+            // does not follow from what I was told" (T0902: the missing
+            // fact was a disjointness axiom that had silently dropped
+            // out of the context).
             Ok(Maybe::None) => Err(ProofError::TacticFailed(
-                "SMT: goal is unsatisfiable".into(),
+                "SMT: the goal does not follow — the solver found a \
+                 counterexample, or could not decide within its budget"
+                    .into(),
             )),
             Err(e) => Err(e),
         }
