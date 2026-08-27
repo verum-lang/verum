@@ -1,0 +1,74 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: affine, linearity, control-flow, branches
+// @expected-stdout-begin
+// 7 -7
+// @expected-stdout-end
+// @skip: T0920: consuming an affine value in each of two EXCLUSIVE arms is refused as a use after move. Remedy: each branch must start from the affine state that held AT the construct, with a union merge afterwards. Per-branch snapshot/restore was written for `infer_match_expr` and for `if`/`else` and measured INERT — a trace inside `restore` shows it is never called for this shape, so neither is the walk that reaches these arms. Find the caller of `borrow_value` for a match arm before writing a third per-branch fix.
+// @description: An affine value may be consumed in EACH of two mutually
+//   exclusive arms, because exactly one of them runs.
+//
+// THIS IS THE SHAPE EVERY AFFINE RESOURCE APPEARS IN. A transaction
+// commits on success and rolls back on failure; a session closes one way
+// or the other; a lock is released on both paths. Each arm consumes the
+// handle exactly once, and exactly one arm executes, so the value is
+// consumed exactly once per execution — which is precisely what affinity
+// asks for.
+//
+// The checker used to walk the arms in sequence and carry the consumed
+// state from one into the next:
+//
+//     error: value `tx` used after move
+//       moved at: 7142
+//       used at:  7339
+//
+// — refusing the most ordinary correct program a transaction handle
+// appears in. Six files in `core/database` were written that way and
+// were green only because their types had not resolved yet; once they
+// did, the approximation surfaced in all of them at once.
+//
+// The general fault is the walk ORDER standing in for control flow, one
+// construct over from the loop rule in
+// `affine_consumed_on_a_leaving_path`: that one asked "is a loop around
+// this" instead of "can the back-edge be reached", this one asked "was
+// it consumed earlier in the traversal" instead of "can both
+// consumptions happen in one execution".
+//
+// The companion file carries the negative pole, and it is what keeps
+// this fix from being a hole: consuming in ONE arm and using the value
+// after the match is still an error.
+
+type affine Tx is { id: Int };
+
+fn commit(t: Tx) -> Int {
+    t.id
+}
+
+fn rollback(t: Tx) -> Int {
+    0 - t.id
+}
+
+/// Both arms consume, exactly one runs.
+fn finish(t: Tx, ok: Bool) -> Int {
+    match ok {
+        true  => commit(t),
+        false => rollback(t),
+    }
+}
+
+/// The same over a variant scrutinee with three arms, so the fix is not
+/// specific to a two-way boolean split.
+type Outcome is Done | Failed | Abandoned;
+
+fn settle(t: Tx, o: Outcome) -> Int {
+    match o {
+        Outcome.Done      => commit(t),
+        Outcome.Failed    => rollback(t),
+        Outcome.Abandoned => rollback(t),
+    }
+}
+
+fn main() {
+    print(f"{finish(Tx { id: 7 }, true)} {settle(Tx { id: 7 }, Outcome.Failed)}");
+}
