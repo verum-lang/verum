@@ -8028,7 +8028,16 @@ fn substitute_refinement_binder(
             }
         }
         let _guard = AssocDepthGuard;
-        self.try_resolve_associated_type_projection_inner(base_ty, assoc_name, depth)
+        let out = self.try_resolve_associated_type_projection_inner(base_ty, assoc_name, depth);
+        if crate::ctor_trace_enabled() {
+            eprintln!(
+                "[assoc] {}<{:?}> -> {:?}",
+                assoc_name,
+                self.unifier.apply(base_ty),
+                out
+            );
+        }
+        out
     }
 
     fn try_resolve_associated_type_projection_inner(
