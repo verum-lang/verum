@@ -1,0 +1,32 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: meta-parameters, refinement
+// @description: The positive pole — a width the refinement ADMITS is
+//   accepted, and so is one the compiler cannot decide.
+//
+// Without this, a "fix" that rejected every meta argument would satisfy
+// `meta_parameter_refinement.vr` and destroy the feature. Two cases:
+//
+//   * a literal the predicate admits;
+//   * a parameter passed THROUGH from an enclosing generic, which has no
+//     value yet. A refusal has to be a fact about a value, so a symbolic
+//     argument is left alone rather than guessed at — the safe
+//     direction, since the alternative is rejecting correct code.
+
+public type Digest<N: meta USize {it == 4 || it == 8}> is {
+    bytes: [Byte; N],
+};
+
+/// The width is not known here. Nothing may be concluded about it.
+public fn width_of<N: meta USize>(d: &Digest<N>) -> Int {
+    d.bytes.len()
+}
+
+fn main() {
+    let four: Digest<4> = Digest { bytes: [1_u8, 2_u8, 3_u8, 4_u8] };
+    let eight: Digest<8> = Digest {
+        bytes: [1_u8, 2_u8, 3_u8, 4_u8, 5_u8, 6_u8, 7_u8, 8_u8],
+    };
+    print(f"{width_of(&four)} {width_of(&eight)}");
+}

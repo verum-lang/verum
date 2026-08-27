@@ -1429,6 +1429,110 @@ impl TypeChecker {
     /// to an internal `Type`.
     /// Handles: type-args (Type/Const/Lifetime/Binding), arity validation,
     /// variant substitution, HKT TypeApp, dependent Eq/Fin well-formedness.
+/// Replace the refinement binder — `it`, or `self` in the older
+/// spelling — with the argument, so the predicate becomes a closed
+/// expression the constant evaluator can decide.
+///
+/// Structural and total: an expression kind this does not know is
+/// returned unchanged, so an unsubstituted binder leaves a free name and
+/// the evaluator declines. A miss becomes "not decided", never "decided
+/// wrongly" — which is the only safe direction for a check that refuses
+/// code.
+fn substitute_refinement_binder(
+        expr: &verum_ast::expr::Expr,
+        value: &verum_ast::expr::Expr,
+    ) -> verum_ast::expr::Expr {
+    use verum_ast::expr::ExprKind;
+        let sub = |e: &verum_ast::expr::Expr| Self::substitute_refinement_binder(e, value);
+    let kind = match &expr.kind {
+        ExprKind::Path(path) => {
+            if let Some(id) = path.as_ident()
+                && (id.as_str() == "it" || id.as_str() == "self")
+            {
+                return value.clone();
+            }
+            return expr.clone();
+        }
+        ExprKind::Binary { op, left, right } => ExprKind::Binary {
+            op: *op,
+            left: verum_common::Heap::new(sub(left)),
+            right: verum_common::Heap::new(sub(right)),
+        },
+        ExprKind::Unary { op, expr: inner } => ExprKind::Unary {
+            op: *op,
+            expr: verum_common::Heap::new(sub(inner)),
+        },
+        ExprKind::Paren(inner) => ExprKind::Paren(verum_common::Heap::new(sub(inner))),
+        _ => return expr.clone(),
+    };
+    verum_ast::expr::Expr::new(kind, expr.span)
+}
+
+    /// Check every refinement written on a meta parameter against the
+    /// argument supplied for it.
+    ///
+    /// `type Digest<N: meta USize {it == 32 || it == 64}>` means that a
+    /// `Digest<5>` is not a type. Nothing enforced that: the predicate
+    /// reached the AST and every reader of `GenericParamKind::Meta`
+    /// destructured it away, so the declaration read like a guarantee
+    /// and made none (T0909).
+    ///
+    /// Only arguments that EVALUATE at compile time are judged. A
+    /// symbolic argument — a meta parameter passed through from an
+    /// enclosing generic — is left alone rather than guessed at: the
+    /// refusal has to be a fact about a value, and there is no value
+    /// there yet. That is the same rule the rest of the checker follows
+    /// for refinements it cannot decide statically, and it is the safe
+    /// direction, since the alternative is rejecting correct code.
+    fn check_meta_param_refinements(
+        &mut self,
+        type_name: &str,
+        args: &List<verum_ast::ty::GenericArg>,
+        span: verum_ast::span::Span,
+    ) -> Result<()> {
+        let Some(refinements) = self.meta_param_refinements.get(type_name).cloned() else {
+            return Ok(());
+        };
+        for (index, predicate) in refinements.iter() {
+            let Some(arg) = args.get(*index) else {
+                continue;
+            };
+            // The argument as an EXPRESSION: a meta argument is written
+            // as a value, and the parser may deliver it as either form.
+            let arg_expr = match arg {
+                verum_ast::ty::GenericArg::Const(e) => e.clone(),
+                // A meta argument is a VALUE, and the parser delivers
+                // it as a const argument. Anything else in that position
+                // is a type, and a type does not satisfy or violate a
+                // value predicate — leave it alone.
+                _ => continue,
+            };
+            // Substitute the argument for the refinement's binder and
+            // ask the constant evaluator. Anything it cannot decide is
+            // left alone.
+            let bound = Self::substitute_refinement_binder(predicate, &arg_expr);
+            let mut evaluator = crate::const_eval::ConstEvaluator::new();
+            match evaluator.eval(&bound) {
+                Ok(verum_common::ConstValue::Bool(true)) => {}
+                Ok(verum_common::ConstValue::Bool(false)) => {
+                    return Err(TypeError::MetaRefinementViolation {
+                        type_name: verum_common::Text::from(type_name),
+                        position: index + 1,
+                        argument: verum_common::Text::from(
+                            verum_ast::pretty::format_expr(&arg_expr),
+                        ),
+                        predicate: verum_common::Text::from(
+                            verum_ast::pretty::format_expr(predicate),
+                        ),
+                        span,
+                    });
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     fn ast_to_generic_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
         use verum_ast::ty::TypeKind;
         let TypeKind::Generic { base, args } = &ast_ty.kind
@@ -1541,6 +1645,17 @@ impl TypeChecker {
                                 ))));
                             }
                         }
+                        // A refinement on a META parameter is checked
+                        // HERE, where the argument is supplied — the
+                        // point of a compile-time parameter being that
+                        // the check is compile-time. See T0909: the
+                        // predicate was parsed, stored, and read by
+                        // nobody.
+                        self.check_meta_param_refinements(
+                            type_name.as_str(),
+                            args,
+                            ast_ty.span,
+                        )?;
                     }
                 }
 

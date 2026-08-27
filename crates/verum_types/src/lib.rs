@@ -1593,6 +1593,37 @@ pub enum TypeError {
         span: verum_ast::span::Span,
     },
 
+    /// A META ARGUMENT violates the refinement its parameter declares
+    /// (E506).
+    ///
+    /// The point of a refinement on a compile-time parameter is that the
+    /// check is compile-time, so a width that is not one of the widths
+    /// the type admits is not a type:
+    ///
+    /// ```verum
+    /// type Digest<N: meta USize {it == 32 || it == 64}> is
+    ///     { bytes: [Byte; N] };
+    ///
+    /// let d: Digest<5> = …;   // E506
+    /// ```
+    ///
+    /// Only arguments that evaluate at compile time are judged; a
+    /// symbolic one is left alone, because a refusal has to be a fact
+    /// about a value.
+    #[error("E506: meta argument {position} of `{type_name}` violates its refinement: `{argument}` does not satisfy `{predicate}`")]
+    MetaRefinementViolation {
+        /// The type whose parameter was violated.
+        type_name: Text,
+        /// 1-based position of the offending argument.
+        position: usize,
+        /// The argument, as written.
+        argument: Text,
+        /// The predicate it fails.
+        predicate: Text,
+        /// Span of the type reference.
+        span: verum_ast::span::Span,
+    },
+
     // =========================================================================
     // Coinductive / Productivity Errors (E505)
     // =========================================================================
@@ -2069,6 +2100,7 @@ impl TypeError {
             InvalidMetaContext { span, .. } => *span,
             // Pure function purity error
             ImpurePureFunction { span, .. } => *span,
+            MetaRefinementViolation { span, .. } => *span,
             // Async property violation
             AsyncPropertyViolation { span, .. } => *span,
             // Coinductive / productivity error (E505)
@@ -3736,6 +3768,26 @@ impl TypeError {
                 builder =
                     builder.add_note("meta functions can only use compiler-provided contexts");
                 builder = builder.help("valid meta contexts: BuildAssets, TypeInfo, AstAccess, CompileDiag, MetaRuntime, MacroState");
+                builder.build()
+            }
+
+            MetaRefinementViolation {
+                type_name,
+                position,
+                argument,
+                predicate,
+                span,
+            } => {
+                // E506: a meta argument violates its parameter's refinement
+                let mut builder = DiagnosticBuilder::error().code("E506").message(format!(
+                    "meta argument {} of `{}` violates its refinement: `{}` does not satisfy `{}`",
+                    position, type_name, argument, predicate
+                ));
+                if let Some(diag_span) = convert_span(*span) {
+                    builder = builder.span(diag_span);
+                }
+                builder = builder
+                    .help("a refinement on a compile-time parameter is checked at compile time");
                 builder.build()
             }
 

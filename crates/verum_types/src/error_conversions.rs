@@ -565,6 +565,22 @@ impl From<TypeError> for VerumError {
                 message: format!("E504: {}", message).into(),
             },
 
+            // Meta Refinement Violation (E506)
+            TypeError::MetaRefinementViolation {
+                type_name,
+                position,
+                argument,
+                predicate,
+                ..
+            } => VerumError::Other {
+                message: format!(
+                    "E506: meta argument {} of `{}` violates its refinement: \
+                     `{}` does not satisfy `{}`",
+                    position, type_name, argument, predicate
+                )
+                .into(),
+            },
+
             // Non-Productive Corecursion (E505)
             TypeError::NonProductiveCorecursion { func_name, unguarded_calls, .. } => VerumError::Other {
                 message: format!(

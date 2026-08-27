@@ -140,6 +140,44 @@ impl TypeChecker {
             }
         }
 
+        // A refinement written on a META parameter is recorded by
+        // POSITION, so the argument supplied at a use site can be
+        // checked against it. The AST has carried this predicate all
+        // along and nothing read it — every consumer of
+        // `GenericParamKind::Meta` takes `{ name, .. }` — so
+        // `type Digest<N: meta USize {it == 4 || it == 8}>` accepted
+        // `Digest<5>` in silence (T0909).
+        let mut refinements: Vec<(usize, verum_ast::expr::Expr)> = Vec::new();
+        let mut index = 0usize;
+        for param in generics.iter() {
+            match &param.kind {
+                GenericParamKind::Lifetime { .. } => continue,
+                GenericParamKind::Meta { ty, refinement, .. } => {
+                    // TWO PLACES carry the predicate, and only one of
+                    // them is the field named for it. `N: meta USize
+                    // {it == 4}` is parsed by `parse_type` reaching the
+                    // brace first, so the predicate lands on the TYPE as
+                    // a `Refined` wrapper and the `refinement` field
+                    // stays empty — which is why looking only at the
+                    // field found nothing (measured: `recorded=None`
+                    // for a declaration that plainly had one).
+                    if let verum_common::Maybe::Some(pred) = refinement {
+                        refinements.push((index, (**pred).clone()));
+                    } else if let verum_ast::ty::TypeKind::Refined { predicate, .. } = &ty.kind {
+                        refinements.push((index, predicate.expr.clone()));
+                    }
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+        if refinements.is_empty() {
+            self.meta_param_refinements.remove(type_name.as_str());
+        } else {
+            self.meta_param_refinements
+                .insert(type_name.as_str().to_string(), refinements);
+        }
+
         let arity = param_record.len();
         let type_params_key: verum_common::Text =
             format!("__type_params_{}", type_name).into();

@@ -1316,6 +1316,18 @@ pub struct TypeChecker {
     /// by define_type_in_current_module; cleared per-file with
     /// explicit_imports.
     current_module_declared_types: std::collections::HashSet<String>,
+    /// Refinements written on META PARAMETERS, by type name and
+    /// positional index: `type Digest<N: meta USize {it == 32}>`.
+    ///
+    /// The AST carries the predicate; nothing read it. Every consumer of
+    /// `GenericParamKind::Meta` destructures `{ name, .. }`, so a
+    /// refinement on a compile-time parameter was accepted by the parser
+    /// and constrained nothing — `Digest<5>` checked clean against
+    /// `{it == 4 || it == 8}` (T0909). The predicate is recorded here
+    /// when the declaration is registered, and evaluated where an
+    /// argument is supplied.
+    meta_param_refinements:
+        std::collections::HashMap<String, Vec<(usize, verum_ast::expr::Expr)>>,
     /// T0528 — names the CHECKER ITSELF seeded (primitive types, sized
     /// integers, builtin/intrinsic/meta functions) before any source or
     /// archive module was processed.  Union-snapshot taken at the end of
