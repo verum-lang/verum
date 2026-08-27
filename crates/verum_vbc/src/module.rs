@@ -157,9 +157,20 @@ pub struct VbcModule {
     #[serde(default)]
     pub source_dir: Option<String>,
 
-    /// Index into `functions` where user-defined functions start.
-    /// Functions before this index are from the stdlib. Used by the @test runner
-    /// to only execute user-defined test functions, not stdlib tests.
+    /// Index into `functions` where user-defined functions WOULD start:
+    /// functions before it from the stdlib, functions from it on the
+    /// user's.
+    ///
+    /// RESERVED, NOT YET PRODUCED, AND NOT YET CONSUMED. Nothing assigns
+    /// it, so it is always `0` — which reads as "every function is the
+    /// user's", the opposite of what a script's module holds. The
+    /// previous wording claimed the `@test` runner uses it to skip
+    /// stdlib tests; no reader exists anywhere in the tree.
+    ///
+    /// It is the enabling fact for splitting a script's cache entry from
+    /// the stdlib closure it currently duplicates (a one-line script
+    /// costs 412 KB and 137 ms), so producing it is wanted — see T0917 —
+    /// but that is work, not a fact already in hand (T0921).
     #[serde(default)]
     pub user_function_start: u32,
 
@@ -238,14 +249,30 @@ pub struct VbcModule {
     // target.
     // ========================================================================
     /// Deduplicated cfg-key table — referenced by `VbcVariant::cfg_key_id`.
-    /// Empty when the module has no target-conditional functions.
+    ///
+    /// RESERVED, NOT YET PRODUCED. The serialiser writes it, the reader
+    /// restores it and the linker copies it between modules, but nothing
+    /// creates one: the pass that would is `precompile.rs`'s "Phase-4b
+    /// post-pass (deferred)", which is not implemented. So this is
+    /// always empty — including for a module that DOES have
+    /// target-conditional functions, which the previous wording
+    /// ("empty when the module has no target-conditional functions")
+    /// read as a statement about the module rather than about the pass
+    /// (T0921).
     #[serde(default)]
     pub cfg_keys: Vec<crate::cfg_key::CfgKey>,
 
     /// Per-function variant tables — sparse list, only target-conditional
-    /// functions appear. The loader picks the first variant whose
-    /// `cfg_key_id` matches the active triple's CfgKey and overrides the
+    /// functions appear. The loader would pick the first variant whose
+    /// `cfg_key_id` matches the active triple's CfgKey and override the
     /// FunctionDescriptor's bytecode_offset/bytecode_length.
+    ///
+    /// RESERVED, NOT YET PRODUCED — same deferred Phase-4b pass as
+    /// `cfg_keys`. The table is always empty, so no variant is ever
+    /// picked; per-target function bodies are resolved at bake time by
+    /// excluding non-matching `@cfg` branches instead. `serialize.rs`
+    /// calls this "the one with teeth" and gates a trailing record on it
+    /// being non-empty, which it never is (T0921).
     #[serde(default)]
     pub function_variants: Vec<FunctionVariantSet>,
 
@@ -258,8 +285,13 @@ pub struct VbcModule {
 
     /// `@framework(name, citation)` provenance edges and
     /// `@framework_translate(src, tgt, citation)` bridge edges.
-    /// Loaded eagerly because the table is small (~1 KB) and audit
-    /// tooling consults it on every invocation.
+    /// Loaded eagerly because the table is small (~1 KB).
+    ///
+    /// RESERVED, NOT YET PRODUCED — the deferred Phase-4b pass again.
+    /// The previous wording said audit tooling "consults it on every
+    /// invocation"; no consumer exists, and if one did it would read an
+    /// empty table on every invocation, which is a green audit rather
+    /// than an audit (T0921).
     #[serde(default)]
     pub framework_provenance: FrameworkProvenance,
 
