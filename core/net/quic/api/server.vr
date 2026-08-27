@@ -235,7 +235,14 @@ implement QuicServer {
         loop {
             match self.accept().await {
                 Result.Ok(accepted) => {
-                    core.async.nursery.spawn(async move {
+                    // `core.async.nursery.spawn` named nothing: `spawn`
+                    // on a Nursery is a METHOD (`&mut self`), and a
+                    // module-path call to a name that resolves nowhere
+                    // was accepted silently — so every accepted
+                    // connection was dropped instead of handled
+                    // (T0806). The free task spawner is the callee this
+                    // wanted.
+                    let _ = core.async.task.spawn(async move {
                         handler(accepted);
                     });
                 },

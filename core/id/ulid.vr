@@ -248,15 +248,25 @@ public fn from_parts(timestamp_ms: Int, rand_seed: Int) -> Ulid {
 public fn generate() -> Ulid {
     let now = SystemTime.now();
     let ts_ms = now.duration_since_epoch().as_millis();
-    // Two 64-bit values give us > 80 bits of entropy; truncated to
-    // 80 bits inside `Ulid.from_parts_seeded`.  Stdlib-agnostic
-    // RNG via `sys.common.random_bytes`.
-    let mut seed_bytes: List<Byte> = List.with_capacity(16);
-    let _ = core.sys.common.random_bytes(&mut seed_bytes, 16);
+    // Eight bytes of entropy for the seed; `from_parts_seeded`
+    // truncates to the 80 random bits the spec gives a ULID.
+    //
+    // This read `random_bytes(&mut seed_bytes, 16)` against a
+    // one-parameter `random_bytes(buf: &mut [Byte])`, and a
+    // module-path call had its argument count checked nowhere, so the
+    // call was accepted and did nothing. The buffer was a
+    // `with_capacity(16)` List — capacity, not LENGTH — so even a
+    // correct call would have filled zero bytes, and the loop below
+    // reads `seed_bytes.len()`: every ULID from this builder carried a
+    // zero seed. That is the same zero-entropy defect `fill_random`
+    // was written to close one call site earlier, wearing a different
+    // shape (T0806).
+    let mut seed_buf: [Byte; 8] = [0_u8; 8];
+    fill_random(&mut seed_buf);
     let mut seed: UInt64 = 0_u64;
     let mut i: Int = 0;
-    while i < 8 && i < seed_bytes.len() {
-        seed = (seed << 8_u64) | (seed_bytes[i] as UInt64);
+    while i < 8 {
+        seed = (seed << 8_u64) | (seed_buf[i] as UInt64);
         i = i + 1;
     }
     from_parts(ts_ms, seed as Int)

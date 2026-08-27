@@ -305,11 +305,11 @@ implement KeyUpdateSm {
             return Result.Err(KeyUpdateError.PendingRotationInProgress);
         }
         // Swap current ← next for tx side immediately.
-        self.current_tx_secret = core.mem.replace(
+        self.current_tx_secret = core.base.memory.replace(
             &mut self.next_tx_secret,
             self.current_tx_secret.clone(),
         );
-        self.current_tx_keys = core.mem.replace(
+        self.current_tx_keys = core.base.memory.replace(
             &mut self.next_tx_keys,
             self.current_tx_keys.clone(),
         );
@@ -343,11 +343,11 @@ implement KeyUpdateSm {
     /// an inbound packet under `next_rx_keys`.
     public fn commit_inbound_phase_flip(&mut self) -> Result<(), KeyUpdateError> {
         // Swap current ← next for rx side.
-        self.current_rx_secret = core.mem.replace(
+        self.current_rx_secret = core.base.memory.replace(
             &mut self.next_rx_secret,
             self.current_rx_secret.clone(),
         );
-        self.current_rx_keys = core.mem.replace(
+        self.current_rx_keys = core.base.memory.replace(
             &mut self.next_rx_keys,
             self.current_rx_keys.clone(),
         );

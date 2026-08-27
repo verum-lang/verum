@@ -277,7 +277,7 @@ implement ReplayCache {
         let half_window_ms = self.cfg.window_ms / 2;
         if (age.as_millis() as Int) >= half_window_ms {
             // Retire the active bucket; start a fresh one.
-            let old = core.mem.replace(&mut self.active, new_bucket(&self.cfg, now));
+            let old = core.base.memory.replace(&mut self.active, new_bucket(&self.cfg, now));
             self.retired = Maybe.Some(old);
         }
     }

@@ -2430,6 +2430,23 @@ where
     }
 
     /// Get first key-value pair
+    /// Entries whose key falls in `range`, in key order.
+    ///
+    /// Passthrough to the BTreeMap. The reason it exists rather than a
+    /// `keys().filter(...)` at the call site: asking "does any key start
+    /// with this prefix" over a 44 000-entry function table is O(log n)
+    /// here and O(n) there, and the question is asked on the failure
+    /// path of name resolution, where a linear scan per unresolved call
+    /// is exactly the shape that turns a diagnostic into a slowdown.
+    pub fn range<T, R>(&self, range: R) -> impl Iterator<Item = (&K, &V)> + '_
+    where
+        T: Ord + ?Sized,
+        K: std::borrow::Borrow<T> + Ord,
+        R: std::ops::RangeBounds<T>,
+    {
+        self.inner.range(range)
+    }
+
     pub fn first_key_value(&self) -> Option<(&K, &V)> {
         self.inner.first_key_value()
     }

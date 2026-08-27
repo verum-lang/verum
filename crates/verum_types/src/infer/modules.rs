@@ -22217,7 +22217,9 @@ impl TypeChecker {
             return Ok(Some(r));
         }
 
-        if let Some(r) = self.try_resolve_module_call(receiver, method, args, span)? {
+        if let Some(r) =
+            self.try_resolve_module_call(receiver, method, args, span, skip_static_lookup)?
+        {
             if crate::ctor_trace_enabled() {
                 eprintln!(
                     "[ctor-trace] pre-recv MODULE-CALL {} -> {}",
@@ -22903,6 +22905,7 @@ impl TypeChecker {
         method: &Ident,
         args: &[Expr],
         span: Span,
+        skip_static_lookup: bool,
     ) -> Result<Option<InferResult>> {
         // Handle inline module function calls
         // When we have `module.func(args)`, this is parsed as a method call
@@ -22969,12 +22972,16 @@ impl TypeChecker {
                             ..
                         } = &func_result.ty
                         {
-                            // Check argument count
-                            // Allow ±1 tolerance for self-param counting inconsistencies
-                            // and default parameter handling in method resolution
-                            if args.len() > params.len() + 1
-                                || (args.len() + 1 < params.len() && params.len() > 1)
-                            {
+                            // A MODULE-path call has no receiver, so the
+                            // count is exact. The ±1 tolerance this used to carry was
+                            // borrowed from method resolution, where whether `self` is
+                            // counted is genuinely ambiguous — a module's free function
+                            // has no `self` to be unsure about, and Verum has no default
+                            // parameters (`param_pattern` in `grammar/verum.ebnf` admits
+                            // no initialiser). With the tolerance, `a.b.g()` against
+                            // `fn g(x: Int)` checked clean and RAN, reading an unset
+                            // register as the missing argument (T0806).
+                            if args.len() != params.len() {
                                 return Err(TypeError::wrong_arg_count(method.name.clone(), params.len(), args.len(), span));
                             }
 
@@ -23055,12 +23062,16 @@ impl TypeChecker {
                                 ..
                             } = &func_result.ty
                             {
-                                // Check argument count
-                                // Allow ±1 tolerance for self-param counting inconsistencies
-                                // and default parameter handling in method resolution
-                                if args.len() > params.len() + 1
-                                    || (args.len() + 1 < params.len() && params.len() > 1)
-                                {
+                                // A MODULE-path call has no receiver, so the
+                                // count is exact. The ±1 tolerance this used to carry was
+                                // borrowed from method resolution, where whether `self` is
+                                // counted is genuinely ambiguous — a module's free function
+                                // has no `self` to be unsure about, and Verum has no default
+                                // parameters (`param_pattern` in `grammar/verum.ebnf` admits
+                                // no initialiser). With the tolerance, `a.b.g()` against
+                                // `fn g(x: Int)` checked clean and RAN, reading an unset
+                                // register as the missing argument (T0806).
+                                if args.len() != params.len() {
                                     return Err(TypeError::wrong_arg_count(method.name.clone(), params.len(), args.len(), span));
                                 }
 
@@ -23105,6 +23116,20 @@ impl TypeChecker {
                 {
                     return Ok(Some(r));
                 }
+                // Same judgement as the Path-receiver arm below: a
+                // module we know about, and no member by this name in
+                // it, is an unbound name — not a reason to fall through
+                // to a fresh type variable that satisfies anything.
+                if self.module_member_is_missing(&seg_vec, method, skip_static_lookup) {
+                    return Err(TypeError::UnboundVariable {
+                        name: verum_common::Text::from(format!(
+                            "{}.{}",
+                            seg_vec.join("."),
+                            method.name
+                        )),
+                        span,
+                    });
+                }
             }
         }
 
@@ -23125,14 +23150,155 @@ impl TypeChecker {
                     }
                 }
             }
-            if all_names
-                && let Some(r) =
-                    self.try_resolve_global_module_fn_call(&seg_vec, method, args)?
-            {
-                return Ok(Some(r));
+            if all_names {
+                if let Some(r) = self.try_resolve_global_module_fn_call(&seg_vec, method, args)? {
+                    return Ok(Some(r));
+                }
+                if self.module_member_is_missing(&seg_vec, method, skip_static_lookup) {
+                    return Err(TypeError::UnboundVariable {
+                        name: verum_common::Text::from(format!(
+                            "{}.{}",
+                            seg_vec.join("."),
+                            method.name
+                        )),
+                        span,
+                    });
+                }
             }
         }
         Ok(None)
+    }
+
+    /// Does this dotted path name a MODULE we know about?
+    ///
+    /// The question only gets asked once resolution has already failed,
+    /// and it is what separates the two failures that used to look
+    /// identical: `a.b.absent()` where `a.b` is a real module and
+    /// `absent` is not in it — an unbound name — from a receiver chain
+    /// this resolver has no business judging, which must still fall
+    /// through untouched. Answering YES on a chain that is not a module
+    /// would reject working code, so every arm below requires positive
+    /// evidence that the path is a module: an inline-module entry under
+    /// the exact key, or a registered function whose key lies under the
+    /// path as a prefix.
+    ///
+    /// The prefix probe walks the same progressively-stripped joins the
+    /// resolver itself probes, because the archive registers modules
+    /// with the root sometimes present and sometimes stripped
+    /// (`archive_ctx_loader::register_module`) — asking only about the
+    /// fully-qualified spelling would answer NO for half the library.
+    /// Is `<segments>.<method>` a call into a MODULE whose member does
+    /// not exist — as opposed to one of the several other things that
+    /// wear the same syntax?
+    ///
+    /// Two of those others were measured against `core/` before this
+    /// gate existed, and both are working code the naive test rejected:
+    ///
+    ///   * a CHAINED call, `base64.decode_url(s).map_err(f)`. The
+    ///     iterative chain handler reuses the OUTERMOST receiver for
+    ///     every step, so `.map_err`'s receiver still reads as the
+    ///     module path — `skip_static_lookup` is the flag that says a
+    ///     step is not the first, and it is exactly the right question.
+    ///
+    ///   * a variant or static reached through a module path,
+    ///     `core.database.common.error.AuthErrorKind.Aek…(x)`, where
+    ///     the last segment names a TYPE and the method is its
+    ///     constructor.
+    ///
+    /// Both were caught the same way: the change was measured over all
+    /// 2560 `core/` files against a build of the parent commit. Eight
+    /// files newly failed; six were these two shapes.
+    fn module_member_is_missing(
+        &self,
+        segments: &[&str],
+        _method: &Ident,
+        skip_static_lookup: bool,
+    ) -> bool {
+        if skip_static_lookup {
+            return false;
+        }
+        // A TYPE anywhere in the receiver means this is type-qualified
+        // dispatch, not a module member: a trailing type is a static or
+        // variant call (`…error.AuthErrorKind.Aek…(x)`), and a LEADING
+        // one is a method on an associated constant
+        // (`MemProt.READ_WRITE.to_unix_flags()`). The leading case also
+        // defeats the module oracle from the inside — associated
+        // functions are registered under a type-qualified key, so a
+        // prefix scan for `MemProt.` finds entries and concludes
+        // "module".
+        if segments
+            .iter()
+            .any(|seg| self.name_is_a_type(seg))
+        {
+            return false;
+        }
+        self.module_path_is_known(segments)
+    }
+
+    /// Is this simple name a TYPE — declared here or carried by the
+    /// archive?
+    fn name_is_a_type(&self, name: &str) -> bool {
+        self.ctx.lookup_type(name).is_some()
+            || self
+                .core_metadata()
+                .is_some_and(|m| m.types.contains_key(&verum_common::Text::from(name)))
+    }
+
+    fn module_path_is_known(&self, segments: &[&str]) -> bool {
+        // A bound value at the head means this is a field chain
+        // (`self.cfg.parser.parse(x)`), which this resolver has no
+        // business judging — the same guard `try_resolve_global_module_
+        // fn_call` opens with.
+        if segments.is_empty() || self.ctx.env.lookup(segments[0]).is_some() {
+            return false;
+        }
+        // Longest PREFIX first. The whole path being a module answers
+        // the missing-LEAF case (`a.b.absent()`); a shorter prefix
+        // answers the missing-MIDDLE one (`a.zzz.f()` — `a` is a module
+        // and has no `zzz`), which is the same defect one segment
+        // earlier and deserves the same diagnostic.
+        (1..=segments.len())
+            .rev()
+            .any(|k| self.module_prefix_is_known(&segments[..k].join(".")))
+    }
+
+    /// Is this exact dotted string a module, allowing for the archive's
+    /// root-stripping? Front-strips one segment at a time, because
+    /// `archive_ctx_loader::register_module` registers a module's
+    /// functions with the root sometimes present and sometimes not.
+    fn module_prefix_is_known(&self, joined: &str) -> bool {
+        let mut rest = joined;
+        loop {
+            // An inline module is keyed by its path from the crate root
+            // (`pre_register_module`: `cog.a.b`), and a TOP-LEVEL one is
+            // additionally keyed by its bare name. So `a` is found bare
+            // and `a.b` only under the `cog.` root — probing one
+            // spelling answers NO for every nested module.
+            if self
+                .inline_modules
+                .contains_key(&verum_common::Text::from(rest))
+                || self
+                    .inline_modules
+                    .contains_key(&verum_common::Text::from(format!("cog.{}", rest)))
+            {
+                return true;
+            }
+            if let Some(meta) = self.core_metadata() {
+                let lo = format!("{}.", rest);
+                // The half-open range `["p.", "p/")` is every key that
+                // starts with `p.` — `/` is the byte after `.`.
+                let hi = format!("{}/", rest);
+                let lo_key = verum_common::Text::from(lo.as_str());
+                let hi_key = verum_common::Text::from(hi.as_str());
+                if meta.functions.range(lo_key..hi_key).next().is_some() {
+                    return true;
+                }
+            }
+            match rest.split_once('.') {
+                Some((_, tail)) if !tail.is_empty() => rest = tail,
+                _ => return false,
+            }
+        }
     }
 
     /// Resolve `<dotted.module.path>.fn(args)` against the global
@@ -23142,11 +23308,32 @@ impl TypeChecker {
     /// most-qualified first.  Guarded on the base segment not being a
     /// bound VALUE so genuine field chains
     /// (`self.cfg.parser.parse(...)`) are never hijacked.
+    /// Resolve `a.b.c.f(args)` against the global registry / archive
+    /// metadata, where `a.b.c` is a module path rather than a value.
+    ///
+    /// The arity comparison below is a FILTER, and a filter that finds
+    /// nothing answers `None` — which the caller reads as "not a module
+    /// call", falls through to leniency, and lets the call satisfy any
+    /// declared type. So a real callee invoked with the wrong number of
+    /// arguments was indistinguishable from a name that does not exist,
+    /// and both were silent (T0806). The name-hit is remembered: if no
+    /// candidate matches exactly and some candidate matched by NAME,
+    /// that is an arity error and is reported as one.
     fn try_resolve_global_module_fn_call(
         &mut self,
         segments: &[&str],
         method: &Ident,
         args: &[Expr],
+    ) -> Result<Option<InferResult>> {
+        self.try_resolve_global_module_fn_call_at(segments, method, args, method.span)
+    }
+
+    fn try_resolve_global_module_fn_call_at(
+        &mut self,
+        segments: &[&str],
+        method: &Ident,
+        args: &[Expr],
+        span: Span,
     ) -> Result<Option<InferResult>> {
         let base_bound = self.ctx.env.lookup(segments[0]).is_some();
         if std::env::var("VERUM_TRACE_QUALPATH").is_ok() {
@@ -23167,6 +23354,7 @@ impl TypeChecker {
             candidates.push(format!("{}.{}", tail, method.name));
             rest = tail;
         }
+        let mut arity_mismatch: Option<usize> = None;
         for cand in &candidates {
             let scheme = self
                 .ctx
@@ -23208,16 +23396,32 @@ impl TypeChecker {
                     return_type,
                     ..
                 } = &func_type
-                    && params.len() == args.len()
                 {
-                    for (arg, param_ty) in args.iter().zip(params.iter()) {
-                        let resolved_param = self.unifier.apply(param_ty);
-                        self.check_expr(arg, &resolved_param)?;
+                    if params.len() == args.len() {
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+                        let resolved_return = self.unifier.apply(return_type);
+                        return Ok(Some(InferResult::new(resolved_return)));
                     }
-                    let resolved_return = self.unifier.apply(return_type);
-                    return Ok(Some(InferResult::new(resolved_return)));
+                    // The NAME resolves here; only the count is wrong.
+                    // Remember the most-qualified such candidate — the
+                    // list is probed most-qualified first — and report it
+                    // if nothing later matches exactly.
+                    if arity_mismatch.is_none() {
+                        arity_mismatch = Some(params.len());
+                    }
                 }
             }
+        }
+        if let Some(expected) = arity_mismatch {
+            return Err(TypeError::wrong_arg_count(
+                method.name.clone(),
+                expected,
+                args.len(),
+                span,
+            ));
         }
         Ok(None)
     }

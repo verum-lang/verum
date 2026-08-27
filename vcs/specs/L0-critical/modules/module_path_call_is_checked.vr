@@ -1,0 +1,67 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: modules, name-resolution, arity, silent-failure
+// @expected-error: E100
+// @expected-error-count: 2
+// @description: A call through a module path is resolved and counted,
+//   like every other call.
+//
+// It was neither. A call whose receiver is a module path of THREE or
+// more segments accepted any leaf name, accepted any middle segment,
+// produced a fresh type variable that satisfied whatever the caller
+// declared, and reached the runtime as a stub. And the argument COUNT
+// was not checked at any path length: `a.b.g()` against
+// `fn g(x: Int) -> Int` checked clean, ran, and answered 1 — the
+// missing argument read as an unset register.
+//
+// The neighbourhood was all checked, which is why this survived so
+// long: a two-segment path reports E100 for a missing leaf, a missing
+// method on a VALUE reports E400, a missing field reports E404, and a
+// three-segment chain rooted in a value reports E404 too. Only the
+// module-path form was exempt, and the exemption was invisible because
+// its symptom is a call that does nothing rather than a call that fails.
+//
+// Two mechanisms, both now closed:
+//
+//   * The arity comparison in the global-registry arm was a FILTER. A
+//     candidate with the right name and the wrong count was skipped, the
+//     arm answered "not a module call", and the caller fell through to
+//     leniency — so a real callee invoked wrongly was indistinguishable
+//     from a name that does not exist. A name that resolves and a count
+//     that does not is now reported as an arity error.
+//
+//   * The inline-module arms carried a ±1 tolerance "for self-param
+//     counting", borrowed from method resolution. A module's free
+//     function has no `self` to be unsure about and Verum has no default
+//     parameters, so the count is exact.
+//
+// And resolution now asks the question it was avoiding: when the path
+// names a module we know about and the member is not in it, that is an
+// unbound name. `a.b.absent` and `a.zzz.f` are the two errors this spec
+// pins — the missing LEAF and the missing MIDDLE.
+//
+// The positive controls live in `module_path_call_still_resolves.vr`,
+// which must keep checking clean: a fix that rejected working
+// module-path calls would satisfy this file and break the language.
+
+module a {
+    public module b {
+        public fn f() -> Bool {
+            true
+        }
+    }
+    public fn top() -> Bool {
+        true
+    }
+}
+
+fn main() {
+    // Missing LEAF: `a.b` is a module, `absent` is not in it.
+    let _leaf = a.b.absent();
+
+    // Missing MIDDLE: `a` is a module, `zzz` is not in it.
+    let _middle = a.zzz.f();
+
+    print("unreachable");
+}

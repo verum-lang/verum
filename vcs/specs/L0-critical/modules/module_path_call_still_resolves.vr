@@ -1,0 +1,79 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: modules, name-resolution, arity
+// @expected-stdout-begin
+// leaf true
+// arg 2
+// two-segment true
+// deep 7
+// chained 2
+// @expected-stdout-end
+// @description: The positive pole of `module_path_call_is_checked.vr` —
+//   every module-path call that WORKED must keep working.
+//
+// Closing the hole in module-path resolution meant teaching the checker
+// to refuse two things it used to accept, and a refusal is only as good
+// as what it leaves alone. This file is what "leaves alone" means: five
+// spellings that must check clean and run, so a fix that rejects the
+// good path too fails here instead of in someone's program.
+//
+// Three of them were measured breaking a first attempt, over all 2560
+// `core/` files against a build of the parent commit, and each is
+// listed because a plausible implementation gets it wrong:
+//
+//   * `deep` — a call several segments down a nested module. The naive
+//     "does this whole path name a module" test says no for a nested
+//     inline module, because those are keyed from the crate root.
+//
+//   * `chained` — `mod.path.f(x).method()`. The chain handler reuses
+//     the OUTERMOST receiver for every step, so `.method()`'s receiver
+//     still reads as the module path; judging it rejects
+//     `base64.decode_url(s).map_err(f)`, which is ordinary stdlib code.
+//
+//   * a call whose receiver ends in a TYPE — `Type.CONSTANT.method()`
+//     and `module.path.Type.Variant(x)` — is type-qualified dispatch,
+//     not a module member. It is exercised by `Colour.Red.brightness()`
+//     below.
+
+module lib {
+    public module inner {
+        public fn leaf() -> Bool {
+            true
+        }
+        public fn takes(x: Int) -> Int {
+            x + 1
+        }
+        public module deeper {
+            public fn deep() -> Int {
+                7
+            }
+        }
+    }
+    public fn top() -> Bool {
+        true
+    }
+}
+
+public type Colour is Red | Green;
+
+implement Colour {
+    public fn brightness(&self) -> Int {
+        match self {
+            Colour.Red => 3,
+            Colour.Green => 5,
+        }
+    }
+}
+
+fn main() {
+    print(f"leaf {lib.inner.leaf()}");
+    print(f"arg {lib.inner.takes(1)}");
+    print(f"two-segment {lib.top()}");
+    print(f"deep {lib.inner.deeper.deep()}");
+
+    // A method CHAINED onto the result of a module-path call, and a
+    // method on a variant reached through a type name.
+    let chained = lib.inner.takes(1).min(3);
+    print(f"chained {chained + Colour.Red.brightness() - 3}");
+}

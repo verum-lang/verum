@@ -521,10 +521,14 @@ fn wait_for_child(pid: Int) -> Result<ExitStatus, Text> {
 
 @cfg(target_os = "macos")
 fn wait_for_child(pid: Int) -> Result<ExitStatus, Text> {
-    let mut status: Int32 = 0;
-    let r = core.sys.darwin.libsystem.waitpid(pid as Int32, &mut status, 0 as Int32);
-    if r < 0 { Result.Err("waitpid failed".into()) }
-    else     { Result.Ok(ExitStatus { raw: status as Int }) }
+    // Through the `safe_*` wrapper, like every other extern in that
+    // module. The raw `waitpid` is private, so this module-path call
+    // named nothing and was accepted silently — the status came back
+    // as whatever the call left in place (T0806).
+    match core.sys.darwin.libsystem.safe_waitpid(pid as Int32, 0 as Int32) {
+        Result.Ok(status) => Result.Ok(ExitStatus { raw: status as Int }),
+        Result.Err(_)     => Result.Err("waitpid failed".into()),
+    }
 }
 
 @cfg(any(target_os = "linux", target_os = "macos"))
@@ -550,7 +554,11 @@ fn close_fd(fd: Int) {
 
 @cfg(target_os = "macos")
 fn close_fd(fd: Int) {
-    let _ = core.sys.darwin.libsystem.close(fd as Int32);
+    // Same shape as the Linux arm just above: through the safe
+    // wrapper, since the raw `close` is not reachable by that path.
+    let _ = core.sys.darwin.libsystem.safe_close(
+        core.sys.common.FileDesc.from_raw(fd as Int32),
+    );
 }
 
 // =============================================================================

@@ -1259,6 +1259,28 @@ public fn safe_close(fd: FileDesc) -> Result<(), OSError> {
     }
 }
 
+/// Wait for a child process (safe wrapper).
+///
+/// The raw `waitpid` in the extern block above is not `public` — every
+/// extern a caller reaches goes through a `safe_*` wrapper — and this
+/// one was missing while `core/io/process.vr` called the raw name
+/// through a module path. A module-path call whose name resolves
+/// nowhere was accepted silently, so on macOS `wait_for_child` never
+/// observed a child's exit status: it read whatever the call left
+/// behind and reported it as the child's (T0806).
+///
+/// Answers the raw wait status; the caller decodes it.
+public fn safe_waitpid(pid: Int32, options: Int32) -> Result<Int32, OSError> {
+    let mut status: Int32 = 0;
+    let result = unsafe { waitpid(pid, &mut status, options) };
+    if result < 0 {
+        let err = errno();
+        Result.Err(OSError.new(err, errno_to_message(err)))
+    } else {
+        Result.Ok(status)
+    }
+}
+
 /// Memory map (safe wrapper) - returns typed pointer consistent with Linux
 @intrinsic("sys_mmap")
 public fn safe_mmap(
@@ -1797,7 +1819,7 @@ public fn safe_getenv(name: &[Byte]) -> Maybe<Text> {
             while *result.offset(value_len) != 0 {
                 value_len = value_len + 1;
             }
-            let value_bytes = core.slice.from_raw_parts(result as &Byte, value_len);
+            let value_bytes = core.intrinsics.memory.slice_from_raw_parts(result as &Byte, value_len);
             Maybe.Some(Text.from_utf8_lossy(value_bytes))
         }
     }
@@ -1888,7 +1910,7 @@ public fn args_get(index: Int) -> Maybe<Text> {
         while *arg_ptr.offset(len) != 0 {
             len = len + 1;
         }
-        let arg_bytes = core.slice.from_raw_parts(arg_ptr as &Byte, len);
+        let arg_bytes = core.intrinsics.memory.slice_from_raw_parts(arg_ptr as &Byte, len);
         Maybe.Some(Text.from_utf8_lossy(arg_bytes))
     }
 }
