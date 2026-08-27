@@ -16101,14 +16101,33 @@ impl TypeChecker {
                     // pattern (Result<T,E>, Maybe<T>) bound payload
                     // patterns to raw T/E placeholders instead of
                     // the concrete type args.
-                    if subst.is_empty() {
+                    //
+                    // IT FIRES ON A PARTIAL MAP TOO, and that is the
+                    // load-bearing half. The registered map can carry
+                    // FEWER parameters than the use site supplies
+                    // arguments, and the loop above then substitutes a
+                    // PREFIX: `Result<Int, EA>` bound `Ok` to `Int` and
+                    // left `Err`'s payload as its template variable —
+                    //
+                    //     scrut = Variant({Ok: Int, Err: Var(17301)})
+                    //
+                    // — so a complete match over `EA`'s constructors was
+                    // reported non-exhaustive, with `EA`'s full variant
+                    // body sitting right there in `args[1]` (T0891).
+                    // Half a substitution is worse than none: none is
+                    // caught by this fallback, half is not.
+                    if subst.len() < args.len() {
                         if let Some(metadata) = self.core_metadata() {
                             let gname = verum_common::Text::from(name);
                             if let Some(td) = metadata.types.get(&gname) {
                                 for (gp, arg) in
                                     td.generic_params.iter().zip(args.iter())
                                 {
-                                    subst.insert(gp.name.clone(), arg.clone());
+                                    // Do not overwrite what the
+                                    // registered map already decided —
+                                    // it is the more specific source
+                                    // when it has an entry at all.
+                                    subst.entry(gp.name.clone()).or_insert(arg.clone());
                                 }
                             }
                         }
