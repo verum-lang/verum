@@ -86,6 +86,31 @@ public theorem guard_then_binding_holds(n: Int)
     ensures guard_then_binding(n)
     proof by auto;
 
+public type Held is None | Some(Int);
+
+/// A guard comparing a VARIANT against its own constant.
+///
+/// This declined for a while after the rest of the guard fold landed,
+/// and the two halves working separately is what made it one narrow
+/// question: the same guard over an `Int` reflected, and the same
+/// comparison inside a `match` arm reflected — that arm building the
+/// constant from the PATTERN's path and never going through the
+/// expression translator at all. `Held.None` in expression position has
+/// the parse shape of a FIELD ACCESS, so it was asking for the named
+/// type of a receiver that is a TYPE. One authority for the constant
+/// now, whichever position it is written in.
+public fn none_or_anything(h: Held) -> Bool {
+    if h == Held.None {
+        return true;
+    }
+    true
+}
+
+@verify(formal)
+public theorem none_or_anything_holds(h: Held)
+    ensures none_or_anything(h)
+    proof by auto;
+
 /// The control: no guards at all. It proved before and must keep
 /// proving, since a change that broke the plain case would still leave
 /// the guard cases passing.

@@ -69,6 +69,23 @@ public theorem binding_after_guard_must_not_prove(n: Int)
     ensures binding_after_guard(n)
     proof by auto;
 
+public type Held is None | Some(Int);
+
+/// False whenever `h` is a `Some`: the guard does not fire and the tail
+/// is `false`. A variant guard that always took its own branch — or a
+/// constant that compared equal to everything — would prove this.
+public fn everything_is_none(h: Held) -> Bool {
+    if h == Held.None {
+        return true;
+    }
+    false
+}
+
+@verify(formal)
+public theorem variant_guard_must_not_prove(h: Held)
+    ensures everything_is_none(h)
+    proof by auto;
+
 fn main() {
     print("guards-unsound");
 }

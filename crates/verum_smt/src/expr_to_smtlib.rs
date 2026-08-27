@@ -727,6 +727,24 @@ pub fn expr_to_smtlib_env(
         // is exactly what lets a reflected field-conjunction body and
         // a hypothesis about the same receiver meet.
         ExprKind::Field { expr: obj, field } => {
+            // TYPE-QUALIFIED first: `Held.None` is a variant CONSTANT
+            // written in expression position, and the parser gives it
+            // the same shape as a field access. It is not one — there
+            // is no receiver whose type could be looked up, which is
+            // why this used to decline with "field access on a value
+            // whose named type is unknown: .None", and why a guard
+            // comparing a variant against its own constant was
+            // unreflectable while the same comparison inside a `match`
+            // arm worked (that arm builds the constant from the
+            // PATTERN's path and never reaches here). Same constant,
+            // same spelling, one authority (T0906).
+            if let ExprKind::Path(p) = &obj.kind
+                && let Some(type_ident) = p.as_ident()
+                && let Some(ctors) = env.variants.get(type_ident.as_str())
+                && ctors.iter().any(|(n, _)| n == field.name.as_str())
+            {
+                return Ok(format!("path_{}.{}", type_ident.as_str(), field.name.as_str()));
+            }
             let tn = member_type_name(obj, env).ok_or_else(|| SmtTranslateError::UnsupportedExpr {
                 description: format!(
                     "field access on a value whose named type is unknown to reflection: .{}",
@@ -1196,19 +1214,34 @@ pub fn try_reflect_function_with_env(
 ) -> Option<crate::refinement_reflection::ReflectedFunction> {
     // Gate: must have parameters (nullary functions are constants,
     // not interesting for reflection).
+    let decline = |reason: &str| -> Option<crate::refinement_reflection::ReflectedFunction> {
+        // Every decline says WHY, on the tracing channel.
+        //
+        // This used to answer a bare `None`, so the only way to learn
+        // why a predicate stayed an uninterpreted symbol — and every
+        // claim about it therefore unprovable — was to guess and
+        // re-measure. The reason was computed and then thrown away.
+        tracing::debug!(
+            "reflection declined `{}`: {}",
+            func.name.name.as_str(),
+            reason
+        );
+        None
+    };
+
     if func.params.is_empty() {
-        return None;
+        return decline("nullary — a constant, not a definition to unfold");
     }
 
     // Gate: must not have context requirements (impure).
     if !func.contexts.is_empty() {
-        return None;
+        return decline("declares contexts, so its result may depend on injected state");
     }
 
     // Gate: must have a body.
     let body = match &func.body {
         verum_common::Maybe::Some(b) => b,
-        verum_common::Maybe::None => return None,
+        verum_common::Maybe::None => return decline("no body"),
     };
 
     // Gate: body must be a Block with a tail expression. STRAIGHT-LINE
@@ -1231,17 +1264,29 @@ pub fn try_reflect_function_with_env(
         verum_ast::decl::FunctionBody::Block(block) => {
             let tail = match &block.expr {
                 verum_common::Maybe::Some(e) => e,
-                verum_common::Maybe::None => return None,
+                verum_common::Maybe::None => {
+                    return decline("block body with no tail expression");
+                }
             };
             if block.stmts.is_empty() {
                 tail
             } else {
-                folded_tail = fold_let_bindings(&block.stmts, tail)?;
-                &folded_tail
+                match fold_let_bindings(&block.stmts, tail) {
+                    Some(f) => {
+                        folded_tail = f;
+                        &folded_tail
+                    }
+                    None => {
+                        return decline(
+                            "body has a statement that is neither a `let` nor an \
+                             early-return guard",
+                        );
+                    }
+                }
             }
         }
         verum_ast::decl::FunctionBody::Expr(e) => e,
-        _ => return None,
+        _ => return decline("body is not a block or an expression"),
     };
 
     // Parameter bindings: names of NAMED-typed parameters feed the
@@ -1262,12 +1307,12 @@ pub fn try_reflect_function_with_env(
     let mut aux = std::collections::BTreeSet::new();
     let body_smtlib = match expr_to_smtlib_env(tail_expr, &env, &mut aux) {
         Ok(s) => s,
-        Err(_) => return None,
+        Err(e) => return decline(&format!("body does not translate: {}", e)),
     };
 
     let params = extract_params(func);
     if params.is_empty() {
-        return None;
+        return decline("no regular parameters");
     }
 
     let return_sort = func
