@@ -318,6 +318,53 @@ unenforced guarantee in under an hour.
 A claim nobody has tried to falsify is worth what a scene that cannot
 fail is worth.
 
+### 15. Census what nothing in the product calls, then break those rules
+
+Rule 14 breaks the claims a programme makes about the language. This
+one finds claims nobody ever wrote down: a rule the compiler CONTAINS
+and does not ask.
+
+The instrument is two greps and a comparison. List the `pub fn`s in an
+analysis crate; count, over the whole workspace's non-test sources, how
+many call each; keep the ones whose only callers live under `tests/`.
+
+APPLY THE SAME FILTER TO BOTH SIDES or the number is fiction. Counting
+callers within one crate says 111 of 1619 in `verum_types`; counting
+across every crate's `src/` says 86, and the 25 in between are what the
+COMPILER calls from another crate. That is rule 13 again, and it is the
+first thing to get wrong here.
+
+The output is a suspect list, not a verdict. Constructors and accessors
+legitimately have no internal caller. So take the alarming names and
+FALSIFY them — write the smallest program that breaks the rule the
+function implements, and see whether anything complains. Two probes
+into an 86-name list produced, inside an hour:
+
+* `check_linear_consumed` — no caller anywhere. `type linear` was
+  parsed, registered, tracked, and its exactly-once obligation never
+  asked. The spec that named it was `parse-pass`: ten cases about
+  linear semantics, verifying that the text parses.
+* `is_well_kinded` — no caller. `Pair<Int>` for a two-parameter `Pair`
+  is accepted, and the free parameter is then unified with whatever
+  arrives first.
+
+BUILD THE POSITIVE CONTROL INTO EVERY PROBE. `let x: Int8 = 300` being
+accepted means nothing until `let x: Int8 = "hello"` is refused in the
+same file — otherwise you have measured that the position is unchecked,
+or that the type does not exist, and reported it as a missing rule. The
+control also catches the wrong POSITION: the arity probe first went in
+a record field, where nothing is checked at all, and would have been
+written up as a missing arity check instead of the separate, larger
+finding that a type declaration's interior is unchecked.
+
+AND MEASURE THE BLAST RADIUS BEFORE LANDING THE FIX. Turning the arity
+check two-sided refuses 194 uses of `Result<X>` across 31 stdlib files
+— and zero uses of any other multi-parameter type. One type, written
+the same way 194 times, is not 194 mistakes: it is a missing feature
+(a default type parameter) that the stdlib has been assuming. A fix
+whose blast radius lands entirely on one shape is a message about the
+shape, not about the sites.
+
 ## What the proving ground must keep doing
 
 It has to stay ambitious. The moment it is trimmed to what already
