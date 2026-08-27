@@ -1,0 +1,83 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: transducers, closures, inference, field-access
+// @timeout: 20000
+// @expected-stdout-begin
+// loop 1
+// filter 1
+// annotated 1
+// mapped 2
+// @expected-stdout-end
+// @description: A closure handed to a transducer factory needs its
+//   parameter type ANNOTATED, and every other spelling of the same
+//   predicate infers it.
+//
+// The unannotated form does not fail to compile. It compiles, and then:
+//
+//     WARN [field-guess] 'n' has 9 position-disagreeing candidates;
+//          guessed AliasSampler.n idx 0 (most fields)
+//     Panic: GetFieldNamed: no TypeDescriptor for runtime type_id=0
+//
+// The closure's parameter type is lost, so `r.n` becomes a by-name
+// field guess that lands on an unrelated standard-library type. A
+// warning and a panic, where a type error belonged.
+//
+// FOUR CASES HERE, and the two that are NOT here are what make them
+// mean something:
+//
+//   * `for r in rows.iter() { r.n … }`               works — `loop`
+//   * `.filter(|r| r.n …)` on the iterator           works — `filter`
+//   * `Transducer.filter(|r: &Row| r.n …)`           works — `annotated`
+//   * `Transducer.map(|r: Row| r.n …)`               works — `mapped`
+//
+//   * `Transducer.filter(|r| r.n …)` in a factory    PANICS
+//   * `Transducer.filter(|r| r.n …)` inline at the
+//     use site, where the receiver determines the
+//     item type                                      PANICS
+//
+// So the receiver determines the item type for `.filter` and does not
+// reach a closure inside a transducer factory: the type has to flow
+// backwards from where the transducer is eventually consumed, and it
+// does not. An annotation supplies it directly.
+//
+// This spec pins the four that work. When the inference reaches the
+// other two, the unannotated forms belong here beside them.
+
+mount core.base.iterator.{Transducer};
+
+public type Row is { n: Int };
+
+fn rows() -> List<Row> {
+    let mut out: List<Row> = List.new();
+    out.push(Row { n: 1 });
+    out.push(Row { n: 2 });
+    out
+}
+
+fn by_loop(rs: &List<Row>) -> Int {
+    let mut c = 0;
+    for r in rs.iter() {
+        if r.n % 2 == 0 {
+            c = c + 1;
+        }
+    }
+    c
+}
+
+fn by_filter(rs: &List<Row>) -> Int {
+    rs.iter().filter(|r| r.n % 2 == 0).fold(0, |a, _r| a + 1)
+}
+
+fn even_rows() -> Transducer<Row, Row> {
+    Transducer.filter(|r: &Row| r.n % 2 == 0)
+}
+
+fn main() {
+    let rs = rows();
+    print(f"loop {by_loop(&rs)}");
+    print(f"filter {by_filter(&rs)}");
+    print(f"annotated {rs.iter().transduce(even_rows()).fold(0, |a, _r| a + 1)}");
+    let doubled: List<Int> = rs.iter().transduce(Transducer.map(|r: Row| r.n * 2)).collect();
+    print(f"mapped {doubled.len()}");
+}
