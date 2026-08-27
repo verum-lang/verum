@@ -2,7 +2,12 @@
 // @level: L0
 // @tier: 0
 // @tags: capability, attenuation, records, soundness
-// @expected-error: E313
+// @expected-error: E400
+//   (the code is NOT settled: `E313` was tried and is already taken by
+//   another diagnostic in `verum_types`, which is itself a symptom —
+//   codes are assigned by hand with no registry. Whatever the refusal
+//   ends up being called, it must not be `E103`: that is the
+//   non-record-type error this feature was failing with by accident.)
 // @skip: T0918: widening is not refused. `subtype.rs` carries the correct rule and nothing asks it; a gate in check_expr was written and measured INERT because every binding reports the plain base type. Remedy: establish whether the binding erases the capability or the diagnostic renderer does — they need different fixes.
 // @description: The negative pole — a value carrying fewer capabilities
 //   may NOT be passed where more are required.

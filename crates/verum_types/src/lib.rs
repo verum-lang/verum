@@ -3323,7 +3323,7 @@ impl TypeError {
             // Definite Assignment Analysis Errors (E201)
             UseOfUninitializedVariable { name, span } => {
                 let mut builder = DiagnosticBuilder::error()
-                    .message(format!("E201: use of uninitialized variable '{}'", name));
+                    .code("E201").message(format!("use of uninitialized variable '{}'", name));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3335,8 +3335,9 @@ impl TypeError {
                 missing,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "E201: use of partially initialized variable '{}' (missing: {})",
+                let mut builder = DiagnosticBuilder::error().code("E201")
+                .message(format!(
+                    "use of partially initialized variable '{}' (missing: {})",
                     name, missing
                 ));
                 if let Some(diag_span) = convert_span(*span) {
@@ -3346,8 +3347,9 @@ impl TypeError {
             }
 
             UninitializedField { var, field, span } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "E201: field '{}' of variable '{}' is not initialized",
+                let mut builder = DiagnosticBuilder::error().code("E201")
+                .message(format!(
+                    "field '{}' of variable '{}' is not initialized",
                     field, var
                 ));
                 if let Some(diag_span) = convert_span(*span) {
@@ -3357,8 +3359,9 @@ impl TypeError {
             }
 
             UninitializedArrayElement { var, index, span } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "E201: array element at index {} of '{}' is not initialized",
+                let mut builder = DiagnosticBuilder::error().code("E201")
+                .message(format!(
+                    "array element at index {} of '{}' is not initialized",
                     index, var
                 ));
                 if let Some(diag_span) = convert_span(*span) {
@@ -3368,8 +3371,9 @@ impl TypeError {
             }
 
             UninitializedTupleElement { var, index, span } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "E201: tuple element {} of '{}' is not initialized",
+                let mut builder = DiagnosticBuilder::error().code("E201")
+                .message(format!(
+                    "tuple element {} of '{}' is not initialized",
                     index, var
                 ));
                 if let Some(diag_span) = convert_span(*span) {
@@ -3379,8 +3383,9 @@ impl TypeError {
             }
 
             IterationOverPartialArray { var, span, .. } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "E201: cannot iterate over partially initialized array '{}'",
+                let mut builder = DiagnosticBuilder::error().code("E201")
+                .message(format!(
+                    "cannot iterate over partially initialized array '{}'",
                     var
                 ));
                 if let Some(diag_span) = convert_span(*span) {
@@ -3395,8 +3400,9 @@ impl TypeError {
                 module_path,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "E601: visibility error: '{}' is {} in module '{}'",
+                let mut builder = DiagnosticBuilder::error().code("E601")
+                .message(format!(
+                    "visibility error: '{}' is {} in module '{}'",
                     name, visibility, module_path
                 ));
                 if let Some(diag_span) = convert_span(*span) {
@@ -3410,8 +3416,9 @@ impl TypeError {
                 sources,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "E602: ambiguous name: '{}' is imported from multiple modules: {}",
+                let mut builder = DiagnosticBuilder::error().code("E602")
+                .message(format!(
+                    "ambiguous name: '{}' is imported from multiple modules: {}",
                     name, sources
                 ));
                 if let Some(diag_span) = convert_span(*span) {
@@ -3458,8 +3465,9 @@ impl TypeError {
                 } else {
                     "immutable"
                 };
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "E310: cannot borrow `{}` as {} because it is already borrowed as {}",
+                let mut builder = DiagnosticBuilder::error().code("E310")
+                .message(format!(
+                    "cannot borrow `{}` as {} because it is already borrowed as {}",
                     var, new_kind, existing_kind
                 ));
                 if let Some(diag_span) = convert_span(*new_borrow_span) {
@@ -3478,8 +3486,9 @@ impl TypeError {
                 existing_span,
                 new_span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "E311: cannot borrow `{}` because field `{}` is already borrowed",
+                let mut builder = DiagnosticBuilder::error().code("E311")
+                .message(format!(
+                    "cannot borrow `{}` because field `{}` is already borrowed",
                     var, field
                 ));
                 if let Some(diag_span) = convert_span(*new_span) {
@@ -3496,8 +3505,9 @@ impl TypeError {
                 ref_span,
                 drop_span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "E312: `{}` does not live long enough - reference outlives referent",
+                let mut builder = DiagnosticBuilder::error().code("E312")
+                .message(format!(
+                    "`{}` does not live long enough - reference outlives referent",
                     var
                 ));
                 if let Some(diag_span) = convert_span(*ref_span) {
@@ -3510,8 +3520,9 @@ impl TypeError {
             }
 
             CheckedRefEscape { var, span } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "E310: `&checked` reference to `{}` may escape through function call",
+                let mut builder = DiagnosticBuilder::error().code("E310")
+                .message(format!(
+                    "`&checked` reference to `{}` may escape through function call",
                     var
                 ));
                 if let Some(diag_span) = convert_span(*span) {
@@ -3532,7 +3543,7 @@ impl TypeError {
                 borrow_span,
             } => {
                 let mut builder = DiagnosticBuilder::error()
-                    .message(format!("E313: cannot move `{}` while it is borrowed", var));
+                    .code("E313").message(format!("cannot move `{}` while it is borrowed", var));
                 if let Some(diag_span) = convert_span(*move_span) {
                     builder = builder.span(diag_span);
                 }
@@ -3547,8 +3558,9 @@ impl TypeError {
                 assign_span,
                 borrow_span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "E314: cannot assign to `{}` while it is borrowed",
+                let mut builder = DiagnosticBuilder::error().code("E314")
+                .message(format!(
+                    "cannot assign to `{}` while it is borrowed",
                     var
                 ));
                 if let Some(diag_span) = convert_span(*assign_span) {
