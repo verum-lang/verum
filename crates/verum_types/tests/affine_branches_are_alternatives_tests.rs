@@ -240,3 +240,28 @@ fn work(fail: Bool) -> Int {
         "both paths close the session exactly once: {cs:?}"
     );
 }
+
+#[test]
+fn a_method_taking_a_linear_receiver_by_value_is_the_consumer() {
+    // `self` is a parameter like any other. Leaving it out of the
+    // exemption makes the METHOD form of the canonical consumer an error
+    // while the free-function form is fine — the same rule reading two
+    // ways depending on how the receiver is spelled.
+    let code = r#"
+type linear Handle is { fd: Int };
+
+implement Handle {
+    public fn close(self) -> Int { self.fd }
+}
+
+fn use_it() -> Int {
+    let h = Handle { fd: 3 };
+    h.close()
+}
+"#;
+    let cs = complaints(code);
+    assert!(
+        !cs.iter().any(|c| c.contains("exactly once")),
+        "`close(self)` consumes the receiver; the local is consumed by calling it: {cs:?}"
+    );
+}

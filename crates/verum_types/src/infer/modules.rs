@@ -10234,7 +10234,12 @@ impl TypeChecker {
                             _ => None,
                         }
                     }
-                    _ => None,
+                    // `self` is a parameter like any other, and a method
+                    // taking a linear receiver BY VALUE is the ordinary
+                    // consumer — `fn close(self)`. Leaving it out would
+                    // make the method form of the canonical consumer an
+                    // error while the free-function form is fine.
+                    _ => Some(verum_common::Text::from("self")),
                 })
                 .collect(),
         );

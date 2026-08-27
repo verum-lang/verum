@@ -1649,7 +1649,24 @@ fn convert_generic_params(
                 .map(Text::from)
                 .unwrap_or_default(),
             bounds: List::new(),
-            default: Maybe::None,
+            // The DEFAULT, carried through. `TypeParamDescriptor.default`
+            // is populated by codegen and written by the serialiser, and
+            // this converter dropped it on the floor — so a stdlib type
+            // declaring `<E = Error>` arrived from the archive with the
+            // parameter bare, and every use had to supply what the
+            // declaration had already answered.
+            //
+            // Rendered the same way `type_bounds` are, one line down: the
+            // descriptor's currency is text, and the two must agree or the
+            // reader parses one of them wrong (same-name-is-not-same-format).
+            default: match &tp.default {
+                Some(tr) => Maybe::Some(Text::from(type_ref_to_text_with_params(
+                    tr,
+                    &type_id_to_name,
+                    &param_id_to_name,
+                ))),
+                None => Maybe::None,
+            },
             type_bounds: tp
                 .type_bounds
                 .iter()

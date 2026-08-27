@@ -1355,6 +1355,38 @@ impl TypeChecker {
                     crate::ty::Type::Record(param_record),
                 );
             }
+
+            // A parameter's DEFAULT, from the archive. Mirror of the
+            // source-declaration write in `decls.rs`
+            // (`record_type_param_defaults`) — the two paths have to
+            // agree, or `Result<T>` means one thing when core/ is
+            // compiled from source and another when it comes from the
+            // baked archive, which is the worst kind of disagreement
+            // because only one of the two is ever exercised at a time.
+            let defaults_key: verum_common::Text =
+                format!("__type_param_defaults_{}", name).into();
+            if self.ctx.lookup_type(defaults_key.as_str()).is_none() {
+                let mut defaults: verum_common::List<crate::ty::Type> =
+                    verum_common::List::new();
+                let mut any = false;
+                for gp in type_desc.generic_params.iter() {
+                    match &gp.default {
+                        Maybe::Some(text) if !text.is_empty() => {
+                            defaults.push(
+                                crate::infer::helpers::parse_descriptor_type_string(
+                                    text.as_str(),
+                                ),
+                            );
+                            any = true;
+                        }
+                        _ => defaults.push(crate::ty::Type::Unknown),
+                    }
+                }
+                if any {
+                    self.ctx
+                        .define_type(defaults_key, crate::ty::Type::Tuple(defaults));
+                }
+            }
         }
 
         if self.ctx.lookup_type(name.as_str()).is_none() {
