@@ -1,0 +1,91 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: io, references, cbgr, interior-pointer, data-loss
+// @timeout: 20000
+// @expected-stdout-begin
+// literal Ok(()) read=Ok(literal)
+// local Ok(()) read=Ok(local)
+// field Ok(()) read=Ok(field)
+// ref-param Ok(()) read=Ok(ref-param)
+// nested Ok(()) read=Ok(nested)
+// missing Err
+// @expected-stdout-end
+// @description: A file path held in a record field addresses the same
+//   file as any other spelling of that path.
+//
+// It addressed a DIFFERENT file. `write(&s.path, …)` on
+//
+//     type S is { path: Text };
+//     let s = S { path: "/tmp/out.txt" };
+//
+// returned `Ok(())` and created a file named, literally,
+//
+//     <ptr@0x9d4831cf8>
+//
+// in the working directory. Nothing was written where the program said,
+// nothing failed, and a later read through the same field returned the
+// bytes of that junk file — so a store that keeps its own path in a
+// field, which is where any store keeps it, silently lost everything it
+// held and reported success both ways.
+//
+// `&record.field` is not the same runtime shape as `&local`: it is the
+// `RefField` opcode, whose result is an interior POINTER to the field
+// slot, tracked in the interpreter's mutable-pointer registry — while
+// `&local` is a register-ref. The file intercept's argument extraction
+// peeled the register-ref and the thin-ref and not the third shape, so
+// the slot ADDRESS reached the text probes, failed all of them, and
+// bottomed out in a debug rendering that happens to be a valid
+// filename. That last step is what turned a wrong answer into a silent
+// one, and it is now a refusal: a value that is not a path does not
+// become one.
+//
+// The other four spellings are load-bearing controls. They worked
+// before and must keep working — a "fix" that refused field paths, or
+// one that made every argument take the interior-pointer branch, would
+// satisfy the field line and break these.
+//
+// `missing` is the honesty control: a write into a directory that does
+// not exist must FAIL. Before the fix it returned `Ok(())`, because a
+// path with no directory component in it cannot fail for the reason the
+// program intended.
+
+public type S is { path: Text };
+public type W is { inner: S };
+
+/// Write the label, read it straight back, and report both verdicts.
+/// The content read back is the load-bearing part: a wrong path can
+/// still round-trip against ITSELF, so the label has to survive.
+fn round_trip(label: Text, path: &Text) {
+    let w = core.io.file.write(path, &label);
+    let r = core.io.file.read_to_string(path);
+    print(f"{label} {w} read={r}");
+}
+
+fn through_ref_param(s: &S) {
+    round_trip("ref-param", &s.path);
+}
+
+fn main() {
+    round_trip("literal", &"/tmp/vcs_path_literal.txt");
+
+    let p = "/tmp/vcs_path_local.txt";
+    round_trip("local", &p);
+
+    let s = S { path: "/tmp/vcs_path_field.txt" };
+    round_trip("field", &s.path);
+
+    let r = S { path: "/tmp/vcs_path_refparam.txt" };
+    through_ref_param(&r);
+
+    let w = W { inner: S { path: "/tmp/vcs_path_nested.txt" } };
+    round_trip("nested", &w.inner.path);
+
+    // A write into a directory that does not exist must be refused.
+    let missing = S { path: "/tmp/vcs_no_such_dir/f.txt" };
+    let verdict = match core.io.file.write(&missing.path, &"x") {
+        Ok(_) => "Ok(())",
+        Err(_) => "Err",
+    };
+    print(f"missing {verdict}");
+}

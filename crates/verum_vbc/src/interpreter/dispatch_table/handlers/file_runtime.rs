@@ -621,12 +621,10 @@ fn intercept_write_dispatch(
     let contents_v = state
         .registers
         .get(caller_base, crate::instruction::Reg(args_start_reg + 1));
-    let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&contents_v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(contents_v);
-        state.registers.get_absolute(abs_index)
-    } else {
-        contents_v
-    };
+    // Same authority as the path argument — the CONTENTS of a write can
+    // just as easily be `&record.field`, and a private one-hop peel
+    // would silently write the debug rendering of a slot address.
+    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, contents_v);
     let result = if value_is_text(&unwrapped) {
         let text = extract_string(&unwrapped, state);
         std::fs::write(&path, text.as_bytes())
@@ -682,18 +680,19 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
     // garbage, and bottomed out in the `<value:bits>` debug
     // rendering — surfacing as `NotFound` against a path the user
     // never typed.
-    let mut unwrapped = if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v);
-        state.registers.get_absolute(abs_index)
-    } else {
-        v
-    };
-    if unwrapped.is_thin_ref() {
-        let tr = unwrapped.as_thin_ref();
-        if !tr.ptr.is_null() {
-            unwrapped = unsafe { *(tr.ptr as *const Value) };
-        }
-    }
+    // ONE authority for "what does this `&T` argument denote"
+    // (`cbgr_helpers::resolve_arg_value`), whose own documentation says
+    // every intercept consuming a `&T` MUST funnel through it. The
+    // private copy that used to stand here peeled a register-ref and a
+    // ThinRef but NOT a `cbgr_mutable_ptrs` interior pointer — the shape
+    // `&record.field` produces (the `RefField` opcode). So a path held
+    // in a struct field arrived as the raw address of the field SLOT,
+    // failed every text probe, and bottomed out in the debug rendering
+    // below: `write(&s.path, …)` created a file literally named
+    // `<ptr@0x9d4831cf8>` in the working directory and returned `Ok(())`
+    // (T0899). A store that keeps its own path in a field — which is
+    // where any store keeps it — lost every byte and reported success.
+    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, v);
     // Fast path: it's already a Text.
     if value_is_text(&unwrapped) {
         return extract_string(&unwrapped, state);
@@ -739,10 +738,22 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
             }
         }
     }
-    // Last resort — let extract_string do its `<value:...>` debug
-    // rendering rather than silently returning empty, so any future
-    // bug surfaces in the path string and not as a baffling NotFound.
-    extract_string(&unwrapped, state)
+    // Not a path in any shape this knows. It used to fall through to
+    // `extract_string`'s `<value:…>` debug rendering, on the reasoning
+    // that a visible wrong path beats a baffling NotFound. But a
+    // rendering IS a valid filename: the host happily created
+    // `<ptr@0x9d4831cf8>` in the working directory, so the failure that
+    // was meant to be loud became a silent write to the wrong file
+    // (T0899). A value that is not a path must not become one — answer
+    // the empty string, which no `std::fs` call can satisfy, and say
+    // on the log what arrived so the diagnosis the rendering was for
+    // is still one `VERUM_LOG=warn` away.
+    tracing::warn!(
+        "file intercept: argument is not a path in any known shape \
+         (received {}); refusing to treat its rendering as a filename",
+        extract_string(&unwrapped, state),
+    );
+    String::new()
 }
 
 /// Extract a `&[Byte]` (or `List<Byte>`) argument from a register
@@ -759,12 +770,9 @@ pub(super) fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_b
 /// registers from the CURRENT frame (`state.get_reg`) rather than a
 /// caller frame — the FfiExtended System sub-ops (ENV-IMPL-TRIO-1).
 pub(super) fn extract_byte_list_from_value(state: &InterpreterState, v: Value) -> Vec<u8> {
-    let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v);
-        state.registers.get_absolute(abs_index)
-    } else {
-        v
-    };
+    // A `&[Byte]` argument reaches here through the same three
+    // encodings a `&Text` does; one authority peels all of them.
+    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, v);
     // A BYTE_SLICE (528) is the representation-tagged borrowed byte view
     // that `Text.as_bytes()` (TextExtended::AsBytes) and slice ops produce
     // — NOT a heap List<Byte>. `core/base/env.vr`'s `var()` passes
