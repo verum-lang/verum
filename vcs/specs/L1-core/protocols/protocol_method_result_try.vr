@@ -10,7 +10,8 @@
 //   It did not, and the cause was three layers from the symptom. Every
 //   protocol in the baked metadata carried ZERO methods, because the
 //   protocol map is keyed by simple name and a dozen empty re-export
-//   shells (`core::Debug`, `core.sys::Debug`, …) displaced the one real
+//   shells — whose keys still carried the Rust path separator, from a
+//   spelling the language does not have — displaced the one real
 //   declaration. Separately, a function's recorded return type dropped
 //   its arguments whenever the type-ref render was lossy in its base:
 //   the descriptor held `Instantiated { base, args: [Unit,

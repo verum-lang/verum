@@ -32,8 +32,8 @@
 // THE one allocation-header layout for the whole platform (T0846
 // layer 2): the Tier-0 interpreter bridge, the Tier-1 AOT runtime and
 // this declaration all read the same offsets, pinned on the Rust side
-// by `verum_common::layout::ALLOCATION_HEADER_*` and its offset_of!
-// tests. Before the unification this file declared generation at
+// by the `ALLOCATION_HEADER_*` constants in `verum_common`'s layout
+// module, and by its offset_of tests. Before the unification this file declared generation at
 // offset 0 while the interpreter wrote it at 8 and the AOT runtime at
 // 0 with a different neighbourhood — three descriptions, no two
 // agreeing, and every .vr header read through this struct read the

@@ -6,7 +6,8 @@
 //   observation channel agrees with the allocator across BOTH tiers
 //   (T0846 mem_raw acceptance). cbgr_alloc returns (ptr, gen, epoch)
 //   from the allocator's own bookkeeping; cbgr_get_generation reads
-//   the header AT THE CANONICAL OFFSET (gen@8, verum_common::layout).
+//   the header AT THE CANONICAL OFFSET (gen@8, the layout module in
+//   `verum_common`).
 //   If either tier reads a different arrangement, the two values
 //   disagree and this spec fails loudly — this is the first LIVE
 //   caller of the observation channel (the older cbgr_test only

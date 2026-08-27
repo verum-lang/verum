@@ -588,7 +588,7 @@ public module prelude {
 
     // From text.format — the LANGUAGE inserts these names: `f"{x:?}"`
     // desugars to a bare `format_debug(&x)` call (see
-    // `verum_fast_parser/src/safe_interpolation.rs::format_debug_call`),
+    // `format_debug_call` in `verum_fast_parser/src/safe_interpolation.rs`),
     // and the TEXT-DEBUG-STATIC-1 codegen rewrite substitutes
     // `format_debug_text` for the concrete-Text receiver IN PLACE, so
     // it must resolve exactly where `format_debug` does.  Under the
