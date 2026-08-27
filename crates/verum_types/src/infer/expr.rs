@@ -151,6 +151,27 @@ impl TypeChecker {
     /// recursion between check_expr and infer_expr.
     pub(super) fn check_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         let _depth_guard = self.inc_inference_depth("check_expr")?;
+
+        // REDUCE THE PROJECTION BEFORE COMPARING AGAINST IT.
+        //
+        // `resolve_assoc_projections_deep` was applied to match
+        // scrutinees and to nothing else, so an EXPECTED type carrying a
+        // projection reached unification unreduced and the mismatch was
+        // reported against the projection itself:
+        //
+        //     expected 'Item<ListIter<Verified>>', found 'Verified'
+        //
+        // The resolver had already answered, in the same run — the
+        // `[assoc]` trace shows `Item<ListIter<Int>> -> Some(&Int)` —
+        // and the comparison did not ask. Computed and discarded, which
+        // is the shape this codebase keeps paying for (T0912).
+        //
+        // Resolve MORE, never less: the helper rewrites only heads the
+        // protocol registry recognises as associated types and returns
+        // everything else unchanged, so a genuine generic (`List`,
+        // `Maybe`) passes through untouched.
+        let expected = &self.resolve_assoc_projections_deep(expected);
+
         self.check_expr_inner(expr, expected)
     }
 

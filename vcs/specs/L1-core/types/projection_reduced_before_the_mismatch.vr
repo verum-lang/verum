@@ -1,0 +1,60 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: types, associated-types, projection, iterator
+// @description: An associated-type projection is reduced before a
+//   mismatch is reported against it.
+//
+// `Item<ListIter<T>>` IS the element type. When a projection reaches
+// unification unreduced, the diagnostic compares a program against a
+// type it never wrote:
+//
+//     error<E400>: Type mismatch:
+//                  expected 'Item<ListIter<Verified>>', found 'Verified'
+//
+// The resolver had already answered in the same run — an instrument on
+// `try_resolve_associated_type_projection` shows
+// `Item<ListIter<Int>> -> Some(&Int)` — and the comparison did not ask.
+// Computed and discarded, rather than never computed, which is why the
+// fix is at the comparison and not in the resolver.
+//
+// WHY THIS FILE IS A SINGLE FILE AND THE BUG NEEDED A PROJECT: the
+// file-mode and project-mode paths gave different verdicts on
+// byte-identical source, and the program RAN and printed the right
+// answer in both. What this pole protects is the reduction itself, so a
+// regression that stopped reducing shows up here as a mismatch naming a
+// projection — the exact string above.
+
+/// A closure over the element type, applied through an iterator chain,
+/// so the projection has to reduce for the call to check.
+public type Item2 is { v: Int };
+
+public fn positives(xs: &List<Item2>) -> Int {
+    let mut n = 0;
+    for x in xs.iter() {
+        if x.v > 0 {
+            n = n + 1;
+        }
+    }
+    n
+}
+
+/// The same element type reached through `map`, which is where the
+/// projection is a PARAMETER rather than a loop binding.
+public fn doubled(xs: &List<Int>) -> List<Int> {
+    xs.iter().map(|x| x * 2).collect()
+}
+
+/// And through `filter`, whose predicate takes the projected element —
+/// the shape that made the registry's transducer layer unusable.
+public fn kept(xs: &List<Int>) -> List<Int> {
+    xs.iter().filter(|x| x > 0).collect()
+}
+
+fn main() {
+    let mut xs: List<Item2> = List.new();
+    xs.push(Item2 { v: 3 });
+    let mut ns: List<Int> = List.new();
+    ns.push(2);
+    print(f"{positives(&xs)} {doubled(&ns).len()} {kept(&ns).len()}");
+}
