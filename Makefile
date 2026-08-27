@@ -63,6 +63,10 @@ check-type-name-collisions: ## Gate (T0458): simple-type-name collisions in core
 	python3 scripts/ci/check_type_name_collisions.py --self-test
 	python3 scripts/ci/check_type_name_collisions.py
 
+check-determinism: ## Gate (T0927): the compiler must give the same answer twice — needs a built binary (VERUM_BIN=... to point at one)
+	python3 scripts/ci/check_determinism.py --self-test
+	python3 scripts/ci/check_determinism.py --sample 40 --check
+
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
 
