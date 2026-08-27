@@ -223,6 +223,56 @@ The general form: when a tool has a broad mode and a narrow one, the
 narrow one is what gets typed and the broad one is where the findings
 are. Ask what the broad mode says before concluding a program is clean.
 
+### 12. Before designing a fix, find the sibling that already does it right
+
+Five roots in one session had the same shape: the rule, the authority or
+the registry ALREADY existed and was correct, and the consumer did not
+ask it — or one fact had N consumers and N-1 were fed.
+
+| the authority that existed | who did not ask |
+|---|---|
+| the record-variant pattern arm carries a guard and explains it | the tuple-variant arm forty lines below |
+| a variant's constructors go to the reflector and to the proof engine | the third consumer, which binds `result` to the body |
+| `mount sys.darwin.…` normalises through `is_stdlib_toplevel_path` | the dotted CALL resolver, which only stripped from the left |
+| `subtype.rs`: `T with [c1] <: T with [c2]` iff `c2 ⊆ c1` | argument checking, which unifies and peels both ways |
+| field access peels the wrapper in `infer/expr.rs` | the second emitter of the same error in `infer/env.rs` |
+
+So the first question is not "what should this do" but "where is this
+already done, and why does that place not answer here". Three checks
+cover most of it:
+
+* **the same construct** — is there an arm for a relative and not for
+  this one? (`If` handled, `Match` not; record handled, tuple not.)
+* **the same fact** — how many consumers receive it? Count the
+  `register_*` calls and the push-to-all loops.
+* **the same decision** — is it already written in a module whose name
+  says so? (`subtype.rs` for subtyping, `is_stdlib_toplevel_path` for
+  path normalisation.)
+
+When the sibling is found the fix is usually one line and arrives with
+its own justification: not "I decided", but "it is already decided
+there". When there is NO sibling and the behaviour is still wanted, that
+is a DESIGN decision and must not be smuggled in as a repair — the tell
+is having to invent an error code, a name or a policy.
+
+### 13. Compare both sides of a measurement with ONE filter
+
+`verum` emits errors both with and without a code. Exactly half the type
+diagnostics in `verum_types` render through `DiagnosticBuilder::error()`
+with no `.code(...)`, and the uncoded half is the memory-safety family —
+`AffineViolation`, `DanglingReference`, `BorrowConflict`,
+`AssignWhileBorrowed`, `CheckedRefEscape`.
+
+So `grep -c '^error<'` scores those ZERO and calls the file clean, while
+`grep -c '^error'` counts them. Using one on each side of a comparison
+is not a comparison; it is two different measurements presented as one.
+That produced a WRONG published conclusion in this session — "check
+accepts what run refuses" — from two commands that in fact agreed.
+
+Count `^error`. Use the same command on both sides. An instrument that
+under-reports is worse than no instrument, because it answers
+confidently.
+
 ## What the proving ground must keep doing
 
 It has to stay ambitious. The moment it is trimmed to what already

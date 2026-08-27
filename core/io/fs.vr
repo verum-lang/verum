@@ -879,9 +879,26 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
     path_buf[..len].copy_from_slice(&path_bytes[..len]);
     path_buf[len] = 0;
 
-    let dir_handle = unsafe { sys.darwin.libsystem.opendir(path_buf.as_ptr() as &Byte) };
+    // CALLED BY THE MOUNTED NAMES, which this file already imports
+    // (`opendir as sys_opendir`, `errno`) forty lines up.
+    //
+    // Spelled as the dotted path `sys.darwin.libsystem.opendir(…)` these
+    // two calls did not resolve — and nothing said so. An unresolved
+    // module-path call is accepted with an unknown type rather than
+    // reported, so the body could not be compiled and the bake shipped
+    // `read_dir` as a STUB. The failure surfaced only when a program
+    // called it:
+    //
+    //     Panic: [lenient] stage-5 qualified cross-module fn stub never
+    //     resolved (func_id=4269801471)
+    //
+    // `walk_dir` inherited it through `read_dir(path)?`, so listing a
+    // directory — the first thing any build tool does — was impossible
+    // from Verum (T0916). The language-level defect is filed separately:
+    // a module-path call that resolves to nothing must be an error.
+    let dir_handle = unsafe { sys_opendir(path_buf.as_ptr() as &Byte) };
     if dir_handle.is_null() {
-        let err = sys.darwin.libsystem.errno();
+        let err = errno();
         return Result.Err(StreamError { kind: io_error_kind_from_os_code(err), message: Maybe.Some(f"OS error {err}") });
     }
 

@@ -1,0 +1,51 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: capability, attenuation, records, soundness
+// @expected-error: E313
+// @description: The negative pole — a value carrying fewer capabilities
+//   may NOT be passed where more are required.
+//
+// The companion to `capability_on_a_record_keeps_its_fields`. That file
+// checks a restricted record is still a record; this one checks the
+// restriction still means something.
+//
+// Attenuation is one-way. Handing over `[Read, Write]` where `[Read]` is
+// wanted is safe — the callee simply uses less than it was given. The
+// reverse is the whole point of the feature: a caller holding a
+// read-only view must not be able to reach a function that writes,
+// because that is precisely the confinement the type was chosen to
+// express.
+//
+// WHY THE POLE IS LOAD-BEARING HERE IN PARTICULAR: before the field-access
+// fix, BOTH directions failed, and both failed with the same E103 about
+// a non-record type. So there was no program that told a working
+// attenuation check apart from a broken one — the feature could have
+// been doing nothing at all and every spec in this directory would have
+// stayed green. A relaxation that removes the check and a fix that
+// repairs it are indistinguishable from the passing side; only a
+// program that must be REFUSED separates them.
+//
+// The refusal must also be about CAPABILITIES. If this file starts
+// failing with E103 again, the fix regressed even though the test still
+// reports a failure — which is why the expected code is pinned.
+
+public type Store is { n: Int };
+
+/// Requires the right to write.
+public fn bump(s: &mut Store with [Read, Write]) {
+    s.n = s.n + 1;
+}
+
+/// Holds only the right to read, and tries to write anyway.
+public fn sneak(ro: &mut Store with [Read]) {
+    // ERROR: `[Read]` is not `[Read, Write]`. Rights can be given away,
+    // never taken back.
+    bump(ro);
+}
+
+fn main() {
+    let mut s = Store { n: 1 };
+    sneak(&mut s);
+    print(f"{s.n}");
+}

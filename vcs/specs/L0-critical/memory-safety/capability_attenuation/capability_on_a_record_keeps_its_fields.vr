@@ -1,0 +1,63 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: capability, attenuation, records, fields
+// @description: A capability-restricted record is still a record, and
+//   passing a wider capability where a narrower one is required is
+//   allowed.
+//
+// A CAPABILITY RESTRICTS WHAT MAY BE DONE WITH A VALUE. IT DOES NOT
+// CHANGE WHAT THE VALUE IS.
+//
+// That sentence is the whole rule, and the unifier has always read it
+// that way — its `CapabilityRestricted` arms unify through to the base.
+// Field access did not, so a restricted record stopped being a record:
+//
+//     error<E103>: Cannot access field 'n' on non-record type:
+//                  Store with [ReadOnly]
+//
+// which made the feature unusable on any record at all — the shape it
+// exists for.
+//
+// WHY THIS FILE AND NOT THE FOUR ALREADY HERE: the existing capability
+// specs in this directory name types that are never declared
+// (`Database`, `AppContext`, `IOContext`) and never touch a field, so
+// they check that the SYNTAX parses. Parsing was never the problem. A
+// spec that would have caught this has to declare a real record and
+// read a real field from it, which is what the two functions below do.
+//
+// The companion file carries the negative pole. Both are needed: a
+// relaxation that removes the check and a fix that repairs it look
+// identical from this side.
+
+public type Store is { n: Int, tag: Text };
+
+/// Reading a field through a restriction.
+public fn read_count(s: &Store with [Read]) -> Int {
+    s.n
+}
+
+/// A second field, of a different type, so a fix that special-cased one
+/// sort does not pass by accident.
+public fn read_tag(s: &Store with [Read]) -> Text {
+    s.tag.clone()
+}
+
+/// Writing through a wider restriction.
+public fn bump(s: &mut Store with [Read, Write]) {
+    s.n = s.n + 1;
+}
+
+/// ATTENUATION: a caller holding `[Read, Write]` may pass it where
+/// `[Read]` is required. The superset is a subtype of the subset —
+/// giving away rights is always safe, and it is the direction the
+/// feature exists to make ordinary.
+public fn narrow(full: &Store with [Read, Write]) -> Int {
+    read_count(full)
+}
+
+fn main() {
+    let mut s = Store { n: 1, tag: "one" };
+    bump(&mut s);
+    print(f"{read_count(&s)} {read_tag(&s)} {narrow(&s)}");
+}
