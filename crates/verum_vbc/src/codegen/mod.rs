@@ -5366,6 +5366,53 @@ impl VbcCodegen {
     /// can be mapped straight to the emitting instruction. Wired into
     /// BOTH finalizers (`finalize_module` — single-module/test path;
     /// `finalize_module_from_state` — pipeline path).
+    /// Do the archive-derived functions occupy a contiguous PREFIX of
+    /// `functions`?
+    ///
+    /// `VbcModule::user_function_start` is an INDEX — "functions before
+    /// it are from the stdlib" — which is only meaningful if the two
+    /// groups do not interleave. Nothing produces that field today
+    /// (T0921), and producing it is the enabling step for splitting a
+    /// script's cache entry from the stdlib closure it duplicates
+    /// (T0917). So the assumption is measured BEFORE a producer is
+    /// written, rather than after it ships a wrong number.
+    ///
+    /// `archive_func_name_to_fid` is the authority for "came from the
+    /// archive": `archive_ctx_loader::record_archive_function_name`
+    /// fills it during archive load.
+    fn report_archive_prefix_if_requested(&self) {
+        if std::env::var_os("VERUM_TRACE_ARCHIVE_PREFIX").is_none() {
+            return;
+        }
+        let from_archive: std::collections::HashSet<u32> = self
+            .archive_func_name_to_fid
+            .values()
+            .map(|fid| fid.0)
+            .collect();
+        let mut last_archive: Option<usize> = None;
+        let mut first_user: Option<usize> = None;
+        let mut interleavings = 0usize;
+        for (i, f) in self.functions.iter().enumerate() {
+            if from_archive.contains(&f.descriptor.id.0) {
+                last_archive = Some(i);
+                if first_user.is_some() {
+                    interleavings += 1;
+                }
+            } else if first_user.is_none() {
+                first_user = Some(i);
+            }
+        }
+        eprintln!(
+            "[archive-prefix] functions={} from_archive={} last_archive={:?} \
+             first_user={:?} interleavings={}",
+            self.functions.len(),
+            from_archive.len(),
+            last_archive,
+            first_user,
+            interleavings,
+        );
+    }
+
     fn dump_vbc_if_requested(&self) {
         if let Ok(filter) = std::env::var("VERUM_DUMP_VBC") {
             for f in &self.functions {
@@ -5398,6 +5445,7 @@ impl VbcCodegen {
         mount_cost::report_aliases("finalize_module");
         bare_method::report("finalize_module");
         self.dump_vbc_if_requested();
+        self.report_archive_prefix_if_requested();
         // Compile any pending constants (struct literals, etc.) before building
         self.compile_pending_constants()?;
         // Compile any pending @thread_local initializations

@@ -161,16 +161,32 @@ pub struct VbcModule {
     /// functions before it from the stdlib, functions from it on the
     /// user's.
     ///
-    /// RESERVED, NOT YET PRODUCED, AND NOT YET CONSUMED. Nothing assigns
-    /// it, so it is always `0` — which reads as "every function is the
-    /// user's", the opposite of what a script's module holds. The
-    /// previous wording claimed the `@test` runner uses it to skip
-    /// stdlib tests; no reader exists anywhere in the tree.
+    /// UNPRODUCIBLE AS AN INDEX — measured, not assumed. Nothing assigns
+    /// it, so it is always `0`; the previous wording also claimed the
+    /// `@test` runner uses it to skip stdlib tests, and no reader exists
+    /// anywhere in the tree.
     ///
-    /// It is the enabling fact for splitting a script's cache entry from
-    /// the stdlib closure it currently duplicates (a one-line script
-    /// costs 412 KB and 137 ms), so producing it is wanted — see T0917 —
-    /// but that is work, not a fact already in hand (T0921).
+    /// An index can only separate the two groups if they do not
+    /// interleave, and they interleave almost completely. Counting
+    /// archive-derived functions (`archive_func_name_to_fid`) against
+    /// position in `functions`:
+    ///
+    ///     hello.vr  1979 functions, first_user=0, 1955 interleavings
+    ///     a script mounting core.io.fs
+    ///               22865 functions, first_user=0, 22816 interleavings
+    ///
+    /// The first function is already the user's and the last
+    /// archive-derived one sits at the end, so no index exists. A
+    /// producer written from the definition above would compute
+    /// `first_user = 0` — correct by that definition and
+    /// indistinguishable from the default.
+    ///
+    /// The need behind it is real: a ONE-LINE script's module carries
+    /// 1979 functions, essentially all archive-derived, which is the
+    /// 412 KB cache entry T0917 is about. The answer is per-function
+    /// ORIGIN — `archive_func_name_to_fid`, which is already populated —
+    /// not a boundary index. This field should be removed or redefined
+    /// rather than produced (T0921).
     #[serde(default)]
     pub user_function_start: u32,
 
