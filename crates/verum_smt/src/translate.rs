@@ -663,8 +663,10 @@ impl<'ctx> Translator<'ctx> {
     /// different signatures and the axiom never bears on the goal —
     /// read verbatim out of a dumped query (T0901):
     ///
-    ///     (declare-fun p_two (Verum!Box) Bool)   from the axiom
-    ///     (declare-fun p_two (Int) Bool)         from the goal
+    /// ```text
+    /// (declare-fun p_two (Verum!Box) Bool)   from the axiom
+    /// (declare-fun p_two (Int) Bool)         from the goal
+    /// ```
     fn sort_from_name(name: &str) -> z3::Sort {
         if name.starts_with("Verum!") {
             return z3::Sort::uninterpreted(z3::Symbol::String(name.to_string()));

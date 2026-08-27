@@ -1006,9 +1006,11 @@ pub fn extract_params(func: &verum_ast::FunctionDecl) -> Vec<(String, String)> {
 ///
 /// The guard shape is what a comparison chain looks like:
 ///
-///     if a.major != b.major { return a.major < b.major; }
-///     if a.minor != b.minor { return a.minor < b.minor; }
-///     a.patch < b.patch
+/// ```text
+/// if a.major != b.major { return a.major < b.major; }
+/// if a.minor != b.minor { return a.minor < b.minor; }
+/// a.patch < b.patch
+/// ```
 ///
 /// Returns `None` — declining the whole reflection — for anything else:
 /// a statement that is neither, a destructuring or otherwise
