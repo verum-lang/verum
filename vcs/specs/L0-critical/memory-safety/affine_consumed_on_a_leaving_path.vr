@@ -1,0 +1,60 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: affine, linearity, control-flow
+// @expected-stdout-begin
+// 7 7
+// @expected-stdout-end
+// @description: An affine value consumed on a path that RETURNS is
+//   accepted even though the path is inside a loop, because the loop
+//   cannot iterate past it.
+//
+// The rule an affine type asks for is that the value is consumed at most
+// once. The check used to ask a different question — "is a loop around
+// this?" — and refused the program below:
+//
+//     error<E302>: affine value `t` cannot be used in loop
+//
+// The consuming path returns. There is no execution in which the loop
+// reaches a second consumption, so the linearity holds; refusing it
+// means the author restructures working control flow to satisfy an
+// approximation, which is the opposite of what an affine type is for.
+//
+// The negative pole lives in the companion file: a consumption that CAN
+// reach the loop's back-edge is still refused, and that is the half that
+// keeps this one honest.
+
+type affine Token is { id: Int };
+
+fn take(t: Token) -> Int {
+    t.id
+}
+
+/// Consumed inside a `loop`, on a path that returns.
+fn from_loop(t: Token, n: Int) -> Int {
+    let mut i = 0;
+    loop {
+        if i >= n {
+            return take(t);
+        }
+        i = i + 1;
+    }
+}
+
+/// The same, with the consumption in a statement BEFORE the return
+/// rather than inside it — the shape a match arm produces when it
+/// releases a resource and then reports a failure.
+fn released_then_returned(t: Token, n: Int) -> Int {
+    let mut i = 0;
+    loop {
+        if i >= n {
+            let seen = take(t);
+            return seen;
+        }
+        i = i + 1;
+    }
+}
+
+fn main() {
+    print(f"{from_loop(Token { id: 7 }, 2)} {released_then_returned(Token { id: 7 }, 2)}");
+}

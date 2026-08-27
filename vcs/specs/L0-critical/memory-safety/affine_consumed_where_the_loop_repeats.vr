@@ -1,0 +1,40 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: affine, linearity, control-flow
+// @expected-error: E302
+// @description: The negative pole — an affine value consumed on a path
+//   the loop CAN come back from is still refused.
+//
+// The companion to `affine_consumed_on_a_leaving_path`. That file checks
+// a consumption that leaves is accepted; this one checks the check still
+// exists.
+//
+// A relaxation of a soundness rule can go wrong in exactly one
+// direction — by accepting everything — and from the passing side the
+// two are indistinguishable. Only a program that must be REFUSED tells
+// them apart.
+//
+// Here the consumption is in the loop's own body with nothing after it
+// that leaves: the second iteration consumes an already-moved value.
+
+type affine Token is { id: Int };
+
+fn take(t: Token) -> Int {
+    t.id
+}
+
+fn drains_it_every_pass(t: Token, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        // ERROR: `t` is consumed here on every pass.
+        total = total + take(t);
+        i = i + 1;
+    }
+    total
+}
+
+fn main() {
+    print(f"{drains_it_every_pass(Token { id: 7 }, 3)}");
+}

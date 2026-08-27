@@ -117,6 +117,10 @@ pub struct AffineTracker {
 
     /// Current loop nesting depth (0 = not in loop)
     loop_depth: usize,
+    /// How deep we are inside a region from which the enclosing loop's
+    /// BACK-EDGE cannot be reached — a block carrying an unconditional
+    /// `return` at its own top level. See `enter_leaving_region`.
+    leaving_depth: usize,
 
     /// Set of variable names that were bound before entering the current loop
     /// Used to detect use of outer-scope affine values in loops
@@ -152,6 +156,7 @@ impl AffineTracker {
             affine_types: Set::new(),
             linear_types: Set::new(),
             loop_depth: 0,
+            leaving_depth: 0,
             pre_loop_bindings: Set::new(),
         }
     }
@@ -187,6 +192,7 @@ impl AffineTracker {
             affine_types: self.affine_types.clone(),
             linear_types: self.linear_types.clone(),
             loop_depth: 0,
+            leaving_depth: 0,
             pre_loop_bindings: Set::new(),
         }
     }
@@ -373,6 +379,44 @@ impl AffineTracker {
         self.loop_depth > 0
     }
 
+    /// Enter a region the enclosing loop cannot iterate out of.
+    ///
+    /// The loop restriction below exists because a loop MIGHT run twice,
+    /// and an affine value consumed on the first pass would be consumed
+    /// again on the second. That reasoning does not apply when the
+    /// consuming path leaves: a block whose own top level carries an
+    /// unconditional `return` reaches the loop's back-edge from nowhere
+    /// inside it — statements before the return exit the function,
+    /// statements after it are unreachable.
+    ///
+    /// Without this, a correct program is refused and the author is
+    /// asked to restructure working control flow to satisfy an
+    /// approximation, which is the opposite of what an affine type is
+    /// for (T0915):
+    ///
+    ///     loop {
+    ///         if i >= n { return take(t); }   // E302, and `t` is moved once
+    ///         i = i + 1;
+    ///     }
+    ///
+    /// DELIBERATELY NARROW. `break` is not treated as leaving: it exits
+    /// only the innermost loop, so under nesting the outer one can still
+    /// iterate and consume again. Widening it needs the loop identity,
+    /// not just the depth, and no measured case asks for it yet.
+    pub fn enter_leaving_region(&mut self) {
+        self.leaving_depth += 1;
+    }
+
+    /// Leave the region entered by `enter_leaving_region`.
+    pub fn exit_leaving_region(&mut self) {
+        self.leaving_depth = self.leaving_depth.saturating_sub(1);
+    }
+
+    /// Is the enclosing loop's back-edge reachable from here?
+    fn loop_can_iterate(&self) -> bool {
+        self.loop_depth > 0 && self.leaving_depth == 0
+    }
+
     /// Record a use of an affine value
     ///
     /// Returns an error if the value was already consumed.
@@ -387,6 +431,7 @@ impl AffineTracker {
                 self.bindings.get(&Text::from(name)).map(|b| b.is_consumed)
             );
         }
+        let loop_can_iterate = self.loop_can_iterate();
         if let Some(binding) = self.bindings.get_mut(&Text::from(name)) {
             if binding.is_consumed {
                 // Value already consumed
@@ -431,7 +476,7 @@ impl AffineTracker {
 
             // Check for use of outer-scope affine value in loop
             // This is an error because the loop might execute multiple times
-            if self.loop_depth > 0 && self.pre_loop_bindings.contains(&Text::from(name)) {
+            if loop_can_iterate && self.pre_loop_bindings.contains(&Text::from(name)) {
                 return Err(TypeError::AffineValueInLoop {
                     name: name.to_text(),
                     binding_span: binding.binding_span,
@@ -456,6 +501,7 @@ impl AffineTracker {
         field_name: &str,
         span: Span,
     ) -> Result<(), TypeError> {
+        let loop_can_iterate = self.loop_can_iterate();
         if let Some(binding) = self.bindings.get_mut(&Text::from(var_name)) {
             // Check if the whole struct has been consumed
             if binding.is_consumed {
@@ -476,7 +522,7 @@ impl AffineTracker {
             }
 
             // Check for use in loop
-            if self.loop_depth > 0 && self.pre_loop_bindings.contains(&Text::from(var_name)) {
+            if loop_can_iterate && self.pre_loop_bindings.contains(&Text::from(var_name)) {
                 return Err(TypeError::AffineValueInLoop {
                     name: format!("{}.{}", var_name, field_name).to_text(),
                     binding_span: binding.binding_span,
@@ -525,6 +571,7 @@ impl AffineTracker {
     /// let whole = container; // Now valid!
     /// ```
     pub fn reinitialize_field(&mut self, var_name: &str, field_name: &str) {
+        let loop_can_iterate = self.loop_can_iterate();
         if let Some(binding) = self.bindings.get_mut(&Text::from(var_name)) {
             // Remove the field from moved_fields set
             binding.moved_fields.remove(&Text::from(field_name));
@@ -559,6 +606,7 @@ impl AffineTracker {
         index: usize,
         span: Span,
     ) -> Result<(), TypeError> {
+        let loop_can_iterate = self.loop_can_iterate();
         if let Some(binding) = self.bindings.get_mut(&Text::from(var_name)) {
             // Check if the whole tuple has been consumed
             if binding.is_consumed {
@@ -579,7 +627,7 @@ impl AffineTracker {
             }
 
             // Check for use in loop
-            if self.loop_depth > 0 && self.pre_loop_bindings.contains(&Text::from(var_name)) {
+            if loop_can_iterate && self.pre_loop_bindings.contains(&Text::from(var_name)) {
                 return Err(TypeError::AffineValueInLoop {
                     name: format!("{}.{}", var_name, index).to_text(),
                     binding_span: binding.binding_span,
@@ -617,6 +665,7 @@ impl AffineTracker {
     ///
     /// This is called when a moved tuple element is reassigned.
     pub fn reinitialize_index(&mut self, var_name: &str, index: usize) {
+        let loop_can_iterate = self.loop_can_iterate();
         if let Some(binding) = self.bindings.get_mut(&Text::from(var_name)) {
             binding.moved_indices.remove(&index);
         }

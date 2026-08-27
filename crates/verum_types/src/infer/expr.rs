@@ -13321,6 +13321,13 @@ impl TypeChecker {
         // don't cascade phantom "undefined variable" noise. The pushed
         // error-severity diagnostics still fail the typecheck.
         let mut has_diverging_stmt = false;
+        // An affine value consumed here cannot be consumed twice when
+        // the block leaves the enclosing loop — see
+        // `AffineChecker::enter_leaving_region` (T0915).
+        let leaves = Self::block_leaves_unconditionally(block);
+        if leaves {
+            self.affine_tracker.enter_leaving_region();
+        }
         for stmt in &block.stmts {
             let amb_mark = self.pending_ambiguity.len();
             match self.check_stmt(stmt) {
@@ -13342,8 +13349,20 @@ impl TypeChecker {
         }
 
         // Type check final expression
-        let result = if let Some(expr) = &block.expr {
-            self.synth_expr(expr)?
+        let tail = if let Some(expr) = &block.expr {
+            let r = self.synth_expr(expr);
+            if leaves {
+                self.affine_tracker.exit_leaving_region();
+            }
+            Some(r?)
+        } else {
+            if leaves {
+                self.affine_tracker.exit_leaving_region();
+            }
+            None
+        };
+        let result = if let Some(r) = tail {
+            r
         } else if has_diverging_stmt {
             // Block has a diverging statement, so it has type Never
             InferResult::new(Type::never())
@@ -13354,6 +13373,28 @@ impl TypeChecker {
         self.borrow_tracker.exit_scope();
         self.ctx.exit_scope();
         Ok(result)
+    }
+
+
+    /// Does this block leave the enclosing loop unconditionally?
+    ///
+    /// True when the block's OWN top level carries a `return` — as a
+    /// statement or as the tail expression. Nothing inside such a block
+    /// can reach the enclosing loop's back-edge: statements before the
+    /// return exit the function, statements after it are unreachable.
+    ///
+    /// Deliberately syntactic and deliberately shallow. A `return`
+    /// nested inside an `if` does not make THIS block leave — but that
+    /// `if`'s own body is a block, and the recursive walk asks the same
+    /// question of it, which is where the answer belongs.
+    fn block_leaves_unconditionally(block: &Block) -> bool {
+        use verum_ast::stmt::StmtKind;
+        let is_return = |e: &Expr| matches!(&e.kind, ExprKind::Return(_));
+        block
+            .stmts
+            .iter()
+            .any(|stmt| matches!(&stmt.kind, StmtKind::Expr { expr, .. } if is_return(expr)))
+            || block.expr.as_ref().is_some_and(|e| is_return(e))
     }
 
     /// STMT-RECOVERY-1 companion: after a statement's check failed and
