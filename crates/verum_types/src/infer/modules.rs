@@ -10588,6 +10588,21 @@ impl TypeChecker {
             match &param.kind {
                 FunctionParamKind::Regular { pattern, ty, .. } => {
                     let param_ty = self.ast_to_type(ty)?;
+                    if std::env::var_os("VERUM_TRACE_CAPS").is_some() {
+                        // T0918: what the binding ACTUALLY holds.
+                        // Structural, not Display — Display was one of
+                        // the two channels under suspicion, and printing
+                        // through a suspect channel measures nothing.
+                        //
+                        // It answered both questions at once and refuted
+                        // both hypotheses: the binding carries
+                        // `CapabilityRestricted { base: Named{Store},
+                        // capabilities: {ReadOnly} }`, and Display prints
+                        // it faithfully. The misleading `found 'Store'`
+                        // comes from inside the unifier's own deliberate
+                        // peel.
+                        eprintln!("[caps] param bound as: {:?}", param_ty);
+                    }
 
                     // Track parameter name for return lifetime validation
                     if let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind {

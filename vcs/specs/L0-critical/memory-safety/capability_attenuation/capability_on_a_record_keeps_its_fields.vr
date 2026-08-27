@@ -2,7 +2,6 @@
 // @level: L0
 // @tier: 0
 // @tags: capability, attenuation, records, fields
-// @skip: T0918: a capability-restricted record is not treated as a record, so field access fails with E103. Remedy: peel the wrapper at BOTH field-access paths (infer/expr.rs named-field, infer/env.rs assignment-target) — measured to take this file from 2 errors to 0 — but that must land together with the widening refusal, or attenuation becomes unenforced.
 // @description: A capability-restricted record is still a record, and
 //   passing a wider capability where a narrower one is required is
 //   allowed.
