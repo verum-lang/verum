@@ -392,6 +392,15 @@ WHAT TO ACTUALLY DO:
 * **Read the FIRST few results, not only the last.** A sweep with a
   broken invocation reports 2560 clean files just as convincingly as a
   clean tree.
+* **Verify COVERAGE by set difference, never by line count.** A resumed
+  sweep produced 2564 result lines for a 2560-file corpus and looked
+  complete; `comm -23 <all> <measured>` showed 363 files were never
+  checked and 367 rows were duplicates. Line counts can only tell you
+  how much was written, and a killed sweep writes plenty: `pkill`ing the
+  checker does not stop the `while read` loop around it, so the loop
+  races through the rest of the corpus recording every remaining file as
+  ZERO ERRORS. The wreck of an interrupted sweep is a file full of false
+  greens with the right number of lines.
 * **Expect the sweep to answer questions you did not ask.** Its value is
   the breadth, not the question — nothing else in the project runs every
   stdlib file through the front door one at a time.
