@@ -13,7 +13,7 @@
 //           `5` does not satisfy `it == 4 || it == 8`
 //
 // It was accepted in silence. The grammar admits the refinement, the
-// parser stored it, and every reader of `GenericParamKind::Meta`
+// parser stored it, and every reader of the meta-parameter kind
 // destructured it away with `{ name, .. }` — a feature present,
 // accepted, documented, and doing nothing, so everything built on it
 // inherited a guarantee that was never made.
