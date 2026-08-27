@@ -1,0 +1,74 @@
+// @test: verify-fail
+// @level: L3
+// @tier: 0
+// @tags: verification, smt, refinement-reflection, soundness
+// @timeout: 30000
+// @description: Folding early-return guards does not make false claims
+//   provable.
+//
+// The soundness pole of `reflected_body_with_guards.vr`. That spec
+// shows a guard chain becomes provable; this one shows it does not
+// become provable when it is wrong.
+//
+// The direction matters because a fold is a rewrite the solver then
+// trusts completely. Get the ORDER wrong — wrap the guards the other
+// way round, or substitute a later binding into an earlier guard — and
+// the axiom describes a function nobody wrote. That failure does not
+// look like a crash; it looks like a proof.
+//
+// Each claim below is false for at least one input, so each must FAIL.
+// The middle one is the ordering probe: it is false ONLY because the
+// first guard fires first, so a fold that reversed them would prove it.
+
+/// False whenever `n` is negative: the guard returns `n > 0`, which is
+/// false, and the tail is never reached.
+public fn guard_is_always_true(n: Int) -> Bool {
+    if n != 0 {
+        return n > 0;
+    }
+    true
+}
+
+@verify(formal)
+public theorem guard_must_not_prove(n: Int)
+    ensures guard_is_always_true(n)
+    proof by auto;
+
+/// ORDERING. For `n = 5` the FIRST guard fires and answers `false`. A
+/// fold that applied the second guard first would answer `true` and
+/// prove this — so this claim failing is what says the guards are
+/// wrapped in source order.
+public fn first_guard_wins(n: Int) -> Bool {
+    if n > 0 {
+        return false;
+    }
+    if n > 3 {
+        return true;
+    }
+    true
+}
+
+@verify(formal)
+public theorem ordering_must_not_prove(n: Int)
+    ensures first_guard_wins(n)
+    proof by auto;
+
+/// A binding written AFTER a guard, used in the tail. False for
+/// `n <= 0`, where the guard does not fire and the tail compares
+/// `n + 1` against `n`.
+public fn binding_after_guard(n: Int) -> Bool {
+    if n > 0 {
+        return true;
+    }
+    let m = n + 1;
+    m == n
+}
+
+@verify(formal)
+public theorem binding_after_guard_must_not_prove(n: Int)
+    ensures binding_after_guard(n)
+    proof by auto;
+
+fn main() {
+    print("guards-unsound");
+}

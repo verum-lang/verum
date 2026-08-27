@@ -1,0 +1,103 @@
+// @test: verify-pass
+// @level: L3
+// @tier: 0
+// @tags: verification, smt, refinement-reflection, proofs
+// @timeout: 30000
+// @description: A predicate written as a chain of early returns is
+//   provable.
+//
+// A comparison over more than one component is written one way by
+// everyone:
+//
+//     if a.major != b.major { return a.major < b.major; }
+//     if a.minor != b.minor { return a.minor < b.minor; }
+//     a.patch < b.patch
+//
+// and that shape was outside the reflector, so a predicate using it
+// stayed an uninterpreted symbol and nothing about it could be proved —
+// not even that nothing is older than itself. `let` bindings had
+// already been folded; a GUARD is the other half of what a
+// straight-line body contains, and it is what a lexicographic order,
+// a range check and a validation cascade all look like.
+//
+// The fold turns each guard into the `if … else` it already means, so
+// the body becomes one expression and the translator's existing `ite`
+// renders it. Order is the part worth stating: a guard is folded with
+// the bindings written BEFORE it and none of those after, because a
+// binding that follows a guard is only reached when the guard did not
+// fire — which is exactly the else-branch that guard becomes.
+//
+// `_unsound.vr` is the pole: the same shapes, claims that are FALSE,
+// which must still fail.
+
+public type Version is { major: Int, minor: Int, patch: Int };
+
+/// Two guards and a tail — the lexicographic order.
+public fn older(a: Version, b: Version) -> Bool {
+    if a.major != b.major {
+        return a.major < b.major;
+    }
+    if a.minor != b.minor {
+        return a.minor < b.minor;
+    }
+    a.patch < b.patch
+}
+
+/// Nothing is older than itself. Small, and the property a selection
+/// leans on: if it failed, which of two equal versions won would depend
+/// on iteration order.
+public fn irreflexive(v: Version) -> Bool {
+    !older(v, v)
+}
+
+@verify(formal)
+public theorem nothing_is_older_than_itself(v: Version)
+    ensures irreflexive(v)
+    proof by auto;
+
+/// One guard, and a `let` BEFORE it — the binding must reach both the
+/// guard's condition and its value.
+public fn doubled_is_bigger(n: Int) -> Bool {
+    let d = n + n;
+    if d > n {
+        return d > n;
+    }
+    true
+}
+
+@verify(formal)
+public theorem doubled_holds(n: Int)
+    ensures doubled_is_bigger(n)
+    proof by auto;
+
+/// A `let` AFTER a guard, which is only reached when the guard did not
+/// fire. Folding it into the guard's own value would be wrong; folding
+/// it into the else-branch is right.
+public fn guard_then_binding(n: Int) -> Bool {
+    if n > 0 {
+        return n > 0;
+    }
+    let m = n;
+    m == n
+}
+
+@verify(formal)
+public theorem guard_then_binding_holds(n: Int)
+    ensures guard_then_binding(n)
+    proof by auto;
+
+/// The control: no guards at all. It proved before and must keep
+/// proving, since a change that broke the plain case would still leave
+/// the guard cases passing.
+public fn direct(n: Int) -> Bool {
+    n + 0 == n
+}
+
+@verify(formal)
+public theorem direct_holds(n: Int)
+    ensures direct(n)
+    proof by auto;
+
+fn main() {
+    print("reflected-guards");
+}

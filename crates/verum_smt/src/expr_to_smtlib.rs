@@ -699,17 +699,36 @@ pub fn extract_params(func: &verum_ast::FunctionDecl) -> Vec<(String, String)> {
 /// Context-free wrapper over [`try_reflect_function_with_env`]:
 /// member expressions in the body (field access, method calls) are
 /// refused without an env.
-/// Fold straight-line `let` bindings into the tail expression.
+/// Fold a straight-line body into ONE expression.
 ///
-/// `let m = n; m == n` becomes `n == n`. Returns `None` — declining the
-/// whole reflection — for anything the fold cannot carry: a statement
-/// that is not a `let`, a destructuring or otherwise non-identifier
-/// pattern, a `let` with no initialiser, or a chain long enough that
-/// substitution would blow the term up.
+/// Two statement shapes are carried, and both are shapes people
+/// actually write when a predicate stops fitting on a line:
 ///
-/// Declining is the point. Producing a PARTIAL fold would hand the
-/// solver a body that is not the function's, and a proof about the
-/// wrong body is worse than no proof.
+///   * a `let` binding — `let m = n; m == n` becomes `n == n`;
+///   * an EARLY-RETURN GUARD — `if c { return e; } tail` becomes
+///     `if c { e } else { tail }`, which the translator already renders
+///     as an `ite`.
+///
+/// The guard shape is what a comparison chain looks like:
+///
+///     if a.major != b.major { return a.major < b.major; }
+///     if a.minor != b.minor { return a.minor < b.minor; }
+///     a.patch < b.patch
+///
+/// Returns `None` — declining the whole reflection — for anything else:
+/// a statement that is neither, a destructuring or otherwise
+/// non-identifier pattern, a `let` with no initialiser, an `if` with an
+/// `else` or with anything but a single `return` inside, or a chain
+/// long enough that substitution would blow the term up.
+///
+/// Declining is the point. A PARTIAL fold would hand the solver a body
+/// that is not the function's, and a proof about the wrong body is
+/// worse than no proof.
+///
+/// ORDER is load-bearing. A guard is substituted with the bindings seen
+/// BEFORE it and not with any that follow, because a `let` after a
+/// guard is only reached when that guard did not fire — which is
+/// exactly the else-branch the guard becomes.
 fn fold_let_bindings(
     stmts: &[verum_ast::stmt::Stmt],
     tail: &Expr,
@@ -726,31 +745,105 @@ fn fold_let_bindings(
     }
 
     let mut bindings: Vec<(String, Expr)> = Vec::with_capacity(stmts.len());
-    for stmt in stmts {
-        let StmtKind::Let { pattern, value, .. } = &stmt.kind else {
-            return None;
-        };
-        let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind else {
-            return None;
-        };
-        let verum_common::Maybe::Some(init) = value else {
-            return None;
-        };
-        // Substitute the bindings already seen INTO this initialiser,
-        // so `let a = n; let b = a + 1; b` folds to `n + 1` rather than
-        // leaving a dangling `a`.
-        let mut init = init.clone();
-        for (bound, replacement) in bindings.iter() {
-            init = substitute_ident(&init, bound, replacement);
+    let mut guards: Vec<(Expr, Expr)> = Vec::new();
+    let apply = |e: &Expr, bs: &[(String, Expr)]| -> Expr {
+        let mut out = e.clone();
+        for (bound, replacement) in bs {
+            out = substitute_ident(&out, bound, replacement);
         }
-        bindings.push((name.name.as_str().to_string(), init));
+        out
+    };
+
+    for stmt in stmts {
+        match &stmt.kind {
+            StmtKind::Let { pattern, value, .. } => {
+                let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind else {
+                    return None;
+                };
+                let verum_common::Maybe::Some(init) = value else {
+                    return None;
+                };
+                // Substitute the bindings already seen INTO this
+                // initialiser, so `let a = n; let b = a + 1; b` folds to
+                // `n + 1` rather than leaving a dangling `a`.
+                let init = apply(init, &bindings);
+                bindings.push((name.name.as_str().to_string(), init));
+            }
+            StmtKind::Expr { expr, .. } => {
+                let (cond, value) = early_return_guard(expr)?;
+                guards.push((apply(&cond, &bindings), apply(&value, &bindings)));
+            }
+            _ => return None,
+        }
     }
 
-    let mut folded = tail.clone();
-    for (bound, replacement) in bindings.iter() {
-        folded = substitute_ident(&folded, bound, replacement);
+    let mut folded = apply(tail, &bindings);
+    // Innermost guard last: the FIRST guard written is the outermost
+    // test, so wrapping runs in reverse.
+    for (cond, value) in guards.iter().rev() {
+        folded = Expr::new(
+            ExprKind::If {
+                condition: verum_common::Heap::new(verum_ast::expr::IfCondition {
+                    conditions: std::iter::once(verum_ast::expr::ConditionKind::Expr(
+                        cond.clone(),
+                    ))
+                    .collect(),
+                    span: cond.span,
+                }),
+                then_branch: verum_ast::expr::Block::new(
+                    verum_common::List::new(),
+                    verum_common::Maybe::Some(verum_common::Heap::new(value.clone())),
+                    value.span,
+                ),
+                else_branch: verum_common::Maybe::Some(verum_common::Heap::new(folded)),
+            },
+            cond.span,
+        );
     }
     Some(folded)
+}
+
+/// `if c { return e; }` — with no `else` and nothing else in the block
+/// — as the pair `(c, e)`. `None` for any other expression.
+///
+/// Deliberately narrow. An `if` with an `else` is already an
+/// expression the translator handles, and an `if` whose block does more
+/// than return one value is not a guard: treating it as one would drop
+/// whatever else it does.
+fn early_return_guard(expr: &Expr) -> Option<(Expr, Expr)> {
+    use verum_ast::stmt::StmtKind;
+    let ExprKind::If {
+        condition,
+        then_branch,
+        else_branch,
+    } = &expr.kind
+    else {
+        return None;
+    };
+    if matches!(else_branch, verum_common::Maybe::Some(_)) {
+        return None;
+    }
+    if condition.conditions.len() != 1 {
+        return None;
+    }
+    let Some(verum_ast::expr::ConditionKind::Expr(cond)) = condition.conditions.first() else {
+        return None;
+    };
+
+    // The returned value: either the block's tail, or its single
+    // statement — both spellings of the same one-line block.
+    let returned = match (&then_branch.expr, then_branch.stmts.len()) {
+        (verum_common::Maybe::Some(tail), 0) => (**tail).clone(),
+        (verum_common::Maybe::None, 1) => match &then_branch.stmts[0].kind {
+            StmtKind::Expr { expr, .. } => expr.clone(),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let ExprKind::Return(verum_common::Maybe::Some(value)) = &returned.kind else {
+        return None;
+    };
+    Some((cond.clone(), (**value).clone()))
 }
 
 /// Replace every bare-path reference to `name` with `replacement`.

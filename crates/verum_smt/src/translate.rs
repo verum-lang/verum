@@ -2246,7 +2246,7 @@ impl<'ctx> Translator<'ctx> {
             // The arms above stay ahead of this one: an Int equality
             // wants the Int comparison, not this generic one, because
             // the Int arm also handles the mixed-numeric coercions.
-            let eq = left_z3._eq(&right_z3);
+            let eq = left_z3.eq(&right_z3);
             let result = if matches!(op, BinOp::Ne) { eq.not() } else { eq };
             Ok(Dynamic::from_ast(&result))
         } else {
