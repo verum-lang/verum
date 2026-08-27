@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: types, generics, arity, kinds, higher-kinded
+// @description: The positive pole of the arity rule — a constructor
+//   NAME supplies no arguments, so there is nothing to count.
+//
+// Without this file, the sibling `typecheck-fail` reads as "every type
+// constructor must be saturated everywhere", and the cheapest way to
+// make that sibling pass is to demand saturation. That would make
+// higher-kinded parameters unwritable — the thing the language has kind
+// inference for.
+//
+// The distinction the pair pins: BRACKETS ARE THE APPLICATION. `Pair`
+// names a constructor; `Pair<Int>` applies it to one argument and is
+// wrong for a two-parameter `Pair`; `Pair<Int, Text>` applies it to two
+// and is right.
+
+public type Pair<A, B> is { a: A, b: B };
+
+/// A parameter that holds an unapplied constructor. No brackets, so no
+/// application, so no count to check.
+public type Holder<F> is { f: F };
+
+/// The saturated application, which is the control: a rule that refused
+/// everything would still pass a file that only tests refusals.
+public fn take(p: Pair<Int, Text>) -> Int {
+    p.a
+}
+
+/// Saturated through an alias, so the count is taken after the alias is
+/// expanded rather than on the surface spelling.
+public type IntPair is Pair<Int, Int>;
+
+public fn sum(p: IntPair) -> Int {
+    p.a + p.b
+}
+
+/// Nested applications, so the check reaches arguments that are
+/// themselves applications.
+public fn nested(p: Pair<Pair<Int, Int>, Text>) -> Int {
+    p.a.a
+}
+
+fn main() {
+    let one = take(Pair { a: 1, b: "t" });
+    let two = sum(Pair { a: 2, b: 3 });
+    let three = nested(Pair { a: Pair { a: 4, b: 5 }, b: "t" });
+    print(f"{one} {two} {three}");
+}

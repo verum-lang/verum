@@ -1,0 +1,44 @@
+// @test: typecheck-fail
+// @level: L1
+// @tier: 0
+// @tags: types, generics, arity, kinds
+// @expected-error: E407
+// @skip: T0922 — the `provided < expected` half is blocked on default type
+//   parameters. Turning it on refuses 194 uses of `Result<T>` across 31
+//   core/ files, where `Result<T, E>` takes two and the stdlib is written as
+//   if `E` defaulted; the grammar has no `= Type` on a type parameter. The
+//   remedy is the feature, not a looser check: once `type Result<T, E = Error>`
+//   is writable, flip `>` to `!=` in infer/types.rs and un-skip. The
+//   too-MANY half already holds and is pinned by the sibling unit test.
+// @description: Writing brackets applies a type constructor, so the
+//   number of arguments must match the declaration — in BOTH directions.
+//
+// The arity check existed and asked only `provided > expected`:
+//
+//     let p: Pair<Int, Text, Bool> = …;   // refused, 3 > 2
+//     let p: Pair<Int>             = …;   // ACCEPTED
+//
+// The half that was missing is the worse half. Too many arguments is a
+// loud mistake with nowhere to go. Too FEW leaves a parameter free, and
+// inference then unifies it with whatever arrives first — so the program
+// does not fail, it quietly means something else, and the wrong answer
+// surfaces far from the annotation that caused it.
+//
+// UNDER-APPLICATION IS NOT ITSELF THE ERROR. A bare `List` is the
+// unapplied constructor, and a higher-kinded position wants exactly
+// that. The rule keys on the BRACKETS: write them and you have applied
+// the constructor, so the count has to match; write the bare name and
+// you have named it, so there is nothing to count. Its positive pole
+// (`generic_arity_the_bare_name_is_not_an_application.vr`) is what keeps
+// this file from being read as "saturate everything".
+
+public type Pair<A, B> is { a: A, b: B };
+
+// ERROR: `Pair` takes two type arguments, one was supplied.
+public fn take(p: Pair<Int>) -> Int {
+    p.a
+}
+
+fn main() {
+    print(f"{take(Pair { a: 1, b: 2 })}");
+}

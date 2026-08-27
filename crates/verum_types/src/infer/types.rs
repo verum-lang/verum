@@ -1638,11 +1638,55 @@ fn substitute_refinement_binder(
                                 .iter()
                                 .filter(|t| !matches!(t, Type::Lifetime { .. }))
                                 .count();
+                            // BRACKETS ARE AN APPLICATION, so the count has
+                            // to match in BOTH directions. This used to ask
+                            // only `provided > expected`, which let
+                            // `Pair<Int>` through for a two-parameter `Pair`
+                            // — and an under-applied constructor is worse
+                            // than a loud one, because the free parameter is
+                            // then unified with whatever arrives first and
+                            // the program quietly means something else.
+                            //
+                            // Under-application is not itself an error: a
+                            // BARE `List` is the unapplied constructor, and
+                            // higher-kinded positions want exactly that.
+                            // Writing the brackets is what says "applied",
+                            // which is why this fires on `provided != 0`
+                            // and a bare name never reaches here at all.
+                            // TWO-SIDED IS THE RULE, ONE-SIDED IS WHAT
+                            // SHIPS TODAY. `provided < expected` is a real
+                            // error and the checker can already see it, but
+                            // turning it on refuses 194 uses of `Result<T>`
+                            // across 31 core/ files, where `Result<T, E>`
+                            // takes two. Those sites are not typos: the
+                            // stdlib is written as if `E` had a default,
+                            // the way `io::Result<T>` reads in Rust — and
+                            // the grammar has no default for a type
+                            // parameter (`extended_type_param` carries
+                            // bounds, never `= Type`).
+                            //
+                            // So the missing half of the arity rule is
+                            // blocked on a missing LANGUAGE FEATURE, not on
+                            // this condition. Landing it here without the
+                            // feature would refuse a correct-looking stdlib
+                            // and teach authors to spell an error type the
+                            // language should be defaulting. T0922 carries
+                            // the design; flip `>` to `!=` once
+                            // `type Result<T, E = Error>` is writable.
                             if expected_count > 0 && provided > expected_count {
-                                return Err(TypeError::Other(verum_common::Text::from(format!(
-                                    "type `{}` expects {} type argument(s), but {} were provided",
-                                    type_name, expected_count, provided
-                                ))));
+                                return Err(TypeError::OtherWithCodeSpanned {
+                                    code: verum_common::Text::from("E407"),
+                                    msg: verum_common::Text::from(format!(
+                                        "type `{}` takes {} type argument(s), but {} {} supplied\n  \
+                                         help: write `{}` on its own to name the unapplied type constructor",
+                                        type_name,
+                                        expected_count,
+                                        provided,
+                                        if provided == 1 { "was" } else { "were" },
+                                        type_name,
+                                    )),
+                                    span: ast_ty.span,
+                                });
                             }
                         }
                         // A refinement on a META parameter is checked
