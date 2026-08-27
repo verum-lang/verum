@@ -22,14 +22,26 @@
 //! handle for `module_registry` and `session_registry`, deliberately, to
 //! stop the two copies drifting as lazy loads landed in one and not the
 //! other. A repair for a DRIFT bug turned a harmless lock on two objects
-//! into a self-deadlock on one — which is why the shape is worth a test
-//! rather than a comment.
+//! into a self-deadlock on one.
 //!
-//! THE TRIGGER IS A RELATIVE GLOB MOUNT of a sibling that is not already
-//! registered, which is exactly how every `mod.vr` in core/ is written.
-//! Three call sites had the shape (`phases_orchestration.rs`,
-//! `cross_file.rs`, `audit.rs`); this checks the first, which is the one
-//! a plain `verum check` goes through.
+//! WHY THIS TEST NAMES A REAL FILE INSTEAD OF SCAFFOLDING ONE. Three
+//! synthetic projects were built and measured against the pre-fix
+//! binary, and all three finished in about 0.25s:
+//!
+//!   * an aggregator at the project root with two relative glob mounts;
+//!   * the same one directory down, matching core/'s own layout;
+//!   * a user file mounting `core.intrinsics.arithmetic.*` directly.
+//!
+//! So did `core/collections/mod.vr`. The lazy resolver engages only for
+//! a stdlib path that is not already registered, and reproducing that
+//! took the exact shape of `core/intrinsics/mod.vr`. A scaffold that
+//! does not reproduce is not a lighter test — it is a test that passes
+//! for the wrong reason, and this one is checked: the pre-fix binary
+//! exits 124 on the file below and 0 on every scaffold tried.
+//!
+//! If the file is ever moved or thinned out, this test should fail
+//! loudly rather than be repointed at whatever is nearest: re-derive the
+//! trigger by sweeping core/ and sampling whatever stops advancing.
 //!
 //! WHY A TIMEOUT AND NOT AN ASSERTION ON OUTPUT: a deadlock has no
 //! output. The only observable is that the process does not finish, so
@@ -38,20 +50,25 @@
 //!
 //! Task: T0926.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-/// Generous next to the ~1s this check takes when it works, and far
+/// Generous next to the ~2s this check takes when it works, and far
 /// under the 17 minutes the deadlock ran before it was sampled.
-const BUDGET: Duration = Duration::from_secs(90);
+const BUDGET: Duration = Duration::from_secs(120);
 
-fn write(path: &Path, body: &str) {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).expect("create project dir");
-    }
-    std::fs::write(path, body).expect("write project file");
+/// `core/intrinsics/mod.vr`, the one file measured to reproduce.
+const AGGREGATOR: &str = "core/intrinsics/mod.vr";
+
+fn repo_root() -> PathBuf {
+    // crates/verum_compiler -> crates -> repo root
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("repo root above crates/verum_compiler")
+        .to_path_buf()
 }
 
 fn verum_binary() -> PathBuf {
@@ -70,47 +87,25 @@ fn verum_binary() -> PathBuf {
     )
 }
 
-fn scaffold() -> PathBuf {
-    let root = std::env::temp_dir().join("verum-import-deadlock");
-    let _ = std::fs::remove_dir_all(&root);
-
-    write(
-        &root.join("verum.toml"),
-        "[cog]\nname = \"deadlock\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
-    );
-    // The aggregator: relative glob mounts of siblings that are not in
-    // the registry when this file is checked on its own, so each one
-    // reaches the lazy loader. Two of them, because one module resolving
-    // is not evidence that a second can follow it.
-    write(
-        &root.join("mod.vr"),
-        "module deadlock;\n\
-         public mount alpha.*;\n\
-         public mount beta.*;\n",
-    );
-    write(
-        &root.join("alpha.vr"),
-        "module deadlock.alpha;\n\
-         public fn a() -> Int { 1 }\n",
-    );
-    write(
-        &root.join("beta.vr"),
-        "module deadlock.beta;\n\
-         public fn b() -> Int { 2 }\n",
-    );
-    root
-}
-
 #[test]
-fn checking_an_aggregator_module_finishes() {
-    let verum = verum_binary();
-    let root = scaffold();
+fn checking_the_intrinsics_aggregator_finishes() {
+    let root = repo_root();
+    let target = root.join(AGGREGATOR);
+    assert!(
+        target.is_file(),
+        "{AGGREGATOR} is gone. This test names a real file because no \
+         synthetic project reproduced the deadlock (see the module docs). \
+         Do not repoint it at a nearby file without checking that the new \
+         one reproduces against a pre-fix binary — re-derive the trigger \
+         by sweeping core/ and sampling whatever stops advancing."
+    );
 
+    let verum = verum_binary();
     let (tx, rx) = mpsc::channel();
     let handle = std::thread::spawn(move || {
         let out = Command::new(&verum)
             .arg("check")
-            .arg("mod.vr")
+            .arg(AGGREGATOR)
             .current_dir(&root)
             .stdin(Stdio::null())
             .output();
@@ -125,9 +120,9 @@ fn checking_an_aggregator_module_finishes() {
         }
         Ok(Err(e)) => panic!("could not run `verum check`: {e}"),
         Err(_) => panic!(
-            "`verum check mod.vr` did not finish in {BUDGET:?} — the import \
-             pass is holding a registry read guard across a lazy load again \
-             (T0926). Sample the process: the stack ends in \
+            "`verum check {AGGREGATOR}` did not finish in {BUDGET:?} — the \
+             import pass is holding a registry read guard across a lazy load \
+             again (T0926). Sample the process: the stack ends in \
              RawRwLock::wait_for_readers under process_import."
         ),
     }

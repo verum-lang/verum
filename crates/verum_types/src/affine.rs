@@ -125,6 +125,22 @@ pub struct AffineTracker {
     /// Set of variable names that were bound before entering the current loop
     /// Used to detect use of outer-scope affine values in loops
     pre_loop_bindings: Set<Text>,
+
+    /// Names the exactly-once obligation does NOT apply to in the
+    /// function this tracker belongs to: its own parameters, `self`
+    /// included. A parameter arrived by being moved in and its scope end
+    /// is its destruction site, so requiring it to move on again would
+    /// make `fn close(h: Handle) { }` — the canonical consumer — the one
+    /// thing a linear type could not have.
+    ///
+    /// IT LIVES HERE, not on the checker, because it is swapped with the
+    /// tracker. `check_function_inner` replaces the tracker on entry and
+    /// restores it at the end, with 22 `?` exits in between; a second
+    /// field restored separately would leak the inner function's
+    /// parameter names to the outer on any one of them, and the file
+    /// says so in the comment on its ambiguity window one screen up.
+    /// One object, one lifetime.
+    linear_exempt: Set<Text>,
 }
 
 /// Binding information for an affine or linear value.
@@ -171,6 +187,7 @@ impl AffineTracker {
             loop_depth: 0,
             leaving_depth: 0,
             pre_loop_bindings: Set::new(),
+            linear_exempt: Set::new(),
         }
     }
 
@@ -207,6 +224,7 @@ impl AffineTracker {
             loop_depth: 0,
             leaving_depth: 0,
             pre_loop_bindings: Set::new(),
+            linear_exempt: Set::new(),
         }
     }
 
@@ -748,13 +766,23 @@ impl AffineTracker {
     ///
     /// # Returns
     /// A list of errors for each unconsumed linear value
+    /// Declare which names this scope's exactly-once obligation skips.
+    /// See `linear_exempt`.
+    pub fn set_linear_exempt(&mut self, names: Set<Text>) {
+        self.linear_exempt = names;
+    }
+
     pub fn check_linear_consumed(&self, scope_end: Span) -> List<TypeError> {
         self.bindings
             .iter()
             // `linear` is EXACTLY once, so the question is whether every
             // path consumed it — the MUST bit, not the MAY bit. They are
             // the same everywhere except after a branching construct.
-            .filter(|(_, b)| b.resource_kind == ResourceKind::Linear && !b.definitely_consumed)
+            .filter(|(name, b)| {
+                b.resource_kind == ResourceKind::Linear
+                    && !b.definitely_consumed
+                    && !self.linear_exempt.contains(*name)
+            })
             .map(|(name, b)| TypeError::LinearNotConsumed {
                 name: name.clone(),
                 binding_span: b.binding_span,

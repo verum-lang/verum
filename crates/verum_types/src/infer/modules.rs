@@ -10215,14 +10215,14 @@ impl TypeChecker {
         // are NOT accessible in inner functions (unless captured explicitly).
         // The new_scope() preserves which types are affine but clears variable bindings.
         // Spec: L0-critical/reference_system/value_transfer - Affine type safety
-        let new_affine_tracker = self.affine_tracker.new_scope();
-        let prev_affine_tracker = std::mem::replace(&mut self.affine_tracker, new_affine_tracker);
-        // See `linear_exempt`: the obligation is on values the function
-        // HOLDS, and it can expire at any `return`, not only at the end of
-        // the body — so the set has to be reachable from the expression
-        // walker, not computed once at the bottom of this function.
-        let prev_linear_exempt = std::mem::replace(
-            &mut self.linear_exempt,
+        let mut new_affine_tracker = self.affine_tracker.new_scope();
+        // The obligation is on values the function HOLDS, and it can
+        // expire at any `return`, not only at the end of the body — so
+        // the exemption has to be reachable from the expression walker.
+        // It rides ON the tracker, which is swapped and restored as one
+        // object, rather than in a second field a `?` exit could leave
+        // out of step.
+        new_affine_tracker.set_linear_exempt(
             func.params
                 .iter()
                 .filter_map(|p| match &p.kind {
@@ -10243,6 +10243,7 @@ impl TypeChecker {
                 })
                 .collect(),
         );
+        let prev_affine_tracker = std::mem::replace(&mut self.affine_tracker, new_affine_tracker);
 
         // AMBIGUITY-E404-1 (T0585): open this function's ambiguity
         // window — MARKER discipline, not take/replace: an early `?`
@@ -11226,7 +11227,6 @@ impl TypeChecker {
         // job is to receive and destroy — the one thing a linear type
         // could not have.
         self.report_unmet_linear_obligations(func.span);
-        self.linear_exempt = prev_linear_exempt;
 
         // Restore the outer affine tracker scope
         // This ensures affine tracking is isolated per function

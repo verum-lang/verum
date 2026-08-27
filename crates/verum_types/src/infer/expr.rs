@@ -9812,11 +9812,6 @@ impl TypeChecker {
     /// right; excluded from the CHECK is the hole.
     pub(crate) fn report_unmet_linear_obligations(&mut self, at: verum_ast::Span) {
         for err in self.affine_tracker.check_linear_consumed(at) {
-            if let crate::TypeError::LinearNotConsumed { name, .. } = &err
-                && self.linear_exempt.contains(name)
-            {
-                continue;
-            }
             self.push_diagnostic_for(err);
         }
     }
