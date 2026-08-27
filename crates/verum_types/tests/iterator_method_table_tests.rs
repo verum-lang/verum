@@ -11,17 +11,12 @@
 //!
 //! `core/base/iterator.vr` defines the `Iterator` protocol with:
 //!   - ONE required method: `fn next(&mut self) -> Maybe<Self.Item>;`
-//!   - 74 default methods providing the full iterator adapter surface.
+//!   - the rest defaulted, providing the iterator adapter surface.
 //!
 //! This validator pins:
 //!   1. `fn next` is present and is the ONLY required method (no body `{`).
-//!   2. Core consuming adapters exist: count, last, nth, fold, reduce.
-//!   3. Core lazy adapters exist: map, filter, filter_map, flat_map, flatten,
-//!      take, skip, take_while, skip_while, chain, zip, enumerate, peekable.
-//!   4. Result-aware combinators exist: try_fold, try_collect, try_for_each.
-//!   5. Ordering/comparison methods exist: cmp, eq, min, max, sum, product.
-//!   6. Utility adapters: for_each, inspect, cycle, step_by, cloned, copied.
-//!   7. The total method count in the protocol block is pinned (drift alert).
+//!   2. The method table, by NAME and as a set — see `DECLARED_METHODS`.
+//!   3. `size_hint` has a default body.
 //!
 //! Baking the source in via `include_str!` means file renames and method
 //! removals both fail CI immediately.
@@ -116,87 +111,76 @@ fn next_has_no_default_body() {
     );
 }
 
-// ── 2. Core consuming adapters ────────────────────────────────────────────────
+// ── 2. The method table, pinned by NAME ──────────────────────────────────────
 
-macro_rules! assert_method {
-    ($name:literal) => {
-        assert!(
-            protocol_body().contains(concat!("fn ", $name)),
-            concat!("Iterator protocol must contain method '", $name, "'")
-        );
-    };
+/// Every method the `Iterator` protocol declares, in source order.
+///
+/// This replaces 44 per-name `contains("fn <name>")` assertions plus a
+/// count guard, and it is not a tidier spelling of them — the two
+/// together did not say what they appeared to say:
+///
+///   * `contains("fn min")` is satisfied by `fn min_by_key`. Twenty of
+///     the 78 names are a prefix of another name, so a fifth of those
+///     assertions could pass with the method they name absent.
+///   * the count guard read 75 against a table of 78, and 34 methods
+///     had no per-name assertion at all — including every one added
+///     since the guard was written, which is exactly the set a drift
+///     guard exists to catch.
+///
+/// A pinned SET catches both directions and says which name moved.
+/// Adding or removing a method is a deliberate change: update this
+/// list in the same commit, and the diff shows a reviewer the name
+/// rather than a number.
+const DECLARED_METHODS: &[&str] = &[
+    "next", "size_hint", "count", "last", "nth", "advance_by", "map",
+    "filter", "filter_map", "flat_map", "flatten", "take", "skip", "take_while",
+    "skip_while", "chain", "zip", "enumerate", "peekable", "dedup",
+    "interleave", "step_by", "inspect", "fuse", "cycle", "cloned", "copied",
+    "chunks", "windows", "intersperse", "fold", "reduce", "try_fold",
+    "scan", "all", "any", "find", "find_map", "position", "sum", "product",
+    "sum_by", "product_by", "max", "min", "max_by_key", "min_by_key",
+    "max_by", "min_by", "min_max", "min_max_by_key", "cmp", "eq", "collect",
+    "try_collect", "partition", "is_sorted", "is_sorted_by", "is_sorted_by_key",
+    "is_partitioned", "partition_point", "for_each", "try_for_each",
+    "try_find", "map_while", "intersperse_with", "pairwise", "zip_longest",
+    "ne", "lt", "le", "gt", "ge", "by_ref", "unzip", "transduce", "transduce_stateful",
+    "reduce_with",
+];
+
+/// The names the protocol block declares, in source order.
+fn declared_method_names() -> Vec<&'static str> {
+    let mut out = Vec::new();
+    for line in protocol_body().lines() {
+        let Some(rest) = line.strip_prefix("    fn ") else {
+            continue;
+        };
+        let end = rest
+            .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .unwrap_or(rest.len());
+        if end > 0 {
+            out.push(&rest[..end]);
+        }
+    }
+    out
 }
 
-#[test] fn consuming_count()   { assert_method!("count"); }
-#[test] fn consuming_last()    { assert_method!("last"); }
-#[test] fn consuming_nth()     { assert_method!("nth"); }
-#[test] fn consuming_fold()    { assert_method!("fold"); }
-#[test] fn consuming_reduce()  { assert_method!("reduce"); }
-#[test] fn consuming_sum()     { assert_method!("sum"); }
-#[test] fn consuming_product() { assert_method!("product"); }
-#[test] fn consuming_collect() { assert_method!("collect"); }
-#[test] fn consuming_for_each() { assert_method!("for_each"); }
-
-// ── 3. Core lazy adapters ─────────────────────────────────────────────────────
-
-#[test] fn adapter_map()          { assert_method!("map"); }
-#[test] fn adapter_filter()       { assert_method!("filter"); }
-#[test] fn adapter_filter_map()   { assert_method!("filter_map"); }
-#[test] fn adapter_flat_map()     { assert_method!("flat_map"); }
-#[test] fn adapter_flatten()      { assert_method!("flatten"); }
-#[test] fn adapter_take()         { assert_method!("take"); }
-#[test] fn adapter_skip()         { assert_method!("skip"); }
-#[test] fn adapter_take_while()   { assert_method!("take_while"); }
-#[test] fn adapter_skip_while()   { assert_method!("skip_while"); }
-#[test] fn adapter_chain()        { assert_method!("chain"); }
-#[test] fn adapter_zip()          { assert_method!("zip"); }
-#[test] fn adapter_enumerate()    { assert_method!("enumerate"); }
-#[test] fn adapter_peekable()     { assert_method!("peekable"); }
-#[test] fn adapter_step_by()      { assert_method!("step_by"); }
-#[test] fn adapter_cycle()        { assert_method!("cycle"); }
-#[test] fn adapter_inspect()      { assert_method!("inspect"); }
-#[test] fn adapter_cloned()       { assert_method!("cloned"); }
-#[test] fn adapter_copied()       { assert_method!("copied"); }
-#[test] fn adapter_map_while()    { assert_method!("map_while"); }
-
-// ── 4. Result-aware combinators ───────────────────────────────────────────────
-
-#[test] fn result_try_fold()       { assert_method!("try_fold"); }
-#[test] fn result_try_collect()    { assert_method!("try_collect"); }
-#[test] fn result_try_for_each()   { assert_method!("try_for_each"); }
-#[test] fn result_try_find()       { assert_method!("try_find"); }
-
-// ── 5. Boolean / search predicates ───────────────────────────────────────────
-
-#[test] fn predicate_all()       { assert_method!("all"); }
-#[test] fn predicate_any()       { assert_method!("any"); }
-#[test] fn predicate_find()      { assert_method!("find"); }
-#[test] fn predicate_find_map()  { assert_method!("find_map"); }
-#[test] fn predicate_position()  { assert_method!("position"); }
-
-// ── 6. Ordering / comparison ──────────────────────────────────────────────────
-
-#[test] fn ordering_cmp()        { assert_method!("cmp"); }
-#[test] fn ordering_eq()         { assert_method!("eq"); }
-#[test] fn ordering_min()        { assert_method!("min"); }
-#[test] fn ordering_max()        { assert_method!("max"); }
-#[test] fn ordering_min_by_key() { assert_method!("min_by_key"); }
-#[test] fn ordering_max_by_key() { assert_method!("max_by_key"); }
-#[test] fn ordering_is_sorted()  { assert_method!("is_sorted"); }
-
-// ── 7. Total method count guard ───────────────────────────────────────────────
-
-/// Pins the total number of `fn ` declarations inside the Iterator protocol
-/// block.  Adding or removing methods without updating this count is a
-/// deliberate, reviewed change — the drift guard prevents silent surface
-/// expansion.
 #[test]
-fn iterator_protocol_method_count_is_75() {
-    let count = method_count_in_protocol();
+fn iterator_protocol_method_table_is_pinned() {
+    let found = declared_method_names();
+    let expected: Vec<&str> = DECLARED_METHODS.to_vec();
+    let missing: Vec<&&str> = expected.iter().filter(|m| !found.contains(m)).collect();
+    let added: Vec<&&str> = found.iter().filter(|m| !expected.contains(m)).collect();
+    assert!(
+        missing.is_empty() && added.is_empty(),
+        "Iterator protocol method table drifted.\n           removed since the pin: {missing:?}\n           added since the pin:   {added:?}\n           Update DECLARED_METHODS in the same commit as the change."
+    );
     assert_eq!(
-        count, 75,
-        "Expected 75 method declarations in Iterator protocol block, got {count}. \
-         Update this count after any intentional addition or removal."
+        found.len(),
+        expected.len(),
+        "duplicate method declaration in the Iterator protocol block: \
+         {} declarations for {} distinct pinned names",
+        found.len(),
+        expected.len()
     );
 }
 
