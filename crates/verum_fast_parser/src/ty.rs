@@ -3637,7 +3637,21 @@ impl<'a> RecursiveParser<'a> {
                     span,
                 });
             } else {
-                // Just a type parameter without bounds: T
+                // A type parameter without bounds: `T`, or `T = Default`.
+                //
+                // THE DEFAULT BELONGS TO THE PARAMETER, NOT TO THE BOUNDS.
+                // Only the bounded branch above looked for `=`, so
+                // `<B: Named = Text>` parsed and `<B = Text>` did not —
+                // the unbounded spelling, which is the common one, hit
+                // "unclosed delimiter '<'" at the `=`. Same shape as the
+                // qualified/bare pattern pair in `bind_pattern`: two
+                // spellings of one thing, and the guard written on only
+                // one of them.
+                let default = if self.stream.consume(&TokenKind::Eq).is_some() {
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
                 if is_implicit {
                     self.stream.expect(TokenKind::RBrace)?;
                 }
@@ -3646,7 +3660,7 @@ impl<'a> RecursiveParser<'a> {
                     kind: GenericParamKind::Type {
                         name: Ident::new(name, name_span),
                         bounds: List::new(),
-                        default: Maybe::None,
+                        default,
                     },
                     is_implicit,
                     span,

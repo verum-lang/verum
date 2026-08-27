@@ -270,6 +270,51 @@ impl TypeChecker {
         self.decl_param_frames.last().and_then(|f| f.get(name))
     }
 
+    /// Record the DEFAULT of each type parameter, in declaration order,
+    /// under `__type_param_defaults_<Name>`.
+    ///
+    /// Stored as a tuple so position is the key — a default belongs to a
+    /// parameter's SLOT, and filling `Pair<Int>` means supplying the
+    /// second slot. A parameter with no default holds `Type::Unknown`,
+    /// which is the hole: an application may omit a trailing run of
+    /// parameters only while every one of them has a default.
+    ///
+    /// Nothing is recorded for a type whose parameters all lack defaults,
+    /// so the common case adds no entry and no lookup cost.
+    fn record_type_param_defaults(
+        &mut self,
+        type_name: &str,
+        generics: &[verum_ast::ty::GenericParam],
+    ) {
+        use verum_ast::ty::GenericParamKind;
+        if generics.is_empty() {
+            return;
+        }
+        let mut defaults: List<Type> = List::new();
+        let mut any = false;
+        for gp in generics.iter() {
+            match &gp.kind {
+                GenericParamKind::Type {
+                    default: Maybe::Some(ast_ty),
+                    ..
+                } => {
+                    // Lenient: a default naming a type that is not
+                    // registered yet must not fail the declaration it
+                    // decorates — declarations are registered in file
+                    // order and a default may point forward.
+                    defaults.push(self.ast_to_type_lenient(ast_ty));
+                    any = true;
+                }
+                _ => defaults.push(Type::Unknown),
+            }
+        }
+        if !any {
+            return;
+        }
+        let key: verum_common::Text = format!("__type_param_defaults_{}", type_name).into();
+        self.ctx.define_type(key, Type::Tuple(defaults));
+    }
+
     fn register_type_declaration_inner(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
         use crate::context::TypeScheme;
         use indexmap::IndexMap;
@@ -291,6 +336,16 @@ impl TypeChecker {
         let generics_count = type_decl.generics.len();
         self.type_generics_count
             .insert(type_name.clone(), generics_count);
+
+        // A parameter's DEFAULT, recorded once, at the declaration.
+        //
+        // There are five places that write some part of a type's
+        // parameter story (`__type_params_`, `__type_var_order_`,
+        // `__type_params_count_`, the archive path, the alias path), and
+        // adding a sixth fact to all five is how a fact ends up stated in
+        // four of them. The declaration is the authority for what its own
+        // defaults are, so this is the one site.
+        self.record_type_param_defaults(type_name.as_str(), &type_decl.generics);
 
         // CRITICAL: Prevent infinite recursion when registering mutually recursive types.
         // If we're already in the process of registering this type, return early.

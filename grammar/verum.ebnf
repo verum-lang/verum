@@ -971,7 +971,11 @@ kind_expr = 'Type' , [ '->' , kind_expr ]
 kind_annotated_param = identifier , ':' , kind_expr , [ '+' , bounds ] ;
 
 (* Extended type_param to support HKT syntax: T or F<_> or F<_, _> *)
-extended_type_param = identifier , [ hk_params ] , [ ':' , bounds ] ;
+(* AUDIT 2026-08-28: a type parameter may carry a DEFAULT, and the
+   parser has accepted one since before this line was written — but only
+   after a bounds clause, so `<B: Named = Text>` parsed and `<B = Text>`
+   did not.  The default belongs to the parameter, not to the bounds. *)
+extended_type_param = identifier , [ hk_params ] , [ ':' , bounds ] , [ '=' , type ] ;
 hk_params           = '<' , hk_placeholder_list , '>' ;
 hk_placeholder_list = '_' , { ',' , '_' } ;
 

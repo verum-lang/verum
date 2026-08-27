@@ -1633,6 +1633,39 @@ fn substitute_refinement_binder(
                                 _ => None,
                             },
                         };
+                        // FILL THE OMITTED TRAILING SLOTS FROM THEIR
+                        // DEFAULTS, before anything counts them.
+                        //
+                        // `type Pair<A, B = Text>` applied as `Pair<Int>`
+                        // is a two-argument application whose second
+                        // argument the declaration supplied. Without this
+                        // the parameter survives as the bare name `B` and
+                        // a mismatch reports `expected 'Int', found 'B'`
+                        // — a type the program never wrote.
+                        //
+                        // Only a TRAILING run may be omitted, and only
+                        // while every omitted slot has a default: a hole
+                        // in the middle has no positional reading.
+                        if let Some(expected_count) = expected {
+                            let supplied = type_args
+                                .iter()
+                                .filter(|t| !matches!(t, Type::Lifetime { .. }))
+                                .count();
+                            if supplied < expected_count
+                                && let Some(Type::Tuple(defaults)) = self
+                                    .ctx
+                                    .lookup_type(&format!("__type_param_defaults_{}", type_name))
+                                && defaults.len() == expected_count
+                                && defaults
+                                    .iter()
+                                    .skip(supplied)
+                                    .all(|d| !matches!(d, Type::Unknown))
+                            {
+                                for d in defaults.iter().skip(supplied) {
+                                    type_args.push(d.clone());
+                                }
+                            }
+                        }
                         if let Some(expected_count) = expected {
                             let provided = type_args
                                 .iter()
