@@ -1,0 +1,73 @@
+// @test: verify-fail
+// @level: L3
+// @tier: 0
+// @tags: verification, smt, refinement-reflection, known-gap
+// @timeout: 30000
+// @description: PINS A GAP — a guard comparing a variant against its
+//   own constant is not reflected, while both halves of that shape are.
+//
+// This spec expects a FAILURE, and it exists to make that failure
+// visible rather than to bless it. Two controls sit beside the failing
+// case and both prove, which is what makes the gap a single narrow
+// question instead of a vague "the prover is limited":
+//
+//   * the guard fold works — the same `if … { return … }` over an `Int`
+//     proves;
+//   * equality over a variant works — the same claim written as a
+//     `match` proves, and its arm builds exactly the comparison the
+//     guard needs.
+//
+// It is the two TOGETHER that decline, and they decline at reflection
+// time: the function is never given an axiom, so the claim has nothing
+// to close against. Measured with the reflection count, not inferred.
+//
+// When the gap closes, `a_holds` starts proving and this spec flips to
+// red — which is the intended signal. Change the directive to
+// `verify-pass` then, and move the case into
+// `reflected_body_with_guards.vr` where it belongs.
+
+public type Held is None | Some(Int);
+
+/// THE GAP: a guard whose condition compares a variant with a variant
+/// constant. Trivially true, and not provable.
+public fn a_guard(h: Held) -> Bool {
+    if h == Held.None {
+        return true;
+    }
+    true
+}
+
+@verify(formal)
+public theorem a_holds(h: Held)
+    ensures a_guard(h)
+    proof by auto;
+
+/// CONTROL — the same claim as a `match`. Proves.
+public fn b_match(h: Held) -> Bool {
+    match h {
+        Held.None => true,
+        Held.Some(x) => true,
+    }
+}
+
+@verify(formal)
+public theorem b_holds(h: Held)
+    ensures b_match(h)
+    proof by auto;
+
+/// CONTROL — the same guard over an `Int`. Proves.
+public fn c_int(n: Int) -> Bool {
+    if n == 0 {
+        return true;
+    }
+    true
+}
+
+@verify(formal)
+public theorem c_holds(n: Int)
+    ensures c_int(n)
+    proof by auto;
+
+fn main() {
+    print("guard-over-variant");
+}
