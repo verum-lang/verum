@@ -985,8 +985,14 @@ impl<'s> CompilationPipeline<'s> {
         // Cross-module name resolution: process imports before type declarations.
         for item in &module.items {
             if let ItemKind::Mount(import) = &item.kind {
+                // SNAPSHOT, NOT A HELD GUARD — see the twin of this loop
+                // in `phases_orchestration.rs`. Holding the read guard
+                // across `process_import` deadlocks the thread against
+                // itself the moment the call lazy-loads a module and
+                // registers it under a write lock on the same registry.
+                let registry_snapshot = registry.read().clone();
                 if let Err(type_error) =
-                    checker.process_import(import, &current_module_path_str, &registry.read())
+                    checker.process_import(import, &current_module_path_str, &registry_snapshot)
                 {
                     let diag = type_error_to_diagnostic(&type_error, Some(self.session));
                     self.session.emit_diagnostic(diag);

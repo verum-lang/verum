@@ -279,7 +279,13 @@ impl<'s> CompilationPipeline<'s> {
         // This resolves mount statements (e.g., mount super.constants.*)
         // so that imported names are available during body type checking.
         {
-            let reg = registry.read();
+            // SNAPSHOT, NOT A HELD GUARD — the third of three sites with
+            // this shape; see `phases_orchestration.rs` for the full
+            // reason. `process_import` can lazy-load a module and
+            // register it under a WRITE lock on this same registry, and
+            // `parking_lot`'s RwLock is not reentrant, so a live read
+            // guard here deadlocks the thread against itself.
+            let reg = registry.read().clone();
             for (module_path, stdlib_mod) in &stdlib_modules {
                 for item in &stdlib_mod.items {
                     if let verum_ast::ItemKind::Mount(import) = &item.kind {

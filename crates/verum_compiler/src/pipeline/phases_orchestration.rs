@@ -606,8 +606,32 @@ impl<'s> CompilationPipeline<'s> {
         let t_passes = std::time::Instant::now();
         for item in &module.items {
             if let verum_ast::ItemKind::Mount(import) = &item.kind {
+                // SNAPSHOT, NOT A HELD GUARD.
+                //
+                // `&registry.read()` in argument position keeps the read
+                // guard alive for the whole call, and `process_import`
+                // may LAZY-LOAD a module and register it — which takes a
+                // WRITE lock on this very registry. `parking_lot`'s
+                // RwLock is not reentrant, so the writer waits for a
+                // reader that is its own frame and the compiler hangs
+                // forever. `verum check core/intrinsics/mod.vr` never
+                // returned.
+                //
+                // It became reachable when `set_module_registry` started
+                // sharing ONE handle for `module_registry` and
+                // `session_registry` — deliberately, to stop two copies
+                // drifting as lazy loads landed in one and not the other.
+                // That repair turned a harmless lock on two objects into
+                // a self-deadlock on one.
+                //
+                // Cloned per mount rather than once for the pass, so a
+                // module registered by an earlier mount is visible to a
+                // later one — the freshness the per-iteration `read()`
+                // used to give. Same shape as the caller in
+                // `infer/modules.rs`, which already reads-and-clones.
+                let registry_snapshot = registry.read().clone();
                 if let Err(type_error) =
-                    checker.process_import(import, &current_module_path_str, &registry.read())
+                    checker.process_import(import, &current_module_path_str, &registry_snapshot)
                 {
                     let diag = type_error_to_diagnostic(&type_error, Some(self.session));
                     self.session.emit_diagnostic(diag);
