@@ -9794,6 +9794,33 @@ impl TypeChecker {
         }
     }
 
+    /// Report every `linear` obligation that is still outstanding, minus
+    /// the function's own parameters.
+    ///
+    /// A `linear` value is EXACTLY once, so the obligation expires
+    /// wherever control leaves the function — which is every `return`,
+    /// not only the end of the body. Checking the end alone accepts
+    ///
+    /// ```text
+    /// let s = open();
+    /// if fail { return 0; }   // `s` is never closed on this path
+    /// close(s)
+    /// ```
+    ///
+    /// because the leaving branch is (correctly) excluded from the merge
+    /// that forms the continuation. Excluded from the CONTINUATION is
+    /// right; excluded from the CHECK is the hole.
+    pub(crate) fn report_unmet_linear_obligations(&mut self, at: verum_ast::Span) {
+        for err in self.affine_tracker.check_linear_consumed(at) {
+            if let crate::TypeError::LinearNotConsumed { name, .. } = &err
+                && self.linear_exempt.contains(name)
+            {
+                continue;
+            }
+            self.push_diagnostic_for(err);
+        }
+    }
+
     fn infer_expr_return_expr(&mut self, expr: &Expr) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Return(val) = &expr.kind else { unreachable!() };
@@ -9841,6 +9868,13 @@ impl TypeChecker {
                 self.check_return_lifetime(v, expr.span)?;
             }
         }
+        // `return` is a scope end for an exactly-once obligation — AFTER
+        // the returned expression is walked, because `return close(s)`
+        // discharges the obligation IN the thing being returned. Asking
+        // before the walk refuses every correct early exit, which is what
+        // the control test in `affine_branches_are_alternatives_tests`
+        // exists to catch.
+        self.report_unmet_linear_obligations(expr.span);
         // Return has Never type - unifies with any type
         Ok(InferResult::new(Type::never()))
     }

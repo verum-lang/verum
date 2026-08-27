@@ -10217,6 +10217,27 @@ impl TypeChecker {
         // Spec: L0-critical/reference_system/value_transfer - Affine type safety
         let new_affine_tracker = self.affine_tracker.new_scope();
         let prev_affine_tracker = std::mem::replace(&mut self.affine_tracker, new_affine_tracker);
+        // See `linear_exempt`: the obligation is on values the function
+        // HOLDS, and it can expire at any `return`, not only at the end of
+        // the body — so the set has to be reachable from the expression
+        // walker, not computed once at the bottom of this function.
+        let prev_linear_exempt = std::mem::replace(
+            &mut self.linear_exempt,
+            func.params
+                .iter()
+                .filter_map(|p| match &p.kind {
+                    verum_ast::decl::FunctionParamKind::Regular { pattern, .. } => {
+                        match &pattern.kind {
+                            verum_ast::pattern::PatternKind::Ident { name, .. } => {
+                                Some(name.name.clone())
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                })
+                .collect(),
+        );
 
         // AMBIGUITY-E404-1 (T0585): open this function's ambiguity
         // window — MARKER discipline, not take/replace: an early `?`
@@ -11199,29 +11220,8 @@ impl TypeChecker {
         // consumer — `fn close(h: Handle) { }`, the function whose whole
         // job is to receive and destroy — the one thing a linear type
         // could not have.
-        let linear_exempt: std::collections::HashSet<verum_common::Text> = func
-            .params
-            .iter()
-            .filter_map(|p| match &p.kind {
-                verum_ast::decl::FunctionParamKind::Regular { pattern, .. } => {
-                    match &pattern.kind {
-                        verum_ast::pattern::PatternKind::Ident { name, .. } => {
-                            Some(name.name.clone())
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            })
-            .collect();
-        for err in self.affine_tracker.check_linear_consumed(func.span) {
-            if let crate::TypeError::LinearNotConsumed { name, .. } = &err
-                && linear_exempt.contains(name)
-            {
-                continue;
-            }
-            self.push_diagnostic_for(err);
-        }
+        self.report_unmet_linear_obligations(func.span);
+        self.linear_exempt = prev_linear_exempt;
 
         // Restore the outer affine tracker scope
         // This ensures affine tracking is isolated per function

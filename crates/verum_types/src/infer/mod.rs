@@ -1097,6 +1097,14 @@ pub struct TypeChecker {
     /// Ensures affine values are used at most once, detecting use-after-move.
     /// Spec: L0-critical/reference_system/value_transfer - Affine type safety
     pub(crate) affine_tracker: crate::affine::AffineTracker,
+    /// Names the `linear` obligation does NOT apply to in the function
+    /// being checked: its own parameters. A parameter arrived by being
+    /// moved in and its scope end is its destruction site, so requiring
+    /// it to move on again would make the canonical consumer —
+    /// `fn close(h: Handle) { }` — the one thing a linear type could not
+    /// have. Set on entering a body, read at every point the obligation
+    /// can expire: each `return`, and the end of the body.
+    pub(crate) linear_exempt: verum_common::Set<verum_common::Text>,
     /// Borrow tracker for reference aliasing detection.
     /// Ensures borrowing rules are followed: at most one &mut OR multiple &T.
     /// Spec: L0-critical/reference_system/access_rules - Reference aliasing safety

@@ -187,3 +187,56 @@ fn always_close(ok: Bool) -> Int {
         "every path consumes it exactly once: {cs:?}"
     );
 }
+
+#[test]
+fn a_return_is_a_scope_end_for_a_linear_obligation() {
+    // The hole the branch merge opens if only the end of the body is
+    // checked: the leaving branch is (correctly) excluded from the merge
+    // that forms the continuation, so by the end of the function the
+    // obligation looks met on the only path that survived. Excluded from
+    // the CONTINUATION is right; excluded from the CHECK is not.
+    let code = r#"
+type linear Session is { id: Int };
+
+fn open() -> Session { Session { id: 1 } }
+fn close(s: Session) -> Int { s.id }
+
+fn work(fail: Bool) -> Int {
+    let s = open();
+    if fail {
+        return 0;
+    }
+    close(s)
+}
+"#;
+    let cs = complaints(code);
+    assert!(
+        cs.iter().any(|c| c.contains("exactly once")),
+        "the early return leaves `s` unclosed on that path: {cs:?}"
+    );
+}
+
+#[test]
+fn a_return_that_discharges_the_obligation_is_accepted() {
+    // The control. A rule that fired at every `return` would pass the
+    // test above while refusing every correct early exit.
+    let code = r#"
+type linear Session is { id: Int };
+
+fn open() -> Session { Session { id: 1 } }
+fn close(s: Session) -> Int { s.id }
+
+fn work(fail: Bool) -> Int {
+    let s = open();
+    if fail {
+        return close(s);
+    }
+    close(s)
+}
+"#;
+    let cs = complaints(code);
+    assert!(
+        !cs.iter().any(|c| c.contains("exactly once")),
+        "both paths close the session exactly once: {cs:?}"
+    );
+}

@@ -329,6 +329,25 @@ jobs:
         timeout-minutes: 30
         run: cargo test --locked --tests -p verum_types
 
+      # Doc examples, for the pure tier plus the two crates whose doc
+      # comments carry non-Rust snippets. An INDENTED block inside a
+      # `///` comment is a Rust code block to rustdoc, which COMPILES it
+      # — so a Verum or SMT-LIB example written that way fails to build
+      # and reports a rustc error that says nothing about the code it
+      # documents. Five such blocks were found and fenced as ```text on
+      # 2026-08-28, one of them written the same day the other four were
+      # cleared.
+      #
+      # This step is the whole check and there is no cheaper one. A
+      # token-matching gate was written first and DELETED: it reported
+      # clean on the very block it was written for, because a Verum
+      # snippet that fails as Rust can be indistinguishable from Rust by
+      # inspection (`loop { if i >= n { … } }` is a syntax rustc accepts
+      # and a program it cannot resolve). Only the compiler knows.
+      - name: Doc examples compile
+        timeout-minutes: 20
+        run: cargo test --locked --doc -p verum_types -p verum_smt -p verum_common -p verum_ast
+
       # verum_verification tier: 1,537 tests measured green 2026-08-03,
       # zero carve-outs.
       - name: Run tests/ for verum_verification
