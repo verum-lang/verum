@@ -334,18 +334,28 @@ impl RefinementReflectionRegistry {
             out.push_str(d);
             out.push('\n');
         }
-        for d in aux.iter().filter(|d| !d.starts_with("(declare-sort")) {
+        for d in aux
+            .iter()
+            .filter(|d| !d.starts_with("(declare-sort") && !d.starts_with("(assert"))
+        {
             out.push_str(d);
             out.push('\n');
         }
-        // Constants last among the declarations — every sort they name
-        // is declared by now.
+        // Constants after the declarations — every sort they name is
+        // declared by now.
         for pc in &path_consts {
             out.push_str("(declare-const ");
             out.push_str(pc);
             out.push(' ');
             out.push_str(&self.path_const_sort(pc));
             out.push_str(")\n");
+        }
+        // AUXILIARY FACTS last of the auxiliaries: a discriminant axiom
+        // ties `Verum!is!K!A` to `path_K.A`, so it can only be asserted
+        // once that constant exists.
+        for d in aux.iter().filter(|d| d.starts_with("(assert")) {
+            out.push_str(d);
+            out.push('\n');
         }
 
         for n in &names {

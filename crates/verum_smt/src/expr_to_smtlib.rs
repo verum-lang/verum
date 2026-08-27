@@ -105,6 +105,14 @@ pub struct ReflectionTypeEnv {
         std::collections::HashMap<String, std::collections::HashMap<String, (String, Option<String>)>>,
     /// Type (record, protocol, impl target) → method → signature.
     pub methods: std::collections::HashMap<String, std::collections::HashMap<String, MemberSig>>,
+    /// Sum type → its constructors, in declaration order, each with the
+    /// SORTS of its payload positions.
+    ///
+    /// A nullary constructor has an empty payload list and needs no
+    /// machinery beyond the constant it already is. One with a payload
+    /// gets a discriminant predicate and one projection per position —
+    /// see `solver_symbols::discriminant` / `::payload`.
+    pub variants: std::collections::HashMap<String, Vec<(String, Vec<String>)>>,
 }
 
 impl ReflectionTypeEnv {
@@ -171,6 +179,29 @@ impl ReflectionTypeEnv {
         for item in &module.items {
             match &item.kind {
                 ItemKind::Type(td) => match &td.body {
+                    TypeDeclBody::Variant(vs) => {
+                        // First declarer wins — see `absorb_types_from`.
+                        let name = td.name.name.as_str().to_string();
+                        if env.variants.contains_key(&name) {
+                            continue;
+                        }
+                        let ctors: Vec<(String, Vec<String>)> = vs
+                            .iter()
+                            .map(|v| {
+                                let payload = match &v.data {
+                                    verum_common::Maybe::Some(
+                                        verum_ast::decl::VariantData::Tuple(tys),
+                                    ) => tys.iter().map(type_to_sort).collect(),
+                                    verum_common::Maybe::Some(
+                                        verum_ast::decl::VariantData::Record(fs),
+                                    ) => fs.iter().map(|f| type_to_sort(&f.ty)).collect(),
+                                    verum_common::Maybe::None => Vec::new(),
+                                };
+                                (v.name.name.as_str().to_string(), payload)
+                            })
+                            .collect();
+                        env.variants.insert(name, ctors);
+                    }
                     TypeDeclBody::Record(fields) => {
                         // First declarer wins — see `absorb_types_from`.
                         let name = td.name.name.as_str().to_string();
@@ -251,6 +282,224 @@ fn member_type_name(expr: &Expr, env: &ReflectionTypeEnv) -> Option<String> {
         _ => None,
     }
 }
+
+/// Build one arm of a `match` whose pattern carries a PAYLOAD.
+///
+/// Answers `(condition, body)`. The condition is a discriminant
+/// predicate over the scrutinee; the body is the arm translated with
+/// each bound name replaced by a projection of that scrutinee.
+///
+/// Declines — and so declines the whole reflection — when it cannot
+/// name the scrutinee's TYPE, when that type's constructors are not
+/// known, when the constructor named is not one of them, or when the
+/// pattern binds anything but plain identifiers. A partial answer here
+/// would be a body that is not the function's.
+fn payload_arm(
+    scrut: &Expr,
+    scrut_smt: &str,
+    path: &verum_ast::ty::Path,
+    data: &verum_ast::pattern::VariantPatternData,
+    body: &Expr,
+    env: &ReflectionTypeEnv,
+    aux: &mut std::collections::BTreeSet<String>,
+) -> Result<(String, String), SmtTranslateError> {
+    use verum_ast::pattern::PatternKind;
+
+    let decline = |what: &str| SmtTranslateError::UnsupportedExpr {
+        description: what.to_string(),
+    };
+
+    // The constructor is the LAST segment; the type is either the
+    // segment before it (`Result.Ok`) or the scrutinee's own type
+    // (a bare `Ok`).
+    let segs: Vec<&str> = path
+        .segments
+        .iter()
+        .filter_map(|seg| match seg {
+            verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
+            _ => None,
+        })
+        .collect();
+    let ctor = *segs
+        .last()
+        .ok_or_else(|| decline("variant pattern with no constructor name"))?;
+    let scrut_type = member_type_name(scrut, env)
+        .or_else(|| {
+            if segs.len() >= 2 {
+                Some(segs[segs.len() - 2].to_string())
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| decline("payload match on a scrutinee of unknown type"))?;
+
+    let ctors = env
+        .variants
+        .get(&scrut_type)
+        .ok_or_else(|| decline("payload match on a type with no known constructors"))?;
+    let payload_sorts = ctors
+        .iter()
+        .find(|(name, _)| name == ctor)
+        .map(|(_, sorts)| sorts.clone())
+        .ok_or_else(|| decline("payload match on an unknown constructor"))?;
+
+    // The bound names, in order.
+    let bound: Vec<&verum_ast::pattern::Pattern> = match data {
+        verum_ast::pattern::VariantPatternData::Tuple(ps) => ps.iter().collect(),
+        verum_ast::pattern::VariantPatternData::Record { fields, rest } => {
+            if *rest {
+                return Err(decline("payload pattern with `..`"));
+            }
+            // A record-style field pattern may elide its sub-pattern
+            // (`Error { code }` binds `code` by its own name); this
+            // fragment only carries the explicit form, and declines
+            // the shorthand rather than guessing at the binding.
+            let mut out: Vec<&verum_ast::pattern::Pattern> = Vec::new();
+            for fp in fields.iter() {
+                match &fp.pattern {
+                    Some(p) => out.push(p),
+                    None => return Err(decline("record payload pattern using field shorthand")),
+                }
+            }
+            out
+        }
+    };
+    if bound.len() != payload_sorts.len() {
+        return Err(decline("payload pattern with the wrong number of bindings"));
+    }
+
+    let scrut_sort = crate::solver_symbols::opaque_sort(&scrut_type);
+    note_sort(aux, &scrut_sort);
+
+    // Each binding becomes a projection application, substituted into
+    // the arm's body before translation.
+    let mut substituted = body.clone();
+    for (i, pat) in bound.iter().enumerate() {
+        let name = match &pat.kind {
+            PatternKind::Ident { name, .. } => name.name.as_str().to_string(),
+            PatternKind::Wildcard => continue,
+            _ => return Err(decline("payload pattern binding a non-identifier")),
+        };
+        let proj = crate::solver_symbols::payload(&scrut_type, ctor, i);
+        note_decl(
+            aux,
+            format!("(declare-fun {} ({}) {})", proj, scrut_sort, payload_sorts[i]),
+        );
+        note_sort(aux, &payload_sorts[i]);
+        substituted = substitute_ident_with_symbol(
+            &substituted,
+            &name,
+            &format!("({} {})", proj, scrut_smt),
+        );
+    }
+
+    let disc = crate::solver_symbols::discriminant(&scrut_type, ctor);
+    note_decl(aux, format!("(declare-fun {} ({}) Bool)", disc, scrut_sort));
+    note_variant_discriminant_facts(&scrut_type, ctors, &scrut_sort, aux);
+
+    let body_smt = expr_to_smtlib_env(&substituted, env, aux)?;
+    Ok((format!("({} {})", disc, scrut_smt), body_smt))
+}
+
+/// Declare every constructor's discriminant for a type and say what
+/// they mean, once.
+///
+/// Three facts, and each is needed by a different kind of claim:
+///
+///   * EXHAUSTIVE — some constructor holds. Without it the solver may
+///     pick a value that is none of them.
+///   * DISJOINT — no two hold together. This is what makes "it is an
+///     `Err`, so it is not an `Ok`" available, which is the whole of an
+///     `accepts exactly when` claim.
+///   * for a NULLARY constructor, the discriminant is exactly equality
+///     with its constant, so the two spellings of the same test —
+///     `(= k path_K.A)` from a nullary arm and `(Verum!is!K!A k)` from
+///     a payload one — agree in a match that mixes them.
+///
+/// Emitted for the whole TYPE rather than the one constructor in hand,
+/// because disjointness is a statement about pairs and a partial
+/// version of it is worse than none.
+fn note_variant_discriminant_facts(
+    type_name: &str,
+    ctors: &[(String, Vec<String>)],
+    sort: &str,
+    aux: &mut std::collections::BTreeSet<String>,
+) {
+    if ctors.is_empty() {
+        return;
+    }
+    let disc_of = |c: &str| crate::solver_symbols::discriminant(type_name, c);
+    for (name, _) in ctors {
+        note_decl(aux, format!("(declare-fun {} ({}) Bool)", disc_of(name), sort));
+    }
+
+    let applied: Vec<String> = ctors
+        .iter()
+        .map(|(n, _)| format!("({} x)", disc_of(n)))
+        .collect();
+    if applied.len() == 1 {
+        note_decl(
+            aux,
+            format!("(assert (forall ((x {})) {}))", sort, applied[0]),
+        );
+    } else {
+        note_decl(
+            aux,
+            format!(
+                "(assert (forall ((x {})) (or {})))",
+                sort,
+                applied.join(" ")
+            ),
+        );
+        for i in 0..ctors.len() {
+            for j in (i + 1)..ctors.len() {
+                note_decl(
+                    aux,
+                    format!(
+                        "(assert (forall ((x {})) (not (and {} {}))))",
+                        sort, applied[i], applied[j]
+                    ),
+                );
+            }
+        }
+    }
+
+    for (name, payload) in ctors {
+        if payload.is_empty() {
+            note_decl(
+                aux,
+                format!(
+                    "(assert (forall ((x {})) (= ({} x) (= x path_{}.{}))))",
+                    sort,
+                    disc_of(name),
+                    type_name,
+                    name
+                ),
+            );
+        }
+    }
+}
+
+/// Replace a bare-path reference by a RAW SMT-LIB symbol.
+///
+/// The payload projection `(Verum!payload!Result!Ok!0 r)` is not a
+/// Verum expression, so it cannot be substituted as one. A marker
+/// expression carries it through the AST and the translator's Path arm
+/// emits it verbatim.
+fn substitute_ident_with_symbol(expr: &Expr, name: &str, symbol: &str) -> Expr {
+    let marker = Expr::new(
+        ExprKind::Path(verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+            format!("{}{}", RAW_SMT_PREFIX, symbol).as_str(),
+            expr.span,
+        ))),
+        expr.span,
+    );
+    substitute_ident(expr, name, &marker)
+}
+
+/// Prefix marking an identifier that is really a raw SMT-LIB term.
+/// Chosen so no Verum identifier can collide with it.
+const RAW_SMT_PREFIX: &str = "\u{0}smt:";
 
 /// Note an auxiliary declaration; `Verum!`-prefixed sorts get their
 /// `declare-sort` alongside. BTreeSet keeps emission deterministic.
@@ -411,19 +660,41 @@ pub fn expr_to_smtlib_env(
                         description: "guarded match arm".to_string(),
                     });
                 }
-                let body_smt = expr_to_smtlib_env(&arm.body, env, aux)?;
+                // A PAYLOAD arm's body names the bound payload, which
+                // has no meaning until the arm is built, so its
+                // translation cannot be attempted here. Nullary arms
+                // are unaffected — they bind nothing.
+                let is_payload_arm = matches!(
+                    &arm.pattern.kind,
+                    PatternKind::Variant { data: Some(_), .. }
+                );
+                let body_smt = if is_payload_arm {
+                    String::new()
+                } else {
+                    expr_to_smtlib_env(&arm.body, env, aux)?
+                };
                 match &arm.pattern.kind {
                     // Binds anything → the fallthrough (else) branch.
                     PatternKind::Wildcard | PatternKind::Ident { .. } => {
                         chain = Some(body_smt);
                     }
-                    // A nullary variant `K.A`. A payload (`Some(x)`) has no SMT
-                    // form for `x`, so refuse rather than emit a wrong body.
+                    // A variant pattern. Nullary is a CONSTANT, so the
+                    // test is `(= k path_K.A)`. One with a payload is
+                    // not a constant: the test is a discriminant
+                    // predicate and each bound name is a projection of
+                    // the scrutinee — the same device a record field
+                    // uses, and for the same reason. The solver learns
+                    // nothing about the payload's value, only that one
+                    // scrutinee projects to one payload, which is what
+                    // an arm's body and a hypothesis about the same
+                    // value need in order to meet.
                     PatternKind::Variant { path, data } => {
-                        if data.is_some() {
-                            return Err(SmtTranslateError::UnsupportedExpr {
-                                description: "variant pattern with payload".to_string(),
-                            });
+                        if let Some(d) = data {
+                            let (cond, body) =
+                                payload_arm(scrut, &scrut_smt, path, d, &arm.body, env, aux)?;
+                            let existing = chain.clone().unwrap_or_else(|| body.clone());
+                            chain = Some(format!("(ite {} {} {})", cond, body, existing));
+                            continue;
                         }
                         let cond = format!("(= {} {})", scrut_smt, path_to_smtlib(path)?);
                         let existing = chain.clone().unwrap_or_else(|| body_smt.clone());
@@ -668,6 +939,12 @@ fn path_to_smtlib(path: &verum_ast::ty::Path) -> SmtResult {
         0 => Err(SmtTranslateError::UnsupportedExpr {
             description: "empty path".to_string(),
         }),
+        // A marker planted by `substitute_ident_with_symbol`: the name
+        // IS an SMT-LIB term already. Nothing a Verum source can spell
+        // reaches this arm — the prefix contains a NUL.
+        1 if names[0].starts_with(RAW_SMT_PREFIX) => {
+            Ok(names[0][RAW_SMT_PREFIX.len()..].to_string())
+        }
         1 => Ok(names[0].to_string()),
         _ => Ok(format!("path_{}", names.join("."))),
     }

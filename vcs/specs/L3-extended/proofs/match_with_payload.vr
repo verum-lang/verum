@@ -1,0 +1,122 @@
+// @test: verify-pass
+// @level: L3
+// @tier: 0
+// @tags: verification, smt, refinement-reflection, match, variants
+// @timeout: 30000
+// @description: A `match` that binds a payload is reflected.
+//
+// A `match` over NULLARY variants already reflected. One that binds
+// anything — `Some(x)`, `Ok(v)`, `Err(e)` — declined, on the honest
+// grounds that the bound name had no SMT form. So the moment a sum type
+// carried data, every claim about a function matching on it became
+// unprovable, and sum types carrying data is most of what sum types are
+// for.
+//
+// The device is the one record fields already use. A constructor gets a
+// DISCRIMINANT — `Verum!is!K!A`, a predicate on the scrutinee — and each
+// payload position gets a PROJECTION, so `Some(x) => x + 1` becomes
+// `(ite (Verum!is!Held!Some h) (+ (Verum!payload!Held!Some!0 h) 1) …)`.
+// The solver learns nothing about the payload's value, only that one
+// scrutinee projects to one payload, which is what an arm's body and a
+// hypothesis about the same value need in order to meet.
+//
+// Three facts come with the discriminants, and each carries a different
+// kind of claim: some constructor holds, no two hold together, and a
+// NULLARY constructor's discriminant is exactly equality with its
+// constant — which is what lets a match mixing both spellings agree
+// with itself.
+//
+// `_unsound.vr` is the pole: the same shapes, claims that are FALSE.
+
+public type Held is None | Some(Int);
+
+/// Both arms, one binding a payload and one not.
+public fn or_zero(h: Held) -> Int {
+    match h {
+        Held.Some(x) => x,
+        Held.None => 0,
+    }
+}
+
+/// The disjointness fact, used: on the `None` arm, `or_zero` is 0 —
+/// which holds only because being a `None` rules out being a `Some`.
+///
+/// Written as a `match` rather than as `if h == Held.None { … }`: a
+/// guard whose condition compares a VARIANT against a variant constant
+/// is not reflected today, while the same guard over an `Int` is
+/// (filed, with the three-case reproduction). The claim is the same
+/// either way; the spelling is the one the prover can read.
+public fn none_is_zero(h: Held) -> Bool {
+    match h {
+        Held.None => or_zero(h) == 0,
+        Held.Some(x) => true,
+    }
+}
+
+@verify(formal)
+public theorem none_gives_zero(h: Held)
+    ensures none_is_zero(h)
+    proof by auto;
+
+/// The projection fact, used: the payload comes back unchanged.
+public fn round_trips(h: Held) -> Bool {
+    match h {
+        Held.Some(x) => or_zero(h) == x,
+        Held.None => true,
+    }
+}
+
+@verify(formal)
+public theorem payload_round_trips(h: Held)
+    ensures round_trips(h)
+    proof by auto;
+
+public type Pair is Empty | Both(Int, Int);
+
+/// TWO payload positions — each gets its own projection, and mixing
+/// them up would make this claim false.
+public fn first_of(p: Pair) -> Int {
+    match p {
+        Pair.Both(a, b) => a,
+        Pair.Empty => 0,
+    }
+}
+
+public fn second_of(p: Pair) -> Int {
+    match p {
+        Pair.Both(a, b) => b,
+        Pair.Empty => 0,
+    }
+}
+
+public fn sum_is_parts(p: Pair) -> Bool {
+    match p {
+        Pair.Both(a, b) => first_of(p) + second_of(p) == a + b,
+        Pair.Empty => true,
+    }
+}
+
+@verify(formal)
+public theorem positions_do_not_swap(p: Pair)
+    ensures sum_is_parts(p)
+    proof by auto;
+
+/// The control: a nullary-only match, which reflected before and must
+/// keep reflecting.
+public type Colour is Red | Green;
+
+public fn is_red(c: Colour) -> Bool {
+    match c {
+        Colour.Red => true,
+        Colour.Green => false,
+    }
+}
+
+@verify(formal)
+public theorem red_is_red()
+    ensures is_red(Colour.Red)
+    proof by auto;
+
+fn main() {
+    print("payload-match");
+}

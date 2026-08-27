@@ -1,0 +1,83 @@
+// @test: verify-fail
+// @level: L3
+// @tier: 0
+// @tags: verification, smt, refinement-reflection, match, soundness
+// @timeout: 30000
+// @description: Payload projections do not make false claims provable.
+//
+// The soundness pole of `match_with_payload.vr`. That spec shows a
+// `match` binding a payload becomes provable; this one shows it does not
+// become provable when it is wrong.
+//
+// The direction matters because the arms are now built from symbols the
+// solver is told to trust: a discriminant predicate per constructor, a
+// projection per payload position, and three facts about them. Any of
+// those being too strong turns an unproved goal into a proof. The three
+// claims below are false, and each is false for a different reason.
+
+public type Held is None | Some(Int);
+
+public fn or_zero(h: Held) -> Int {
+    match h {
+        Held.Some(x) => x,
+        Held.None => 0,
+    }
+}
+
+/// FALSE: a `Some` carries whatever it carries, and nothing says that
+/// is zero. If the projection were treated as a constant, this would
+/// prove.
+public fn always_zero(h: Held) -> Bool {
+    or_zero(h) == 0
+}
+
+@verify(formal)
+public theorem payload_is_not_always_zero(h: Held)
+    ensures always_zero(h)
+    proof by auto;
+
+public type Pair is Empty | Both(Int, Int);
+
+public fn first_of(p: Pair) -> Int {
+    match p {
+        Pair.Both(a, b) => a,
+        Pair.Empty => 0,
+    }
+}
+
+public fn second_of(p: Pair) -> Int {
+    match p {
+        Pair.Both(a, b) => b,
+        Pair.Empty => 0,
+    }
+}
+
+/// FALSE: the two positions are different projections. If they
+/// collapsed into one symbol — the mistake a positional encoding
+/// invites — this would prove.
+public fn positions_agree(p: Pair) -> Bool {
+    first_of(p) == second_of(p)
+}
+
+@verify(formal)
+public theorem positions_are_not_the_same(p: Pair)
+    ensures positions_agree(p)
+    proof by auto;
+
+/// FALSE: a value is not both. If the disjointness fact were emitted
+/// with the wrong polarity, this would prove.
+public fn both_at_once(h: Held) -> Bool {
+    match h {
+        Held.None => or_zero(h) == 1,
+        Held.Some(x) => true,
+    }
+}
+
+@verify(formal)
+public theorem none_does_not_carry_one(h: Held)
+    ensures both_at_once(h)
+    proof by auto;
+
+fn main() {
+    print("payload-unsound");
+}

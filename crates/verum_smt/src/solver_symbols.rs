@@ -34,6 +34,28 @@ pub fn opaque_sort(type_name: &str) -> String {
     format!("Verum!{}", type_name)
 }
 
+/// The DISCRIMINANT symbol for one constructor of a sum type: "is this
+/// value an `A`?".
+///
+/// A nullary constructor needs none — `(= k path_K.A)` says it, because
+/// a nullary constructor IS a constant. One carrying a payload is not a
+/// constant, so the test has to be a predicate on the scrutinee.
+pub fn discriminant(type_name: &str, ctor: &str) -> String {
+    format!("Verum!is!{}!{}", type_name, ctor)
+}
+
+/// The projection symbol for one PAYLOAD position of a constructor:
+/// `match r { Ok(v) => … }` binds `v` to `payload("Result", "Ok", 0)`
+/// applied to `r`.
+///
+/// Same device as a record field, and for the same reason: the solver
+/// learns nothing about the payload's value, only that one scrutinee
+/// projects to one payload — which is what an arm's body and a
+/// hypothesis about the same value need in order to meet.
+pub fn payload(type_name: &str, ctor: &str, index: usize) -> String {
+    format!("Verum!payload!{}!{}!{}", type_name, ctor, index)
+}
+
 /// The projection symbol for a record field: `w.flag` becomes an
 /// application of `projection("W", "flag")` to the receiver.
 ///
