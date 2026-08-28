@@ -1389,6 +1389,7 @@ simple_type     = primitive_type
                 | existential_type
                 | inferred_type
                 | dynamic_type
+                | static_protocol_type
                 | capability_type ;
 
 (* Anonymous record type: { x: Int, y: Int }                                       *)
@@ -1514,6 +1515,21 @@ higher_kinded_type = path , '<' , '_' , '>' ;
 inferred_type   = '_' ;
 
 dynamic_type    = 'dyn' , protocol_bounds , [ associated_type_bindings ] ;
+
+(* STATIC protocol type — the compile-time counterpart of `dyn`.  The
+   caller's concrete type is monomorphised in; nothing is boxed.
+
+       fn a(x: impl P) -> Int { 1 }
+       fn b(x: implement P) -> Int { 1 }
+
+   `implement` is the keyword; `impl` is a CONTEXTUAL identifier the
+   parser accepts in the same place (fast_parser ty.rs
+   `parse_protocol_type` consumes either), which is why the
+   lexer-keyword gate cannot see it — there is no `impl` token to
+   compare against.  Both spellings verified accepted; `implement` is
+   canonical, matching `implement P for T` at the item level.       *)
+static_protocol_type = ( 'implement' | 'impl' ) , protocol_bounds ,
+                       [ associated_type_bindings ] ;
 
 protocol_bounds = protocol_bound , { '+' , protocol_bound } ;
 
