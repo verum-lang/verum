@@ -28010,10 +28010,21 @@ impl VbcCodegen {
                     } else {
                         None
                     };
-                    if let Some(info) = mount_scoped_ret
-                        .as_ref()
-                        .or_else(|| self.ctx.lookup_function_with_arity(&func_name, args.len()))
-                    {
+                    // …and when there is no mount, the module's OWN
+                    // declaration is the authority (T0946). The scope
+                    // mirror `(current_source_module, name)` already
+                    // exists for exactly this — `compile_call` uses it —
+                    // and this site was reaching past it to the bare
+                    // HashMap probe. `resolve` is registered ~20 times by
+                    // different stdlib modules under the same bare key;
+                    // whichever wins decides how the caller's result is
+                    // FORMATTED, so a local `fn resolve(..) -> Int`
+                    // printed `None` through a stdlib namesake's
+                    // `Maybe<JsonValue>` Display.
+                    if let Some(info) = mount_scoped_ret.as_ref().or_else(|| {
+                        self.ctx
+                            .lookup_function_with_arity_in_scope(&func_name, args.len())
+                    }) {
                         if info.variant_tag.is_some()
                             && let Some(parent) = &info.parent_type_name
                         {
