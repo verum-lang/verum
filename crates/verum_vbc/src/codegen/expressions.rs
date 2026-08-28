@@ -38808,12 +38808,28 @@ impl VbcCodegen {
                 Ok(Some(dest))
             }
             _ => {
-                // Unknown macro — emit panic
-                let dest = self.ctx.alloc_temp();
-                let message_id =
-                    self.intern_string(&format!("macro not expanded: @{}", macro_name));
-                self.ctx.emit(Instruction::Panic { message_id });
-                Ok(Some(dest))
+                // Unknown macro — a COMPILE error, not a runtime panic.
+                //
+                // This arm used to emit `Panic { "macro not expanded: @X" }`,
+                // which made an unresolvable name behave like a program that
+                // compiles. `verum check` reported zero errors on
+                //
+                //     let xs: List<Int> = list![1, 2, 3];
+                //
+                // and the binary died at the first execution of that line.
+                // Every documentation example using `list!`, `map!`,
+                // `deque!` or `heap!` therefore looked verified and was not
+                // — which is how a whole family of collection literals that
+                // has never worked stayed in the reference.
+                //
+                // Nothing is recoverable here: the macro name is fixed at
+                // this point and no later phase can supply an expansion, so
+                // the failure is known at compile time and belongs there.
+                // An undefined FUNCTION in this same file is already a
+                // codegen error; an undefined macro now matches it.
+                Err(CodegenError::undefined_function(format!(
+                    "macro `{macro_name}` (no expansion is registered for it)"
+                )))
             }
         }
     }
