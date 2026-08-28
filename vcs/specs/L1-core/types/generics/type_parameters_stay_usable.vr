@@ -1,0 +1,81 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: generics, soundness, parametricity
+// @timeout: 30000
+// @expected-stdout-begin
+// identity 7
+// bounded 6
+// literal 0
+// through 3
+// @expected-stdout-end
+// @description: The positive pole of `type_parameters_are_rigid.vr`.
+//
+//   Making a function's type parameters rigid inside its body is a REFUSAL,
+//   and a refusal is only as good as what it leaves alone. Every spelling
+//   here was measured breaking one attempt at that rule, against the L1
+//   suite and a 400-file sweep of `core/`, and each is listed because a
+//   plausible implementation gets it wrong:
+//
+//   * `identity` — the parameter flowing straight through. A rule that
+//     compares variables by identity rather than by rigidity rejects this,
+//     because the parameter binding and the declared return reach the
+//     comparison as two different variables.
+//
+//   * `bounded` — a parameter bounded by a FUNCTION TYPE, inline. The bound
+//     says F IS that function type, so calling `f(x)` and passing `f` on are
+//     the bound being used as written, not the body discovering what the
+//     caller chose. Holding these rigid rejected `self.data.retain(f)` in
+//     `core/collections/heap.vr`.
+//
+//   * `through` — the same bound written in a `where` clause. A `where`
+//     clause is processed AFTER the body's scope is installed, so a check
+//     that only reads the inline form passes this file and still rejects
+//     `core/`'s generic combinators. The two spellings must agree.
+//
+//   * `literal` — an unsuffixed integer literal assigned to a BOUNDED
+//     parameter. `fn matrix_multiply<T: Num>` writing `let sum: T = 0` is
+//     how numeric generic code is written; which types a literal may inhabit
+//     is settled where the parameter is instantiated. Note the contrast with
+//     `type_parameters_are_rigid.vr`, where the same literal against an
+//     UNBOUNDED parameter is an error: with no bound, T could be any type at
+//     all and 42 is not one of them.
+//
+//   Task: T0793.
+
+type Adder is protocol {
+    fn add_one(&self) -> Int;
+};
+
+implement Adder for Int {
+    fn add_one(&self) -> Int {
+        self + 1
+    }
+}
+
+fn identity<T>(t: T) -> T {
+    t
+}
+
+fn apply_bounded<F: fn(Int) -> Int>(f: F, x: Int) -> Int {
+    f(x)
+}
+
+fn apply_through<T, F>(f: F, x: T) -> Int
+where
+    F: fn(T) -> Int,
+{
+    f(x)
+}
+
+fn zero_of<T: Adder>(seed: T) -> Int {
+    let start: T = 0;
+    start.add_one() - 1
+}
+
+fn main() {
+    print(f"identity {identity(7)}");
+    print(f"bounded {apply_bounded(|n| n + 1, 5)}");
+    print(f"literal {zero_of(9)}");
+    print(f"through {apply_through(|n| n + 1, 2)}");
+}

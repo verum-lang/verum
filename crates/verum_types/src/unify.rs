@@ -149,6 +149,27 @@ pub struct Unifier {
     /// detection.
     projection_resolver:
         Option<std::sync::Arc<dyn Fn(&Type, &str) -> Option<Type> + Send + Sync>>,
+
+    /// Type variables that are RIGID: universally quantified parameters of
+    /// the function body currently being checked.
+    ///
+    /// `fn f<T>(t: T) -> T` promises to work for every `T` the caller
+    /// picks, so inside the body `T` stands for a type that is not yet
+    /// known and cannot be discovered. Represented as an ordinary
+    /// `TypeVar` that this set marks as unbindable, rather than as a new
+    /// `Type` variant — every existing match arm keeps working, and the
+    /// one place that could break the promise is [`Unifier::bind_var`].
+    ///
+    /// Empty everywhere except inside a generic body. The function's
+    /// published scheme still quantifies over exactly these vars
+    /// (`TypeScheme::poly`), so a call site instantiates fresh flexible
+    /// ones and is unaffected.
+    ///
+    /// Carries the SOURCE NAME of each parameter, because the diagnostic is
+    /// half the fix. A rigid var renders through the ordinary var path as
+    /// `_`, and "expected `_`, found `Int`" tells the author nothing about
+    /// which promise they broke; "expected `T`, found `Int`" names it.
+    rigid_vars: Map<TypeVar, Text>,
 }
 
 /// Default `unify_inner` recursion budget (#304). 50 frames ×
@@ -233,7 +254,61 @@ impl Unifier {
             context_bindings: IndexMap::new(),
             cubical_enabled: true,
             projection_resolver: None,
+            rigid_vars: Map::new(),
         }
+    }
+
+    /// Make `vars` rigid for the duration of a function body, each paired
+    /// with the name it was written under.
+    ///
+    /// Adds rather than replaces: a generic function declared inside a
+    /// generic function must keep the OUTER parameters rigid too, or the
+    /// inner body could discover the outer `T`.
+    pub fn enter_rigid_scope(&mut self, vars: impl IntoIterator<Item = (TypeVar, Text)>) {
+        for (var, name) in vars {
+            self.rigid_vars.insert(var, name);
+        }
+    }
+
+    /// Restore the rigid set saved by [`Unifier::rigid_snapshot`].
+    pub fn exit_rigid_scope(&mut self, previous: Map<TypeVar, Text>) {
+        self.rigid_vars = previous;
+    }
+
+    /// The current rigid set, for a caller that must restore it on EVERY
+    /// exit path including the early ones.
+    ///
+    /// A body check leaves through a dozen `?` operators, so the restore
+    /// cannot sit at the bottom of the function that installs the scope: an
+    /// error would leak the parameters of a half-checked body into the next
+    /// function, where they belong to nothing and would refuse to bind.
+    pub fn rigid_snapshot(&self) -> Map<TypeVar, Text> {
+        self.rigid_vars.clone()
+    }
+
+    /// Whether `var` is a rigid parameter of the body being checked.
+    pub fn is_rigid(&self, var: TypeVar) -> bool {
+        self.rigid_vars.contains_key(&var)
+    }
+
+    /// Drop one parameter back to flexible.
+    ///
+    /// Needed because a parameter's bounds arrive from two places: written
+    /// inline (`fn f<F: fn(T) -> U>`) they are known before the body is
+    /// entered, but written in a `where` clause they are processed after.
+    /// A bound naming a structural type says the parameter IS that type,
+    /// which is the one thing a rigid var may not be.
+    pub fn release_rigid(&mut self, var: TypeVar) {
+        self.rigid_vars.remove(&var);
+    }
+
+    /// How a rigid var should read in a diagnostic: the name the author
+    /// wrote, not the `_` an unsolved variable renders as.
+    fn rigid_name(&self, var: TypeVar) -> Text {
+        self.rigid_vars
+            .get(&var)
+            .cloned()
+            .unwrap_or_else(|| Type::Var(var).to_text())
     }
 
     /// Enable or disable cubical normalization during unification.
@@ -5000,6 +5075,54 @@ impl Unifier {
             && *v == var
         {
             return Ok(Substitution::new());
+        }
+
+        // A RIGID var is a type parameter of the body being checked. The
+        // signature promised to work for every type the caller picks, so
+        // the body may not decide what it is.
+        //
+        // Two cases, and the asymmetry is the whole point. Against another
+        // FLEXIBLE var the binding is legal but must go the other way — the
+        // flexible one learns it is this parameter, not the reverse — and
+        // `(Var, Var)` above picks its direction by variable id, which has
+        // nothing to do with rigidity. Against anything else the promise is
+        // broken and this is the type error.
+        //
+        // Without this, `fn f<T>(t: T) -> T { 42 }` was ACCEPTED with no
+        // call site: T was an ordinary inference variable shared by the
+        // body and every caller, so the body simply solved it to Int. The
+        // mistake then surfaced at a CALLER, or as an ambiguity elsewhere
+        // in the body, never at the line that made it.
+        if self.rigid_vars.contains_key(&var) {
+            if let Type::Var(other) = ty
+                && !self.rigid_vars.contains_key(other)
+            {
+                return self.bind_var(*other, &Type::Var(var), span);
+            }
+            // A refusal here is only as good as what the caller does with
+            // it, and `synth_and_check`'s error arm has some thirty
+            // recovery paths that answer `Ok(expected)`. VERUM_TRACE_RIGID
+            // says the refusal HAPPENED, which separates "the guard never
+            // saw this case" from "the guard fired and someone recovered".
+            if std::env::var_os("VERUM_TRACE_RIGID").is_some() {
+                eprintln!(
+                    "[rigid] refuse bind {} := {}",
+                    self.rigid_name(var),
+                    ty.to_text()
+                );
+            }
+            return Err(TypeError::Mismatch {
+                expected: self.rigid_name(var),
+                // The found side is often the OTHER parameter, and it would
+                // render as `_` through the ordinary path — "expected `A`,
+                // found `_`" hides exactly the fact that makes the code
+                // wrong.
+                actual: match ty {
+                    Type::Var(other) => self.rigid_name(*other),
+                    other => other.to_text(),
+                },
+                span,
+            });
         }
 
         // FULL BIND LOG (#41 door-3): under the ctor trace, log every var

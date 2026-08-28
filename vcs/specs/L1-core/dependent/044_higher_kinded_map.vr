@@ -8,9 +8,22 @@
 /// Higher-kinded types: `F<_>` binds a type constructor of arity 1.
 /// This is the canonical Functor signature and is the foundation for
 /// every monadic / applicative abstraction in `core/math/category.vr`.
+///
+/// The body is a `panic`, and that is the point of this file: what is
+/// under test is the SIGNATURE — that `F<_>` binds a type constructor and
+/// that `F<A>`, `fn(A) -> B` and `F<B>` all resolve against it. A body
+/// cannot be written without picking a particular functor.
+///
+/// It used to read `fa`, which returns `F<A>` where `F<B>` is declared
+/// and ignores `f` entirely. That checked clean only because a function's
+/// type parameters were not rigid inside its own body: `A` and `B` were
+/// ordinary inference variables the body was free to unify with each
+/// other. Once they became rigid the stub was correctly rejected, which
+/// is how it was found. `panic` has type `Never`, which satisfies any
+/// declared return type without claiming anything about `A` or `B`.
 
 fn map<F<_>, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
-    fa
+    panic("signature-only: pick a functor to implement map")
 }
 
 mount core.prelude.*;

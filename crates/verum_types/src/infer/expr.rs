@@ -2518,6 +2518,32 @@ impl TypeChecker {
                     if coerces {
                         return Ok(InferResult::new(expected.clone()));
                     }
+
+                    // An unsuffixed integer literal against a BOUNDED type
+                    // parameter takes that parameter's type.
+                    //
+                    // `fn matrix_multiply<T: Num>(…)` writing `let sum: T = 0`
+                    // and `fn make_double_transform<N: Numeric>()` writing
+                    // `x * 2` are how numeric generic code is written; a
+                    // literal is polymorphic, and WHICH types it may inhabit
+                    // is decided where the parameter is instantiated, by the
+                    // bound check at the call site.
+                    //
+                    // The condition is "has a bound", not "has a numeric
+                    // bound", and deliberately so: naming `Num` here would put
+                    // stdlib knowledge in the compiler, which this crate must
+                    // not have. The approximation is coarse — a `T: Display`
+                    // parameter accepts `0` too — but it is bounded by what
+                    // the call site verifies, and it keeps the case that
+                    // matters rejected: `fn f<T>(t: T) -> T { 42 }` names NO
+                    // bound, so T could be any type at all and 42 is not one
+                    // of them.
+                    if let Type::Var(var) = expected
+                        && self.unifier.is_rigid(*var)
+                        && !self.get_type_var_bounds(var).is_empty()
+                    {
+                        return Ok(InferResult::new(expected.clone()));
+                    }
                 }
 
                 // Float literal coercion: `4.0` for Float32, Float64
@@ -2748,7 +2774,23 @@ impl TypeChecker {
 
                 // Normalized type structural equality: accept if alias-expanded
                 // types match textually (e.g., Result<T,E> -> Ok(T)|Err(E)).
-                if normalized_actual.to_text() == normalized_expected.to_text() {
+                //
+                // Two UNSOLVED variables are not equal just because they print
+                // the same. Every one of them renders as `_`, so this test read
+                // `_ == _` and accepted, which is how `fn f<A, B>(a: A, b: B)
+                // -> A { b }` type-checked: A and B are distinct parameters,
+                // unification correctly refused to bind one to the other, and
+                // this recovery then overruled the refusal on the strength of
+                // both being printed as a placeholder. The comparison is meant
+                // for spellings that differ structurally while naming the same
+                // type; a placeholder names nothing.
+                let is_placeholder_text = |t: &Type| {
+                    let rendered = t.to_text();
+                    rendered.as_str() == "_" || rendered.as_str().is_empty()
+                };
+                if !is_placeholder_text(&normalized_actual)
+                    && normalized_actual.to_text() == normalized_expected.to_text()
+                {
                     return Ok(InferResult::new(expected.clone()));
                 }
 

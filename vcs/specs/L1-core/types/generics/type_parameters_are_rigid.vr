@@ -1,0 +1,59 @@
+// @test: typecheck-fail
+// @level: L1
+// @tier: 0
+// @tags: generics, soundness, parametricity
+// @timeout: 30000
+// @expected-error: E400
+// @expected-error-count: 3
+// @description: A function's type parameters are RIGID inside its own body.
+//
+//   `fn f<T>(t: T) -> T` promises to work for every T the CALLER picks, so
+//   the body may not decide what T is. All three functions below break that
+//   promise in a different direction and each must be rejected at the line
+//   that breaks it — not at a call site, and not as an ambiguity somewhere
+//   else. There is no call to any of them in this file: that is the point,
+//   because the defect this pins was invisible without one.
+//
+//   Measured before the fix: all three checked CLEAN. T was an ordinary
+//   inference variable shared by the body and every caller, so the body
+//   simply solved it — to Int, to Text, to whatever the mistake implied.
+//   Adding a call site DID produce an error, at the caller, about code the
+//   caller had not written.
+//
+//   The root was that a type parameter existed as TWO variables.
+//   `check_function_inner` walks `func.generics` twice: once before the
+//   parameter and return types are built, and again after entering the
+//   body's scope, where it minted a second fresh variable and redefined the
+//   name with it. So `T` in the SIGNATURE and `T` in the BODY were different
+//   variables, and two different variables cannot contradict each other.
+//   That is why the third function below — a concrete declared return fed
+//   from a parameter — survived even the first attempt at making the
+//   signature's T rigid: the body was not using that T at all.
+//
+//   The positive pole is `type_parameters_stay_usable.vr`, and it is not
+//   optional: a rule this sharp is one bad predicate away from rejecting
+//   every generic function in the standard library.
+//
+//   Task: T0793.
+
+// The body yields Int where the caller was promised T.
+fn returns_wrong_type<T>(t: T) -> T {
+    42
+}
+
+// Same shape, different type, to show the diagnostic follows the value and
+// is not a special case for integers.
+fn returns_wrong_type_text<T>(t: T) -> T {
+    "oops"
+}
+
+// The mirror image: a CONCRETE declared return fed from a parameter. This is
+// the direction that survived the first fix, and it is the one that the
+// two-variables root actually explains.
+fn concrete_return_from_parameter<T>(t: T) -> Int {
+    t
+}
+
+fn main() {
+    print("type parameters are rigid");
+}

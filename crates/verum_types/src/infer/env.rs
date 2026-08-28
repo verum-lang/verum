@@ -12607,15 +12607,47 @@ with .to_float() or .to_int() (at {:?})",
                                 }
                             }
                         }
-                        // No Ref/RefMut bound found - produce a fresh type variable
-                        // and constrain the original to be a reference to it.
-                        // This handles deferred resolution (e.g., Iterator.next() returning Maybe<&T>).
+                        // If the variable has already RESOLVED to something
+                        // concrete, answer exactly as the concrete arm below
+                        // would. The same source line had two different
+                        // meanings depending on how the operand was spelled:
+                        // for a known type `*x` looks for a Deref target and
+                        // otherwise is the identity, while anything arriving
+                        // as a variable skipped that logic entirely and fell
+                        // into the guess underneath — so `*xs.get(0)` on
+                        // `&List<Byte>` compiled clean and the identical line
+                        // on `&List<T>` did not.
+                        if !matches!(resolved, Type::Var(_)) {
+                            if let Some(target_ty) = self.find_deref_target_type(&resolved) {
+                                return Ok(InferResult::new(target_ty));
+                            }
+                            return Ok(InferResult::new(resolved.clone()));
+                        }
+
+                        // A RIGID parameter is a type the caller chose; the
+                        // body cannot discover it to be a reference. With no
+                        // Ref/RefMut bound to say otherwise, `*t` is the same
+                        // identity the concrete arm gives a value type.
+                        //
+                        // Guessing here is what poisoned the parameter: the
+                        // operand's variable IS the function's `T`, so the
+                        // constraint below set `T := &R` with R never
+                        // determined, and every later mention of T printed as
+                        // `&_` — including on a `let` that already carried the
+                        // annotation the resulting diagnostic asked for.
+                        if self.unifier.is_rigid(var) {
+                            return Ok(InferResult::new(Type::Var(var)));
+                        }
+
+                        // Still an unsolved FLEXIBLE variable: constrain it to
+                        // be a reference to a fresh one. This is the deferred
+                        // resolution that `Iterator.next()` returning
+                        // `Maybe<&T>` depends on.
                         let result_var = TypeVar::fresh();
                         let ref_ty = Type::Reference {
                             inner: Box::new(Type::Var(result_var)),
                             mutable: false,
                         };
-                        let resolved = self.unifier.apply(&Type::Var(var));
                         let _ = self.unifier.unify(&resolved, &ref_ty, expr.span);
                         Ok(InferResult::new(Type::Var(result_var)))
                     }

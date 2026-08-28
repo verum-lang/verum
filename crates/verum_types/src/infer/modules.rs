@@ -9845,7 +9845,15 @@ impl TypeChecker {
         if !self.cfg_evaluator.should_include(&func.attributes) {
             return Ok(());
         }
-        self.check_function_inner(func)
+        // The rigid set belongs to ONE body. Restoring it here rather than
+        // at the end of `check_function_inner` is what makes that true on
+        // the error paths too — the inner function exits through many `?`,
+        // and a leaked parameter would arrive at the next function as a var
+        // that refuses to bind to anything.
+        let saved_rigid = self.unifier.rigid_snapshot();
+        let result = self.check_function_inner(func);
+        self.unifier.exit_rigid_scope(saved_rigid);
+        result
     }
 
     /// Inner implementation of check_function
@@ -9891,6 +9899,14 @@ impl TypeChecker {
         // This is needed for phantom type parameters like `fn foo<T: Bound>()` where T
         // doesn't appear in parameters or return type but is still a valid type parameter.
         let mut func_type_param_vars: List<TypeVar> = List::new();
+        // The ordinary `<T>` parameters only, paired with the name each was
+        // written under. HKT and meta parameters go through their own arms
+        // below and are deliberately not made rigid yet — one kind at a
+        // time, each with its own measurement.
+        let mut func_rigid_type_params: List<(TypeVar, Text)> = List::new();
+        // …and the same thing keyed by NAME, because the loop below is not
+        // the only one: `check_function_inner` walks `func.generics` twice.
+        let mut func_type_param_by_name: Map<Text, TypeVar> = Map::new();
         // T0741 PROBE (companion to `[ambig-free]` below): does this filling
         // point run at all for a method of an `implement<…>` block? Measured at
         // the DECISION point, the list is empty for such a method and holds the
@@ -9917,6 +9933,30 @@ impl TypeChecker {
                     let name_text: Text = name.name.clone();
                     self.ctx.define_type(name_text.clone(), type_var);
                     func_type_param_vars.push(tvar);
+                    // A parameter is rigid only when its bounds constrain it
+                    // by PROTOCOL. A bound that names a structural type —
+                    // `fn retain<F: fn(&T) -> Bool>(f: F)` — says F IS that
+                    // function type, so passing `f` where that type is
+                    // expected is the bound being used as written, not the
+                    // body discovering what the caller chose. Holding those
+                    // rigid rejected `self.data.retain(f)` in
+                    // `core/collections/heap.vr`, which is correct Verum.
+                    let bound_names_a_structural_type = bounds.iter().any(|b| {
+                        use verum_ast::ty::{TypeBoundKind, TypeKind};
+                        let bound_ty = match &b.kind {
+                            TypeBoundKind::Equality(ty) => Some(ty),
+                            TypeBoundKind::GenericProtocol(ty) => Some(ty),
+                            _ => None,
+                        };
+                        matches!(
+                            bound_ty.map(|ty| &ty.kind),
+                            Some(TypeKind::Function { .. }) | Some(TypeKind::Rank2Function { .. })
+                        )
+                    });
+                    if !bound_names_a_structural_type {
+                        func_rigid_type_params.push((tvar, name_text.clone()));
+                    }
+                    func_type_param_by_name.insert(name_text.clone(), tvar);
 
                     // Track implicit parameters
                     if generic_param.is_implicit {
@@ -10203,6 +10243,29 @@ impl TypeChecker {
         }
 
         // Type check body
+        //
+        // The function's type parameters become RIGID here and stay rigid
+        // until the body is done. They are quantified in the scheme
+        // published just above (`TypeScheme::poly(func_type_param_vars, …)`),
+        // so a call site instantiates fresh flexible copies and sees no
+        // difference; only the body is held to the promise its signature
+        // made. Without this the body could SOLVE its own parameter —
+        // `fn f<T>(t: T) -> T { 42 }` checked clean with no call site
+        // anywhere, because T was one shared inference variable rather than
+        // a universally quantified one.
+        // (Restored by `check_function`, which wraps every exit path.)
+        if std::env::var_os("VERUM_TRACE_RIGID").is_some() {
+            eprintln!(
+                "[rigid] scope for `{}`: {:?}",
+                func.name.name.as_str(),
+                func_rigid_type_params
+                    .iter()
+                    .map(|(v, n)| format!("{}=v{}", n.as_str(), v.id()))
+                    .collect::<Vec<_>>()
+            );
+        }
+        self.unifier
+            .enter_rigid_scope(func_rigid_type_params.iter().cloned());
         self.ctx.enter_scope();
 
         // Enter a new context scope for this function
@@ -10276,10 +10339,28 @@ impl TypeChecker {
             use verum_ast::ty::GenericParamKind;
             match &generic_param.kind {
                 GenericParamKind::Type { name, bounds, .. } => {
-                    // Type parameters create fresh type variables
-                    let tvar = TypeVar::fresh();
-                    let type_var = Type::Var(tvar);
                     let name_text: Text = name.name.clone();
+                    // REUSE the variable the first pass gave this parameter.
+                    //
+                    // This loop used to mint a second fresh one and redefine
+                    // the name with it, so `T` meant one variable in the
+                    // SIGNATURE — the parameter types, the declared return
+                    // type, and the published scheme, all built above — and a
+                    // different variable everywhere in the BODY, which is
+                    // resolved after this point. Two variables cannot
+                    // contradict each other, which is why
+                    // `fn f<T>(t: T) -> Int { t }` type-checked: the body's
+                    // `t` was the body's T, free to become Int, while the
+                    // declared return stayed the signature's T, untouched.
+                    //
+                    // Minting is kept only for a parameter the first pass did
+                    // not see (it handles `GenericParamKind::Type`; anything
+                    // reaching here under another shape still needs a var).
+                    let tvar = match func_type_param_by_name.get(&name_text) {
+                        Some(existing) => *existing,
+                        None => TypeVar::fresh(),
+                    };
+                    let type_var = Type::Var(tvar);
                     // Add to value environment (for type checking expressions)
                     self.ctx
                         .env
@@ -10540,6 +10621,34 @@ impl TypeChecker {
                             && let Some(ident) = path.as_ident()
                         {
                             let param_name: Text = ident.name.clone();
+
+                            // Same rule as the inline bound form, applied
+                            // here because a `where` clause is processed
+                            // AFTER the body's rigid scope is installed:
+                            // `where F: fn(T) -> U` says F IS that function
+                            // type, so calling `f(head)` and passing `f` on
+                            // are the bound being used, not the body
+                            // discovering the caller's choice.
+                            {
+                                use verum_ast::ty::{TypeBoundKind, TypeKind};
+                                let structural = bounds.iter().any(|b| {
+                                    let bound_ty = match &b.kind {
+                                        TypeBoundKind::Equality(bt) => Some(bt),
+                                        TypeBoundKind::GenericProtocol(bt) => Some(bt),
+                                        _ => None,
+                                    };
+                                    matches!(
+                                        bound_ty.map(|bt| &bt.kind),
+                                        Some(TypeKind::Function { .. })
+                                            | Some(TypeKind::Rank2Function { .. })
+                                    )
+                                });
+                                if structural
+                                    && let Some(tvar) = func_type_param_by_name.get(&param_name)
+                                {
+                                    self.unifier.release_rigid(*tvar);
+                                }
+                            }
 
                             // Convert AST bounds to protocol bounds
                             let protocol_bounds =
