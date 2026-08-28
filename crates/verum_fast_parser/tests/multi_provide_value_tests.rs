@@ -224,3 +224,38 @@ fn an_alias_on_a_later_binding_keeps_the_record_literal() {
     assert_eq!(top_level_unit_count(&m), 1);
     assert!(innermost_provide_body_has_a_call(&m));
 }
+
+#[test]
+fn a_bare_identifier_value_does_not_swallow_the_scope() {
+    // The REGRESSION the first version of this fix introduced.
+    //
+    //     provide Logger = logger, Database = db { seed(); }
+    //
+    // With the identifier peek alone, `db { seed(); }` reads as a record
+    // literal, the block disappears into it, and the whole statement is
+    // a parse error at `seed()`. This shape is what the context-system
+    // tutorial teaches, and it worked before the record-literal fix —
+    // so the fix traded one broken spelling for another until the value
+    // parse learned to rewind.
+    let m = parse("fn main() { provide A = logger, B = db { seed(); } }");
+    assert_eq!(provided_contexts(&m), vec!["A", "B"]);
+    assert_eq!(top_level_unit_count(&m), 1);
+    assert!(
+        innermost_provide_body_has_a_call(&m),
+        "seed() must sit in the innermost provide's block, not inside `db`"
+    );
+}
+
+#[test]
+fn a_bare_identifier_value_works_in_the_single_form_too() {
+    let m = parse("fn main() { provide A = logger { seed(); } }");
+    assert_eq!(provided_contexts(&m), vec!["A"]);
+    assert!(innermost_provide_body_has_a_call(&m));
+}
+
+#[test]
+fn a_record_literal_and_a_bare_identifier_can_be_mixed() {
+    let m = parse("fn main() { provide A = X { n: 1 }, B = db { seed(); } }");
+    assert_eq!(provided_contexts(&m), vec!["A", "B"]);
+    assert!(innermost_provide_body_has_a_call(&m));
+}

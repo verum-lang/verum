@@ -760,18 +760,49 @@ impl<'a> RecursiveParser<'a> {
     /// ran. The program compiled and panicked with "Context T not provided".
     ///
     /// One rule, one carrier: every binding in a provide is parsed here.
+    ///
+    /// `Name { … }` after `=` is GENUINELY ambiguous — it is a record
+    /// literal in `provide Logger = ConsoleLogger { level: 1 } { … }`
+    /// and the scope block in `provide Logger = logger { … }`. The
+    /// identifier peek alone gets the first right and the second wrong,
+    /// which is how the first version of this fix broke
+    /// `provide A = x, B = y { body }` while repairing
+    /// `provide A = X { .. }, B = Y { .. } { body }`.
+    ///
+    /// So: try the record-literal reading, and if what follows is not
+    /// something a provide can continue with — a `,` for the next
+    /// binding, a `;`, an `in`, or the `{` of the scope — the braces
+    /// belonged to the scope after all. Rewind and reread without them.
     fn parse_provide_value(&mut self) -> ParseResult<verum_ast::Expr> {
-        if matches!(self.stream.peek_kind(), Some(TokenKind::Ident(_)))
-            || matches!(
-                self.stream.peek_kind(),
-                Some(TokenKind::Some | TokenKind::None | TokenKind::Ok | TokenKind::Err)
-            )
-        {
-            // Identifier-led expression: allow struct literal parsing
-            self.parse_expr_bp(7)
-        } else {
-            // Non-identifier expression: no_struct, so `{` stays the scope
-            self.parse_expr_bp_no_struct(7)
+        let identifier_led = matches!(
+            self.stream.peek_kind(),
+            Some(TokenKind::Ident(_))
+                | Some(TokenKind::Some | TokenKind::None | TokenKind::Ok | TokenKind::Err)
+        );
+        if !identifier_led {
+            // Nothing that could start a record literal: `{` is the scope.
+            return self.parse_expr_bp_no_struct(7);
+        }
+
+        let checkpoint = self.stream.position();
+        // The record reading can also FAIL outright — `db { seed(); }`
+        // has no `field: value` pair — so the error is a rewind signal
+        // exactly like a non-continuing token, not something to
+        // propagate. Propagating it was the first attempt, and it made
+        // every bare-identifier value a parse error.
+        match self.parse_expr_bp(7) {
+            Ok(value)
+                if matches!(
+                    self.stream.peek_kind(),
+                    Some(TokenKind::Comma) | Some(TokenKind::Semicolon) | Some(TokenKind::In)
+                ) || self.stream.check(&TokenKind::LBrace) =>
+            {
+                Ok(value)
+            }
+            _ => {
+                self.stream.reset_to(checkpoint);
+                self.parse_expr_bp_no_struct(7)
+            }
         }
     }
 
