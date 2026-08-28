@@ -549,7 +549,14 @@ derive_attribute = 'derive' , '(' , identifier , { ',' , identifier } , ')' ;
    `synthesis`/`synth` for synthesize, hyphenated and concatenated
    variants of the multi-word names). Aliases are accepted, canonical
    spellings are the documented surface.                               *)
-verify_attribute = 'verify' , '(' , verify_strategy , ')' ;
+(* MEASURED: `@verify(fast, thorough)` is accepted, so the attribute
+   takes a LIST and not a single strategy.  Also measured, and NOT
+   expressible here: `@verify(nonsense)` is accepted too — the parser
+   does not check the name against this set, so the list below is the
+   intended surface rather than an enforced one.                      *)
+verify_attribute = 'verify' , '(' , verify_strategy_list , ')' ;
+verify_strategy_list = verify_strategy , { ',' , verify_strategy }
+                     | '[' , verify_strategy , { ',' , verify_strategy } , ']' ;
 verify_strategy =
       'runtime' | 'static' | 'formal' | 'proof'
     | 'fast' | 'thorough' | 'reliable'
@@ -609,7 +616,12 @@ crate_alias     = 'crate' ;
 (* AUDIT 2026-08-01: `linear` is a live resource modifier alongside
    `affine` (fast_parser ResourceModifier::Linear; `@must_consume` is
    its attribute alias). The website reference already documented it. *)
-type_def        = visibility , 'type' , [ 'affine' | 'linear' ] , identifier , [ generics ]
+(* The resource discipline a type carries.  Named rather than written
+   inline because it is one concept with two spellings, and the
+   documentation refers to it by name.                                *)
+linearity_qualifier = 'linear' | 'affine' ;
+
+type_def        = visibility , 'type' , [ linearity_qualifier ] , identifier , [ generics ]
                 , [ meta_where_clause ]
                 (* dependent value-parameters (T0266): an indexed family
                    declares the values its applications must supply, e.g.
