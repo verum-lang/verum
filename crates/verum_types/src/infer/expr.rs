@@ -2530,14 +2530,14 @@ impl TypeChecker {
                     // bound check at the call site.
                     //
                     // The condition is "has a bound", not "has a numeric
-                    // bound", and deliberately so: naming `Num` here would put
-                    // stdlib knowledge in the compiler, which this crate must
-                    // not have. The approximation is coarse — a `T: Display`
-                    // parameter accepts `0` too — but it is bounded by what
-                    // the call site verifies, and it keeps the case that
-                    // matters rejected: `fn f<T>(t: T) -> T { 42 }` names NO
-                    // bound, so T could be any type at all and 42 is not one
-                    // of them.
+                    // bound", and deliberately so: naming `Num` here would
+                    // put stdlib knowledge in the compiler, which this crate
+                    // must not have. The approximation is coarse — a
+                    // `T: Display` parameter accepts `0` too — but it is
+                    // bounded by what the call site verifies, and it keeps
+                    // the case that matters rejected: `fn f<T>(t: T) -> T
+                    // { 42 }` names NO bound, so T could be any type at all
+                    // and 42 is not one of them.
                     if let Type::Var(var) = expected
                         && self.unifier.is_rigid(*var)
                         && !self.get_type_var_bounds(var).is_empty()
@@ -7997,7 +7997,31 @@ impl TypeChecker {
                     let resolved_ty = self.unifier.apply(&Type::Var(*type_var));
                     // Only check bounds when the type var resolved to a concrete type
                     // (not still a type variable — those are checked at their own call sites)
-                    if !matches!(resolved_ty, Type::Var(_)) {
+                    //
+                    // "Still a type variable" has to look THROUGH reference
+                    // layers. `&_` is `Reference { inner: Var }`, which is not
+                    // `Type::Var(_)`, so a top-level-only test let it past and
+                    // the checker announced that `&_` does not implement `Fn`
+                    // — a verdict about a type it does not know. Five such
+                    // diagnostics appeared in `core/math/calculus.vr` the
+                    // moment `where`-clause bounds started reaching this
+                    // check, all of them on `&_`, none of them a real
+                    // conformance gap. Saying "does not implement" about an
+                    // unknown type is the same error as saying it about a
+                    // module path nobody recognises: absence of evidence.
+                    let mut unresolved_core = &resolved_ty;
+                    loop {
+                        match unresolved_core {
+                            Type::Reference { inner, .. }
+                            | Type::CheckedReference { inner, .. }
+                            | Type::UnsafeReference { inner, .. }
+                            | Type::Pointer { inner, .. }
+                            | Type::VolatilePointer { inner, .. }
+                            | Type::Ownership { inner, .. } => unresolved_core = inner,
+                            _ => break,
+                        }
+                    }
+                    if !matches!(unresolved_core, Type::Var(_)) {
                         // LAZY-LOAD FIRST, THEN JUDGE. The verdict used to be
                         // thrown away into `tracing::debug!` with the note
                         // «some stdlib impls may not yet be loaded depending on

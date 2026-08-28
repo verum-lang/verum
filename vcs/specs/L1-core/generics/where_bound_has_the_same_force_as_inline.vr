@@ -1,0 +1,65 @@
+// @test: typecheck-fail
+// @level: L1
+// @tier: 0
+// @tags: generics, protocols, soundness, where-clause
+// @timeout: 30000
+// @expected-error: E405
+// @expected-error-count: 2
+// @description: `where T: P` constrains exactly as much as `<T: P>`.
+//
+//   Two spellings of one bound, and only one of them used to be enforced.
+//   Measured before the fix, with a protocol P, a conforming Good and a
+//   non-conforming Bad:
+//
+//       fn f<T: P>(x: &T) -> Int { x.m() }
+//           f(&bad)   E405                                     CAUGHT
+//       fn f<T>(x: &T) -> Int where T: P { x.m() }
+//           f(&bad)   checks CLEAN                             NOT CAUGHT
+//
+//   What happened at run time is why this was a P0 rather than a missing
+//   diagnostic. A protocol with exactly ONE implementation dispatches to
+//   it, so `f(&bad)` did not fail — it RETURNED 7, which is Good's answer,
+//   for a value of a type that does not implement the protocol at all. A
+//   wrong value, silently, and a library whose protocols mostly have one
+//   implementation gets that branch by default.
+//
+//   The bound was being collected only from `func.generics` by both passes
+//   that publish a scheme, and a call site can check only what reached the
+//   SCHEME. Fixing one of the two passes is inert, because the body check
+//   republishes the scheme over whatever the signature pass left.
+//
+//   Both calls below must be rejected, and the file exists to keep them
+//   REJECTED FOR THE SAME REASON: if the two spellings ever diverge again,
+//   the count drops to 1 and this fails.
+//
+//   Task: T0813.
+
+type P is protocol {
+    fn m(&self) -> Int;
+};
+
+type Good is { v: Int };
+type Bad is { w: Int };
+
+implement P for Good {
+    fn m(&self) -> Int {
+        7
+    }
+}
+
+fn via_inline<T: P>(x: &T) -> Int {
+    x.m()
+}
+
+fn via_where<T>(x: &T) -> Int
+where
+    T: P,
+{
+    x.m()
+}
+
+fn main() {
+    let b = Bad { w: 1 };
+    print(f"{via_inline(&b)}");
+    print(f"{via_where(&b)}");
+}

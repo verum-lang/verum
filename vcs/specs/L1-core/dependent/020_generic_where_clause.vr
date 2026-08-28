@@ -19,6 +19,27 @@ type Comparable is protocol {
     fn compare(&self, other: &Self) -> Int;
 };
 
+// `main` below calls `sorted_unique` on a `List<Int>`, and its bound is
+// `where type T: Comparable + Eq`. Int has to actually satisfy it.
+//
+// This implementation was missing, and the file still passed: a
+// where-clause bound never reached the call-site check, so the bound was
+// decoration. With the two spellings of a bound now carrying the same
+// force, the call is checked and the protocol has to be provided — which
+// is the whole point of a file testing that `where type` CONSTRAINS a
+// type parameter.
+implement Comparable for Int {
+    fn compare(&self, other: &Int) -> Int {
+        if self < other {
+            -1
+        } else if self > other {
+            1
+        } else {
+            0
+        }
+    }
+}
+
 // Generic function with where clause
 fn print_all<T>(items: List<T>) where type T: Showable {
     for item in items {

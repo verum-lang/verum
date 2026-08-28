@@ -6671,6 +6671,66 @@ impl TypeChecker {
         self.ctx.env.insert(name.as_str(), TypeScheme::mono(ty));
     }
 
+    /// Fold a function's `where` clause into the bound maps a scheme is
+    /// built from.
+    ///
+    /// `where T: P` and `<T: P>` are two spellings of one constraint, and a
+    /// call site can only check the one that reached the SCHEME. Until this
+    /// existed only the inline spelling did, so `fn f<T: P>(x: &T)` rejected
+    /// a non-conforming argument with E405 while `fn f<T>(x: &T) where T: P`
+    /// accepted it — and since a protocol with exactly one implementation
+    /// dispatches to that implementation, the call returned the OTHER type's
+    /// answer rather than failing. A silent wrong value, in the spelling the
+    /// language documentation recommends for anything but simple bounds.
+    ///
+    /// Called from BOTH passes that publish a scheme. Fixing only the
+    /// signature pass is inert: the body check republishes the scheme, so a
+    /// bound added in one place and not the other is overwritten before any
+    /// call site sees it.
+    pub(super) fn collect_where_clause_bounds(
+        &mut self,
+        func: &verum_ast::FunctionDecl,
+        protocol_bounds_out: &mut Map<TypeVar, List<crate::protocol::ProtocolBound>>,
+        type_bounds_out: &mut Map<TypeVar, List<Type>>,
+    ) {
+        let Some(ref where_clause) = func.generic_where_clause else {
+            return;
+        };
+        for predicate in &where_clause.predicates {
+            use verum_ast::ty::WherePredicateKind;
+            let WherePredicateKind::Type { ty, bounds } = &predicate.kind else {
+                continue;
+            };
+            // Only a bound on a bare type-parameter NAME belongs here.
+            // `where List<T>: P` and `where T.Item: P` constrain something
+            // other than the parameter itself, and a call site does not
+            // instantiate those.
+            let verum_ast::ty::TypeKind::Path(path) = &ty.kind else {
+                continue;
+            };
+            let Some(ident) = path.as_ident() else { continue };
+            let Maybe::Some(Type::Var(tvar)) = self.ctx.lookup_type(ident.name.as_str()).cloned()
+            else {
+                continue;
+            };
+            if let Ok(protocol_bounds) = self.convert_type_bounds_to_protocol_bounds(bounds)
+                && !protocol_bounds.is_empty()
+            {
+                // MERGE, never replace: `fn f<T: Clone>(…) where T: Ord` is
+                // one parameter carrying both, and dropping either half
+                // would trade this defect for its mirror image.
+                protocol_bounds_out
+                    .entry(tvar)
+                    .or_default()
+                    .extend(protocol_bounds);
+            }
+            let type_bounds = self.extract_type_bounds_from_ast(bounds);
+            if !type_bounds.is_empty() {
+                type_bounds_out.entry(tvar).or_default().extend(type_bounds);
+            }
+        }
+    }
+
     pub fn register_function_signature(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
         use verum_ast::decl::FunctionParamKind;
         use verum_common::Set;
@@ -6883,6 +6943,16 @@ impl TypeChecker {
                 _ => {} // Other generic param kinds (Lifetime, Context) handled elsewhere
             }
         }
+
+        // `where T: P` carries the SAME bound as `<T: P>` and must reach the
+        // same place: the scheme this pass publishes, which is what a call
+        // site checks its argument against. One collector, called from both
+        // passes that build a scheme — see `collect_where_clause_bounds`.
+        self.collect_where_clause_bounds(
+            func,
+            &mut param_protocol_bounds,
+            &mut param_type_bounds,
+        );
 
         // Build parameter types
         let param_types: Result<List<_>> = func

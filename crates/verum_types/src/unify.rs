@@ -169,7 +169,7 @@ pub struct Unifier {
     /// half the fix. A rigid var renders through the ordinary var path as
     /// `_`, and "expected `_`, found `Int`" tells the author nothing about
     /// which promise they broke; "expected `T`, found `Int`" names it.
-    rigid_vars: Map<TypeVar, Text>,
+    rigid_vars: Map<TypeVar, (Text, bool)>,
 }
 
 /// Default `unify_inner` recursion budget (#304). 50 frames ×
@@ -264,14 +264,25 @@ impl Unifier {
     /// Adds rather than replaces: a generic function declared inside a
     /// generic function must keep the OUTER parameters rigid too, or the
     /// inner body could discover the outer `T`.
-    pub fn enter_rigid_scope(&mut self, vars: impl IntoIterator<Item = (TypeVar, Text)>) {
-        for (var, name) in vars {
-            self.rigid_vars.insert(var, name);
+    pub fn enter_rigid_scope(&mut self, vars: impl IntoIterator<Item = (TypeVar, Text, bool)>) {
+        for (var, name, bounded) in vars {
+            self.rigid_vars.insert(var, (name, bounded));
+        }
+    }
+
+    /// Record that a parameter carries a bound after all.
+    ///
+    /// A `where` clause is processed after the body's rigid scope is
+    /// installed, so a parameter written `fn f<T>(…) where T: P` enters the
+    /// scope looking unbounded and has to be corrected here.
+    pub fn mark_rigid_bounded(&mut self, var: TypeVar) {
+        if let Some(entry) = self.rigid_vars.get_mut(&var) {
+            entry.1 = true;
         }
     }
 
     /// Restore the rigid set saved by [`Unifier::rigid_snapshot`].
-    pub fn exit_rigid_scope(&mut self, previous: Map<TypeVar, Text>) {
+    pub fn exit_rigid_scope(&mut self, previous: Map<TypeVar, (Text, bool)>) {
         self.rigid_vars = previous;
     }
 
@@ -282,7 +293,7 @@ impl Unifier {
     /// cannot sit at the bottom of the function that installs the scope: an
     /// error would leak the parameters of a half-checked body into the next
     /// function, where they belong to nothing and would refuse to bind.
-    pub fn rigid_snapshot(&self) -> Map<TypeVar, Text> {
+    pub fn rigid_snapshot(&self) -> Map<TypeVar, (Text, bool)> {
         self.rigid_vars.clone()
     }
 
@@ -307,8 +318,16 @@ impl Unifier {
     fn rigid_name(&self, var: TypeVar) -> Text {
         self.rigid_vars
             .get(&var)
-            .cloned()
+            .map(|(name, _)| name.clone())
             .unwrap_or_else(|| Type::Var(var).to_text())
+    }
+
+    /// Whether a rigid parameter carries a protocol or structural bound.
+    fn rigid_is_bounded(&self, var: TypeVar) -> bool {
+        self.rigid_vars
+            .get(&var)
+            .map(|(_, bounded)| *bounded)
+            .unwrap_or(false)
     }
 
     /// Enable or disable cubical normalization during unification.
@@ -5094,11 +5113,43 @@ impl Unifier {
         // mistake then surfaced at a CALLER, or as an ambiguity elsewhere
         // in the body, never at the line that made it.
         if self.rigid_vars.contains_key(&var) {
-            if let Type::Var(other) = ty
-                && !self.rigid_vars.contains_key(other)
-            {
-                return self.bind_var(*other, &Type::Var(var), span);
+            // "The other side carries no information yet" is not always a
+            // bare `Type::Var`. A refinement over an unsolved variable —
+            // `_{a: T where true}`, which `core/math/hott.vr` produces by
+            // the dozen — is just as unknown, and a top-level-only test
+            // refused it as though it were a concrete type. Peel the
+            // wrappers that add a constraint without naming a type.
+            let mut carrier = ty;
+            loop {
+                match carrier {
+                    Type::Refined { base, .. } => carrier = base,
+                    _ => break,
+                }
             }
+            // A BOUNDED parameter may take a function shape. The only way
+            // a body can demand one is if the bound promised it —
+            // `fn retain<F: fn(&T) -> Bool>(f: F)` calling `f`, or passing
+            // it on — and whether the caller's chosen type really satisfies
+            // the bound is checked at the call site.
+            //
+            // Narrower than the alternative, and deliberately so: dropping
+            // rigidity for every bounded parameter also lets these through
+            // and costs real detection. Measured, it took
+            // `vcs/specs/L1-core/types/protocols/protocol_impl.vr` from 0
+            // diagnostics back to 3 — rigidity is what stops a bounded
+            // parameter being solved to junk during inference.
+            let callable_by_bound =
+                matches!(carrier, Type::Function { .. }) && self.rigid_is_bounded(var);
+            match carrier {
+                // Nothing is known about the other side: let it learn that
+                // it is this parameter, rather than the reverse.
+                Type::Var(other) if !self.rigid_vars.contains_key(other) => {
+                    return self.bind_var(*other, &Type::Var(var), span);
+                }
+                Type::Unknown => return Ok(Substitution::new()),
+                _ => {}
+            }
+            if !callable_by_bound {
             // A refusal here is only as good as what the caller does with
             // it, and `synth_and_check`'s error arm has some thirty
             // recovery paths that answer `Ok(expected)`. VERUM_TRACE_RIGID
@@ -5123,6 +5174,7 @@ impl Unifier {
                 },
                 span,
             });
+            }
         }
 
         // FULL BIND LOG (#41 door-3): under the ctor trace, log every var

@@ -9903,7 +9903,7 @@ impl TypeChecker {
         // written under. HKT and meta parameters go through their own arms
         // below and are deliberately not made rigid yet — one kind at a
         // time, each with its own measurement.
-        let mut func_rigid_type_params: List<(TypeVar, Text)> = List::new();
+        let mut func_rigid_type_params: List<(TypeVar, Text, bool)> = List::new();
         // …and the same thing keyed by NAME, because the loop below is not
         // the only one: `check_function_inner` walks `func.generics` twice.
         let mut func_type_param_by_name: Map<Text, TypeVar> = Map::new();
@@ -9933,29 +9933,17 @@ impl TypeChecker {
                     let name_text: Text = name.name.clone();
                     self.ctx.define_type(name_text.clone(), type_var);
                     func_type_param_vars.push(tvar);
-                    // A parameter is rigid only when its bounds constrain it
-                    // by PROTOCOL. A bound that names a structural type —
-                    // `fn retain<F: fn(&T) -> Bool>(f: F)` — says F IS that
-                    // function type, so passing `f` where that type is
-                    // expected is the bound being used as written, not the
-                    // body discovering what the caller chose. Holding those
-                    // rigid rejected `self.data.retain(f)` in
-                    // `core/collections/heap.vr`, which is correct Verum.
-                    let bound_names_a_structural_type = bounds.iter().any(|b| {
-                        use verum_ast::ty::{TypeBoundKind, TypeKind};
-                        let bound_ty = match &b.kind {
-                            TypeBoundKind::Equality(ty) => Some(ty),
-                            TypeBoundKind::GenericProtocol(ty) => Some(ty),
-                            _ => None,
-                        };
-                        matches!(
-                            bound_ty.map(|ty| &ty.kind),
-                            Some(TypeKind::Function { .. }) | Some(TypeKind::Rank2Function { .. })
-                        )
-                    });
-                    if !bound_names_a_structural_type {
-                        func_rigid_type_params.push((tvar, name_text.clone()));
-                    }
+                    // EVERY type parameter is rigid; the flag records
+                    // whether it carries a bound.
+                    //
+                    // An unbounded `<T>` says "any type the caller picks"
+                    // and nothing in the body may narrow it. A bounded one
+                    // says "any type satisfying P", and the body may use
+                    // what P promises — which in practice means calling it.
+                    // That single allowance lives in `bind_var`; dropping
+                    // rigidity for bounded parameters outright also lets it
+                    // through and costs real detection.
+                    func_rigid_type_params.push((tvar, name_text.clone(), !bounds.is_empty()));
                     func_type_param_by_name.insert(name_text.clone(), tvar);
 
                     // Track implicit parameters
@@ -10199,6 +10187,18 @@ impl TypeChecker {
             func.is_generator,
         );
 
+        // Fold in the `where` clause before the scheme is built. This pass
+        // REPUBLISHES the function's scheme, so a bound collected only by
+        // the signature pass is overwritten here and never reaches a call
+        // site — fixing one place and not the other is inert, which is how
+        // the first attempt at this measured.
+        let mut func_where_type_bounds: Map<TypeVar, List<Type>> = Map::new();
+        self.collect_where_clause_bounds(
+            func,
+            &mut func_param_protocol_bounds,
+            &mut func_where_type_bounds,
+        );
+
         // Create initial function type with contexts and add to environment (for recursive calls)
         let initial_func_type = if let Some(req) = context_requirement.clone() {
             Type::function_with_contexts(param_types.clone(), initial_return_for_sig, req)
@@ -10260,7 +10260,7 @@ impl TypeChecker {
                 func.name.name.as_str(),
                 func_rigid_type_params
                     .iter()
-                    .map(|(v, n)| format!("{}=v{}", n.as_str(), v.id()))
+                    .map(|(v, n, b)| format!("{}=v{}{}", n.as_str(), v.id(), if *b { "+bound" } else { "" }))
                     .collect::<Vec<_>>()
             );
         }
@@ -10622,32 +10622,17 @@ impl TypeChecker {
                         {
                             let param_name: Text = ident.name.clone();
 
-                            // Same rule as the inline bound form, applied
-                            // here because a `where` clause is processed
-                            // AFTER the body's rigid scope is installed:
-                            // `where F: fn(T) -> U` says F IS that function
-                            // type, so calling `f(head)` and passing `f` on
-                            // are the bound being used, not the body
-                            // discovering the caller's choice.
+                            // A `where` clause is processed AFTER the
+                            // body's rigid scope is installed, so a
+                            // parameter written `fn f<T>(…) where T: P`
+                            // entered that scope looking unbounded. Correct
+                            // the flag here, or every `where`-bounded
+                            // combinator in `core/` is rejected for using
+                            // what its bound promised.
+                            if !bounds.is_empty()
+                                && let Some(tvar) = func_type_param_by_name.get(&param_name)
                             {
-                                use verum_ast::ty::{TypeBoundKind, TypeKind};
-                                let structural = bounds.iter().any(|b| {
-                                    let bound_ty = match &b.kind {
-                                        TypeBoundKind::Equality(bt) => Some(bt),
-                                        TypeBoundKind::GenericProtocol(bt) => Some(bt),
-                                        _ => None,
-                                    };
-                                    matches!(
-                                        bound_ty.map(|bt| &bt.kind),
-                                        Some(TypeKind::Function { .. })
-                                            | Some(TypeKind::Rank2Function { .. })
-                                    )
-                                });
-                                if structural
-                                    && let Some(tvar) = func_type_param_by_name.get(&param_name)
-                                {
-                                    self.unifier.release_rigid(*tvar);
-                                }
+                                self.unifier.mark_rigid_bounded(*tvar);
                             }
 
                             // Convert AST bounds to protocol bounds

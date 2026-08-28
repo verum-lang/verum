@@ -1,0 +1,74 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: generics, protocols, where-clause
+// @timeout: 30000
+// @expected-stdout-begin
+// inline 7
+// where 7
+// called 6
+// through 3
+// @expected-stdout-end
+// @description: The positive pole of
+//   `where_bound_has_the_same_force_as_inline.vr`.
+//
+//   Teaching the checker to enforce a `where` bound is a refusal, and a
+//   refusal that also rejects conforming code is worse than the silence it
+//   replaced. Each spelling here was measured breaking one attempt:
+//
+//   * `where` on a conforming type must still run. The obvious failure
+//     mode is a bound that reaches the call-site check but resolves to a
+//     protocol the checker cannot find, which rejects everything.
+//
+//   * A parameter bounded by a FUNCTION type must stay callable. Bounds
+//     are what make a type parameter usable, so a parameter held to "the
+//     caller decides what you are" with no allowance for its bound cannot
+//     call `f(x)` — which rejects every higher-order function in `core/`.
+//     `called` covers the inline spelling and `through` the `where` one,
+//     because they are processed at different times: a `where` clause is
+//     read AFTER the body scope is installed, so a check that reads only
+//     the inline form passes its own spec and still rejects the stdlib.
+//
+//   Task: T0813.
+
+type P is protocol {
+    fn m(&self) -> Int;
+};
+
+type Good is { v: Int };
+
+implement P for Good {
+    fn m(&self) -> Int {
+        7
+    }
+}
+
+fn via_inline<T: P>(x: &T) -> Int {
+    x.m()
+}
+
+fn via_where<T>(x: &T) -> Int
+where
+    T: P,
+{
+    x.m()
+}
+
+fn call_inline<F: fn(Int) -> Int>(f: F, x: Int) -> Int {
+    f(x)
+}
+
+fn call_through<T, F>(f: F, x: T) -> Int
+where
+    F: fn(T) -> Int,
+{
+    f(x)
+}
+
+fn main() {
+    let g = Good { v: 1 };
+    print(f"inline {via_inline(&g)}");
+    print(f"where {via_where(&g)}");
+    print(f"called {call_inline(|n| n + 1, 5)}");
+    print(f"through {call_through(|n| n + 1, 2)}");
+}
