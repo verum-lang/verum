@@ -2189,7 +2189,32 @@ impl Unifier {
                 if v1.len() == v2.len() {
                     let mut subst = Substitution::new();
                     let mut all_matched = true;
-                    for (tag, ty1) in v1 {
+                    // SORTED, and the reason is soundness, not tidiness.
+                    //
+                    // `Variant` holds a `Map`, which is a `HashMap`, so a
+                    // bare `for .. in v1` visits the tags in an order that
+                    // is randomised per PROCESS. This loop ACCUMULATES a
+                    // substitution as it goes and BREAKS on the first
+                    // failure, so both what each comparison sees and
+                    // whether the loop finishes depend on that order —
+                    // and the caller turns the result into a verdict.
+                    //
+                    // Measured (T0927): `verum check core/logic/kripke.vr`
+                    // returned 0 errors on 32 of 40 runs and 20 on the
+                    // other 8, from one binary on one file. The divergence
+                    // is exactly here — `check_residual_type_compatibility`
+                    // is `unify(..).is_ok()`, and it answered `true` on the
+                    // clean runs and `false` on the others, consistently
+                    // across all 19 sites within each run, which is the
+                    // signature of per-process state.
+                    //
+                    // `ProtocolRegistry::get_implementations` sorts its
+                    // matches for the same reason (T0368). Same hazard,
+                    // same remedy.
+                    let mut tags1: Vec<_> = v1.keys().collect();
+                    tags1.sort();
+                    for tag in tags1 {
+                        let ty1 = &v1[tag];
                         match v2.get(tag) {
                             Some(ty2) => {
                                 match self.unify_inner(
@@ -2229,7 +2254,12 @@ impl Unifier {
                     } else {
                         (v2, v1)
                     };
-                    for (name, ty_s) in smaller.iter() {
+                    // Sorted for the same reason as the exact-match loop
+                    // above: this one accumulates a substitution too.
+                    let mut names: Vec<_> = smaller.keys().collect();
+                    names.sort();
+                    for name in names {
+                        let ty_s = &smaller[name];
                         if let Some(ty_l) = larger.get(name) {
                             let (a, b) =
                                 (ty_s.apply_subst(&subst), ty_l.apply_subst(&subst));

@@ -2529,24 +2529,52 @@ fn substitute_refinement_binder(
 
         // Step 5: Check residual type compatibility via FromResidual
         // The function's return type must implement FromResidual<inner.Residual>
-        if !self
+        //
+        // T0927: FOUR gates stand between here and the E0203 raise, and any
+        // one of them short-circuits to Ok. The trace names WHICH answered,
+        // because two runs of the same file disagree and the inputs to this
+        // step are byte-identical — so the divergence is one of these four.
+        let trace_gates = std::env::var_os("VERUM_TRACE_TRYGATE").is_some();
+        let gate1 = self
             .protocol_checker
             .read()
-            .can_convert_residual(&function_return_type, &inner_try.residual)
+            .can_convert_residual(&function_return_type, &inner_try.residual);
+        if trace_gates {
+            eprintln!("[trygate] 1 can_convert_residual = {}", gate1);
+        }
+        if !gate1
         {
             // Check if error types can be unified (type variables, etc.)
-            if !self.check_residual_type_compatibility(
+            let gate2 = self.check_residual_type_compatibility(
                 &inner_try.residual,
                 &outer_try.residual,
                 try_span,
-            ) {
+            );
+            if trace_gates {
+                // The RESIDUALS, not just the verdict. `inner` and
+                // `fn_ret` were already measured identical across a clean
+                // run and a failing one, so if gate 2 still disagrees the
+                // difference is in what `resolve_try_protocol` DERIVED
+                // from them — which takes a protocol path or a structural
+                // fallback depending on `implements_protocol`, itself a
+                // registry query.
+                eprintln!(
+                    "[trygate] 2 residual_compatible = {}\n[trygate] 2 inner_res  = {:?}\n[trygate] 2 outer_res  = {:?}",
+                    gate2, inner_try.residual, outer_try.residual
+                );
+            }
+            if !gate2 {
                 // Extract error types from residuals for better error messages
                 let inner_err = self.extract_error_from_residual(&inner_try.residual);
                 let outer_err = self.extract_error_from_residual(&outer_try.residual);
 
                 // Check if From conversion exists between error types
                 if let (Maybe::Some(ie), Maybe::Some(oe)) = (&inner_err, &outer_err) {
-                    if self.check_from_implementation(ie, oe) {
+                    let gate3 = self.check_from_implementation(ie, oe);
+                    if trace_gates {
+                        eprintln!("[trygate] 3 from_impl = {}", gate3);
+                    }
+                    if gate3 {
                         // From conversion exists, residuals are compatible
                         return Ok(InferResult::new(inner_try.output));
                     }
@@ -2572,6 +2600,9 @@ fn substitute_refinement_binder(
                                         _ => false,
                                     }
                             });
+                            if trace_gates {
+                                eprintln!("[trygate] 4 throws_union = {}", inner_compatible);
+                            }
                             if inner_compatible {
                                 return Ok(InferResult::new(inner_try.output));
                             }

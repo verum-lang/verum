@@ -5608,9 +5608,40 @@ impl ProtocolChecker {
                                 // Uses positional matching: non-Unit payloads are matched to type
                                 // parameters in the order they appear in the variant map.
                                 // This is stdlib-agnostic - no hardcoded variant names.
-                                let non_unit_payloads: List<&Type> = variants
-                                    .values()
-                                    .filter(|payload| **payload != Type::Unit)
+                                // BY NAME, because the map has no order to
+                                // offer and the comment above asks for one.
+                                //
+                                // "in the order they appear in the variant
+                                // map" is HASH ORDER: `variants` is a
+                                // `Map`, so for a two-payload variant the
+                                // pattern's parameters were zipped against
+                                // the payloads in whichever order the table
+                                // handed them over — and `unify_types`
+                                // MUTATES the substitution and returns false
+                                // on conflict, so the match itself succeeded
+                                // or failed by the seed. Measured (T0927):
+                                // `implements_protocol(ty, "Try")` answered
+                                // `true` 57 times in one run of
+                                // `core/logic/kripke.vr` and `false` 19 of
+                                // 57 in another, with IDENTICAL lookup keys.
+                                //
+                                // Sorting makes the answer STABLE. It does
+                                // not make it RIGHT: the honest pairing is
+                                // DECLARATION order — `Ok(T) | Err(E)` names
+                                // T first — and `Type::Variant` does not
+                                // keep it. That is the same missing fact
+                                // T0928 needs, and until it exists a stable
+                                // wrong answer at least stays diagnosable
+                                // where a random one cannot.
+                                let mut payload_names: Vec<&verum_common::Text> = variants
+                                    .iter()
+                                    .filter(|(_, payload)| **payload != Type::Unit)
+                                    .map(|(name, _)| name)
+                                    .collect();
+                                payload_names.sort();
+                                let non_unit_payloads: List<&Type> = payload_names
+                                    .into_iter()
+                                    .map(|n| &variants[n])
                                     .collect();
 
                                 // Match pattern args to non-unit payloads positionally
@@ -8020,6 +8051,16 @@ impl ProtocolChecker {
     /// Check if a type implements a protocol (by name)
     pub fn implements_protocol(&self, ty: &Type, protocol_name: &str) -> bool {
         let protocol_text: Text = protocol_name.into();
+        if std::env::var_os("VERUM_TRACE_TRYGATE").is_some() && protocol_name == "Try" {
+            // T0927: the KEY the index is asked with. If it differs
+            // between two runs, the key is not a function of the value;
+            // if it is the same and the answer differs, the divergence is
+            // further down.
+            eprintln!(
+                "[trygate] implements_protocol key = {:?}",
+                self.make_type_key(ty)
+            );
+        }
         self.check_protocol_satisfied(ty, &protocol_text)
             .unwrap_or_default()
     }
@@ -8069,7 +8110,11 @@ impl ProtocolChecker {
         // Stdlib-agnostic type system: type checker operates without hardcoded knowledge of stdlib types, stdlib types registered from parsed .vr files
         // =========================================================================
         // Try protocol-based resolution first (doesn't require hardcoded type knowledge)
-        if self.implements_protocol(ty, "Try") {
+        let has_try = self.implements_protocol(ty, "Try");
+        if std::env::var_os("VERUM_TRACE_TRYGATE").is_some() {
+            eprintln!("[trygate] resolve_try: implements_protocol(Try) = {}", has_try);
+        }
+        if has_try {
             let try_path = Path::single(verum_ast::ty::Ident::new("Try", Span::default()));
             if let Maybe::Some(impl_) = self.find_impl(ty, &try_path) {
                 // Build type substitution from impl's generic type to concrete type
@@ -10503,14 +10548,33 @@ impl ProtocolChecker {
                 verum_common::Text::from(format!("slice:{}", self.make_type_key(element)))
             }
             Record(fields) => {
+                // SORTED BY NAME, and it is the difference between a key
+                // and a coincidence.
+                //
+                // `Record` holds a `Map`, i.e. a `HashMap`, and iterating
+                // one yields an order that depends on the hash seed AND on
+                // the insertion history. Two records with identical
+                // contents, built by different code paths, therefore
+                // rendered DIFFERENT key strings — so `impl_index.get`
+                // found the registered implementation on some runs and
+                // missed it on others.
+                //
+                // A key must be a function of the VALUE. Measured (T0927):
+                // `verum check core/logic/kripke.vr` returned 0 errors on
+                // 32 of 40 runs and 20 on the rest, and the divergence is
+                // `implements_protocol(ty, "Try")` answering `true` 57
+                // times in a clean run and `false` 19 of 57 in a failing
+                // one — one answer per `?` site in the file.
+                let mut names: Vec<&verum_common::Text> = fields.keys().collect();
+                names.sort();
                 let mut key = verum_common::Text::from("record:{");
-                for (i, (name, field_ty)) in fields.iter().enumerate() {
+                for (i, name) in names.into_iter().enumerate() {
                     if i > 0 {
                         key.push(',');
                     }
                     key.push_str(name.as_str());
                     key.push(':');
-                    key.push_str(self.make_type_key(field_ty).as_str());
+                    key.push_str(self.make_type_key(&fields[name]).as_str());
                 }
                 key.push('}');
                 key
@@ -10558,14 +10622,21 @@ impl ProtocolChecker {
                     verum_common::Text::from(format!("generic:{}", named_type))
                 } else {
                     // No named type found - use structural variant key
+                    // Sorted for the same reason as the record arm above:
+                    // a key built by walking a hash map is not a function
+                    // of the value it names. The `variant_type_signature`
+                    // consulted a few lines up already sorts, which is the
+                    // same admission in the same match.
+                    let mut names: Vec<&verum_common::Text> = variants.keys().collect();
+                    names.sort();
                     let mut key = verum_common::Text::from("variant:{");
-                    for (i, (name, variant_ty)) in variants.iter().enumerate() {
+                    for (i, name) in names.into_iter().enumerate() {
                         if i > 0 {
                             key.push(',');
                         }
                         key.push_str(name.as_str());
                         key.push(':');
-                        key.push_str(self.make_type_key(variant_ty).as_str());
+                        key.push_str(self.make_type_key(&variants[name]).as_str());
                     }
                     key.push('}');
                     key
