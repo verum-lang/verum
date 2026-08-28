@@ -403,8 +403,25 @@ item            = function_def
                 | module_def
                 | meta_def
                 | pattern_def
+                | layer_def
                 | ffi_declaration
                 | attribute_item ;
+
+(* Layer — a named group of `provide` bindings, and composition of such
+   groups.  Both forms below were verified against a release compiler;
+   `layer` was a lexer keyword and a parsed item that this file did not
+   mention, which made a reader consulting the grammar conclude that
+   valid syntax was invented.
+
+       layer DbLayer  { provide Pool = P { n: 1 }; }
+       layer AppLayer = DbLayer + LogLayer;
+
+   The composition form takes layers left to right; the compiler orders
+   initialisation from the dependencies between the provided contexts,
+   so the written order is not the run order.                          *)
+layer_def       = visibility , 'layer' , identifier ,
+                  ( '{' , { provide_stmt } , '}'
+                  | '=' , identifier , { '+' , identifier } , ';' ) ;
 
 (* AUDIT 2026-08-01: the parser has always accepted the full surface
    below (fast_parser decl.rs parse_visibility): `pub` as an alias of
@@ -558,7 +575,12 @@ context_group_identifier = identifier ;
 
    makes `mount core.term.layout.{Constraint};` resolve
    (core/term/layout/mod.vr:26).                                       *)
-mount_stmt       = visibility , 'mount' , mount_tree , [ 'as' , identifier ] , ';' ;
+(* `link` is an accepted synonym for `mount`, taken by the same parser
+   routine (`parse_mount` consumes either).  Prefer `mount` in new code;
+   the alias is documented because a reader who meets `link` in source
+   must be able to find it here.                                       *)
+mount_stmt       = visibility , ( 'mount' | 'link' ) , mount_tree
+                 , [ 'as' , identifier ] , ';' ;
 mount_tree       = mount_item , [ 'as' , identifier ]
                 | path , '.' , '{' , mount_list , '}'
                 | path , '.' , '*' ;
@@ -601,7 +623,39 @@ type_definition_body = type_expr , [ type_refinement ] , ';'
                      | '(' , type_list , ')' , ';'
                      | '{' , field_list , '}' , [ type_refinement ] , ';'
                      | variant_list , ';'
+                     | inductive_def , ';'
+                     | coinductive_def , ';'
                      | protocol_def , ';' ;
+
+(* Inductive and coinductive type definitions.
+
+   These were parsed but UNDOCUMENTED here, and the parser cites this
+   file for both — `decl.rs` carries `Spec: grammar/verum.ebnf -
+   inductive_def` and `- coinductive_def` against productions that did
+   not exist.  A grammar declared the only source of truth has to
+   contain the syntax the parser accepts, or reading it rules out valid
+   programs.
+
+   An INDUCTIVE type is given by its constructors and is well-founded:
+   every value is finite, so recursion over it terminates.
+
+       type Nat is inductive { | Zero | Succ(Nat) };
+
+   A COINDUCTIVE type is given by its DESTRUCTORS — the observations
+   that can be made of it — and its values may be infinite.  It is
+   what `cofix` functions produce, and it is judged on productivity
+   rather than termination (see cofix_modifier).
+
+       type Str<A> is coinductive { fn head(&self) -> A; fn tail(&self) -> Str<A>; };
+
+   `codata` is an accepted spelling of the same idea in RECORD form,
+   where each field is an observation.  It is an ordinary identifier to
+   the lexer, not a keyword:
+
+       type Str<A> is codata { head: A, tail: Str<A> };                 *)
+inductive_def   = 'inductive' , '{' , [ variant_list ] , '}' ;
+coinductive_def = ( 'coinductive' | 'codata' ) ,
+                  ( '{' , protocol_items , '}' | '{' , field_list , '}' ) ;
 
 (* Dependent type bindings (Sigma types) - supports single or multiple bindings     *)
 (* Spec: type theory dependent pairs (Σ-types)                                      *)
@@ -1671,7 +1725,16 @@ primary_expr    = literal_expr
                 | nursery_expr
                 | forall_expr
                 | exists_expr
+                | inject_expr
                 | typeof_expr ;
+
+(* inject — name the context instance the caller provided, as a value.
+
+   `using [Log]` makes `Log.note(..)` callable by name; `inject Log`
+   names the INSTANCE, for passing on or storing.  Verified accepted by
+   a release compiler; it was parsed (`expr.rs` ExprKind::Inject) and
+   absent from this file.                                              *)
+inject_expr     = 'inject' , path ;
 
 (* typeof expression - runtime type introspection                       *)
 (* Returns TypeInfo for the runtime type of a value.                    *)
@@ -2276,7 +2339,21 @@ token_tree_elem = token | '(' , token_tree , ')'
 token           = identifier | keyword | literal_expr | operator | punctuation ;
 operator        = arith_op | compare_op | logical_op | bitwise_op
                 | assign_op | range_op | pipe_op | compose_op
-                | arrow_op | optional_chain | null_coalesce ;
+                | arrow_op | optional_chain | null_coalesce | spec_op ;
+
+(* Specification connectives — implication and bi-implication.
+
+   Both bind at the same precedence as assignment (level 3, the loosest
+   binary level), so `a > 0 implies b > 0` groups as intended without
+   parentheses.  They are SPECIFICATION operators: verified accepted in
+   `requires` / `ensures`, while `a implies b` in an ordinary
+   expression is refused — the checker reports that the operator
+   requires a protocol implementation, and no type in core/ provides
+   one.  Write `!a || b` for a runtime implication.
+
+       requires x > 0 <-> x >= 1
+       ensures  result > 0 implies x > 0                               *)
+spec_op         = 'implies' | '<->' ;
 
 (* ============================================================================ *)
 (* 2.17 TYPE PROPERTIES - COMPILE-TIME TYPE INTROSPECTION                       *)
