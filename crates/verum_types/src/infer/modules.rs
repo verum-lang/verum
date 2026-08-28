@@ -23266,6 +23266,16 @@ impl TypeChecker {
                         span,
                     });
                 }
+                // Both arms need BOTH gates. `zz.nope.absent()` reaches
+                // this one — the receiver parses as a Field chain — and
+                // adding the mirror only to the Path arm below left it
+                // exactly as silent as before.
+                if self.module_root_is_unknown(&seg_vec, skip_static_lookup) {
+                    return Err(TypeError::UnboundVariable {
+                        name: verum_common::Text::from(seg_vec[0].to_string()),
+                        span,
+                    });
+                }
             }
         }
 
@@ -23300,9 +23310,71 @@ impl TypeChecker {
                         span,
                     });
                 }
+                if self.module_root_is_unknown(&seg_vec, skip_static_lookup) {
+                    return Err(TypeError::UnboundVariable {
+                        name: verum_common::Text::from(seg_vec[0].to_string()),
+                        span,
+                    });
+                }
             }
         }
         Ok(None)
+    }
+
+    /// The MIRROR of [`Self::module_member_is_missing`]: the path is not
+    /// a module at all, and nothing else claims it either.
+    ///
+    /// That gate asks "is this a module MISSING a member" and answers
+    /// only on positive evidence, which is right — saying yes about a
+    /// chain it cannot judge would reject working code. But the case it
+    /// declines leaves a hole: `zz.nope.absent()`, where `zz` is bound
+    /// to nothing, is not a module, and is not a type. Nobody claims it,
+    /// the chain handler mints a fresh type variable for the receiver
+    /// (`base_is_module_path` — a root with no value binding is assumed
+    /// to be a module), and the call type-checks against ANY declared
+    /// return type and evaluates to `nil`.
+    ///
+    /// MEASURED before this arm existed, with a positive control in the
+    /// same batch (`a.b.f()` prints `true`):
+    ///
+    ///     a.b.absent()        3 segments, real module, no leaf   E100
+    ///     a.zzz.f()           3 segments, real module, no mid    E100
+    ///     zz.absent()         2 segments, unknown root           E100
+    ///     zz.a.b.c.absent()   5 segments, unknown root           E100
+    ///     zz.nope.absent()    3 segments, unknown root           SILENT -> nil
+    ///
+    /// One shape, and only because it fell between two gates: short
+    /// enough that the longer-path route did not judge it, unknown
+    /// enough that the module route declined.
+    ///
+    /// Every guard here is a REASON not to judge, in the same spirit as
+    /// the sibling gate — a bound head is a field chain, a type segment
+    /// is type-qualified dispatch, a later step in a chain reuses the
+    /// outermost receiver, and a mount alias is a module under another
+    /// name. What is left is a root that names nothing.
+    fn module_root_is_unknown(&self, segments: &[&str], skip_static_lookup: bool) -> bool {
+        if skip_static_lookup || segments.is_empty() {
+            return false;
+        }
+        let root = segments[0];
+        // A bound value at the head is a field chain, not a module path.
+        if self.ctx.env.lookup(root).is_some() {
+            return false;
+        }
+        // Type-qualified dispatch — a static or a variant constructor.
+        if segments.iter().any(|seg| self.name_is_a_type(seg)) {
+            return false;
+        }
+        // `mount X.Y.Z as A;` — a module reached under another name.
+        if self
+            .module_aliases
+            .contains_key(&verum_common::Text::from(root))
+        {
+            return false;
+        }
+        // Positive evidence of a module anywhere along the path means the
+        // sibling gate owns this call, not this one.
+        !self.module_path_is_known(segments)
     }
 
     /// Does this dotted path name a MODULE we know about?
@@ -23402,6 +23474,50 @@ impl TypeChecker {
     /// root-stripping? Front-strips one segment at a time, because
     /// `archive_ctx_loader::register_module` registers a module's
     /// functions with the root sometimes present and sometimes not.
+    /// The top-level roots the archive keys its modules under.
+    ///
+    /// A call may name a module WITHOUT the root — `core/async/intrinsics.vr`
+    /// writes `sys.linux.tls.ctx_get(0)` with no `mount`, while the metadata
+    /// holds that function under `core.sys.linux.tls.ctx_get`. Every probe
+    /// in this file front-strips the QUERY, which can never reach a key
+    /// that has one segment MORE, so both the module oracle and the
+    /// candidate list answered NO for a module that plainly exists.
+    ///
+    /// The roots are read from the metadata rather than named here:
+    /// hardcoding `core.` would be one more piece of stdlib knowledge in
+    /// the compiler, and any library that registers under a root has the
+    /// same shape.
+    ///
+    /// LOWERCASE ONLY, the same signal `is_global_module_root` uses:
+    /// module segments are lowercase by grammar convention, and a large
+    /// share of the metadata's keys are TYPE-qualified (`Array.len`,
+    /// `AtomicBool.store`, …). A first draft took the first eight
+    /// distinct heads in sort order, never reached `core`, and the probe
+    /// it was written for never ran.
+    fn metadata_module_roots(&self) -> Vec<String> {
+        let Some(meta) = self.core_metadata() else {
+            return Vec::new();
+        };
+        let mut roots: Vec<String> = Vec::new();
+        for key in meta.functions.keys() {
+            let Some((head, _)) = key.as_str().split_once('.') else {
+                continue;
+            };
+            if !head.starts_with(|c: char| c.is_lowercase())
+                || roots.iter().any(|r| r == head)
+            {
+                continue;
+            }
+            roots.push(head.to_string());
+            // Bounded so a pathological archive cannot turn one probe
+            // into a scan of everything.
+            if roots.len() >= 32 {
+                break;
+            }
+        }
+        roots
+    }
+
     fn module_prefix_is_known(&self, joined: &str) -> bool {
         let mut rest = joined;
         loop {
@@ -23432,9 +23548,39 @@ impl TypeChecker {
             }
             match rest.split_once('.') {
                 Some((_, tail)) if !tail.is_empty() => rest = tail,
-                _ => return false,
+                _ => break,
             }
         }
+        // …and the MIRROR of the front-strip above: a call may name a
+        // module WITHOUT the root the archive keys it under.
+        // `core/async/intrinsics.vr` calls `sys.linux.tls.ctx_get(0)`
+        // with no `mount`, and the metadata holds that function under
+        // `core.sys.linux.tls.ctx_get`. Stripping the QUERY can never
+        // reach a key that has one segment MORE, so the probe answered
+        // NO for a module that plainly exists — measured as the single
+        // newly-failing file when the unknown-root gate first landed.
+        //
+        // The roots are collected from the metadata rather than named
+        // here: hardcoding `core.` would be one more piece of stdlib
+        // knowledge in the compiler, and the same shape appears for any
+        // library that registers under a root.
+        if let Some(meta) = self.core_metadata() {
+            let roots = self.metadata_module_roots();
+            for root in &roots {
+                let lo = format!("{}.{}.", root, joined);
+                let hi = format!("{}.{}/", root, joined);
+                if meta
+                    .functions
+                    .range(verum_common::Text::from(lo.as_str())
+                        ..verum_common::Text::from(hi.as_str()))
+                    .next()
+                    .is_some()
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Resolve `<dotted.module.path>.fn(args)` against the global
@@ -23489,6 +23635,14 @@ impl TypeChecker {
         while let Some((_, tail)) = rest.split_once('.') {
             candidates.push(format!("{}.{}", tail, method.name));
             rest = tail;
+        }
+        // …and the MIRROR: the call may have omitted the root the
+        // archive keys the module under. Without these candidates
+        // `sys.linux.tls.ctx_get(0)` resolved to nothing, and — once the
+        // module oracle learned the same trick — was then reported as a
+        // MISSING MEMBER of a module that has it.
+        for root in self.metadata_module_roots() {
+            candidates.push(format!("{}.{}.{}", root, joined, method.name));
         }
         let mut arity_mismatch: Option<usize> = None;
         for cand in &candidates {

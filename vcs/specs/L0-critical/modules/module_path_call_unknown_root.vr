@@ -1,0 +1,47 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: modules, name-resolution, module-path, totality
+// @timeout: 60000
+// @expected-error: E100
+// @description: A call through a module path whose ROOT names nothing is
+//   an unbound name — not a fresh type variable that satisfies anything.
+//
+//   Everything around this shape was already checked, which is why it
+//   survived. Measured in one batch with a positive control:
+//
+//       a.b.f()             real path                     compiles
+//       a.b.absent()        real module, no leaf          E100
+//       a.zzz.f()           real module, no middle        E100
+//       zz.absent()         2 segments, unknown root      E100
+//       zz.a.b.c.absent()   5 segments, unknown root      E100
+//       p.sub.deep.absent() rooted in a VALUE             E404
+//
+//       zz.nope.absent()    3 segments, unknown root      SILENT -> nil
+//
+//   One shape, and only because it fell between two gates: short enough
+//   that the longer-path route did not judge it, unknown enough that the
+//   module route declined. The chain handler then minted a fresh type
+//   variable for the receiver — a root with no value binding is assumed
+//   to be a module — so the call satisfied ANY declared return type and
+//   evaluated to `nil`.
+//
+//   `module_member_is_missing` answers "is this a module MISSING a
+//   member" and answers only on positive evidence, which is right: saying
+//   yes about a chain it cannot judge would reject working code. Its
+//   mirror, `module_root_is_unknown`, answers the case it declines.
+//
+//   Task: T0806.
+
+module a {
+    public module b {
+        public fn f() -> Bool { true }
+    }
+}
+
+fn main() {
+    // The control lives in the sibling spec; this file must FAIL, and a
+    // file that also contains a passing call would still fail for the
+    // wrong reason if the gate regressed to rejecting everything.
+    zz.nope.absent();
+}
