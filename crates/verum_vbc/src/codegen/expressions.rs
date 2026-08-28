@@ -27980,11 +27980,39 @@ impl VbcCodegen {
                     // `name#arity` shadow slot when primary's arity
                     // mismatches; this eliminates the arity-mismatched
                     // candidates deterministically.  It does NOT
-                    // disambiguate same-arity collisions — that's the
-                    // residual surface tracked by task #39's
-                    // mount-scope-aware fundamental fix.
-                    if let Some(info) =
-                        self.ctx.lookup_function_with_arity(&func_name, args.len())
+                    // disambiguate same-arity collisions.
+                    //
+                    // MOUNT-SCOPE FIRST (T0882). That residual was this:
+                    // an explicit `mount lib.{resolve}` bound correctly at
+                    // the CALL, which already consults
+                    // `carried_mount_bindings` / `mounted_fns`, and this
+                    // site — which decides the call's RESULT TYPE — did
+                    // not. So codegen emitted the right `Call` to
+                    // `lib.resolve` and then formatted its `Int` result
+                    // through the stdlib namesake's `Maybe` Display,
+                    // printing `None`. Two channels for one call, and
+                    // only one of them asked the authority.
+                    //
+                    // Measured: two functions in one file with identical
+                    // signatures and bodies, differing only in name —
+                    // `uniquely_named_thing` printed 42, `resolve`
+                    // printed `None`.
+                    let mount_scoped_ret: Option<FunctionInfo> = if !func_name.contains('.')
+                        && !func_name.contains("::")
+                    {
+                        self.ctx
+                            .carried_mount_bindings
+                            .get(&func_name)
+                            .or_else(|| self.ctx.mounted_fns.get(&func_name))
+                            .and_then(|key| self.ctx.functions.get(key))
+                            .filter(|info| info.param_count == args.len())
+                            .cloned()
+                    } else {
+                        None
+                    };
+                    if let Some(info) = mount_scoped_ret
+                        .as_ref()
+                        .or_else(|| self.ctx.lookup_function_with_arity(&func_name, args.len()))
                     {
                         if info.variant_tag.is_some()
                             && let Some(parent) = &info.parent_type_name
