@@ -2323,6 +2323,19 @@ fn substitute_refinement_binder(
         // Step 1: Infer type of inner expression
         let inner_result = self.synth_expr(inner_expr)?;
         let inner_ty = self.unifier.apply(&inner_result.ty);
+        if std::env::var_os("VERUM_TRACE_TRY").is_some() {
+            // T0927: the SAME source gives 0 errors on 32 runs of 40 and
+            // 20 on the other 8, and the surviving diagnostic is E0203
+            // against a residual whose error parameter is sometimes an
+            // open inference variable. Structural, and paired with the
+            // enclosing function's declared return, because the mismatch
+            // is between the two — printing either alone cannot show
+            // which one moved.
+            eprintln!(
+                "[try] inner={:?}\n[try] fn_ret={:?}",
+                inner_ty, self.current_function_return_type
+            );
+        }
 
         // Never propagation: `never_value?` should return Never
         if matches!(inner_ty, Type::Never) {
