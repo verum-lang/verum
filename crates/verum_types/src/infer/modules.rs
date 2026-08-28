@@ -11885,11 +11885,39 @@ impl TypeChecker {
         // `false` here to avoid double-wrapping.
         let final_return_for_sig =
             self.wrap_return_type_for_sig(final_return_type.clone(), &func.throws_clause, false);
-        let final_func_type = Type::function_with_properties(
-            param_types.clone(),
-            final_return_for_sig,
-            inferred_properties,
-        );
+        // The contexts travel with the properties, for the reason the
+        // protocol-bounds note below gives: this is the LAST writer, so
+        // anything it does not carry is GONE from the environment no
+        // matter what the signature pass registered.
+        //
+        // `function_with_properties` carries properties and drops
+        // contexts, and that is how `using [Log]` disappeared between
+        // registration and the call site. Measured on a release binary,
+        // three inserts for one function:
+        //
+        //     [fnins] work skip=false ctx=Some(1)   <- signature pass
+        //     [fnins] work skip=false ctx=Some(1)   <- initial scheme
+        //     [fnins] work skip=false ctx=None      <- HERE
+        //
+        // The call-site check in `infer_expr_call` reads the callee's
+        // `contexts` and had nothing to read, so calling a function that
+        // requires a context imposed no obligation on its caller — the
+        // program compiled and panicked at runtime with "Context Log not
+        // provided" (T0935).
+        let final_func_type = match context_requirement.clone() {
+            Some(req) => Type::Function {
+                params: param_types.clone(),
+                return_type: Box::new(final_return_for_sig),
+                contexts: Some(crate::di::requirement::ContextExpr::Concrete(req)),
+                type_params: List::new(),
+                properties: Some(inferred_properties),
+            },
+            None => Type::function_with_properties(
+                param_types.clone(),
+                final_return_for_sig,
+                inferred_properties,
+            ),
+        };
         // CRITICAL: Create TypeScheme explicitly with tracked type parameters (same as initial).
         // We cannot use `generalize()` because phantom type parameters would be lost.
         let final_scheme = if func_type_param_vars.is_empty() {

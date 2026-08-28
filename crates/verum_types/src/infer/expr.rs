@@ -7612,6 +7612,40 @@ impl TypeChecker {
                 // ============================================================
                 // When calling a function with context requirements, verify that
                 // the current function's contexts satisfy those requirements.
+                // VERUM_TRACE_CTXCALL prints the DECISION this block is
+                // about to make: what the callee requires, what the caller
+                // has, and whether leniency is on. It stays because the
+                // failure mode it caught is invisible without it — the
+                // check below was correct and dead for as long as
+                // `contexts` arrived as `None`, and no diagnostic, test or
+                // suite could tell that apart from "the caller was fine".
+                // One line here answers it in a second (T0935).
+                if std::env::var("VERUM_TRACE_CTXCALL").is_ok() {
+                    let callee_name = if let ExprKind::Path(p) = &func.kind {
+                        p.segments
+                            .last()
+                            .and_then(|s| match s {
+                                verum_ast::ty::PathSegment::Name(i) => {
+                                    Some(i.name.to_string())
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or_else(|| "<path>".into())
+                    } else {
+                        format!("<{:?}>", std::mem::discriminant(&func.kind))
+                    };
+                    eprintln!(
+                        "[ctxcall] callee={callee_name} contexts={:?} caller={:?} lenient={}",
+                        contexts.as_ref().map(|c| c
+                            .iter()
+                            .map(|r| r.name.to_string())
+                            .collect::<Vec<_>>()),
+                        self.current_function_contexts
+                            .as_ref()
+                            .map(|s| s.iter().map(|r| r.name.to_string()).collect::<Vec<_>>()),
+                        self.context_checker.is_lenient(),
+                    );
+                }
                 if let Some(ref callee_contexts) = contexts {
                     // Build a ContextSet from the callee's requirements
                     let mut callee_context_set = ContextSet::new();
