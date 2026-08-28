@@ -240,7 +240,7 @@ impl From<TypeError> for VerumError {
                 message: format!("cyclic type definition detected: {}", cycle_path).into(),
             },
             TypeError::ImportCycle { cycle_path, .. } => VerumError::Other {
-                message: format!("E0811: import cycle detected: {}", cycle_path).into(),
+                message: format!("E201: import cycle detected: {}", cycle_path).into(),
             },
             TypeError::UnresolvedPlaceholder { name, .. } => VerumError::Other {
                 message: format!("unresolved type placeholder: {}", name).into(),
@@ -284,7 +284,7 @@ impl From<TypeError> for VerumError {
                 ..
             } => VerumError::Other {
                 message: format!(
-                    "E3050: direct negative context violation in function `{}`: cannot use `{}` which is explicitly excluded via `!{}`",
+                    "E611: direct negative context violation in function `{}`: cannot use `{}` which is explicitly excluded via `!{}`",
                     function_name, context, context
                 ).into(),
             },
@@ -298,7 +298,7 @@ impl From<TypeError> for VerumError {
                 ..
             } => VerumError::Other {
                 message: format!(
-                    "E3060: context alias conflict: alias `{}` used for `{}` in `{}` but also for `{}` in `{}`",
+                    "E612: context alias conflict: alias `{}` used for `{}` in `{}` but also for `{}` in `{}`",
                     alias, first_context, first_function, second_context, second_function
                 ).into(),
             },
@@ -405,39 +405,39 @@ impl From<TypeError> for VerumError {
                 actual: format!("{}", expr_type).into(),
             },
 
-            // Definite Assignment Analysis Errors (E201)
+            // Definite Assignment Analysis Errors (E305)
             // Spec: L0-critical/memory-safety/uninitialized
             TypeError::UseOfUninitializedVariable { name, .. } => VerumError::Other {
-                message: format!("E201: use of uninitialized variable '{}'", name).into(),
+                message: format!("E305: use of uninitialized variable '{}'", name).into(),
             },
 
             TypeError::PartiallyInitializedVariable { name, missing, .. } => VerumError::Other {
                 message: format!(
-                    "E201: use of partially initialized variable '{}' (missing: {})",
+                    "E305: use of partially initialized variable '{}' (missing: {})",
                     name, missing
                 ).into(),
             },
 
             TypeError::UninitializedField { var, field, .. } => VerumError::Other {
-                message: format!("E201: field '{}' of variable '{}' is not initialized", field, var).into(),
+                message: format!("E305: field '{}' of variable '{}' is not initialized", field, var).into(),
             },
 
             TypeError::UninitializedArrayElement { var, index, .. } => VerumError::Other {
                 message: format!(
-                    "E201: array element at index {} of '{}' is not initialized",
+                    "E305: array element at index {} of '{}' is not initialized",
                     index, var
                 ).into(),
             },
 
             TypeError::UninitializedTupleElement { var, index, .. } => VerumError::Other {
                 message: format!(
-                    "E201: tuple element {} of '{}' is not initialized",
+                    "E305: tuple element {} of '{}' is not initialized",
                     index, var
                 ).into(),
             },
 
             TypeError::IterationOverPartialArray { var, .. } => VerumError::Other {
-                message: format!("E201: cannot iterate over partially initialized array '{}'", var).into(),
+                message: format!("E305: cannot iterate over partially initialized array '{}'", var).into(),
             },
 
             TypeError::AffineValueInLoop { name, .. } => VerumError::Other {

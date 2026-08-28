@@ -744,7 +744,7 @@ pub enum TypeError {
 
     /// E808: Duplicate provide for same context in same scope
     /// Context requirements: functions declare needed contexts with "using [Ctx1, Ctx2]" after return type, callers must provide all — Provide Statements
-    #[error("E808: duplicate provide for context '{context}' in same scope")]
+    #[error("duplicate provide for context '{context}' in same scope")]
     DuplicateProvide {
         context: Text,
         span: verum_ast::span::Span,
@@ -796,7 +796,7 @@ pub enum TypeError {
         span: verum_ast::span::Span,
     },
 
-    /// Direct negative context violation (E3050)
+    /// Direct negative context violation (E611)
     /// Function body directly accesses a context that is excluded in the signature.
     ///
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
@@ -804,11 +804,11 @@ pub enum TypeError {
     /// Example:
     /// ```verum
     /// fn pure_compute() using [!Database] {
-    ///  Database.query(...); // E3050: Direct violation
+    ///  Database.query(...); // E611: Direct violation
     /// }
     /// ```
     #[error(
-        "E3050: direct negative context violation: `{context}` is accessed but excluded via `!{context}`"
+        "direct negative context violation: `{context}` is accessed but excluded via `!{context}`"
     )]
     DirectNegativeContextViolation {
         /// The excluded context that was directly accessed
@@ -821,7 +821,7 @@ pub enum TypeError {
         declaration_span: verum_ast::span::Span,
     },
 
-    /// Context alias conflict within a module (E3060)
+    /// Context alias conflict within a module (E612)
     /// Two functions in the same module use the same alias for different contexts.
     ///
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.2 - Aliased Contexts
@@ -829,9 +829,9 @@ pub enum TypeError {
     /// Example:
     /// ```verum
     /// fn migrate() using [Database as primary] { ... }
-    /// fn verify() using [Cache as primary] { ... } // E3060: Alias 'primary' conflicts
+    /// fn verify() using [Cache as primary] { ... } // E612: Alias 'primary' conflicts
     /// ```
-    #[error("E3060: context alias conflict: alias `{alias}` used for different contexts")]
+    #[error("context alias conflict: alias `{alias}` used for different contexts")]
     ContextAliasConflict {
         /// The conflicting alias name
         alias: Text,
@@ -1153,7 +1153,7 @@ pub enum TypeError {
     /// let x: Int;
     /// print(x); // E201: Use of uninitialized variable 'x'
     /// ```
-    #[error("E201: use of uninitialized variable '{name}'")]
+    #[error("use of uninitialized variable '{name}'")]
     UseOfUninitializedVariable {
         /// Name of the uninitialized variable
         name: Text,
@@ -1173,7 +1173,7 @@ pub enum TypeError {
     /// // tuple.2 not initialized
     /// let sum = tuple.0 + tuple.1 + tuple.2; // E201: Partially initialized variable
     /// ```
-    #[error("E201: use of partially initialized variable '{name}' (missing: {missing})")]
+    #[error("use of partially initialized variable '{name}' (missing: {missing})")]
     PartiallyInitializedVariable {
         /// Name of the partially initialized variable
         name: Text,
@@ -1192,7 +1192,7 @@ pub enum TypeError {
     /// // person.age not initialized
     /// print(person.age); // E201: Field 'age' is not initialized
     /// ```
-    #[error("E201: field '{field}' of variable '{var}' is not initialized")]
+    #[error("field '{field}' of variable '{var}' is not initialized")]
     UninitializedField {
         /// Variable name
         var: Text,
@@ -1211,7 +1211,7 @@ pub enum TypeError {
     /// arr[1] = 20;
     /// let val = arr[2]; // E201: Array element at index 2 is not initialized
     /// ```
-    #[error("E201: array element at index {index} of '{var}' is not initialized")]
+    #[error("array element at index {index} of '{var}' is not initialized")]
     UninitializedArrayElement {
         /// Variable name
         var: Text,
@@ -1230,7 +1230,7 @@ pub enum TypeError {
     /// tuple.1 = 2;
     /// let val = tuple.2; // E201: Tuple element 2 is not initialized
     /// ```
-    #[error("E201: tuple element {index} of '{var}' is not initialized")]
+    #[error("tuple element {index} of '{var}' is not initialized")]
     UninitializedTupleElement {
         /// Variable name
         var: Text,
@@ -1248,7 +1248,7 @@ pub enum TypeError {
     /// arr[0] = 10;
     /// for elem in arr { ... } // E201: Cannot iterate over partially initialized array
     /// ```
-    #[error("E201: cannot iterate over partially initialized array '{var}'")]
+    #[error("cannot iterate over partially initialized array '{var}'")]
     IterationOverPartialArray {
         /// Variable name
         var: Text,
@@ -1268,7 +1268,7 @@ pub enum TypeError {
     /// let r1 = &mut x; // Mutable borrow
     /// let r2 = &x; // E310: Cannot borrow `x` as immutable because it's already mutably borrowed
     /// ```
-    #[error("E310: cannot borrow `{var}` - conflicting borrows")]
+    #[error("cannot borrow `{var}` - conflicting borrows")]
     BorrowConflict {
         /// Variable being borrowed
         var: Text,
@@ -1290,7 +1290,7 @@ pub enum TypeError {
     /// let rx = &mut point.x;
     /// let rp = &mut point; // E311: Cannot borrow `point` while field `x` is borrowed
     /// ```
-    #[error("E311: cannot borrow `{var}` because field `{field}` is already borrowed")]
+    #[error("cannot borrow `{var}` because field `{field}` is already borrowed")]
     FieldBorrowConflict {
         /// Variable being borrowed
         var: Text,
@@ -1311,7 +1311,7 @@ pub enum TypeError {
     ///  &x // E312: `x` does not live long enough
     /// }
     /// ```
-    #[error("E312: `{var}` does not live long enough - reference outlives referent")]
+    #[error("`{var}` does not live long enough - reference outlives referent")]
     DanglingReference {
         /// Variable that doesn't live long enough
         var: Text,
@@ -1332,7 +1332,7 @@ pub enum TypeError {
     ///  capture(checked_ref); // E310: checked ref may escape
     /// }
     /// ```
-    #[error("E310: `&checked` reference to `{var}` may escape through function call")]
+    #[error("`&checked` reference to `{var}` may escape through function call")]
     CheckedRefEscape {
         /// Variable being referenced
         var: Text,
@@ -1349,7 +1349,7 @@ pub enum TypeError {
     /// let y = x; // E313: Cannot move `x` while it is borrowed
     /// println("{:?}", r);
     /// ```
-    #[error("E313: cannot move `{var}` while it is borrowed")]
+    #[error("cannot move `{var}` while it is borrowed")]
     MoveWhileBorrowed {
         /// Variable being moved
         var: Text,
@@ -1368,7 +1368,7 @@ pub enum TypeError {
     /// x = 100; // E314: Cannot assign to `x` while it is borrowed
     /// println("{}", r);
     /// ```
-    #[error("E314: cannot assign to `{var}` while it is borrowed")]
+    #[error("cannot assign to `{var}` while it is borrowed")]
     AssignWhileBorrowed {
         /// Variable being assigned
         var: Text,
@@ -1393,7 +1393,7 @@ pub enum TypeError {
     ///  let huge: [Int; 134_217_728] = [0; 134_217_728]; // E320
     /// }
     /// ```
-    #[error("E320: stack allocation exceeds safe limit ({size} bytes exceeds {limit} byte limit)")]
+    #[error("stack allocation exceeds safe limit ({size} bytes exceeds {limit} byte limit)")]
     StackAllocationExceedsLimit {
         /// Size of the attempted allocation in bytes
         size: u64,
@@ -1414,7 +1414,7 @@ pub enum TypeError {
     ///  infinite(n + 1) // E321: no base case, unbounded recursion
     /// }
     /// ```
-    #[error("E321: potential stack overflow from unbounded recursion in function `{func_name}`")]
+    #[error("potential stack overflow from unbounded recursion in function `{func_name}`")]
     UnboundedRecursionDetected {
         /// Name of the recursive function
         func_name: Text,
@@ -1437,7 +1437,7 @@ pub enum TypeError {
     /// ```verum
     /// import core.{size_of}; // E401: `size_of` not found in module `core`
     /// ```
-    #[error("E401: cannot find `{item_name}` in module `{module_path}`")]
+    #[error("cannot find `{item_name}` in module `{module_path}`")]
     ImportItemNotFound {
         /// Name of the item that was not found
         item_name: Text,
@@ -1457,7 +1457,7 @@ pub enum TypeError {
     /// ```verum
     /// import nonexistent.module.{Item}; // E402: module `nonexistent.module` not found
     /// ```
-    #[error("E402: module `{module_path}` not found")]
+    #[error("module `{module_path}` not found")]
     ImportModuleNotFound {
         /// Path of the module that was not found
         module_path: Text,
@@ -1478,7 +1478,7 @@ pub enum TypeError {
     ///  unknown_function(); // E403: undefined function `unknown_function`
     /// }
     /// ```
-    #[error("E403: undefined function `{func_name}`")]
+    #[error("undefined function `{func_name}`")]
     UndefinedFunction {
         /// Name of the undefined function
         func_name: Text,
@@ -1502,7 +1502,7 @@ pub enum TypeError {
     ///  print("hello"); // E501: meta function cannot have IO
     /// }
     /// ```
-    #[error("E501: meta function `{func_name}` must be pure but has side effects: {properties}")]
+    #[error("meta function `{func_name}` must be pure but has side effects: {properties}")]
     ImpureMetaFunction {
         /// Name of the meta function
         func_name: Text,
@@ -1563,7 +1563,7 @@ pub enum TypeError {
     ///  x
     /// }
     /// ```
-    #[error("E503: pure function `{func_name}` has side effects: {properties}")]
+    #[error("pure function `{func_name}` has side effects: {properties}")]
     ImpurePureFunction {
         /// Name of the pure function
         func_name: Text,
@@ -1585,7 +1585,7 @@ pub enum TypeError {
     ///  some_async_call().await // E504: await in non-async function
     /// }
     /// ```
-    #[error("E504: {message}")]
+    #[error("{message}")]
     AsyncPropertyViolation {
         /// Description of the violation
         message: Text,
@@ -1610,7 +1610,7 @@ pub enum TypeError {
     /// Only arguments that evaluate at compile time are judged; a
     /// symbolic one is left alone, because a refusal has to be a fact
     /// about a value.
-    #[error("E506: meta argument {position} of `{type_name}` violates its refinement: `{argument}` does not satisfy `{predicate}`")]
+    #[error("meta argument {position} of `{type_name}` violates its refinement: `{argument}` does not satisfy `{predicate}`")]
     MetaRefinementViolation {
         /// The type whose parameter was violated.
         type_name: Text,
@@ -2206,7 +2206,7 @@ impl TypeError {
             }
 
             CannotInferLambda { span } => {
-                let mut builder = DiagnosticBuilder::error().message("cannot infer lambda type");
+                let mut builder = DiagnosticBuilder::error().code("E406").message("cannot infer lambda type");
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2254,7 +2254,7 @@ impl TypeError {
 
             NotAFunction { ty, span } => {
                 let mut builder =
-                    DiagnosticBuilder::error().message(format!("not a function: {}", ty));
+                    DiagnosticBuilder::error().code("E412").message(format!("not a function: {}", ty));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2346,7 +2346,7 @@ impl TypeError {
             }
 
             ContextNotAllowed { context, span } => {
-                let mut builder = DiagnosticBuilder::error()
+                let mut builder = DiagnosticBuilder::error().code("E604")
                     .message(format!("context {} not allowed in this context", context));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
@@ -2359,7 +2359,7 @@ impl TypeError {
                 actual,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E413").message(format!(
                     "const generic parameter mismatch: expected {}, found {}",
                     expected, actual
                 ));
@@ -2370,7 +2370,7 @@ impl TypeError {
             }
 
             AmbiguousType { span } => {
-                let mut builder = DiagnosticBuilder::error()
+                let mut builder = DiagnosticBuilder::error().code("E414")
                     .message("ambiguous type: cannot infer type without more context");
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
@@ -2383,7 +2383,7 @@ impl TypeError {
                 first_use,
                 second_use,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E304").message(format!(
                     "affine type `{}` used more than once\n  \
                          first use at: {}\n  \
                          second use at: {}\n  \
@@ -2401,7 +2401,7 @@ impl TypeError {
                 usage_count,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E303").message(format!(
                     "linear type `{}` not used exactly once (used {} times)\n  \
                          help: linear types must be consumed exactly once",
                     ty, usage_count
@@ -2417,7 +2417,7 @@ impl TypeError {
                 moved_at,
                 used_at,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E310").message(format!(
                     "value `{}` used after move\n  \
                          moved at: {}\n  \
                          used at: {}\n  \
@@ -2507,7 +2507,7 @@ impl TypeError {
             }
 
             UndefinedContext { name, span } => {
-                let mut builder = DiagnosticBuilder::error()
+                let mut builder = DiagnosticBuilder::error().code("E605")
                     .message(format!(
                         "undefined context: {}\n  \
                          help: check if context or protocol is imported\n  \
@@ -2539,7 +2539,7 @@ impl TypeError {
                 method,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E606").message(format!(
                     "context `{}` has no method `{}`\n  \
                          help: check the context declaration for available methods",
                     context, method
@@ -2578,7 +2578,7 @@ impl TypeError {
                     ));
                 }
 
-                let mut builder = DiagnosticBuilder::error().message(msg);
+                let mut builder = DiagnosticBuilder::error().code("E607").message(msg);
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2590,7 +2590,7 @@ impl TypeError {
                 actual,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E603").message(format!(
                     "context mismatch: expected `{}`, found `{}`",
                     expected, actual
                 ));
@@ -2605,7 +2605,7 @@ impl TypeError {
                 callee,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E600").message(format!(
                     "function `{}` requires context `{}` but caller doesn't provide it\n  \
                          help: add `using [{}]` to caller's signature\n  \
                          help: or provide it locally with `provide {} = ...`",
@@ -2618,7 +2618,7 @@ impl TypeError {
             }
 
             ExcludedContextViolation { context, span } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E608").message(format!(
                     "cannot use context `{}` which is explicitly excluded (`!{}`)\n  \
                          help: remove the context usage\n  \
                          help: or remove `!{}` from the function's `using` clause if context is needed",
@@ -2635,7 +2635,7 @@ impl TypeError {
                 callee,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E609").message(format!(
                     "calling `{}` violates negative context constraint\n  \
                          note: context `{}` is excluded (`!{}`), but `{}` requires it\n  \
                          help: remove the call to `{}`\n  \
@@ -2655,7 +2655,7 @@ impl TypeError {
                 declaration_span,
             } => {
                 let mut builder = DiagnosticBuilder::error()
-                    .code("E3050")
+                    .code("E611")
                     .message(format!(
                         "negative context violation in function `{}`\n   |\n{} | Cannot use '{}' context - explicitly excluded via `using [!{}]`\n   |\n   = help: Remove the !{} from the using clause if you need {} access\n   = note: Function '{}' excludes {} for testing purity",
                         function_name,
@@ -2682,7 +2682,7 @@ impl TypeError {
                 second_span,
             } => {
                 let mut builder = DiagnosticBuilder::error()
-                    .code("E3060")
+                    .code("E612")
                     .message(format!(
                         "context alias conflict in module\n   |\n{} |     fn {}() using [{} as {}] {{ ... }}\n   |                         ^^^^^^^^^^^^^^^^^\n   = note: Alias '{}' conflicts with usage in same module\n   |\n{} |     fn {}() using [{} as {}] {{ ... }}\n   |                        ^^^^^^^^^^^^^^^\n   |                        Also uses alias '{}' for different context\n   |\n   = help: Use distinct aliases for different contexts",
                         first_span.start,
@@ -2848,7 +2848,7 @@ impl TypeError {
                 method,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E404").message(format!(
                     "method `{}` requires protocol `{}` but type `{}` does not implement it\n  \
                          help: implement `{}` for type `{}`\n  \
                          help: or use a different method that doesn't require this protocol",
@@ -2866,11 +2866,23 @@ impl TypeError {
                 actual,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "method `{}` expects {} argument(s), but {} were provided\n  \
+                // E102 is the arity code, and it has to be the SAME code the
+                // free-function path already uses (`infer/expr.rs`, both the
+                // under- and over-arity arms). A caller cannot tell whether
+                // the callee it named resolved as a method or as a free
+                // function, so a diagnostic that carries the code down one
+                // route and drops it down the other is not a smaller
+                // diagnostic — it is an uncatchable one. Anything that keys
+                // off the code (a spec's `@expected-error`, an editor's
+                // quick-fix, a `^error<` filter) sees the coded route only,
+                // and the uncoded half reads as "no such check exists".
+                let mut builder = DiagnosticBuilder::error()
+                    .code("E102")
+                    .message(format!(
+                        "method `{}` expects {} argument(s), but {} were provided\n  \
                          help: check the method signature",
-                    method, expected, actual
-                ));
+                        method, expected, actual
+                    ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2891,7 +2903,7 @@ impl TypeError {
                 }
                 msg.push_str("  help: specify the protocol explicitly or add type annotations");
 
-                let mut builder = DiagnosticBuilder::error().message(msg);
+                let mut builder = DiagnosticBuilder::error().code("E105").message(msg);
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2913,7 +2925,7 @@ impl TypeError {
                 actual_kind,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E415").message(format!(
                     "`{}` is not a type (it is a {})",
                     name, actual_kind
                 ));
@@ -2924,7 +2936,7 @@ impl TypeError {
             }
 
             TryOperatorOutsideFunction { span } => {
-                let mut builder = DiagnosticBuilder::error()
+                let mut builder = DiagnosticBuilder::error().code("E416")
                     .message("cannot use '?' operator outside of function context");
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
@@ -2933,8 +2945,13 @@ impl TypeError {
             }
 
             TryOnNonResult { ty, span } => {
+                // E0205, not E0203: this is the same defect `NotResultOrMaybe`
+                // reports below — `?` applied to a type that cannot carry
+                // failure — and the two were filing it under two codes, while
+                // E0203 ALSO covered the unrelated error-type conversion
+                // mismatch. One concept, one code; E0203 keeps the mismatch.
                 let mut builder = DiagnosticBuilder::error()
-                    .code("E0203")
+                    .code("E0205")
                     .message(format!("cannot use '?' on non-Result/Maybe type: {}", ty));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
@@ -3022,7 +3039,7 @@ impl TypeError {
                     "  help: break the cycle by using a reference type, Box<T>, or indirect reference\n  \
                      help: recursive types must use indirection (e.g., Box<Self>) to have finite size"
                 );
-                let mut builder = DiagnosticBuilder::error().message(msg);
+                let mut builder = DiagnosticBuilder::error().code("E417").message(msg);
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3048,7 +3065,10 @@ impl TypeError {
                      help: import specific items (`mount core.base.{Int, Text}`) instead of a glob, \
                      or remove the re-export that closes the cycle."
                 );
-                let mut builder = DiagnosticBuilder::error().code("E0811").message(msg);
+                // E201 is the registry's "circular import" — this IS that, and it
+                // was reaching users under a four-digit code from a second
+                // numbering while E201 sat unemitted.
+                let mut builder = DiagnosticBuilder::error().code("E201").message(msg);
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3056,7 +3076,7 @@ impl TypeError {
             }
 
             UnresolvedPlaceholder { name, span } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E106").message(format!(
                     "unresolved type `{}`\n  \
                          This type was referenced but never defined.\n  \
                          help: check the spelling of the type name\n  \
@@ -3070,7 +3090,7 @@ impl TypeError {
             }
 
             IncompleteTypeReference { name, span } => {
-                let mut builder = DiagnosticBuilder::error()
+                let mut builder = DiagnosticBuilder::error().code("E407")
                     .message(format!(
                         "type `{}` cannot reference itself in its own definition without indirection\n  \
                          help: use Box<{}> or a reference to break the direct self-reference\n  \
@@ -3084,7 +3104,7 @@ impl TypeError {
             }
 
             NonContextProtocolInUsing { name, span } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E610").message(format!(
                     "protocol '{}' cannot be used as a context\n  \
                          note: '{}' is a constraint protocol, use `where T: {}` instead\n  \
                          help: to make it injectable, declare as `context protocol {} {{ ... }}`",
@@ -3102,7 +3122,7 @@ impl TypeError {
                 unpacking_span,
                 escape_span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E418").message(format!(
                     "existential type escapes its scope\n  \
                          the opaque type '{}' cannot be used outside its unpacking scope\n  \
                          note: existential types hide their implementation details",
@@ -3119,7 +3139,7 @@ impl TypeError {
                 protocol,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E419").message(format!(
                     "existential bound not satisfied\n  \
                          type '{}' does not implement '{}'\n  \
                          help: ensure the witness type implements all required protocols",
@@ -3137,7 +3157,7 @@ impl TypeError {
                 type_name,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E420").message(format!(
                     "kind mismatch for '{}'\n  \
                          expected kind: {}\n  \
                          found kind: {}\n  \
@@ -3156,7 +3176,7 @@ impl TypeError {
                 actual_arity,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E421").message(format!(
                     "type constructor '{}' has wrong arity\n  \
                          expected {} type argument(s), found {}\n  \
                          note: F<_> has arity 1, F<_, _> has arity 2",
@@ -3174,7 +3194,7 @@ impl TypeError {
                 reason,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E422").message(format!(
                     "cannot resolve associated type '{}.{}'\n  \
                          {}\n  \
                          help: ensure '{}' implements a protocol that defines '{}'",
@@ -3197,7 +3217,7 @@ impl TypeError {
                     .map(|c| c.as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E423").message(format!(
                     "ambiguous associated type '{}.{}'\n  \
                          multiple implementations define '{}': {}\n  \
                          help: qualify with the specific protocol: Protocol.{}",
@@ -3210,7 +3230,7 @@ impl TypeError {
             }
 
             NegativeBoundViolated { ty, protocol, span } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E424").message(format!(
                     "negative bound violated\n  \
                          type '{}' implements '{}', but '!{}' was required\n  \
                          note: negative bounds exclude types that implement the protocol",
@@ -3228,7 +3248,7 @@ impl TypeError {
                 impl2,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E425").message(format!(
                     "specialization overlap for type '{}'\n  \
                          conflicting implementations:\n  \
                          - {}\n  \
@@ -3247,7 +3267,7 @@ impl TypeError {
                 protocol,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E426").message(format!(
                     "higher-kinded bound not satisfied\n  \
                          type constructor '{}' does not implement '{}'\n  \
                          help: implement '{}' for '{}' or use a different type constructor",
@@ -3261,7 +3281,7 @@ impl TypeError {
 
             // Inline assembly errors
             InvalidAsmConstType { found, span } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
+                let mut builder = DiagnosticBuilder::error().code("E803").message(format!(
                     "invalid type for inline assembly const operand: {}\n  \
                          help: const operands must be integer or pointer types",
                     found
@@ -3273,7 +3293,7 @@ impl TypeError {
             }
 
             AsmOutputNotLvalue { span } => {
-                let mut builder = DiagnosticBuilder::error().message(
+                let mut builder = DiagnosticBuilder::error().code("E804").message(
                     "inline assembly output operand must be an lvalue\n  \
                          help: use a variable or field access, not a literal or expression",
                 );
@@ -3283,7 +3303,7 @@ impl TypeError {
                 builder.build()
             }
 
-            RecursionLimit(msg) => DiagnosticBuilder::error()
+            RecursionLimit(msg) => DiagnosticBuilder::error().code("E804")
                 .message(format!("recursion limit exceeded: {}", msg))
                 .build(),
 
@@ -3323,7 +3343,7 @@ impl TypeError {
             // Definite Assignment Analysis Errors (E201)
             UseOfUninitializedVariable { name, span } => {
                 let mut builder = DiagnosticBuilder::error()
-                    .code("E201").message(format!("use of uninitialized variable '{}'", name));
+                    .code("E305").message(format!("use of uninitialized variable '{}'", name));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3335,7 +3355,7 @@ impl TypeError {
                 missing,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().code("E201")
+                let mut builder = DiagnosticBuilder::error().code("E305")
                 .message(format!(
                     "use of partially initialized variable '{}' (missing: {})",
                     name, missing
@@ -3347,7 +3367,7 @@ impl TypeError {
             }
 
             UninitializedField { var, field, span } => {
-                let mut builder = DiagnosticBuilder::error().code("E201")
+                let mut builder = DiagnosticBuilder::error().code("E305")
                 .message(format!(
                     "field '{}' of variable '{}' is not initialized",
                     field, var
@@ -3359,7 +3379,7 @@ impl TypeError {
             }
 
             UninitializedArrayElement { var, index, span } => {
-                let mut builder = DiagnosticBuilder::error().code("E201")
+                let mut builder = DiagnosticBuilder::error().code("E305")
                 .message(format!(
                     "array element at index {} of '{}' is not initialized",
                     index, var
@@ -3371,7 +3391,7 @@ impl TypeError {
             }
 
             UninitializedTupleElement { var, index, span } => {
-                let mut builder = DiagnosticBuilder::error().code("E201")
+                let mut builder = DiagnosticBuilder::error().code("E305")
                 .message(format!(
                     "tuple element {} of '{}' is not initialized",
                     index, var
@@ -3383,7 +3403,7 @@ impl TypeError {
             }
 
             IterationOverPartialArray { var, span, .. } => {
-                let mut builder = DiagnosticBuilder::error().code("E201")
+                let mut builder = DiagnosticBuilder::error().code("E305")
                 .message(format!(
                     "cannot iterate over partially initialized array '{}'",
                     var
@@ -3444,7 +3464,7 @@ impl TypeError {
                     "  help: break the cycle by removing one of the dependencies\n  \
                      help: constants must have a well-defined evaluation order",
                 );
-                let mut builder = DiagnosticBuilder::error().message(msg);
+                let mut builder = DiagnosticBuilder::error().code("E204").message(msg);
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }

@@ -3,10 +3,6 @@
 // @tier: 0
 // @tags: modules, name-resolution, module-path, arity
 // @expected-error: E102
-// @skip: T0806 is open — arity is not checked through a module path at any
-//        length, so this file checks CLEAN today and the call evaluates to
-//        `nil`. The skip comes off in the commit that fixes the check, not
-//        by editing the expectation.
 //
 // Pin (T0806, second half) — a call through a module path must satisfy the
 // callee's arity.

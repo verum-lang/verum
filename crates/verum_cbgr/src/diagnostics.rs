@@ -7,15 +7,27 @@
 //!
 //! | Code | Category | Description |
 //! |------|----------|-------------|
-//! | E1001 | Memory | Use-after-free detected |
-//! | E1002 | Memory | Double-free detected |
+//! | E315 | Memory | Use-after-free detected |
+//! | E316 | Memory | Double-free detected |
 //! | W1003 | Memory | Potential memory leak |
-//! | E1004 | Concurrency | Data race detected |
-//! | E1005 | Concurrency | Potential deadlock |
-//! | E1006 | Concurrency | Thread safety violation |
-//! | E1007 | Lifetime | Lifetime violation |
-//! | E1008 | Borrow | Borrow violation (NLL) |
+//! | E317 | Concurrency | Data race detected |
+//! | E318 | Concurrency | Potential deadlock |
+//! | E319 | Concurrency | Thread safety violation |
+//! | E312 | Lifetime | Lifetime violation |
+//! | E314 | Borrow | Borrow violation (NLL) |
 //! | W1009 | Tier | Reference kept at Tier 0 |
+//!
+//! These were E1001–E1008 until the error-code registry was completed
+//! and the two bands were compared. `verum_compiler`'s lint tables give
+//! E1001 to "stage mismatch in a quote expression" and E1002 to
+//! "cross-stage function call", so a diagnostic reading `E1001` meant
+//! either a use-after-free or a macro-staging mistake depending on which
+//! half of the compiler produced it — and nothing could route on it.
+//! The staging codes are pinned by three conformance specs and these
+//! were pinned by none, so these moved. They land in the registry's
+//! Memory band (E3xx), where two of them turned out to duplicate codes
+//! that already existed: a lifetime violation IS E312 and a borrow
+//! violation IS E314, so those two are now reused rather than minted.
 //!
 //! # Architecture
 //!
@@ -30,9 +42,9 @@
 //! ```
 //!
 //! Converts CBGR tier analysis results into standardized verum_diagnostics::Diagnostic
-//! instances. Reports memory safety issues (use-after-free E1001, double-free E1002,
-//! leaks W1003), concurrency issues (data race E1004, deadlock E1005, thread safety
-//! E1006), lifetime violations (E1007), borrow violations (E1008), and tier warnings
+//! instances. Reports memory safety issues (use-after-free E315, double-free E316,
+//! leaks W1003), concurrency issues (data race E317, deadlock E318, thread safety
+//! E319), lifetime violations (E312), borrow violations (E314), and tier warnings
 //! (W1009 for references that remain at Tier 0 when promotion might be possible).
 
 use crate::analysis::Span as CbgrSpan;
@@ -57,21 +69,21 @@ use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Span as DiagSpan};
 /// CBGR diagnostic codes.
 pub mod codes {
     /// Use-after-free detected.
-    pub const USE_AFTER_FREE: &str = "E1001";
+    pub const USE_AFTER_FREE: &str = "E315";
     /// Double-free detected.
-    pub const DOUBLE_FREE: &str = "E1002";
+    pub const DOUBLE_FREE: &str = "E316";
     /// Potential memory leak.
     pub const MEMORY_LEAK: &str = "W1003";
     /// Data race detected.
-    pub const DATA_RACE: &str = "E1004";
+    pub const DATA_RACE: &str = "E317";
     /// Potential deadlock.
-    pub const DEADLOCK: &str = "E1005";
+    pub const DEADLOCK: &str = "E318";
     /// Thread safety violation.
-    pub const THREAD_SAFETY: &str = "E1006";
-    /// Lifetime violation.
-    pub const LIFETIME_VIOLATION: &str = "E1007";
-    /// Borrow violation (NLL).
-    pub const BORROW_VIOLATION: &str = "E1008";
+    pub const THREAD_SAFETY: &str = "E319";
+    /// Lifetime violation — the registry's existing code for exactly this.
+    pub const LIFETIME_VIOLATION: &str = "E312";
+    /// Borrow violation (NLL) — the registry's existing "borrow conflict".
+    pub const BORROW_VIOLATION: &str = "E314";
     /// Reference kept at Tier 0.
     pub const TIER0_REFERENCE: &str = "W1009";
 }
@@ -270,7 +282,10 @@ impl CbgrDiagnostics {
 
         // Add documentation URL
         if self.config.include_doc_urls {
-            builder = builder.doc_url("https://verum-lang.org/docs/errors/E1001");
+            builder = builder.doc_url(format!(
+                "https://verum-lang.org/docs/errors/{}",
+                codes::USE_AFTER_FREE
+            ));
         }
 
         builder.build()
@@ -312,7 +327,10 @@ impl CbgrDiagnostics {
         }
 
         if self.config.include_doc_urls {
-            builder = builder.doc_url("https://verum-lang.org/docs/errors/E1002");
+            builder = builder.doc_url(format!(
+                "https://verum-lang.org/docs/errors/{}",
+                codes::DOUBLE_FREE
+            ));
         }
 
         builder.build()
@@ -434,7 +452,10 @@ impl CbgrDiagnostics {
         }
 
         if self.config.include_doc_urls {
-            builder = builder.doc_url("https://verum-lang.org/docs/errors/E1004");
+            builder = builder.doc_url(format!(
+                "https://verum-lang.org/docs/errors/{}",
+                codes::DATA_RACE
+            ));
         }
 
         builder.build()
@@ -483,7 +504,10 @@ impl CbgrDiagnostics {
         }
 
         if self.config.include_doc_urls {
-            builder = builder.doc_url("https://verum-lang.org/docs/errors/E1005");
+            builder = builder.doc_url(format!(
+                "https://verum-lang.org/docs/errors/{}",
+                codes::DEADLOCK
+            ));
         }
 
         builder.build()
@@ -529,7 +553,10 @@ impl CbgrDiagnostics {
         }
 
         if self.config.include_doc_urls {
-            builder = builder.doc_url("https://verum-lang.org/docs/errors/E1006");
+            builder = builder.doc_url(format!(
+                "https://verum-lang.org/docs/errors/{}",
+                codes::THREAD_SAFETY
+            ));
         }
 
         builder.build()
@@ -602,7 +629,10 @@ impl CbgrDiagnostics {
         }
 
         if self.config.include_doc_urls {
-            builder = builder.doc_url("https://verum-lang.org/docs/errors/E1007");
+            builder = builder.doc_url(format!(
+                "https://verum-lang.org/docs/errors/{}",
+                codes::LIFETIME_VIOLATION
+            ));
         }
 
         builder.build()
@@ -668,7 +698,10 @@ impl CbgrDiagnostics {
         }
 
         if self.config.include_doc_urls {
-            builder = builder.doc_url("https://verum-lang.org/docs/errors/E1008");
+            builder = builder.doc_url(format!(
+                "https://verum-lang.org/docs/errors/{}",
+                codes::BORROW_VIOLATION
+            ));
         }
 
         builder.build()

@@ -22,6 +22,36 @@ pub fn execute(code: &str, no_color: bool) -> Result<()> {
         let rendered = render_explanation(explanation, !no_color);
         println!("{}", rendered);
         Ok(())
+    } else if let Some(entry) = verum_error::registry::lookup(&normalized_code) {
+        // The explanation TABLE and the codes the compiler actually PRINTS
+        // were, until this fallback existed, disjoint sets. The table holds
+        // twenty-seven four-digit codes; the compiler emits sixty-nine, most
+        // of them three-digit. So `verum explain E400` — a type mismatch,
+        // about the most common diagnostic there is — answered "not found",
+        // and every code a user was likely to have in front of them did the
+        // same. The registry knows all of them. A one-line description is
+        // less than the hand-written explanations offer, but it is what the
+        // compiler can honestly say about every code it can produce, and it
+        // cannot drift: the same table the diagnostic was checked against
+        // answers here.
+        println!("{}", normalized_code.bold());
+        println!();
+        println!("  {}", entry.description);
+        println!();
+        println!(
+            "  {} {}",
+            "category:".bright_black(),
+            entry.category.label()
+        );
+        println!();
+        println!(
+            "{}",
+            "This code has no long-form explanation yet — the line above is its\n\
+             registry entry. `verum explain` shows a worked example, causes and\n\
+             fixes for codes that have one."
+                .bright_black()
+        );
+        Ok(())
     } else {
         // Error code not found - show helpful message
         eprintln!(
@@ -41,9 +71,18 @@ pub fn execute(code: &str, no_color: bool) -> Result<()> {
             eprintln!();
         }
 
-        // Show available codes
+        // Show available codes — from BOTH tables. Listing only the
+        // explanation table told a user who mistyped that twenty-seven
+        // codes exist, while omitting every code the compiler had just
+        // printed at them.
         eprintln!("{}", "Available error codes:".cyan());
         let mut codes = list_error_codes();
+        for registered in verum_error::registry::REGISTRY.keys() {
+            let registered = verum_common::Text::from(*registered);
+            if !codes.contains(&registered) {
+                codes.push(registered);
+            }
+        }
         codes.sort();
 
         // Group by category (first 2 digits after E)
@@ -76,10 +115,21 @@ pub fn execute(code: &str, no_color: bool) -> Result<()> {
         }
 
         eprintln!();
-        let usage_msg: &str = "Usage: verum explain E0312";
+        let usage_msg: &str = "Usage: verum explain E400";
         eprintln!("{}", usage_msg.bright_black());
 
-        std::process::exit(1);
+        // Return the failure rather than calling `std::process::exit(1)`
+        // here. `main` already maps an Err to a non-zero exit
+        // (`process::exit(e.exit_code())`), so the exit behaviour is
+        // unchanged — but exiting from inside made this branch impossible
+        // to test: `process::exit` in a unit test kills the whole test
+        // binary, not just the case. That is why the module's tests only
+        // ever exercised codes that RESOLVE, and why nobody noticed that
+        // `verum explain E400` — a code the compiler prints constantly —
+        // answered "not found" for as long as it did.
+        Err(crate::error::CliError::Custom(format!(
+            "unknown error code '{normalized_code}'"
+        )))
     }
 }
 
@@ -194,5 +244,34 @@ mod tests {
     fn test_search_refinement() {
         let result = search("refinement");
         assert!(result.is_ok());
+    }
+
+    /// The codes a user actually sees must be explainable.
+    ///
+    /// Each of these is emitted by the compiler and NONE of them is in the
+    /// hand-written explanation table — they resolve through the registry.
+    /// Before that fallback existed every one of them printed "Error code
+    /// not found", which is the worst possible answer: the diagnostic told
+    /// the user to look the code up, and the lookup denied the code exists.
+    #[test]
+    fn codes_the_compiler_actually_prints_are_explainable() {
+        for code in ["E100", "E400", "E404", "E102", "E305", "E600"] {
+            assert!(
+                execute(code, true).is_ok(),
+                "`verum explain {code}` failed, but the compiler can print {code}"
+            );
+        }
+    }
+
+    /// And a code that exists in NEITHER table is still an error — the
+    /// fallback must not turn every string into a plausible answer.
+    #[test]
+    fn a_code_in_no_table_is_reported_as_unknown() {
+        assert!(
+            execute("E999", true).is_err(),
+            "E999 is in neither table; reporting it as explainable would make \
+             the command useless as a check"
+        );
+        assert!(execute("E12345", true).is_err(), "not a well-formed code");
     }
 }

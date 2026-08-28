@@ -3,11 +3,6 @@
 // @tier: 0
 // @tags: modules, name-resolution, module-path, call
 // @expected-error: E100
-// @skip: T0806 is open — a call through a module path of three or more
-//        segments is not resolved, so this file checks CLEAN today and the
-//        call evaluates to `nil`. The spec states the expectation and is the
-//        acceptance control for that task; the skip comes off in the commit
-//        that fixes the resolution, not by editing the expectation.
 //
 // Pin (T0806) — a call through a module path must name something.
 //

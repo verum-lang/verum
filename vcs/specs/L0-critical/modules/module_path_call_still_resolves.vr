@@ -8,13 +8,14 @@
 // two-segment true
 // deep 7
 // chained 2
+// archive dead
 // @expected-stdout-end
 // @description: The positive pole of `module_path_call_is_checked.vr` —
 //   every module-path call that WORKED must keep working.
 //
 // Closing the hole in module-path resolution meant teaching the checker
 // to refuse two things it used to accept, and a refusal is only as good
-// as what it leaves alone. This file is what "leaves alone" means: five
+// as what it leaves alone. This file is what "leaves alone" means: six
 // spellings that must check clean and run, so a fix that rejects the
 // good path too fails here instead of in someone's program.
 //
@@ -35,6 +36,16 @@
 //     and `module.path.Type.Variant(x)` — is type-qualified dispatch,
 //     not a module member. It is exercised by `Colour.Red.brightness()`
 //     below.
+//
+//   * `archive` — a stdlib path written WITHOUT the archive root. The
+//     source says `encoding.hex.encode`; the archive keys it under
+//     `core.encoding.hex.encode`. Any probe that answers by shortening
+//     the QUERY can never reach a key one segment LONGER than what it
+//     was handed, so it reports "no such member" about a function that
+//     is right there — and a gate built on that probe rejects working
+//     stdlib code. The root has to come from the archive metadata and
+//     be prefixed onto the query. This spelling is how `core/` calls
+//     itself; three files' worth of it were being rejected.
 
 module lib {
     public module inner {
@@ -76,4 +87,8 @@ fn main() {
     // method on a variant reached through a type name.
     let chained = lib.inner.takes(1).min(3);
     print(f"chained {chained + Colour.Red.brightness() - 3}");
+
+    // A stdlib path spelled without its archive root.
+    let bytes: [Byte; 2] = [222, 173];
+    print(f"archive {encoding.hex.encode(&bytes[..])}");
 }
