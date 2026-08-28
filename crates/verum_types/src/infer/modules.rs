@@ -10947,7 +10947,21 @@ impl TypeChecker {
                 .iter()
                 .any(|attr| attr.name.as_str() == "tailrec");
 
-            if !has_allow_unbounded && !has_tailrec {
+            // A `cofix` function is CORECURSIVE BY DECLARATION, and the
+            // question asked of it is productivity, not termination:
+            // `cofix fn ones() -> Stream<Int> { .head => 1, .tail => ones() }`
+            // is the canonical coinductive definition and must never
+            // terminate. Running the termination walk over it reports
+            // `E321: unbounded recursion` — correctly, by its own
+            // criterion, and about the wrong criterion.
+            //
+            // The right check is already wired: `check_cofix_productivity`
+            // a few hundred lines below, gated on `func.is_cofix &&
+            // coinductive_enabled`, which refuses an UNGUARDED self-call.
+            // It simply never ran, because this walk errored first — so
+            // `cofix` was unusable, and the minimal one-line definition
+            // above was refused.
+            if !has_allow_unbounded && !has_tailrec && !func.is_cofix {
                 let term_result = if self.in_impl_block {
                     self.termination_checker.check_method(func)
                 } else {
