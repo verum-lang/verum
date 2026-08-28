@@ -739,6 +739,42 @@ impl<'a> RecursiveParser<'a> {
     /// provide_stmt = 'provide' , context_path , [ 'as' , identifier ] , '=' , expression , ( ';' | 'in' , block_expr ) ;
     /// context_path = identifier , { '.' , identifier } ;
     /// ```
+    /// Parses ONE `provide` binding's value expression.
+    ///
+    /// Binding power 7 stops before the `in` operator (which is (6, 7)), so
+    /// the caller can still see `in { ... }` as the scope form.
+    ///
+    /// The identifier peek is what lets a named record literal through:
+    ///
+    ///     provide Logger = ConsoleLogger { level: 1 } { ... }
+    ///                      ^^^^^^^^^^^^^^^^^^^^^^^^^ value  ^^^^^ scope
+    ///
+    /// Without it the `{` after the name reads as the scope block and the
+    /// record's fields land in statement position. That is exactly what
+    /// happened to the SECOND and later bindings of a multi-provide, which
+    /// called `parse_expr_bp_no_struct` directly while the first binding
+    /// used this rule: `provide A = X { .. }, B = Y { f: 1 } { body }` lost
+    /// `Y`'s fields, and with an EMPTY record the misparse was silent —
+    /// `B = T { }` took `{ }` as the scope, the real body became a separate
+    /// statement after the provide, and both contexts were popped before it
+    /// ran. The program compiled and panicked with "Context T not provided".
+    ///
+    /// One rule, one carrier: every binding in a provide is parsed here.
+    fn parse_provide_value(&mut self) -> ParseResult<verum_ast::Expr> {
+        if matches!(self.stream.peek_kind(), Some(TokenKind::Ident(_)))
+            || matches!(
+                self.stream.peek_kind(),
+                Some(TokenKind::Some | TokenKind::None | TokenKind::Ok | TokenKind::Err)
+            )
+        {
+            // Identifier-led expression: allow struct literal parsing
+            self.parse_expr_bp(7)
+        } else {
+            // Non-identifier expression: no_struct, so `{` stays the scope
+            self.parse_expr_bp_no_struct(7)
+        }
+    }
+
     fn parse_provide_stmt(&mut self) -> ParseResult<Stmt> {
         // Consume "provide" keyword. Supports:
         // - Single: `provide Ctx = value { block }`
@@ -910,17 +946,7 @@ impl<'a> RecursiveParser<'a> {
         // If the next token after '=' is an identifier and the token after THAT is '{',
         // we need to allow struct literal parsing. But if there's no identifier before '{',
         // the '{' is a scope block.
-        let value = if matches!(self.stream.peek_kind(), Some(TokenKind::Ident(_)))
-            || matches!(
-                self.stream.peek_kind(),
-                Some(TokenKind::Some | TokenKind::None | TokenKind::Ok | TokenKind::Err)
-            ) {
-            // Identifier-led expression: allow struct literal parsing
-            self.parse_expr_bp(7)?
-        } else {
-            // Non-identifier expression: use no_struct to prevent { from being consumed
-            self.parse_expr_bp_no_struct(7)?
-        };
+        let value = self.parse_provide_value()?;
         let value_span = value.span;
 
         // Handle multi-provide: provide A = x, B = y { block }
@@ -955,7 +981,7 @@ impl<'a> RecursiveParser<'a> {
                 };
 
                 self.stream.expect(TokenKind::Eq)?;
-                let next_value = self.parse_expr_bp_no_struct(7)?;
+                let next_value = self.parse_provide_value()?;
                 bindings.push((next_ctx, next_alias, next_value));
             }
 
