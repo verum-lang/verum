@@ -17,6 +17,14 @@
 //   Shared's OWN methods — must still answer about the carrier rather
 //   than being forwarded to the value. A fix that peels unconditionally
 //   passes the first half and breaks the second.
+//
+//   ROUND TWO (2026-08-28): the first fix peeled POINTERS, so it cured
+//   `Shared<List<Int>>` — a list is a heap pointer — and left every
+//   carrier holding a NaN-boxed inner untouched. `Shared.new("hello")`
+//   and `Shared.new("hi")` both still answered 2, and so did
+//   `Shared<Shared<List>>` one level up; `Shared.new(list)[1]` returned
+//   the whole list. The three cases below are why the peel now happens
+//   on the VALUE, before any branch asks what shape it has.
 // @expected-stdout-begin
 // direct_len=3
 // direct_empty=false
@@ -25,6 +33,10 @@
 // wide_len=7
 // empty_len=0
 // empty_is_empty=true
+// text_len=5
+// text_short_len=2
+// nested_len=4
+// index_1=20
 // strong=1
 // @expected-stdout-end
 
@@ -47,6 +59,24 @@ fn main() {
     let se = Shared.new(none);
     print(f"empty_len={se.len()}");
     print(f"empty_is_empty={se.is_empty()}");
+
+    // A NaN-BOXED inner. `"hello"` is a small string carried inside the
+    // value itself, not a heap pointer, so a peel that only follows
+    // pointers does not fire — and the carrier's own two slots answer.
+    // Two different texts, because a constant 2 passes one of them.
+    print(f"text_len={Shared.new(\"hello\").len()}");
+    print(f"text_short_len={Shared.new(\"hi\").len()}");
+
+    // NESTED carriers: peeling once leaves another carrier, whose two
+    // slots answer 2 exactly as before.
+    let inner: List<Int> = [1, 2, 3, 4];
+    print(f"nested_len={Shared.new(Shared.new(inner)).len()}");
+
+    // INDEXING is the second direct opcode with the same blind spot:
+    // `GetE` had no peel at all, so this read the carrier and returned
+    // the whole list.
+    let idx: List<Int> = [10, 20, 30];
+    print(f"index_1={Shared.new(idx)[1]}");
 
     // Shared's own method still answers about the CARRIER.
     print(f"strong={se.strong_count()}");

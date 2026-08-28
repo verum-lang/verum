@@ -587,6 +587,48 @@ fn shared_carrier_inner(
     Ok(ptr)
 }
 
+/// Peel `Shared<T>` carriers from a VALUE, returning the value the
+/// outermost carrier ultimately holds.
+///
+/// The ONE value-level peel authority, next to the pointer-level
+/// [`shared_carrier_inner`] used by GetF/SetF. Both exist because the
+/// two kinds of site ask different questions: a field read already
+/// holds a pointer and needs the inner POINTER, while an opcode that
+/// dispatches on the value's SHAPE — `Len`, `GetE` — must peel before
+/// it can ask what shape it has.
+///
+/// That distinction is what the pointer-only peel got wrong: it fired
+/// for `Shared<List<Int>>`, because a list is a heap pointer, and did
+/// nothing for a carrier whose inner value is NaN-boxed inline. A small
+/// string is exactly that, so `Shared.new("hello").len()` measured the
+/// CARRIER — two slots, `[rc][inner]` — and answered a constant 2 for
+/// every text.
+///
+/// The loop rather than a single peel is for `Shared<Shared<T>>`, wrong
+/// for the same reason one level up. It is bounded because a malformed
+/// carrier could otherwise point at itself.
+fn peel_shared_value(mut val: Value) -> Value {
+    for _ in 0..16 {
+        if !val.is_ptr() || val.is_nil() {
+            break;
+        }
+        let p = val.as_ptr::<u8>();
+        if p.is_null() {
+            break;
+        }
+        // SAFETY: non-null heap pointer; `ref_or_stub` tolerates a
+        // non-object target by returning a stub header, whose type_id
+        // is not SHARED, so the loop stops.
+        let carrier = unsafe { heap::ObjectHeader::ref_or_stub(p) };
+        if carrier.type_id != TypeId::SHARED {
+            break;
+        }
+        // SAFETY: SHARED type-id established.
+        val = unsafe { shared_cell_inner_value(p) };
+    }
+    val
+}
+
 /// Read the inner `Value` stored in a `Shared<T>` carrier cell.
 /// Shared layout: `[ObjectHeader][rc:i64 @ slot0][inner:Value @ slot1]` —
 /// the ONE layout authority for Shared auto-deref, shared by
@@ -840,7 +882,11 @@ pub(in super::super) fn handle_get_index(
     let arr = read_reg(state)?;
     let idx = read_reg(state)?;
 
-    let arr_val = state.get_reg(arr);
+    // Same value-level peel as `Len`: every branch below dispatches on
+    // the value's SHAPE, so a `Shared<T>` carrier has to be gone before
+    // the first question is asked. Without it `Shared.new([10,20,30])[1]`
+    // read the carrier and returned the whole list instead of `20`.
+    let arr_val = peel_shared_value(state.get_reg(arr));
 
     // Handle FatRef (slice) indexing first - FatRef also passes is_ptr() so check this before
     if arr_val.is_fat_ref() {
@@ -1538,6 +1584,11 @@ pub(in super::super) fn handle_array_len(
         }
     }
 
+    // Peel `Shared<T>` carriers HERE, at the VALUE level, before any of
+    // the value-shaped branches below — see `peel_shared_value` for what
+    // the pointer-level peel further down could not reach.
+    val = peel_shared_value(val);
+
     // Handle small strings: return byte length directly from NaN-boxed value
     if val.is_small_string() {
         let ss = val.as_small_string();
@@ -1572,7 +1623,12 @@ pub(in super::super) fn handle_array_len(
     // dispatcher performs never ran. The carrier is a two-slot cell
     // (`[header][rc][inner]`), so `Shared.new(list).len()` answered a
     // constant 2 for every list: a plausible number, reported by nothing.
-    // Same authority as the GetF/SetF deref, so the three cannot drift.
+    //
+    // The peel itself now happens ABOVE, on the Value, so that a carrier
+    // holding a NaN-boxed inner (a small string) is peeled too. This
+    // call stays as the alignment check for a pointer-shaped inner —
+    // `shared_carrier_inner` returns `ptr` unchanged once the header is
+    // no longer SHARED, which after the loop above it never is.
     let ptr = {
         let carrier_header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
         shared_carrier_inner(carrier_header, ptr)?
