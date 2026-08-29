@@ -1,58 +1,103 @@
-// @test: verify-fail
+// @test: verify-pass
 // @tier: 0
 // @level: L1
 // @tags: refinement, quantifiers, forall, exists, substitution, capture, soundness
 // @timeout: 30000
-// @expected-error: proof-failed
 
-/// A quantifier that binds the refinement's own name must SHADOW it.
+/// A quantified refinement does not kill the verifier.
 ///
 /// Substituting a value into a refinement predicate walks the predicate
 /// replacing the refinement variable. That walk had explicit rules for
-/// `block`, `if`, `match`, `closure` and `for`, and none for `forall` or
-/// `exists` — so a quantifier fell through to the structural walk, which
-/// rebuilds a node with every child substituted and knows nothing about
-/// what the node binds. The quantified variable was rewritten.
+/// `block`, `if`, `match`, `closure` and `for`, and none for `forall`
+/// or `exists` — so a quantifier fell through to the structural walk,
+/// which rebuilds a node with every child substituted and knows nothing
+/// about what the node binds. The QUANTIFIED variable was rewritten.
 ///
-/// Both types below are UNINHABITED under the correct reading and
-/// INHABITED under capture, which is what makes this file a test rather
-/// than a demonstration:
+/// What stood there was `debug_assert!(!introduces_bindings(..))`,
+/// which is not a guard: release builds delete it, so that is where the
+/// capture happened, in silence. In a debug build it aborted the
+/// verifier outright, and three L1 specs did exactly that the moment
+/// the suite started running a verifier at all (T0957):
+/// `quantified_refinements`, `quantified_predicates`, `smt_integration`.
 ///
-///   `forall x in 0..3 => x == 7` quantifies its own `x`, so it asks
-///   whether every one of 0,1,2,3 equals 7. It does not. Capture turns it
-///   into `forall x in 0..3 => 7 == 7`, which is true of everything.
+/// WHAT THIS FILE PINS, and what it deliberately does not.
 ///
-/// So a function claiming to return one of these must NOT verify. Before
-/// the fix it did — or, in a debug build, tripped the `debug_assert!` that
-/// stood in for a scope rule and killed the verifier outright. Release
-/// builds delete that assertion, so there the capture simply happened.
+/// It pins that a refinement whose quantifier SHADOWS the refinement
+/// variable is processed without crashing, and that the surrounding
+/// contracts still discharge. That is the observable consequence of the
+/// fix today.
 ///
-/// This went unnoticed because the whole `verify-pass` / `verify-fail`
-/// category ran a typecheck and reported PASS without ever calling a
-/// verifier (T0957). The assertion was written, and nothing asked it.
+/// It does NOT pin the capture itself, and pretending otherwise would
+/// be the false green this suite is full of. Measured: a quantified
+/// refinement is never decided — the solver answers `unknown` and the
+/// compiler says so, `warning<W0500>: refinement … was NOT verified …
+/// so the constraint is not enforced here`. A predicate that is not
+/// enforced is green whether it is true or false, so a spec built on
+/// one proves nothing about substitution. An earlier version of this
+/// file stated two claims that are false under correct shadowing and
+/// true under capture, and BOTH "passed" before the fix and after it,
+/// for that reason. Enforcement is T0964.
 ///
-/// Task: T0958. The companion `quantifier_shadow_still_substitutes.vr`
-/// holds the other half: refusing to substitute everywhere would satisfy
-/// this file and prove nothing.
+/// Two further measurements recorded so the next reader does not
+/// rediscover them: a refinement in a function SIGNATURE does not
+/// discharge at all (neither as a return type nor as a hypothesis on a
+/// parameter), while the same predicate on a local binding does; and
+/// `forall k in 0..3` — the form the rest of the corpus is written in —
+/// does not translate, while `forall k: Int. …` does. Both are T0964.
+///
+/// Task: T0958.
 
-/// The quantifier binds `x`, shadowing the refinement's `x`.
-type ForallShadow is x: Int where forall x in 0..3 => x == 7;
+/// The quantifier binds `x`, shadowing the refinement's own `x`.
+type ForallShadow is x: Int where forall x: Int. x >= 0 && x < 3 => x == 7;
 
 /// The same for the existential.
-type ExistsShadow is x: Int where exists x in 0..3 => x == 7;
+type ExistsShadow is x: Int where exists x: Int. x >= 0 && x < 3 && x == 7;
+
+/// The quantifier binds something ELSE, so the refinement variable is
+/// the one that must be replaced — in the guard and in the body.
+type BeatsAll is m: Int where forall k: Int. k >= 0 && k < 3 => m >= k;
 
 @verify(formal)
-public fn forall_shadow_MUST_FAIL() -> ForallShadow {
-    7
+public fn a_shadowing_forall_does_not_crash(n: Int) -> Int
+    requires n == 0
+    ensures result == 7
+{
+    let v: ForallShadow = 7;
+    v
 }
 
 @verify(formal)
-public fn exists_shadow_MUST_FAIL() -> ExistsShadow {
-    7
+public fn a_shadowing_exists_does_not_crash(n: Int) -> Int
+    requires n == 0
+    ensures result == 7
+{
+    let v: ExistsShadow = 7;
+    v
+}
+
+@verify(formal)
+public fn a_non_shadowing_forall_does_not_crash(n: Int) -> Int
+    requires n == 0
+    ensures result == 9
+{
+    let v: BeatsAll = 9;
+    v
+}
+
+/// The control that keeps this file from passing on an empty verifier:
+/// an ordinary contract in the same file must still discharge, and a
+/// quantifier in an `ensures` — which IS decided — must still hold.
+@verify(formal)
+public fn ordinary_contracts_still_discharge(m: Int) -> Int
+    requires m == 9
+    ensures result >= 0
+    ensures forall k: Int. k >= 0 && k < 3 => result >= k
+{
+    m
 }
 
 mount core.prelude.*;
 
 fn main() {
-    print("a quantifier shadows the refinement variable");
+    print("a quantified refinement does not kill the verifier");
 }

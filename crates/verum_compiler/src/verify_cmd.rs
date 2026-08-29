@@ -1785,7 +1785,28 @@ impl<'s> VerifyCommand<'s> {
                     tail_expr = Some(e);
                 }
                 FunctionBody::Block(blk) => {
-                    for stmt in &blk.stmts {
+                    let last_index = blk.stmts.len().saturating_sub(1);
+                    for (i, stmt) in blk.stmts.iter().enumerate() {
+                        // The only statement whose value the block
+                        // RETURNS is a final one without a semicolon,
+                        // and only when the block states no `expr` of
+                        // its own. Everything else runs for effect,
+                        // semicolon or not — `while c { … }` in the
+                        // middle of a block carries no semicolon and
+                        // changes everything after it.
+                        //
+                        // Measured: without this distinction a body
+                        // whose loop the fold could not decide fell
+                        // back to the bare tail, the solver still held
+                        // `acc == 0` from the `let`, and
+                        // `ensures result == 0` PROVED for a function
+                        // that never returns. That is the T0954 hole
+                        // reopening through the no-semicolon door, and
+                        // the negative spec written for the loop work
+                        // is what caught it.
+                        let is_the_tail = i == last_index
+                            && matches!(blk.expr, verum_common::Maybe::None)
+                            && matches!(&stmt.kind, StmtKind::Expr { has_semi: false, .. });
                         match &stmt.kind {
                             StmtKind::Let {
                                 pattern,
@@ -1808,21 +1829,21 @@ impl<'s> VerifyCommand<'s> {
                                     }
                                 }
                             }
-                            StmtKind::Expr { has_semi: false, .. } => {
-                                // A tail expression appearing as the final
-                                // statement (some parser shapes produce a
-                                // block with no separate `.expr`). It is
-                                // picked up below, where it goes through
-                                // the same fold as the other shape.
-                            }
-                            StmtKind::Expr { has_semi: true, .. } => {
-                                // No VALUE, which is not the same as no
-                                // EFFECT — `acc = 1;` and `xs.push(v);`
-                                // both change what the tail evaluates to.
+                            StmtKind::Expr { .. } => {
+                                // No VALUE is not the same as no EFFECT.
+                                // `acc = 1;`, `xs.push(v);` and a
+                                // `while` in the middle of a block all
+                                // change what the tail evaluates to.
                                 // Skipping them is only sound when the
-                                // fold below models them; record that one
-                                // is present and let that decide.
-                                has_semi_stmt = true;
+                                // fold below models them; record that
+                                // one is present and let that decide.
+                                //
+                                // The one exception is the block's own
+                                // tail, which is a value rather than an
+                                // effect and is read below.
+                                if !is_the_tail {
+                                    has_semi_stmt = true;
+                                }
                             }
                             _ => {
                                 safe_encoding = false;

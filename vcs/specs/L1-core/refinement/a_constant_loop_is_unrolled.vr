@@ -1,0 +1,102 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, loops, unrolling, reflection, verification
+// @timeout: 30000
+
+/// A loop whose trip count the fold can decide is unrolled.
+///
+/// Each pair below is the SAME arithmetic written twice — once
+/// straight, once as a loop — so what is measured is exactly the loop
+/// and nothing else. Before this, the second of each pair failed while
+/// the first proved.
+///
+/// The condition is decided by CONSTANT FOLDING against the bindings
+/// the fold already holds, not by matching the loop's shape. A shape
+/// rule — "find `i < K` and a `+1` step" — sees `four_by_loop` and
+/// misses `count_down`, which counts down by two and tests `> 0`. One
+/// rule covers both, and stops by itself the moment the condition stops
+/// being constant.
+///
+/// WHERE IT HAD TO GO. Unrolling was implemented first at the
+/// weakest-precondition level and measured completely inert: the
+/// analysis fired, a constant trip count was detected, the formula was
+/// built, and no verdict moved. That work was reverted rather than
+/// landed. A function's postcondition is discharged by binding `result`
+/// to the FOLDED body, so a loop has to disappear in the fold — which
+/// is only possible now that everything inside a loop body folds:
+/// assignment to a local (T0954), the bitwise operators (T0956), and
+/// reading an element (T0962).
+///
+/// The budget is a COST, not a line count. Three lines of source can
+/// spend thirty-two rounds, and a body that squares its accumulator
+/// doubles its term every round; counting statements PROCESSED lets the
+/// first through and still refuses the second.
+///
+/// Task: T0963.
+
+@verify(formal)
+public fn four_straight(n: Int) -> Int
+    requires n == 0
+    ensures result == 4
+{
+    let mut acc = 0;
+    acc = acc + 1;
+    acc = acc + 1;
+    acc = acc + 1;
+    acc = acc + 1;
+    acc
+}
+
+@verify(formal)
+public fn four_by_loop(n: Int) -> Int
+    requires n == 0
+    ensures result == 4
+{
+    let mut acc = 0;
+    let mut i = 0;
+    while i < 4 {
+        acc = acc + 1;
+        i = i + 1;
+    }
+    acc
+}
+
+/// Counts DOWN, by two, testing `>`. A rule written around the shape of
+/// `four_by_loop` does not see this one.
+@verify(formal)
+public fn count_down(n: Int) -> Int
+    requires n == 0
+    ensures result == 3
+{
+    let mut acc = 0;
+    let mut i = 6;
+    while i > 0 {
+        acc = acc + 1;
+        i = i - 2;
+    }
+    acc
+}
+
+/// A loop that runs zero times still has to be right: the condition is
+/// constantly false from the start, so the accumulator keeps its
+/// initial value rather than the fold refusing or looping.
+@verify(formal)
+public fn never_runs(n: Int) -> Int
+    requires n == 0
+    ensures result == 7
+{
+    let mut acc = 7;
+    let mut i = 0;
+    while i > 10 {
+        acc = acc + 1;
+        i = i + 1;
+    }
+    acc
+}
+
+mount core.prelude.*;
+
+fn main() {
+    print("a constant loop is unrolled");
+}

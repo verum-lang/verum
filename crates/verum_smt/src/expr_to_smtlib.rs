@@ -860,9 +860,34 @@ pub fn expr_to_smtlib_env(
             Ok(format!("({})", parts.join(" ")))
         }
 
-        _ => Err(SmtTranslateError::UnsupportedExpr {
-            description: format!("{:?}", std::mem::discriminant(&expr.kind)),
-        }),
+        // NAME the form. This used to answer
+        // `format!("{:?}", std::mem::discriminant(&expr.kind))`, which
+        // prints `Discriminant(13)` — a number that identifies the
+        // variant to nobody, changes whenever the enum is reordered,
+        // and cannot be grepped for. Measured cost: a reflected body
+        // declined with `Discriminant(13)` and the only way to learn
+        // which construct it meant was to bisect the source by hand.
+        //
+        // `{:?}` on the kind leads with the variant's NAME, so a
+        // truncated debug rendering says "Cast { … " or "TupleIndex {
+        // … " and the reader is done. Truncated because the tail is the
+        // entire subtree, and a decline reason that is thirty kilobytes
+        // long is unreadable in a different way.
+        _ => {
+            let rendered = format!("{:?}", expr.kind);
+            let name: String = rendered
+                .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .next()
+                .unwrap_or("")
+                .to_string();
+            Err(SmtTranslateError::UnsupportedExpr {
+                description: format!(
+                    "no SMT-LIB rule for `{}`: {}",
+                    name,
+                    rendered.chars().take(120).collect::<String>()
+                ),
+            })
+        }
     }
 }
 
@@ -1073,28 +1098,77 @@ fn fold_let_bindings(
     stmts: &[verum_ast::stmt::Stmt],
     tail: &Expr,
 ) -> Option<Expr> {
-    use verum_ast::stmt::StmtKind;
-
-    // Bounded: each substitution can duplicate its bound expression
-    // once per use, so a long chain multiplies. Eight is far past any
-    // predicate anyone writes and short enough that the worst case
-    // stays small.
-    const MAX_BINDINGS: usize = 8;
-    if stmts.len() > MAX_BINDINGS {
-        return None;
-    }
+    // Bounded by COST, not by line count. Each substitution can
+    // duplicate its bound expression once per use, so a long chain
+    // multiplies; and an unrolled loop spends the same budget many
+    // times over from three lines of source. Counting statements
+    // PROCESSED rather than statements written is what lets a 32-round
+    // loop through while still refusing a body that doubles its term
+    // on every step.
+    //
+    // 256 covers both hash widths the showcase uses — 32 rounds of two
+    // statements, and 64 of the same — with room over.
+    let mut budget: usize = 256;
 
     let mut bindings: Vec<(String, Expr)> = Vec::with_capacity(stmts.len());
     let mut guards: Vec<(Expr, Expr)> = Vec::new();
-    let apply = |e: &Expr, bs: &[(String, Expr)]| -> Expr {
-        let mut out = e.clone();
-        for (bound, replacement) in bs {
-            out = substitute_ident(&out, bound, replacement);
-        }
-        out
-    };
+    fold_stmts(stmts, &mut bindings, &mut guards, &mut budget)?;
+
+    let mut folded = apply_bindings(tail, &bindings);
+    // Innermost guard last: the FIRST guard written is the outermost
+    // test, so wrapping runs in reverse.
+    for (cond, value) in guards.iter().rev() {
+        folded = Expr::new(
+            ExprKind::If {
+                condition: verum_common::Heap::new(verum_ast::expr::IfCondition {
+                    conditions: std::iter::once(verum_ast::expr::ConditionKind::Expr(
+                        cond.clone(),
+                    ))
+                    .collect(),
+                    span: cond.span,
+                }),
+                then_branch: verum_ast::expr::Block::new(
+                    verum_common::List::new(),
+                    verum_common::Maybe::Some(verum_common::Heap::new(value.clone())),
+                    value.span,
+                ),
+                else_branch: verum_common::Maybe::Some(verum_common::Heap::new(folded)),
+            },
+            cond.span,
+        );
+    }
+    Some(folded)
+}
+
+/// Substitute every binding seen so far into `e`.
+fn apply_bindings(e: &Expr, bs: &[(String, Expr)]) -> Expr {
+    let mut out = e.clone();
+    for (bound, replacement) in bs {
+        out = substitute_ident(&out, bound, replacement);
+    }
+    out
+}
+
+/// Run one statement list through the fold, threading the bindings, the
+/// early-return guards and the cost budget.
+///
+/// Separate from [`fold_let_bindings`] so a loop body can be run through
+/// it AGAIN — unrolling is just the same statements folded once per
+/// round, which is the whole reason this is a function.
+fn fold_stmts(
+    stmts: &[verum_ast::stmt::Stmt],
+    bindings: &mut Vec<(String, Expr)>,
+    guards: &mut Vec<(Expr, Expr)>,
+    budget: &mut usize,
+) -> Option<()> {
+    use verum_ast::stmt::StmtKind;
+    let apply = |e: &Expr, bs: &[(String, Expr)]| -> Expr { apply_bindings(e, bs) };
 
     for stmt in stmts {
+        if *budget == 0 {
+            return None;
+        }
+        *budget -= 1;
         match &stmt.kind {
             StmtKind::Let { pattern, value, .. } => {
                 let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind else {
@@ -1160,37 +1234,166 @@ fn fold_let_bindings(
                     }
                     continue;
                 }
+                // A `while` whose trip count is decided by the values
+                // the fold already holds is UNROLLED: the loop body is
+                // the same statements, folded once per round.
+                //
+                // The condition is evaluated by constant folding
+                // against the current bindings, not by matching the
+                // loop's SHAPE. A shape rule ("find `i < K` and a `+1`
+                // step") sees `while i < 4` and misses `while i > 0`
+                // with `i = i - 2` and `while i != 32`; constant
+                // folding covers all of them with one rule, and stops
+                // by itself the moment the condition stops being
+                // constant.
+                //
+                // Everything a loop body does is already foldable —
+                // assignment (T0954), the bitwise operators (T0956),
+                // reading an element (T0962) — which is what makes
+                // this the last layer rather than the first. The
+                // earlier attempt unrolled at the
+                // weakest-precondition level instead and measured
+                // completely inert: a function's postcondition is
+                // discharged by binding `result` to the FOLDED body,
+                // so the fold is where a loop has to disappear.
+                if let ExprKind::While {
+                    condition, body, ..
+                } = &expr.kind
+                {
+                    loop {
+                        if *budget == 0 {
+                            return None;
+                        }
+                        match const_eval_bool(&apply(condition, bindings)) {
+                            Some(true) => {
+                                *budget -= 1;
+                                fold_stmts(&body.stmts, bindings, guards, budget)?;
+                            }
+                            Some(false) => break,
+                            // Not a constant trip count. Declining is
+                            // the honest answer: a loop the fold cannot
+                            // finish is a loop whose result it does not
+                            // know, and guessing one is how a
+                            // reflection starts describing a different
+                            // function.
+                            None => return None,
+                        }
+                    }
+                    continue;
+                }
                 let (cond, value) = early_return_guard(expr)?;
-                guards.push((apply(&cond, &bindings), apply(&value, &bindings)));
+                guards.push((apply(&cond, bindings), apply(&value, bindings)));
             }
             _ => return None,
         }
     }
+    Some(())
+}
 
-    let mut folded = apply(tail, &bindings);
-    // Innermost guard last: the FIRST guard written is the outermost
-    // test, so wrapping runs in reverse.
-    for (cond, value) in guards.iter().rev() {
-        folded = Expr::new(
-            ExprKind::If {
-                condition: verum_common::Heap::new(verum_ast::expr::IfCondition {
-                    conditions: std::iter::once(verum_ast::expr::ConditionKind::Expr(
-                        cond.clone(),
-                    ))
-                    .collect(),
-                    span: cond.span,
-                }),
-                then_branch: verum_ast::expr::Block::new(
-                    verum_common::List::new(),
-                    verum_common::Maybe::Some(verum_common::Heap::new(value.clone())),
-                    value.span,
-                ),
-                else_branch: verum_common::Maybe::Some(verum_common::Heap::new(folded)),
-            },
-            cond.span,
-        );
+/// The value of an expression when it is a CONSTANT, and nothing
+/// otherwise.
+///
+/// Deliberately total on failure: every arm that is not certain answers
+/// `None`, so an unrolling driven by this stops rather than proceeding
+/// on a guess.
+fn const_eval_int(e: &Expr) -> Option<i128> {
+    use verum_ast::expr::BinOp;
+    use verum_ast::literal::LiteralKind;
+    match &e.kind {
+        ExprKind::Literal(lit) => match &lit.kind {
+            LiteralKind::Int(i) => Some(i.value as i128),
+            _ => None,
+        },
+        ExprKind::Paren(inner) => const_eval_int(inner),
+        ExprKind::Unary {
+            op: verum_ast::UnOp::Neg,
+            expr: inner,
+        } => const_eval_int(inner).map(|v| -v),
+        ExprKind::Binary { op, left, right } => {
+            let l = const_eval_int(left)?;
+            let r = const_eval_int(right)?;
+            match op {
+                BinOp::Add => l.checked_add(r),
+                BinOp::Sub => l.checked_sub(r),
+                BinOp::Mul => l.checked_mul(r),
+                BinOp::Div => {
+                    if r == 0 {
+                        None
+                    } else {
+                        l.checked_div(r)
+                    }
+                }
+                BinOp::Rem => {
+                    if r == 0 {
+                        None
+                    } else {
+                        l.checked_rem(r)
+                    }
+                }
+                BinOp::BitAnd => Some(l & r),
+                BinOp::BitOr => Some(l | r),
+                BinOp::BitXor => Some(l ^ r),
+                _ => None,
+            }
+        }
+        _ => None,
     }
-    Some(folded)
+}
+
+/// The truth of an expression when it is CONSTANT, and nothing
+/// otherwise. Comparisons over [`const_eval_int`], plus the
+/// propositional connectives so a compound loop condition folds too.
+fn const_eval_bool(e: &Expr) -> Option<bool> {
+    use verum_ast::expr::BinOp;
+    use verum_ast::literal::LiteralKind;
+    match &e.kind {
+        ExprKind::Literal(lit) => match &lit.kind {
+            LiteralKind::Bool(b) => Some(*b),
+            _ => None,
+        },
+        ExprKind::Paren(inner) => const_eval_bool(inner),
+        ExprKind::Unary {
+            op: verum_ast::UnOp::Not,
+            expr: inner,
+        } => const_eval_bool(inner).map(|v| !v),
+        ExprKind::Binary { op, left, right } => {
+            if let (Some(l), Some(r)) = (const_eval_int(left), const_eval_int(right)) {
+                return match op {
+                    BinOp::Lt => Some(l < r),
+                    BinOp::Le => Some(l <= r),
+                    BinOp::Gt => Some(l > r),
+                    BinOp::Ge => Some(l >= r),
+                    BinOp::Eq => Some(l == r),
+                    BinOp::Ne => Some(l != r),
+                    _ => None,
+                };
+            }
+            match op {
+                BinOp::And => match (const_eval_bool(left), const_eval_bool(right)) {
+                    (Some(false), _) | (_, Some(false)) => Some(false),
+                    (Some(true), Some(true)) => Some(true),
+                    _ => None,
+                },
+                BinOp::Or => match (const_eval_bool(left), const_eval_bool(right)) {
+                    (Some(true), _) | (_, Some(true)) => Some(true),
+                    (Some(false), Some(false)) => Some(false),
+                    _ => None,
+                },
+                BinOp::Eq => {
+                    let l = const_eval_bool(left)?;
+                    let r = const_eval_bool(right)?;
+                    Some(l == r)
+                }
+                BinOp::Ne => {
+                    let l = const_eval_bool(left)?;
+                    let r = const_eval_bool(right)?;
+                    Some(l != r)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 /// `if c { return e; }` — with no `else` and nothing else in the block

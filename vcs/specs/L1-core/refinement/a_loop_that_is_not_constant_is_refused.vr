@@ -1,0 +1,66 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, loops, unrolling, negative-test, soundness
+// @timeout: 30000
+// @expected-error: proof-failed
+
+/// CONTROL for `a_constant_loop_is_unrolled.vr`.
+///
+/// Unrolling is a fold, and a fold that guesses is worse than a fold
+/// that stops. Each claim below is TRUE of the program and must still
+/// be REFUSED, because the fold cannot decide the loop and refusing is
+/// the only honest answer left to it:
+///
+///   * `bounded_by_a_parameter_MUST_FAIL` — the trip count is `n`, and
+///     `n` is not a constant. If this proves, the fold is deciding a
+///     loop it cannot see the end of. Note the claim is TRUE: running
+///     `n` times adding one gives `n`. It must still not verify — an
+///     unproved truth is the correct outcome for a body the fold does
+///     not model, and a fix that "passes" this file by inventing an
+///     induction rule has to be justified by something other than this
+///     spec.
+///
+///   * `unbounded_MUST_FAIL` — the condition never becomes false. The
+///     fold must run out of budget and decline rather than unroll
+///     forever, and the test's own timeout is not what stops it: the
+///     budget is.
+///
+/// A loop with a user-written invariant is a different mechanism and
+/// not the subject here.
+///
+/// Task: T0963.
+
+@verify(formal)
+public fn bounded_by_a_parameter_MUST_FAIL(n: Int) -> Int
+    requires n > 0 && n < 100
+    ensures result == n
+{
+    let mut acc = 0;
+    let mut i = 0;
+    while i < n {
+        acc = acc + 1;
+        i = i + 1;
+    }
+    acc
+}
+
+@verify(formal)
+public fn unbounded_MUST_FAIL(n: Int) -> Int
+    requires n == 0
+    ensures result == 0
+{
+    let mut acc = 0;
+    let mut i = 0;
+    while i >= 0 {
+        acc = acc + 1;
+        i = i + 1;
+    }
+    acc
+}
+
+mount core.prelude.*;
+
+fn main() {
+    print("a loop the fold cannot decide is refused");
+}
