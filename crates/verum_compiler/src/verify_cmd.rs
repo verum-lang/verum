@@ -98,6 +98,106 @@ pub struct VerifyCommand<'s> {
 ///
 /// A DECLARED SHAPE is a record layout or a variant's constructor list
 /// — the two things this command actually learns about a named type.
+/// The locals a loop in `stmts` assigns, and whether each is a MONOTONE
+/// counter — every assignment to it inside the loop being
+/// `v = v + <non-negative literal>`.
+///
+/// A `for` over a collection has no trip count to unroll and no havoc
+/// that helps: after havoc the counter is arbitrary, so `Int{it >= 0}`
+/// on a function that counts is unprovable. But a counter that starts
+/// non-negative and only grows is still bounded below by where it
+/// started, and that ONE fact is what the refinement needs.
+///
+/// Deliberately narrow. Anything else assigned in a loop — a different
+/// shape, a subtraction, a field — answers `false`, and the caller then
+/// leaves `result` free rather than guessing. The alternative is the
+/// defect this whole area was fixed for: asserting a local's PRE-LOOP
+/// value and binding `result` to a tail that reads its post-loop one.
+fn loop_assigned_locals(
+    stmts: &[verum_ast::stmt::Stmt],
+) -> std::collections::HashMap<String, bool> {
+    use verum_ast::ExprKind;
+    use verum_ast::stmt::StmtKind;
+    let mut out: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    for stmt in stmts {
+        if let StmtKind::Expr { expr, .. } = &stmt.kind {
+            let body = match &expr.kind {
+                ExprKind::While { body, .. } => Some(body),
+                ExprKind::For { body, .. } => Some(body),
+                ExprKind::ForAwait { body, .. } => Some(body),
+                _ => None,
+            };
+            if let Some(block) = body {
+                collect_loop_assignments(&block.stmts, &mut out);
+            }
+        }
+    }
+    out
+}
+
+fn collect_loop_assignments(
+    stmts: &[verum_ast::stmt::Stmt],
+    out: &mut std::collections::HashMap<String, bool>,
+) {
+    use verum_ast::ExprKind;
+    use verum_ast::expr::BinOp;
+    use verum_ast::stmt::StmtKind;
+    for stmt in stmts {
+        let StmtKind::Expr { expr, .. } = &stmt.kind else {
+            continue;
+        };
+        // Nested loops count too — the same variable may be touched at
+        // any depth, and missing one would let a wrong fact through.
+        match &expr.kind {
+            ExprKind::While { body, .. }
+            | ExprKind::For { body, .. }
+            | ExprKind::ForAwait { body, .. } => {
+                collect_loop_assignments(&body.stmts, out);
+                continue;
+            }
+            _ => {}
+        }
+        let ExprKind::Binary { op, left, right } = &expr.kind else {
+            continue;
+        };
+        if !op.is_assignment() {
+            continue;
+        }
+        let ExprKind::Path(path) = &left.kind else {
+            continue;
+        };
+        let Some(ident) = path.as_ident() else {
+            continue;
+        };
+        let name = ident.name.as_str().to_string();
+        let monotone = matches!(op, BinOp::Assign) && is_self_plus_nonneg(right, &name);
+        let entry = out.entry(name).or_insert(true);
+        *entry = *entry && monotone;
+    }
+}
+
+/// `v + c` with `c` a non-negative integer literal, read as "v grows".
+fn is_self_plus_nonneg(e: &Expr, name: &str) -> bool {
+    use verum_ast::ExprKind;
+    use verum_ast::expr::BinOp;
+    use verum_ast::literal::LiteralKind;
+    let ExprKind::Binary {
+        op: BinOp::Add,
+        left,
+        right,
+    } = &e.kind
+    else {
+        return false;
+    };
+    let reads_self = matches!(&left.kind, ExprKind::Path(p)
+        if p.as_ident().is_some_and(|i| i.name.as_str() == name));
+    if !reads_self {
+        return false;
+    }
+    matches!(&right.kind, ExprKind::Literal(l)
+        if matches!(&l.kind, LiteralKind::Int(i) if i.value >= 0))
+}
+
 fn declared_sort_of(
     ty: &verum_ast::ty::Type,
     record_layouts: &std::collections::HashMap<String, std::collections::HashMap<String, (String, Option<String>)>>,
@@ -1787,6 +1887,7 @@ impl<'s> VerifyCommand<'s> {
         // — and we simply skip the result binding, leaving `result` free;
         // that's weaker but sound for existential reading of `ensures`.
         if let verum_common::Maybe::Some(b) = body {
+            use verum_ast::ExprKind;
             use verum_ast::decl::FunctionBody;
             use verum_ast::pattern::PatternKind;
             use verum_ast::stmt::{Stmt, StmtKind};
@@ -1809,6 +1910,17 @@ impl<'s> VerifyCommand<'s> {
                     tail_expr = Some(e);
                 }
                 FunctionBody::Block(blk) => {
+                    // What the loops in this block change, and whether
+                    // each change is a monotone count. A local a loop
+                    // touches must NOT have its `let` value asserted —
+                    // that value is the PRE-loop one — but a monotone
+                    // counter still carries `v >= v0` afterwards, and
+                    // that is exactly what an `Int{it >= 0}` return
+                    // needs (T0966).
+                    let loop_locals = loop_assigned_locals(&blk.stmts);
+                    let all_loop_locals_summarised =
+                        loop_locals.values().all(|monotone| *monotone);
+                    let mut has_unmodelled_stmt = false;
                     let last_index = blk.stmts.len().saturating_sub(1);
                     for (i, stmt) in blk.stmts.iter().enumerate() {
                         // The only statement whose value the block
@@ -1840,7 +1952,20 @@ impl<'s> VerifyCommand<'s> {
                                 if let PatternKind::Ident { name, .. } = &pattern.kind {
                                     if let Ok(val_z3) = translator.translate_expr(val) {
                                         let n = name.as_str();
-                                        if let Some(v_int) = val_z3.as_int() {
+                                        // A local a loop CHANGES keeps no
+                                        // equality: `n == 0` is true only
+                                        // before the loop, and asserting it
+                                        // beside a tail that reads the
+                                        // post-loop value is the defect this
+                                        // area was fixed for. A monotone
+                                        // counter gets the inequality it
+                                        // really has instead.
+                                        if let Some(monotone) = loop_locals.get(n) {
+                                            if *monotone && let Some(v_int) = val_z3.as_int() {
+                                                let var = z3::ast::Int::new_const(n);
+                                                solver.assert(&var.ge(&v_int));
+                                            }
+                                        } else if let Some(v_int) = val_z3.as_int() {
                                             let var = z3::ast::Int::new_const(n);
                                             solver.assert(&var.eq(&v_int));
                                         } else if let Some(v_bool) = val_z3.as_bool() {
@@ -1867,6 +1992,24 @@ impl<'s> VerifyCommand<'s> {
                                 // effect and is read below.
                                 if !is_the_tail {
                                     has_semi_stmt = true;
+                                    // A LOOP is modelled by the summary
+                                    // above when every local it touches
+                                    // is a monotone counter; any other
+                                    // effectful statement is not
+                                    // modelled at all.
+                                    let is_loop = matches!(
+                                        &stmt.kind,
+                                        StmtKind::Expr { expr, .. }
+                                            if matches!(
+                                                &expr.kind,
+                                                ExprKind::While { .. }
+                                                    | ExprKind::For { .. }
+                                                    | ExprKind::ForAwait { .. }
+                                            )
+                                    );
+                                    if !is_loop {
+                                        has_unmodelled_stmt = true;
+                                    }
                                 }
                             }
                             _ => {
@@ -1944,7 +2087,22 @@ impl<'s> VerifyCommand<'s> {
                                 // still encodes as before: the fold can
                                 // decline it for length alone, and there
                                 // is no effect to have missed.
-                                None if has_semi_stmt => None,
+                                // The fold declined. Reading the bare
+                                // tail is sound when every effectful
+                                // statement is a LOOP whose locals are
+                                // monotone counters — those locals carry
+                                // `v >= v0` rather than an equality, so
+                                // the tail is read against facts that
+                                // hold AFTER the loop. Anything else
+                                // effectful leaves `result` free: an
+                                // unproved obligation beats a false
+                                // proof (T0963, T0966).
+                                None if has_semi_stmt
+                                    && (has_unmodelled_stmt
+                                        || !all_loop_locals_summarised) =>
+                                {
+                                    None
+                                }
                                 None => Some(boxed),
                             };
                         }

@@ -1,0 +1,82 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, loops, refined-return, soundness
+// @timeout: 30000
+
+/// A counter that only grows keeps its lower bound past the loop.
+///
+/// `Int{it >= 0}` on a function that counts something is the most
+/// common refined return there is, and it was unprovable. The reason
+/// was a soundness rule working correctly: a loop is an effectful
+/// statement the fold cannot model, so `result` was left unbound
+/// rather than tied to a tail read against the loop's PRE-loop facts.
+/// That rule exists because without it an infinite loop PROVED
+/// `ensures result == 0` — see
+/// `a_loop_that_is_not_constant_is_refused.vr`.
+///
+/// Neither unrolling nor havoc reaches this shape: a `for` over a
+/// collection has no trip count, and after havoc the counter is
+/// arbitrary. What is true, and enough, is ONE fact — a local whose
+/// every in-loop assignment is `v = v + <non-negative literal>` is,
+/// afterwards, at least what it started as. So such a local carries
+/// `v >= v0` instead of the equality it does not have, and the tail is
+/// read against facts that hold AFTER the loop.
+///
+/// The summary is deliberately weak, and the negative file is what
+/// keeps it that way: `v >= v0` cannot prove `result == 0` for a loop
+/// that never ends, nor `result == n` for one bounded by a parameter.
+/// Both still fail, as they must.
+///
+/// Measured on the showcase: `prune_before`, which counts evictions
+/// and returns `Int{it >= 0}`, went from unproved back to proved
+/// without weakening either control.
+///
+/// Task: T0966.
+
+@verify(formal)
+public fn counts_with_a_for_loop(xs: &List<Int>) -> Int{it >= 0} {
+    let mut n = 0;
+    for _x in xs.iter() {
+        n = n + 1;
+    }
+    n
+}
+
+@verify(formal)
+public fn counts_with_a_while_loop(limit: Int) -> Int{it >= 0} {
+    let mut n = 0;
+    let mut i = 0;
+    while i < limit {
+        n = n + 2;
+        i = i + 1;
+    }
+    n
+}
+
+/// Two counters in one loop: each is summarised on its own.
+@verify(formal)
+public fn two_counters(xs: &List<Int>) -> Int{it >= 0} {
+    let mut seen = 0;
+    let mut kept = 0;
+    for _x in xs.iter() {
+        seen = seen + 1;
+        kept = kept + 1;
+    }
+    kept
+}
+
+/// The control that the summary is not doing the work by itself: the
+/// same claim with no loop at all must still prove, and it does.
+@verify(formal)
+public fn no_loop(m: Int) -> Int{it >= 0} {
+    let mut n = 0;
+    n = n + 1;
+    n
+}
+
+mount core.prelude.*;
+
+fn main() {
+    print("a monotone counter survives its loop");
+}
