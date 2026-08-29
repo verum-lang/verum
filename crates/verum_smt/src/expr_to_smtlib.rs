@@ -1053,6 +1053,19 @@ pub fn type_to_sort_and_name(ty: &verum_ast::ty::Type) -> (String, Option<String
         // a `&T` parameter carries T's facts, and `Int{ it > 0 }` is
         // an Int with an assumption, not a new sort.
         TypeKind::Refined { base, .. } => type_to_sort_and_name(base),
+        // A generic INSTANTIATION is named by what it instantiates.
+        // `Hash<32>` is a `Generic { base: Path(Hash), args }` and had
+        // no arm, so it fell to the catch-all and lost its name — and a
+        // value with no type name has no resolvable members, which is
+        // where `a.0.bytes` stopped even once `a.0` had a position to
+        // read.
+        //
+        // `Hash<32>` and `Hash<64>` therefore share `Verum!Hash`, which
+        // is what `opaque_sort` already assumes — two values of one
+        // type share a sort — and is right for member resolution: both
+        // have a `bytes`, and nothing here reasons about the width,
+        // which lives in the field's own type (T0965).
+        TypeKind::Generic { base, .. } => type_to_sort_and_name(base),
         // ALL THREE reference tiers, not one. `&T`, `&checked T` and
         // `&unsafe T` are three AST variants of one idea — a value of
         // T reached through a reference — and only `Reference` was
