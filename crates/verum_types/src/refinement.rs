@@ -1814,6 +1814,139 @@ impl RefinementChecker {
                 )
             }
 
+            // `for await` binds exactly as `for` does. It had no arm and
+            // fell through to the structural walk, which substitutes into
+            // the body without noticing the pattern — so a refinement
+            // mentioning the loop variable had that variable rewritten.
+            ExprKind::ForAwait {
+                label: _,
+                pattern,
+                async_iterable,
+                body,
+                invariants,
+                decreases,
+            } => {
+                let shadowed = self.pattern_binds_var(pattern, var);
+                Expr::new(
+                    ExprKind::ForAwait {
+                        label: verum_common::Maybe::None,
+                        pattern: pattern.clone(),
+                        async_iterable: Box::new(self.substitute_in_expr(
+                            async_iterable,
+                            var,
+                            value,
+                        )),
+                        body: if !shadowed {
+                            self.substitute_in_block(body, var, value)
+                        } else {
+                            body.clone()
+                        },
+                        invariants: invariants.clone(),
+                        decreases: decreases.clone(),
+                    },
+                    expr.span,
+                )
+            }
+
+            // QUANTIFIERS. This is the arm whose absence was measured:
+            // `forall`/`exists` bind a name, had no rule, and reached the
+            // structural walk — which happily rewrote the BOUND variable.
+            // `it := e` substituted into `forall it. P(it)` produced
+            // `forall it. P(e)`, a different claim about a different
+            // thing, and the only thing standing between that and a wrong
+            // verdict was a `debug_assert!` that release builds delete.
+            //
+            // A binding's DOMAIN is not inside its own scope — in
+            // `forall x in xs . P` the `xs` is the outer `xs` — so the
+            // domain is substituted before the binding takes effect, and
+            // the guard and body after. With several bindings the scopes
+            // nest left to right, which is why `shadowed` is a running
+            // flag rather than a single test.
+            ExprKind::Forall { bindings, body } | ExprKind::Exists { bindings, body } => {
+                let is_forall = matches!(&expr.kind, ExprKind::Forall { .. });
+                let mut shadowed = false;
+                let mut captures = false;
+                let mut new_bindings: List<verum_ast::expr::QuantifierBinding> = List::new();
+
+                for b in bindings.iter() {
+                    let open = !shadowed && !captures;
+                    let domain = match (&b.domain, open) {
+                        (verum_common::Maybe::Some(d), true) => {
+                            verum_common::Maybe::Some(self.substitute_in_expr(d, var, value))
+                        }
+                        (other, _) => other.clone(),
+                    };
+
+                    // From here on this binding is in scope.
+                    if self.pattern_binds_var(&b.pattern, var) {
+                        shadowed = true;
+                    }
+                    if self
+                        .pattern_vars(&b.pattern)
+                        .iter()
+                        .any(|v| free_vars_in_value.contains(v))
+                    {
+                        // Substituting would capture a name the value
+                        // reads. Alpha-renaming is the real answer; until
+                        // there is one, refusing is the sound half —
+                        // exactly the policy the closure arm already
+                        // takes.
+                        captures = true;
+                    }
+
+                    let open = !shadowed && !captures;
+                    let guard = match (&b.guard, open) {
+                        (verum_common::Maybe::Some(g), true) => {
+                            verum_common::Maybe::Some(self.substitute_in_expr(g, var, value))
+                        }
+                        (other, _) => other.clone(),
+                    };
+
+                    new_bindings.push(verum_ast::expr::QuantifierBinding {
+                        pattern: b.pattern.clone(),
+                        ty: b.ty.clone(),
+                        domain,
+                        guard,
+                        span: b.span,
+                    });
+                }
+
+                let new_body = if shadowed || captures {
+                    body.clone()
+                } else {
+                    Box::new(self.substitute_in_expr(body, var, value))
+                };
+
+                let kind = if is_forall {
+                    ExprKind::Forall {
+                        bindings: new_bindings,
+                        body: new_body,
+                    }
+                } else {
+                    ExprKind::Exists {
+                        bindings: new_bindings,
+                        body: new_body,
+                    }
+                };
+                Expr::new(kind, expr.span)
+            }
+
+            // These three are a block wearing a keyword, and the block
+            // arm already knows how a `let` shadows. Reaching the
+            // structural walk instead skipped that check.
+            ExprKind::Async(block) => Expr::new(
+                ExprKind::Async(self.substitute_in_block(block, var, value)),
+                expr.span,
+            ),
+            ExprKind::Unsafe(block) => Expr::new(
+                ExprKind::Unsafe(self.substitute_in_block(block, var, value)),
+                expr.span,
+            ),
+            ExprKind::Meta(block) => Expr::new(
+                ExprKind::Meta(self.substitute_in_block(block, var, value)),
+                expr.span,
+            ),
+
             // Return - substitute in inner expression if present
             ExprKind::Return(inner) => {
                 let new_inner = inner
@@ -1904,11 +2037,42 @@ impl RefinementChecker {
             // `walk_expr` that already covers all 73 variants, so a variant
             // added to the enum cannot quietly reintroduce the gap.
             _ => {
-                debug_assert!(
-                    !verum_ast::visit_mut::introduces_bindings(&expr.kind),
-                    "substitution reached a binder through the structural path; \
-                     it needs an explicit arm or the replaced name gets captured"
-                );
+                // A BINDER without an arm must not take the structural
+                // walk: that walk substitutes into children knowing
+                // nothing about what they bind, so it rewrites the bound
+                // name. This used to be a `debug_assert!`, which is not a
+                // guard — release builds delete it, and the capture
+                // happened there in silence. Measured: three L1 specs
+                // (`quantified_refinements`, `quantified_predicates`,
+                // `smt_integration`) tripped it as soon as the suite
+                // started running the verifier at all (T0957).
+                //
+                // Refusing is the sound half. It is not the free half:
+                // an unsubstituted `it` leaves the predicate speaking
+                // about a name nothing binds, and the solver answers
+                // `unknown` rather than proving anything. So this is a
+                // LOUD refusal, and each variant that lands here is a
+                // missing arm to write, not a resting state.
+                //
+                // Arms exist for every binder a refinement predicate has
+                // been observed to contain: `Block`, `If`, `Match`,
+                // `Closure`, `For`, `ForAwait`, `Forall`, `Exists`,
+                // `Async`, `Unsafe`, `Meta`. What remains — `Select`,
+                // the five comprehensions, `TryRecover`,
+                // `TryRecoverFinally`, `Nursery` — has no arm because it
+                // has no observed use inside a refinement, and writing a
+                // scope rule for a construct with no test would be
+                // guessing (T0958).
+                if let Some(binder) = verum_ast::visit_mut::binder_name(&expr.kind) {
+                    tracing::warn!(
+                        "refinement substitution refused inside `{}`, a binder with \
+                         no scope rule; `{}` stays free and the obligation will not \
+                         discharge — this form needs an arm (T0958)",
+                        binder,
+                        var.as_str()
+                    );
+                    return expr.clone();
+                }
                 let mut rebuilt = expr.clone();
                 verum_ast::visit_mut::each_child_expr_mut(&mut rebuilt, &mut |child| {
                     *child = self.substitute_in_expr(child, var, value);

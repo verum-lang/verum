@@ -474,38 +474,52 @@ fn each_child_in_clauses(clauses: &mut [ComprehensionClause], f: &mut dyn FnMut(
 /// Whether this node makes new bindings visible to some of its children.
 ///
 /// A rewriter that replaces a *name* must handle these itself — descending
-/// blindly into a node that rebinds that name captures it.  The point of
-/// exposing the question here is that a caller can end its explicit arms with
-/// `debug_assert!(!introduces_bindings(kind))` before falling through to
-/// [`each_child_expr_mut`]; a binder added to the enum later then trips the
-/// assertion instead of silently taking the blind path.
+/// blindly into a node that rebinds that name captures it.  A caller ends its
+/// explicit arms by ASKING this question and refusing when the answer is yes,
+/// before falling through to [`each_child_expr_mut`]; a binder added to the
+/// enum later is then refused rather than silently captured.
+///
+/// It was a `debug_assert!` here once, and that is not a guard: release
+/// builds delete it, so the capture it described happened anyway and said
+/// nothing.  The check has to run where the code runs.
 ///
 /// `Is` and `DestructuringAssign` are deliberately absent.  Both carry a
 /// pattern, but neither scopes it over a child: `x is Some(n)` publishes `n`
 /// to the statements that follow, and a destructuring assignment writes to
 /// places that already exist.
 pub fn introduces_bindings(kind: &ExprKind) -> bool {
-    matches!(
-        kind,
-        ExprKind::Closure { .. }
-            | ExprKind::For { .. }
-            | ExprKind::ForAwait { .. }
-            | ExprKind::Match { .. }
-            | ExprKind::Forall { .. }
-            | ExprKind::Exists { .. }
-            | ExprKind::Select { .. }
-            | ExprKind::Comprehension { .. }
-            | ExprKind::StreamComprehension { .. }
-            | ExprKind::SetComprehension { .. }
-            | ExprKind::GeneratorComprehension { .. }
-            | ExprKind::MapComprehension { .. }
-            | ExprKind::TryRecover { .. }
-            | ExprKind::TryRecoverFinally { .. }
-            | ExprKind::Nursery { .. }
-            | ExprKind::If { .. }
-            | ExprKind::Block(_)
-            | ExprKind::Async(_)
-            | ExprKind::Unsafe(_)
-            | ExprKind::Meta(_)
-    )
+    binder_name(kind).is_some()
+}
+
+/// The name of the binding form, when this node is one.
+///
+/// One list, two questions.  A rewriter that has to REFUSE a binder it has
+/// no scope rule for should be able to say WHICH one it refused — a refusal
+/// that names nothing is a dead end for whoever reads the log, and the
+/// alternative (each caller keeping its own copy of the list to render a
+/// name) is how the list drifts.
+pub fn binder_name(kind: &ExprKind) -> Option<&'static str> {
+    Some(match kind {
+        ExprKind::Closure { .. } => "closure",
+        ExprKind::For { .. } => "for",
+        ExprKind::ForAwait { .. } => "for await",
+        ExprKind::Match { .. } => "match",
+        ExprKind::Forall { .. } => "forall",
+        ExprKind::Exists { .. } => "exists",
+        ExprKind::Select { .. } => "select",
+        ExprKind::Comprehension { .. } => "list comprehension",
+        ExprKind::StreamComprehension { .. } => "stream comprehension",
+        ExprKind::SetComprehension { .. } => "set comprehension",
+        ExprKind::GeneratorComprehension { .. } => "generator comprehension",
+        ExprKind::MapComprehension { .. } => "map comprehension",
+        ExprKind::TryRecover { .. } => "try/recover",
+        ExprKind::TryRecoverFinally { .. } => "try/recover/finally",
+        ExprKind::Nursery { .. } => "nursery",
+        ExprKind::If { .. } => "if",
+        ExprKind::Block(_) => "block",
+        ExprKind::Async(_) => "async block",
+        ExprKind::Unsafe(_) => "unsafe block",
+        ExprKind::Meta(_) => "meta block",
+        _ => return None,
+    })
 }
