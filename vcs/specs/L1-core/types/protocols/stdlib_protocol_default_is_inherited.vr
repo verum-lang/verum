@@ -1,0 +1,65 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: protocols, defaults, stdlib
+// @timeout: 30000
+// @skip: T0952 is open — a protocol default body does not survive the bake,
+//        so this file does not merely fail, it PANICS at run time with
+//        "method 'Counter.fold' not found". The skip comes off in the commit
+//        that makes stdlib protocol defaults inheritable, not by editing the
+//        expectation. Do not "fix" this file by writing `fold` on Counter:
+//        that is the workaround every core/ type already applies (23 explicit
+//        `fn fold` across the tree), and it is why nothing inside the stdlib
+//        ever noticed.
+// @expected-stdout-begin
+// fold 3
+// count 3
+// @expected-stdout-end
+// @description: A type implementing a stdlib protocol inherits that
+//   protocol's default methods.
+//
+//   `core/base/iterator.vr:378` gives `Iterator.fold` a body, so a type that
+//   supplies `next` gets `fold` for free. That is the whole point of a
+//   default: 124 methods in `core/` carry one.
+//
+//   It works for a protocol declared in the SAME compilation and not for one
+//   loaded from the archive, which locates the defect precisely — default
+//   bodies survive within a compilation and are lost through the bake.
+//   `VbcCodegen` already monomorphises defaults onto every implementor via
+//   `ProtocolInfo.default_methods`, but that registry is filled from source
+//   declarations, so an archive-loaded protocol contributes nothing and there
+//   is no dispatch-time fallback either — the body is not in the archive
+//   under any name. The candidate list in the panic shows only concrete
+//   types' `fold`.
+//
+//   The sibling `implement_block_completeness_leaves_these_alone.vr` covers
+//   the same feature for a LOCALLY declared protocol, and passes. Reading the
+//   two together is what shows this is a bake boundary and not a protocol
+//   feature that was never implemented.
+
+mount core.prelude.*;
+
+type Counter is { n: Int };
+
+implement Iterator for Counter {
+    type Item = Int;
+
+    fn next(&mut self) -> Maybe<Int> {
+        if self.n <= 0 {
+            Maybe.None
+        } else {
+            self.n = self.n - 1;
+            Maybe.Some(self.n)
+        }
+    }
+}
+
+fn main() {
+    let mut a = Counter { n: 3 };
+    let total: Int = a.fold(0, |acc, x| acc + x);
+    print(f"fold {total}");
+
+    let mut b = Counter { n: 3 };
+    let n: Int = b.count();
+    print(f"count {n}");
+}
