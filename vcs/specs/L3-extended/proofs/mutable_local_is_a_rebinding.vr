@@ -1,0 +1,97 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, refinement, ensures, reflection, assignment, mutable-local
+// @timeout: 30000
+
+/// A function that ASSIGNS to a mutable local can be verified.
+///
+/// Until this spec existed the verifier could not discharge a postcondition
+/// for any imperative body. Measured on one binary, `ensures result == 1`:
+///
+///     { let acc = 1; acc }                    PROVED
+///     { let mut acc = 1; acc }                PROVED
+///     { let mut acc = 0; acc = 1; acc }       FAILED   <- one statement more
+///     { let mut acc = 0; acc = acc + 1; acc } FAILED
+///
+/// Two independent places read the body and both stopped at the assignment.
+/// Reflection declined the whole function — "body has a statement that is
+/// neither a `let` nor an early return" — so a call to it unfolded to
+/// nothing. And the function's OWN postcondition was checked by binding
+/// `result` to the block's BARE TAIL while the statement walk had asserted
+/// `acc == 0` from the `let` and nothing at all about the assignment. The
+/// solver was handed a body arguing against its own contract and returned
+/// the counterexample `acc = 0, result = 0`.
+///
+/// The rule is that an assignment to a local is a REBINDING: `acc = acc + 1`
+/// means the same as introducing a fresh `acc` bound to the old one plus
+/// one, which the substitution model already handled. Resolving the
+/// right-hand side against the CURRENT bindings before replacing the old
+/// entry is what makes that equivalence hold — the stored value closes over
+/// the state the assignment saw.
+///
+/// The soundness pole is `mutable_local_rebinding_soundness.vr`: the same
+/// bodies with FALSE postconditions, which must still fail. A fold that
+/// simply dropped assignments would satisfy this file and be caught there.
+///
+/// Loops are deliberately absent. Every undischarged obligation in the
+/// showcase application blamed a loop, and the loops were the loudest
+/// symptom of this defect rather than its cause; a body with a loop is
+/// still HAVOC'd without a user invariant, which is a separate subject.
+///
+/// Task: T0954.
+
+@verify(formal)
+public fn assign_then_read(n: Int) -> Int
+    requires n == 0
+    ensures result == 1
+{
+    let mut acc = 0;
+    acc = 1;
+    acc
+}
+
+@verify(formal)
+public fn assignment_reads_its_own_old_value(n: Int) -> Int
+    requires n == 0
+    ensures result == 1
+{
+    let mut acc = 0;
+    acc = acc + 1;
+    acc
+}
+
+@verify(formal)
+public fn repeated_assignment_accumulates(n: Int) -> Int
+    requires n == 0
+    ensures result == 4
+{
+    let mut acc = 0;
+    acc = acc + 1;
+    acc = acc + 1;
+    acc = acc + 1;
+    acc = acc + 1;
+    acc
+}
+
+/// The classic swap. Any fold that stored right-hand sides UNRESOLVED, or
+/// applied its substitutions in the wrong order, gets a different answer
+/// here while still agreeing on every function above.
+@verify(formal)
+public fn swap_through_a_temporary(n: Int) -> Int
+    requires n == 0
+    ensures result == 1
+{
+    let mut a = 1;
+    let mut b = 2;
+    let t = a;
+    a = b;
+    b = t;
+    a - b
+}
+
+mount core.prelude.*;
+
+fn main() {
+    print("mutable locals verify");
+}

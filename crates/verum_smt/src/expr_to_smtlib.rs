@@ -1026,6 +1026,23 @@ pub fn extract_params(func: &verum_ast::FunctionDecl) -> Vec<(String, String)> {
 /// BEFORE it and not with any that follow, because a `let` after a
 /// guard is only reached when that guard did not fire — which is
 /// exactly the else-branch the guard becomes.
+/// The single expression a straight-line block computes, or `None` when
+/// the block does something this substitution model does not represent.
+///
+/// Public because two places need the SAME answer to "what does this body
+/// compute": reflection, which unfolds a call at another site, and the
+/// verifier's own result binding, which ties `result` to the body. They
+/// used to answer separately — reflection by folding, the result binding
+/// by asserting each `let` into the solver and ignoring assignments — and
+/// the second one then argued against its own postcondition with the
+/// function's initial values.
+pub fn fold_block_to_expr(
+    stmts: &[verum_ast::stmt::Stmt],
+    tail: &Expr,
+) -> Option<Expr> {
+    fold_let_bindings(stmts, tail)
+}
+
 fn fold_let_bindings(
     stmts: &[verum_ast::stmt::Stmt],
     tail: &Expr,
@@ -1067,6 +1084,56 @@ fn fold_let_bindings(
                 bindings.push((name.name.as_str().to_string(), init));
             }
             StmtKind::Expr { expr, .. } => {
+                // An assignment to a local is a REBINDING, and folding it as
+                // one is what lets an imperative body be reflected at all.
+                //
+                // `let mut acc = 0; acc = acc + 1; acc` means the same thing
+                // as `let acc0 = 0; let acc1 = acc0 + 1; acc1`, and the fold
+                // already knows how to inline the second form. Resolving the
+                // right-hand side against the CURRENT bindings before
+                // replacing the old one is what makes that equivalence hold:
+                // the stored value closes over the state the assignment saw,
+                // so a later `acc` reads the new value and the one inside
+                // `acc + 1` still reads the old.
+                //
+                // Without this the whole function was declined — "body has a
+                // statement that is neither a `let` nor an early return" —
+                // and a declined body reflects as nothing, so its
+                // postcondition had nothing to be proved against. Measured:
+                // `{ let mut acc = 0; acc = 1; acc }` with
+                // `ensures result == 1` did not verify, while the same
+                // function written with an immutable binding did. Every
+                // undischarged loop obligation in the registry showcase is
+                // downstream of this, the loops being a symptom.
+                if let ExprKind::Binary { op, left, right } = &expr.kind
+                    && op.is_assignment()
+                    && let ExprKind::Path(path) = &left.kind
+                    && let Some(ident) = path.as_ident()
+                {
+                    let name = ident.name.as_str().to_string();
+                    // Only a variable this fold introduced. A write to
+                    // anything else — a field, an index, a captured
+                    // binding — is a state change the substitution model
+                    // does not represent, and guessing is how a reflection
+                    // starts describing a different function.
+                    if !bindings.iter().any(|(b, _)| b == &name) {
+                        return None;
+                    }
+                    // Compound forms carry the read implicitly: `acc += e`
+                    // is `acc = acc + e`. Only the plain form is folded
+                    // here; the rest decline rather than be approximated.
+                    let value_expr = match op {
+                        verum_ast::expr::BinOp::Assign => right.as_ref().clone(),
+                        _ => return None,
+                    };
+                    let resolved = apply(&value_expr, &bindings);
+                    for b in bindings.iter_mut() {
+                        if b.0 == name {
+                            b.1 = resolved.clone();
+                        }
+                    }
+                    continue;
+                }
                 let (cond, value) = early_return_guard(expr)?;
                 guards.push((apply(&cond, &bindings), apply(&value, &bindings)));
             }
@@ -1275,13 +1342,24 @@ pub fn try_reflect_function_with_env(
             } else {
                 match fold_let_bindings(&block.stmts, tail) {
                     Some(f) => {
+                        // The ACCEPT counterpart of `decline`, on the same
+                        // channel. A decline says why; an accept has to say
+                        // INTO WHAT, because the next failure mode after
+                        // "declined everything" is "folded it wrongly", and
+                        // that one is silent — the reflection succeeds and
+                        // simply describes a different function.
+                        tracing::debug!(
+                            "reflection accepted `{}`: folded to {:?}",
+                            func.name.name.as_str(),
+                            f.kind
+                        );
                         folded_tail = f;
                         &folded_tail
                     }
                     None => {
                         return decline(
-                            "body has a statement that is neither a `let` nor an \
-                             early-return guard",
+                            "body has a statement that is neither a `let`, an \
+                             assignment to a local, nor an early-return guard",
                         );
                     }
                 }

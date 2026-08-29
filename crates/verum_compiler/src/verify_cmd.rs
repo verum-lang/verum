@@ -1765,7 +1765,7 @@ impl<'s> VerifyCommand<'s> {
         if let verum_common::Maybe::Some(b) = body {
             use verum_ast::decl::FunctionBody;
             use verum_ast::pattern::PatternKind;
-            use verum_ast::stmt::StmtKind;
+            use verum_ast::stmt::{Stmt, StmtKind};
 
             // Assert each `let name = expr;` in the block's statement
             // list as a fresh Z3 binding so the tail expression can
@@ -1777,6 +1777,8 @@ impl<'s> VerifyCommand<'s> {
             // the encoding conservatively and leave `result` free.
             let mut tail_expr: Option<&Expr> = None;
             let mut safe_encoding = true;
+            let folded_body: Option<Expr>;
+            let mut has_semi_stmt = false;
 
             match b {
                 FunctionBody::Expr(e) => {
@@ -1806,19 +1808,21 @@ impl<'s> VerifyCommand<'s> {
                                     }
                                 }
                             }
-                            StmtKind::Expr {
-                                expr,
-                                has_semi: false,
-                            } => {
-                                // Tail expression appearing as the final
-                                // stmt (block without separate `.expr`
-                                // — some parser shapes produce this).
-                                tail_expr = Some(expr);
+                            StmtKind::Expr { has_semi: false, .. } => {
+                                // A tail expression appearing as the final
+                                // statement (some parser shapes produce a
+                                // block with no separate `.expr`). It is
+                                // picked up below, where it goes through
+                                // the same fold as the other shape.
                             }
                             StmtKind::Expr { has_semi: true, .. } => {
-                                // Expression-with-semicolon statements
-                                // have no return value; ignore them but
-                                // don't invalidate the encoding.
+                                // No VALUE, which is not the same as no
+                                // EFFECT — `acc = 1;` and `xs.push(v);`
+                                // both change what the tail evaluates to.
+                                // Skipping them is only sound when the
+                                // fold below models them; record that one
+                                // is present and let that decide.
+                                has_semi_stmt = true;
                             }
                             _ => {
                                 safe_encoding = false;
@@ -1827,8 +1831,77 @@ impl<'s> VerifyCommand<'s> {
                         }
                     }
                     if safe_encoding {
-                        if let verum_common::Maybe::Some(boxed) = &blk.expr {
-                            tail_expr = Some(boxed.as_ref());
+                        // A block states its tail in one of two shapes: its
+                        // own `expr`, or a final statement without a
+                        // semicolon. They mean the same thing, so they are
+                        // reduced to one pair here — the statements that
+                        // run, and the expression whose value is returned —
+                        // and everything below sees a single shape. Keeping
+                        // two paths is how one of them acquires a fix the
+                        // other does not.
+                        let (body_stmts, body_tail) = match &blk.expr {
+                            verum_common::Maybe::Some(boxed) => {
+                                (blk.stmts.as_slice(), Some(boxed.as_ref()))
+                            }
+                            verum_common::Maybe::None => match blk.stmts.split_last() {
+                                Some((
+                                    Stmt {
+                                        kind:
+                                            StmtKind::Expr {
+                                                expr,
+                                                has_semi: false,
+                                            },
+                                        ..
+                                    },
+                                    rest,
+                                )) => (rest, Some(expr)),
+                                _ => (blk.stmts.as_slice(), None),
+                            },
+                        };
+                        if let Some(boxed) = body_tail {
+                            // FOLD the block, do not read its tail alone.
+                            //
+                            // The walk above asserts each `let` into the
+                            // solver, which is right until a statement
+                            // CHANGES one: `let mut acc = 0; acc = 1; acc`
+                            // told the solver `acc == 0`, said nothing about
+                            // the assignment, and then bound `result` to the
+                            // bare tail `acc` — so `ensures result == 1`
+                            // came back with the counterexample
+                            // `acc = 0, result = 0`, the function's own body
+                            // arguing against its own contract. Every
+                            // imperative body was unverifiable for this
+                            // reason, and the registry showcase attributed
+                            // it to loops, which are only the loudest case.
+                            //
+                            // `fold_block_to_expr` is the same answer
+                            // reflection uses, so the two cannot drift.
+                            // It returns `None` for anything the
+                            // substitution model does not represent, and
+                            // then the bare tail is used exactly as before.
+                            folded_body =
+                                verum_smt::expr_to_smtlib::fold_block_to_expr(body_stmts, boxed);
+                            tail_expr = match &folded_body {
+                                Some(f) => Some(f),
+                                // The fold declined. Reading the bare tail
+                                // is only correct when nothing between the
+                                // `let`s and the tail changed anything —
+                                // otherwise the solver holds `acc == 0`
+                                // from a `let`, hears nothing of `acc = 1;`
+                                // and PROVES `result == 0` for a function
+                                // that returns 1. A false postcondition is
+                                // worse than an unproved one, so when the
+                                // body has a statement the fold could not
+                                // model, `result` is left free and the
+                                // obligation simply does not discharge.
+                                //
+                                // A block of nothing but `let`s and a tail
+                                // still encodes as before: the fold can
+                                // decline it for length alone, and there
+                                // is no effect to have missed.
+                                None if has_semi_stmt => None,
+                                None => Some(boxed),
+                            };
                         }
                     } else {
                         tail_expr = None;
