@@ -1,0 +1,48 @@
+// @test: typecheck-fail
+// @level: L1
+// @tier: 0
+// @tags: protocols, conformance, soundness
+// @timeout: 30000
+// @expected-error: E405
+// @expected-error-count: 2
+// @description: An `implement P for T` block must provide every method P
+//   requires, and the diagnostic must name the ones it does not.
+//
+//   The checker verified that an implementation EXISTS, never that it was
+//   COMPLETE. Measured before the fix:
+//
+//       no `implement` at all, used at a bound <T: P>   E405        caught
+//       implement P for R { }                           checks CLEAN
+//           r.m()  ->  Panic: method 'm' not found on receiver
+//
+//   So writing an EMPTY implementation SILENCED the diagnostic that a
+//   missing one produces, and the bound `T: P` went on promising a method
+//   the type does not have. The type checker accepted a program that
+//   provably panics.
+//
+//   Two shapes here, because the partial case is the one a reader is
+//   likelier to write: `Half` supplies one of two required methods, and
+//   the message has to name the missing one rather than the block.
+//
+//   Task: T0812.
+
+type P is protocol {
+    fn m(&self) -> Int;
+    fn n(&self) -> Int;
+};
+
+type Empty is { v: Int };
+type Half is { v: Int };
+
+implement P for Empty {
+}
+
+implement P for Half {
+    fn m(&self) -> Int {
+        1
+    }
+}
+
+fn main() {
+    print("an implement block must be complete");
+}

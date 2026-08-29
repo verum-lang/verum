@@ -729,6 +729,32 @@ pub struct TypeChecker {
     /// α still free → the binding-level E404 judge has already
     /// reported it (bindings are the shapes that matter); nothing is
     /// double-reported here.
+    /// Protocols whose declaration THIS run has seen, so their
+    /// `has_default` flags can be trusted.
+    ///
+    /// The baked archive does not record which protocol methods carry a
+    /// default body: both `required_methods` and `default_methods` are
+    /// derived from the same VBC variant list, and the descriptor the type
+    /// checker reads gets an EMPTY default list. Every stdlib protocol
+    /// method therefore looks required. Asking "must this implementation
+    /// provide method m" of an archive-loaded protocol gets a confident
+    /// wrong answer — measured, 109 diagnostics across 13 `core/` files
+    /// demanding `fold`, `skip_while` and their kin from iterator
+    /// adaptors, all of which the protocol supplies itself.
+    ///
+    /// So conformance is checked only against a declaration this run
+    /// parsed. Narrower than it should be, and the way to widen it is to
+    /// teach the bake to carry the flag, not to guess here.
+    ///
+    /// Stores the ANSWER, not the name: `(required, declared)` method sets
+    /// captured at registration. A name is not enough because the registry
+    /// is keyed by BARE NAME — a spec that declares its own `Iterator` and
+    /// also mounts the stdlib one has two protocols under one key, and
+    /// looking the name up again returns whichever registered last. Trusting
+    /// the name while reading someone else's definition is how this check
+    /// first demanded `skip_while` from a three-method local protocol.
+    pub(crate) protocols_with_known_defaults: Map<Text, (Set<Text>, Set<Text>)>,
+
     pub(crate) pending_protocol_static_calls:
         Vec<(verum_ast::span::Span, Text, Text, TypeVar)>,
     /// PARAMETERIZED-PROTOCOL OVERLOADS (T0585 ERROR-14) — instance

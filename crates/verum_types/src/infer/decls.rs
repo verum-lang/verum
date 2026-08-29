@@ -2157,6 +2157,20 @@ impl TypeChecker {
                     span: type_decl.span,
                 };
                 self.unifier.register_protocol_name(protocol.name.as_str());
+                // This run parsed the declaration, so its default-body flags are
+                // trustworthy — see `protocols_with_known_defaults`.
+                self.protocols_with_known_defaults.insert(
+                    protocol.name.clone(),
+                    (
+                        protocol
+                            .methods
+                            .iter()
+                            .filter(|(_, m)| !m.has_default)
+                            .map(|(n, _)| n.clone())
+                            .collect(),
+                        protocol.methods.keys().cloned().collect(),
+                    ),
+                );
                 let _ = self.protocol_checker.write().register_protocol(protocol);
 
                 // IMPORTANT: Register protocols correctly based on their context status.
@@ -3816,6 +3830,20 @@ impl TypeChecker {
                     span: type_decl.span,
                 };
                 self.unifier.register_protocol_name(protocol.name.as_str());
+                // This run parsed the declaration, so its default-body flags are
+                // trustworthy — see `protocols_with_known_defaults`.
+                self.protocols_with_known_defaults.insert(
+                    protocol.name.clone(),
+                    (
+                        protocol
+                            .methods
+                            .iter()
+                            .filter(|(_, m)| !m.has_default)
+                            .map(|(n, _)| n.clone())
+                            .collect(),
+                        protocol.methods.keys().cloned().collect(),
+                    ),
+                );
                 let _ = self.protocol_checker.write().register_protocol(protocol);
 
                 // Register as context or constraint protocol based on is_context flag
@@ -4942,10 +4970,23 @@ impl TypeChecker {
                 // or reused.
                 self.ctx.exit_scope();
 
+                // A default body reaches this declaration by EITHER route:
+                // as the item's `default_impl`, or written inline on the
+                // signature itself — `fn fold<B, F>(mut self, …) -> B { … }`
+                // in `core/base/iterator.vr` is the second, and reading only
+                // the first registered it as REQUIRED. Nothing consulted the
+                // flag, so the mistake was invisible until the conformance
+                // check started asking: it then demanded `fold`, `nth`,
+                // `count` and their kin from every iterator adaptor in the
+                // standard library, 109 diagnostics across 13 files.
+                //
+                // The sibling registration path (`register_protocol_decl`)
+                // already reads both. Two paths, one question, one answer.
+                let has_default = default_impl.is_some() || func.body.is_some();
                 let mut pm = crate::protocol::ProtocolMethod::simple(
                     method_name.clone(),
                     method_ty,
-                    default_impl.is_some(),
+                    has_default,
                 );
                 pm.receiver_kind = method_receiver_kind;
                 pm.type_param_names = method_param_names;
@@ -4989,6 +5030,20 @@ impl TypeChecker {
             span: proto_decl.span,
         };
         self.unifier.register_protocol_name(protocol.name.as_str());
+        // This run parsed the declaration, so its default-body flags are
+        // trustworthy — see `protocols_with_known_defaults`.
+        self.protocols_with_known_defaults.insert(
+                    protocol.name.clone(),
+                    (
+                        protocol
+                            .methods
+                            .iter()
+                            .filter(|(_, m)| !m.has_default)
+                            .map(|(n, _)| n.clone())
+                            .collect(),
+                        protocol.methods.keys().cloned().collect(),
+                    ),
+                );
         let _ = self.protocol_checker.write().register_protocol(protocol);
 
         // Object safety enforcement for context protocols.
@@ -7917,8 +7972,137 @@ impl TypeChecker {
             }
         }
 
+
+        // CONFORMANCE: an `implement P for T` block must provide every
+        // method P requires.
+        //
+        // The check used to be that an implementation EXISTS, never that it
+        // is COMPLETE, so `implement P for R { }` against a protocol
+        // requiring `fn m` type-checked and then panicked at the call with
+        // "method 'm' not found". Worse than a missing implementation,
+        // which E405 catches: writing an EMPTY one silenced that too, so
+        // the bound `T: P` promised a method the type did not have.
+        self.check_protocol_impl_is_complete(impl_decl);
+
         Ok(())
     }
+
+    /// Report every method an `implement P for T` block owes P and does not
+    /// provide.
+    ///
+    /// Only methods WITHOUT a default body are owed — a protocol that
+    /// supplies one has already answered for the case. There are 124 such
+    /// methods in `core/`, so treating defaults as required would reject
+    /// most of the standard library.
+    fn check_protocol_impl_is_complete(&mut self, impl_decl: &verum_ast::decl::ImplDecl) {
+        use verum_ast::decl::{ImplItemKind, ImplKind};
+        let ImplKind::Protocol { protocol, for_type, .. } = &impl_decl.kind else {
+            return;
+        };
+        let Some(proto_ident) = protocol.segments.last().and_then(|s| match s {
+            verum_ast::ty::PathSegment::Name(id) => Some(id.name.clone()),
+            _ => None,
+        }) else {
+            return;
+        };
+
+        // No lazy-load here, deliberately. The obvious move is to pull the
+        // protocol in before judging, the way the call-site bound check
+        // does — but the answer this check needs was captured when the
+        // declaration was PARSED, so loading would only add a side effect.
+        // It is not a harmless one: triggering a stdlib load from every
+        // `implement` block changed inference elsewhere in the same file.
+        // Measured, `core/database/mysql/typed_row.vr` went from 0 to 13
+        // diagnostics, none of them about conformance.
+
+        // Only judge against a declaration THIS run parsed. The baked
+        // archive does not carry which protocol methods have a default
+        // body, so an archive-loaded protocol reports every method as
+        // required — measured, 109 diagnostics across 13 `core/` files
+        // demanding `fold` and `skip_while` from iterator adaptors that
+        // the protocol supplies itself.
+        // Read the sets captured when this run PARSED the declaration.
+        //
+        // Absence here means the protocol reached us through the baked
+        // archive, which does not record which methods carry a default
+        // body, so every method would read as required. Declining is not
+        // caution about load order — it is refusing to answer from a source
+        // that cannot know.
+        let Some((required_set, declared)) =
+            self.protocols_with_known_defaults.get(&proto_ident).cloned()
+        else {
+            return;
+        };
+        let required: List<Text> = required_set.into_iter().collect();
+        if required.is_empty() {
+            return;
+        }
+
+        let provided: Set<Text> = impl_decl
+            .items
+            .iter()
+            .filter_map(|item| match &item.kind {
+                ImplItemKind::Function(f) => Some(f.name.name.clone()),
+                _ => None,
+            })
+            .collect();
+
+        // If the block provides a method this protocol does not declare, we
+        // are almost certainly not looking at the protocol the author meant.
+        // The registry is keyed by BARE NAME, so a file that declares its
+        // own `Display` and also mounts the stdlib one has two protocols
+        // under one key and the lookup returns whichever registered last —
+        // measured, that reported `implement Display for Point` as missing
+        // `fmt` when the local Display requires `display` and the block
+        // provides exactly that.
+        //
+        // Declining costs one class: an implementation that names the
+        // method of a DIFFERENT protocol (`Debug` requiring `fmt_debug`,
+        // implemented with `fmt`) is no longer reported here. That is a
+        // wrong-name error and reads better as one — "Debug has no method
+        // fmt" — than as a completeness failure, and `core/`'s instances of
+        // it are covered by scripts/ci/check_protocol_conformance.py.
+        if provided.iter().any(|name| !declared.contains(name)) {
+            return;
+        }
+
+        let mut missing: List<Text> = required
+            .into_iter()
+            .filter(|name| !provided.contains(name))
+            .collect();
+        // Sorted, because the set iterates in an unspecified order and the
+        // message is what a spec pins. An unordered list makes a
+        // deterministic compiler look flaky.
+        missing.sort();
+        if missing.is_empty() {
+            return;
+        }
+
+        // The AST type has no Display; render through the checker's own
+        // conversion so the message names the type the way every other
+        // diagnostic does.
+        let for_type_name = self
+            .ast_to_type(for_type)
+            .map(|t| t.to_text())
+            .unwrap_or_else(|_| Text::from("?"));
+        let listed: Vec<&str> = missing.iter().map(|m| m.as_str()).collect();
+        let msg = format!(
+            "`implement {} for {}` does not provide {}: `{}`\n  \
+             help: a protocol method without a default body must be provided by every implementation\n  \
+             note: without it the bound `{}` promises a method the type does not have, and the call panics at run time",
+            proto_ident,
+            for_type_name,
+            if listed.len() == 1 { "the required method" } else { "the required methods" },
+            listed.join("`, `"),
+            proto_ident,
+        );
+        self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
+            code: Text::from("E405"),
+            msg: Text::from(msg),
+            span: impl_decl.span,
+        });
+    }
+
 
     /// Check if a type represents the Never (bottom) type.
     ///

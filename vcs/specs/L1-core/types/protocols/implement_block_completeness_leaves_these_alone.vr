@@ -1,0 +1,79 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: protocols, conformance
+// @timeout: 30000
+// @expected-stdout-begin
+// required 7
+// defaulted 42
+// marker ok
+// shadowed 3
+// @expected-stdout-end
+// @description: The positive pole of `implement_block_must_be_complete.vr`.
+//
+//   Demanding completeness is a refusal, and each spelling below was
+//   measured breaking one attempt at it:
+//
+//   * `defaulted` — a protocol method WITH a body is optional. There are
+//     124 such methods in `core/`; treating them as required rejects most
+//     of the standard library. The first attempt did exactly that, because
+//     one of the three protocol-registration paths read only the item's
+//     `default_impl` channel and not a body written on the signature
+//     itself.
+//
+//   * `marker` — a protocol with no methods is satisfied by an empty
+//     block. Nothing to provide, nothing to report.
+//
+//   * `shadowed` — a file that declares its OWN protocol and also mounts
+//     the stdlib is the case that makes a name-based check dangerous. The
+//     registry is keyed by bare name, so `Display` here means two
+//     different protocols and looking the name up again returns whichever
+//     registered last. Measured: the check reported `implement Display for
+//     Point` as missing `fmt` while the local `Display` requires `display`
+//     and the block provides exactly that — 12 L1 specs failed that way.
+//     The check must answer from the declaration it actually trusted.
+//
+//   Task: T0812.
+
+type Full is protocol {
+    fn required(&self) -> Int;
+    fn defaulted(&self) -> Int {
+        42
+    }
+};
+
+type Marker is protocol {
+};
+
+// Shadows the stdlib protocol of the same name, and requires a DIFFERENT
+// method than the stdlib one does.
+type Display is protocol {
+    fn display(&self) -> Int;
+};
+
+type R is { v: Int };
+
+implement Full for R {
+    fn required(&self) -> Int {
+        7
+    }
+}
+
+implement Marker for R {
+}
+
+implement Display for R {
+    fn display(&self) -> Int {
+        3
+    }
+}
+
+mount core.prelude.*;
+
+fn main() {
+    let r = R { v: 1 };
+    print(f"required {r.required()}");
+    print(f"defaulted {r.defaulted()}");
+    print("marker ok");
+    print(f"shadowed {r.display()}");
+}
