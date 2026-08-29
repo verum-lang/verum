@@ -1,0 +1,60 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, bitwise, translation, negative-test, soundness
+// @timeout: 30000
+// @expected-error: proof-failed
+
+/// SOUNDNESS pole for `bitwise_operators_reach_the_solver.vr`.
+///
+/// Teaching the translator a bitwise operator can be "passed" two wrong
+/// ways, and each claim below is the exact answer one of them gives:
+///
+///   * `xor_is_not_one_MUST_FAIL` — `n ^ n` is zero, never one. If this
+///     proves, XOR is being translated as something that is not XOR.
+///
+///   * `and_with_zero_is_not_n_MUST_FAIL` — `n & 0` is zero, so it
+///     equals `n` only when `n` is zero, and the claim is made for every
+///     `n`. If this proves, the operand is being dropped.
+///
+///   * `unbound_result_MUST_FAIL` is the shape of the ORIGINAL defect
+///     rather than of a wrong operator: before the fix the body did not
+///     translate, `result` stayed a free constant, and the counterexample
+///     named an impossible value (`result = 2` for `n ^ n`).
+///
+/// A file of nothing but MUST_FAIL claims cannot tell "translated and
+/// false" from "not translated at all" — a free `result` refuses
+/// everything, so all three would be red for the wrong reason and this
+/// file would look fine. What separates the two is the POSITIVE pole:
+/// `xor_with_itself_is_zero` PROVES there, which a free `result` can
+/// never do. The two files are only meaningful together.
+///
+/// Task: T0956.
+
+@verify(formal)
+public fn xor_is_not_one_MUST_FAIL(n: Int) -> Int
+    ensures result == 1
+{
+    n ^ n
+}
+
+@verify(formal)
+public fn and_with_zero_is_not_n_MUST_FAIL(n: Int) -> Int
+    requires n != 0
+    ensures result == n
+{
+    n & 0
+}
+
+@verify(formal)
+public fn unbound_result_MUST_FAIL(n: Int) -> Int
+    ensures result == 2
+{
+    n ^ n
+}
+
+mount core.prelude.*;
+
+fn main() {
+    print("false bitwise claims stay false");
+}

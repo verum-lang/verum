@@ -2195,12 +2195,57 @@ impl<'ctx> Translator<'ctx> {
                     let result = left_int.ge(&right_int);
                     Ok(Dynamic::from_ast(&result))
                 }
-                BinOp::And | BinOp::Or | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
-                    Err(TranslationError::TypeMismatch(Text::from(format!(
-                        "operator {} requires boolean operands, got integers",
-                        op.as_str()
-                    ))))
+                // `&`, `|` and `^` are BITWISE in Verum — the logical pair
+                // is `&&` and `||`. Calling them a type error on integers
+                // described a language that does not exist, and the cost
+                // was not a bad message: the whole body failed to
+                // translate, so `result` was never bound to it and every
+                // claim about the function became unprovable. Measured,
+                // `{ let mut d = 0; d = d | (n ^ n); d }` with
+                // `ensures result == 0` failed with `result = 2`.
+                //
+                // The width does not have to be known here, and that is
+                // not luck. For AND/OR/XOR the sign-extension of the
+                // narrow result equals the wide result of the
+                // sign-extended operands: the high bits of a sign-extended
+                // `a` are all `sign(a)`, so the high bits of the wide
+                // answer are `sign(a) op sign(b)` — which is exactly the
+                // sign bit of the narrow answer. 64 bits, the width of
+                // `Int`, is therefore EXACT for every integer type Verum
+                // has, `Byte` and `Int8` included.
+                //
+                // Shifts and `~` do NOT have that property (a left shift
+                // overflows at the real width, a right shift depends on
+                // signedness), and this translator holds Z3 sorts rather
+                // than Verum types — it cannot tell `Int` from `Byte`. So
+                // they are refused below, with that as the reason.
+                BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
+                    const INT_BITS: u32 = 64;
+                    let l = BV::from_int(&left_int, INT_BITS);
+                    let r = BV::from_int(&right_int, INT_BITS);
+                    let bits = match op {
+                        BinOp::BitAnd => l.bvand(&r),
+                        BinOp::BitOr => l.bvor(&r),
+                        _ => l.bvxor(&r),
+                    };
+                    Ok(Dynamic::from_ast(&bits.to_int(true)))
                 }
+                BinOp::And | BinOp::Or => Err(TranslationError::TypeMismatch(Text::from(
+                    format!(
+                        "operator {} is logical and requires boolean operands, got integers \
+                         (the bitwise operators are `&`, `|` and `^`)",
+                        op.as_str()
+                    ),
+                ))),
+                BinOp::Shl | BinOp::Shr => Err(TranslationError::UnsupportedOp(Text::from(
+                    format!(
+                        "shift `{}` needs the operand's WIDTH and SIGNEDNESS, and this \
+                         translator holds Z3 sorts rather than Verum types — `>>` is \
+                         arithmetic on a signed operand and logical on an unsigned one, \
+                         and `<<` overflows at the declared width (T0956)",
+                        op.as_str()
+                    ),
+                ))),
                 _ => Err(TranslationError::UnsupportedOp(op.as_str().to_text())),
             }
         } else if self.config.precise_floats {
@@ -2481,6 +2526,19 @@ impl<'ctx> Translator<'ctx> {
                     Ok(Dynamic::from_ast(&bool_operand.not()))
                 }
             }
+
+            // `~` is not width-independent the way `&`/`|`/`^` are. On a
+            // SIGNED operand it is — the high bits of `~a` are `~sign(a)`,
+            // which is the sign bit of the narrow answer — but on an
+            // unsigned one it is not: `~5` is 250 as a `Byte` and -6 as a
+            // 64-bit `Int`. Deciding needs the operand's type, and this
+            // translator holds Z3 sorts, so it refuses and says why
+            // instead of guessing a width (T0956).
+            verum_ast::UnOp::BitNot => Err(TranslationError::UnsupportedOp(Text::from(
+                "`~` needs the operand's WIDTH and SIGNEDNESS: on an unsigned type the \
+                 complement is taken at the declared width, and this translator holds Z3 \
+                 sorts rather than Verum types (T0956)",
+            ))),
 
             _ => Err(TranslationError::UnsupportedOp(Text::from(format!(
                 "{:?}",

@@ -1,0 +1,104 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, bitwise, translation, verification
+// @timeout: 30000
+
+/// `&`, `|` and `^` on integers are BITWISE, and the verifier can reason
+/// about them.
+///
+/// It could not. The translator's integer branch listed them beside the
+/// logical operators and answered
+///
+///     operator ^ requires boolean operands, got integers
+///
+/// which describes a language that does not exist — Verum's logical pair
+/// is `&&` and `||`. The cost was not a bad message. A body containing
+/// one failed to translate at all, so `result` was never bound to it and
+/// every claim about the function became unprovable. Measured, with no
+/// array and no loop in sight:
+///
+///     fn f(n: Int) -> Int ensures result == 0
+///     { let mut d = 0; d = d | (n ^ n); d }
+///
+///     ✗ Failed, counterexample `d = 0, result = 2`
+///
+/// `result = 2` is the tell: `n ^ n` is zero for every n, so a bound
+/// `result` could not have been 2. It was not bound at all.
+///
+/// This is the second of three layers under the showcase application's
+/// hash theorems, which all attribute themselves to loops. The first was
+/// the assignment (T0954); this is the operator; the loop is the third
+/// and has not been reached yet. A version of the byte comparison
+/// unrolled BY HAND, with no loop anywhere, still failed here.
+///
+/// WIDTH. The translation goes through a 64-bit bitvector and back, and
+/// that is exact for every integer type Verum has, not an approximation
+/// for `Int`. For AND/OR/XOR the sign-extension of the narrow result
+/// equals the wide result of the sign-extended operands: the high bits of
+/// a sign-extended `a` are all `sign(a)`, so the high bits of the wide
+/// answer are `sign(a) op sign(b)` — which is the sign bit of the narrow
+/// answer. Shifts and `~` do not have that property and are refused with
+/// that as the stated reason.
+///
+/// The soundness pole is `bitwise_operators_stay_honest.vr`.
+///
+/// Task: T0956.
+
+@verify(formal)
+public fn xor_with_itself_is_zero(n: Int) -> Int
+    ensures result == 0
+{
+    n ^ n
+}
+
+// THE KNOWN LIMIT, measured rather than assumed. `n & n == n` and
+// `n | 0 == n` are NOT stated here, and the reason is worth more than the
+// two lines they would occupy.
+//
+// The solver models Verum's `Int` as an UNBOUNDED mathematical integer,
+// while the language's `Int` is 64 bits. The bitvector round-trip is exact
+// inside 64 bits and lossy outside it, so an identity that returns the
+// operand — `n & n`, `n | 0` — is not valid for the unbounded `n` the
+// solver is reasoning about, and it is correctly refused. Identities whose
+// answer does not depend on the operand's magnitude (`n ^ n == 0`,
+// `n & 0 == 0`) are unaffected, which is why they are the ones stated.
+//
+// This is INCOMPLETENESS, not unsoundness: the encoding is exact for
+// in-range values and merely permissive outside, so anything proved for
+// every integer holds in particular for every `Int`.
+//
+// Measured: adding `requires n >= 0 && n < 65536` makes both prove — in
+// 26s and 55s respectively, against 0.09s for the unbounded-safe
+// identities above. So the fix is not to bound them here; it is to give
+// the solver the range fact that the type already carries, and the cost of
+// bit-blasting says that has to be done carefully. Task: T0961.
+
+@verify(formal)
+public fn and_with_zero_is_zero(n: Int) -> Int
+    ensures result == 0
+{
+    n & 0
+}
+
+/// The shape the showcase actually writes: an accumulator OR-ed with a
+/// XOR difference, which is zero exactly when the two sides agree. This
+/// is `equal_narrow` with the loop unrolled by hand.
+@verify(formal)
+public fn accumulated_difference_of_equals_is_zero(a: Int, b: Int) -> Int
+    requires a == b
+    ensures result == 0
+{
+    let mut diff = 0;
+    diff = diff | (a ^ b);
+    diff = diff | (a ^ b);
+    diff = diff | (a ^ b);
+    diff = diff | (a ^ b);
+    diff
+}
+
+mount core.prelude.*;
+
+fn main() {
+    print("bitwise operators reach the solver");
+}
