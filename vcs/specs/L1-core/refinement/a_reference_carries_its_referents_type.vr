@@ -1,0 +1,65 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, reflection, references, cbgr, tiers
+// @timeout: 30000
+
+/// A `&checked` reference is a reference.
+///
+/// The three reference tiers are three AST variants of one idea — a
+/// value of `T` reached through a reference — and the SMT translators
+/// listed only the first. `TypeKind::Reference` recursed to its
+/// referent; `CheckedReference` and `UnsafeReference` fell to the
+/// catch-all and became an opaque shape with no NAME. Everything
+/// downstream then stopped: a field access on such a value could not be
+/// resolved ("field access on a value whose named type is unknown to
+/// reflection"), so the body did not render, so the definition never
+/// reached the goal that needed it.
+///
+/// The tier is a statement about how a reference is CHECKED at runtime
+/// — CBGR at tier 0, a compile-time proof at tier 1, a manual proof at
+/// tier 2. It says nothing about what the value IS. A translator that
+/// treats it as a different type is reading the wrong thing.
+///
+/// Measured, and the contrast is the diagnosis: the same helper over a
+/// plain `&` reflected and its theorem closed, while over `&checked` it
+/// declined. The showcase application writes `&checked` throughout,
+/// which is why nothing in it could be proved through a helper.
+///
+/// This file also carries the two rules that had to exist before the
+/// tier fix could show: `a.0` is a positional projection spelled with
+/// the same symbol on both sides, and a widening cast is the identity
+/// (T0965).
+///
+/// Task: T0965.
+
+public type Plain is { bytes: [Byte; 4] };
+
+/// A helper read through a `&checked` reference, containing a field
+/// access, an index and a cast — the shape a digest comparison has.
+public pure fn reads_the_same_byte_twice(p: &checked Plain) -> Bool {
+    (p.bytes[0] as Int) == (p.bytes[0] as Int)
+}
+
+/// The same through a plain `&`, which worked throughout and is the
+/// control that identified the TIER as the difference rather than the
+/// field, the index or the cast.
+public pure fn reads_the_same_byte_twice_plain(p: &Plain) -> Bool {
+    (p.bytes[0] as Int) == (p.bytes[0] as Int)
+}
+
+@verify(formal)
+public theorem a_checked_reference_reflects(p: &checked Plain)
+    ensures reads_the_same_byte_twice(p)
+    proof by auto;
+
+@verify(formal)
+public theorem a_plain_reference_reflects(p: &Plain)
+    ensures reads_the_same_byte_twice_plain(p)
+    proof by auto;
+
+mount core.prelude.*;
+
+fn main() {
+    print("a reference carries its referent's type");
+}

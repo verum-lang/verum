@@ -113,6 +113,15 @@ pub struct ReflectionTypeEnv {
     /// gets a discriminant predicate and one projection per position —
     /// see `solver_symbols::discriminant` / `::payload`.
     pub variants: std::collections::HashMap<String, Vec<(String, Vec<String>)>>,
+    /// Newtype or tuple type → its positions, each with the SORT and
+    /// the named type when that position is opaque.
+    ///
+    /// The positional counterpart of `record_fields`, and needed for
+    /// the same reason: without it `a.0.bytes` cannot be resolved,
+    /// because nothing names the type of `a.0`. A newtype over a record
+    /// is how the showcase writes a digest — `type Narrow is (Hash<32>)`
+    /// — so every claim about one stopped there.
+    pub positional: std::collections::HashMap<String, Vec<(String, Option<String>)>>,
 }
 
 impl ReflectionTypeEnv {
@@ -223,6 +232,21 @@ impl ReflectionTypeEnv {
                         });
                         add_methods(&mut env, td.name.name.as_str(), &mut fns);
                     }
+                    // A newtype is a tuple of one. Recording both here
+                    // is what lets `a.0` be given a type, and without a
+                    // type its own `.bytes` cannot be resolved either.
+                    TypeDeclBody::Newtype(ty) => {
+                        let name = td.name.name.as_str().to_string();
+                        env.positional
+                            .entry(name)
+                            .or_insert_with(|| vec![type_to_sort_and_name(ty)]);
+                    }
+                    TypeDeclBody::Tuple(tys) => {
+                        let name = td.name.name.as_str().to_string();
+                        env.positional.entry(name).or_insert_with(|| {
+                            tys.iter().map(type_to_sort_and_name).collect()
+                        });
+                    }
                     _ => {}
                 },
                 ItemKind::Protocol(p) => {
@@ -278,7 +302,41 @@ fn member_type_name(expr: &Expr, env: &ReflectionTypeEnv) -> Option<String> {
                 .ret_type_name
                 .clone()
         }
+        ExprKind::TupleIndex { expr: obj, index } => {
+            let t = member_type_name(obj, env)?;
+            env.positional.get(&t)?.get(*index as usize)?.1.clone()
+        }
         ExprKind::Paren(inner) => member_type_name(inner, env),
+        _ => None,
+    }
+}
+
+/// The SORT of a member-bearing expression, by the same walk as
+/// [`member_type_name`].
+///
+/// Needed because a symbol that carries its argument's sort in its NAME
+/// — `solver_symbols::index` does, so that one name never carries two
+/// signatures — can only be spelled identically by both translators if
+/// both compute the same sort. The goal side reads it off the Z3 value;
+/// this reads it off the declared type, and the two agree because both
+/// go through `type_to_sort_and_name`.
+fn member_sort(expr: &Expr, env: &ReflectionTypeEnv) -> Option<String> {
+    match &expr.kind {
+        ExprKind::Path(p) => {
+            let id = p.as_ident()?;
+            env.bindings
+                .get(id.as_str())
+                .map(|t| crate::solver_symbols::opaque_sort(t))
+        }
+        ExprKind::Field { expr: obj, field } => {
+            let t = member_type_name(obj, env)?;
+            Some(env.record_fields.get(&t)?.get(field.name.as_str())?.0.clone())
+        }
+        ExprKind::TupleIndex { expr: obj, index } => {
+            let t = member_type_name(obj, env)?;
+            Some(env.positional.get(&t)?.get(*index as usize)?.0.clone())
+        }
+        ExprKind::Paren(inner) => member_sort(inner, env),
         _ => None,
     }
 }
@@ -771,6 +829,40 @@ pub fn expr_to_smtlib_env(
             Ok(format!("({} {})", proj, recv))
         }
 
+        // A cast is the identity here, and matches what the goal side
+        // does (`translate.rs`: `Cast { expr, .. } => translate_expr(expr)`).
+        // Both sides model every integer type as one `Int`, so widening
+        // — which is every cast a verified body has been observed to
+        // contain, `Byte as Int` above all — changes nothing. A
+        // NARROWING cast is not the identity and this does not model it;
+        // that limit is the goal side's too, and lifting it needs the
+        // operand's width, which neither translator holds (T0956, T0961).
+        ExprKind::Cast { expr: inner, .. } => expr_to_smtlib_env(inner, env, aux),
+
+        // `a.0` — a positional projection, spelled with the same symbol
+        // the goal side applies. Same device as a named field, and the
+        // shape a newtype's payload takes: the showcase's hash
+        // comparison reads `a.0.bytes[i]`, so without this arm its
+        // reflected body could not be rendered at all even after the
+        // fold had unrolled the loop that produced it (T0965).
+        ExprKind::TupleIndex { expr: obj, index } => {
+            let tn = member_type_name(obj, env).ok_or_else(|| {
+                SmtTranslateError::UnsupportedExpr {
+                    description: format!(
+                        "positional access on a value whose named type is unknown to \
+                         reflection: .{}",
+                        index
+                    ),
+                }
+            })?;
+            let recv = expr_to_smtlib_env(obj, env, aux)?;
+            let tsort = crate::solver_symbols::opaque_sort(&tn);
+            note_sort(aux, &tsort);
+            let proj = crate::solver_symbols::tuple_projection(&tsort, *index as usize);
+            note_decl(aux, format!("(declare-fun {} ({}) Int)", proj, tsort));
+            Ok(format!("({} {})", proj, recv))
+        }
+
         // Reading one element: `xs[i]`, as an application of the same
         // uninterpreted symbol the goal side emits.
         //
@@ -784,16 +876,22 @@ pub fn expr_to_smtlib_env(
         ExprKind::Index { expr: base, index } => {
             let b = expr_to_smtlib_env(base, env, aux)?;
             let i = expr_to_smtlib_env(index, env, aux)?;
-            // `Int` is the base sort this side can name: a reflected
-            // body reaches here with the container rendered as an
-            // ordinary term, and the goal side spells the same symbol
-            // for an `Int`-sorted base. A container that arrives at the
-            // goal under an opaque sort is a different symbol by
-            // construction, which is the point — the two would
-            // otherwise share a name and disagree about its signature
-            // (T0962).
-            let sym = crate::solver_symbols::index("Int");
-            note_decl(aux, format!("(declare-fun {} (Int Int) Int)", sym));
+            // The base's SORT is part of the symbol's name, so this
+            // side has to compute the SAME sort the goal side reads off
+            // the Z3 value — otherwise the two spell different symbols
+            // and the definition never reaches the goal, which is the
+            // failure mode `solver_symbols` exists to prevent. `Int` is
+            // the fallback for a base whose type this side cannot name;
+            // a plain identifier standing for an integer is exactly
+            // that case (T0962, T0965).
+            let base_sort =
+                member_sort(base, env).unwrap_or_else(|| "Int".to_string());
+            note_sort(aux, &base_sort);
+            let sym = crate::solver_symbols::index(&base_sort);
+            note_decl(
+                aux,
+                format!("(declare-fun {} ({} Int) Int)", sym, base_sort),
+            );
             Ok(format!("({} {} {})", sym, b, i))
         }
 
@@ -955,7 +1053,26 @@ pub fn type_to_sort_and_name(ty: &verum_ast::ty::Type) -> (String, Option<String
         // a `&T` parameter carries T's facts, and `Int{ it > 0 }` is
         // an Int with an assumption, not a new sort.
         TypeKind::Refined { base, .. } => type_to_sort_and_name(base),
-        TypeKind::Reference { inner, .. } => type_to_sort_and_name(inner),
+        // ALL THREE reference tiers, not one. `&T`, `&checked T` and
+        // `&unsafe T` are three AST variants of one idea — a value of
+        // T reached through a reference — and only `Reference` was
+        // listed here, so a `&checked` parameter fell to the catch-all
+        // and lost its referent's NAME. Everything downstream then
+        // stopped: a field access on it could not be resolved
+        // ("field access on a value whose named type is unknown to
+        // reflection"), so the body did not render, so the definition
+        // never reached the goal that needed it.
+        //
+        // Measured on the showcase, which writes `&checked`
+        // everywhere: `p.bytes[0] == p.bytes[0]` on a `&checked`
+        // record declined, while the same on a plain `&` did not. The
+        // tier is a performance choice about how the reference is
+        // CHECKED at runtime; it says nothing about what the value IS,
+        // and a translator that treats it as a different type is
+        // reading the wrong thing (T0965).
+        TypeKind::Reference { inner, .. }
+        | TypeKind::CheckedReference { inner, .. }
+        | TypeKind::UnsafeReference { inner, .. } => type_to_sort_and_name(inner),
         TypeKind::Path(path) => {
             let Some(ident) = path.as_ident() else {
                 return ("Verum!Path".to_string(), None);

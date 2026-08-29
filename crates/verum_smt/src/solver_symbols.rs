@@ -104,6 +104,24 @@ pub fn index(base_sort: &str) -> String {
     format!("Verum!index!{}", base_sort)
 }
 
+/// Reading one POSITION: `a.0` becomes an application of this symbol to
+/// the receiver.
+///
+/// The same device as [`projection`], for the same reason — a newtype
+/// or a tuple projects positionally instead of by name.
+///
+/// The goal side used to build this one with a local `format!`, keying
+/// an `Int` constant on the receiver's PRETTY-PRINTED SOURCE
+/// (`tuple_idx_{}_{}`), which is the exact species of drift this module
+/// was created to end: the reflection side had no rule at all, so a
+/// reflected body containing `a.0` could not be rendered, and if it had
+/// been rendered by a second local `format!` the two spellings would
+/// have described different symbols. A pretty-printed key also makes
+/// `a.0` and `(a).0` different constants.
+pub fn tuple_projection(base_sort: &str, position: usize) -> String {
+    format!("Verum!tuple!{}!{}", base_sort, position)
+}
+
 /// True for a symbol this module minted. The reflection registry's
 /// closure pass uses it: a projection is declared by the entry that
 /// uses it, so it is never an "undeclared symbol" that would poison

@@ -1481,14 +1481,31 @@ impl<'ctx> Translator<'ctx> {
             // property needed for postconditions like
             //  ensures result.0 + result.1 == x
             // to use the same symbol on both sides.
+            // `a.0` is a projection, and it is now spelled as one: an
+            // application of `solver_symbols::tuple_projection` to the
+            // receiver, exactly as a named field is.
+            //
+            // It used to be an `Int` constant keyed on the receiver's
+            // PRETTY-PRINTED SOURCE (`tuple_idx_{}_{}`). Two costs, and
+            // the second is the one that mattered: `a.0` and `(a).0`
+            // were different constants, and the reflection side had no
+            // rule for `TupleIndex` at all — so a reflected body
+            // containing one could not be rendered, and a definition
+            // that never renders can never reach the goal that needs
+            // it. A newtype's payload is the shape the showcase's hash
+            // comparison is written in (T0965).
             ExprKind::TupleIndex { expr, index } => {
-                let key = format!(
-                    "tuple_idx_{}_{}",
-                    verum_ast::pretty::format_expr(strip_paren(expr)),
-                    index
+                let recv = self.translate_expr(strip_paren(expr))?;
+                let recv_sort = recv.get_sort();
+                let decl = FuncDecl::new(
+                    Symbol::String(crate::solver_symbols::tuple_projection(
+                        &format!("{}", recv_sort),
+                        *index as usize,
+                    )),
+                    &[&recv_sort],
+                    &Sort::int(),
                 );
-                let int_var = Int::new_const(key.as_str());
-                Ok(Dynamic::from_ast(&int_var))
+                Ok(decl.apply(&[&recv]))
             }
 
             // Interpolated string expressions - concatenate parts and expressions
@@ -3752,7 +3769,15 @@ impl<'ctx> Translator<'ctx> {
             // `&T` fell to the catch-all and ALL ref-typed parameters
             // shared one `Verum!Reference` sort — distinct types
             // colliding, the exact property the opaque design forbids.
-            TypeKind::Reference { inner, .. } => self.create_var(name, inner),
+            // All three tiers, for the reason spelled out beside the
+            // same list in `expr_to_smtlib::type_to_sort_and_name`:
+            // `&T`, `&checked T` and `&unsafe T` are three spellings of
+            // one idea, and listing only the first gave a `&checked`
+            // parameter an opaque shape sort instead of its referent's
+            // (T0965).
+            TypeKind::Reference { inner, .. }
+            | TypeKind::CheckedReference { inner, .. }
+            | TypeKind::UnsafeReference { inner, .. } => self.create_var(name, inner),
 
             TypeKind::Path(path) => {
                 // The integer and float FAMILIES, not a hand-written
