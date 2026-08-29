@@ -74,6 +74,36 @@ pub fn method(type_name: &str, method_name: &str) -> String {
     format!("Verum!method!{}!{}", type_name, method_name)
 }
 
+/// Reading one element: `xs[i]` becomes an application of this symbol
+/// to the container and the index.
+///
+/// Uninterpreted, and that is the whole content: the solver learns
+/// nothing about the element's VALUE, only that one container and one
+/// index name one value. Reflexivity follows, which sounds too small to
+/// state until you see what its absence did. `translate_index` demanded
+/// a Z3 array sort, an ordinary identifier is an `Int` constant, so
+/// `Z3_mk_select` on it was refused and the WHOLE body failed to
+/// translate — `result` unbound, nothing provable. Measured,
+/// `xs[0] == xs[0]` did not verify.
+///
+/// The container is an ARGUMENT, not part of the name: different
+/// containers and different indices are different applications, so
+/// `xs[0] == xs[1]` stays unprovable — the control that says this is a
+/// read and not a collapse.
+///
+/// The container's SORT is part of the name, because a container
+/// reaches the solver with whatever sort it was declared at — `Int` for
+/// a plain identifier, `Verum!Array` for a parameter `create_var` could
+/// only make opaque — and one name with two signatures is a
+/// redeclaration the moment both appear in one module's SMT text.
+///
+/// A base that really carries a Z3 array sort still gets the exact
+/// `select`; this is the fallback for a sort that was never declared,
+/// not a replacement for array theory.
+pub fn index(base_sort: &str) -> String {
+    format!("Verum!index!{}", base_sort)
+}
+
 /// True for a symbol this module minted. The reflection registry's
 /// closure pass uses it: a projection is declared by the entry that
 /// uses it, so it is never an "undeclared symbol" that would poison
@@ -93,6 +123,7 @@ mod tests {
         assert_eq!(opaque_sort("Witness"), "Verum!Witness");
         assert_eq!(projection("Witness", "flag"), "Verum!proj!Witness!flag");
         assert_eq!(method("Candidate", "cond"), "Verum!method!Candidate!cond");
+        assert_eq!(index("Int"), "Verum!index!Int");
     }
 
     /// Everything this module mints is recognisable as ours, and

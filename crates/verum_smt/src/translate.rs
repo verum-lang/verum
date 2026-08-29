@@ -1779,41 +1779,52 @@ impl<'ctx> Translator<'ctx> {
             let result = array.select(&index_int);
             Ok(result)
         } else {
-            // The base might be a nested select result (Dynamic)
-            // We need to construct a select operation manually
-            // This handles nested indexing like tensor[i][j]
-            use z3::ast::Ast;
-
-            // Get the context from the base AST node
-            let ctx = base_z3.get_ctx();
-
-            // SAFETY: FFI call to Z3's C API for the select
-            // operation on a Dynamic-sorted base.
-            //  - `ctx.get_z3_context()` is the live Z3_context
-            //  pointer the binding owns.
-            //  - `base_z3.get_z3_ast()` and `index_int.get_z3_ast()`
-            //  are live AST pointers for the array operand and
-            //  index respectively, both produced by translation
-            //  within the same context.
-            //  - `Z3_mk_select` produces a fresh AST owned by the
-            //  context; `Dynamic::wrap(ctx, ast)` takes ownership
-            //  and reference-counts via `Z3_inc_ref` internally.
-            unsafe {
-                // Use Z3 C API directly for select operation on Dynamic
-                let select_ast = z3_sys::Z3_mk_select(
-                    ctx.get_z3_context(),
-                    base_z3.get_z3_ast(),
-                    index_int.get_z3_ast(),
-                );
-
-                if let Some(ast) = select_ast {
-                    Ok(Dynamic::wrap(ctx, ast))
-                } else {
-                    Err(TranslationError::TypeMismatch(
-                        "failed to create array select operation".to_text(),
-                    ))
-                }
-            }
+            // The base is not a Z3 array, and in practice it never is:
+            // a plain identifier is declared as an `Int` constant and a
+            // parameter typed `[Int; 4]` reaches `create_var`'s
+            // catch-all as an OPAQUE sort, because this translator holds
+            // Z3 sorts rather than Verum types. Demanding an array sort
+            // here therefore refused EVERY ordinary indexing —
+            // `Z3_mk_select` on a non-array is not well-typed, so
+            // translation of the whole body failed, `result` was never
+            // bound to it, and nothing about the function could be
+            // proved. Measured, `xs[0] == xs[0]` did not verify: an
+            // array element was not equal to itself.
+            //
+            // Read it as an uninterpreted FUNCTION of the container and
+            // the index instead. That is sound: the solver is told
+            // nothing about the value, only that one container and one
+            // index name one value, which is exactly the semantics of
+            // reading an immutable array. Reflexivity comes back, and
+            // `xs[0] == xs[1]` stays unprovable because the two are
+            // different applications.
+            //
+            // `solver_symbols::index` rather than a local `format!`,
+            // because the reflection side emits the same symbol and a
+            // definition that spells it differently can never meet the
+            // goal that needs it — that is what the whole module exists
+            // to prevent.
+            // `solver_symbols::index` rather than a local `format!`,
+            // because the reflection side emits the same symbol and a
+            // definition that spells it differently can never meet the
+            // goal that needs it — that is what the whole module exists
+            // to prevent. The base's sort is part of the name: a
+            // container arrives as `Int` or as an opaque sort depending
+            // on how it was declared, and one name carrying two
+            // signatures is a redeclaration in the module's SMT text.
+            //
+            // This also replaces a direct `Z3_mk_select` on a
+            // non-array base, which could only ever fail — it was the
+            // sole producer of "failed to create array select
+            // operation", and that error was the whole defect.
+            let base_sort = base_z3.get_sort();
+            let int_sort = Sort::int();
+            let decl = FuncDecl::new(
+                Symbol::String(crate::solver_symbols::index(&format!("{}", base_sort))),
+                &[&base_sort, &int_sort],
+                &int_sort,
+            );
+            Ok(decl.apply(&[&base_z3, &Dynamic::from_ast(&index_int)]))
         }
     }
 

@@ -1,0 +1,55 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, arrays, indexing, negative-test, soundness
+// @timeout: 30000
+// @expected-error: proof-failed
+
+/// CONTROL for `array_element_reads_are_one_value.vr`.
+///
+/// Making `xs[0] == xs[0]` provable is easy the wrong way: read every
+/// index as the same term, or read the container itself and ignore the
+/// index. Either would satisfy the positive file completely and make
+/// the verifier claim that all elements of every array are equal.
+///
+/// So each claim below is false, and each is the exact answer one wrong
+/// reading gives:
+///
+///   * `two_indices_MUST_FAIL` — provable only if the index is being
+///     ignored, so `xs[0]` and `xs[1]` are one term.
+///
+///   * `two_containers_MUST_FAIL` — provable only if the CONTAINER is
+///     being ignored, so `xs[0]` and `ys[0]` are one term.
+///
+///   * `an_element_has_a_known_value_MUST_FAIL` — the read is
+///     uninterpreted, and must stay so. If this proves, the symbol has
+///     acquired a meaning nobody gave it.
+///
+/// Task: T0962.
+
+@verify(formal)
+public fn two_indices_MUST_FAIL(xs: &checked [Int; 4]) -> Bool
+    ensures result == true
+{
+    xs[0] == xs[1]
+}
+
+@verify(formal)
+public fn two_containers_MUST_FAIL(xs: &checked [Int; 4], ys: &checked [Int; 4]) -> Bool
+    ensures result == true
+{
+    xs[0] == ys[0]
+}
+
+@verify(formal)
+public fn an_element_has_a_known_value_MUST_FAIL(xs: &checked [Int; 4]) -> Int
+    ensures result == 0
+{
+    xs[0]
+}
+
+mount core.prelude.*;
+
+fn main() {
+    print("a read is a read, not a collapse");
+}

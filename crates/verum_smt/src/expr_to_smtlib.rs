@@ -771,6 +771,32 @@ pub fn expr_to_smtlib_env(
             Ok(format!("({} {})", proj, recv))
         }
 
+        // Reading one element: `xs[i]`, as an application of the same
+        // uninterpreted symbol the goal side emits.
+        //
+        // This arm did not exist, and neither did the goal side's — so a
+        // reflected body containing an index was declined here while the
+        // goal containing one failed to translate there. Both are the
+        // same missing rule, and writing it on one side only would have
+        // been worse than writing neither: a definition that spells the
+        // read differently from the goal can never reach it, which is
+        // exactly the drift `solver_symbols` exists to prevent (T0962).
+        ExprKind::Index { expr: base, index } => {
+            let b = expr_to_smtlib_env(base, env, aux)?;
+            let i = expr_to_smtlib_env(index, env, aux)?;
+            // `Int` is the base sort this side can name: a reflected
+            // body reaches here with the container rendered as an
+            // ordinary term, and the goal side spells the same symbol
+            // for an `Int`-sorted base. A container that arrives at the
+            // goal under an opaque sort is a different symbol by
+            // construction, which is the point — the two would
+            // otherwise share a name and disagree about its signature
+            // (T0962).
+            let sym = crate::solver_symbols::index("Int");
+            note_decl(aux, format!("(declare-fun {} (Int Int) Int)", sym));
+            Ok(format!("({} {} {})", sym, b, i))
+        }
+
         // Protocol/impl method call: `p.cond()` (chains included —
         // the receiver's type is resolved through method return
         // types) becomes `(Verum!method!<Type>!<name> recv args…)`,

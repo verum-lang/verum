@@ -1,0 +1,94 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, arrays, indexing, translation, verification
+// @timeout: 30000
+
+/// Reading `xs[i]` twice reads the same value.
+///
+/// That is small enough to sound unnecessary, so here is what its
+/// absence did. `translate_index` demanded a Z3 ARRAY sort for the
+/// base. An ordinary identifier is declared as an `Int` constant —
+/// the translator holds Z3 sorts, not Verum types, and never learned
+/// that `xs` is an array — so the fallback path called `Z3_mk_select`
+/// on an `Int`, Z3 refused it as ill-typed, and translation of the
+/// WHOLE body failed. A failed body is never bound to `result`, so
+/// nothing about the function could be proved at all. Measured:
+///
+///     { xs[0] == xs[0] }  ensures result == true    ✗ Failed
+///     { xs[0] - xs[0] }   ensures result == 0       ✗ Failed
+///
+/// An array element was not equal to itself.
+///
+/// Bisected to the index rather than assumed: a record field proves, a
+/// `Byte`-to-`Int` cast proves, `h.v ^ h.v == 0` proves — only the
+/// index failed, and it failed the same way with a bare array
+/// parameter as through a record field.
+///
+/// The read is now an application of an uninterpreted symbol to the
+/// container and the index. The solver is told nothing about the
+/// value, only that one container and one index name one value —
+/// which is the semantics of reading an immutable array, and enough
+/// for everything below. A base that really carries an array sort
+/// still gets the exact `select`; this is the fallback for a sort that
+/// was never declared.
+///
+/// The control against a fix that "passes" by collapsing every read
+/// into one term is `array_element_reads_are_not_all_equal.vr`.
+///
+/// Third and last layer under the showcase application's hash
+/// theorems: T0954 was the assignment, T0956 the bitwise operators,
+/// this is the index. Task: T0962.
+
+public type Small is { bytes: [Byte; 4] };
+
+@verify(formal)
+public fn an_element_equals_itself(xs: &checked [Int; 4]) -> Bool
+    ensures result == true
+{
+    xs[0] == xs[0]
+}
+
+@verify(formal)
+public fn an_element_minus_itself_is_zero(xs: &checked [Int; 4]) -> Int
+    ensures result == 0
+{
+    xs[0] - xs[0]
+}
+
+@verify(formal)
+public fn an_element_xored_with_itself_is_zero(xs: &checked [Int; 4]) -> Int
+    ensures result == 0
+{
+    xs[0] ^ xs[0]
+}
+
+@verify(formal)
+public fn through_a_record_field(a: &checked Small) -> Int
+    ensures result == 0
+{
+    (a.bytes[0] as Int) ^ (a.bytes[0] as Int)
+}
+
+/// The showcase's byte comparison with the loop unrolled by hand: a
+/// digest equals itself, so every XOR difference is zero and the
+/// accumulated OR is zero. This is the shape `equal_narrow` has once
+/// the loop is gone, and it is what the three layers were in the way
+/// of.
+@verify(formal)
+public fn a_digest_equals_itself(a: &checked Small) -> Int
+    ensures result == 0
+{
+    let mut diff = 0;
+    diff = diff | ((a.bytes[0] as Int) ^ (a.bytes[0] as Int));
+    diff = diff | ((a.bytes[1] as Int) ^ (a.bytes[1] as Int));
+    diff = diff | ((a.bytes[2] as Int) ^ (a.bytes[2] as Int));
+    diff = diff | ((a.bytes[3] as Int) ^ (a.bytes[3] as Int));
+    diff
+}
+
+mount core.prelude.*;
+
+fn main() {
+    print("array element reads are one value");
+}
