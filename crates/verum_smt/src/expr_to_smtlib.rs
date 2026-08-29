@@ -621,10 +621,10 @@ pub fn expr_to_smtlib_env(
                     _ => "bvxor",
                 };
                 return Ok(format!(
-                    "(let ((verum!bv ({} ((_ int2bv 64) {}) ((_ int2bv 64) {})))) \
-                     (ite (= ((_ extract 63 63) verum!bv) #b1) \
-                     (- (bv2nat verum!bv) 18446744073709551616) \
-                     (bv2nat verum!bv)))",
+                    "(let ((Verum!bv ({} ((_ int2bv 64) {}) ((_ int2bv 64) {})))) \
+                     (ite (= ((_ extract 63 63) Verum!bv) #b1) \
+                     (- (bv2nat Verum!bv) 18446744073709551616) \
+                     (bv2nat Verum!bv)))",
                     bv, l, r
                 ));
             }
@@ -1647,7 +1647,40 @@ fn substitute_ident(expr: &Expr, name: &str, replacement: &Expr) -> Expr {
             args: args.iter().map(&sub).collect(),
             type_args: type_args.clone(),
         },
-        _ => return expr.clone(),
+        // Everything else is STRUCTURAL: rebuild the node with each
+        // child substituted.
+        //
+        // This arm was `return expr.clone()`, which made substitution
+        // stop dead at every variant not listed above — seven of the
+        // seventy-three. An index, a positional access, a cast, an `if`
+        // all blocked it, so a name survived inside `xs[i]`, and the
+        // closure gate then dropped the whole entry for referencing a
+        // symbol that is "neither a parameter nor another reflected
+        // function". Measured: `equal_narrow`, whose loop the fold had
+        // just unrolled, was skipped because the counter `i` was still
+        // standing inside the array index that the unrolling was
+        // supposed to have replaced.
+        //
+        // The identical defect was found and fixed in
+        // `verum_types::refinement::substitute_in_expr`, and the
+        // remedy is the same: walk the children through the authority
+        // in `verum_ast` that already covers all 73 variants, so a
+        // variant added later cannot quietly reintroduce the gap.
+        //
+        // A BINDER is refused rather than walked, for the reason that
+        // arm spells out: descending blindly into a node that rebinds
+        // the name captures it. This substitution has no scope rules of
+        // its own, so refusing is the sound half (T0958, T0965).
+        _ => {
+            if verum_ast::visit_mut::introduces_bindings(&expr.kind) {
+                return expr.clone();
+            }
+            let mut rebuilt = expr.clone();
+            verum_ast::visit_mut::each_child_expr_mut(&mut rebuilt, &mut |child| {
+                *child = substitute_ident(child, name, replacement);
+            });
+            return rebuilt;
+        }
     };
     let mut out = expr.clone();
     out.kind = kind;

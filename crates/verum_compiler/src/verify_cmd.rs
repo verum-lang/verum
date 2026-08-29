@@ -102,11 +102,21 @@ fn declared_sort_of(
     ty: &verum_ast::ty::Type,
     record_layouts: &std::collections::HashMap<String, std::collections::HashMap<String, (String, Option<String>)>>,
     variant_names: &[(Text, Vec<Text>)],
+    positional_layouts: &std::collections::HashMap<String, Vec<(String, Option<String>)>>,
 ) -> (Text, Option<String>) {
     let (sort_name, type_name) = verum_smt::expr_to_smtlib::type_to_sort_and_name(ty);
     let opaque = sort_name.starts_with("Verum!");
+    // A NEWTYPE is a declared type like any other. Counting only
+    // records and variants as "known" meant a parameter typed
+    // `Narrow` — `type Narrow is (Hash<32>)` — was declared to the
+    // solver as a plain `Int`, so a reflected definition built over
+    // `Verum!Narrow` could not apply to it even when it arrived.
+    // Measured with `VERUM_DUMP_SMT_DIR`: the goal read
+    // `(declare-fun a () Int)` for a newtype parameter (T0965).
     let known = type_name.as_deref().is_some_and(|n| {
-        record_layouts.contains_key(n) || variant_names.iter().any(|(t, _)| t.as_str() == n)
+        record_layouts.contains_key(n)
+            || variant_names.iter().any(|(t, _)| t.as_str() == n)
+            || positional_layouts.contains_key(n)
     });
     if !opaque || known {
         (Text::from(sort_name.as_str()), type_name)
@@ -402,7 +412,13 @@ impl<'s> VerifyCommand<'s> {
         }
 
         let sort_of_declared = |ty: &verum_ast::ty::Type| -> Text {
-            declared_sort_of(ty, &reflection_env.record_fields, &variant_registry).0
+            declared_sort_of(
+                ty,
+                &reflection_env.record_fields,
+                &variant_registry,
+                &reflection_env.positional,
+            )
+            .0
         };
 
         for item in &module.items {
@@ -662,6 +678,7 @@ impl<'s> VerifyCommand<'s> {
                 &reflection_env.record_fields,
                 &variant_axioms,
                 &variant_registry,
+                &reflection_env.positional,
             );
 
             // Note: Profiler is not used for theorem verification (different result type)
@@ -707,6 +724,7 @@ impl<'s> VerifyCommand<'s> {
         >,
         variant_axioms: &[Expr],
         variant_registry: &[(Text, Vec<Text>)],
+        positional_layouts: &std::collections::HashMap<String, Vec<(String, Option<String>)>>,
     ) -> VerificationResult {
         let start = Instant::now();
 
@@ -794,7 +812,7 @@ impl<'s> VerifyCommand<'s> {
                 // defaulted to anyway — so writing it down changes
                 // nothing except that the sort now has ONE source.
                 let (sort_name, type_name) =
-                    declared_sort_of(ty, record_layouts, variant_registry);
+                    declared_sort_of(ty, record_layouts, variant_registry, positional_layouts);
                 proof_engine.register_value_sort(name.name.clone(), sort_name);
                 if let Some(tn) = type_name {
                     proof_engine

@@ -165,12 +165,25 @@ fn is_smtlib_builtin_symbol(tok: &str) -> bool {
     if tok.starts_with("path_") {
         return true;
     }
+    // Bit-vector spelling. `&`, `|` and `^` on integers are an
+    // int2bv / bv2int round trip (T0956/T0965), which is not one
+    // operator name — it brings `let`, the indexed-identifier form
+    // `(_ int2bv 64)` / `(_ extract 63 63)`, and a `#b1` bit literal.
+    // Without them here the scanner reads `let` as an undeclared
+    // SYMBOL and drops the whole entry, which is how `equal_narrow`
+    // was skipped after it had finally started rendering.
+    if tok.starts_with("#b") || tok.starts_with("#x") {
+        return true;
+    }
     matches!(
         tok,
         "+" | "-" | "*" | "div" | "mod"
             | "=" | "<" | "<=" | ">" | ">="
             | "and" | "or" | "not" | "=>" | "ite" | "distinct"
             | "true" | "false"
+            | "let" | "_" | "int2bv" | "bv2nat" | "bv2int" | "extract"
+            | "bvand" | "bvor" | "bvxor" | "bvnot"
+            | "bvadd" | "bvsub" | "bvmul" | "bvshl" | "bvlshr" | "bvashr"
     )
 }
 
@@ -421,10 +434,14 @@ impl RefinementReflectionRegistry {
         f: &ReflectedFunction,
         live: &std::collections::BTreeSet<String>,
     ) -> Option<String> {
-        // The translator emits no binders (no `forall`/`exists`/`let`),
-        // so every whitespace/paren-delimited token is either an operator,
-        // a literal, or an applied/referenced symbol — splitting on parens
-        // and whitespace yields exactly the referenced-symbol set.
+        // Every whitespace/paren-delimited token is an operator, a
+        // literal, or an applied/referenced symbol, so splitting on
+        // parens and whitespace yields the referenced-symbol set.
+        //
+        // The one binder the translator emits is the `let` inside a
+        // bitwise operation, and its bound name is minted through
+        // `solver_symbols` so it is recognised as ours rather than read
+        // as an undeclared reference (T0965).
         for tok in f
             .body_smtlib
             .as_str()
