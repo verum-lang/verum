@@ -599,6 +599,35 @@ pub fn expr_to_smtlib_env(
         ExprKind::Binary { op, left, right } => {
             let l = expr_to_smtlib_env(left, env, aux)?;
             let r = expr_to_smtlib_env(right, env, aux)?;
+            // BITWISE ops are not one operator name, so they cannot go
+            // through `binop_to_smtlib` — they are an int2bv / bv2int
+            // round trip, the same 64-bit one the goal translator
+            // performs (T0956). Taught to the goal side only, they left
+            // the reflection renderer answering "unsupported operator
+            // for SMT-LIB" for exactly the bodies the goal side had just
+            // learned to read.
+            //
+            // The conversion back is SIGNED, and that is not a detail:
+            // the unsigned reading would make `(-1) & (-1)` equal to
+            // 2^64-1, which is false, and a definition that says so
+            // would let the solver prove it. `bv2nat` is the standard
+            // unsigned conversion, so the sign is restored by testing
+            // the top bit — which is what the goal side's
+            // `to_int(signed = true)` does.
+            if matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor) {
+                let bv = match op {
+                    BinOp::BitAnd => "bvand",
+                    BinOp::BitOr => "bvor",
+                    _ => "bvxor",
+                };
+                return Ok(format!(
+                    "(let ((verum!bv ({} ((_ int2bv 64) {}) ((_ int2bv 64) {})))) \
+                     (ite (= ((_ extract 63 63) verum!bv) #b1) \
+                     (- (bv2nat verum!bv) 18446744073709551616) \
+                     (bv2nat verum!bv)))",
+                    bv, l, r
+                ));
+            }
             let smt_op = binop_to_smtlib(*op)?;
             match op {
                 BinOp::Ne => Ok(format!("(not (= {} {}))", l, r)),
