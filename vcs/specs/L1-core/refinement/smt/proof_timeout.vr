@@ -2,8 +2,14 @@
 // @tier: 0
 // @level: L1
 // @tags: refinement, smt, timeout
-// @timeout: 100
+// @timeout: 30000
 // @expected-error: verification-timeout
+//
+// `@timeout:` is the RUNNER's budget for the whole spec, not the solver's:
+// no path has ever passed it to Z3. At 100 it could not even load the
+// standard library, and nothing noticed because `verify-fail` returned
+// Pass unconditionally until T0957. The expectation itself holds —
+// measured, this file produces two timeouts alongside two failures.
 
 /// Proof timeout test: verification should fail due to time limit.
 /// Tests that the verifier respects timeout constraints.

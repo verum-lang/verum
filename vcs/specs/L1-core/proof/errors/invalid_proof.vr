@@ -1,18 +1,32 @@
 // @test: verify-fail
 // @level: L1
 // @tags: proofs, verification, errors
-// @timeout: 5000
+// @timeout: 30000
+// @expected-error: proof-failed
 
 /// Tests that invalid proofs are rejected.
+///
+/// MEASURED 2026-08-29: this file used to state no claim at all. Both
+/// theorems carried a `requires` and NO `ensures`, so each asked the prover
+/// to establish nothing — which it did, in three lines of `proved`. The
+/// comments described false claims ("claims negative is positive") that the
+/// code never made, and the spec reported PASS the whole time because
+/// `verify-fail` accepted any outcome until T0957.
+///
+/// The claims below are the ones the comments always meant, and they are
+/// false, so the prover must refuse them. If either becomes provable, the
+/// prover is deriving `x < 0` from `x > 0`.
 
-// Theorem with false claim — should fail verification
+// A positive number is negative. FALSE.
 theorem false_claim(x: Int)
     requires x > 0
+    ensures x < 0
     proof by auto;
 
-// This theorem claims negative is positive — should fail
+// A negative number is positive. FALSE.
 theorem invalid_sign(x: Int)
     requires x < 0
+    ensures x > 0
     proof by auto;
 
 mount core.prelude.*;

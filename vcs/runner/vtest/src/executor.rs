@@ -49,8 +49,8 @@ use verum_common::{List, Map, Set, Text};
 // Direct compiler integration
 use verum_ast::FileId;
 use verum_compiler::{
-    CompilationPipeline, CompilerOptions, OutputFormat, Session, TestExecutionResult, VerifyMode,
-    get_cached_stdlib_registry,
+    CompilationPipeline, CompilerOptions, OutputFormat, Session, TestExecutionResult, VerifyCommand,
+    VerifyMode, get_cached_stdlib_registry,
 };
 use verum_fast_parser::FastParser;
 use verum_lexer::Lexer;
@@ -758,12 +758,13 @@ impl Executor {
                 | TestType::RunInterpreterPanic
                 | TestType::Benchmark
                 | TestType::Differential => TestType::TypecheckPass,
-                // Verification tests: verify-pass becomes typecheck-pass (must at least typecheck).
-                // verify-fail stays as-is to use execute_verify_fail which handles
-                // direct integration correctly (always passes since we can't test
-                // verification failure without the full verification pipeline).
-                TestType::VerifyPass => TestType::TypecheckPass,
-                TestType::VerifyFail => TestType::VerifyFail,
+                // Verification tests are NOT downgraded. `--compile-time-only`
+                // exists so a suite can run where no RUNTIME is available, and
+                // verification needs none — it is a compile-time activity that
+                // ends in a solver, not in a process. Downgrading `verify-pass`
+                // to `typecheck-pass` here turned 123 specs into typecheck
+                // specs that reported PASS, which reads as verification
+                // coverage and is not (T0957).
                 // CompileOnly tests become typecheck (no need for full codegen)
                 TestType::CompileOnly => TestType::TypecheckPass,
                 // VBC tests also become typecheck
@@ -1602,12 +1603,8 @@ impl Executor {
     async fn execute_verify_pass(&self, directives: &TestDirectives, tier: Tier) -> TestOutcome {
         let start = Instant::now();
 
-        // Use direct library integration if enabled (preferred)
-        // Verify-pass tests should at minimum typecheck successfully.
-        // When the full verification pipeline is available, this will
-        // also run contract verification.
         if self.config.use_direct_integration {
-            return self.execute_typecheck_pass_direct(directives, tier, start);
+            return self.execute_verify_direct(directives, tier, start, false);
         }
 
         match self.run_compiler_phase(directives, tier, "verify").await {
@@ -1634,59 +1631,246 @@ impl Executor {
         }
     }
 
-    /// Execute a verify-fail test.
+    /// Run the REAL verifier in-process and read its verdict.
     ///
-    /// Uses direct library integration when available (preferred).
-    /// For verify-fail tests, the code may be type-correct but violate contracts.
-    /// When using direct integration (typecheck only), we accept either:
-    /// - Typecheck failure (error caught at type level) -> pass
-    /// - Typecheck success (error is verification-only) -> pass (optimistic)
-    async fn execute_verify_fail(&self, directives: &TestDirectives, tier: Tier) -> TestOutcome {
-        let start = Instant::now();
+    /// This is the whole of `verify-pass` and `verify-fail`. Before it
+    /// existed, `verify-pass` returned `execute_typecheck_pass_direct`
+    /// — a typecheck under another name — and `verify-fail` ran a
+    /// typecheck, DISCARDED the result and returned `Pass`
+    /// unconditionally, so it could not go red for any reason at all.
+    /// Measured: a copy of a verify-pass spec whose postconditions were
+    /// all made FALSE passed, and a copy of a verify-fail spec whose
+    /// postconditions were all made TRUE passed too. 164 specs asserted
+    /// nothing, and the verifier defect they existed to catch (T0954 —
+    /// a false postcondition was PROVED) lived behind them (T0957).
+    ///
+    /// vtest links the compiler, so no subprocess is needed:
+    /// `VerifyCommand::run_to_report` is the same entry `verum verify`
+    /// uses, and it answers a report rather than printing one precisely
+    /// so that a caller can assert on the verdict.
+    ///
+    /// The verdict text handed to `@expected-error` is rendered here
+    /// rather than scraped: one `error<proof-failed>` /
+    /// `error<verification-timeout>` line per undischarged function,
+    /// followed by the session's own diagnostics. A spec matching on a
+    /// counterexample or a tactic's complaint still finds it.
+    fn execute_verify_direct(
+        &self,
+        directives: &TestDirectives,
+        tier: Tier,
+        start: Instant,
+        expect_failure: bool,
+    ) -> TestOutcome {
+        let source_path = PathBuf::from(&directives.source_path);
+        let options = CompilerOptions {
+            input: source_path.clone(),
+            output_format: OutputFormat::Human,
+            verify_mode: VerifyMode::Runtime,
+            continue_on_error: false,
+            ..Default::default()
+        };
 
-        // Use direct library integration if enabled (preferred)
-        // Verify-fail tests expect errors that may only be caught by the
-        // verification pipeline. Since we only have typecheck in direct mode:
-        // - If typecheck fails: great, we caught it early -> pass
-        // - If typecheck succeeds: the code is type-correct but verification
-        //   would catch the contract violation -> pass (optimistic until
-        //   full verification pipeline is available)
-        if self.config.use_direct_integration {
-            let source_path = PathBuf::from(&directives.source_path);
-            let options = CompilerOptions {
-                input: source_path.clone(),
-                output_format: OutputFormat::Human,
-                verify_mode: VerifyMode::Runtime,
-                continue_on_error: true,
-                ..Default::default()
-            };
-            // Run on dedicated thread with large stack
-            let (tx, rx) = std::sync::mpsc::channel();
-            let _ = std::thread::Builder::new()
-                .name("vtest-check".into())
-                .stack_size(512 * 1024 * 1024)
-                .spawn(move || {
-                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let mut session =
-                            if let Some(cached_registry) = get_cached_stdlib_registry() {
-                                Session::with_registry(options, cached_registry)
-                            } else {
-                                Session::new(options)
-                            };
-                        let mut pipeline = CompilationPipeline::new_check(&mut session);
-                        let _ = pipeline.run_check_only();
-                    }));
-                    let _ = tx.send(());
-                })
-                .expect("Failed to spawn verify-fail thread");
-            let _ = rx.recv_timeout(std::time::Duration::from_millis(
-                directives.effective_timeout_ms(),
-            ));
-            // Whether typecheck passes or fails, we accept it for verify-fail
+        // Same dedicated thread and stack size as the typecheck path:
+        // verification runs inference first, and deep inference
+        // overflows the default stack on the larger specs.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = std::thread::Builder::new()
+            .name("vtest-verify".into())
+            .stack_size(512 * 1024 * 1024)
+            .spawn(move || {
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut session = if let Some(cached_registry) = get_cached_stdlib_registry() {
+                        Session::with_registry(options, cached_registry)
+                    } else {
+                        Session::new(options)
+                    };
+                    let report = {
+                        let mut cmd = VerifyCommand::new(&mut session);
+                        cmd.run_to_report(None)
+                            .map(|r| r.to_json())
+                            .map_err(|e| format!("{:#}", e))
+                    };
+                    (report, session.format_diagnostics())
+                }));
+                let _ = tx.send(outcome);
+            })
+            .expect("Failed to spawn verify thread");
+
+        let (report, diagnostics) = match rx.recv_timeout(std::time::Duration::from_millis(
+            directives.effective_timeout_ms(),
+        )) {
+            Ok(Ok(pair)) => pair,
+            Ok(Err(panic_info)) => {
+                let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic".to_string()
+                };
+                return TestOutcome::Fail {
+                    tier,
+                    reason: format!("Verification panicked: {}", msg).into(),
+                    expected: Some("A verification verdict".to_string().into()),
+                    actual: Some(msg.into()),
+                    duration: start.elapsed(),
+                };
+            }
+            Err(_) => {
+                return TestOutcome::Fail {
+                    tier,
+                    reason: "Verification timed out".to_string().into(),
+                    expected: Some("A verification verdict".to_string().into()),
+                    actual: Some("timeout".to_string().into()),
+                    duration: start.elapsed(),
+                };
+            }
+        };
+
+        let report = match report {
+            Ok(r) => r,
+            Err(e) => {
+                // The verifier never got to run: the file did not load,
+                // parse or typecheck. For verify-pass that is simply a
+                // failure. For verify-fail it counts ONLY when the
+                // spec said which error it wanted — several specs pin a
+                // diagnostic the type checker raises before any
+                // obligation exists, and those stay honest, while a
+                // file that broke for an unrelated reason does not
+                // silently satisfy a contract claim.
+                let text = if diagnostics.is_empty() {
+                    e.clone()
+                } else {
+                    format!("{}\n\nDiagnostics:\n{}", e, diagnostics)
+                };
+                if expect_failure
+                    && !directives.expected_errors.is_empty()
+                    && self.check_expected_errors(&text, &directives.expected_errors)
+                {
+                    return TestOutcome::Pass {
+                        tier,
+                        duration: start.elapsed(),
+                    };
+                }
+                return TestOutcome::Fail {
+                    tier,
+                    reason: "Verification could not run: the file did not compile"
+                        .to_string()
+                        .into(),
+                    expected: Some(if expect_failure {
+                        "An undischarged obligation".to_string().into()
+                    } else {
+                        "Successful verification".to_string().into()
+                    }),
+                    actual: Some(text.into()),
+                    duration: start.elapsed(),
+                };
+            }
+        };
+
+        let mut verdict = String::new();
+        for r in report.results.iter() {
+            match r.status.as_str() {
+                "failed" => {
+                    verdict.push_str(&format!(
+                        "error<proof-failed>: `{}` did not discharge\n",
+                        r.function
+                    ));
+                    if let Some(cex) = &r.counterexample {
+                        verdict.push_str(&format!("  counterexample: {}\n", cex));
+                    }
+                }
+                "timeout" => verdict.push_str(&format!(
+                    "error<verification-timeout>: `{}` exceeded the solver budget\n",
+                    r.function
+                )),
+                _ => {}
+            }
+        }
+        if !diagnostics.is_empty() {
+            verdict.push_str("\nDiagnostics:\n");
+            verdict.push_str(&diagnostics);
+        }
+        let undischarged = report.failed + report.timeout;
+
+        if expect_failure {
+            if undischarged == 0 {
+                return TestOutcome::Fail {
+                    tier,
+                    reason: format!(
+                        "Verification unexpectedly succeeded: {} proved, {} skipped",
+                        report.proved, report.skipped
+                    )
+                    .into(),
+                    expected: Some("An undischarged obligation".to_string().into()),
+                    actual: Some(verdict.into()),
+                    duration: start.elapsed(),
+                };
+            }
+            if !self.check_expected_errors(&verdict, &directives.expected_errors) {
+                return TestOutcome::Fail {
+                    tier,
+                    reason: "Verification failed, but not with the expected error"
+                        .to_string()
+                        .into(),
+                    expected: Some(format!("{:?}", directives.expected_errors).into()),
+                    actual: Some(verdict.into()),
+                    duration: start.elapsed(),
+                };
+            }
             return TestOutcome::Pass {
                 tier,
                 duration: start.elapsed(),
             };
+        }
+
+        if undischarged > 0 {
+            return TestOutcome::Fail {
+                tier,
+                reason: format!(
+                    "Verification failed: {} undischarged of {}",
+                    undischarged, report.total_functions
+                )
+                .into(),
+                expected: Some("Successful verification".to_string().into()),
+                actual: Some(verdict.into()),
+                duration: start.elapsed(),
+            };
+        }
+        if report.proved == 0 {
+            // Everything was skipped. A verify-pass spec that proves
+            // nothing is the vacuous case this test type exists to
+            // exclude — it reads as coverage and is not.
+            return TestOutcome::Fail {
+                tier,
+                reason: format!(
+                    "Nothing was verified: {} functions, all skipped",
+                    report.total_functions
+                )
+                .into(),
+                expected: Some("At least one discharged obligation".to_string().into()),
+                actual: Some(verdict.into()),
+                duration: start.elapsed(),
+            };
+        }
+        TestOutcome::Pass {
+            tier,
+            duration: start.elapsed(),
+        }
+    }
+
+    /// Execute a verify-fail test.
+    ///
+    /// The contract is that at least one obligation in the file does NOT
+    /// discharge. A file that fails to typecheck also counts, but only
+    /// when the spec's `@expected-error` names what was raised — a file
+    /// that does not compile has not exercised a contract, and accepting
+    /// it blindly is how this test type came to accept everything.
+    async fn execute_verify_fail(&self, directives: &TestDirectives, tier: Tier) -> TestOutcome {
+        let start = Instant::now();
+
+        if self.config.use_direct_integration {
+            return self.execute_verify_direct(directives, tier, start, true);
         }
 
         match self.run_compiler_phase(directives, tier, "verify").await {

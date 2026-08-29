@@ -2,8 +2,27 @@
 // @tier: 0
 // @level: L0
 // @tags: verification, smt, timeout, soundness, red-team-1.5
-// @timeout: 50
-// @expected-error: verification-timeout
+// @timeout: 30000
+// @expected-error: proof-failed
+//
+// MEASURED 2026-08-29, and two directives corrected with it.
+//
+// `@timeout:` is the RUNNER's wall-clock budget for the whole spec — the
+// process has to load the standard library inside it. It was 50 here,
+// meaning "give Z3 50ms", but no path has ever passed it to the solver:
+// the subprocess path hands it to the process, and the in-process path
+// hands it to the thread. 50ms was therefore never a solver budget and
+// always an impossible spec budget — which nothing noticed, because
+// `verify-fail` returned Pass unconditionally until T0957.
+//
+// The invariant this file pins is unchanged and is the `verify-fail` line
+// itself: the obligation MUST NOT be accepted. Measured, it is not —
+// `z3_unknown_witness` is REJECTED in 0.08s. What changed is only the
+// mechanism named: the solver answers rather than running out of time, so
+// the verdict is `proof-failed`, not `verification-timeout`. Pinning the
+// mechanism instead of the invariant is what made this line stale;
+// `proof-failed` still separates "rejected" from "accepted", which is the
+// whole soundness question.
 //
 // Red-team round 1 vector 5.1/5.2 — fail-closed guardrail (L0-critical).
 //
