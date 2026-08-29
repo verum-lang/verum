@@ -816,7 +816,12 @@ impl<'s> CompilationPipeline<'s> {
         // The walk stops at the first `verum.toml` ancestor — if
         // none exists we fall back to the immediate-dir behaviour
         // so single-file scripts still work.
-        let input_dir = {
+        // Whether a MANIFEST was found, not just where the walk stopped.
+        // The two differ: with no `verum.toml` anywhere above the entry
+        // file, the walk falls back to the entry's own directory, and that
+        // directory is not a project — it may just be where someone keeps
+        // a script next to unrelated ones.
+        let (input_dir, manifest_found) = {
             let mut cursor = immediate_dir.clone();
             let mut root: Option<std::path::PathBuf> = None;
             loop {
@@ -831,7 +836,20 @@ impl<'s> CompilationPipeline<'s> {
                     _ => break,
                 }
             }
-            root.unwrap_or(immediate_dir.clone())
+            // A manifest counts only if it is NEAR the entry: at the
+            // entry's own directory, or one level above it (the `src/`
+            // layout). Anything further away is not this file's project.
+            //
+            // This repository has a `verum.toml` at its root, so without the
+            // distance rule every `.vr` file anywhere under it would be
+            // treated as part of one enormous cog — measured, checking a
+            // single spec file went from 2.03s to 245s, and conformance
+            // specs began loading their neighbours as sibling modules.
+            let found = match &root {
+                Some(r) => *r == immediate_dir || Some(r.as_path()) == immediate_dir.parent(),
+                None => false,
+            };
+            (root.unwrap_or(immediate_dir.clone()), found)
         };
 
         // The stdlib `core` cog must never be eager-loaded as a user
@@ -875,11 +893,52 @@ impl<'s> CompilationPipeline<'s> {
                 mod_file.exists()
             );
         }
-        if !mod_file.exists() {
+        // A MANIFEST is what makes a directory a project; `mod.vr` is one
+        // convention for laying one out, not the definition of one.
+        //
+        // Requiring `mod.vr` meant the ordinary shape — `verum.toml` with
+        // `src/main.vr` beside `src/lib.vr` — loaded no sibling modules at
+        // all, so `verum run` and `verum build` reported
+        // `error<E402>: module `probe.lib` not found` on a project that
+        // `verum check` accepted. `check` discovers project files through
+        // `Session::discover_project_files`, which asks only where the
+        // input is, so the two commands disagreed about which modules
+        // exist. A project can be green in an editor, in CI and under
+        // `check`, and still not start.
+        if !manifest_found && !mod_file.exists() {
             if trace_load {
-                eprintln!("[project-load] EARLY RETURN: no mod.vr at the project root");
+                eprintln!(
+                    "[project-load] EARLY RETURN: no verum.toml above the entry and no mod.vr at {}",
+                    input_dir.display()
+                );
             }
             return Ok(());
+        }
+
+        // WHERE to enumerate from, which is not the same question as where
+        // the project ROOT is.
+        //
+        // With a `mod.vr` the root is a real source root and walking it is
+        // bounded by the author's own layout. Without one, the manifest can
+        // sit at the top of something enormous: this repository has a
+        // `verum.toml` at its root, so walking from there pulls in every
+        // `.vr` file in `core/` and `vcs/` — measured, checking ONE spec
+        // file went from 2.03s to 245s. Enumerate from the entry file's own
+        // directory instead, which is exactly what `verum check` does
+        // (`Session::discover_project_files` walks from the input, never
+        // from the manifest), so the two commands see the same files. The
+        // module PREFIX still comes from the manifest's cog name below —
+        // that is what `mount` is written against and it is unaffected.
+        let enumerate_from = if mod_file.exists() {
+            input_dir.clone()
+        } else {
+            immediate_dir.clone()
+        };
+        if trace_load {
+            eprintln!(
+                "[project-load] enumerating from {}",
+                enumerate_from.display()
+            );
         }
 
         // The project's module root is its COG NAME, not its directory
@@ -911,7 +970,7 @@ impl<'s> CompilationPipeline<'s> {
         // Discover all .vr files in the project directory (recursive)
         let canonical_input = input_path.canonicalize().ok();
         let mut project_files: Vec<PathBuf> = Vec::new();
-        Self::discover_vr_files_recursive(&input_dir, &canonical_input, &mut project_files);
+        Self::discover_vr_files_recursive(&enumerate_from, &canonical_input, &mut project_files);
 
         if trace_load {
             eprintln!(

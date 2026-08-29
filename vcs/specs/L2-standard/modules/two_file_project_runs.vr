@@ -1,0 +1,39 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: modules, project, mount, cross-file
+// @timeout: 60000
+// @project: two_file_project
+// @expected-stdout: 7
+// @description: A library module beside a main runs.
+//
+//   This is the first shape any program takes once it outgrows one file,
+//   and until this spec existed the suite could not express it. Measured
+//   across 6949 specs: not one `verum.toml`, and every one of 8560 `mount`
+//   statements points at the standard library — no spec imports a sibling
+//   spec. The defect below therefore did not slip past the suite; the suite
+//   had no way to see it.
+//
+//   What it hid: `verum check` accepted the project and `verum run` and
+//   `verum build` both failed with
+//
+//       error<E402>: module `probe.lib` not found
+//
+//   The two commands disagreed about which modules exist. `check` discovers
+//   project files by walking from the input, while the loader that `run` and
+//   `build` share required a `mod.vr` at the project root and returned early
+//   without it — so the ordinary layout, `verum.toml` with `src/main.vr`
+//   beside `src/lib.vr`, loaded no sibling modules at all. A project could
+//   be green in an editor, in CI and under `check`, and still not start.
+//
+//   The `@project:` directive names a sibling DIRECTORY to compile instead
+//   of this file: the `.vr` carries the directives and the expectation, the
+//   directory carries the program. Its negative pole is
+//   `two_file_project_rejects_unknown_module.vr`, which keeps a fix from
+//   passing by making `run` accept everything.
+//
+//   Task: T0826.
+
+fn main() {
+    print("placeholder — see @project: two_file_project");
+}

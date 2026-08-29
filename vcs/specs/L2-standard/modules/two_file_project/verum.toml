@@ -1,0 +1,13 @@
+[cog]
+name = "probe"
+version = "0.1.0"
+authors = []
+license = "MIT"
+keywords = []
+categories = []
+
+[language]
+profile = "application"
+
+[dependencies]
+stdlib = "0.1"

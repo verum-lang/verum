@@ -1,0 +1,5 @@
+mount probe.zzz_no_such_module.{via_local, make};
+
+fn main() {
+    print(f"{via_local(&make())}");
+}

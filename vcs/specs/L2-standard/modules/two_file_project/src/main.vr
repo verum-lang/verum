@@ -1,0 +1,5 @@
+mount probe.lib.{via_local, make};
+
+fn main() {
+    print(f"{via_local(&make())}");
+}

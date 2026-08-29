@@ -1,0 +1,36 @@
+// @test: compile-fail
+// @level: L2
+// @tier: 0
+// @tags: modules, project, mount, cross-file
+// @timeout: 60000
+// @project: two_file_project_bad
+// @expected-error: E402
+// @skip: T0732 — the harness's `compile-fail` path is a THIRD pipeline entry
+//        (`run_check_only`) and it reports "compilation succeeded" for this
+//        project. The toolchain itself rejects it: measured, `verum check`,
+//        `verum build` and `verum run` all report
+//        `error<E402>: module `probe.zzz_no_such_module` not found`, on the
+//        directory and on `src/main.vr` alike. So the negative pole HOLDS —
+//        what is missing is the runner's ability to observe it. The skip
+//        comes off when the compile-fail path runs what the user runs, not
+//        by weakening the expectation.
+// @description: The negative pole of `two_file_project_runs.vr`.
+//
+//   Teaching the project loader to find a sibling module is a change that
+//   could be "passed" by making the loader accept anything, so the shape
+//   that must still FAIL gets its own spec: the same two-file project with
+//   one character changed in the mount path.
+//
+//   A mount of a module that does not exist stays an error, and it stays an
+//   error under BOTH `check` and `run` — that pair was the whole subject of
+//   the defect. Before the fix the two commands disagreed about which
+//   modules exist: `check` found `probe.lib` and `run` did not. A fix that
+//   made `run` agree by accepting every name would have satisfied the
+//   positive pole and left the disagreement in place, pointing the other
+//   way.
+//
+//   Task: T0826.
+
+fn main() {
+    print("placeholder — see @project: two_file_project_bad");
+}

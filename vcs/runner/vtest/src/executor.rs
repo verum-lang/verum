@@ -1504,7 +1504,7 @@ impl Executor {
         tier: Tier,
         start: Instant,
     ) -> TestOutcome {
-        let source_path = PathBuf::from(&directives.source_path);
+        let source_path = directives.compiler_input_path();
 
         // Create compiler options for check-only mode
         let options = CompilerOptions {
@@ -1894,7 +1894,7 @@ impl Executor {
         tier: Tier,
         start: Instant,
     ) -> TestOutcome {
-        let source_path = PathBuf::from(&directives.source_path);
+        let source_path = directives.compiler_input_path();
 
         // Execute in a separate thread with timeout to prevent hangs.
         // A cancel_flag is shared with the interpreter so that on timeout
@@ -2153,7 +2153,7 @@ impl Executor {
         tier: Tier,
         start: Instant,
     ) -> TestOutcome {
-        let source_path = PathBuf::from(&directives.source_path);
+        let source_path = directives.compiler_input_path();
 
         // Execute in a separate thread with timeout to prevent hangs.
         // A cancel_flag is shared with the interpreter so that on timeout

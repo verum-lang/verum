@@ -435,6 +435,18 @@ impl<'s> CompilationPipeline<'s> {
         self.load_stdlib_modules_scoped(reachable.as_ref())?;
         debug!("Phase 0 (stdlib): {:.2}s", start.elapsed().as_secs_f64());
 
+        // Project and cog modules load HERE, beside the stdlib, because that
+        // is where `run_interpreter` loads them — and the position, not just
+        // the presence, is what the harness has to match. Below
+        // `validate_module` they arrived too late: a `mount` of a sibling
+        // module was resolved against a world that did not contain it yet,
+        // so a two-file project reported `error<E402>: module `probe.lib`
+        // not found` under the harness while `verum run` on the same entry
+        // file printed its answer. Same six phases as before, in the order
+        // the user's path uses them.
+        self.load_project_modules()?;
+        self.load_external_cog_modules()?;
+
         // Get module path for registration and expansion
         let module_path = Text::from(self.session.options().input.display().to_string());
 
@@ -464,8 +476,6 @@ impl<'s> CompilationPipeline<'s> {
         // own a `main`, the full pipeline moved the count from 16 passed to
         // 17: no wave, one spec that starts working because the type check
         // now runs.
-        self.load_project_modules()?;
-        self.load_external_cog_modules()?;
         self.phase_safety_gate(&module)?;
         self.phase_type_check(&module)?;
         self.apply_resolved_call_targets(&mut module);

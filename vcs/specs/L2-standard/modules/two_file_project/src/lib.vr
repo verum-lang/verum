@@ -1,0 +1,11 @@
+module probe.lib;
+
+public type P is { v: Int };
+
+public fn make() -> P {
+    P { v: 7 }
+}
+
+public fn via_local(p: &P) -> Int {
+    p.v
+}

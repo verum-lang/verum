@@ -824,6 +824,19 @@ pub struct TestDirectives {
     pub expected_stdout: Option<Text>,
     /// Expected stdout from file
     pub expected_stdout_file: Option<Text>,
+    /// `@project: <dir>` — compile a sibling DIRECTORY as a cog instead of
+    /// this file.
+    ///
+    /// The suite is otherwise single-file by construction: measured across
+    /// 6949 specs there is not one `verum.toml`, and every `mount` points at
+    /// the standard library — no spec imports a sibling spec. So the shape
+    /// every program takes the moment it outgrows one file, a library module
+    /// beside a main, was covered by nothing, and a defect that made
+    /// `verum run` fail on exactly that shape while `verum check` passed
+    /// survived in plain sight. This directive exists so the suite can see
+    /// it: the `.vr` file carries the directives and the expectation, the
+    /// directory carries the program.
+    pub project: Option<Text>,
     /// Expected stderr content
     pub expected_stderr: Option<Text>,
     /// Expected exit code
@@ -901,6 +914,7 @@ impl Default for TestDirectives {
             expected_warning_count: None,
             expected_stdout: None,
             expected_stdout_file: None,
+            project: None,
             expected_stderr: None,
             expected_exit: None,
             expected_panic: None,
@@ -1081,6 +1095,8 @@ impl TestDirectives {
                     );
             } else if let Some(rest) = comment.strip_prefix("@expected-stdout:") {
                 directives.expected_stdout = Some(unescape_string(rest.trim()));
+            } else if let Some(rest) = comment.strip_prefix("@project:") {
+                directives.project = Some(rest.trim().to_string().into());
             } else if let Some(rest) = comment.strip_prefix("@expected-stdout-file:") {
                 directives.expected_stdout_file = Some(rest.trim().to_string().into());
             } else if let Some(rest) = comment.strip_prefix("@expected-stderr:") {
@@ -1217,6 +1233,22 @@ impl TestDirectives {
     /// Validate the parsed directives for consistency.
     fn validate(&self) -> Result<(), DirectiveError> {
         // Check for conflicting expectations
+        // `@project` only reaches the compiler on the paths that RUN a
+        // program. Accepting it silently elsewhere would give a spec author
+        // a directive that looks like it selects the input and does not —
+        // the file would be compiled instead of the project and the spec
+        // would pass for the wrong reason.
+        if self.project.is_some()
+            && !matches!(
+                self.test_type,
+                TestType::Run | TestType::RunPanic | TestType::CompileFail
+            )
+        {
+            return Err(DirectiveError::ConflictingDirectives(
+                "@project is only supported for `run`, `run-panic` and `compile-fail` tests".into(),
+            ));
+        }
+
         if self.expected_stdout.is_some() && self.expected_stdout_file.is_some() {
             return Err(DirectiveError::ConflictingDirectives(
                 "Cannot specify both @expected-stdout and @expected-stdout-file"
@@ -1298,6 +1330,38 @@ impl TestDirectives {
     }
 
     /// Get the effective timeout for this test.
+    /// The path the compiler should take as input.
+    ///
+    /// Normally the spec file itself. With `@project: <dir>` it is the
+    /// sibling directory, so the spec can exercise a multi-file cog — the
+    /// one shape a single `.vr` file cannot express, and the shape the whole
+    /// suite was missing.
+    pub fn compiler_input_path(&self) -> std::path::PathBuf {
+        let own = std::path::PathBuf::from(&self.source_path);
+        let Some(dir) = &self.project else {
+            return own;
+        };
+        let root = own
+            .parent()
+            .map(|p| p.join(dir.as_str()))
+            .unwrap_or_else(|| std::path::PathBuf::from(dir.as_str()));
+        // Resolve the ENTRY the way the CLI does — `src/main.vr` by cog
+        // convention, a top-level `main.vr` for script-style layouts. The
+        // pipeline takes a file: handed a directory it reports "No main
+        // function or @test functions found in VBC module", which reads as
+        // a defect in the program under test rather than as the runner
+        // passing the wrong thing.
+        let primary = root.join("src").join("main.vr");
+        if primary.is_file() {
+            return primary;
+        }
+        let secondary = root.join("main.vr");
+        if secondary.is_file() {
+            return secondary;
+        }
+        root
+    }
+
     pub fn effective_timeout_ms(&self) -> u64 {
         self.timeout_ms.unwrap_or(30_000) // Default 30 seconds
     }
