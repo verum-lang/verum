@@ -2916,6 +2916,71 @@ pub fn build_refinement_alias_map(
     flattened
 }
 
+/// The UNDERLYING type of every refinement alias in the module —
+/// `type Pos is Int{it > 0}` answers `Int`.
+///
+/// The predicate map above says WHAT a refinement claims; this says
+/// what the value IS. Both are needed, and only the first existed: a
+/// function returning `Pos` had `result` declared at the alias's own
+/// opaque sort, so the synthesised `result > 0` failed to translate
+/// with "incompatible types for binary operation > (left is Verum!Pos,
+/// right is Int)" — the obligation was stated and could not be read.
+/// The inline spelling `-> Int{it > 0}` worked throughout, because
+/// there the base is right there in the AST node (T0964).
+pub fn build_refinement_alias_base_map(
+    module: &verum_ast::Module,
+) -> std::collections::HashMap<Text, verum_ast::ty::Type> {
+    use std::collections::HashMap;
+    use verum_ast::ItemKind;
+    use verum_ast::decl::TypeDeclBody;
+
+    let mut raw: HashMap<Text, verum_ast::ty::Type> = HashMap::new();
+    for item in &module.items {
+        if let ItemKind::Type(td) = &item.kind {
+            match &td.body {
+                TypeDeclBody::Alias(t) | TypeDeclBody::Newtype(t) => {
+                    raw.insert(td.name.name.clone(), t.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out: HashMap<Text, verum_ast::ty::Type> = HashMap::new();
+    for (name, ty) in raw.iter() {
+        let mut visited = std::collections::HashSet::new();
+        if let Some(base) = unrefined_base(ty, &raw, &mut visited) {
+            out.insert(name.clone(), base);
+        }
+    }
+    out
+}
+
+/// Peel `Refined` wrappers and follow alias references to the first
+/// type that is neither — the sort a value of the alias really has.
+fn unrefined_base(
+    ty: &verum_ast::ty::Type,
+    raw: &std::collections::HashMap<Text, verum_ast::ty::Type>,
+    visited: &mut std::collections::HashSet<Text>,
+) -> Option<verum_ast::ty::Type> {
+    use verum_ast::ty::TypeKind;
+    match &ty.kind {
+        TypeKind::Refined { base, .. } => unrefined_base(base, raw, visited),
+        TypeKind::Path(path) if path.segments.len() == 1 => {
+            if let verum_ast::PathSegment::Name(id) = &path.segments[0] {
+                if let Some(next) = raw.get(&id.name) {
+                    if visited.insert(id.name.clone()) {
+                        return unrefined_base(next, raw, visited);
+                    }
+                    // A cycle: no base to answer with.
+                    return None;
+                }
+            }
+            Some(ty.clone())
+        }
+        _ => Some(ty.clone()),
+    }
+}
+
 /// Inner recursive flattener.
 fn flatten_chain(
     ty: &verum_ast::ty::Type,

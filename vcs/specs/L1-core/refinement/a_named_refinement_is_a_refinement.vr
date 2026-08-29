@@ -1,0 +1,71 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, aliases, refined-return, refined-param
+// @timeout: 30000
+
+/// A refinement given a NAME behaves like the one written inline.
+///
+///     type Pos is Int{it > 0};
+///     fn f() -> Pos { 9 }              was ✗
+///     fn f() -> Int{it > 0} { 9 }      was ✓
+///
+/// Same claim, same value, two spellings, two answers. The predicate
+/// was found — the alias map already flattened it — and then could not
+/// be READ: `result` was declared at the alias's own opaque sort, so
+/// the synthesised obligation failed to translate with
+///
+///     incompatible types for binary operation > (left is Verum!Pos,
+///     right is Int)
+///
+/// The inline spelling carries its base type in the AST node and was
+/// unwrapped; the named one was not, so a value of `Pos` was an opaque
+/// thing that no arithmetic could touch. The same held for a PARAMETER
+/// typed by an alias: its refinement was synthesised as a hypothesis
+/// and could not be compared to anything either.
+///
+/// All three named spellings are stated, because a fix that resolves
+/// one is not a fix: `m: Int where m > 0`, `Int{it > 0}` and
+/// `Int{self > 0}` are one concept under three surfaces, and this
+/// suite has been bitten before by a test that covered one of them.
+///
+/// The soundness pole is `a_named_refinement_still_refuses.vr`.
+///
+/// Task: T0964.
+
+type PosWhere is m: Int where m > 0;
+type PosIt is Int{it > 0};
+type PosSelf is Int{self > 0};
+
+@verify(formal)
+public fn returns_where(n: Int) -> PosWhere { 9 }
+
+@verify(formal)
+public fn returns_it(n: Int) -> PosIt { 9 }
+
+@verify(formal)
+public fn returns_self(n: Int) -> PosSelf { 9 }
+
+/// The alias as a HYPOTHESIS: nothing here says `p > 0` except the
+/// parameter's type.
+@verify(formal)
+public fn takes_an_alias(p: PosWhere) -> Int
+    ensures result > 0
+{
+    p
+}
+
+/// The inline control, which worked throughout and is what identified
+/// the alias — rather than the refinement — as the difference.
+@verify(formal)
+public fn takes_an_inline(p: Int{it > 0}) -> Int
+    ensures result > 0
+{
+    p
+}
+
+mount core.prelude.*;
+
+fn main() {
+    print("a named refinement is a refinement");
+}

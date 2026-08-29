@@ -1,0 +1,48 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, aliases, negative-test, soundness
+// @timeout: 30000
+// @expected-error: proof-failed
+
+/// SOUNDNESS pole for `a_named_refinement_is_a_refinement.vr`.
+///
+/// Resolving an alias to its base type can be "passed" by dropping the
+/// predicate along with the wrapper — the value would then be an
+/// ordinary `Int` and every claim about it would go through. Each
+/// function below violates its alias's predicate, and each must be
+/// refused:
+///
+///   * `returns_an_unknown_MUST_FAIL` — nothing says the parameter is
+///     positive, so returning it as `Pos` must not verify. If this
+///     proves, the refinement was unwrapped and THROWN AWAY rather
+///     than unwrapped and kept.
+///
+///     Written with a parameter rather than a literal on purpose: the
+///     type checker refuses `-> Pos { 0 }` statically with
+///     `error<E500>: refinement constraint failed`, so that spelling
+///     never reaches a verifier and would pin the wrong phase.
+///
+///   * `assumes_too_much_MUST_FAIL` — `p > 0` does not give `p > 1`.
+///     If this proves, the hypothesis being synthesised is stronger
+///     than the type states.
+///
+/// Task: T0964.
+
+type Pos is Int{it > 0};
+
+@verify(formal)
+public fn returns_an_unknown_MUST_FAIL(n: Int) -> Pos { n }
+
+@verify(formal)
+public fn assumes_too_much_MUST_FAIL(p: Pos) -> Int
+    ensures result > 1
+{
+    p
+}
+
+mount core.prelude.*;
+
+fn main() {
+    print("a named refinement still refuses");
+}

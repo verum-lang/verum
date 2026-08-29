@@ -424,6 +424,11 @@ impl<'s> VerifyCommand<'s> {
         // turn `n: FanoDim` into the implicit hypothesis `n == 7` without
         // forcing the author to repeat the refinement via `requires`.
         let alias_map = crate::phases::proof_verification::build_refinement_alias_map(module);
+        // What a refinement alias IS, beside what it claims. Needed so
+        // `result` is declared at the underlying sort rather than the
+        // alias's own opaque one (T0964).
+        let alias_bases =
+            crate::phases::proof_verification::build_refinement_alias_base_map(module);
 
         // Pre-populate a hints database with every sibling theorem / lemma /
         // corollary / axiom in this module so `apply <name>` can find them.
@@ -653,6 +658,7 @@ impl<'s> VerifyCommand<'s> {
                     func,
                     timeout,
                     &alias_map,
+                    &alias_bases,
                     &reflection_registry,
                     &callee_signatures_for_module,
                     &contract_table,
@@ -1018,6 +1024,7 @@ impl<'s> VerifyCommand<'s> {
         func: &FunctionDecl,
         timeout: Duration,
         alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+        alias_bases: &std::collections::HashMap<Text, Type>,
         reflection_registry: &verum_smt::refinement_reflection::RefinementReflectionRegistry,
         callee_signatures_for_module: &[(Text, Vec<Text>, Text)],
         contract_table: &verum_verification::SymbolTable,
@@ -1172,7 +1179,21 @@ impl<'s> VerifyCommand<'s> {
         for param in &func.params {
             if let FunctionParamKind::Regular { pattern, ty, .. } = &param.kind {
                 if let Some(name) = self.extract_param_name(pattern) {
-                    if let Ok(z3_var) = translator.create_var(name.as_str(), ty) {
+                    // A NAMED refinement is unwrapped to what it IS, for
+                    // the same reason the return type is: the hypothesis
+                    // `synthesize_alias_refinement_requires` states
+                    // speaks about the underlying value, and a parameter
+                    // declared at the alias's opaque sort cannot be
+                    // compared to an integer (T0964).
+                    let resolved: Option<Type> = match &ty.kind {
+                        TypeKind::Path(path) => path
+                            .as_ident()
+                            .and_then(|id| alias_bases.get(&id.name))
+                            .cloned(),
+                        _ => None,
+                    };
+                    let effective_ty: &Type = resolved.as_ref().unwrap_or(ty);
+                    if let Ok(z3_var) = translator.create_var(name.as_str(), effective_ty) {
                         translator.bind(name.clone(), z3_var);
                     }
                 }
@@ -1301,8 +1322,23 @@ impl<'s> VerifyCommand<'s> {
             // Float-returning refined function died in translation
             // ("incompatible types for binary operation").
             if let Some(ret_ty) = &func.return_type {
-                let base_ty: &Type = match &ret_ty.kind {
-                    TypeKind::Refined { base, .. } => base,
+                // A NAMED refinement is unwrapped too. `-> Int{it > 0}`
+                // carries its base in the AST node and always worked;
+                // `-> Pos` for `type Pos is Int{it > 0}` did not, so
+                // `result` was declared at `Verum!Pos` and the
+                // synthesised `result > 0` failed to translate —
+                // "incompatible types for binary operation >". The
+                // obligation was stated and unreadable (T0964).
+                let resolved: Option<Type> = match &ret_ty.kind {
+                    TypeKind::Path(path) => path
+                        .as_ident()
+                        .and_then(|id| alias_bases.get(&id.name))
+                        .cloned(),
+                    _ => None,
+                };
+                let base_ty: &Type = match (&resolved, &ret_ty.kind) {
+                    (Some(b), _) => b,
+                    (None, TypeKind::Refined { base, .. }) => base,
                     _ => ret_ty,
                 };
                 if let Ok(z3_result) = translator.create_var("result", base_ty) {
