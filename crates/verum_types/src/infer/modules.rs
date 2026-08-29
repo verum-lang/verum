@@ -17200,6 +17200,35 @@ impl TypeChecker {
         // ============================================================
         if let Type::DynProtocol { ref bounds, .. } = recv_ty {
             for bound_name in bounds {
+                // A protocol that arrived through the archive is not in the
+                // checker until something asks for it, and this lookup was
+                // not asking — so EVERY method on a `dyn` over a stdlib
+                // protocol failed to resolve. Measured outside `core/`:
+                //
+                //   fn a(w: &mut (dyn EscapeWriter)) { w.begin_sync(); }
+                //   error<E400>: no method named `begin_sync` found for
+                //                type `dyn EscapeWriter`
+                //
+                // and inside `core/`, where name resolution is lenient, the
+                // same call degraded to `Unknown` and surfaced only when `?`
+                // was applied to it — 23 such diagnostics in
+                // `core/term/render/diff.vr` alone, every one of them
+                // blaming the question mark for a method that was never
+                // found.
+                //
+                // Loading here is not the side-effecting kind: this is type
+                // INFERENCE, which cannot answer without the protocol, as
+                // opposed to a diagnostic pass that has its answer already.
+                // The load runs only when the direct lookup missed, so a
+                // protocol already registered costs nothing.
+                let known = {
+                    let pc = self.protocol_checker.read();
+                    pc.get_method_type(bound_name.as_str(), method_name_str)
+                        .is_some()
+                };
+                if !known {
+                    self.ensure_stdlib_type_loaded_transitive(bound_name);
+                }
                 let pc = self.protocol_checker.read();
                 if let Some(method_ty) = pc.get_method_type(bound_name.as_str(), method_name_str) {
                     drop(pc);

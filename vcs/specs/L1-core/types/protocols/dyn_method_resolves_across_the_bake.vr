@@ -1,0 +1,55 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: protocols, dyn, stdlib, name-resolution
+// @timeout: 30000
+// @description: A method call on `dyn P` resolves when P comes from the
+//   standard library, not only when P is declared in the same file.
+//
+//   The dyn branch of method resolution asked the protocol registry for the
+//   method's type, and a protocol that arrived through the archive is not in
+//   that registry until something asks for it — this lookup was not asking.
+//   So EVERY method on a `dyn` over a stdlib protocol failed:
+//
+//       fn a(w: &mut (dyn EscapeWriter)) { w.begin_sync(); }
+//       error<E400>: no method named `begin_sync` found for type
+//                    `dyn EscapeWriter`
+//
+//   The same call inside `core/`, where name resolution is lenient, produced
+//   no error at all: the call typed as `Unknown` and the complaint surfaced
+//   only where `?` was applied to it, blaming the question mark for a method
+//   that was never found. `core/term/render/diff.vr` carried 23 such
+//   diagnostics, all of them on `dyn EscapeWriter` calls, and all of them
+//   gone once the lookup loads the protocol before deciding.
+//
+//   The control is the same shape with a LOCALLY declared protocol, which
+//   passed throughout — that contrast is what identified the bake as the
+//   boundary rather than `dyn` as the problem.
+//
+//   `EscapeWriter` is used here because it is where the defect was found and
+//   it is a protocol with several methods, none of which resolved. Any
+//   archive-loaded protocol would do.
+//
+//   Task: T0799.
+
+mount core.term.raw.escape.*;
+
+// Local protocol of the same shape — the control.
+type LocalWriter is protocol {
+    fn local_begin(&mut self) -> Int;
+};
+
+fn through_stdlib_dyn(w: &mut (dyn EscapeWriter)) -> Int {
+    let _ = w.begin_sync();
+    let _ = w.end_sync();
+    0
+}
+
+fn through_local_dyn(w: &mut (dyn LocalWriter)) -> Int {
+    let _ = w.local_begin();
+    0
+}
+
+fn main() {
+    print("dyn methods resolve across the bake");
+}
