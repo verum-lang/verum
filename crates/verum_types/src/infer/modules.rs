@@ -6773,7 +6773,13 @@ impl TypeChecker {
             {
                 let head = format!("{}.", prefix);
                 let tail = format!(".{}", item_name);
-                for (key, _) in metadata.functions.iter() {
+                // The keys sharing this prefix are contiguous in the
+                // metadata's BTreeMap, so a range query finds them without
+                // touching the rest of the table. This used to walk EVERY
+                // key, once per imported item and twice over — see
+                // `CoreMetadata::function_keys_between`.
+                let pool = metadata.function_keys_between(prefix, item_name);
+                for key in pool {
                     let k = key.as_str();
                     if k.starts_with(head.as_str())
                         && k.ends_with(tail.as_str())

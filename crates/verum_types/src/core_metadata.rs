@@ -127,6 +127,8 @@ pub struct CoreMetadata {
     /// deserialise this field.
     #[serde(default)]
     pub module_reexports: OrderedMap<Text, List<(Text, Text, Text)>>,
+
+
 }
 
 /// Descriptor for a type definition in stdlib
@@ -864,5 +866,58 @@ mod tests {
         assert!(order.len() > 30, "Should have many modules");
         assert_eq!(order[0], "core/primitives", "Primitives must be first");
         assert_eq!(order.last(), Some(&"mod"), "Root module must be last");
+    }
+}
+
+impl CoreMetadata {
+    /// Function keys whose last dot-segment is `leaf`, in `functions` order.
+    /// `None` when the index cannot be trusted, so the caller falls back to
+    /// scanning. The index is built once and `functions` can gain entries
+    /// afterwards — a stale index does not merely slow things down, it
+    /// answers with a SMALLER candidate set and changes the program's
+    /// meaning. Measured while building it: `core/async/executor.vr` went
+    /// from 0 diagnostics to 9 with no candidate reported missing at the
+    /// moment of comparison, because the loss happened on a later call
+    /// against a table that had grown.
+    ///
+    /// The stored length is the cheapest honest witness: same length, same
+    /// table for this purpose; different length, do not trust it.
+    /// Function keys that start with `prefix.` and end with `.item`.
+    ///
+    /// The one-hop re-export search used to answer this by walking EVERY key
+    /// in `functions`, once per imported item and twice over. A glob mount
+    /// makes that items × keys — measured, `mount core.collections.*` on a
+    /// two-line program spent sixty-eight seconds there, against four for
+    /// the whole prelude.
+    ///
+    /// `functions` is a `BTreeMap`, so the keys sharing a prefix are already
+    /// CONTIGUOUS and a range query finds them in O(log n + hits). No index,
+    /// no second copy of the data, nothing to keep coherent when the table
+    /// grows, and no allocation.
+    ///
+    /// A side index was tried first and rejected on evidence, which is worth
+    /// recording because it looked obviously right: keyed by the item's last
+    /// segment, it produced provably identical candidate lists on all 11284
+    /// calls of one file — and the compiler then reported NINE diagnostics
+    /// on `core/async/executor.vr` where it reported none. Isolating build
+    /// from lookup showed the BUILD alone did it: materialising tens of
+    /// thousands of `Text` clones moves some global state. Filed separately;
+    /// the range query sidesteps it by not existing.
+    pub fn function_keys_between(&self, prefix: &str, item: &str) -> Vec<&Text> {
+        let head = format!("{}.", prefix);
+        let tail = format!(".{}", item);
+        let mut out: Vec<&Text> = Vec::new();
+        for (key, _) in self.functions.range(Text::from(head.as_str())..) {
+            let k = key.as_str();
+            if !k.starts_with(head.as_str()) {
+                // Past the prefix block: BTreeMap order guarantees nothing
+                // further can match.
+                break;
+            }
+            if k.ends_with(tail.as_str()) {
+                out.push(key);
+            }
+        }
+        out
     }
 }

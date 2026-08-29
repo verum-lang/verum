@@ -476,11 +476,23 @@ impl<'s> CompilationPipeline<'s> {
         // own a `main`, the full pipeline moved the count from 16 passed to
         // 17: no wave, one spec that starts working because the type check
         // now runs.
+        // Two more phases `verum run` performs and this path did not.
+        //
+        // `clear_non_compilable_stdlib_modules` decides WHICH stdlib modules
+        // reach codegen, so leaving it out compiled a different program than
+        // the user's. `diagnostic_gate` is what turns accumulated diagnostics
+        // into a failure — without it the harness could report PASS on a file
+        // the CLI refuses, which is the whole subject of this task: a green
+        // suite is only evidence if it exercised the user's path.
+        if std::env::var("VERUM_FULL_STDLIB").is_err() {
+            self.clear_non_compilable_stdlib_modules(Some(&module));
+        }
         self.phase_safety_gate(&module)?;
         self.phase_type_check(&module)?;
         self.apply_resolved_call_targets(&mut module);
         self.phase_dependency_analysis(&module)?;
         self.phase_cbgr_analysis(&module)?;
+        self.diagnostic_gate()?;
         debug!(
             "Phase 3+ (validate_module): {:.2}s",
             start.elapsed().as_secs_f64()

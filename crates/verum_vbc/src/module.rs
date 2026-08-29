@@ -416,6 +416,38 @@ pub struct VbcModule {
     /// unchanged — mirrors `StringTable::id_to_idx`.
     #[serde(skip, default)]
     pub(crate) type_idx_by_id: std::sync::OnceLock<std::collections::HashMap<u32, usize>>,
+
+    /// Function indices grouped by NAME, so a lookup by name does not scan
+    /// the whole table.
+    ///
+    /// Name lookup is the archive's hottest operation: loading a module's
+    /// context resolves every referenced symbol by name, and each resolution
+    /// walked all `functions`, materialising a `&str` per descriptor to
+    /// compare it. With a stdlib archive holding tens of thousands of
+    /// functions that is O(symbols × functions) — measured, `mount
+    /// collections.List` in a two-line program spent its entire cold second
+    /// under `ArchiveCtxCache::apply_lazy_with_types` in
+    /// `find_function_by_name`.
+    ///
+    /// Keyed by the NAME TEXT, not by `StringId`, and that is not a
+    /// convenience. `StringTable::get` resolves an id through `id_to_idx`,
+    /// so ids are not positional and the SAME text can arrive under more
+    /// than one id once modules are merged or remapped. An id-keyed index
+    /// therefore silently loses every function whose descriptor carries the
+    /// other id — measured, `core/async/stream.vr` went from 0 diagnostics
+    /// to 33 that way. Building from `get_string(desc.name)` keeps the
+    /// comparison the scan performed.
+    ///
+    /// Values stay in TABLE ORDER, which is what the tie-break rules rely
+    /// on — same-named candidates are ranked by whether they carry a body,
+    /// and ties fall to the earliest index.
+    ///
+    /// `OnceLock` (not `OnceCell`) keeps `Arc<VbcModule>` `Send + Sync`;
+    /// skipped from serialize to keep the wire format unchanged — mirrors
+    /// `type_idx_by_id` and `StringTable::id_to_idx`.
+    #[serde(skip, default)]
+    pub(crate) fn_idx_by_name:
+        std::sync::OnceLock<std::collections::HashMap<String, smallvec::SmallVec<[u32; 2]>>>,
 }
 
 impl Default for VbcModule {
@@ -535,6 +567,7 @@ impl VbcModule {
             resolved_protocol_dispatch: std::collections::HashMap::new(),
             mount_aliases: Vec::new(),
             type_idx_by_id: std::sync::OnceLock::new(),
+            fn_idx_by_name: std::sync::OnceLock::new(),
         }
     }
 
@@ -814,8 +847,35 @@ impl VbcModule {
     /// Adds a function descriptor.
     pub fn add_function(&mut self, desc: FunctionDescriptor) -> FunctionId {
         let id = FunctionId(self.functions.len() as u32);
+        // Keep the by-name index coherent when it is already materialised,
+        // mirroring `add_type`. Appending preserves table order, which the
+        // tie-break in `find_function_by_name` depends on.
+        if let Some(m) = self.fn_idx_by_name.get_mut()
+            && let Some(n) = self.strings.get(desc.name)
+        {
+            m.entry(n.to_string()).or_default().push(id.0);
+        }
         self.functions.push(desc);
         id
+    }
+
+    /// Indices of every function carrying `name`, in table order.
+    ///
+    /// Empty when the name is not interned in this module at all, which is
+    /// the common case for a miss and costs one hash lookup rather than a
+    /// full scan.
+    pub(crate) fn function_indices_named(&self, name: &str) -> &[u32] {
+        let map = self.fn_idx_by_name.get_or_init(|| {
+            let mut m: std::collections::HashMap<String, smallvec::SmallVec<[u32; 2]>> =
+                std::collections::HashMap::with_capacity(self.functions.len());
+            for (idx, desc) in self.functions.iter().enumerate() {
+                if let Some(n) = self.get_string(desc.name) {
+                    m.entry(n.to_string()).or_default().push(idx as u32);
+                }
+            }
+            m
+        });
+        map.get(name).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
     /// Gets a function descriptor by ID.
@@ -1603,16 +1663,36 @@ impl VbcModule {
                     .unwrap_or(false)
         };
         // Exact match first
+        // Candidates come from the by-name index, in table order, so this
+        // walks the two or three functions that share the name instead of
+        // every function in the module. Same order, same tie-break, same
+        // answer — see `fn_idx_by_name`.
+        // VERUM_NO_FN_INDEX=1 forces the pre-index linear scan. Kept, not
+        // scaffolding: an index that answers differently from the scan it
+        // replaced is a silent change of meaning, and comparing two BUILDS
+        // cannot separate it from everything else in the tree. This makes
+        // the comparison possible inside one binary, which is how the
+        // equivalence here was established.
+        let scan_all = std::env::var_os("VERUM_NO_FN_INDEX").is_some();
+        let candidates: smallvec::SmallVec<[u32; 8]> = if scan_all {
+            (0..self.functions.len() as u32).collect()
+        } else {
+            self.function_indices_named(name).iter().copied().collect()
+        };
         let mut exact: Option<(bool, u32)> = None;
-        for (idx, desc) in self.functions.iter().enumerate() {
-            if let Some(fname) = self.get_string(desc.name)
-                && fname == name
+        for idx in candidates {
+            let Some(desc) = self.functions.get(idx as usize) else {
+                continue;
+            };
+            if scan_all && self.get_string(desc.name) != Some(name) {
+                continue;
+            }
             {
                 let bodied = has_body(desc);
                 match exact {
-                    None => exact = Some((bodied, idx as u32)),
+                    None => exact = Some((bodied, idx)),
                     Some((false, _)) if bodied => {
-                        exact = Some((true, idx as u32))
+                        exact = Some((true, idx))
                     }
                     _ => {}
                 }

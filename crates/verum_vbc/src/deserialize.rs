@@ -520,6 +520,7 @@ impl<'a> Deserializer<'a> {
  mount_aliases: extensions.mount_aliases,
  // Runtime-only reverse cache — never serialized.
  type_idx_by_id: std::sync::OnceLock::new(),
+        fn_idx_by_name: std::sync::OnceLock::new(),
  })
  }
 
