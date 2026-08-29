@@ -1,0 +1,76 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, reflection, newtype, projection, sorts
+// @timeout: 30000
+
+/// A newtype projects to what it holds — a record, not an integer.
+///
+/// A positional projection was declared as returning `Int` whatever the
+/// position held. For `type NT is (Plain)` that produced
+///
+///     (Verum!proj!Plain!bytes (Verum!tuple!Verum!NT!0 a))
+///
+/// — a record projection applied to an integer. Z3 answers an
+/// ill-sorted block by rejecting ALL of it, and `from_string`'s own
+/// comment says the rejection is silent: "an axiom we can't translate
+/// doesn't fire". So every reflected definition in the module went
+/// quiet at once, and a theorem over any of them failed with its
+/// helper still uninterpreted.
+///
+/// The instrument that settled it, after three wrong guesses, was
+/// `VERUM_DUMP_SMT_DIR=<dir>`: the dumped goal showed
+/// `(declare-fun p_read (Verum!NTP) Bool)` and no definition anywhere,
+/// which separates "we dropped it" from "Z3 refused it" — two failures
+/// that look identical from the verdict.
+///
+/// This is the last of EIGHT layers under one theorem of the showcase
+/// application, each real and each closed in turn: the assignment
+/// (T0954), the bitwise operators (T0956), reading an element (T0962),
+/// the loop (T0963), the reference tiers, the positional projection,
+/// the generic instantiation, and the sort it projects to (T0965).
+/// With it, `a_hash_matches_itself` — a digest equals itself, 32 bytes
+/// compared through a loop — discharges.
+///
+/// Task: T0965.
+
+public type Plain is { bytes: [Byte; 4] };
+public type NT is (Plain);
+
+/// The payload is a RECORD, so the projection's sort must be that
+/// record — the case that produced the ill-sorted application.
+public pure fn reads_through_a_newtype(a: &checked NT) -> Bool {
+    (a.0.bytes[0] as Int) == (a.0.bytes[0] as Int)
+}
+
+/// The same over a loop, which is the showcase's actual shape: the fold
+/// unrolls it, and every read inside has to keep its sorts.
+public pure fn compares_a_whole_buffer(a: &checked NT, b: &checked NT) -> Bool {
+    let mut diff = 0;
+    let mut i = 0;
+    while i < 4 {
+        diff = diff | ((a.0.bytes[i] as Int) ^ (b.0.bytes[i] as Int));
+        i = i + 1;
+    }
+    diff == 0
+}
+
+public pure fn compares_with_itself(a: &checked NT) -> Bool {
+    compares_a_whole_buffer(a, a)
+}
+
+@verify(formal)
+public theorem a_newtype_read_reflects(a: &checked NT)
+    ensures reads_through_a_newtype(a)
+    proof by auto;
+
+@verify(formal)
+public theorem a_buffer_equals_itself(a: &checked NT)
+    ensures compares_with_itself(a)
+    proof by auto;
+
+mount core.prelude.*;
+
+fn main() {
+    print("a newtype projects to its payload type");
+}

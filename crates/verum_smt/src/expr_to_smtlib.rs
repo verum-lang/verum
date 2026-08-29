@@ -887,8 +887,24 @@ pub fn expr_to_smtlib_env(
             let recv = expr_to_smtlib_env(obj, env, aux)?;
             let tsort = crate::solver_symbols::opaque_sort(&tn);
             note_sort(aux, &tsort);
+            // The position's OWN sort. Declaring every projection as
+            // Int-returning made a newtype over a record produce an
+            // ill-sorted application — a record projection applied to
+            // an integer — and Z3 answers that by rejecting the whole
+            // block, so every reflected definition in the module goes
+            // quiet at once (T0965).
+            let psort = env
+                .positional
+                .get(&tn)
+                .and_then(|ps| ps.get(*index as usize))
+                .map(|(s, _)| s.clone())
+                .unwrap_or_else(|| "Int".to_string());
+            note_sort(aux, &psort);
             let proj = crate::solver_symbols::tuple_projection(&tsort, *index as usize);
-            note_decl(aux, format!("(declare-fun {} ({}) Int)", proj, tsort));
+            note_decl(
+                aux,
+                format!("(declare-fun {} ({}) {})", proj, tsort, psort),
+            );
             Ok(format!("({} {})", proj, recv))
         }
 

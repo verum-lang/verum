@@ -326,6 +326,14 @@ pub struct Translator<'ctx> {
     /// List sort.
     pending_axioms: std::cell::RefCell<Vec<z3::ast::Bool>>,
 
+    /// Newtype / tuple type name → the SORT of each position.
+    ///
+    /// The positional counterpart of `record_fields`: without it a
+    /// projection out of a newtype is declared to return `Int`, and a
+    /// newtype over a record then yields an ill-sorted application that
+    /// makes Z3 reject the module's entire reflection block.
+    positional_sorts: std::cell::RefCell<std::collections::HashMap<String, Vec<String>>>,
+
     /// Signatures of known user functions (name → list of parameter
     /// sort names, return sort name). Populated by the caller from
     /// the module's `FunctionDecl`s so the UF-fallback arm in
@@ -395,6 +403,7 @@ impl<'ctx> Translator<'ctx> {
             record_fields: std::cell::RefCell::new(std::collections::HashMap::new()),
             value_types: std::cell::RefCell::new(std::collections::HashMap::new()),
             value_sorts: std::cell::RefCell::new(std::collections::HashMap::new()),
+            positional_sorts: std::cell::RefCell::new(std::collections::HashMap::new()),
             variant_registry: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
@@ -411,6 +420,7 @@ impl<'ctx> Translator<'ctx> {
             record_fields: std::cell::RefCell::new(std::collections::HashMap::new()),
             value_types: std::cell::RefCell::new(std::collections::HashMap::new()),
             value_sorts: std::cell::RefCell::new(std::collections::HashMap::new()),
+            positional_sorts: std::cell::RefCell::new(std::collections::HashMap::new()),
             variant_registry: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
@@ -495,6 +505,21 @@ impl<'ctx> Translator<'ctx> {
     /// `Bool` field could not be used as a proposition at all
     /// ("expected boolean expression"), and why the goal side and the
     /// reflection side named the same field differently and never met.
+    /// Register a NEWTYPE or tuple type's positions, each by its SORT
+    /// name.
+    ///
+    /// A positional projection used to be declared as returning `Int`
+    /// no matter what the position held, so a newtype over a RECORD
+    /// produced `(Verum!proj!Plain!bytes (Verum!tuple!Verum!NTP!0 a))`
+    /// — a record projection applied to an integer. Z3 refuses the
+    /// whole block for that, silently, and every reflected definition
+    /// in the module goes with it (T0965).
+    pub fn register_positional_type(&self, type_name: &str, position_sorts: Vec<String>) {
+        self.positional_sorts
+            .borrow_mut()
+            .insert(type_name.to_string(), position_sorts);
+    }
+
     pub fn register_record_type(
         &self,
         type_name: &str,
@@ -1497,13 +1522,26 @@ impl<'ctx> Translator<'ctx> {
             ExprKind::TupleIndex { expr, index } => {
                 let recv = self.translate_expr(strip_paren(expr))?;
                 let recv_sort = recv.get_sort();
+                let recv_sort_name = format!("{}", recv_sort);
+                // The position's own sort, not `Int`. A newtype over a
+                // RECORD projects to that record, and declaring the
+                // projection as Int-returning made every use of it
+                // ill-sorted — which Z3 answers by rejecting the whole
+                // reflection block, silently (T0965).
+                let ret_sort = self
+                    .positional_sorts
+                    .borrow()
+                    .get(recv_sort_name.trim_start_matches("Verum!"))
+                    .and_then(|ps| ps.get(*index as usize).cloned())
+                    .map(|s| Self::sort_from_name(&s))
+                    .unwrap_or_else(Sort::int);
                 let decl = FuncDecl::new(
                     Symbol::String(crate::solver_symbols::tuple_projection(
-                        &format!("{}", recv_sort),
+                        &recv_sort_name,
                         *index as usize,
                     )),
                     &[&recv_sort],
-                    &Sort::int(),
+                    &ret_sort,
                 );
                 Ok(decl.apply(&[&recv]))
             }

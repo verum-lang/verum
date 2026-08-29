@@ -2361,6 +2361,8 @@ pub struct ProofSearchEngine {
         Text,
         std::collections::HashMap<String, (String, Option<String>)>,
     >,
+    /// Newtype / tuple type name -> the SORT of each position.
+    positional_layouts: std::collections::HashMap<Text, Vec<String>>,
     /// Declared types of values in scope, same lifetime as the layouts.
     value_type_bindings: std::collections::HashMap<Text, Text>,
     /// The SORT NAME of a value in scope — a different question from its
@@ -2448,6 +2450,7 @@ impl ProofSearchEngine {
             incomplete_proofs: List::new(),
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
             record_layouts: std::collections::HashMap::new(),
+            positional_layouts: std::collections::HashMap::new(),
             value_type_bindings: std::collections::HashMap::new(),
             value_sort_bindings: std::collections::HashMap::new(),
             callee_signatures: std::collections::HashMap::new(),
@@ -2470,6 +2473,7 @@ impl ProofSearchEngine {
             incomplete_proofs: List::new(),
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
             record_layouts: std::collections::HashMap::new(),
+            positional_layouts: std::collections::HashMap::new(),
             value_type_bindings: std::collections::HashMap::new(),
             value_sort_bindings: std::collections::HashMap::new(),
             callee_signatures: std::collections::HashMap::new(),
@@ -2539,6 +2543,17 @@ impl ProofSearchEngine {
         fields: std::collections::HashMap<String, (String, Option<String>)>,
     ) {
         self.record_layouts.insert(type_name, fields);
+    }
+
+    /// Register a newtype or tuple type's positions by SORT.
+    ///
+    /// The positional counterpart of [`Self::register_record_type`],
+    /// and needed for the same reason: a projection declared to return
+    /// `Int` regardless of what the position holds makes a newtype over
+    /// a record ill-sorted, and Z3 rejects the whole reflection block
+    /// for it (T0965).
+    pub fn register_positional_type(&mut self, type_name: Text, position_sorts: Vec<String>) {
+        self.positional_layouts.insert(type_name, position_sorts);
     }
 
     /// Register the declared type of a value in scope, so member
@@ -5050,6 +5065,9 @@ impl ProofSearchEngine {
         // so a Bool field could not even be stated as a goal.
         for (type_name, fields) in &self.record_layouts {
             translator.register_record_type(type_name.as_str(), fields.clone());
+        }
+        for (type_name, positions) in &self.positional_layouts {
+            translator.register_positional_type(type_name.as_str(), positions.clone());
         }
         for (value, type_name) in &self.value_type_bindings {
             translator.register_value_type(value.as_str(), type_name.as_str());

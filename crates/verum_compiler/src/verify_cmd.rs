@@ -824,6 +824,12 @@ impl<'s> VerifyCommand<'s> {
         for (type_name, fields) in record_layouts.iter() {
             proof_engine.register_record_type(Text::from(type_name.as_str()), fields.clone());
         }
+        for (type_name, positions) in positional_layouts.iter() {
+            proof_engine.register_positional_type(
+                Text::from(type_name.as_str()),
+                positions.iter().map(|(s, _)| s.clone()).collect(),
+            );
+        }
 
         // Register variant-disjointness axioms (computed once per
         // module, passed in via `variant_axioms`). Each pair of
