@@ -267,6 +267,49 @@ precondition T0657; higher-order reflection T0490; excluded-middle on
 opaque calls T0487; five ProofTerm types T0637; refinement
 value-free-validity class (register §refinement).
 
+**R6-addendum, MEASURED 2026-08-30 — a red verification spec has FIVE
+distinct causes, and they must not be added together.**
+
+The L3 proofs corpus stands at 27/71 specs, 265 unproved obligations
+(from 23/68 and 275 the same day). Triaging what remains gave five
+kinds of red, only the first of which is prover debt:
+
+1. **A weak tactic or a missing theory.** The real debt: list theory
+   (`len(xs.concat(ys)) == len(xs) + len(ys)` and its family, 14 goals),
+   Peano over a user `Nat`, induction, existential witnesses.
+2. **A compiler defect.** A `cases` block built its goal from the
+   SCRUTINEE, so a proof structure destroyed a goal the solver closes
+   in 10ms (T0960); a generic function's definition was declared over
+   its type parameter's sort while the goal's call declared the same
+   name over the instantiated sort, so the definitional axiom described
+   a different function (T0980).
+3. **The spec asserts something its author did not mean.** `==` binds
+   tighter than `&&`, so `p && true == p` is `p && (true == p)` — false
+   at `p = false`. The verifier refused correctly and the refusal was
+   counted as prover weakness. A census over the corpus for that shape
+   found 18 sites, of which 3 were mis-grouped.
+4. **The spec declares its expectation where the runner never looks.**
+   `// @test: verify-fail` on an individual theorem inside a file whose
+   own directive says `verify-pass`. vtest reads the file's first
+   directive and nothing else, so six theorems across three tactic
+   files were punished for declining correctly.
+5. **The verifier answers FALSE** — the worst, and the one that makes
+   the other four cheap by comparison.
+
+Two instrument defects were found while measuring, and both would have
+falsified the numbers: `cargo build -p A --bin X -p B` builds only `X`
+(the `--bin` filter silences every other `-p`, exit 0, no warning), so
+a suite run by `B`'s binary measures the previous build; and a full
+disk wears other defects' symptoms — a name-resolution census taken at
+100% disk did not survive re-measurement and was retracted.
+
+Structural finding, filed as T0983: the parser accepts a theorem body
+with NO closing brace, silently. Four of 68 files in the proofs corpus
+are unbalanced; `blast_tactic.vr` is missing 24. Bodies close on the
+next keyword, so nothing shows until a file is cut. A spec whose
+structure depends on error recovery is a spec whose content is decided
+by a heuristic rather than by its author.
+
 **R7. Product surface.** Format-spec pipeline T0700; effect
 polymorphism T0696; QTT channels T0697; region polymorphism T0698;
 contract-carrying archives T0699 — the innovation tier, after R1-R6
