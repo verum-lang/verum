@@ -77,11 +77,11 @@ each says whether that instrument currently exists.
 
 | # | Property | Instrument | Exists? |
 |---|---|---|---|
-| P1 | The same source, the same binary, gives the same verdict | determinism harness | **no** — T0927 (checker gives 0 or 20 errors on one file), T0953 (a stale cache reports 0 errors on a file with 9) |
+| P1 | The same source, the same binary, gives the same verdict | determinism harness | **no** — T0927 (checker gives 0 or 20 errors on one file), T0953 (a stale cache reports 0 errors on a file with 9). Related and now gated: the same file checked as a FILE and as a PROJECT had to agree — `check_file_vs_project_parity.py`, three programs, both ways |
 | P2 | A failure is loud: no phase answers "fine" by degrading | degradation ratchet | partial — T0747 names the class; ratchet drafted, not in CI (T0857) |
 | P3 | The two tiers agree: interpreter ≡ AOT | cross-tier suite | partial — `core-tests` runs both, but AOT lane is non-blocking (`nightly-aot.yml`) |
 | P4 | The stdlib a user gets is the stdlib we test | bake-vs-source parity | partial — T0692 (one driver), T0755 (535 of 2 561 `core/` files fail `check` while the bake is green) |
-| P5 | Every public stdlib name is reachable by a documented spelling | mount/reexport suite | **partial** — the glob now asks the same authority a named mount asks (T0969, landed); contexts joined the export surface as a fourth family, `core.context.standard` going from 6 exported items to 22 (T0974). Open: the checker's context table is filled on the single-file path and not the project path |
+| P5 | Every public stdlib name is reachable by a documented spelling | mount/reexport suite | **yes for contexts, partial overall** — the glob asks the same authority a named mount asks (T0969); contexts joined the export surface as a fourth family, `core.context.standard` going from 6 exported items to 22, and the project path now registers them too (T0974, closed). Gated by `check_file_vs_project_parity.py` |
 | P6 | The published specification predicts what the compiler does | grammar↔parser gate | **partial** — `operator_ladder_tests.rs` pins the ladder against the parser (T0816, new). `check_grammar_docs_match.py` compares the site's EBNF to the authority, but takes the "no documentation tree" branch on every CI run, because the website lives in a separate, gitignored repository (T0971) |
 | P7 | The tools survive a working day | LSP/CLI soak | **no** — T0752 (`verum lsp` reaches 36.6 GB over 13.5 h), T0746 |
 
