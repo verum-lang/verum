@@ -384,7 +384,11 @@ impl<'s> CompilationPipeline<'s> {
             }
             verum_vbc::module::EntryMain::Ambiguous { candidates } => {
                 Err(anyhow::anyhow!(
-                    "ambiguous entry point: no bare `main`, and {} qualified candidates: {}",
+                    "ambiguous entry point: {} candidates: {}.\n\
+                     A file without a `module` header contributes an \
+                     unqualified `main`, so several such files in one \
+                     project are indistinguishable. Give each file a \
+                     `module` header, or keep one entry point per project.",
                     candidates.len(),
                     candidates.join(", ")
                 ))

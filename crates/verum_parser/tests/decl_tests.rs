@@ -1906,33 +1906,34 @@ fn test_extern_fn_default_abi() {
 }
 
 #[test]
-fn test_extern_fn_with_body_is_an_exported_function() {
-    // An extern fn WITH a body is an EXPORTED function — the declaration
-    // Verum compiles and makes callable from foreign code, exactly as
-    // `extern "C" fn f() { .. }` does in Rust. An extern fn WITHOUT a body
-    // (terminated by `;`) is the imported FFI declaration. Both are
-    // deliberate; see the body branch in verum_fast_parser/src/decl.rs.
+fn test_extern_fn_with_a_body_is_refused() {
+    // `extern fn` DECLARES a foreign symbol; it never defines one. The
+    // grammar allows it only inside an `extern` block and requires the
+    // `;` terminator (`extern_fn_decl`, grammar/verum.ebnf), and the
+    // parser enforces that since T0643.
     //
-    // These two tests previously asserted the opposite — that an extern fn
-    // "should not have a body" — and had never run, because a failure
-    // earlier in the crate truncated the suite before reaching them.
+    // To make a Verum function callable FROM foreign code, keep the
+    // ordinary `fn` and attribute it — `@export` / `@no_mangle` — rather
+    // than spelling it `extern`.
+    //
+    // These two tests asserted the opposite for three weeks: that an
+    // extern fn with a body is an exported function, the Rust reading of
+    // `extern "C" fn f() { .. }`. They were red from the day T0643
+    // landed (2026-08-10) and nobody saw it, because `verum_parser`'s
+    // tests are not among the crates CI runs `--tests` for.
     let source = r#"extern fn foo() { }"#;
-    let result = parse_module(source);
     assert!(
-        result.is_ok(),
-        "extern fn with a body is an exported function: {:?}",
-        result.err()
+        parse_module(source).is_err(),
+        "an extern fn with a block body must be refused"
     );
 }
 
 #[test]
-fn test_extern_fn_with_expr_body_is_an_exported_function() {
+fn test_extern_fn_with_an_expression_body_is_refused() {
     let source = r#"extern fn foo() = 42;"#;
-    let result = parse_module(source);
     assert!(
-        result.is_ok(),
-        "extern fn with an expression body is an exported function: {:?}",
-        result.err()
+        parse_module(source).is_err(),
+        "an extern fn with an expression body must be refused"
     );
 }
 

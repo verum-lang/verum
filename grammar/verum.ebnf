@@ -1596,18 +1596,27 @@ destructuring_target = '(' , expression_list , ')'       (* tuple: (a, b, c) *)
 field_expr_list = [ field_expr , { ',' , field_expr } , [ ',' , '..' ] ] ;
 field_expr      = identifier , [ ':' , expression ] ;
 
-(* Simple assignment: lvalue on left side *)
-simple_assign   = null_coalesce_expr , [ assign_op , assignment_expr ] ;
+(* Simple assignment: lvalue on left side.                                     *)
+(* Assignment is the loosest operator except the pipeline: the whole            *)
+(* right-hand side belongs to it, so `x = a ?? b` is `x = (a ?? b)`.            *)
+simple_assign   = implication_expr , [ assign_op , assignment_expr ] ;
 
-null_coalesce_expr = range_expr , { '??' , range_expr } ;
+(* Logical implication and the biconditional, for requires/ensures and          *)
+(* proof terms.  Right-associative: `P implies Q implies R` is                  *)
+(* `P implies (Q implies R)`.  Binds tighter than assignment, looser than `||`. *)
+implication_expr = null_coalesce_expr , [ implication_op , implication_expr ] ;
+implication_op  = '->' | 'implies' | '=>' | '<->' | 'iff' ;
+
+(* Right-associative: `a ?? b ?? c` is `a ?? (b ?? c)`. *)
+null_coalesce_expr = range_expr , [ '??' , null_coalesce_expr ] ;
 
 range_expr      = logical_or_expr , [ range_op , logical_or_expr ] ;
 
 logical_or_expr = logical_and_expr , { '||' , logical_and_expr } ;
-logical_and_expr= equality_expr , { '&&' , equality_expr } ;
+logical_and_expr= comparison_expr , { '&&' , comparison_expr } ;
 
 (* BOOLEAN-EQUALITY-CLARITY (language law, 2026-08-05): within a
-   logical_and_expr / logical_or_expr, an equality_expr using '=='
+   logical_and_expr / logical_or_expr, a comparison_expr using '=='
    or '!=' whose operands BOTH type as Bool is ill-formed unless
    parenthesized, when the adjacent conjunct operand is itself of
    type Bool.  With Bool operands both precedence readings
@@ -1615,12 +1624,12 @@ logical_and_expr= equality_expr , { '&&' , equality_expr } ;
    — makes proof obligations vacuous.  Diagnostic: E432.
    Spec: docs/architecture/language-law-visibility-and-boolean-clarity.md *)
 
-equality_expr   = is_relational_expr , { ( '==' | '!=' ) , is_relational_expr } ;
-
-(* is_relational_expr integrates the 'is' pattern test operator *)
-(* The 'is' operator has same precedence as relational operators *)
-(* Example: x is Some(v), value is not None *)
-is_relational_expr = relational_expr , [ 'is' , [ 'not' ] , pattern ] ;
+(* COMPARISON IS ONE LEVEL, LEFT-ASSOCIATIVE.  `==`, `!=`, the four        *)
+(* orderings, the containment test `in` and the pattern test `is` all      *)
+(* bind equally, so `a == b < c` is `(a == b) < c` and                     *)
+(* `a == b is Some(v)` is `(a == b) is Some(v)`.  `is` takes a PATTERN on  *)
+(* its right, not an expression, which is why it is spelled as its own     *)
+(* alternative rather than listed in comparison_op.                        *)
 
 (* DESIGN DECISION: Verum does NOT support Python-style chained comparisons.    *)
 (* Expressions like `a < b < c` parse as `(a < b) < c` (left-associative).      *)
@@ -1636,14 +1645,28 @@ is_relational_expr = relational_expr , [ 'is' , [ 'not' ] , pattern ] ;
 (* For range checks, use explicit pattern:                                      *)
 (*   if a < b && b < c { ... }  // Explicit, clear, composable                  *)
 (*   if let x = b && x > a && x < c { ... }  // With binding for reuse          *)
-relational_expr = bitwise_expr , { ( '<' | '>' | '<=' | '>=' ) , bitwise_expr } ;
+comparison_expr = bitor_expr ,
+                  { ( comparison_op , bitor_expr )
+                  | ( 'is' , [ 'not' ] , pattern ) } ;
+comparison_op   = '==' | '!=' | '<' | '>' | '<=' | '>=' | 'in' ;
 
-bitwise_expr    = shift_expr , { ( '&' | '|' | '^' ) , shift_expr } ;
+(* THREE bitwise levels, tightest last, exactly as the compiler binds them: *)
+(* `&` tighter than `^` tighter than `|`.  So `a | b & c` is `a | (b & c)`  *)
+(* and `d | a ^ b` is `d | (a ^ b)` — the C ladder.  A single flat level    *)
+(* here would give those expressions a DIFFERENT VALUE (T0816).            *)
+bitor_expr      = bitxor_expr , { '|' , bitxor_expr } ;
+bitxor_expr     = bitand_expr , { '^' , bitand_expr } ;
+bitand_expr     = shift_expr  , { '&' , shift_expr } ;
 shift_expr      = additive_expr , { ( '<<' | '>>' ) , additive_expr } ;
 
 additive_expr   = mult_expr , { ( '+' | '-' ) , mult_expr } ;
 mult_expr       = power_expr , { ( '*' | '/' | '%' ) , power_expr } ;
-power_expr      = unary_expr , [ '**' , power_expr ] ;
+power_expr      = cast_expr , [ '**' , power_expr ] ;
+
+(* `as` binds LOOSER than a prefix operator and TIGHTER than any        *)
+(* arithmetic: `-a as Int` is `(-a) as Int`, and `a as Int * b` is      *)
+(* `(a as Int) * b`.  Casts chain left-to-right: `a as Int as Float`.   *)
+cast_expr       = unary_expr , { 'as' , type_expr } ;
 
 unary_expr      = unary_op , unary_expr | postfix_expr ;
 unary_op        = '!' | '-' | '~' | '&' | '&' , 'mut'
@@ -1657,8 +1680,10 @@ postfix_op      = '.' , identifier , [ type_args ] , [ call_args ]
                 | '.' , 'await'
                 | '[' , expression , ']'
                 | [ type_args ] , call_args
-                | '?'
-                | 'as' , type_expr ;
+                | '?' ;
+(* `as` is NOT a postfix operator: a prefix operator binds tighter than *)
+(* it (`-a as Int` is `(-a) as Int`), so it has its own level —         *)
+(* cast_expr, above.                                                    *)
 
 (* Generic function call: func<T>(args) or just func(args)                      *)
 (* The type_args before call_args enables explicit type arguments:              *)
@@ -2711,8 +2736,8 @@ quantifier_binding =
     pattern , [ ':' , type_expr ] , [ 'in' , expression ] , [ 'where' , expression ] ;
 
 (* 2.19.10 Is Expression - Pattern Testing *)
-(* is_expr is integrated into expression grammar as is_relational_expr *)
-(* See Section 2.10 - is_relational_expr for the production *)
+(* is_expr is integrated into the expression grammar as an alternative *)
+(* of comparison_expr.  See Section 2.10 for the production.            *)
 (* Example: if value is Some(x) { use(x) } *)
 (* Example: while result is not Done { poll(); } *)
 

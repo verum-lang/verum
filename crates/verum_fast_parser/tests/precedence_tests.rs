@@ -1,3 +1,16 @@
+//! PARSE ACCEPTANCE for operator-bearing expressions.
+//!
+//! CAUTION: with three exceptions these tests call `assert_parses`,
+//! which checks only that a source string PARSES — not how it groups.
+//! A test named `test_bitwise_and_before_or` therefore passes whichever
+//! way `&` and `|` bind.  That is how `grammar/verum.ebnf` came to
+//! describe a single flat bitwise level while the parser used the C
+//! ladder, giving the two documents different values for `a | b & c`
+//! (T0816).
+//!
+//! The precedence LADDER itself is pinned by shape in
+//! `operator_ladder_tests.rs`.  Add precedence rows there, not here.
+
 #![allow(
     dead_code,
     unused_imports,
@@ -16,23 +29,14 @@
 //
 
 // Verifies that operators are parsed with correct precedence and associativity.
-// Precedence from lowest to highest:
-// 1. Pipeline `|>`
-// 2. Null coalescing `??`
-// 3. Assignment `=`, `+=`, etc.
-// 4. Logical OR `||`
-// 5. Logical AND `&&`
-// 6. Equality `==`, `!=`
-// 7. Comparison `<`, `>`, `<=`, `>=`
-// 8. Bitwise OR `|`
-// 9. Bitwise XOR `^`
-// 10. Bitwise AND `&`
-// 11. Shift `<<`, `>>`
-// 12. Additive `+`, `-`
-// 13. Multiplicative `*`, `/`, `%`
-// 14. Exponentiation `**` (right-associative)
-// 15. Unary `!`, `-`, `~`, `&`, `%`, `*`
-// 16. Postfix `.`, `?.`, `()`, `[]`, `?`, `as`
+// The precedence ladder is NOT restated here.  It lives in exactly two
+// places: `grammar/verum.ebnf` §2.10 (the specification) and
+// `verum_fast_parser/tests/operator_ladder_tests.rs` (the executable
+// pin, which states how each expression GROUPS).  A numbered copy in a
+// comment is a fourth authority that cannot be checked and drifts
+// silently — the copy that used to stand here still claimed `??` binds
+// looser than assignment and `as` is a postfix operator, both of which
+// the parser contradicts (T0816).
 
 use verum_ast::{BinOp, ExprKind, FileId};
 use verum_fast_parser::VerumParser;
@@ -627,7 +631,12 @@ fn test_unary_complex() {
 
 #[test]
 fn test_all_levels_1() {
-    assert_parses("x |> f ?? y = a || b && c == d > e + f * g ** h");
+    // Assignment is looser than `??` (T0816), so the right-hand side of
+    // `=` swallows the rest.  The previous spelling put `y = …` INSIDE a
+    // coalesce (`f ?? y = a || …`), which only parsed while assignment
+    // bound tighter than `??`.
+    assert_parses("x = a ?? b || c && d == e > f + g * h ** i");
+    assert_parses("x |> f");
 }
 
 #[test]

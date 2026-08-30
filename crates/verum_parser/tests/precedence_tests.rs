@@ -16,23 +16,14 @@
 //
 
 // Verifies that operators are parsed with correct precedence and associativity.
-// Precedence from lowest to highest:
-// 1. Pipeline `|>`
-// 2. Null coalescing `??`
-// 3. Assignment `=`, `+=`, etc.
-// 4. Logical OR `||`
-// 5. Logical AND `&&`
-// 6. Equality `==`, `!=`
-// 7. Comparison `<`, `>`, `<=`, `>=`
-// 8. Bitwise OR `|`
-// 9. Bitwise XOR `^`
-// 10. Bitwise AND `&`
-// 11. Shift `<<`, `>>`
-// 12. Additive `+`, `-`
-// 13. Multiplicative `*`, `/`, `%`
-// 14. Exponentiation `**` (right-associative)
-// 15. Unary `!`, `-`, `~`, `&`, `%`, `*`
-// 16. Postfix `.`, `?.`, `()`, `[]`, `?`, `as`
+// The precedence ladder is NOT restated here.  It lives in exactly two
+// places: `grammar/verum.ebnf` §2.10 (the specification) and
+// `verum_fast_parser/tests/operator_ladder_tests.rs` (the executable
+// pin, which states how each expression GROUPS).  A numbered copy in a
+// comment is a fourth authority that cannot be checked and drifts
+// silently — the copy that used to stand here still claimed `??` binds
+// looser than assignment and `as` is a postfix operator, both of which
+// the parser contradicts (T0816).
 
 use verum_ast::{BinOp, ExprKind, FileId};
 use verum_parser::VerumParser;
@@ -627,7 +618,13 @@ fn test_unary_complex() {
 
 #[test]
 fn test_all_levels_1() {
-    assert_parses("x |> f ?? y = a || b && c == d > e + f * g ** h");
+    // Assignment is looser than `??` (T0816): the right-hand side of `=`
+    // swallows the rest.  The previous spelling nested an assignment
+    // inside a coalesce (`f ?? y = a || …`), which parsed only while
+    // assignment bound tighter than `??`.  Same ladder as the compiler's
+    // parser — this crate shares it.
+    assert_parses("x = a ?? b || c && d == e > f + g * h ** i");
+    assert_parses("x |> f");
 }
 
 #[test]

@@ -1,0 +1,44 @@
+// @test: run-interpreter
+// @level: L2
+// @tier: 0
+// @tags: contexts, using, warnings, tail-expression
+// @expected-stdout: v3 at 1700000000
+// @description: A context used in the TAIL expression counts as used.
+//
+//   The context-usage finder walked a block's statements and stopped
+//   there. A block keeps its tail expression in a separate field
+//   (`Block::expr`), so the most ordinary shape of a context-using
+//   function — one expression, no statements — reported:
+//
+//     warning: Context 'Clock' declared in 'using' clause but never
+//              used in function 'stamp'
+//
+//   on code that calls `Clock.now()` in that very expression. The
+//   program ran correctly; only the advice was wrong, and advice that
+//   fires on correct code teaches authors to stop reading the channel
+//   it arrives on.
+//
+//   Time is the reason a registry wants a context at all: `stamp` needs
+//   the clock, tests need it fixed, and neither wants a global.
+
+context Clock {
+    fn now(&self) -> Int;
+}
+
+type FixedClock is { at: Int };
+
+implement Clock for FixedClock {
+    fn now(&self) -> Int { self.at }
+}
+
+type Stamped is { version: Int, at: Int };
+
+fn stamp(version: Int) -> Stamped using [Clock] {
+    Stamped { version: version, at: Clock.now() }
+}
+
+fn main() {
+    provide Clock = FixedClock { at: 1700000000 };
+    let s = stamp(3);
+    print(f"v{s.version} at {s.at}");
+}

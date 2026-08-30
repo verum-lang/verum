@@ -746,8 +746,10 @@ impl<'a> RecursiveParser<'a> {
     ///
     /// The identifier peek is what lets a named record literal through:
     ///
-    ///     provide Logger = ConsoleLogger { level: 1 } { ... }
-    ///                      ^^^^^^^^^^^^^^^^^^^^^^^^^ value  ^^^^^ scope
+    /// ```text
+    /// provide Logger = ConsoleLogger { level: 1 } { ... }
+    ///                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ value  ^^^^^ scope
+    /// ```
     ///
     /// Without it the `{` after the name reads as the scope block and the
     /// record's fields land in statement position. That is exactly what

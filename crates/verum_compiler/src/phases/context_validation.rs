@@ -1193,6 +1193,22 @@ impl ContextUsageValidator {
                 for stmt in &block.stmts {
                     finder.visit_stmt(stmt);
                 }
+                // The TAIL expression is a separate field of `Block`, not a
+                // statement. Skipping it made the most ordinary shape of a
+                // context-using function warn that it does not use the
+                // context it just called:
+                //
+                //     fn stamp(v: Int) -> Stamped using [Clock] {
+                //         Stamped { version: v, at: Clock.now() }
+                //     }
+                //     warning: Context 'Clock' declared in 'using' clause
+                //              but never used in function 'stamp'
+                //
+                // A warning that fires on correct code teaches authors to
+                // ignore the channel it arrives on.
+                if let verum_common::Maybe::Some(tail) = &block.expr {
+                    finder.visit_expr(tail);
+                }
             }
             FunctionBody::Expr(expr) => {
                 finder.visit_expr(expr);

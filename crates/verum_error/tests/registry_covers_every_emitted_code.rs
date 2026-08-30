@@ -70,7 +70,20 @@ fn is_test_or_example(path: &Path) -> bool {
 /// whose entries reach diagnostics.
 fn codes_in(source: &str) -> BTreeSet<String> {
     let mut found = BTreeSet::new();
-    for (pat, skip) in [(".code(\"", 7), ("code: \"", 7), ("Text::from(\"", 12)] {
+    // `=> "E001"` is the fourth spelling and the one that mattered: the
+    // parser maps an enum to a literal (`ErrorCode::UnterminatedChar =>
+    // "E001"`), so 138 codes it can print were invisible here while this
+    // gate reported green. Its sibling
+    // `registry_covers_parser_codes.rs` asks `ErrorCode::ALL` directly,
+    // which is the durable answer; this arm keeps the REVERSE direction
+    // (registered-but-unemitted) honest, since without it every parser
+    // code reads as dead weight in the table.
+    for (pat, skip) in [
+        (".code(\"", 7),
+        ("code: \"", 7),
+        ("Text::from(\"", 12),
+        ("=> \"", 4),
+    ] {
         let mut rest = source;
         while let Some(at) = rest.find(pat) {
             let after = &rest[at + skip..];

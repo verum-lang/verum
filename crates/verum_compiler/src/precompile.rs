@@ -226,8 +226,9 @@ fn write_core_metadata_alongside_archive(
 
     let mut metadata = crate::archive_metadata::archive_to_core_metadata(&archive);
     if let Some(root) = stdlib_source_root {
-        let (names, decl_nodes) = scan_context_declarations(root);
+        let (names, decl_nodes, declaring_modules) = scan_context_declarations(root);
         metadata.context_declarations = names;
+        metadata.context_declaring_modules = declaring_modules;
         metadata.context_decl_nodes = decl_nodes;
         if verbose {
             eprintln!(
@@ -426,11 +427,17 @@ fn scan_context_declarations(
 ) -> (
     verum_common::List<verum_common::Text>,
     verum_common::OrderedMap<verum_common::Text, verum_ast::decl::ContextDecl>,
+    verum_common::OrderedMap<verum_common::Text, verum_common::Text>,
 ) {
     use std::collections::BTreeMap;
     use verum_ast::decl::Visibility;
-    let mut found_decls: BTreeMap<String, verum_ast::decl::ContextDecl> = BTreeMap::new();
-    fn walk(dir: &Path, found: &mut BTreeMap<String, verum_ast::decl::ContextDecl>) {
+    let mut found_decls: BTreeMap<String, (verum_ast::decl::ContextDecl, String)> =
+        BTreeMap::new();
+    fn walk(
+        root: &Path,
+        dir: &Path,
+        found: &mut BTreeMap<String, (verum_ast::decl::ContextDecl, String)>,
+    ) {
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(_) => return,
@@ -443,7 +450,7 @@ fn scan_context_declarations(
                 continue;
             }
             if path.is_dir() {
-                walk(&path, found);
+                walk(root, &path, found);
                 continue;
             }
             if path.extension().and_then(|s| s.to_str()) != Some("vr") {
@@ -467,15 +474,33 @@ fn scan_context_declarations(
                 if let verum_ast::ItemKind::Context(ctx_decl) = &item.kind {
                     if matches!(ctx_decl.visibility, Visibility::Public) {
                         let name = ctx_decl.name.name.as_str().to_string();
+                        // The declaring module, recovered from the file
+                        // path the walk already holds. Without it a
+                        // module's export surface cannot list its own
+                        // contexts (T0974).
+                        let module = path
+                            .strip_prefix(root)
+                            .ok()
+                            .map(|rel| {
+                                crate::stdlib_index::file_path_to_module_path(
+                                    &rel.to_string_lossy().replace('\\', "/"),
+                                )
+                            })
+                            .unwrap_or_default();
                         // First-wins under name collision so the
                         // BTreeSet-ordered iteration is reproducible.
-                        found.entry(name).or_insert_with(|| (*ctx_decl).clone());
+                        // The collision itself is now VISIBLE: two modules
+                        // declaring one name map to different modules here,
+                        // and the loser is silently dropped.
+                        found
+                            .entry(name)
+                            .or_insert_with(|| ((*ctx_decl).clone(), module));
                     }
                 }
             }
         }
     }
-    walk(root, &mut found_decls);
+    walk(root, root, &mut found_decls);
     let names: verum_common::List<verum_common::Text> = found_decls
         .keys()
         .map(|k| verum_common::Text::from(k.as_str()))
@@ -484,10 +509,16 @@ fn scan_context_declarations(
         verum_common::Text,
         verum_ast::decl::ContextDecl,
     > = verum_common::OrderedMap::new();
-    for (k, v) in found_decls {
-        decl_map.insert(verum_common::Text::from(k.as_str()), v);
+    let mut module_map: verum_common::OrderedMap<verum_common::Text, verum_common::Text> =
+        verum_common::OrderedMap::new();
+    for (k, (decl, module)) in found_decls {
+        let key = verum_common::Text::from(k.as_str());
+        decl_map.insert(key.clone(), decl);
+        if !module.is_empty() {
+            module_map.insert(key, verum_common::Text::from(module.as_str()));
+        }
     }
-    (names, decl_map)
+    (names, decl_map, module_map)
 }
 
 /// Task #20 — scan every `.vr` file under `root` for public

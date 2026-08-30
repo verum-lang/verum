@@ -87,7 +87,11 @@ check-barename-census: ## Report every colliding (name,arity) pair with its modu
 	python3 scripts/ci/check_barename_collisions.py
 
 gates-source: check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+
 	@echo "gates-source: all source-only gates green"
+
+gates-source-report: ## Run EVERY source-only gate past the first failure and summarise (make stops at the first; this does not)
+	bash scripts/ci/run_source_gates.sh
 
 check-phantom-mounts: ## Gate (T0780): mounts naming a symbol the module does not export. NEEDS a built verum; ~15 min, NOT in gates-source.
 	@test -n "$(VERUM)" || (echo "usage: make check-phantom-mounts VERUM=/path/to/verum" && false)

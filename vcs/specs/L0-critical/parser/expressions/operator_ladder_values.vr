@@ -1,0 +1,59 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: parser, precedence, grammar, null-coalesce, power, assignment
+// @expected-stdout: 512 4 3 ok
+//
+// Pin (T0816) — the levels of the ladder that are NOT bitwise. The
+// bitwise trio has its own pin next door (`bitwise_precedence.vr`);
+// measuring the whole ladder against the parser turned up five more
+// divergences between `grammar/verum.ebnf`, the published operator
+// table and the compiler.
+//
+// Every row below is chosen so the two readings give DIFFERENT VALUES.
+// A row where both group to the same answer proves nothing and is not
+// pinned here — which is the defect this file exists to prevent, not
+// merely to document: 96 of the 99 tests in
+// `verum_fast_parser/tests/precedence_tests.rs` called `assert_parses`,
+// so they passed whichever way the operators bound.
+//
+// Rows whose two readings differ only in TYPING, not in value, are
+// pinned as compile-time checks instead and are not here: `a == b < c`
+// groups as `(a == b) < c` and is then a Bool compared with an Int.
+//
+// ONE OF THESE WAS A REAL DEFECT, not a documentation drift. Assignment
+// used to bind TIGHTER than `??`:
+//
+//     x = m ?? 7      parsed as     (x = m) ?? 7
+//
+// so the coalesce applied to the RESULT of the assignment rather than
+// to the value being assigned. The grammar said otherwise
+// (`simple_assign = null_coalesce_expr , [ assign_op , assignment_expr ]`)
+// and so did the published table; the parser was the odd one out. The
+// spec that exercises this exact line — `L0-critical/lexer/operators/
+// null_coalesce.vr:72`, `value = value ?? Some(42)` — is `@test:
+// parse-pass`, so it asserted only that the line parses.
+
+fn main() {
+    // `**` is right-associative: 2**(3**2) = 2**9 = 512.
+    // The left reading (2**3)**2 = 64.
+    let power_chain: Int = 2 ** 3 ** 2;
+
+    // A prefix operator binds TIGHTER than `**`: (-2)**2 = 4.
+    // The other reading -(2**2) = -4.
+    let neg_power: Int = -2 ** 2;
+
+    // The assignment row lives in a companion spec: `x = m ?? 7` now
+    // parses correctly and then fails to TYPE (T0972) — the checker
+    // rejects the assignment against the coalesce's operand type rather
+    // than its result. Pinning it here would make this file red for a
+    // reason that has nothing to do with the ladder.
+
+    // `??` is right-associative: first ?? (second ?? 3).
+    // The grammar described it as left-associative.
+    let first: Maybe<Int> = None;
+    let second: Maybe<Int> = None;
+    let chained: Int = first ?? second ?? 3;
+
+    print(f"{power_chain} {neg_power} {chained} ok");
+}
