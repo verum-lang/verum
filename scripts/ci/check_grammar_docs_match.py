@@ -124,13 +124,13 @@ def rules(text: str) -> dict[str, str]:
     return out
 
 
-def doc_rules() -> dict[str, list[tuple[str, str]]]:
+def doc_rules(docs_root: Path = DOCS) -> dict[str, list[tuple[str, str]]]:
     """Production name -> [(page, rhs), ...] across every ```ebnf block."""
     found: dict[str, list[tuple[str, str]]] = {}
-    for d in sorted(DOCS.rglob("*.md")):
+    for d in sorted(docs_root.rglob("*.md")):
         for m in BLOCK.finditer(d.read_text(errors="ignore")):
             for name, rhs in rules(m.group(1)).items():
-                found.setdefault(name, []).append((str(d.relative_to(DOCS.parent)), rhs))
+                found.setdefault(name, []).append((str(d.relative_to(docs_root.parent)), rhs))
     return found
 
 
@@ -138,6 +138,17 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument(
+        "--docs",
+        type=Path,
+        default=DOCS,
+        help="documentation tree to compare (default: internal/website/docs)",
+    )
+    ap.add_argument(
+        "--require-docs",
+        action="store_true",
+        help="fail instead of skipping when the documentation tree is absent",
+    )
     args = ap.parse_args()
 
     if args.self_test:
@@ -183,12 +194,23 @@ def main() -> int:
         print("self-test: ok" if ok else "self-test: FAILED")
         return 0 if ok else 1
 
-    if not DOCS.is_dir():
-        print("check-grammar-docs-match: docs tree not present, nothing to compare")
-        return 0
+    docs_root = args.docs
+    if not docs_root.is_dir():
+        # NOT a pass. `internal/` is gitignored and the website is a
+        # separate repository, so this branch is what CI takes on every
+        # run: the gate that found 39 divergences on 2026-08-28 has been
+        # reporting success without comparing anything ever since.
+        # Say so in words that cannot be read as "checked and clean".
+        print(
+            "check-grammar-docs-match: SKIPPED — NOT CHECKED "
+            f"(no documentation tree at {docs_root}; pass --docs PATH, "
+            "or --require-docs to make this a failure)",
+            file=sys.stderr,
+        )
+        return 1 if args.require_docs else 0
 
     auth = rules(AUTHORITY.read_text())
-    docs = doc_rules()
+    docs = doc_rules(docs_root)
 
     mismatched: list[tuple[str, str, str, str]] = []
     unknown: list[tuple[str, str]] = []

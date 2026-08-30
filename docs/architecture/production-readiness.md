@@ -82,7 +82,7 @@ each says whether that instrument currently exists.
 | P3 | The two tiers agree: interpreter ≡ AOT | cross-tier suite | partial — `core-tests` runs both, but AOT lane is non-blocking (`nightly-aot.yml`) |
 | P4 | The stdlib a user gets is the stdlib we test | bake-vs-source parity | partial — T0692 (one driver), T0755 (535 of 2 561 `core/` files fail `check` while the bake is green) |
 | P5 | Every public stdlib name is reachable by a documented spelling | mount/reexport suite | **no, fix landing** — T0969 (peer session, 2026-08-30): a module gets TWO registry entries, an empty prefixed stub (`core.intrinsics.control`, 0 exports) and the real one (`intrinsics.control`, 20 exports); a glob resolves to the stub and imports nothing, silently. Radius not yet final — see §3 |
-| P6 | The published specification predicts what the compiler does | grammar↔parser gate | **yes, since 2026-08-30** — `operator_ladder_tests.rs` (T0816) + `check_site_grammar_parity.py` (T0942) |
+| P6 | The published specification predicts what the compiler does | grammar↔parser gate | **partial** — `operator_ladder_tests.rs` pins the ladder against the parser (T0816, new). `check_grammar_docs_match.py` compares the site's EBNF to the authority, but takes the "no documentation tree" branch on every CI run, because `internal/` is gitignored and the website is a separate repository (T0971) |
 | P7 | The tools survive a working day | LSP/CLI soak | **no** — T0752 (`verum lsp` reaches 36.6 GB over 13.5 h), T0746 |
 
 ---
