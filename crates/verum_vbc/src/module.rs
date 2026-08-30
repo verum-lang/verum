@@ -622,6 +622,7 @@ impl VbcModule {
     /// module header.
     pub fn entry_main(&self) -> EntryMain {
         let mut bare: Option<usize> = None;
+        let mut bare_all: Vec<usize> = Vec::new();
         let mut qualified: Vec<(usize, String)> = Vec::new();
         for (idx, func) in self.functions.iter().enumerate() {
             let Some(name) = self.get_string(func.name) else {
@@ -654,10 +655,32 @@ impl VbcModule {
                 continue;
             }
             if name == "main" {
+                // COUNT them. Overwriting kept the LAST bare `main` and
+                // returned Unique, so a project whose files each declare
+                // one ran an arbitrary neighbour's — silently, while the
+                // runner printed the requested path (T0979):
+                //
+                //   verum run showcase/aaa.vr  ->  I-AM-BBB
+                //   verum run showcase/bbb.vr  ->  I-AM-CCC
+                //
+                // A file WITHOUT a `module` header has no qualifying
+                // prefix, so every such `main` lands on this one name.
+                // The same three files WITH headers already report
+                // "ambiguous entry point" from the qualified arm below —
+                // this makes the unqualified case as honest.
+                bare_all.push(idx);
                 bare = Some(idx);
             } else if name.ends_with(".main") {
                 qualified.push((idx, name.to_string()));
             }
+        }
+        if bare_all.len() > 1 {
+            return EntryMain::Ambiguous {
+                candidates: bare_all
+                    .iter()
+                    .map(|idx| format!("main (function #{idx})"))
+                    .collect(),
+            };
         }
         if let Some(idx) = bare {
             return EntryMain::Unique { index: idx };
