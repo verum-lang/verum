@@ -6821,22 +6821,44 @@ impl ProofSearchEngine {
         hypothesis: &Text,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        // Find the hypothesis by name (h0, h1, ...) or by pattern match
-        let hyp_idx = self.find_hypothesis_index(hypothesis, goal)?;
-        let hyp = goal.hypotheses[hyp_idx].clone();
+        // Find the hypothesis by name (h0, h1, ...) or by pattern match.
+        //
+        // A scrutinee is not always a HYPOTHESIS. `theorem em(b: Bool):
+        // b || !b { proof { cases b { … } } }` cases on a PARAMETER, and
+        // parameters live in the value-type registry, not the hypothesis
+        // list — so this lookup failed with "Hypothesis 'b' not found.
+        // Available: h0..h0" and the whole proof was reported as an
+        // unproved goal (T0960). Measured: the same theorem discharges
+        // under `proof by trivial`, `proof { trivial }` and
+        // `proof { left; trivial }`, and fails the instant a `cases`
+        // block appears — writing MORE proof made a provable goal fail.
+        //
+        // A parameter has no index to remove, so the disjunction arm
+        // below removes one only when there is one.
+        let (hyp, hyp_idx) = match self.find_hypothesis_index(hypothesis, goal) {
+            Ok(idx) => (goal.hypotheses[idx].clone(), Some(idx)),
+            Err(e) => match self.bound_value_scrutinee(hypothesis) {
+                Some(expr) => (expr, None),
+                None => return Err(e),
+            },
+        };
 
         match &hyp.kind {
             // Case analysis on disjunction: P ∨ Q => prove with P, prove with Q
             ExprKind::Binary { op: BinOp::Or, left, right } => {
                 // Case 1: Assume P
                 let mut goal_left = goal.clone();
-                goal_left.hypotheses.remove(hyp_idx);
+                if let Some(idx) = hyp_idx {
+                    goal_left.hypotheses.remove(idx);
+                }
                 goal_left.add_hypothesis((**left).clone());
                 goal_left.label = Maybe::Some(format!("case_left_{}", hypothesis).into());
 
                 // Case 2: Assume Q
                 let mut goal_right = goal.clone();
-                goal_right.hypotheses.remove(hyp_idx);
+                if let Some(idx) = hyp_idx {
+                    goal_right.hypotheses.remove(idx);
+                }
                 goal_right.add_hypothesis((**right).clone());
                 goal_right.label = Maybe::Some(format!("case_right_{}", hypothesis).into());
 
@@ -7042,8 +7064,35 @@ impl ProofSearchEngine {
         let Maybe::Some(ident) = p.as_ident() else {
             return false;
         };
-        self.bool_typed_hypotheses
-            .contains(&Text::from(ident.as_str()))
+        let name = Text::from(ident.as_str());
+        self.bool_typed_hypotheses.contains(&name)
+            || matches!(
+                self.value_type_bindings.get(&name),
+                Some(t) if t.as_str() == "Bool"
+            )
+    }
+
+    /// A scrutinee named by a value in scope rather than by a hypothesis.
+    ///
+    /// `cases x` may name a theorem PARAMETER — `theorem em(b: Bool)`
+    /// registers `b` in `value_type_bindings`, never in the hypothesis
+    /// list. Returns the path expression to case on, or `None` when the
+    /// name is unknown to the engine, so the caller can report the
+    /// original hypothesis-not-found error rather than invent a split
+    /// for a name that denotes nothing.
+    fn bound_value_scrutinee(&self, name: &Text) -> Option<Expr> {
+        if !self.value_type_bindings.contains_key(name)
+            && !self.bool_typed_hypotheses.contains(name)
+        {
+            return None;
+        }
+        Some(Expr::new(
+            ExprKind::Path(verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                name.as_str(),
+                verum_ast::span::Span::default(),
+            ))),
+            verum_ast::span::Span::default(),
+        ))
     }
 
     /// Resolve a constructor expression to the constructor list of its variant

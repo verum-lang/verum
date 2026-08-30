@@ -832,12 +832,19 @@ fn verify_contradiction(
     // so future diagnostics can attribute the rejection to the
     // surrounding `proof by contradiction`).
     let mut accumulated = inner_hypotheses;
+    // Under `proof by contradiction` the goal the steps work on is the
+    // negated one the tactic produced, not the theorem's own.
+    let contradiction_goal = sub_goals
+        .first()
+        .map(|sg| sg.goal.clone())
+        .unwrap_or_else(|| goal.goal.clone());
     let inner_steps = verify_proof_steps_accumulating_ctx(
         engine,
         smt_ctx,
         proof_steps,
         &mut accumulated,
         StepContext::Contradiction,
+        &contradiction_goal,
     )?;
     steps.extend(inner_steps);
 
@@ -875,6 +882,18 @@ fn verify_proof_cases(
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
     verify_proof_cases_ctx(engine, smt_ctx, cases, sub_goals, StepContext::CaseBody)
 }
+
+/// The goal a sequence of proof steps is working on.
+///
+/// Threaded through the step walker because a step can SPLIT the goal —
+/// `cases b { … }` turns `G` into `G under b` and `G under !b`. Before
+/// this existed the `Cases` arm had no goal to split and built one out of
+/// the SCRUTINEE instead, so `theorem em(b: Bool): b || !b` case-split on
+/// the goal `b`, produced subgoals about `b`, and the theorem's own goal
+/// was never reached (T0960). Measured: the same theorem discharges under
+/// `proof by trivial`, `proof { trivial }` and `proof { left; trivial }`,
+/// and fails the moment a `cases` block appears — the proof structure
+/// destroyed a goal the solver proves in 10ms without it.
 
 fn verify_proof_cases_ctx(
     engine: &mut ProofSearchEngine,
@@ -920,8 +939,16 @@ fn verify_proof_cases_ctx(
         // context kind so `have` steps are admitted only when the
         // parent is an induction case (the IH surface).
         let mut acc = case_hypotheses.clone();
-        let inner_steps =
-            verify_proof_steps_accumulating_ctx(engine, smt_ctx, &case.proof, &mut acc, ctx_kind)?;
+        // The case's OWN goal is what its body works on — a nested
+        // `cases` inside it must split that, not the enclosing one.
+        let inner_steps = verify_proof_steps_accumulating_ctx(
+            engine,
+            smt_ctx,
+            &case.proof,
+            &mut acc,
+            ctx_kind,
+            &case_goal.goal,
+        )?;
 
         steps.push(VerifiedStep {
             description: Text::from(format!("case {}: pattern {:?}", i + 1, case.pattern)),
@@ -959,6 +986,7 @@ fn verify_proof_steps(
     smt_ctx: &Context,
     steps: &List<ProofStep>,
     initial_hypotheses: &List<Expr>,
+    current_goal: &Expr,
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
     let mut accumulated = initial_hypotheses.clone();
     verify_proof_steps_accumulating_ctx(
@@ -967,6 +995,7 @@ fn verify_proof_steps(
         steps,
         &mut accumulated,
         StepContext::TopLevel,
+        current_goal,
     )
 }
 
@@ -1003,9 +1032,19 @@ fn verify_proof_steps_accumulating(
     smt_ctx: &Context,
     steps: &List<ProofStep>,
     hypotheses: &mut List<Expr>,
+    current_goal: &Expr,
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
-    verify_proof_steps_accumulating_ctx(engine, smt_ctx, steps, hypotheses, StepContext::TopLevel)
+    verify_proof_steps_accumulating_ctx(
+        engine,
+        smt_ctx,
+        steps,
+        hypotheses,
+        StepContext::TopLevel,
+        current_goal,
+    )
 }
+
+
 
 fn verify_proof_steps_accumulating_ctx(
     engine: &mut ProofSearchEngine,
@@ -1013,6 +1052,7 @@ fn verify_proof_steps_accumulating_ctx(
     steps: &List<ProofStep>,
     hypotheses: &mut List<Expr>,
     ctx_kind: StepContext,
+    current_goal: &Expr,
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
     let mut verified = List::new();
 
@@ -1203,8 +1243,11 @@ fn verify_proof_steps_accumulating_ctx(
 
             // ---- Cases: case analysis within structured proof ----
             ProofStepKind::Cases { scrutinee, cases } => {
+                // Split the GOAL on the scrutinee. The scrutinee is what
+                // we case on; it is not itself the thing to prove. See
+                // the note on `current_goal` above.
                 let goal =
-                    ProofGoal::with_hypotheses(scrutinee.as_ref().clone(), hypotheses.clone());
+                    ProofGoal::with_hypotheses(current_goal.clone(), hypotheses.clone());
                 let tactic = ProofTactic::CasesOn {
                     hypothesis: format_expr(scrutinee),
                 };
@@ -1224,7 +1267,8 @@ fn verify_proof_steps_accumulating_ctx(
                 goal_index: _,
                 steps: inner_steps,
             } => {
-                let inner = verify_proof_steps(engine, smt_ctx, inner_steps, &hypotheses)?;
+                let inner =
+                    verify_proof_steps(engine, smt_ctx, inner_steps, &hypotheses, current_goal)?;
                 verified.extend(inner);
             }
 
@@ -1445,13 +1489,29 @@ pub fn verify_proof_body_with_aliases_and_graph(
     for p in &theorem.params {
         if let FunctionParamKind::Regular { pattern, ty, .. } = &p.kind {
             if let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind {
-                if let (_, Some(type_name)) =
-                    verum_smt::expr_to_smtlib::type_to_sort_and_name(ty)
-                {
+                let (sort, type_name) = verum_smt::expr_to_smtlib::type_to_sort_and_name(ty);
+                if let Some(type_name) = type_name {
                     engine.register_value_type(
                         name.name.clone(),
                         Text::from(type_name.as_str()),
                     );
+                }
+                // A Bool parameter must be known to be Bool: `cases b`
+                // on a `b: Bool` parameter failed "Hypothesis 'b' not
+                // found" because the engine had been told nothing about
+                // `b` — `type_to_sort_and_name` answers `("Bool", None)`
+                // for a primitive, so the name-only registration above
+                // dropped every primitive parameter on the floor (T0960).
+                //
+                // Only the Bool fact is registered here, deliberately.
+                // Registering the SORT of every parameter as well
+                // measured WORSE on the corpus — 23/68 specs and 275
+                // unproved theorems became 21/68 and 337 — so the sort
+                // registry means something to the solver context that
+                // a theorem parameter must not be pushed into blindly.
+                // That is its own question, not this fix's.
+                if sort == "Bool" {
+                    engine.register_bool_hypothesis(name.name.clone());
                 }
             }
         }
@@ -2009,6 +2069,7 @@ fn verify_structured_proof(
         smt_ctx,
         &structure.steps,
         &mut accumulated_hypotheses,
+        &proposition,
     ) {
         Ok(mut verified_steps) => {
             let hypotheses = accumulated_hypotheses.clone();

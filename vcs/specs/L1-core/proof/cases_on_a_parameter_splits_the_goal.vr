@@ -1,0 +1,63 @@
+// @test: verify-pass
+// @level: L1
+// @tier: 0
+// @tags: proofs, tactics, cases, structured-proof
+//
+// Pin (T0960) — a `cases` block splits the GOAL, on a scrutinee that may be
+// a theorem PARAMETER.
+//
+// Two separate things were wrong, and together they made writing MORE proof
+// turn a provable goal into a failure. Measured on one binary, a ladder over
+// the same theorem `em(b: Bool): b || !b`:
+//
+//     proof by trivial                                   Proved
+//     proof { trivial }                                   Proved
+//     proof { left; trivial }                             Proved
+//     proof { cases b { true => …, false => … } }         FAILED
+//
+// The goal is a tautology the solver closes in 10ms. Adding a case analysis
+// — the most ordinary thing a person writes in a proof — lost it.
+//
+//   1. The step walker had no goal. `ProofStepKind::Cases` therefore built
+//      one out of the SCRUTINEE: `cases b` case-split on the goal `b`
+//      instead of on `b || !b`, so the theorem's own goal was never reached.
+//
+//   2. The scrutinee was looked up among the HYPOTHESES, and `b` is a
+//      parameter — "Hypothesis 'b' not found. Available: h0..h0". A
+//      parameter is registered in the engine's value tables, not the
+//      hypothesis list; and a Bool parameter was not registered at all,
+//      because `type_to_sort_and_name` answers `("Bool", None)` for a
+//      primitive and the registration site read only the name.
+//
+// Both halves are needed: fixing either alone measured INERT.
+//
+// This file is the L1 pin because the defect is not about tactics being
+// weak — nothing here needs a clever tactic. It is about a proof structure
+// destroying its own goal.
+
+theorem em(b: Bool): b || !b {
+    proof {
+        cases b {
+            true => {
+                left;
+                trivial
+            }
+            false => {
+                right;
+                trivial
+            }
+        }
+    }
+}
+
+/// The control that the theorem above is not vacuous: the SAME goal, with
+/// no `cases` block, discharged before this fix and must keep discharging.
+/// If this one ever goes red the fix has broken the ordinary path, and the
+/// one above proves nothing about `cases`.
+theorem em_without_cases(b: Bool): b || !b {
+    proof by trivial
+}
+
+fn main() {
+    print("ok");
+}
