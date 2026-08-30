@@ -81,7 +81,7 @@ each says whether that instrument currently exists.
 | P2 | A failure is loud: no phase answers "fine" by degrading | degradation ratchet | partial — T0747 names the class; ratchet drafted, not in CI (T0857) |
 | P3 | The two tiers agree: interpreter ≡ AOT | cross-tier suite | partial — `core-tests` runs both, but AOT lane is non-blocking (`nightly-aot.yml`) |
 | P4 | The stdlib a user gets is the stdlib we test | bake-vs-source parity | partial — T0692 (one driver), T0755 (535 of 2 561 `core/` files fail `check` while the bake is green) |
-| P5 | Every public stdlib name is reachable by a documented spelling | mount/reexport suite | **no, fix landing** — T0969 (peer session, 2026-08-30): a module gets TWO registry entries, an empty prefixed stub (`core.intrinsics.control`, 0 exports) and the real one (`intrinsics.control`, 20 exports); a glob resolves to the stub and imports nothing, silently. Radius not yet final — see §3 |
+| P5 | Every public stdlib name is reachable by a documented spelling | mount/reexport suite | **partial** — the glob now asks the same authority a named mount asks (T0969, landed); contexts joined the export surface as a fourth family, `core.context.standard` going from 6 exported items to 22 (T0974). Open: the checker's context table is filled on the single-file path and not the project path |
 | P6 | The published specification predicts what the compiler does | grammar↔parser gate | **partial** — `operator_ladder_tests.rs` pins the ladder against the parser (T0816, new). `check_grammar_docs_match.py` compares the site's EBNF to the authority, but takes the "no documentation tree" branch on every CI run, because the website lives in a separate, gitignored repository (T0971) |
 | P7 | The tools survive a working day | LSP/CLI soak | **no** — T0752 (`verum lsp` reaches 36.6 GB over 13.5 h), T0746 |
 
@@ -174,6 +174,36 @@ Stated explicitly, because an unmeasured area reads as a healthy one.
   disappeared once space was freed, including a file that had answered
   `unbound variable: sin` an hour earlier.
 
+### One name, four defects (2026-08-30)
+
+Four separate rows in this pool are one mechanism: a global bucket
+keyed by a function's SIMPLE name, where the winner is decided by
+registration order and the loser is DISCARDED rather than shadowed.
+
+| task | what the user sees |
+|---|---|
+| T0946 | a local `resolve` prints `None`; eight stdlib `resolve`s share the key, and formatting takes the winner's return type |
+| T0931 | `interval(a, b)` reports "accepts at most 1 argument" — the arity of a different `interval` |
+| T0883 | `field 'capabilities' not found on type 'Session'`, listing another `Session`'s members |
+| T0979 | `verum run a.vr` executes `b.vr`'s `main` |
+
+Established with `VERUM_TRACE_FNREG`, which prints every registration
+and the entry it displaces:
+
+```
+[fnreg] 'resolve' arity=2 rt=Some("Maybe<JsonValue>")  prev=None
+[fnreg] 'resolve' arity=2 rt=Some("Maybe<Text>")       prev=Some(...)
+```
+
+The obvious remedy was tested and REFUSED: adding a `module` header to
+the user's file changes T0979 (the silent pick becomes an honest
+refusal) and changes nothing for T0946. So the root is not a missing
+qualifier — it is that consumers ask for the simple name while the
+qualified one is already in hand. That makes the fix the same shape as
+two that landed today: teach the consumer to ask the authority, as
+T0973 did for error codes (the gate asks the ENUMERATION, not a
+spelling) and T0969 did for glob mounts.
+
 ### The source-only gate wall is RED on main (2026-08-30)
 
 `make gates-source` is the list of gates CI runs that need no build.
@@ -196,6 +226,32 @@ a green run of the later gates had never been observed on this state.
 
 `make gates-source-report` now runs all 21 past the first failure and
 prints a line per gate — the wall reported one failure and had four.
+
+### What the registry proving-ground produced in one session
+
+The directive is that a stumble in the registry is a defect in the
+LANGUAGE, fixed in the language rather than worked around in `.vr`.
+Measured against that, the first session of use produced:
+
+| found by | outcome |
+|---|---|
+| writing a version type | postcondition on a record field is undischargeable (T0975) |
+| the same type's refinement | a refinement on a FIELD is not a hypothesis (T0976) |
+| time as a context | a context used in the tail expression warned as unused (T0977, fixed) |
+| a context from the stdlib | contexts were absent from every module's export surface (T0974) |
+| three example files | `verum run a.vr` executes another file's `main` (T0979) |
+| a three-tier reference | `&unsafe T` loses the receiver's type and guesses the field (T0978) |
+| an `async fn` | produces a value, not a Future — `block_on` panics on an `Int` (T0734, pre-existing, sharpened) |
+| a recursive tree | `Heap(x)`, the form CLAUDE.md documents, is refused (T0944) |
+
+Eight, of which two are closed. None of them was worked around in the
+registry's own source; each is filed with a repro small enough to run
+in seconds.
+
+Two were resolved by REMOVING a claim rather than fixing code: T0825
+and T0890 were open P1 defects that no longer reproduce — a
+measurement, not a fix. Stale RED costs as much as stale green: it is
+work someone plans that does not exist.
 
 ### A measurement rule this session paid for
 
