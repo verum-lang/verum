@@ -12196,6 +12196,37 @@ impl TypeChecker {
         // Functions declared with `pure` modifier must not have IO, mutation,
         // async, external state access, FFI, or spawning properties.
         // Fallible and Divergent are allowed (errors and panics are deterministic).
+        // A `pure fn` may not declare a POSITIVE context. An injected
+        // capability is a hidden argument: `pure fn dice() using [Random]`
+        // claims the result is a function of the arguments while naming
+        // a source of values that is not one of them (T0986).
+        //
+        // NEGATIVE contexts are the opposite claim and stay legal —
+        // `pure fn f() using [!IO, !Database]` promises it touches
+        // NEITHER, which is a stronger statement than `pure` alone, and
+        // the tree already uses that form. Rejecting every context, as
+        // the other `is_pure` in this crate does, would refuse it.
+        if func.is_pure
+            && let Some(positive) = func.contexts.iter().find(|c| !c.is_negative)
+        {
+            let ctx_name = positive
+                .path
+                .segments
+                .last()
+                .and_then(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.to_string()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "?".to_string());
+            return Err(TypeError::ImpurePureFunction {
+                func_name: func.name.name.clone(),
+                properties: verum_common::Text::from(format!(
+                    "declares context `{}`, whose value is not one of its arguments",
+                    ctx_name
+                )),
+                span: func.span,
+            });
+        }
         if func.is_pure {
             if let Err(impure_props) = inferred_properties.validate_for_pure_fn() {
                 let props_str: Vec<String> = impure_props.iter().map(|p| p.to_string()).collect();
