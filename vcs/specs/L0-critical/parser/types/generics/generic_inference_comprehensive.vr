@@ -278,11 +278,19 @@ fn test_array_of_pairs() {
 // ============================================================================
 
 fn test_return_type_from_context() {
-    fn default_value<T>() -> T {
-        // Note: This would need a Default bound in full implementation
-        // For now we test with explicit annotation
-        let result: Int = 0;
-        result
+    // A function that promises to return ANY `T` cannot return an `Int`:
+    // the caller picks `T`, so the body has exactly one way to produce a
+    // value of it — from an argument of that type. This used to read
+    //
+    //     fn default_value<T>() -> T { let result: Int = 0; result }
+    //
+    // and expected a clean typecheck, which would mean `T` unified with
+    // `Int` inside the body. It does not, since T0793 made a function's
+    // type parameters rigid within their own body, and the spec has been
+    // red ever since — asserting that the checker should accept a program
+    // whose signature it cannot honour.
+    fn passthrough<T>(seed: T) -> T {
+        seed
     }
 
     // Type inferred from usage context
