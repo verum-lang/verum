@@ -2336,12 +2336,30 @@ impl TypeChecker {
 
         // Qualified bindings like `HandshakeRole.Client` stay intact, so
         // stdlib callers that use the qualified form keep working.
+        // A UNIT type's constructor is bound as `Named`, not as a
+        // Function and not as a Variant — so the two-case list above
+        // walked past it, and a user type whose name matches a stdlib
+        // one kept the stdlib binding in value position while the
+        // ANNOTATION resolved locally. Measured, three lines, standalone
+        // file (T0993):
+        //
+        //     public type TimeoutError is ();
+        //     fn make() -> TimeoutError { TimeoutError }
+        //     error<E400>: expected 'TimeoutError', found 'SelectTimeoutError'
+        //
+        // One identifier, two meanings, in one file. The same shape with
+        // a unique name passes, and a RECORD body passes — a record's
+        // value is a literal, so it never consults this binding.
+        //
+        // The surface is the whole library: 5677 public type names in
+        // `core/`, all bare-visible, and 104 of them declared more than
+        // once inside `core/` itself.
         if self.user_code_phase && self.ctx.env.lookup(type_name.as_str()).is_some() {
             let should_evict = {
                 use crate::ty::Type as T;
                 matches!(
                     self.ctx.env.lookup(type_name.as_str()).map(|s| &s.ty),
-                    Some(T::Function { .. }) | Some(T::Variant(_))
+                    Some(T::Function { .. }) | Some(T::Variant(_)) | Some(T::Named { .. })
                 )
             };
             if should_evict {

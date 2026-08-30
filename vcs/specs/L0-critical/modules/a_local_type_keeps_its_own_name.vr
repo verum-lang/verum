@@ -1,0 +1,57 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: name-resolution, types, stdlib, collision
+//
+// Pin (T0993) — a file's own type declaration owns its name, even when the
+// standard library declares that name too.
+//
+// Three lines, standalone file, before the fix:
+//
+//     public type TimeoutError is ();
+//     fn make() -> TimeoutError { TimeoutError }
+//
+//     error<E400>: Type mismatch: expected 'TimeoutError',
+//                                 found 'SelectTimeoutError'
+//
+// One identifier, two meanings, in ONE file: the return ANNOTATION resolved
+// to the local declaration, and the constructor in VALUE position resolved
+// to `core/async/select.vr`'s same-named alias, whose target is
+// `SelectTimeoutError`.
+//
+// The eviction that should have prevented this exists — user-code phase
+// wipes a stdlib binding sitting on a name the user declares — but it
+// listed only two shapes — the Function case and the Variant case.
+//
+// A UNIT type's constructor is bound as `Named`, so the closed set walked
+// past it. A RECORD body never hit this, because a record's value is a
+// literal and consults no such binding; that is why the defect looked
+// arbitrary rather than systematic.
+//
+// SURFACE: 5677 public type names in `core/`, every one bare-visible
+// without a mount, and 104 of them declared more than once inside `core/`
+// itself (`Capability` four times; `Thread`, `Stopwatch`, `Context`,
+// `PerfCounter`, `DeadlineTimer` three each). Until this fix, none of
+// those names could be declared by a user — or by another stdlib file.
+//
+// FOUND from `core/async/timer.vr`, which declares its own
+// `public type TimeoutError is ();` on line 337 and failed on line 395 at
+// `Result.Err(TimeoutError)`. The library was colliding with itself.
+
+public type TimeoutError is ();
+
+public type Stopwatch is ();
+
+fn make_timeout() -> TimeoutError {
+    TimeoutError
+}
+
+fn make_stopwatch() -> Stopwatch {
+    Stopwatch
+}
+
+fn main() {
+    let _ = make_timeout();
+    let _ = make_stopwatch();
+    print("ok");
+}
