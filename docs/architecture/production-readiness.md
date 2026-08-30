@@ -81,7 +81,7 @@ each says whether that instrument currently exists.
 | P2 | A failure is loud: no phase answers "fine" by degrading | degradation ratchet | partial — T0747 names the class; ratchet drafted, not in CI (T0857) |
 | P3 | The two tiers agree: interpreter ≡ AOT | cross-tier suite | partial — `core-tests` runs both, but AOT lane is non-blocking (`nightly-aot.yml`) |
 | P4 | The stdlib a user gets is the stdlib we test | bake-vs-source parity | partial — T0692 (one driver), T0755 (535 of 2 561 `core/` files fail `check` while the bake is green) |
-| P5 | Every public stdlib name is reachable by a documented spelling | mount/reexport suite | **no, fix landing** — T0969 (peer session, root found 2026-08-30, still claimed): `mount X.*` imports only a module's re-exports, never its own declarations; measured radius 1 889 of 2 560 `core/` files, 18 199 public declarations |
+| P5 | Every public stdlib name is reachable by a documented spelling | mount/reexport suite | **no, fix landing** — T0969 (peer session, 2026-08-30): a module gets TWO registry entries, an empty prefixed stub (`core.intrinsics.control`, 0 exports) and the real one (`intrinsics.control`, 20 exports); a glob resolves to the stub and imports nothing, silently. Radius not yet final — see §3 |
 | P6 | The published specification predicts what the compiler does | grammar↔parser gate | **yes, since 2026-08-30** — `operator_ladder_tests.rs` (T0816) + `check_site_grammar_parity.py` (T0942) |
 | P7 | The tools survive a working day | LSP/CLI soak | **no** — T0752 (`verum lsp` reaches 36.6 GB over 13.5 h), T0746 |
 
@@ -102,14 +102,25 @@ script against bun's 22 ms, 89 ms of it after process start with a warm
 cache (T0917), and the stdlib expands whole regardless of the program:
 713 MB and 0.2 s before the user's file is parsed (T0745).
 
-**Step 2 — import something.** `mount core.math.elementary.*;`
-followed by `sin(1.0)` gives `unbound variable: sin` — the glob imports
-a module's re-exports and never its own declarations, and a leaf `.vr`
-module has no re-exports, so the glob expands to NOTHING, silently
-(T0969, measured and being fixed by the peer session 2026-08-30;
-radius 1 889 of 2 560 `core/` files). This is the largest single
-barrier to external use: no leaf stdlib module can be imported by
-glob.
+**Step 2 — import something.** `mount X.*` can expand to NOTHING,
+silently. A module can hold two registry entries — an empty prefixed
+stub and the real one:
+
+    Module 'core.intrinsics.control':  0 exports   <- stub
+    Module 'intrinsics.control':      20 exports   <- real
+
+The glob resolves the path to the prefixed form, lands on the stub and
+imports nothing; `mount X.item` by name works, because it reads the
+metadata rather than the registry. Two records of one intent, two
+authorities, diverging. The stub is minted for the modules the stdlib
+ITSELF depends on — 90 in the measured run, among intrinsics: `atomic`,
+`control`, `runtime`, `runtime.async_ops` and `intrinsics` itself,
+while `bitwise`, `float`, `arithmetic`, `memory`, `platform`, `simd`,
+`tensor`, `gpu` and `lowlevel` have no prefixed entry and so work. The
+rule an outsider meets is perverse: **`mount X.*` fails more reliably
+the more central X is** (T0969, peer session 2026-08-30; radius being
+re-measured, see §3).
+
 Adjacent and open: `mount M;` then `M.free_fn(...)` does not resolve
 (T0797, P0); a file-local free function loses to a same-named stdlib
 method (T0798, P0); `mount self.X` resolves to the parent (T0775).
@@ -156,6 +167,23 @@ Stated explicitly, because an unmeasured area reads as a healthy one.
   main. The parse-speed contract exists; the end-to-end one does not.
 * **No soak test** for any long-running tool, which is why T0752 was
   found by a user's editor session rather than by CI.
+* **The radius of T0969 is not settled.** A first census put it at
+  1 889 of 2 560 `core/` files and 18 199 public declarations; it was
+  taken while the disk stood at 100% and did not survive re-measurement
+  on the same files with the same binaries — three of five reproducers
+  disappeared once space was freed, including a file that had answered
+  `unbound variable: sin` an hour earlier.
+
+### A measurement rule this session paid for
+
+**A full disk in this repository wears other defects' symptoms.** It
+has already impersonated a serialisation fault ("embeds stdlib
+typecheck metadata that failed to decode") and, the same day, a
+name-resolution defect. Any number taken while the volume is at 100% is
+suspect and must be re-measured after freeing space — including the
+ones in this document. The numbers in §0 are computed by reading files
+and are unaffected; anything produced by BUILDING or RUNNING under a
+full disk is not.
 
 ---
 
