@@ -2,7 +2,7 @@
 // @level: L0
 // @tier: 0
 // @tags: parser, precedence, grammar, null-coalesce, power, assignment
-// @expected-stdout: 512 4 3 ok
+// @expected-stdout: 512 4 7 3 ok
 //
 // Pin (T0816) — the levels of the ladder that are NOT bitwise. The
 // bitwise trio has its own pin next door (`bitwise_precedence.vr`);
@@ -43,11 +43,15 @@ fn main() {
     // The other reading -(2**2) = -4.
     let neg_power: Int = -2 ** 2;
 
-    // The assignment row lives in a companion spec: `x = m ?? 7` now
-    // parses correctly and then fails to TYPE (T0972) — the checker
-    // rejects the assignment against the coalesce's operand type rather
-    // than its result. Pinning it here would make this file red for a
-    // reason that has nothing to do with the ladder.
+    // Assignment takes its whole right-hand side: x = (m ?? 7).
+    // Under the old ladder this was (x = m) ?? 7 — a coalesce over the
+    // RESULT of an assignment. The row was held out for a while: the
+    // corrected parse then hit a type-checking gap (T0972), because the
+    // tree "assignment with a coalesce on its right" had never been
+    // constructed by any program and its checking path had never run.
+    let mut x: Int = 0;
+    let m: Maybe<Int> = None;
+    x = m ?? 7;
 
     // `??` is right-associative: first ?? (second ?? 3).
     // The grammar described it as left-associative.
@@ -55,5 +59,5 @@ fn main() {
     let second: Maybe<Int> = None;
     let chained: Int = first ?? second ?? 3;
 
-    print(f"{power_chain} {neg_power} {chained} ok");
+    print(f"{power_chain} {neg_power} {x} {chained} ok");
 }
