@@ -1,0 +1,28 @@
+// @test: run-interpreter
+// @level: L1
+// @tier: 0
+// @tags: properties, purity, mutation
+// @expected-stdout: 10 ok
+// @description: A `pure fn` may assign to its OWN locals.
+//
+//   The negative half of this pair refuses a write through a reference.
+//   This is the half that keeps the rule honest: a function that
+//   accumulates into a local it declared itself is pure — no caller can
+//   observe the assignment, and the result is a deterministic function
+//   of the arguments. Marking every assignment `Mutates` would be
+//   simpler to implement and would make `pure` unusable for the ordinary
+//   way of writing a sum.
+
+pure fn sum_below(n: Int) -> Int {
+    let mut acc: Int = 0;
+    let mut i: Int = 0;
+    while i < n {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() {
+    print(f"{sum_below(5)} ok");
+}

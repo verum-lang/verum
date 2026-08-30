@@ -1,0 +1,37 @@
+// @test: typecheck-fail
+// @level: L1
+// @tier: 0
+// @tags: properties, purity, mutation, soundness
+// @expected-error: E503
+// @expected-error-count: 1
+// @description: A `pure fn` that writes through a reference is refused.
+//
+//   `Mutates` is one of the five computational properties Verum infers
+//   rather than asks the author to declare, and `pure` is the promise
+//   that none of the impure ones hold. The inference used to union the
+//   properties of an assignment's OPERANDS and stop there, so the
+//   assignment itself contributed nothing: `print` was caught as IO,
+//   `spawn` as Spawns, a call to an impure function transitively — and
+//   a write straight through a `&mut` parameter passed clean.
+//
+//   Measured before the fix, one binary:
+//
+//       pure fn touch(x: &mut Int) -> Int { *x = 1; *x }
+//       -> Finished checking, 0 errors
+//
+//   That is the whole guarantee gone for the one effect the type system
+//   exists to track: a caller reading `pure` on this signature is told
+//   the argument it lends out comes back unchanged.
+//
+//   The companion spec pins the other half — writing a LOCAL is not an
+//   effect, and refusing it would make `pure` unusable for any loop.
+
+pure fn touch(x: &mut Int) -> Int {
+    *x = 1;
+    *x
+}
+
+fn main() {
+    let mut n = 0;
+    print(f"{touch(&mut n)}");
+}

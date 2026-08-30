@@ -903,6 +903,31 @@ pub struct PropertyInferrer {
     context: PropertyInferenceContext,
 }
 
+/// Does this assignment target reach memory the caller can see?
+///
+/// `*p = v` and `(*p).field = v` write through a reference — the caller
+/// observes the change. `local = v`, `local.field = v` and `local[i] = v`
+/// write memory that came into being inside the function, which no caller
+/// can observe, so they are not an effect (T0792).
+///
+/// Deliberately conservative in one direction: a target rooted in a bare
+/// path is treated as local. Proving that a path names a `&mut` parameter
+/// needs the type environment, which the property inferrer does not carry;
+/// until it does, the syntactic `*` is the honest signal, and the
+/// alternative — flagging every assignment — would make `pure fn` unable
+/// to hold a loop counter.
+fn writes_through_a_reference(target: &verum_ast::expr::Expr) -> bool {
+    use verum_ast::expr::{ExprKind, UnOp};
+    match &target.kind {
+        ExprKind::Unary { op: UnOp::Deref, .. } => true,
+        ExprKind::Field { expr, .. } => writes_through_a_reference(expr),
+        ExprKind::TupleIndex { expr, .. } => writes_through_a_reference(expr),
+        ExprKind::Index { expr, .. } => writes_through_a_reference(expr),
+        ExprKind::Paren(inner) => writes_through_a_reference(inner),
+        _ => false,
+    }
+}
+
 impl PropertyInferrer {
     /// Create a new property inferrer
     pub fn new() -> Self {
@@ -952,6 +977,20 @@ impl PropertyInferrer {
                 ) {
                     combined =
                         combined.union(&PropertySet::single(ComputationalProperty::Fallible));
+                }
+
+                // An assignment THROUGH A REFERENCE mutates state the caller
+                // can observe, which is exactly what `Mutates` names.
+                //
+                // Writing a local is NOT an effect — a loop accumulating into
+                // `let mut acc` is as pure as the fold it is written out from,
+                // and marking it would make `pure` unusable for the ordinary
+                // way of writing arithmetic. The distinction is whether the
+                // assignment's target is reached through a `*deref`, i.e.
+                // through a reference the caller handed in (T0792).
+                if op.is_assignment() && writes_through_a_reference(left) {
+                    combined =
+                        combined.union(&PropertySet::single(ComputationalProperty::Mutates));
                 }
 
                 combined
