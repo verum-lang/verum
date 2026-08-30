@@ -619,16 +619,51 @@ fn scan_module_reexports(
             parts.extend(module_parts.clone());
             parts.join(".")
         } else {
-            // Bare absolute path like `collections.List`.  Stdlib
-            // files implicitly reference siblings under `core.`;
-            // synthesise that prefix when the first segment is not
-            // already `core`.
-            if module_parts.first().map(|s| s.as_str()) == Some("core") {
-                module_parts.join(".")
-            } else if module_parts.is_empty() {
+            // A bare path is relative to the CURRENT MODULE unless its
+            // first segment is a known root.
+            //
+            // This used to anchor every bare path at `core.`, which is
+            // right for `collections.List` written in `core/mod.vr` and
+            // wrong for a sibling named from a nested module:
+            // `public mount control.*;` inside `core/intrinsics/mod.vr`
+            // resolved to `core.control`, a module that does not exist,
+            // so the glob expanded to NOTHING. All twelve re-export
+            // lines in that file were inert, and 596 public intrinsics
+            // were unreachable as `core.intrinsics.<name>` while
+            // `core.intrinsics.control.<name>` worked.
+            //
+            // The rule is not new — the LIVE resolver
+            // (`verum_modules::exports::resolve_link_path`) already
+            // states it, in a comment naming this exact shape:
+            // "treat as relative to current module first (e.g.
+            // `arithmetic` in `std.intrinsics` means
+            // `std.intrinsics.arithmetic`), unless the first segment is
+            // a known root". One rule, two implementations, and the
+            // bake's was the one users see: the live resolver does not
+            // run for a user `check` at all, because the stdlib arrives
+            // as a baked archive (T0959).
+            //
+            // `core` stays anchored so a top-level file naming
+            // `collections.List` keeps working, and the empty case
+            // stays empty.
+            const KNOWN_ROOTS: [&str; 4] = ["core", "std", "cog", "self"];
+            if module_parts.is_empty() {
                 String::new()
-            } else {
+            } else if module_parts
+                .first()
+                .is_some_and(|s| KNOWN_ROOTS.contains(&s.as_str()))
+            {
+                module_parts.join(".")
+            } else if current_module.is_empty() {
                 let mut parts: Vec<String> = vec!["core".to_string()];
+                parts.extend(module_parts.clone());
+                parts.join(".")
+            } else {
+                let mut parts: Vec<String> = current_module
+                    .split('.')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .collect();
                 parts.extend(module_parts.clone());
                 parts.join(".")
             }
