@@ -618,7 +618,13 @@ fn test_unary_complex() {
 
 #[test]
 fn test_all_levels_1() {
-    assert_parses("x |> f ?? y = a || b && c == d > e + f * g ** h");
+    // Assignment is looser than `??` (T0816): the right-hand side of `=`
+    // swallows the rest.  The previous spelling nested an assignment
+    // inside a coalesce (`f ?? y = a || …`), which parsed only while
+    // assignment bound tighter than `??`.  Same ladder as the compiler's
+    // parser — this crate shares it.
+    assert_parses("x = a ?? b || c && d == e > f + g * h ** i");
+    assert_parses("x |> f");
 }
 
 #[test]
