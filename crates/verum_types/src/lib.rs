@@ -2493,8 +2493,14 @@ impl TypeError {
             }
 
             MissingContext { context, span } => {
-                // E801: Context used but not declared in function signature
-                let mut builder = DiagnosticBuilder::error().code("E801").message(format!(
+                // E613, in the CONTEXT band. This printed `E801` for a
+                // long time, which the registry assigns to an FFI ABI
+                // mismatch — so `verum explain E801` answered about
+                // something else entirely, and confidently. A wrong
+                // explanation is worse than a missing one: it sends the
+                // reader looking for a foreign declaration that does not
+                // exist (T0992).
+                let mut builder = DiagnosticBuilder::error().code("E613").message(format!(
                     "context `{}` used but not declared in function signature\n  \
                          help: add `using [{}]` to function signature\n  \
                          help: or provide it with `provide {} = ...`",

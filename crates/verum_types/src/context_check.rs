@@ -721,6 +721,16 @@ impl ContextChecker {
     /// (unless F provides them locally via `provide`).
     pub fn check_call_propagation(&self, callee_contexts: &ContextSet, span: Span) -> Result<()> {
         for ctx in callee_contexts.iter() {
+            // A NEGATIVE context is one the callee promises NOT to use
+            // (`using [!IO]`, or a group like `using Pure = [!IO,
+            // !Random]`). Requiring the caller to supply it inverts the
+            // meaning: the callee said it does not touch IO, and the
+            // caller was told "context `IO` used but not declared"
+            // (T0991). `ContextRef::is_negative` has carried the fact
+            // all along; this loop never asked.
+            if ctx.is_negative {
+                continue;
+            }
             if !self.is_available(ctx.name.as_str()) {
                 return Err(TypeError::MissingContext {
                     context: ctx.name.as_str().to_text(),

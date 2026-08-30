@@ -530,6 +530,20 @@ impl ContextValidationPhase {
                     if registry.has_group(&name) {
                         if let Ok(expanded) = registry.expand(&name) {
                             for ctx_ref in expanded.iter() {
+                                // A group member can be NEGATIVE:
+                                // `using Pure = [!IO, !Random]` says the
+                                // function uses neither. The check three
+                                // lines up does this for a context
+                                // written inline (`using [!IO]`); the
+                                // expansion path dropped the negation and
+                                // recorded `IO` as REQUIRED, so a caller
+                                // of a `using Pure` function was told
+                                // "context `IO` used but not declared"
+                                // (T0991). `ContextRef` has carried
+                                // `is_negative` all along.
+                                if ctx_ref.is_negative {
+                                    continue;
+                                }
                                 contexts.insert(ctx_ref.name.to_string());
                             }
                         }

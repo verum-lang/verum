@@ -7726,6 +7726,26 @@ impl TypeChecker {
                     // Build a ContextSet from the callee's requirements
                     let mut callee_context_set = ContextSet::new();
                     for ctx_ref in callee_contexts.iter() {
+                        // A NEGATIVE context is a promise NOT to use one
+                        // — `using [!IO]`, or every member of a group
+                        // like `using Pure = [!IO, !Random]`. It is not a
+                        // requirement, and turning it into one here told
+                        // the CALLER "context `Random` used but not
+                        // declared" for calling a function that promised
+                        // to touch neither (T0991).
+                        //
+                        // `ContextRequirement::new` sets `is_negative:
+                        // false`; the flag on `ctx_ref` was dropped at
+                        // construction, so no downstream check could see
+                        // it. Two other sites in this repo DO ask
+                        // `is_negative` — the group expansion in
+                        // `context_validation` and the propagation loop
+                        // in `context_check` — and both are dead code on
+                        // this path, which is why fixing them measured
+                        // inert.
+                        if ctx_ref.is_negative {
+                            continue;
+                        }
                         callee_context_set.add(ContextRequirement::new(
                             ctx_ref.name.clone(),
                             expr.span,

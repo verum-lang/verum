@@ -381,6 +381,7 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
         ErrorCodeEntry { code: "E609", numeric: 609, category: ErrorCategory::Context, description: "transitive negative-context violation" },
         ErrorCodeEntry { code: "E610", numeric: 610, category: ErrorCategory::Context, description: "non-context protocol in a `using` clause" },
         ErrorCodeEntry { code: "E611", numeric: 611, category: ErrorCategory::Context, description: "direct negative-context violation" },
+        ErrorCodeEntry { code: "E613", numeric: 613, category: ErrorCategory::Context, description: "context used but not declared in the function signature" },
         ErrorCodeEntry { code: "E612", numeric: 612, category: ErrorCategory::Context, description: "context alias conflict" },
 
         // ── E7xx: Async ───────────────────────────────────────────────────────
