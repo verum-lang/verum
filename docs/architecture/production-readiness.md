@@ -176,42 +176,44 @@ Stated explicitly, because an unmeasured area reads as a healthy one.
 
 ### A defect count going UP can mean the compiler reached further (2026-08-31)
 
-The registry project measured 461 diagnostics in the morning and 485
+The registry project measured 461 diagnostics in the morning and 486
 after a day of compiler repairs. The first reading is a regression. It
-is not, and the measurements that settle it are worth the pattern:
+is not — but the first VERSION of this entry compared the two numbers
+directly, and that comparison was invalid: between them the compiler
+changed AND so did the registry, because three showcase chapters were
+added to it the same day.
 
-| | morning | after |
-|---|---:|---:|
-| total | 461 | 485 |
-| files reporting | 63 | 64 |
-| files whose count DECREASED | — | 0 |
-| parse errors | 2 | 0 |
-| E401 "cannot find X in module Y" | 25 | 47 |
+Re-measured with the source held fixed:
 
-Nothing decreased, coverage barely moved, and the increase is +1 or +2
-spread across services that mount many stdlib types. The parse errors
-went to zero because the contract-clause repair let a file reach the
-type checker for the first time.
+| binary | diagnostics |
+|---|---:|
+| morning, on the morning source | 461 |
+| morning, on the current source | 466 |
+| current, on the current source | 486 |
+
+So the source accounts for +5 and the compiler for +20, and the only
+code that moves is `E401 cannot find X in module Y`: **25 -> 47**.
+Nothing else changes at all, and no file's count falls.
 
 Then the deciding check — are the NEW diagnostics true? Taking one:
 
     registry:  mount architecture.types.Severity;
     core/:     public type Severity is …   in architecture/anti_patterns.vr
-                                           and in cli/verify.vr
                core/architecture/types.vr declares 40 public types,
                and Severity is not among them
 
 The mount names a module that does not declare the type. A real defect,
-previously masked, now reported.
+previously masked.
 
 So the count rose because the compiler stopped bailing early. **A defect
 count is a measurement of the MEASURING APPARATUS as much as of the
 code**, and a repair to the apparatus moves the number in the direction
-that looks like damage. The honest report is the pair: 461 -> 485, of
-which 0 files got worse and 2 files started parsing.
+that looks like damage.
 
-The rule this adds to the one below it: state the units, AND state
-whether the instrument changed between the two readings.
+THE RULE, in the form the correction earned: state the units; state
+whether the INSTRUMENT changed between the readings; and state whether
+the SUBJECT did. This entry got the first two right and the third wrong,
+which is how it came to quote a delta of 24 for a change worth 20.
 
 ### An error count is in messages, not causes (2026-08-30)
 
