@@ -50,20 +50,26 @@ for root in "${TARGETS[@]}"; do
         continue
     fi
 
-    # A tree written to very recently belongs to a running build.
+    # Two separate questions, asked separately — conflating them made the
+    # guard refuse a 22 GB tree that was simply 40 days old.
     #
-    # `-mmin` and not `-newermt`: on this machine `find` resolves to
-    # `bfs`, which rejects `-newermt '-20 minutes'` as an invalid
-    # timestamp and prints the error on stdout — so the guard fired on
-    # its own instrument's error message rather than on a real writer.
-    # Positive control: the same predicate with a large window must
-    # return files, otherwise the guard cannot see a writer at all.
-    if [[ -z "$(find "$root" -type f -mmin -20000 2>/dev/null | head -1)" ]]; then
-        echo "SKIP $root — the freshness probe finds no files at all; refusing to reap blind" >&2
+    # (1) Can the probe see this tree AT ALL?  If a directory holds no
+    #     files, there is nothing to reap and nothing to trust.
+    if [ -z "$(find "$root" -type f 2>/dev/null | head -1)" ]; then
+        echo "SKIP $root — holds no files; nothing to reap" >&2
         continue
     fi
-    recent=$(find "$root" -type f -mmin -20 2>/dev/null | head -1)
-    if [[ -n "$recent" ]]; then
+
+    # (2) Is a build writing to it RIGHT NOW?  `-mmin` and not
+    #     `-newermt`: on this machine `find` resolves to `bfs`, which
+    #     rejects `-newermt '-20 minutes'` and prints the complaint on
+    #     stdout, so the guard used to fire on its own error message.
+    #
+    #     An editor's flycheck/rust-analyzer directory is always warm and
+    #     is not a build of ours; it must not veto the whole tree.
+    recent=$(find "$root" -type f -mmin -20 2>/dev/null |
+                 grep -v '/flycheck[0-9]*/' | grep -v '/rust-analyzer' | head -1)
+    if [ -n "$recent" ]; then
         echo "SKIP $root — written to in the last 20 minutes (a build owns it): $recent" >&2
         continue
     fi
