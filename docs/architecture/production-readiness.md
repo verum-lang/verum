@@ -174,6 +174,80 @@ Stated explicitly, because an unmeasured area reads as a healthy one.
   disappeared once space was freed, including a file that had answered
   `unbound variable: sin` an hour earlier.
 
+### The verifier answered a question wrongly (2026-08-30)
+
+Everything else in this document is about a check that is missing, weak,
+or asleep. This entry is different in kind: a check that RAN, ANSWERED,
+and was WRONG.
+
+    static mut COUNTER: Int = 0;
+    fn tick() -> Int { COUNTER = COUNTER + 1; COUNTER }
+    fn drift(n: Int) -> Int ensures result == 0 {
+        let a = tick();  let b = tick();  a - b
+    }
+
+`✓ drift: Proved`. The interpreter prints `-1`. Control against a
+vacuous check: the same file with `ensures result == 999` reports
+Failed, so the obligation is live.
+
+A postcondition is discharged by asserting `result == body`, and a call
+renders as `(name args…)` keyed on the name alone, so two `tick()` calls
+are one term and congruence gives 0. The identification is CORRECT for a
+pure function — which is why the pure twin still proves, and why the
+variant with different arguments correctly fails.
+
+Three layers, and the bottom one is not in the solver:
+
+| layer | what it does | what it should do |
+|---|---|---|
+| property inferrer | a `static mut` is not state, so `pure fn tick()` is ACCEPTED | a read is `ReadsExternal`, a write is `Mutates` |
+| verifier | asserts `result == body` unasked | ask whether the body is a function of the arguments |
+| purity gate | `is_reflectable` exists; 4 callers, all its own unit tests | be asked |
+
+Tracked as T0982, pinned by a PAIR of specs under
+`vcs/specs/L0-critical/verification/` — the impure case that must fail
+and the pure case that must keep proving, because the blunt repair
+(never identify two calls) turns the first green and the second red.
+
+### Purity is decided by declaration order (2026-08-30)
+
+The same three-line program, twice, differing only in which declaration
+comes first:
+
+| program | order | verdict |
+|---|---|---|
+| `pure fn caller() { helper() }` after `fn helper() { print("x"); 1 }` | callee above | E503 refused |
+| the same two lines swapped | callee BELOW | **accepted** |
+| two hops, both above | callee above | E503 refused |
+
+Properties are registered as the walker goes, in source order, and the
+`Call` arm treats a callee it cannot find as contributing nothing. So a
+forward reference reads as pure. The module walk already registers
+function SIGNATURES in a phase of its own so forward references resolve;
+properties never got that phase. T0985.
+
+### A spec that certifies the gap as intended (2026-08-30)
+
+`vcs/specs/L1-core/types/pure/pure_function_validation.vr` lists in its
+own header what it tests:
+
+    // 2. Pure function calling IO function (FAIL)
+    // 3. Pure function with mutable references (FAIL)
+    // 4. Pure function accessing global state (FAIL)
+
+Twelve functions named `impure_read_global`, `impure_mutate`,
+`impure_random` … each marked `pure`, each written to BE REFUSED — under
+a file directive of `@test: typecheck-pass`, which requires the file to
+type-check cleanly.
+
+Measured: the compiler refuses **three** of the twelve, all three for
+IO. Nine are accepted. So a spec named `pure_function_validation`
+requires that three quarters of the purity violations it documents be
+ACCEPTED, and while it is green the gap reads as intended behaviour.
+
+This is a distinct failure mode from the ones in §0. There the apparatus
+measures nothing; here it measures, and demands the wrong answer.
+
 ### One name, four defects (2026-08-30)
 
 Four separate rows in this pool are one mechanism: a global bucket
