@@ -2855,7 +2855,21 @@ impl CodegenContext {
                     self.functions.insert(alt_key, info.clone());
                     self.functions.insert(name, info);
                 } else {
-                    self.functions.entry(alt_key).or_insert(info);
+                    // The BARE name is left alone here on purpose — the
+                    // tiebreak above hands it to the smaller arity — but
+                    // the `name#arity` mirror must hold a function OF
+                    // THAT ARITY, and the newcomer is one. `or_insert`
+                    // kept whichever same-arity function registered
+                    // FIRST, which is how a user's own two-argument
+                    // `resolve` lost its return type to a stdlib
+                    // namesake and printed `None` for an `Int` (T0946).
+                    //
+                    // Last-wins here matches the bare name's own policy
+                    // on the non-collision path, and changes the VALUE
+                    // only: the key already exists, so the bake's
+                    // key-set determinism — the reason `or_insert` is
+                    // used elsewhere in this function — is untouched.
+                    self.functions.insert(alt_key, info);
                 }
                 return;
             }
