@@ -1012,13 +1012,11 @@ impl<'a> RecursiveParser<'a> {
             match self.stream.peek_kind() {
                 Some(TokenKind::Requires) => {
                     self.stream.advance();
-                    let expr = self.parse_expr_no_struct()?;
-                    requires.push(expr);
+                    requires.extend(self.parse_contract_expr_list()?);
                 }
                 Some(TokenKind::Ensures) => {
                     self.stream.advance();
-                    let expr = self.parse_expr_no_struct()?;
-                    ensures.push(expr);
+                    ensures.extend(self.parse_contract_expr_list()?);
                 }
                 Some(TokenKind::Decreases) => {
                     self.stream.advance();
@@ -4591,13 +4589,11 @@ impl<'a> RecursiveParser<'a> {
                 match self.stream.peek_kind() {
                     Some(TokenKind::Requires) => {
                         self.stream.advance();
-                        let expr = self.parse_expr_no_struct()?;
-                        requires.push(expr);
+                        requires.extend(self.parse_contract_expr_list()?);
                     }
                     Some(TokenKind::Ensures) => {
                         self.stream.advance();
-                        let expr = self.parse_expr_no_struct()?;
-                        ensures.push(expr);
+                        ensures.extend(self.parse_contract_expr_list()?);
                     }
                     // Handle `where ensures EXPR` postcondition syntax
                     Some(TokenKind::Where)
@@ -5291,13 +5287,11 @@ impl<'a> RecursiveParser<'a> {
                 match self.stream.peek_kind() {
                     Some(TokenKind::Requires) => {
                         self.stream.advance();
-                        let expr = self.parse_expr_no_struct()?;
-                        requires.push(expr);
+                        requires.extend(self.parse_contract_expr_list()?);
                     }
                     Some(TokenKind::Ensures) => {
                         self.stream.advance();
-                        let expr = self.parse_expr_no_struct()?;
-                        ensures.push(expr);
+                        ensures.extend(self.parse_contract_expr_list()?);
                     }
                     _ => break,
                 }

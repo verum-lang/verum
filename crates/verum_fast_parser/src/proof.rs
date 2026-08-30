@@ -23,7 +23,7 @@ use verum_ast::{Expr, ExprKind, Ident, Item, ItemKind, Pattern, Span, Type};
 use verum_common::{Heap, List, Maybe, Text};
 use verum_lexer::TokenKind;
 
-use crate::error::ParseError;
+use crate::error::{ErrorCode, ParseError, ParseErrorKind};
 use crate::parser::{ParseResult, RecursiveParser};
 
 impl<'a> RecursiveParser<'a> {
@@ -383,7 +383,15 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a list of contract expressions separated by commas.
     /// Uses parse_expr_no_struct to prevent `{` from being consumed as a struct literal.
     /// Stops at keywords like `ensures`, `where`, `{`, or `;`.
-    fn parse_contract_expr_list(&mut self) -> ParseResult<Vec<Expr>> {
+    /// Parse one contract clause's expression list.
+    ///
+    /// `pub(crate)` because the FUNCTION contract parser in `decl.rs`
+    /// has to call it. It read a single expression at three separate
+    /// sites, so `requires a >= 0, b >= 0` stopped at the comma and was
+    /// reported as "expected `{` to start function body" — blaming the
+    /// body for a comma. The theorem parser had this right; the
+    /// grammar defines the list once, for both (T0988).
+    pub(crate) fn parse_contract_expr_list(&mut self) -> ParseResult<Vec<Expr>> {
         let mut exprs = Vec::new();
 
         // Parse first expression - use parse_expr_no_struct to avoid consuming `{`
@@ -1068,34 +1076,46 @@ impl<'a> RecursiveParser<'a> {
     /// 2. Tactic-mode: `proof { have h1: ...; suffices ...; ... }`
     /// 3. By-method: `by induction on x { case ... }` / `by contradiction { ... }`
     /// 4. Structured: step-by-step with `have`, `suffices`, `show`, `cases`
-    ///  Expect closing brace or accept at top-level keyword boundary.
-    ///  Used in proof bodies where the closing `}` may be omitted when the proof
-    ///  ends with a tactic and the next item is a top-level declaration.
-    fn expect_rbrace_or_top_level(&mut self) -> ParseResult<()> {
+    /// A proof body must be closed. Its absence is `E029`.
+    ///
+    /// This used to accept the missing `}` whenever the next token was
+    /// one of thirteen top-level keywords, or end of file — silently,
+    /// with no diagnostic. The comment called it a convenience: "the
+    /// closing `}` may be omitted when the proof ends with a tactic and
+    /// the next item is a top-level declaration".
+    ///
+    /// It is not a convenience, for three reasons measured 2026-08-30.
+    ///
+    /// The grammar does not describe it. `theorem_proof_tail =
+    /// proof_body , [ ';' ] | ';'` and `proof_structured = '{' ,
+    /// { proof_step } , '}'` — the closing brace is required wherever an
+    /// opening one appears.
+    ///
+    /// The SIBLING form already refuses it, and a conformance spec pins
+    /// that: `vcs/specs/parser/fail/proofs/missing_qed.vr` writes
+    /// `proof { have step1: true by trivial` with no `}`, expects E029,
+    /// and passes. So the language's position is on record; only this
+    /// path disagreed with it.
+    ///
+    /// And the cost is not a stray brace. The body closed at the next
+    /// keyword, so a file declared FEWER theorems than its author wrote,
+    /// and the output was byte-identical to the correct file — every
+    /// theorem still reported proved. In the proof corpus this had
+    /// reached 24 missing braces in one file with all 38 theorems still
+    /// reported. A spec is an assertion about the language; if its
+    /// structure is decided by error recovery, what it asserts is
+    /// decided by a heuristic rather than by its author.
+    fn expect_proof_body_close(&mut self) -> ParseResult<()> {
         if self.stream.consume(&TokenKind::RBrace).is_some() {
             return Ok(());
         }
-        // Accept if we're at a top-level keyword or EOF
-        match self.stream.peek_kind() {
-            Some(TokenKind::Theorem)
-            | Some(TokenKind::Lemma)
-            | Some(TokenKind::Axiom)
-            | Some(TokenKind::Corollary)
-            | Some(TokenKind::Fn)
-            | Some(TokenKind::Type)
-            | Some(TokenKind::Pub)
-            | Some(TokenKind::At)
-            | Some(TokenKind::Module)
-            | Some(TokenKind::Mount)
-            | Some(TokenKind::Const)
-            | Some(TokenKind::Static)
-            | Some(TokenKind::Implement)
-            | None => Ok(()),
-            _ => {
-                self.stream.expect(TokenKind::RBrace)?;
-                Ok(())
-            }
-        }
+        Err(ParseError::with_error_code(
+            ParseErrorKind::InvalidSyntax {
+                message: "proof body is not closed - expected `}`".into(),
+            },
+            self.stream.current_span(),
+            ErrorCode::ProofNotTerminated,
+        ))
     }
 
     /// Skip a balanced brace block `{ ... }`, including nested braces.
@@ -1164,7 +1184,7 @@ impl<'a> RecursiveParser<'a> {
             Some(TokenKind::Proof) => {
                 self.stream.advance(); // consume 'proof'
                 let proof = self.parse_structured_proof()?;
-                self.expect_rbrace_or_top_level()?;
+                self.expect_proof_body_close()?;
                 Ok(proof)
             }
             // By method inside block
@@ -1185,13 +1205,13 @@ impl<'a> RecursiveParser<'a> {
             | Some(TokenKind::Smt)
             | Some(TokenKind::Induction) => {
                 let tactic = self.parse_tactic_expr()?;
-                self.expect_rbrace_or_top_level()?;
+                self.expect_proof_body_close()?;
                 Ok(ProofBody::Tactic(tactic))
             }
             // Default: term proof
             _ => {
                 let expr = self.parse_expr()?;
-                self.expect_rbrace_or_top_level()?;
+                self.expect_proof_body_close()?;
                 Ok(ProofBody::Term(Heap::new(expr)))
             }
         }
