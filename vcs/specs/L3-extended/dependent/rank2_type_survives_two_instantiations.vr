@@ -1,0 +1,59 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L3
+// @tags: rank2, generics, archive, T0997
+// @timeout: 60000
+// @description: Two DIFFERENT instantiations of a rank-2 method in one file each get their own quantified variable
+
+// A rank-2 function type — `fn<R>(Reducer<B, R>) -> Reducer<A, R>` —
+// promises that R is chosen by the CALLEE, for every R. Two call sites
+// with different element types must therefore be independent.
+//
+// Measured before the repair: the second function reported
+//
+//     error<E400>: Type mismatch: expected 'Int', found 'Text'
+//
+// where `Int` is the element type of the FIRST function. The order of
+// CALLS does not matter; the order of DECLARATIONS does.
+//
+// ROOT. The quantifier does not survive the stdlib bake. The rank-2
+// type reference renders as `__opaque_typeref`, because its
+// spelling `fn<N>(…)` carries a COUNT rather than names and so has
+// nothing for `parse_descriptor_type_string` to bind. The archive
+// therefore stores one instantiation per entry — `Reducer<A, Int>` —
+// and the second call site is handed the first one's answer.
+//
+// The decision was documented WITH its condition, at
+// `archive_metadata.rs`: "Zero occurrences in the shipped archive, so
+// the placeholder costs nothing today; giving it a real spelling is a
+// parser-side change first." The condition expired when `Transducer`
+// and `StatefulTransducer` were added — four rank-2 fields now ship in
+// `core/base/iterator.vr`.
+//
+// `only_text` is the CONTROL and is deliberately first: one
+// instantiation always passed, so a repair that breaks rank-2 handling
+// outright fails there before reaching the two-instantiation case.
+
+mount core.base.iterator.{StatefulTransducer, Transducer};
+
+fn only_text() {
+    let xform: StatefulTransducer<Text, (Int, Text), Int> = Transducer.enumerate();
+    let data = ["a", "b", "c"];
+    let r: List<(Int, Text)> = data.iter().map(|x| *x).transduce_stateful(xform).collect();
+}
+
+fn first_int() {
+    let data = [1, 1, 2];
+    let xform: StatefulTransducer<Int, Int, Maybe<Int>> = Transducer.dedupe();
+    let r: List<Int> = data.iter().map(|x| *x).transduce_stateful(xform).collect();
+}
+
+fn then_text() {
+    let xform: StatefulTransducer<Text, (Int, Text), Int> = Transducer.enumerate();
+    let data = ["a", "b", "c"];
+    let r: List<(Int, Text)> = data.iter().map(|x| *x).transduce_stateful(xform).collect();
+}
+
+fn main() {
+    print("rank-2 survives two instantiations");
+}
