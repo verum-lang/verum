@@ -1,0 +1,63 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: types, pure, purity, contexts, E503, T0986
+// @expected-error: E503
+// @description: A pure function may not declare a context — an injected capability is a hidden argument
+
+// RED until T0986. Measured 2026-08-30: both are ACCEPTED.
+//
+// Under the reading that makes `pure` worth anything — the result is a
+// function of the arguments — an injected capability is a hidden
+// argument, and `Random` is the case where that is impossible to argue
+// away.
+//
+// The rule EXISTS, in the other `is_pure`:
+//
+//     if !self.contexts.is_empty() { return false; }   // ComputationalSignature
+//
+// The E503 gate asks `validate_for_pure_fn()` on the PropertySet
+// instead, and contexts are not properties. Two implementations of one
+// question, and the gate asks the one without the rule.
+
+context Random { fn next_int(&self) -> Int; }
+context Clock { fn now(&self) -> Int; }
+
+pure fn impure_random() -> Int using [Random] {
+    Random.next_int()
+}
+
+pure fn impure_time() -> Int using [Clock] {
+    Clock.now()
+}
+
+// The three context-declaring cases from the old file's Section 7,
+// moved here whole. Every one is the same shape: `pure` beside a
+// `using [...]` clause, and the properties never carry the context.
+//
+// The TRANSITIVE case — a pure function calling one that declares
+// `using [IO]` — is deliberately NOT here. It is refused today, because
+// the callee's IO reaches the caller as a PROPERTY rather than as a
+// context, and a `typecheck-fail` file passes on any single error: one
+// working refusal in this file would turn it green and hide the three
+// that do not work. It lives in `purity_violation_io_is_refused.vr`.
+context Database { fn query(&self, sql: Text) -> Int; }
+context Network { fn get(&self, url: Text) -> Int; }
+context FileSystem { fn read(&self, path: Text) -> Text; }
+
+pure fn impure_database() -> Int using [Database] {
+    Database.query("SELECT 1")
+}
+
+pure fn impure_network() -> Int using [Network] {
+    Network.get("http://example.com")
+}
+
+pure fn impure_filesystem() -> Int using [FileSystem] {
+    let content = FileSystem.read("/tmp/file.txt");
+    1
+}
+
+fn main() {
+    print("x");
+}

@@ -1,0 +1,49 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, pure, properties, reflection, T0984
+// @description: static_assert over properties_of(f) — compile-time claims about a function's inferred effects
+
+// RED until T0984. Measured 2026-08-30, this block produces six E400s:
+//
+//     error<E400>: Type mismatch: expected 'Pure', found 'PropertySet'      x2
+//     error<E400>: no method named `contains` found for type `PropertySet`  x4
+//
+// So `properties_of` exists and returns something the checker types
+// `PropertySet`, while the set literal `{Pure}` is read as the property
+// `Pure` itself, and the type carries no membership method.
+//
+// Split out of `pure_function_validation.vr` rather than deleted. The
+// capability is worth finishing: the properties are inferred anyway, and
+// being able to write "this function must stay pure" as a CHECKED claim
+// is what the property system is for. Rust and Haskell have no
+// equivalent.
+
+pure fn pure_modifier_style(x: Int) -> Int {
+    x * x
+}
+
+fn context_group_style(x: Int) -> Int using [Pure] {
+    x * x
+}
+
+/// Equivalence verification: both should have same computational properties
+@verify(static)
+fn verify_pure_equivalence() {
+    // Both styles should produce identical computational property sets
+    static_assert(properties_of(pure_modifier_style) == properties_of(context_group_style));
+
+    // Both should be recognized as pure
+    static_assert(properties_of(pure_modifier_style) == {Pure});
+    static_assert(properties_of(context_group_style) == {Pure});
+
+    // Neither should have IO, State, or other impure properties
+    static_assert(!properties_of(pure_modifier_style).contains(IO));
+    static_assert(!properties_of(context_group_style).contains(IO));
+    static_assert(!properties_of(pure_modifier_style).contains(Mutates));
+    static_assert(!properties_of(context_group_style).contains(Mutates));
+}
+
+fn main() {
+    print(f"{pure_modifier_style(4)}{context_group_style(4)}");
+}

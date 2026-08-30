@@ -1,0 +1,47 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, pure, purity, design
+// @description: A pure function may use a local mutable binding — the property tracks observable effects, not syntax
+
+// This file records a DESIGN DECISION that two artifacts disagreed on.
+//
+// `pure_function_validation.vr` listed a local `mut` under "Pure
+// function with mutable references (FAIL)" and named the function
+// `impure_local_mut`. The language's position is the opposite, and it
+// is the right one: a binding a caller cannot observe does not make the
+// function anything other than a mapping from its arguments. A loop
+// accumulating into `let mut acc` is as pure as the fold it is written
+// out from.
+//
+// The compiler already implements this — `writes_through_a_reference`
+// deliberately matches only a write reached through a `*deref`, i.e.
+// through a reference the caller handed in, and its comment says
+// flagging every assignment "would make `pure fn` unable to hold a loop
+// counter".
+//
+// Written down here because a decision that lives only in a comment
+// beside a helper is a decision that will be re-litigated by whoever
+// next reads the old spec's function names.
+
+pure fn sum_to(n: Int) -> Int {
+    let mut acc = 0;
+    let mut i = 1;
+    while i <= n {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+pure fn count_down(n: Int) -> Int {
+    let mut k = n;
+    while k > 0 {
+        k = k - 1;
+    }
+    k
+}
+
+fn main() {
+    print(f"{sum_to(4)} {count_down(3)}");
+}

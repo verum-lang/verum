@@ -4,11 +4,26 @@
 // @tags: types, pure, computational-properties, purity, side-effects
 // @description: Test pure function type validation and purity inference
 //
-// This file tests pure function validation rules:
+// This file holds the ACCEPTED cases only. Its directive is
+// `typecheck-pass`, so that is all it may hold.
+//
+// It used to list four "(FAIL)" sections here and carry twelve
+// functions named `impure_*`, each written to be REFUSED, under the
+// same `typecheck-pass` directive — which required the compiler to
+// ACCEPT them. Measured 2026-08-30: three of the twelve were refused
+// and nine were not, so while this file was green a spec named
+// `pure_function_validation` was certifying the gap as intended.
+//
+// The refusals now live where a refusal can be pinned:
+//
+//   purity_violation_io_is_refused.vr            green
+//   purity_violation_global_state_is_refused.vr  red — T0982
+//   purity_violation_context_is_refused.vr       red — T0986
+//   pure_fn_may_hold_a_local_mut.vr              the case the old file
+//                                                had backwards
+//   purity_reflection_static_assert.vr           red — T0984
+//
 // 1. Pure function calling pure function (OK)
-// 2. Pure function calling IO function (FAIL)
-// 3. Pure function with mutable references (FAIL)
-// 4. Pure function accessing global state (FAIL)
 // 5. Pure function with only local operations (OK)
 // 6. Pure context group equivalence: `pure fn` vs `using Pure`
 //
@@ -133,99 +148,6 @@ pure fn fibonacci(n: Int) -> Int {
     } else {
         fibonacci(n - 1) + fibonacci(n - 2)
     }
-}
-
-// ============================================================================
-// Section 2: Pure Function Calling IO Function (FAIL)
-// ============================================================================
-// @test: typecheck-fail
-// @expected-error: E701 "Purity violation: pure function cannot call IO function"
-
-/// ERROR: Pure function calling IO context - violates purity
-pure fn impure_with_io(x: Int) -> Int {
-    print(f"Value: {x}");  // ERROR: IO side effect in pure function
-    x
-}
-
-/// ERROR: Pure function calling print (IO) - violates purity
-pure fn impure_print(message: Text) -> () {
-    print(message);  // ERROR: print is an IO operation
-}
-
-/// ERROR: Pure function reading from IO - violates purity
-pure fn impure_read() -> Text {
-    IO.read_line()  // ERROR: IO side effect
-}
-
-// ============================================================================
-// Section 3: Pure Function With Mutable References (FAIL)
-// ============================================================================
-// @test: typecheck-fail
-// @expected-error: E702 "Purity violation: pure function cannot use mutable references"
-
-/// ERROR: Pure function with &mut parameter - violates purity
-pure fn impure_mutate(x: &mut Int) -> Int {
-    *x += 1;  // ERROR: mutation in pure function
-    *x
-}
-
-/// ERROR: Pure function mutating through reference - violates purity
-pure fn impure_increment(counter: &mut Int) -> () {
-    *counter = *counter + 1;  // ERROR: mutation
-}
-
-/// ERROR: Pure function creating mutable reference - violates purity
-pure fn impure_local_mut() -> Int {
-    let mut x = 0;  // ERROR: local mutable variable in pure function
-    x += 1;
-    x
-}
-
-/// ERROR: Pure function with mutable closure capture - violates purity
-pure fn impure_closure_mutate(initial: Int) -> Int {
-    let mut acc = initial;  // ERROR: mutable local
-    let f = || {
-        acc += 1;  // ERROR: mutating captured variable
-        acc
-    };
-    f()
-}
-
-// ============================================================================
-// Section 4: Pure Function Accessing Global State (FAIL)
-// ============================================================================
-// @test: typecheck-fail
-// @expected-error: E703 "Purity violation: pure function cannot access global mutable state"
-
-/// ERROR: Pure function reading global mutable state - violates purity
-pure fn impure_read_global() -> Int {
-    GLOBAL_COUNTER  // ERROR: reading global mutable state
-}
-
-/// ERROR: Pure function writing global mutable state - violates purity
-pure fn impure_write_global() -> () {
-    GLOBAL_COUNTER = 42;  // ERROR: writing global mutable state
-}
-
-/// ERROR: Pure function modifying global state - violates purity
-pure fn impure_increment_global() -> Int {
-    GLOBAL_COUNTER += 1;  // ERROR: modifying global state
-    GLOBAL_COUNTER
-}
-
-/// ERROR: Pure function using State context - violates purity
-pure fn impure_with_state() -> Int using [State<Int>] {
-    State.get()  // ERROR: State context forbidden in pure function
-}
-
-/// ERROR: Pure function using Random context - violates purity (non-deterministic)
-pure fn impure_random() -> Int using [Random] {
-    Random.next_int()  // ERROR: Random is non-deterministic
-}
-
-/// ERROR: Pure function using Time context - violates purity (non-deterministic)
-pure fn impure_time() -> Timestamp using [Time] {
-    Time.now()  // ERROR: Time is non-deterministic
 }
 
 // ============================================================================
@@ -368,55 +290,6 @@ pure fn cross_call_example(n: Int) -> Int {
     squared
 }
 
-/// Equivalence verification: both should have same computational properties
-@verify(static)
-fn verify_pure_equivalence() {
-    // Both styles should produce identical computational property sets
-    static_assert(properties_of(pure_modifier_style) == properties_of(context_group_style));
-
-    // Both should be recognized as pure
-    static_assert(properties_of(pure_modifier_style) == {Pure});
-    static_assert(properties_of(context_group_style) == {Pure});
-
-    // Neither should have IO, State, or other impure properties
-    static_assert(!properties_of(pure_modifier_style).contains(IO));
-    static_assert(!properties_of(context_group_style).contains(IO));
-    static_assert(!properties_of(pure_modifier_style).contains(Mutates));
-    static_assert(!properties_of(context_group_style).contains(Mutates));
-}
-
-// ============================================================================
-// Section 7: Additional Purity Violation Cases
-// ============================================================================
-// @test: typecheck-fail
-
-/// ERROR: Pure function calling impure function
-fn impure_helper() -> Int using [IO] {
-    IO.print("side effect");
-    42
-}
-
-pure fn calls_impure() -> Int {
-    impure_helper()  // ERROR: calling impure function from pure context
-}
-
-/// ERROR: Pure function with Database context
-pure fn impure_database() -> Int using [Database] {
-    let result = Database.query("SELECT 1");  // ERROR: Database is impure
-    42
-}
-
-/// ERROR: Pure function with Network context
-pure fn impure_network() -> Int using [Network] {
-    let response = Network.get("http://example.com");  // ERROR: Network is impure
-    42
-}
-
-/// ERROR: Pure function with FileSystem context
-pure fn impure_filesystem() -> Text using [FileSystem] {
-    let content = FileSystem.read("/tmp/file.txt");  // ERROR: FileSystem is impure
-    "read"
-}
 
 // ============================================================================
 // Section 8: Edge Cases and Corner Cases

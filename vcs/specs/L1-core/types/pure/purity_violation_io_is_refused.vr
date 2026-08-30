@@ -1,0 +1,50 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: types, pure, purity, io, E503
+// @expected-error: E503
+// @description: A pure function that performs IO is refused
+
+// Split out of `pure_function_validation.vr`, whose header listed this
+// as "(FAIL)" while its file directive was `typecheck-pass` — so the
+// suite required the violation to be ACCEPTED, and while it was green
+// the gap read as intended behaviour.
+//
+// This half already works: measured, all three below are E503. It is
+// separated so the working part of purity enforcement has a spec that
+// says so, and cannot be dragged red by its unenforced siblings.
+
+fn helper_that_prints(x: Int) -> Int {
+    print(f"{x}");
+    x
+}
+
+pure fn impure_with_io(x: Int) -> Int {
+    print(f"Value: {x}");
+    x
+}
+
+pure fn calls_impure(x: Int) -> Int {
+    helper_that_prints(x)
+}
+
+// The TRANSITIVE case, from the old file's Section 7: a pure function
+// whose callee declares `using [IO]`. It is refused, and it belongs
+// here rather than in the context spec because what reaches the caller
+// is the callee's IO PROPERTY, not its context — which is exactly why
+// this one works while a function declaring the context itself does
+// not (T0986).
+context IO { fn print(&self, message: Text); }
+
+fn impure_helper() -> Int using [IO] {
+    IO.print("side effect");
+    42
+}
+
+pure fn calls_context_io() -> Int {
+    impure_helper()
+}
+
+fn main() {
+    print(f"{impure_with_io(1)}{calls_impure(2)}{calls_context_io()}");
+}

@@ -1,0 +1,43 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: types, pure, purity, global-state, E503, T0982
+// @expected-error: E503
+// @description: A pure function that reads or writes a `static mut` is refused
+
+// RED until T0982. Measured 2026-08-30: all three below are ACCEPTED.
+//
+// The property inferrer does not treat a `static mut` as state. The
+// target of `COUNTER = COUNTER + 1` is a bare path, shaped exactly like
+// the loop counter that `pure` must keep allowing, and the T0792 repair
+// covers only `*p = …` — as its own comment says, it would need the type
+// environment. It does not: a `static mut` is a top-level declaration
+// and its NAME is visible syntactically.
+//
+// This is not a diagnostic nicety. Downstream, the verifier asserts
+// `result == body` for these functions and PROVED `ensures result == 0`
+// for one that returns -1.
+//
+// The gate is ready for the fix: its own comment already forbids
+// "external state access", so a read producing `ReadsExternal` lands in
+// a check that exists.
+
+static mut GLOBAL_COUNTER: Int = 0;
+
+pure fn impure_read_global() -> Int {
+    GLOBAL_COUNTER
+}
+
+pure fn impure_write_global() -> Int {
+    GLOBAL_COUNTER = 42;
+    GLOBAL_COUNTER
+}
+
+pure fn impure_increment_global() -> Int {
+    GLOBAL_COUNTER = GLOBAL_COUNTER + 1;
+    GLOBAL_COUNTER
+}
+
+fn main() {
+    print(f"{impure_read_global()}");
+}
