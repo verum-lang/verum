@@ -1,0 +1,44 @@
+// @test: verify-fail
+// @level: L3
+// @tier: 3
+// @tags: proofs, tactics, ring, limits
+// @timeout: 15000
+//
+// The LIMITS of the `ring` tactic — theorems it is expected NOT to close.
+//
+// These lived at the bottom of `ring_tactic.vr`, each carrying its own
+// `// @test: verify-fail` and `// @expected-error:` lines. The runner reads
+// the directive at the TOP OF THE FILE and nothing else, so those lines
+// were inert: the file said `verify-pass`, the tactic correctly declined,
+// and the correct decline was counted as an unproved obligation — the
+// tactic punished for knowing its own boundary (T0960).
+//
+// Six theorems across three tactic files were in that state. Moving them
+// into files whose OWN directive says `verify-fail` is what turns the
+// authors' stated expectation into something the runner can act on.
+
+// ------------------------------------------------------------
+// Ring Failures
+// ------------------------------------------------------------
+
+/// Ring cannot prove inequalities
+// @test: verify-fail
+// @expected-error: ring cannot prove inequalities
+theorem ring_inequality_fail(a: Int, b: Int)
+    requires a > 0
+    requires b > 0
+    ensures a + b > 0
+{
+    // Ring only handles equalities
+    proof by ring  // FAILS
+}
+
+/// Ring cannot prove divisibility without field
+// @test: verify-fail
+// @expected-error: requires field tactic
+theorem ring_division_fail(a: Int)
+    requires a != 0
+    ensures a / a == 1
+{
+    proof by ring  // FAILS - needs field
+}

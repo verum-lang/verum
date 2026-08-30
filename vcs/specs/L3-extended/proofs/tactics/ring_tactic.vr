@@ -226,16 +226,19 @@ theorem ring_pow_add(a: Int, m: Nat, n: Nat):
 {
     proof by ring
 
+}
 theorem ring_pow_mul(a: Int, m: Nat, n: Nat):
     pow(pow(a, m), n) == pow(a, m * n)
 {
     proof by ring
 
+}
 theorem ring_pow_distrib(a: Int, b: Int, n: Nat):
     pow(a * b, n) == pow(a, n) * pow(b, n)
 {
     proof by ring
 
+}
 // ------------------------------------------------------------
 // Ring Normalization
 // ------------------------------------------------------------
@@ -310,32 +313,9 @@ theorem ring_with_coefficients(a: Int, b: Int):
 {
     proof by ring
 
+}
 /// Ring with commutative semiring
 theorem ring_semiring(a: Nat, b: Nat): a + b == b + a {
     proof by ring
 
-// ------------------------------------------------------------
-// Ring Failures
-// ------------------------------------------------------------
-
-/// Ring cannot prove inequalities
-// @test: verify-fail
-// @expected-error: ring cannot prove inequalities
-theorem ring_inequality_fail(a: Int, b: Int)
-    requires a > 0
-    requires b > 0
-    ensures a + b > 0
-{
-    // Ring only handles equalities
-    proof by ring  // FAILS
-}
-
-/// Ring cannot prove divisibility without field
-// @test: verify-fail
-// @expected-error: requires field tactic
-theorem ring_division_fail(a: Int)
-    requires a != 0
-    ensures a / a == 1
-{
-    proof by ring  // FAILS - needs field
 }

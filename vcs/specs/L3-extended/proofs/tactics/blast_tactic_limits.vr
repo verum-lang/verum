@@ -1,0 +1,40 @@
+// @test: verify-fail
+// @level: L3
+// @tier: 3
+// @tags: proofs, tactics, blast, limits
+// @timeout: 15000
+//
+// The LIMITS of the `blast` tactic — theorems it is expected NOT to close.
+//
+// These lived at the bottom of `blast_tactic.vr`, each carrying its own
+// `// @test: verify-fail` and `// @expected-error:` lines. The runner reads
+// the directive at the TOP OF THE FILE and nothing else, so those lines
+// were inert: the file said `verify-pass`, the tactic correctly declined,
+// and the correct decline was counted as an unproved obligation — the
+// tactic punished for knowing its own boundary (T0960).
+//
+// Six theorems across three tactic files were in that state. Moving them
+// into files whose OWN directive says `verify-fail` is what turns the
+// authors' stated expectation into something the runner can act on.
+
+// ------------------------------------------------------------
+// Blast Limitations
+// ------------------------------------------------------------
+
+/// Blast may timeout on undecidable problems
+// @test: verify-fail
+// @expected-error: timeout
+theorem blast_undecidable(f: fn(Nat) -> Nat):
+    (forall n: Nat. f(n) > n) implies (forall n: Nat. f(f(n)) > n)
+{
+    // Requires induction, blast can't handle
+    proof by blast
+
+}
+/// Blast cannot do induction
+// @test: verify-fail
+// @expected-error: requires induction
+theorem blast_needs_induction(n: Nat): n + 0 == n {
+    // Needs structural induction on Nat
+    proof by blast  // FAILS
+}
