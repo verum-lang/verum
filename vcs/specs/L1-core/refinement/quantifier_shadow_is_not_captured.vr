@@ -4,7 +4,7 @@
 // @tags: refinement, quantifiers, forall, exists, substitution, capture, soundness
 // @timeout: 30000
 
-/// A quantified refinement does not kill the verifier.
+/// A quantified refinement is substituted, decided and ENFORCED.
 ///
 /// Substituting a value into a refinement predicate walks the predicate
 /// replacing the refinement variable. That walk had explicit rules for
@@ -20,67 +20,60 @@
 /// the suite started running a verifier at all (T0957):
 /// `quantified_refinements`, `quantified_predicates`, `smt_integration`.
 ///
-/// WHAT THIS FILE PINS, and what it deliberately does not.
+/// WHAT THIS FILE PINS. A quantifier that binds something ELSE must
+/// still let the refinement variable be substituted — in the guard and
+/// in the body. Refusing to descend into every binder would be sound
+/// and useless: an unsubstituted refinement variable leaves the
+/// predicate speaking about a name nothing binds, the solver answers
+/// `unknown`, and nothing is proved.
 ///
-/// It pins that a refinement whose quantifier SHADOWS the refinement
-/// variable is processed without crashing, and that the surrounding
-/// contracts still discharge. That is the observable consequence of the
-/// fix today.
-///
-/// It does NOT pin the capture itself, and pretending otherwise would
-/// be the false green this suite is full of. Measured: a quantified
-/// refinement is never decided — the solver answers `unknown` and the
-/// compiler says so, `warning<W0500>: refinement … was NOT verified …
-/// so the constraint is not enforced here`. A predicate that is not
-/// enforced is green whether it is true or false, so a spec built on
-/// one proves nothing about substitution. An earlier version of this
-/// file stated two claims that are false under correct shadowing and
-/// true under capture, and BOTH "passed" before the fix and after it,
-/// for that reason. Enforcement is T0964.
-///
-/// Two further measurements recorded so the next reader does not
-/// rediscover them: a refinement in a function SIGNATURE does not
-/// discharge at all (neither as a return type nor as a hypothesis on a
-/// parameter), while the same predicate on a local binding does; and
-/// `forall k in 0..3` — the form the rest of the corpus is written in —
-/// does not translate, while `forall k: Int. …` does. Both are T0964.
+/// Its negative pole is `quantifier_shadow_is_uninhabited.vr`, where
+/// the quantifier binds the refinement's OWN name and the resulting
+/// type is uninhabited. That file could not exist until three things
+/// were true together: substitution had to stop capturing the bound
+/// variable (T0958), the refinement path had to translate quantifiers,
+/// and the consumer of the verdict had to trust an SMT `Invalid` over
+/// a literal (T0967). Before that the predicate came back `unknown`
+/// and was not enforced, so a claim about it was green whether true or
+/// false.
 ///
 /// Task: T0958.
-
-/// The quantifier binds `x`, shadowing the refinement's own `x`.
-type ForallShadow is x: Int where forall x: Int. x >= 0 && x < 3 => x == 7;
-
-/// The same for the existential.
-type ExistsShadow is x: Int where exists x: Int. x >= 0 && x < 3 && x == 7;
 
 /// The quantifier binds something ELSE, so the refinement variable is
 /// the one that must be replaced — in the guard and in the body.
 type BeatsAll is m: Int where forall k: Int. k >= 0 && k < 3 => m >= k;
 
-@verify(formal)
-public fn a_shadowing_forall_does_not_crash(n: Int) -> Int
-    requires n == 0
-    ensures result == 7
-{
-    let v: ForallShadow = 7;
-    v
-}
+/// The same claim with a RANGE domain, the spelling the rest of the
+/// corpus uses.
+type BeatsAllRange is m: Int where forall k in 0..3 => m >= k;
+
+/// An existential that holds.
+type SomeBelow is m: Int where exists k: Int. k >= 0 && k < 3 && k < m;
 
 @verify(formal)
-public fn a_shadowing_exists_does_not_crash(n: Int) -> Int
-    requires n == 0
-    ensures result == 7
-{
-    let v: ExistsShadow = 7;
-    v
-}
-
-@verify(formal)
-public fn a_non_shadowing_forall_does_not_crash(n: Int) -> Int
+public fn a_non_shadowing_forall_is_enforced(n: Int) -> Int
     requires n == 0
     ensures result == 9
 {
     let v: BeatsAll = 9;
+    v
+}
+
+@verify(formal)
+public fn a_range_domain_is_enforced(n: Int) -> Int
+    requires n == 0
+    ensures result == 9
+{
+    let v: BeatsAllRange = 9;
+    v
+}
+
+@verify(formal)
+public fn an_existential_is_enforced(n: Int) -> Int
+    requires n == 0
+    ensures result == 9
+{
+    let v: SomeBelow = 9;
     v
 }
 

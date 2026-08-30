@@ -458,22 +458,67 @@ impl SubsumptionChecker {
         );
         solver.set_params(&params);
 
-        // Translate expressions to Z3 (using global context)
-        let z3_phi1 = match translate_to_z3(phi1) {
-            Ok(expr) => expr,
-            Err(e) => {
-                return SubsumptionResult::Unknown {
-                    reason: format!("Translation error for phi1: {}", e),
+        // Translate expressions to Z3 (using global context).
+        //
+        // `translate_to_z3` is a small local translator covering
+        // comparisons, arithmetic and the propositional operators —
+        // the FOURTH Verum→Z3 translator in this crate. Its gaps are
+        // silent in a way the others' are not: a refinement it cannot
+        // read is not refuted, it is UNDECIDED, and an undecided
+        // predicate is not enforced. Measured: a type whose predicate
+        // is false for every value accepted a binding, because the
+        // predicate quantified and this translator has none (T0967).
+        //
+        // So when it cannot read one side, BOTH are re-translated
+        // through `translate::Translator` — the one that already knows
+        // quantifiers, range domains, indexing and projections. Both,
+        // not only the failing one: the two formulas share variables,
+        // and a pair built by two translators is sound only while they
+        // happen to agree on the convention. One translator for the
+        // pair does not depend on that.
+        //
+        // ORDER MATTERS, and it was measured the wrong way round
+        // first: landing this alone turned an honest `warning<W0500>`
+        // ("not enforced") into SILENT ACCEPTANCE, because the consumer
+        // of the verdict discarded an `Invalid` no syntactic evaluator
+        // could confirm. That consumer was fixed first; this is the
+        // second half.
+        let local = (translate_to_z3(phi1), translate_to_z3(phi2));
+        let (z3_phi1, z3_phi2) = match local {
+            (Ok(a), Ok(b)) => (a, b),
+            (a, b) => {
+                let ctx = crate::context::Context::new();
+                let t = crate::translate::Translator::new(&ctx);
+                let via_full = |e: &Expr| -> Result<Bool, String> {
+                    t.translate_expr(e)
+                        .map_err(|err| format!("{:?}", err))
+                        .and_then(|d| {
+                            d.as_bool().ok_or_else(|| {
+                                "predicate did not translate to a boolean".to_string()
+                            })
+                        })
                 };
-            }
-        };
-
-        let z3_phi2 = match translate_to_z3(phi2) {
-            Ok(expr) => expr,
-            Err(e) => {
-                return SubsumptionResult::Unknown {
-                    reason: format!("Translation error for phi2: {}", e),
-                };
+                match (via_full(phi1), via_full(phi2)) {
+                    (Ok(x), Ok(y)) => (x, y),
+                    (Err(e), _) => {
+                        return SubsumptionResult::Unknown {
+                            reason: format!(
+                                "Translation error for phi1: {} (local: {})",
+                                e,
+                                a.err().unwrap_or_default()
+                            ),
+                        };
+                    }
+                    (_, Err(e)) => {
+                        return SubsumptionResult::Unknown {
+                            reason: format!(
+                                "Translation error for phi2: {} (local: {})",
+                                e,
+                                b.err().unwrap_or_default()
+                            ),
+                        };
+                    }
+                }
             }
         };
 

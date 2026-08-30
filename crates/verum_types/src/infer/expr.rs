@@ -2295,6 +2295,40 @@ impl TypeChecker {
                                         span: expr.span,
                                     });
                                 }
+                                // A DECLARED refinement over a LITERAL is
+                                // the one case where the solver's verdict
+                                // needs no second opinion, and it is the
+                                // same gate `W0500` already uses below.
+                                //
+                                // The caution above is about values not yet
+                                // known: over one of those an `Invalid` can
+                                // mean "the solver could not see why this
+                                // holds", and refusing would be worse than
+                                // gradual verification. A LITERAL has no
+                                // such doubt — `Invalid` there says the
+                                // predicate is false for a constant the
+                                // compiler is holding.
+                                //
+                                // Without this, an `Invalid` the syntactic
+                                // evaluator cannot reproduce was dropped in
+                                // silence. Measured: a type whose predicate
+                                // is a QUANTIFIER false for every value —
+                                // `forall k: Int. k >= 0 && k < 3 => k == 7`
+                                // — accepted a binding with neither an
+                                // error nor a warning, because the
+                                // syntactic evaluator does not do
+                                // quantifiers and so could not confirm what
+                                // the solver had already decided (T0967).
+                                if matches!(expr.kind, ExprKind::Literal(_))
+                                    && predicate.provenance
+                                        == crate::refinement::PredicateProvenance::Declared
+                                {
+                                    let pred_text = format!("{}", predicate);
+                                    return Err(TypeError::RefinementFailed {
+                                        predicate: verum_common::Text::from(pred_text),
+                                        span: expr.span,
+                                    });
+                                }
                                 // Syntactic can't confirm → gradual verification
                             }
                             // An SMT `unknown` on a DECLARED refinement over a

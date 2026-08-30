@@ -1,0 +1,64 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, quantifiers, forall, exists, substitution, capture, soundness
+// @timeout: 30000
+// @expected-error: E500
+
+/// A quantifier that binds the refinement's own name SHADOWS it, and a
+/// type whose predicate is then false for every value is uninhabited.
+///
+///     type ForallShadow is x: Int where forall x: Int. x >= 0 && x < 3 => x == 7;
+///
+/// The inner `x` is the quantifier's, so the predicate asks whether
+/// every one of 0,1,2 equals 7. It does not. Nothing inhabits this
+/// type, and `let v: ForallShadow = 7;` must be refused.
+///
+/// It was not. Substitution used to rewrite the QUANTIFIED variable —
+/// under capture the predicate becomes `forall x. 7 == 7`, true of
+/// everything — and the only thing standing there was a
+/// `debug_assert!` that release builds delete (T0958). Even once that
+/// was fixed, the claim could not be REFUTED: the refinement path's
+/// translator has no quantifiers, so the predicate came back
+/// `unknown`, and the compiler said so —
+///
+///     warning<W0500>: refinement … was NOT verified against a value
+///     known at compile time … so the constraint is not enforced here
+///
+/// — which is honest and still green. A predicate that is not enforced
+/// is green whether it is true or false. Two more things had to change
+/// before this file could exist: the verdict's consumer had to trust an
+/// SMT `Invalid` over a LITERAL without a second opinion, and the
+/// refinement path had to translate quantifiers at all (T0967).
+///
+/// Its positive pole is `quantifier_shadow_is_not_captured.vr`, where a
+/// quantifier binding something ELSE must still let the refinement
+/// variable be substituted. Refusing everything would satisfy this file
+/// and be caught there.
+
+type ForallShadow is x: Int where forall x: Int. x >= 0 && x < 3 => x == 7;
+type ExistsShadow is x: Int where exists x: Int. x >= 0 && x < 3 && x == 7;
+
+@verify(formal)
+public fn a_shadowing_forall_is_uninhabited(n: Int) -> Int
+    requires n == 0
+    ensures result == 7
+{
+    let v: ForallShadow = 7;
+    v
+}
+
+@verify(formal)
+public fn a_shadowing_exists_is_uninhabited(n: Int) -> Int
+    requires n == 0
+    ensures result == 7
+{
+    let v: ExistsShadow = 7;
+    v
+}
+
+mount core.prelude.*;
+
+fn main() {
+    print("a shadowing quantifier makes an uninhabited type");
+}
