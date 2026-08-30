@@ -5335,6 +5335,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "verum_common",
+ "verum_fast_parser",
 ]
 
 [[package]]

@@ -2567,7 +2567,37 @@ theorem_contract_clause =
     | 'from' , identifier
     | attribute ;
 
-theorem_proof_tail = proof_body , [ ';' ] | ';' ;
+(* A theorem's proof is written in one of two forms, and BOTH are in
+   use. Counted in-tree 2026-08-30: 381 theorem bodies are written
+   brace-delimited and 38 without braces, in `core/` as well as in the
+   conformance suite. This production described only the second, so the
+   form nine tenths of the corpus uses had no grammar behind it — and a
+   missing `}` in it went undiagnosed, because a brace the grammar never
+   required could not be missing (T0983).
+
+   The braces are not decoration. With contract clauses they are what
+   separates the last `ensures` expression from the proof:
+
+       theorem ring_division_fail(a: Int)
+           requires a != 0
+           ensures a / a == 1
+       { proof by ring }
+
+   and a declaration carrying a body is brace-delimited everywhere else
+   in the language — `fn`, `type`, `implement`, `module`. A theorem
+   without them would be the single exception.
+
+   BOTH braces are required. The parser accepted the closing one as
+   optional whenever the next token began a top-level declaration; that
+   is now `E029`, and `missing_qed.vr` plus
+   `missing_brace_after_tactic.vr` pin it from the two sides. *)
+theorem_proof_tail =
+      braced_proof_body , [ ';' ]
+    | proof_body , [ ';' ]
+    | ';' ;
+
+braced_proof_body =
+    '{' , ( proof_body | { proof_step } | tactic_expr ) , '}' ;
 
 (* 2.19.3 Axiom Declaration - Unproven assumptions
    An axiom is a universally quantified proposition over its parameters;

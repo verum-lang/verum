@@ -1,0 +1,33 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, tactic, error, T0983
+// @expected-error: E029
+// @description: A tactic proof body missing its closing brace must be refused, exactly as the structured form already is
+//
+// The sibling of `missing_qed.vr`, which pins the same mistake in the
+// STRUCTURED proof form and passes:
+//
+//     proof { have step1: true by trivial          → E029, refused
+//
+// The tactic form was silent. `{ proof by smt` with no `}` parsed
+// clean, and the next `theorem` closed the body — so the file below
+// declared ONE theorem where its author wrote two, and the verifier
+// reported on whichever set the recovery produced.
+//
+// Measured 2026-08-30 before the fix: a file with a missing brace and
+// one with the brace present produced BYTE-IDENTICAL output, both
+// reporting every theorem proved. In the proof corpus this had reached
+// 24 missing braces in a single file (blast_tactic.vr) with all 38
+// theorems still reported.
+//
+// Why it matters more here than in ordinary code: a spec is an
+// ASSERTION ABOUT THE LANGUAGE. If its structure is decided by error
+// recovery, then which theorems it declares is decided by a heuristic
+// rather than by its author — and the file looks healthy either way.
+
+theorem first(x: Int): x == x {
+    proof by smt
+
+theorem second(y: Int): y == y {
+    proof by smt
+}
