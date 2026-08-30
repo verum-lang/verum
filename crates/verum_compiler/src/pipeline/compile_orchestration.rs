@@ -1058,6 +1058,33 @@ impl<'s> CompilationPipeline<'s> {
                     // checked directly reported none — one source,
                     // two verdicts, decided by which command ran.
                     checker.register_stdlib_types_for_module(&module);
+                    // T0974, the same shape one family over: the
+                    // single-file path registers every stdlib CONTEXT
+                    // from the archive (`phase_type_check` walks
+                    // `context_decl_nodes` and calls
+                    // `register_stdlib_context_full`); the project path
+                    // handed over the metadata and skipped it.
+                    //
+                    // Measured on one file, one binary, differing only
+                    // in whether a `verum.toml` sits beside it:
+                    //
+                    //     mount core.context.standard.{Logger};
+                    //     fn emit() using [Logger] { Logger.info("hi"); }
+                    //
+                    //   verum check src/main.vr  -> 0 errors
+                    //   verum check   (project)  -> E605: undefined context: Logger
+                    //
+                    // The mount itself resolves — the surface carries
+                    // contexts now — but `using [Logger]` consults the
+                    // checker's own declaration table, and in this path
+                    // nothing filled it.
+                    for (ctx_name, ctx_decl) in metadata.context_decl_nodes.iter() {
+                        if !self.collected_contexts.contains(ctx_name) {
+                            checker.register_protocol_as_context(ctx_name.clone());
+                        }
+                        checker
+                            .register_stdlib_context_full(ctx_name.clone(), ctx_decl.clone());
+                    }
                 }
 
                 // Configure type checker with module registry for cross-file resolution

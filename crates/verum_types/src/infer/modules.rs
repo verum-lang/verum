@@ -3778,6 +3778,30 @@ impl TypeChecker {
         }
     }
 
+    /// Contexts the module DECLARES.
+    ///
+    /// The fourth family on this surface, after functions, types and
+    /// protocols. `context_declarations` and `context_decl_nodes` are
+    /// keyed by BARE name and carry no declaring module — the bootstrap
+    /// scanner holds each file's path and drops it — so a module could
+    /// not list its own contexts, and `mount core.context.standard.{Logger}`
+    /// resolved in a single file while the same line inside a project
+    /// reported `E605: undefined context: Logger` (T0974).
+    ///
+    /// `context_declaring_modules` is the map the scanner now records.
+    /// Empty on archives built before it existed, which is why this
+    /// contributes nothing rather than failing.
+    fn own_surface_contexts(&self, module: &str, out: &mut std::collections::BTreeSet<Text>) {
+        let Maybe::Some(metadata) = &self.core_metadata else {
+            return;
+        };
+        for (name, declaring) in metadata.context_declaring_modules.iter() {
+            if declaring.as_str() == module {
+                out.insert(name.clone());
+            }
+        }
+    }
+
     fn metadata_own_surface_for(&self, module_path: &str) -> Option<List<Text>> {
         self.metadata_own_surface_inner(module_path, true)
     }
@@ -3802,6 +3826,7 @@ impl TypeChecker {
         let canonical = Self::canonical_module_key(module_path)?;
         let mut names: std::collections::BTreeSet<Text> = std::collections::BTreeSet::new();
         self.own_surface_functions(canonical.as_str(), &mut names);
+        self.own_surface_contexts(canonical.as_str(), &mut names);
         // The stdlib is inconsistent about the leading cog segment in its
         // `module ...;` declarations — `core/sys/mmio.vr` declares
         // `module sys.mmio;`, so its descriptors are keyed `sys.mmio.*`
@@ -3809,6 +3834,7 @@ impl TypeChecker {
         // `resolve_function_via_metadata_reexports` does for one item.
         if let Some(stripped) = canonical.strip_prefix("core.") {
             self.own_surface_functions(stripped, &mut names);
+            self.own_surface_contexts(stripped, &mut names);
         }
         if with_types {
             if let Some(items) = self.own_surface_lookup(&Text::from(canonical.as_str())) {
