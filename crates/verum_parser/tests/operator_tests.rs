@@ -951,7 +951,12 @@ fn test_precedence_bitwise_shift_arithmetic() {
 #[test]
 fn test_precedence_all_levels() {
     // Complex expression with all precedence levels
-    assert_parses("x |> f ?? y = a || b && c == d > e + f * g ** h");
+    // Assignment is looser than `??` (T0816): the right-hand side of `=`
+    // swallows the rest.  The old spelling nested an assignment inside a
+    // coalesce (`f ?? y = a || …`), which parsed only while assignment
+    // bound tighter than `??`.
+    assert_parses("x = a ?? b || c && d == e > f + g * h ** i");
+    assert_parses("x |> f");
 }
 
 #[test]
