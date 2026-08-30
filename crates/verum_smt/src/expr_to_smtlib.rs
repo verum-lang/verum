@@ -552,7 +552,7 @@ fn substitute_ident_with_symbol(expr: &Expr, name: &str, symbol: &str) -> Expr {
         ))),
         expr.span,
     );
-    substitute_ident(expr, name, &marker)
+    substitute_ident_with_expr(expr, name, &marker)
 }
 
 /// Prefix marking an identifier that is really a raw SMT-LIB term.
@@ -1319,7 +1319,7 @@ fn fold_let_bindings(
 fn apply_bindings(e: &Expr, bs: &[(String, Expr)]) -> Expr {
     let mut out = e.clone();
     for (bound, replacement) in bs {
-        out = substitute_ident(&out, bound, replacement);
+        out = substitute_ident_with_expr(&out, bound, replacement);
     }
     out
 }
@@ -1621,15 +1621,32 @@ fn early_return_guard(expr: &Expr) -> Option<(Expr, Expr)> {
 /// then shows up as a free variable and the reflection's own
 /// translation declines it — a miss becomes "not proved", never
 /// "proved about something else".
-fn substitute_ident(expr: &Expr, name: &str, replacement: &Expr) -> Expr {
-    let sub = |e: &Expr| substitute_ident(e, name, replacement);
+/// Replace every free occurrence of `name` with `replacement`.
+///
+/// `pub` because a refinement carried by a record FIELD has to become a
+/// hypothesis about `param.field`, not about a bare identifier, and the
+/// only other substitution walker in the tree replaces an ident with an
+/// ident (T0994). One walk with two callers beats a second walk.
+pub fn substitute_ident_with_expr(expr: &Expr, name: &str, replacement: &Expr) -> Expr {
+    let sub = |e: &Expr| substitute_ident_with_expr(e, name, replacement);
     let kind = match &expr.kind {
         ExprKind::Path(path) => {
-            if path.segments.len() == 1
-                && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
-                && ident.name.as_str() == name
-            {
-                return replacement.clone();
+            if path.segments.len() == 1 {
+                match &path.segments[0] {
+                    verum_ast::ty::PathSegment::Name(ident)
+                        if ident.name.as_str() == name =>
+                    {
+                        return replacement.clone();
+                    }
+                    // A refinement's binder is often written `self`, and
+                    // the parser keeps that as its own segment kind
+                    // rather than a name — so a walker that matches only
+                    // `Name` silently substitutes nothing.
+                    verum_ast::ty::PathSegment::SelfValue if name == "self" => {
+                        return replacement.clone();
+                    }
+                    _ => {}
+                }
             }
             return expr.clone();
         }
@@ -1693,7 +1710,7 @@ fn substitute_ident(expr: &Expr, name: &str, replacement: &Expr) -> Expr {
             }
             let mut rebuilt = expr.clone();
             verum_ast::visit_mut::each_child_expr_mut(&mut rebuilt, &mut |child| {
-                *child = substitute_ident(child, name, replacement);
+                *child = substitute_ident_with_expr(child, name, replacement);
             });
             return rebuilt;
         }

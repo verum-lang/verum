@@ -2939,6 +2939,49 @@ pub fn register_module_lemmas(
 /// This is the data source that turns `n: FanoDim` into the implicit
 /// hypothesis `n == 7` at verification time, eliminating the need for
 /// authors to restate the refinement as an explicit `requires` clause.
+/// For every RECORD declared in the module, its fields whose declared
+/// type is a refinement alias: `Version { major: Component, … }` with
+/// `Component is n: Int where n >= 0` yields `("Version", [("major",
+/// "Component"), …])`.
+///
+/// Needed because a refinement on a PARAMETER reaches the solver as a
+/// hypothesis and the same refinement on a FIELD did not — measured,
+/// `fn get(b: Box) -> Int ensures result >= 0 { b.v }` with
+/// `Box { v: NonNeg }` FAILED while the parameter form proved. The
+/// argument for refinement types is that the invariant travels with the
+/// type; a refinement that survives a parameter but not a field
+/// survives only the shape nobody writes, since real domain types are
+/// records (T0994).
+pub fn build_record_field_alias_map(
+    module: &verum_ast::Module,
+) -> std::collections::HashMap<Text, Vec<(Text, Text)>> {
+    use std::collections::HashMap;
+    use verum_ast::ItemKind;
+    use verum_ast::decl::TypeDeclBody;
+
+    let mut out: HashMap<Text, Vec<(Text, Text)>> = HashMap::new();
+    for item in &module.items {
+        let ItemKind::Type(td) = &item.kind else {
+            continue;
+        };
+        let TypeDeclBody::Record(fields) = &td.body else {
+            continue;
+        };
+        let mut carried: Vec<(Text, Text)> = Vec::new();
+        for field in fields.iter() {
+            if let verum_ast::ty::TypeKind::Path(p) = &field.ty.kind
+                && let Some(id) = p.as_ident()
+            {
+                carried.push((field.name.name.clone(), id.name.clone()));
+            }
+        }
+        if !carried.is_empty() {
+            out.insert(td.name.name.clone(), carried);
+        }
+    }
+    out
+}
+
 pub fn build_refinement_alias_map(
     module: &verum_ast::Module,
 ) -> std::collections::HashMap<Text, Vec<Expr>> {

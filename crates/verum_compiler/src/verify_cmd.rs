@@ -429,6 +429,11 @@ impl<'s> VerifyCommand<'s> {
         // alias's own opaque one (T0964).
         let alias_bases =
             crate::phases::proof_verification::build_refinement_alias_base_map(module);
+        // Which record fields carry a refinement alias, so a parameter
+        // typed by a record hands the solver its fields' predicates
+        // (T0994).
+        let record_fields =
+            crate::phases::proof_verification::build_record_field_alias_map(module);
 
         // Pre-populate a hints database with every sibling theorem / lemma /
         // corollary / axiom in this module so `apply <name>` can find them.
@@ -669,6 +674,7 @@ impl<'s> VerifyCommand<'s> {
                     timeout,
                     &alias_map,
                     &alias_bases,
+                    &record_fields,
                     &reflection_registry,
                     &callee_signatures_for_module,
                     &contract_table,
@@ -1036,6 +1042,7 @@ impl<'s> VerifyCommand<'s> {
         timeout: Duration,
         alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
         alias_bases: &std::collections::HashMap<Text, Type>,
+        record_fields: &std::collections::HashMap<Text, Vec<(Text, Text)>>,
         reflection_registry: &verum_smt::refinement_reflection::RefinementReflectionRegistry,
         callee_signatures_for_module: &[(Text, Vec<Text>, Text)],
         contract_table: &verum_verification::SymbolTable,
@@ -1059,7 +1066,8 @@ impl<'s> VerifyCommand<'s> {
         // refinements on parameters. For `fn foo(p: PageNo)` where
         // `type PageNo is Int where |n| { n >= 1 }`, this adds an
         // expression equivalent to `p >= 1` to the requires set.
-        let implicit_requires = self.synthesize_alias_refinement_requires(func, alias_map);
+        let implicit_requires =
+            self.synthesize_alias_refinement_requires(func, alias_map, record_fields);
         let has_implicit_requires = !implicit_requires.is_empty();
 
         // Certified strategy: run the proof kernel's K-rule recheck
@@ -1693,6 +1701,7 @@ impl<'s> VerifyCommand<'s> {
         &self,
         func: &FunctionDecl,
         alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+        record_fields: &std::collections::HashMap<Text, Vec<(Text, Text)>>,
     ) -> Vec<Expr> {
         use crate::phases::proof_verification::substitute_ident;
         let mut out: Vec<Expr> = Vec::new();
@@ -1711,6 +1720,37 @@ impl<'s> VerifyCommand<'s> {
             let Some(alias_name) = alias_name else {
                 continue;
             };
+            // A parameter whose type is a RECORD carries its fields'
+            // refinements. `fn rank(v: Version)` with
+            // `Version { major: Component, … }` and
+            // `Component is n: Int where n >= 0` must give the solver
+            // `v.major >= 0`, not nothing — without it the obligation is
+            // unconstrained and the counterexample comes back EMPTY,
+            // which is the tell (T0994).
+            if let Some(fields) = record_fields.get(&alias_name) {
+                for (field_name, field_alias) in fields {
+                    let Some(field_preds) = alias_map.get(field_alias) else {
+                        continue;
+                    };
+                    for pred in field_preds {
+                        let access = Expr::new(
+                            verum_ast::ExprKind::Field {
+                                expr: verum_common::Heap::new(Expr::new(
+                                    verum_ast::ExprKind::Path(verum_ast::ty::Path::single(
+                                        verum_ast::ty::Ident::new(param_name.as_str(), pred.span),
+                                    )),
+                                    pred.span,
+                                )),
+                                field: verum_ast::ty::Ident::new(field_name.as_str(), pred.span),
+                            },
+                            pred.span,
+                        );
+                        out.push(verum_smt::expr_to_smtlib::substitute_ident_with_expr(
+                            pred, "self", &access,
+                        ));
+                    }
+                }
+            }
             let Some(preds) = alias_map.get(&alias_name) else {
                 continue;
             };
