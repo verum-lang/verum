@@ -1,0 +1,61 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L0
+// @tags: verification, smt, soundness, purity, T0982
+// @timeout: 60000
+// @expected-error: proof-failed
+//
+// MEASURED 2026-08-30. The verifier said `Proved` for a postcondition
+// the program VIOLATES.
+//
+// `tick` has state. Two calls to it return 1 and 2, so `a - b` is -1 —
+// the interpreter prints exactly that. The verifier proved `result == 0`.
+//
+// MECHANISM. A function's postcondition is discharged by asserting
+// `result == body`, and the body is folded by substituting the `let`
+// bindings, giving `tick() - tick()`. Both occurrences translate to the
+// same SMT term — `expr_to_smtlib.rs` renders a call as `(name args…)`,
+// keyed on the name alone — so the solver's congruence closure gives 0.
+//
+// Identifying two identical call terms is CORRECT for a pure function
+// and false for one with effects. The neighbouring spec
+// `two_calls_to_one_pure_function_are_equal.vr` is the other half of the
+// pair: same skeleton, pure callee, and there the answer must stay
+// `Proved`. A fix that turns this file green by refusing every call
+// would turn that one red.
+//
+// WHY NOTHING CAUGHT IT. The soundness argument is written down in
+// `fold_let_bindings` — "reflection already refuses impure functions
+// (the context gate above)" — and it names the wrong gate:
+// `func.contexts.is_empty()` refuses `using [Database]`, and contexts
+// are not computational properties. There IS a purity gate,
+// `is_reflectable` (in `refinement_reflection`), and it has four callers, all
+// four its own unit tests.
+//
+// Beneath both: the property inferrer does not treat a `static mut` as
+// state at all, so `pure fn tick()` below is accepted as PURE. The
+// assignment's target is a bare path, indistinguishable from a loop
+// counter without the module's static names.
+//
+// This spec is RED until T0982 lands. It is pinned rather than skipped
+// because a skipped soundness spec is indistinguishable from one that
+// passes.
+
+static mut COUNTER: Int = 0;
+
+fn tick() -> Int {
+    COUNTER = COUNTER + 1;
+    COUNTER
+}
+
+fn drift(n: Int) -> Int
+    ensures result == 0
+{
+    let a = tick();
+    let b = tick();
+    a - b
+}
+
+fn main() {
+    print(f"{drift(1)}");
+}

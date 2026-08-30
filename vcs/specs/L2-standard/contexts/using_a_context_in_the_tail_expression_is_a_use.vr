@@ -7,7 +7,7 @@
 //
 //   The context-usage finder walked a block's statements and stopped
 //   there. A block keeps its tail expression in a separate field
-//   (`Block::expr`), so the most ordinary shape of a context-using
+//   (the block's tail-expression field), so the most ordinary shape of a context-using
 //   function — one expression, no statements — reported:
 //
 //     warning: Context 'Clock' declared in 'using' clause but never

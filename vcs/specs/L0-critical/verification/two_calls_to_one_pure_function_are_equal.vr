@@ -1,0 +1,30 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L0
+// @tags: verification, smt, soundness, purity, T0982
+// @timeout: 60000
+//
+// The control half of the pair. Same skeleton as
+// `two_calls_to_one_impure_function_are_not_equal.vr`, one difference:
+// `twice` is pure, so identifying its two identical call terms is
+// CORRECT and `result == 0` must keep proving.
+//
+// Kept beside its twin because the obvious repair for the twin — refuse
+// to identify any two calls — is sound and would silently cost this.
+// Without this file the regression would read as a clean fix.
+
+pure fn twice(k: Int) -> Int {
+    k * 2
+}
+
+fn same(n: Int) -> Int
+    ensures result == 0
+{
+    let a = twice(3);
+    let b = twice(3);
+    a - b
+}
+
+fn main() {
+    print(f"{same(1)}");
+}
