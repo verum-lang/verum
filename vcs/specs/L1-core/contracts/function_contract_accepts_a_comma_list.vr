@@ -1,0 +1,38 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: parser, contracts, requires, ensures, T0988
+// @description: A function contract takes several clauses separated by commas, exactly as a theorem's does
+
+// The grammar defines the list ONCE, and both constructs point at it:
+//
+//     requires_clause = 'requires' , expression , { ',' , expression } ;
+//
+// The theorem parser implemented it; the function parser read one
+// expression, stopped at the comma, and reported "expected `{` to start
+// function body" — blaming the body for a comma, so the first reading of
+// the message sends the author to the wrong line (T0988).
+//
+// Separate clauses are not a style preference. Each is a separate
+// hypothesis for the solver, and a failed precondition names the
+// individual conjunct rather than one long `&&`.
+
+pure fn rank(major: Int, minor: Int, patch: Int) -> Int
+    requires major >= 0, minor >= 0, patch >= 0
+    ensures result >= 0, result >= patch
+{
+    major * 1000000 + minor * 1000 + patch
+}
+
+// The sibling that already worked. Kept beside it so a repair that moves
+// the function form by breaking the theorem form cannot pass.
+theorem patch_bump_moves_forward(major: Int, minor: Int, patch: Int)
+    requires major >= 0, minor >= 0, patch >= 0
+    ensures rank(major, minor, patch + 1) > rank(major, minor, patch)
+{
+    proof by smt
+}
+
+fn main() {
+    print(f"{rank(1, 2, 3)}");
+}
