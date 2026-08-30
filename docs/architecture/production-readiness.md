@@ -174,6 +174,31 @@ Stated explicitly, because an unmeasured area reads as a healthy one.
   disappeared once space was freed, including a file that had answered
   `unbound variable: sin` an hour earlier.
 
+### An error count is in messages, not causes (2026-08-30)
+
+The registry project checks in 34 s and reports **461 errors**. That
+number is in the wrong units for every purpose it gets used for.
+
+    25  E401 "cannot find X in module Y"      causes
+    24  E100 "unbound variable: X"            echoes of those causes
+    19  of those 24 are ONE name, format_semver
+    8   names the registry imports that the stdlib does not have
+
+So a quarter of the "unbound variable" diagnostics are the compiler
+repeating something it already said, and the single most frequent
+message in the project is not the most frequent cause — it is the most
+duplicated one. A 461-line report is read top-down and abandoned, so
+the echoes displace the genuine diagnostics rather than merely padding
+them (T0990).
+
+The same unit error appears in the conformance suite: "265 unproved
+obligations" counts obligations, and one unresolved entity can fail
+many. Any burndown plan built on either figure is planning against
+message counts.
+
+Rule: a defect count states its units. "461 diagnostics; causes fewer,
+not yet counted" is a usable sentence. "461 errors" is not.
+
 ### The verifier answered a question wrongly (2026-08-30)
 
 Everything else in this document is about a check that is missing, weak,
