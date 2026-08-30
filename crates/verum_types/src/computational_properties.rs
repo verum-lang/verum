@@ -497,6 +497,36 @@ impl PropertySet {
         self.properties.len() == 1 && self.properties.contains(&ComputationalProperty::Pure)
     }
 
+    /// Whether a function with these properties returns a value
+    /// DETERMINED BY ITS ARGUMENTS.
+    ///
+    /// This is the precondition for two things the verifier does and
+    /// never checked: asserting `result == body` when discharging a
+    /// postcondition, and identifying two syntactically equal calls as
+    /// one SMT term. Both are correct exactly when the function is a
+    /// mapping from its arguments, and false otherwise — measured, a
+    /// function reading a `static mut` had `ensures result == 0` PROVED
+    /// while it returned -1 (T0982).
+    ///
+    /// Not the same question as `is_pure`, and deliberately weaker.
+    /// Allocation, deallocation and divergence do not change what a
+    /// call RETURNS for given arguments, so a body that allocates still
+    /// binds. What breaks the mapping is a value drawn from somewhere
+    /// other than the arguments — the outside world, mutable global
+    /// state, another thread, or a foreign call.
+    pub fn determines_result_from_arguments(&self) -> bool {
+        const NOT_A_MAPPING: [ComputationalProperty; 7] = [
+            ComputationalProperty::IO,
+            ComputationalProperty::ReadsExternal,
+            ComputationalProperty::WritesExternal,
+            ComputationalProperty::Mutates,
+            ComputationalProperty::FFI,
+            ComputationalProperty::Async,
+            ComputationalProperty::Spawns,
+        ];
+        !NOT_A_MAPPING.iter().any(|p| self.properties.contains(p))
+    }
+
     /// Check if this property set contains a specific property
     pub fn contains(&self, property: &ComputationalProperty) -> bool {
         self.properties.contains(property)
@@ -783,6 +813,17 @@ pub struct PropertyInferenceContext {
 
     /// Stack of nested scopes for property tracking
     scope_stack: List<PropertySet>,
+
+    /// Names declared `static mut` in the module under inference.
+    ///
+    /// Reading one is `ReadsExternal` and writing one is `Mutates` +
+    /// `WritesExternal`, and without this set neither is visible: the
+    /// target of `COUNTER = COUNTER + 1` is a bare path, shaped exactly
+    /// like the loop counter that `pure` must keep allowing. The
+    /// distinction is not in the expression at all — it is in what the
+    /// name was DECLARED as, which is why the fact has to be carried
+    /// rather than derived (T0982).
+    mutable_statics: std::collections::HashSet<Text>,
 }
 
 /// Builtins whose properties cannot be read off a body, because they have none.
@@ -821,6 +862,7 @@ impl PropertyInferenceContext {
             current_properties: PropertySet::pure(),
             known_functions,
             scope_stack: List::new(),
+            mutable_statics: std::collections::HashSet::new(),
         }
     }
 
@@ -848,6 +890,17 @@ impl PropertyInferenceContext {
     /// Reset to pure
     pub fn reset(&mut self) {
         self.current_properties = PropertySet::pure();
+    }
+
+    /// Record that `name` is declared `static mut`.
+    pub fn register_mutable_static(&mut self, name: Text) {
+        self.mutable_statics.insert(name);
+    }
+
+    /// Whether `name` was declared `static mut` in the module under
+    /// inference.
+    pub fn is_mutable_static(&self, name: &Text) -> bool {
+        self.mutable_statics.contains(name)
     }
 
     /// Register a function with its known properties
@@ -929,6 +982,15 @@ fn writes_through_a_reference(target: &verum_ast::expr::Expr) -> bool {
 }
 
 impl PropertyInferrer {
+    /// Record that `name` is declared `static mut` in the module being
+    /// inferred. Call this for every such declaration BEFORE inferring
+    /// any function body that might touch it — a body inferred earlier
+    /// simply does not see the fact, and reports the function purer
+    /// than it is.
+    pub fn register_mutable_static(&mut self, name: Text) {
+        self.context.register_mutable_static(name);
+    }
+
     /// Create a new property inferrer
     pub fn new() -> Self {
         Self {
@@ -960,7 +1022,18 @@ impl PropertyInferrer {
             ExprKind::Literal(_) => PropertySet::pure(),
 
             // Path/variable references are pure
-            ExprKind::Path(_) => PropertySet::pure(),
+            // A path is pure unless it NAMES mutable global state, in
+            // which case reading it is reading the outside world: two
+            // reads of one `static mut` may differ, and anything that
+            // treats the function as a mapping from its arguments —
+            // memoisation, reordering, or the verifier asserting
+            // `result == body` — is then wrong (T0982).
+            ExprKind::Path(path) => match path.as_ident() {
+                Some(ident) if self.context.is_mutable_static(&ident.name) => {
+                    PropertySet::single(ComputationalProperty::ReadsExternal)
+                }
+                _ => PropertySet::pure(),
+            },
 
             // Binary operations: union of operand properties
             ExprKind::Binary {
@@ -991,6 +1064,21 @@ impl PropertyInferrer {
                 if op.is_assignment() && writes_through_a_reference(left) {
                     combined =
                         combined.union(&PropertySet::single(ComputationalProperty::Mutates));
+                }
+
+                // Assigning a `static mut` is a write the whole program
+                // can observe — a strictly larger claim than `Mutates`
+                // through a caller's reference, and the one that makes
+                // the function stop being a function of its arguments.
+                if op.is_assignment()
+                    && let ExprKind::Path(path) = &left.kind
+                    && let Some(ident) = path.as_ident()
+                    && self.context.is_mutable_static(&ident.name)
+                {
+                    combined = combined.union(&PropertySet::from_properties([
+                        ComputationalProperty::Mutates,
+                        ComputationalProperty::WritesExternal,
+                    ]));
                 }
 
                 combined
@@ -1461,6 +1549,51 @@ impl PropertyInferrer {
         }
 
         properties
+    }
+
+    /// Seed this inferrer from a module's items: record its mutable
+    /// statics, then infer and register every function's properties
+    /// REPEATEDLY until they stop growing.
+    ///
+    /// One pass in source order is not enough, and the difference is
+    /// visible in three lines: `pure fn caller() { helper() }` above
+    /// `fn helper() { print("x"); 1 }` was ACCEPTED, and the same file
+    /// with the two declarations swapped was refused (T0985). The `Call`
+    /// arm looks a callee up and, finding nothing, adds nothing — so a
+    /// forward reference reads as pure.
+    ///
+    /// The iteration terminates because properties only ever grow: each
+    /// round unions, never removes, and the set of properties is finite.
+    /// The round cap is a belt on that argument, not the argument.
+    pub fn seed_from_items(&mut self, items: &[verum_ast::Item]) {
+        for item in items {
+            if let verum_ast::ItemKind::Static(static_decl) = &item.kind
+                && static_decl.is_mut
+            {
+                self.register_mutable_static(static_decl.name.name.clone());
+            }
+        }
+
+        for _round in 0..16 {
+            let mut grew = false;
+            for item in items {
+                if let verum_ast::ItemKind::Function(func) = &item.kind {
+                    let props = self.infer_function_decl(func);
+                    let name = func.name.name.clone();
+                    let changed = match self.context.get_function_properties(&name) {
+                        Some(existing) => *existing != props,
+                        None => true,
+                    };
+                    if changed {
+                        self.context.register_function(name, props);
+                        grew = true;
+                    }
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
     }
 
     /// Get the context for registering known function properties

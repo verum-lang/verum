@@ -448,6 +448,16 @@ impl<'s> VerifyCommand<'s> {
         // the same feature set.
         let mut reflection_registry =
             verum_smt::refinement_reflection::RefinementReflectionRegistry::new();
+
+        // Computational properties for this module, seeded to a
+        // fixpoint. The verifier needs them to decide whether a body
+        // may be bound to `result` at all; without the seeding a callee
+        // declared LATER in the file is read as pure, and the question
+        // gets the wrong answer for the same reason the type checker
+        // did (T0982, T0985).
+        let mut module_properties =
+            verum_types::computational_properties::PropertyInferrer::new();
+        module_properties.seed_from_items(&module.items);
         // Sort signatures for every function declared in the module
         // — including body-less declarations that `try_reflect_function`
         // rejects. The translator's UF-fallback consults this when
@@ -663,6 +673,7 @@ impl<'s> VerifyCommand<'s> {
                     &callee_signatures_for_module,
                     &contract_table,
                     &variant_registry,
+                    &mut module_properties,
                 );
                 let elapsed = start_time.elapsed();
 
@@ -1029,6 +1040,7 @@ impl<'s> VerifyCommand<'s> {
         callee_signatures_for_module: &[(Text, Vec<Text>, Text)],
         contract_table: &verum_verification::SymbolTable,
         variant_registry: &[(Text, Vec<Text>)],
+        module_properties: &mut verum_types::computational_properties::PropertyInferrer,
     ) -> Result<verum_smt::ProofResult, VerificationError> {
         let start = Instant::now();
 
@@ -1346,12 +1358,42 @@ impl<'s> VerifyCommand<'s> {
                 }
             }
 
+            // `result == body` is asserted only when the body IS a
+            // function of the arguments. For one that is not, the
+            // equation is simply false, and asserting it let a
+            // postcondition be PROVED that the program violates
+            // (T0982). Withholding it leaves `result` free, so such a
+            // postcondition reports Failed — which is the honest answer
+            // available without a stronger analysis.
+            // Asked of the SEEDED inferrer, not a fresh one: the
+            // seeding registered every function in the module to a
+            // fixpoint, so a callee declared later is known here
+            // (T0985). Inferred directly rather than looked up by name
+            // — a method and a free function can share a bare name, and
+            // a map keyed on that would answer for the wrong one.
+            let props = module_properties.infer_function_decl(func);
+            let body_for_binding = match () {
+                _ if !props.determines_result_from_arguments() => {
+                    // Say WHY on the tracing channel: a postcondition
+                    // that stops proving after this change has exactly
+                    // two possible causes, and "the body was not bound"
+                    // must not be one of the silent ones.
+                    tracing::debug!(
+                        "verify: `{}` gets no body binding — its result is not a                          function of its arguments ({:?})",
+                        func.name,
+                        props
+                    );
+                    verum_common::Maybe::None
+                }
+                _ => func.body.as_ref(),
+            };
+
             let post_result = self.verify_postconditions(
                 &ctx,
                 &mut translator,
                 &effective_requires,
                 &effective_ensures,
-                func.body.as_ref(),
+                body_for_binding,
                 timeout,
                 reflection_registry,
             );

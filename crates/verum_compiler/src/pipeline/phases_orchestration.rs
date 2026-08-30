@@ -215,6 +215,12 @@ impl<'s> CompilationPipeline<'s> {
             }
         });
 
+        // Computational properties for the whole module, seeded BEFORE
+        // passes 0-4 — those register function signatures, and
+        // registering a signature infers its body's properties. A fact
+        // recorded after that is recorded too late (T0982, T0985).
+        checker.seed_module_properties(&module.items);
+
         // Register built-in types and functions
         // NOTE: In NormalBuild mode, these may already be loaded from stdlib metadata,
         // but register_builtins() is idempotent and ensures core intrinsics are available.

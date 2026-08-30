@@ -73,6 +73,20 @@ use verum_common::{Heap, List, Map, Maybe, Set, Shared, Text, ToText};
 use verum_modules::{ModulePath, ModuleRegistry, NameResolver, resolve_import, resolver::NameKind};
 
 impl TypeChecker {
+    /// Seed computational properties for a whole module BEFORE any item
+    /// is checked: which names are mutable global state, and every
+    /// function's properties to a fixpoint.
+    ///
+    /// Every driver that walks a module's items has to call this, and
+    /// the reason is measurable in three lines: without it a `pure fn`
+    /// calling an impure function DECLARED LATER is accepted, because
+    /// the `Call` arm looks the callee up, finds nothing, and adds
+    /// nothing (T0985). A read or write of a `static mut` is likewise
+    /// invisible until the static's NAME is known (T0982).
+    pub fn seed_module_properties(&mut self, items: &[verum_ast::Item]) {
+        self.property_inferrer.seed_from_items(items);
+    }
+
     // ========================================================================
     // #91 Phase 3 — pre-resolved-static-call side-table API.
     //

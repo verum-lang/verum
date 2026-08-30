@@ -398,6 +398,18 @@ impl TypeChecker {
                 }
             }
 
+            // Phase 1b: seed computational properties for the whole
+            // module BEFORE anything is checked.
+            //
+            // Before Phase 2, because registering a function signature
+            // infers its body's properties: a fact recorded after that
+            // is recorded too late, and the function is already on the
+            // books purer than it is. Two facts are seeded here — which
+            // names are mutable global state (T0982), and every
+            // function's properties to a fixpoint so a call to one
+            // declared LATER is not read as pure (T0985).
+            self.property_inferrer.seed_from_items(items);
+
             // Phase 2: Register function signatures for forward references
             // IMPORTANT: Functions declared inside `module X { ... }` are module-scoped
             // (accessed as `X.fn()`), so they must NOT overwrite an existing top-level
