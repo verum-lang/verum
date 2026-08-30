@@ -1159,11 +1159,31 @@ impl<'s> CompilationPipeline<'s> {
                         }
                     }
                 }
+                // The read guard must NOT live across this call. Written as
+                // `&registry.read()` the temporary guard survives to the end
+                // of the statement — that is, for the whole recursive import
+                // walk — and deep inside it `import_item_from_module_body`
+                // takes `session_registry.write()` to record a lazily loaded
+                // module (modules.rs:3258). Same lock, one thread, reader
+                // still held: `wait_for_readers` never returns.
+                //
+                // Measured on the registry corpus: `verum check` ran 25
+                // minutes for 8.9 s of CPU at 0% and 828 MB resident, and
+                // `sample` put all 4 428 samples in
+                // `RawRwLock::lock_exclusive_slow -> wait_for_readers`.
+                // The guard has been in argument position since 2026-05-08
+                // (a66e1a369); it only became reachable once the lazy load
+                // started firing inside this walk, which is why a hang shows
+                // up on a large project and never on a small one.
+                //
+                // A snapshot costs one clone per module and releases the
+                // reader immediately.
+                let registry_snapshot = registry.read().clone();
                 process_imports_recursive(
                     &mut checker,
                     module.items.as_slice(),
                     path.as_str(),
-                    &registry.read(),
+                    &registry_snapshot,
                     self.session,
                 );
 
