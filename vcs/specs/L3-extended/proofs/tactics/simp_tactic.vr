@@ -32,10 +32,21 @@ theorem use_simp_lemma<T>(xs: List<T>): xs.concat([]) == xs {
 }
 
 /// Boolean simplification
-theorem simp_bool_1(p: Bool): p && true == p { proof by simp }
-theorem simp_bool_2(p: Bool): p || false == p { proof by simp }
-theorem simp_bool_3(p: Bool): p && false == false { proof by simp }
-theorem simp_bool_4(p: Bool): p || true == true { proof by simp }
+///
+/// PARENTHESISED DELIBERATELY. `==` binds TIGHTER than `&&` and `||`, so
+/// `p && true == p` is `p && (true == p)` — FALSE at p = false — and
+/// `p && false == false` is `p && (false == false)`, i.e. plain `p`, also
+/// not a tautology. Both were counted as unproved obligations; both were
+/// the file asserting something other than what its names say.
+///
+/// The other two were VALID under the same misreading, by accident
+/// (`p || (false == p)` is `p || !p`; `p || (true == true)` is
+/// `p || true`). All four are written explicitly so none of them depends
+/// on which way the reader groups the line.
+theorem simp_bool_1(p: Bool): (p && true) == p { proof by simp }
+theorem simp_bool_2(p: Bool): (p || false) == p { proof by simp }
+theorem simp_bool_3(p: Bool): (p && false) == false { proof by simp }
+theorem simp_bool_4(p: Bool): (p || true) == true { proof by simp }
 
 /// Conditional simplification
 theorem simp_if_true<T>(a: T, b: T): (if true { a } else { b }) == a { proof by simp }

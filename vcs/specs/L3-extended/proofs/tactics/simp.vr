@@ -31,8 +31,19 @@ theorem simp_list_nil<T>(xs: List<T>): xs.concat([]) == xs { proof by simp }
 theorem simp_list_len<T>(): len(Nil) == 0 { proof by simp }
 
 /// Simp for boolean simplification
-theorem simp_bool_and(p: Bool): p && true == p { proof by simp }
-theorem simp_bool_or(p: Bool): p || false == p { proof by simp }
+///
+/// PARENTHESISED DELIBERATELY. `==` binds TIGHTER than `&&` and `||`
+/// (grammar/verum.ebnf, and the parser agrees since T0816), so
+/// `p && true == p` is `p && (true == p)` — which is FALSE at p = false,
+/// and the verifier was right to refuse it. The claim the name makes is
+/// the identity `(p && true) == p`, so the file now says that.
+///
+/// `p || false == p` happened to be VALID under the same misreading
+/// (`p || (false == p)` is `p || !p`), which is why only one of the pair
+/// showed up as unproved — an accident, not a difference in kind. Both
+/// are written explicitly here so neither depends on luck.
+theorem simp_bool_and(p: Bool): (p && true) == p { proof by simp }
+theorem simp_bool_or(p: Bool): (p || false) == p { proof by simp }
 theorem simp_bool_not_not(p: Bool): !!p == p { proof by simp }
 
 /// Simp in structured proofs
