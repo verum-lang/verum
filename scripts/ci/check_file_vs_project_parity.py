@@ -75,6 +75,44 @@ fn main() {
 }
 """,
     ),
+    # NEGATIVE cases. A program that must be REFUSED catches the failure
+    # the positive ones cannot see: a check switched on in one driver and
+    # off in the other reads as "clean" on both sides of a positive test.
+    # The single-file path enables dependent types, higher-kinded
+    # protocols, generic associated types and a protocol-coherence mode
+    # that the project path never turns on — so a rule can be live in one
+    # command and absent in the other while every valid program passes.
+    (
+        "NEG_const_generic_mismatch",
+        """type Vector<const N: Int> is { items: List<Int> };
+
+fn takes_three(v: Vector<3>) -> Int { 3 }
+
+fn main() {
+    let four: Vector<4> = Vector { items: [1, 2, 3, 4] };
+    print(f"{takes_three(four)}");
+}
+""",
+    ),
+    (
+        "NEG_refinement_violated",
+        """type Pos is n: Int where n > 0;
+
+fn bump(p: Pos) -> Int { p + 1 }
+
+fn main() {
+    let bad: Pos = 0 - 5;
+    print(f"{bump(bad)}");
+}
+""",
+    ),
+    (
+        "NEG_undeclared_name",
+        """fn main() {
+    print(f"{no_such_function_anywhere(1)}");
+}
+""",
+    ),
 ]
 
 MANIFEST = """[cog]
@@ -123,6 +161,7 @@ def main() -> int:
 
     root = Path(tempfile.mkdtemp(prefix="verum-parity-"))
     mismatches: list[str] = []
+    inert: list[str] = []
     checked = 0
     try:
         for name, source in CASES:
@@ -149,6 +188,13 @@ def main() -> int:
                     f"  {name}: file rc={file_rc}, project rc={proj_rc} "
                     f"— {worse} rejects\n      {first.strip()[:120]}"
                 )
+            elif name.startswith("NEG_") and file_rc == 0:
+                # Agreeing is not enough for a program that must be
+                # REFUSED: both drivers accepting it means the rule is
+                # off everywhere, and comparing verdicts would call that
+                # parity. This is the vacuous-gate failure the whole
+                # `check_result_free_tests` census is about, one level up.
+                inert.append(f"  {name}: accepted by BOTH — the rule is not in force")
     finally:
         if not args.keep:
             shutil.rmtree(root, ignore_errors=True)
@@ -162,10 +208,23 @@ def main() -> int:
         )
         return 2
 
-    print(f"file-vs-project parity: {checked} programs checked both ways")
-    if not mismatches:
+    print(
+        f"file-vs-project parity: {checked} programs checked both ways "
+        f"({sum(1 for n, _ in CASES if n.startswith('NEG_'))} of them expected to fail)"
+    )
+    if inert:
+        print(
+            f"\n{len(inert)} program(s) that must be REFUSED were accepted "
+            "by both drivers:\n",
+            file=sys.stderr,
+        )
+        for m in inert:
+            print(m, file=sys.stderr)
+    if not mismatches and not inert:
         print("one source, one verdict")
         return 0
+    if not mismatches:
+        return 1
     print(f"\n{len(mismatches)} program(s) get DIFFERENT verdicts:\n", file=sys.stderr)
     for m in mismatches:
         print(m, file=sys.stderr)
