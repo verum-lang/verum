@@ -142,7 +142,7 @@ def main() -> int:
         "--docs",
         type=Path,
         default=DOCS,
-        help="documentation tree to compare (default: internal/website/docs)",
+        help="documentation tree to compare (default: the website docs tree)",
     )
     ap.add_argument(
         "--require-docs",

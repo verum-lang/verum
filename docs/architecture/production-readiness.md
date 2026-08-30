@@ -82,7 +82,7 @@ each says whether that instrument currently exists.
 | P3 | The two tiers agree: interpreter ≡ AOT | cross-tier suite | partial — `core-tests` runs both, but AOT lane is non-blocking (`nightly-aot.yml`) |
 | P4 | The stdlib a user gets is the stdlib we test | bake-vs-source parity | partial — T0692 (one driver), T0755 (535 of 2 561 `core/` files fail `check` while the bake is green) |
 | P5 | Every public stdlib name is reachable by a documented spelling | mount/reexport suite | **no, fix landing** — T0969 (peer session, 2026-08-30): a module gets TWO registry entries, an empty prefixed stub (`core.intrinsics.control`, 0 exports) and the real one (`intrinsics.control`, 20 exports); a glob resolves to the stub and imports nothing, silently. Radius not yet final — see §3 |
-| P6 | The published specification predicts what the compiler does | grammar↔parser gate | **partial** — `operator_ladder_tests.rs` pins the ladder against the parser (T0816, new). `check_grammar_docs_match.py` compares the site's EBNF to the authority, but takes the "no documentation tree" branch on every CI run, because `internal/` is gitignored and the website is a separate repository (T0971) |
+| P6 | The published specification predicts what the compiler does | grammar↔parser gate | **partial** — `operator_ladder_tests.rs` pins the ladder against the parser (T0816, new). `check_grammar_docs_match.py` compares the site's EBNF to the authority, but takes the "no documentation tree" branch on every CI run, because the website lives in a separate, gitignored repository (T0971) |
 | P7 | The tools survive a working day | LSP/CLI soak | **no** — T0752 (`verum lsp` reaches 36.6 GB over 13.5 h), T0746 |
 
 ---
@@ -173,6 +173,26 @@ Stated explicitly, because an unmeasured area reads as a healthy one.
   on the same files with the same binaries — three of five reproducers
   disappeared once space was freed, including a file that had answered
   `unbound variable: sin` an hour earlier.
+
+### The source-only gate wall is RED on main (2026-08-30)
+
+`make gates-source` is the list of gates CI runs that need no build.
+Run today, five of them fail, and the target stops at the first — so
+the ones after it did not run at all:
+
+| gate | state |
+|---|---|
+| `check-vr-syntax` | FAIL — one Rust `::` in a spec comment naming a Rust type (`TypeKind::Reference`), landed today in `768de7cca` |
+| `check-internal-refs` | FAIL — three references to the gitignored `internal/` tree, all mine, fixed in this commit |
+| `check-rings` | FAIL — 4 upward edges across the `core/` dependency rings (e.g. `base.env(r1.0) -> text.format(r2.0)`) |
+| `check-panic-surface` | FAIL — 665 unwrap/expect sites under `verum_codegen/src/llvm/` against a baseline of 664 |
+| `check-dup-emitters` | FAIL — an emitter body references libc `getenv` with no Linux syscall leg (T0436 class) |
+
+Two of the five are ratchets that moved by ONE (`panic-surface`) or
+name a known class (`dup-emitters`), which is what a ratchet is for.
+The point is not the individual rows: it is that the wall as a whole
+does not currently hold, and `make` stopping at the first failure means
+a green run of the later gates has never been observed on this state.
 
 ### A measurement rule this session paid for
 

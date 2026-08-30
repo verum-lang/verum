@@ -31,7 +31,7 @@
 //!
 //! Three sources have to agree on it: this file, `grammar/verum.ebnf`
 //! (§2.10) and the published operator table
-//! (`internal/website/docs/reference/operators.md`).  Change one, change
+//! (the operator table on the documentation site).  Change one, change
 //! all three — a row here failing means the parser moved.
 
 use verum_ast::expr::{Expr, ExprKind};
