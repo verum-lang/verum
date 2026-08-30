@@ -199,6 +199,63 @@ message counts.
 Rule: a defect count states its units. "461 diagnostics; causes fewer,
 not yet counted" is a usable sentence. "461 errors" is not.
 
+### Refinement types worked on scalars only (2026-08-30)
+
+The headline feature, measured on the shape every domain model uses:
+
+    type NonNeg is n: Int where n >= 0;
+
+    pure fn triple(a: NonNeg) -> Int ensures result >= 0 { a * 3 }   PROVED
+    type Box is { v: NonNeg };
+    pure fn get(b: Box) -> Int ensures result >= 0 { b.v }           FAILED
+
+A refinement on a PARAMETER became a hypothesis. The same refinement
+reached through a FIELD did not, so `b.v` handed the solver an
+unconstrained `Int`. The counterexample came back EMPTY — nothing to
+show, because the obligation was never constrained.
+
+The other side of the obligation had the mirror gap: a postcondition
+naming a field of the RESULT could not be discharged either, and that
+one was not about refinements at all —
+
+    type Box is { v: Int };                     <- no refinement anywhere
+    pure fn bump(b: Box) -> Box ensures result.v > b.v { Box { v: b.v + 1 } }
+        FAILED
+
+because `result` is bound by translating the body at Int, Bool or Real
+sort, and a record literal is none of those.
+
+So until today the argument "the invariant lives in the type and travels
+with it" held for `Int` and not for `{ x: Int }`. Both halves are fixed
+(T0994, T0995) and the registry showcase now discharges every proof it
+states — 6 of 6, from 4 of 6.
+
+WHAT THIS SAYS ABOUT THE MEASURING APPARATUS, which is what §0 is about:
+neither gap was a regression. Dated across four binaries, the oldest
+three weeks old, the showcase reported 4 proved / 2 failed on every one.
+A conformance suite of 7 036 specs did not contain the four-line program
+that exposes it, and the website guide asserted the opposite in prose.
+
+### An error code can be known as the WRONG thing (2026-08-30)
+
+`verum explain` is where a user goes with a code they just saw. Measured:
+
+    error<E0203>: Result type mismatch in '?' operator   <- printed
+    $ verum explain E203                                 <- the zero dropped
+      module not found                                   <- a different defect
+
+Two spellings are live — `Exxx` in the error registry, `E0xxx` in the
+diagnostics explanations and the compiler's lints — and where the digits
+coincide the meanings do not: `E0101` use-after-free against `E101`
+undefined type, `E0313` integer overflow against `E313` dangling
+reference. 51 four-digit codes, 41 with a colliding twin.
+
+A coverage gate that asks "is every printed code in the registry?" is
+GREEN on all 41, because both codes are registered — as different
+things. That is the same shape as a spec that measures and demands the
+wrong answer: the check runs, and its subject is not the question.
+Ratcheted at 41 (T0996); one instance fixed outright (T0992).
+
 ### The verifier answered a question wrongly (2026-08-30)
 
 Everything else in this document is about a check that is missing, weak,
