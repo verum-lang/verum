@@ -961,6 +961,7 @@ impl TypeChecker {
             imports_in_progress: std::collections::HashSet::new(),
             glob_imports_in_progress: std::collections::HashSet::new(),
             glob_imports_stack: Vec::new(),
+            metadata_own_surface: std::cell::RefCell::new(None),
             reexport_resolution_in_progress: std::collections::HashSet::new(),
             pending_extracted_type_bounds: Map::new(),
             imported_names: Map::new(),
@@ -1063,6 +1064,9 @@ impl TypeChecker {
         // the eager 30k-scheme scan this constructor used to run
         // cost ~150 ms release / ~420 ms debug per cold start.
         checker.core_metadata = Maybe::Some(metadata);
+        // GLOB-OWN-SURFACE (T0969): the index is derived from this
+        // handle; replacing the handle invalidates it.
+        checker.metadata_own_surface = std::cell::RefCell::new(None);
         checker
     }
 
@@ -1129,6 +1133,9 @@ impl TypeChecker {
     ) {
         self.register_coercion_markers_from_metadata(&metadata);
         self.core_metadata = Maybe::Some(metadata);
+        // GLOB-OWN-SURFACE (T0969): the index is derived from this
+        // handle; replacing the handle invalidates it.
+        self.metadata_own_surface = std::cell::RefCell::new(None);
     }
 
     /// Eager construction — registers every type/protocol/function
@@ -1143,6 +1150,9 @@ impl TypeChecker {
         let mut checker = Self::with_minimal_context();
         checker.load_stdlib_from_metadata(&metadata);
         checker.core_metadata = Maybe::Some(metadata);
+        // GLOB-OWN-SURFACE (T0969): the index is derived from this
+        // handle; replacing the handle invalidates it.
+        checker.metadata_own_surface = std::cell::RefCell::new(None);
         checker
     }
 
@@ -3475,6 +3485,7 @@ impl TypeChecker {
             imports_in_progress: std::collections::HashSet::new(),
             glob_imports_in_progress: std::collections::HashSet::new(),
             glob_imports_stack: Vec::new(),
+            metadata_own_surface: std::cell::RefCell::new(None),
             reexport_resolution_in_progress: std::collections::HashSet::new(),
             pending_extracted_type_bounds: Map::new(),
             imported_names: Map::new(),

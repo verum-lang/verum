@@ -1,0 +1,28 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: modules, mount, glob, name-resolution, stdlib, control
+// @expected-error: E100
+//
+// CONTROL for `glob_mount_reaches_a_module_the_stdlib_depends_on.vr` (T0969).
+//
+// That spec passes if `nop` resolves under `mount core.intrinsics.control.*;`.
+// It would ALSO pass if `nop` were ambient — visible with no mount at all —
+// and then it would measure nothing, because its input would sit in the
+// overlap between what the mount provides and what is already in scope.
+//
+// This is not hypothetical.  In the same investigation, a probe on
+// `core.intrinsics.atomic` used `compiler_fence`, which resolves with NO
+// mount whatsoever; that probe reported a working glob and had to be thrown
+// away.  A second probe on the same module used `atomic_fence` — also
+// ambient.  Two of the sweep's rows were vacuous before anyone checked.
+//
+// So this file states the other half: with the mount REMOVED, the same name
+// must not resolve.  If it ever turns green, its sibling has stopped
+// measuring the mount and both need re-reading — do not "fix" this one by
+// changing the expectation.
+
+fn main() {
+    nop();
+    print("unreachable");
+}

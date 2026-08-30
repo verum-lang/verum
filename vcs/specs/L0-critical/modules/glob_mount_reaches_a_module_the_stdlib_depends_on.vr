@@ -1,0 +1,52 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: modules, mount, glob, name-resolution, stdlib
+//
+// Pin (T0969) — `mount X.*;` binds X's names even when the stdlib itself
+// already depends on X.
+//
+// The failure was selective in a way that hides it from casual testing.  A
+// glob over `core.intrinsics.bitwise` works; a glob over
+// `core.intrinsics.control` imports NOTHING, silently, and the author reads
+//
+//     error<E100>: unbound variable: nop
+//
+// at the use site — which reads as a misspelled name, not a failed mount.
+//
+// Measured with a debug trace, the module has TWO registry entries:
+//
+//     Module 'core.intrinsics.control':  0 exports   <- empty stub
+//     Module 'intrinsics.control':      20 exports   <- the real one
+//
+// The glob resolves its path to the `core.`-prefixed spelling, finds the
+// stub, and imports its zero exports.  `bitwise` has no such stub, so the
+// tolerant registry lookup reaches the real entry and the same syntax works.
+//
+// Which modules get a stub: exactly the ones the stdlib itself depends on.
+// In one measured run, 90 of them — among the intrinsics, `atomic`,
+// `control`, `runtime` and `runtime.async_ops`, but not `bitwise`, `float`,
+// `arithmetic`, `memory`, `type_info`, `conversion`, `platform`, `simd`,
+// `tensor`, `gpu` or `lowlevel`.  `core.base.panic` pulls in
+// `core.intrinsics.control`; `core.sync.atomic` pulls in
+// `core.intrinsics.atomic`.  So the rule a user meets is: a glob mount
+// silently imports nothing the MORE central the module is.
+//
+// The named mount of the same item works throughout —
+// `mount core.intrinsics.control.nop;` binds `nop` — because a named mount
+// resolves through the archive metadata and the glob resolved through the
+// registry.  Two spellings of one intent, answered by two different
+// authorities, disagreeing.  That is what this spec pins: they must agree.
+//
+// `nop` is chosen because it is not ambient — see the companion
+// `a_mounted_only_name_is_not_ambient.vr`, without which this spec could
+// pass on a name the prelude already provides and measure nothing.
+
+mount core.intrinsics.control.*;
+
+fn main() {
+    nop();
+    let hot: Bool = likely(true);
+    let _ = hot;
+    print("ok");
+}

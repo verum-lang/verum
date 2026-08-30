@@ -3577,59 +3577,33 @@ impl TypeChecker {
     /// `core.`; `cog.` prefixes are stripped, matching the descriptors'
     /// own `module_path` spelling.
     fn metadata_known_module_items(&self, module_path: &str) -> Option<List<Text>> {
+        if matches!(self.core_metadata, Maybe::None) {
+            return None;
+        }
+        let canonical = match Self::canonical_module_key(module_path) {
+            Some(c) => c,
+            None => return None,
+        };
+        let canonical: &str = canonical.as_str();
+        let mut seen: std::collections::HashSet<Text> = std::collections::HashSet::new();
+        let mut items: List<Text> = List::new();
+        // ONE authority for "what does module M declare itself" — the
+        // same index the glob expander imports from (GLOB-OWN-SURFACE,
+        // T0969).  Before, this query owned a private copy of the walk
+        // and the glob owned none at all; the did-you-mean list could
+        // therefore name items no `mount M.*` would ever bind.
+        let canonical_key = Text::from(canonical);
+        if let Some(own) = self.metadata_own_surface_for(module_path) {
+            for name in own.iter() {
+                if seen.insert(name.clone()) {
+                    items.push(name.clone());
+                }
+            }
+        }
         let Maybe::Some(metadata) = &self.core_metadata else {
             return None;
         };
-        let stripped = module_path.strip_prefix("cog.").unwrap_or(module_path);
-        let canonical_owned;
-        let canonical: &str = if let Some(rest) = stripped.strip_prefix("std.") {
-            canonical_owned = format!("core.{}", rest);
-            canonical_owned.as_str()
-        } else {
-            stripped
-        };
-        if canonical.is_empty() {
-            return None;
-        }
-        let owns = |mp: &Text| -> bool {
-            mp.as_str().strip_prefix("cog.").unwrap_or(mp.as_str()) == canonical
-        };
-        let mut seen: std::collections::HashSet<Text> = std::collections::HashSet::new();
-        let mut items: List<Text> = List::new();
-        for td in metadata.types.values() {
-            // v2.12 TYPE-ORIGIN-MODULE (T0555): a type declared in a FILE
-            // submodule of a multi-file archive entry carries the precise
-            // declaring module in `origin_module_path` — the module-surface
-            // query must honour it, or the submodule reports none of its
-            // own types and mounts of its payload-variant constructors
-            // die E401.
-            let owned = owns(&td.module_path)
-                || matches!(&td.origin_module_path, verum_common::Maybe::Some(om) if owns(om));
-            if owned && seen.insert(td.name.clone()) {
-                items.push(td.name.clone());
-            }
-        }
-        for fd in metadata.functions.values() {
-            // v2.13 FN-ORIGIN-MODULE: the same honouring for the value
-            // namespace. Without it this query reported a file
-            // submodule as exporting its types and none of its free
-            // functions — the surface E401 prints when a mount of one
-            // of them fails, so the diagnostic actively misled by
-            // listing a module's own function as not existing.
-            let owned = owns(&fd.module_path)
-                || matches!(&fd.origin_module_path, verum_common::Maybe::Some(om) if owns(om));
-            if owned && matches!(fd.parent_type, Maybe::None) && seen.insert(fd.name.clone()) {
-                items.push(fd.name.clone());
-            }
-        }
-        for pd in metadata.protocols.values() {
-            let owned = owns(&pd.module_path)
-                || matches!(&pd.origin_module_path, verum_common::Maybe::Some(om) if owns(om));
-            if owned && seen.insert(pd.name.clone()) {
-                items.push(pd.name.clone());
-            }
-        }
-        let reexports = metadata.module_reexports.get(&Text::from(canonical));
+        let reexports = metadata.module_reexports.get(&canonical_key);
         if let Some(leaves) = reexports {
             for (local, _true_name, _src) in leaves.iter() {
                 if seen.insert(local.clone()) {
@@ -3641,6 +3615,214 @@ impl TypeChecker {
             return None;
         }
         Some(items)
+    }
+
+    /// Normalise a mount-path spelling to the spelling the archive
+    /// descriptors use: `cog.` prefixes are stripped, `std.` reads as
+    /// `core.`.  `None` for an empty path.
+    fn canonical_module_key(module_path: &str) -> Option<String> {
+        let stripped = module_path.strip_prefix("cog.").unwrap_or(module_path);
+        let canonical = match stripped.strip_prefix("std.") {
+            Some(rest) => format!("core.{}", rest),
+            None => stripped.to_string(),
+        };
+        if canonical.is_empty() {
+            None
+        } else {
+            Some(canonical)
+        }
+    }
+
+    /// GLOB-OWN-SURFACE (T0969) — the names a module DECLARES, keyed by
+    /// the declaring module.  The counterpart of
+    /// `core_metadata.module_reexports`, which holds the names a module
+    /// RE-EXPORTS.
+    ///
+    /// `mount X.*` means "every public symbol of `X` (and its mod.vr
+    /// re-exports)" — the contract is spelled out in
+    /// `verum_compiler::archive_ctx_loader::collect_mount_names`.  The
+    /// glob expander implemented only the second half: it walked
+    /// `module_reexports` and the registry AST, and BOTH are empty for a
+    /// leaf stdlib module, because a leaf `.vr` file has no `public
+    /// mount` lines of its own.  A glob over one therefore imported the
+    /// empty set — silently, since the module genuinely exists, so the
+    /// honest-miss gate stayed quiet and every use site read
+    /// `E100 unbound variable: <name>` instead.  Measured radius:
+    /// 1889 of 2560 `core/` files, 18199 public declarations.
+    ///
+    /// TYPES AND PROTOCOLS ONLY.  Free functions are NOT in here: their
+    /// descriptors are keyed by qualified name in a BTreeMap-backed map, so
+    /// `metadata_own_surface_for` reaches them with an O(log n + k) range
+    /// query over the module's dotted prefix and needs no index at all.
+    /// Indexing them here instead cost a full O(all descriptors) pass on
+    /// the cold-start path of EVERY compile — measured +16% on a
+    /// `fn main() { print("hi"); }` that mounts nothing but the implicit
+    /// prelude, whose own surface is empty. Types and protocols cannot use
+    /// the same trick because their keys are BARE names, so attribution has
+    /// to read each descriptor's module — but there are far fewer of them.
+    ///
+    /// A descriptor is attributed to `origin_module_path` when it has one
+    /// (v2.12 TYPE-ORIGIN-MODULE: a file submodule folded into a multi-file
+    /// archive entry declares its own module, and that is the module a
+    /// mount names), otherwise to `module_path`.
+    fn build_own_surface_index(&self) -> Map<Text, List<Text>> {
+        type Buckets = std::collections::HashMap<Text, std::collections::BTreeSet<Text>>;
+        let mut buckets: Buckets = std::collections::HashMap::new();
+        let Maybe::Some(metadata) = &self.core_metadata else {
+            return Map::new();
+        };
+        // A descriptor's `name` is NOT always the item name: measured, every
+        // free function of an archive-folded module carries its FULLY
+        // QUALIFIED name there (`core.intrinsics.control.abort`, module_path
+        // `core.intrinsics`, origin_module_path `core.intrinsics.control`),
+        // and `metadata.types` holds a bare entry AND qualified duplicates
+        // of the same type. The importer takes an ITEM name, so a bucket
+        // filled with qualified spellings resolves nothing — which is
+        // exactly how the first version of this index came out inert.
+        // Store the last segment; the set collapses the duplicates.
+        //
+        // This runs once per process but over every type and protocol
+        // descriptor, so it is on the cold-start path of every compile:
+        // allocate a `Text` only when the string actually has to change
+        // (a `cog.` prefix to strip, a qualified name to trim), and clone
+        // the existing handle otherwise.
+        let push = |buckets: &mut Buckets, owner: &Text, name: &Text| {
+            let key_str = owner.as_str().strip_prefix("cog.").unwrap_or(owner.as_str());
+            let name_str = name.as_str();
+            let leaf_str = name_str.rsplit_once('.').map(|(_, l)| l).unwrap_or(name_str);
+            if key_str.is_empty() || leaf_str.is_empty() {
+                return;
+            }
+            let leaf = if leaf_str.len() == name_str.len() {
+                name.clone()
+            } else {
+                Text::from(leaf_str)
+            };
+            let bucket = if key_str.len() == owner.as_str().len() {
+                buckets.entry(owner.clone())
+            } else {
+                buckets.entry(Text::from(key_str))
+            };
+            bucket.or_default().insert(leaf);
+        };
+        for td in metadata.types.values() {
+            let owner = match &td.origin_module_path {
+                Maybe::Some(om) => om,
+                Maybe::None => &td.module_path,
+            };
+            push(&mut buckets, owner, &td.name);
+        }
+        for pd in metadata.protocols.values() {
+            let owner = match &pd.origin_module_path {
+                Maybe::Some(om) => om,
+                Maybe::None => &pd.module_path,
+            };
+            push(&mut buckets, owner, &pd.name);
+        }
+        let mut index: Map<Text, List<Text>> = Map::new();
+        for (module, names) in buckets {
+            index.insert(module, names.into_iter().collect::<List<Text>>());
+        }
+        index
+    }
+
+    /// One exact lookup in the own-surface index, building it on first
+    /// use.  `canonical` must already be normalised by
+    /// [`Self::canonical_module_key`].
+    fn own_surface_lookup(&self, canonical: &Text) -> Option<List<Text>> {
+        {
+            let cached = self.metadata_own_surface.borrow();
+            if let Some(index) = cached.as_ref() {
+                return index.get(canonical).cloned();
+            }
+        }
+        let index = self.build_own_surface_index();
+        let hit = index.get(canonical).cloned();
+        *self.metadata_own_surface.borrow_mut() = Some(index);
+        hit
+    }
+
+    /// The own surface of the module a mount PATH names, tolerating the
+    /// stdlib's inconsistent `module ...;` spelling: `core/sys/mmio.vr`
+    /// declares `module sys.mmio;`, so its descriptors are keyed
+    /// `sys.mmio.*` while users always mount `core.sys.mmio` (the same
+    /// mismatch `resolve_function_via_metadata_reexports` handles for a
+    /// single named item).  Try the mount spelling, then the spelling
+    /// with the leading cog segment dropped.
+    /// Free functions a module declares, by RANGE query over the qualified
+    /// keys of `metadata.functions` — `<module>.` up to `<module>/`, which
+    /// is the successor of `.` in ASCII, so the half-open range is exactly
+    /// the keys one dot-level under `module`. O(log n + k) over 44 000
+    /// entries; the map's own `range` doc calls out this shape.
+    ///
+    /// Deeper descendants are excluded: `mount a.b.*` binds what `a.b`
+    /// declares, not what `a.b.c` declares — `a.b.c` is a module, and
+    /// mounting IT is a separate statement.
+    fn own_surface_functions(&self, module: &str, out: &mut std::collections::BTreeSet<Text>) {
+        let Maybe::Some(metadata) = &self.core_metadata else {
+            return;
+        };
+        let lo = format!("{}.", module);
+        let hi = format!("{}/", module);
+        let lo_key = Text::from(lo.as_str());
+        let hi_key = Text::from(hi.as_str());
+        for (key, fd) in metadata.functions.range(lo_key..hi_key) {
+            if !matches!(fd.parent_type, Maybe::None) {
+                continue;
+            }
+            let leaf = &key.as_str()[lo.len()..];
+            if leaf.is_empty() || leaf.contains('.') {
+                continue;
+            }
+            out.insert(Text::from(leaf));
+        }
+    }
+
+    fn metadata_own_surface_for(&self, module_path: &str) -> Option<List<Text>> {
+        self.metadata_own_surface_inner(module_path, true)
+    }
+
+    /// `with_types` false answers from the range query alone, skipping the
+    /// type/protocol index.
+    ///
+    /// The index is the LAST RESORT, not the first source: it costs one
+    /// pass over every type and protocol descriptor, measured at +6% CPU
+    /// on `fn main() { print("hi"); }` (1.45s -> 1.54s, median of seven,
+    /// non-overlapping ranges — wall clock could not see this at all under
+    /// a neighbouring build, CPU time could). A module whose types the
+    /// registry already supplies must not pay for it.
+    fn metadata_own_surface_inner(
+        &self,
+        module_path: &str,
+        with_types: bool,
+    ) -> Option<List<Text>> {
+        if matches!(self.core_metadata, Maybe::None) {
+            return None;
+        }
+        let canonical = Self::canonical_module_key(module_path)?;
+        let mut names: std::collections::BTreeSet<Text> = std::collections::BTreeSet::new();
+        self.own_surface_functions(canonical.as_str(), &mut names);
+        // The stdlib is inconsistent about the leading cog segment in its
+        // `module ...;` declarations — `core/sys/mmio.vr` declares
+        // `module sys.mmio;`, so its descriptors are keyed `sys.mmio.*`
+        // while users always mount `core.sys.mmio`. Same retry
+        // `resolve_function_via_metadata_reexports` does for one item.
+        if let Some(stripped) = canonical.strip_prefix("core.") {
+            self.own_surface_functions(stripped, &mut names);
+        }
+        if with_types {
+            if let Some(items) = self.own_surface_lookup(&Text::from(canonical.as_str())) {
+                names.extend(items.iter().cloned());
+            } else if let Some(stripped) = canonical.strip_prefix("core.") {
+                if let Some(items) = self.own_surface_lookup(&Text::from(stripped)) {
+                    names.extend(items.iter().cloned());
+                }
+            }
+        }
+        if names.is_empty() {
+            return None;
+        }
+        Some(names.into_iter().collect::<List<Text>>())
     }
 
     /// Find a type declaration in a module's AST by name.
@@ -9062,6 +9244,22 @@ impl TypeChecker {
         // already-registered names).  Errors logged (any single leaf
         // can fail without aborting the glob, mirroring the existing
         // discipline at lines 7660-7677).
+        // The names the legs below actually BIND, so the own-surface leg at
+        // the bottom adds only what is MISSING (T0969).
+        //
+        // It has to be the SET, not a count. Two earlier shapes of this
+        // were both wrong, in opposite directions and for the same reason:
+        // importing the own surface unconditionally re-imported every name
+        // the registry had just imported (+43% on
+        // `mount core.math.elementary.*`, 3.57s -> 5.11s, median of five,
+        // for zero new names), and skipping the leg whenever the earlier
+        // legs bound ANYTHING left `core.intrinsics.control` broken,
+        // because the registry binds SIX of its twenty names — its two
+        // types under three spellings each. A registry entry can be
+        // PARTIAL: types without functions. "Some names arrived" never
+        // implied "the right names arrived".
+        let mut already_bound: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         if let Maybe::Some(metadata) = &self.core_metadata.clone() {
             if let Some(leaves) = metadata.module_reexports.get(module_path) {
                 for (local_name, true_name, source_module) in leaves.iter() {
@@ -9072,20 +9270,25 @@ impl TypeChecker {
                     // own declared name — but register under `local_name`
                     // so a rename alias (`mount X as Y`) still binds `Y`
                     // in this module's scope.
-                    if let Err(e) = self.import_item_from_module_with_alias(
+                    match self.import_item_from_module_with_alias(
                         &source_module,
                         true_name.as_str(),
                         Some(local_name.as_str()),
                         registry,
                     ) {
-                        tracing::debug!(
-                            "import_all_from_module: metadata-driven re-export {}.{} (true_name {}, source {}) failed: {:?}",
-                            module_path.as_str(),
-                            local_name.as_str(),
-                            true_name.as_str(),
-                            source_module.as_str(),
-                            e
-                        );
+                        Ok(()) => {
+                            already_bound.insert(local_name.as_str().to_string());
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                "import_all_from_module: metadata-driven re-export {}.{} (true_name {}, source {}) failed: {:?}",
+                                module_path.as_str(),
+                                local_name.as_str(),
+                                true_name.as_str(),
+                                source_module.as_str(),
+                                e
+                            );
+                        }
                     }
                 }
             }
@@ -9108,6 +9311,7 @@ impl TypeChecker {
             names.sort();
             for name in names {
                 self.import_item_from_module(module_path, &name, registry)?;
+                already_bound.insert(name);
             }
 
             // CRITICAL FIX: Also import inherent impl methods for primitive types.
@@ -9189,6 +9393,67 @@ impl TypeChecker {
                         }
                     }
                 }
+            }
+        }
+
+        // GLOB-OWN-SURFACE (T0969) — the third leg, and the COMPLEMENT of
+        // the two above rather than an addition to them.
+        //
+        // The re-export leg imports what `X` re-exports; the registry leg
+        // imports what `X`'s registered AST declares.  Both can come back
+        // EMPTY for a stdlib module while `X` is nonetheless real and full
+        // of public names: measured with a debug trace, such a module has
+        // TWO registry entries —
+        //
+        //     Module 'core.intrinsics.control':  0 exports   <- empty stub
+        //     Module 'intrinsics.control':      20 exports   <- the real one
+        //
+        // — and the glob resolves its path to the `core.`-prefixed
+        // spelling, finds the stub, and imports its zero exports.  It did
+        // that SILENTLY: the module exists, so the honest-miss gate below
+        // had nothing to report, and the author read `E100 unbound
+        // variable` at the use site, which reads as a misspelled NAME.
+        // Modules with a stub are exactly the ones the stdlib itself
+        // depends on (`core.base.panic` pulls in `core.intrinsics.control`;
+        // `core.sync.atomic` pulls in `core.intrinsics.atomic`), so the
+        // rule a user met was: a glob mount imports nothing the MORE
+        // central the module is.  A NAMED mount of the same item worked
+        // throughout, because it resolves through the archive metadata.
+        // Two spellings of one intent, answered by two authorities.
+        //
+        // So: ask the authority the named mount asks, for the names the
+        // legs above did NOT bind.  Measured per module, with a temporary
+        // dump of each leg's contribution:
+        //
+        //     module=core.prelude              reexport=482 registry=0  own=0
+        //     module=core.intrinsics.control   reexport=0   registry=6  own=20
+
+        //
+        // The type/protocol index is consulted only when NOTHING else knew
+        // the module — no registry entry, no re-exports. Whenever either
+        // did, it already supplied the module's types (measured:
+        // `core.intrinsics.control`'s registry entry carries its two types
+        // and none of its functions), and building the index costs a pass
+        // over every type descriptor: +6% CPU on a hello-world that mounts
+        // only the implicit prelude. Functions never need it — they come
+        // from a range query over the qualified keys, which is O(log n + k)
+        // and always cheap.
+        let needs_type_index = already_bound.is_empty();
+        for name in self
+            .metadata_own_surface_inner(module_path.as_str(), needs_type_index)
+            .unwrap_or_default()
+            .iter()
+        {
+            if already_bound.contains(name.as_str()) {
+                continue;
+            }
+            if let Err(e) = self.import_item_from_module(module_path, name.as_str(), registry) {
+                tracing::debug!(
+                    "import_all_from_module: own-surface item {}.{} failed: {:?}",
+                    module_path.as_str(),
+                    name.as_str(),
+                    e
+                );
             }
         }
 

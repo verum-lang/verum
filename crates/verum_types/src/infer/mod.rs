@@ -1160,6 +1160,16 @@ pub struct TypeChecker {
     /// render the cycle path in the `ImportCycle` diagnostic. Invariant:
     /// the HashSet above contains exactly the entries of this Vec.
     glob_imports_stack: Vec<Text>,
+    /// GLOB-OWN-SURFACE (T0969): `module → names the module DECLARES itself`,
+    /// derived from `core_metadata`'s type / free-function / protocol
+    /// descriptors.  A glob mount is "every public symbol of X and its
+    /// re-exports"; the re-export half lives in
+    /// `core_metadata.module_reexports`, and this is the other half.
+    ///
+    /// Built lazily on first glob expansion (one pass over the metadata) and
+    /// dropped whenever the metadata handle is replaced, because a per-glob
+    /// scan would be O(stdlib_total) on every nested re-export hop.
+    metadata_own_surface: std::cell::RefCell<Option<Map<Text, List<Text>>>>,
     /// Set of (module_path, item_name) pairs currently being resolved via
     /// re-export chains (`resolve_export_kind_with_reexports` /
     /// `find_function_with_source_module`). Prevents unbounded recursion when

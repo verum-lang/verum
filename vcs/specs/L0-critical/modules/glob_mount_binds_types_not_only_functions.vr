@@ -1,0 +1,35 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: modules, mount, glob, name-resolution, stdlib, types
+//
+// Pin (T0969) — the value namespace is not the whole surface: a glob mount
+// must bind the module's TYPES too.
+//
+// `core.control.continuation` is the harder input than the sibling spec's
+// `core.intrinsics.control`, and deliberately so:
+//
+//   * its parent `core/control/mod.vr` declares `public module continuation;`
+//     and re-exports nothing, so `mount core.control.*;` does not reach these
+//     names either — there is no neighbouring spelling that works except the
+//     fully qualified path;
+//   * `CcTerm` is a public TYPE, so a fix that repaired only free functions
+//     would leave this file red while the sibling turned green.
+//
+// Measured before the fix: `mount core.control.continuation.*;` followed by
+// `cc_var("x")` reported `error<E100>: unbound variable: cc_var`, and
+// `mount core.control.*;` reported the same.  An empty import is
+// indistinguishable at the use site from a misspelled name, which is why the
+// defect survived: the diagnostic points at the name, and the name is right.
+
+mount core.control.continuation.*;
+
+fn describe(t: CcTerm) -> Bool {
+    cc_is_value(t)
+}
+
+fn main() {
+    let v: CcTerm = cc_var("x");
+    let _ = describe(v);
+    print("ok");
+}
