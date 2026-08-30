@@ -50,6 +50,7 @@ pub fn register_standard_attributes(registry: &mut AttributeRegistry) {
     register_meta_system_attributes(registry);
     register_testing_attributes(registry);
     register_ffi_attributes(registry);
+    register_measured_attributes(registry);
 }
 
 // =============================================================================
@@ -1606,4 +1607,977 @@ mod tests {
                 .contains(&verum_common::Text::from("hot"))
         );
     }
+}
+
+// =============================================================================
+// MEASURED ATTRIBUTES
+//
+// Names the corpus actually uses, with the target inferred from the
+// declaration each one is attached to rather than guessed. Before this
+// block the registry knew 82 attributes while `core/`, `vcs/specs/` and
+// `core-tests/` used 295 — 242 unregistered across 11 494 occurrences,
+// `@extern` (2 114) and `@intrinsic` (795) among them.
+//
+// That gap is why the registry could not be switched on: it is the
+// SMALLER of the two sets, so enforcing it would reject the standard
+// library. Registration comes first, enforcement after — the census that
+// produced this list is `scripts/ci/census_attribute_registry.py`, so
+// the numbers can be re-measured rather than trusted.
+//
+// The 147 attributes whose target the census could not read off a
+// following declaration are deliberately absent: a guessed target is
+// worse than a missing entry, because it would reject correct code.
+// =============================================================================
+
+fn register_measured_attributes(registry: &mut AttributeRegistry) {
+    registry
+        .register(
+            AttributeMetadata::new("extern")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::FFI)
+                .doc("extern — target inferred from 2114 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("intrinsic")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("intrinsic — target inferred from 795 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("main")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("main — target inferred from 221 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("test_case")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::MetaSystem)
+                .doc("test_case — target inferred from 180 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("kernel")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("kernel — target inferred from 113 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("opaque")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("opaque — target inferred from 103 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("ownership")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::Safety)
+                .doc("ownership — target inferred from 82 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("ffi")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::FFI)
+                .doc("ffi — target inferred from 73 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("requires")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::Safety)
+                .doc("requires — target inferred from 63 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("property")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::MetaSystem)
+                .doc("property — target inferred from 60 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("wasm_export")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::FFI)
+                .doc("wasm_export — target inferred from 39 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("injectable")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::MetaSystem)
+                .doc("injectable — target inferred from 29 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("vjp_rule")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::MetaSystem)
+                .doc("vjp_rule — target inferred from 27 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("inject")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::MetaSystem)
+                .doc("inject — target inferred from 25 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("noreturn")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("noreturn — target inferred from 24 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("ensures")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("ensures — target inferred from 23 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("benchmark")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("benchmark — target inferred from 23 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("visibility")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("visibility — target inferred from 23 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("variadic")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("variadic — target inferred from 23 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("compiler_intrinsic")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("compiler_intrinsic — target inferred from 17 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("section")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("section — target inferred from 17 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("owl2_class")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("owl2_class — target inferred from 16 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("compiler_provided")
+                .targets(AttributeTarget::Context)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("compiler_provided — target inferred from 14 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("linkage")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("linkage — target inferred from 14 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("naked")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("naked — target inferred from 13 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("interrupt")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("interrupt — target inferred from 12 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("ffi_name")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("ffi_name — target inferred from 11 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("link_name")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("link_name — target inferred from 11 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("compiler_type")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("compiler_type — target inferred from 8 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("must_consume")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("must_consume — target inferred from 7 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("checkpoint")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("checkpoint — target inferred from 7 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("cfg_attr")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("cfg_attr — target inferred from 7 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("memory_effects")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("memory_effects — target inferred from 7 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("cost")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("cost — target inferred from 6 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("alias")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("alias — target inferred from 6 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("builder")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("builder — target inferred from 6 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("weak")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("weak — target inferred from 5 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("uninterpreted")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("uninterpreted — target inferred from 5 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("errors_via")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("errors_via — target inferred from 5 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("size")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("size — target inferred from 4 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("stack_align")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("stack_align — target inferred from 4 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("invariant")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("invariant — target inferred from 4 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("owl2_subclass_of")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("owl2_subclass_of — target inferred from 4 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("stub_runtime")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("stub_runtime — target inferred from 3 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("total")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("total — target inferred from 3 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("pub")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("pub — target inferred from 3 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("register_block")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("register_block — target inferred from 3 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("decreases")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("decreases — target inferred from 3 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("axiom")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("axiom — target inferred from 3 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("thread_safe")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("thread_safe — target inferred from 3 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("owl2_property")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("owl2_property — target inferred from 3 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("using")
+                .targets(AttributeTarget::Module)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("using — target inferred from 3 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("no_inline")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("no_inline — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("provide")
+                .targets(AttributeTarget::Module)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("provide — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("cooperative")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("cooperative — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("noinline")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("noinline — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("lock_order")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("lock_order — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("purity_hint")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("purity_hint — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("unstable")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("unstable — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("timeout")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("timeout — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("sql_query")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("sql_query — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("modifies")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("modifies — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("owl2_disjoint_with")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("owl2_disjoint_with — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("owl2_equivalent_class")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("owl2_equivalent_class — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("owl2_has_key")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("owl2_has_key — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("owl2_characteristic")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("owl2_characteristic — target inferred from 2 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("unsafe_required")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("unsafe_required — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("internal")
+                .targets(AttributeTarget::Module)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("internal — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("tailrec")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("tailrec — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("async_trait")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("async_trait — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("custom_attribute")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("custom_attribute — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("impl_trait_for_tuples")
+                .targets(AttributeTarget::Impl)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("impl_trait_for_tuples — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("gen_incrementer")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("gen_incrementer — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("gen_helpers")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("gen_helpers — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("gen_closure_factory")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("gen_closure_factory — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("multi_grid")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("multi_grid — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("constant")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("constant — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("invalid_attribute_that_does_not_exist")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("invalid_attribute_that_does_not_exist — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("private")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("private — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("custom_attr")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("custom_attr — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("wasm_import")
+                .targets(AttributeTarget::Static)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("wasm_import — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("link_section")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("link_section — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("regex")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("regex — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("json")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("json — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("track_caller")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("track_caller — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("json_schema")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("json_schema — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("recursive")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("recursive — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("logic")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("logic — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("object_safe")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("object_safe — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("api")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("api — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("public")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("public — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("cached")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("cached — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("rate_limited")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("rate_limited — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("table")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("table — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
+    registry
+        .register(
+            AttributeMetadata::new("derive_debug")
+                .targets(AttributeTarget::Type)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::LanguageCore)
+                .doc("derive_debug — target inferred from 1 uses in core/, vcs/ and core-tests/")
+                .build(),
+        )
+        .ok();
 }
