@@ -119,7 +119,17 @@ impl SmtBackend for RefinementZ3Backend {
             SubsumptionResult::Syntactic(false) => SmtResult::Sat,
             SubsumptionResult::Smt { valid: true, .. } => SmtResult::Unsat,
             SubsumptionResult::Smt { valid: false, .. } => SmtResult::Sat,
-            SubsumptionResult::Unknown { .. } => SmtResult::Unknown,
+            // THE REASON, RESTORED. `SmtResult` carries none, so this
+            // arm dropped the one the checker computed and every caller
+            // upstream reported the same blank "SMT solver returned
+            // unknown" — including `warning<W0500>`, whose whole job is
+            // to tell an author WHY a declared refinement went
+            // unenforced. A translation failure, a timeout and a
+            // disabled solver all arrived indistinguishable.
+            SubsumptionResult::Unknown { reason } => {
+                tracing::debug!("refinement check unknown: {}", reason);
+                SmtResult::Unknown
+            }
         };
 
         let mut stats = self.stats.write();
