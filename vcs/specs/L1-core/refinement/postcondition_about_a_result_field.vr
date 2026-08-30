@@ -1,0 +1,40 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, records, smt, T0995
+// @timeout: 60000
+// @description: A postcondition naming a field of the RESULT is discharged, and a false one about the same field is still refused
+
+// The mirror of T0994, on the other side of the obligation, and NOT
+// about refinements — it failed on a record carrying none:
+//
+//     pure fn bump(b: Box) -> Box ensures result.v > b.v   FAILED
+//
+// `result` is bound by translating the body at Int, Bool or Real sort,
+// and a record literal is none of those, so no branch fired and
+// `result` stayed a free constant while the postcondition read
+// `field_result__v` — bound to nothing.
+//
+// The negative twin lives in `postcondition_about_a_result_field_false.vr`
+// and is the control that matters most here: a repair of this shape
+// fails by making obligations VACUOUS, so a true postcondition proving
+// is only half the evidence.
+
+type Box is { v: Int };
+
+pure fn bump(b: Box) -> Box
+    ensures result.v > b.v
+{
+    Box { v: b.v + 1 }
+}
+
+pure fn keep(b: Box) -> Box
+    ensures result.v == b.v
+{
+    Box { v: b.v }
+}
+
+fn main() {
+    let b = Box { v: 1 };
+    print(f"{bump(b).v}");
+}

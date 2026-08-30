@@ -1,0 +1,54 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, records, smt, T0994
+// @timeout: 60000
+// @description: A refinement carried by a record FIELD is a hypothesis the solver can use, exactly as one on a parameter is
+
+// The argument for refinement types is that the invariant lives in the
+// TYPE and travels with it. Until T0994 it travelled through a
+// parameter and not through a field:
+//
+//     pure fn triple(a: NonNeg) -> Int ensures result >= 0   PROVED
+//     pure fn get(b: Box) -> Int ensures result >= 0 { b.v }  FAILED
+//
+// `b.v` handed the solver an unconstrained `Int`. The counterexample
+// came back EMPTY, which is the tell of an obligation that was never
+// built rather than one that failed.
+//
+// This mattered more than its size: real domain types are records, so a
+// refinement surviving only a parameter survives only the shape nobody
+// writes.
+//
+// Both forms are here on purpose. The parameter case is the CONTROL: a
+// repair that adds hypotheses must not disturb what already worked, and
+// if it does, the substitution is wrong rather than merely incomplete.
+
+type NonNeg is n: Int where n >= 0;
+
+// The control — this proved before the repair and must keep proving.
+pure fn triple(a: NonNeg) -> Int
+    ensures result >= 0
+{
+    a * 3
+}
+
+type Box is { v: NonNeg };
+
+pure fn get(b: Box) -> Int
+    ensures result >= 0
+{
+    b.v
+}
+
+type Pair is { x: NonNeg, y: NonNeg };
+
+pure fn total(p: Pair) -> Int
+    ensures result >= 0
+{
+    p.x + p.y
+}
+
+fn main() {
+    print("refinement travels through a field");
+}

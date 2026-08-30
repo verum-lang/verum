@@ -1,0 +1,29 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, records, smt, T0995
+// @timeout: 60000
+// @expected-error: proof-failed
+// @description: A FALSE postcondition about a result field is still refused — the binding must not make the obligation vacuous
+
+// The control for `postcondition_about_a_result_field.vr`. Binding
+// `result`'s FIELDS is a repair that ADDS assertions to the solver, and
+// the failure mode of such a repair is not that nothing proves — it is
+// that everything does.
+//
+// Measured after the fix: this file's postcondition is refused, and so
+// is `ensures result.v == b.v + 2` on the same body. Without this twin,
+// a binding that asserted something too strong would read as success.
+
+type Box is { v: Int };
+
+pure fn bump(b: Box) -> Box
+    ensures result.v < b.v
+{
+    Box { v: b.v + 1 }
+}
+
+fn main() {
+    let b = Box { v: 1 };
+    print(f"{bump(b).v}");
+}
