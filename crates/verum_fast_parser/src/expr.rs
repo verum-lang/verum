@@ -1862,13 +1862,17 @@ impl<'a> RecursiveParser<'a> {
             // Level 1: Pipeline (left-assoc)
             TokenKind::PipeGt => (1, 2),
 
-            // Level 2: Null coalescing (right-assoc)
-            TokenKind::QuestionQuestion => (2, 2),
-
-            // Level 3: Assignment and logical implication (right-assoc)
-            // Note: `implies` keyword and `=>` (FatArrow) for formal proofs have same precedence as assignment
-            // but bind looser than || and &&. Right-associative: P implies Q implies R = P implies (Q implies R)
-            // FatArrow is also used as implication in verification contexts (forall, exists bodies)
+            // Level 2: Assignment (right-assoc).
+            //
+            // Assignment is the LOOSEST operator except the pipeline, so
+            // the whole right-hand side belongs to it: `x = a ?? b` is
+            // `x = (a ?? b)`, never `(x = a) ?? b`.  It used to sit at
+            // level 3, ABOVE `??` — which made `value = value ?? Some(42)`
+            // parse as `(value = value) ?? Some(42)`, coalescing the result
+            // of an assignment instead of the value.  `grammar/verum.ebnf`
+            // (`simple_assign = null_coalesce_expr , [ assign_op ,
+            // assignment_expr ]`) and the published operator table both
+            // said `??` binds tighter; the parser was the odd one out (T0816).
             TokenKind::Eq
             | TokenKind::PlusEq
             | TokenKind::MinusEq
@@ -1879,7 +1883,14 @@ impl<'a> RecursiveParser<'a> {
             | TokenKind::PipeEq
             | TokenKind::CaretEq
             | TokenKind::LtLtEq
-            | TokenKind::GtGtEq
+            | TokenKind::GtGtEq => (2, 2),
+
+            // Level 3: Null coalescing and logical implication (right-assoc).
+            // Note: `implies` keyword and `=>` (FatArrow) for formal proofs bind
+            // tighter than assignment but looser than || and &&.
+            // Right-associative: P implies Q implies R = P implies (Q implies R)
+            // FatArrow is also used as implication in verification contexts (forall, exists bodies)
+            TokenKind::QuestionQuestion
             | TokenKind::Implies
             | TokenKind::FatArrow
             | TokenKind::RArrow

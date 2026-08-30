@@ -1,3 +1,16 @@
+//! PARSE ACCEPTANCE for operator-bearing expressions.
+//!
+//! CAUTION: with three exceptions these tests call `assert_parses`,
+//! which checks only that a source string PARSES — not how it groups.
+//! A test named `test_bitwise_and_before_or` therefore passes whichever
+//! way `&` and `|` bind.  That is how `grammar/verum.ebnf` came to
+//! describe a single flat bitwise level while the parser used the C
+//! ladder, giving the two documents different values for `a | b & c`
+//! (T0816).
+//!
+//! The precedence LADDER itself is pinned by shape in
+//! `operator_ladder_tests.rs`.  Add precedence rows there, not here.
+
 #![allow(
     dead_code,
     unused_imports,
@@ -627,7 +640,12 @@ fn test_unary_complex() {
 
 #[test]
 fn test_all_levels_1() {
-    assert_parses("x |> f ?? y = a || b && c == d > e + f * g ** h");
+    // Assignment is looser than `??` (T0816), so the right-hand side of
+    // `=` swallows the rest.  The previous spelling put `y = …` INSIDE a
+    // coalesce (`f ?? y = a || …`), which only parsed while assignment
+    // bound tighter than `??`.
+    assert_parses("x = a ?? b || c && d == e > f + g * h ** i");
+    assert_parses("x |> f");
 }
 
 #[test]

@@ -950,8 +950,41 @@ fn test_precedence_bitwise_shift_arithmetic() {
 
 #[test]
 fn test_precedence_all_levels() {
-    // Complex expression with all precedence levels
-    assert_parses("x |> f ?? y = a || b && c == d > e + f * g ** h");
+    // One expression touching every binary level, pinned by SHAPE at the
+    // top of the ladder: assignment is looser than `??`, which is looser
+    // than `||`.  The whole right-hand side belongs to the assignment.
+    //
+    // This used to read `x |> f ?? y = a || …` and only assert that it
+    // parsed.  It parsed for the wrong reason — assignment bound TIGHTER
+    // than `??`, so `f ?? y = …` had an assignment nested inside a
+    // coalesce.  With the ladder corrected (T0816) that expression is a
+    // parse error, as it is in every language with a `??`: its left-hand
+    // side `f ?? y` is not assignable.
+    let expr = parse_expr("x = a ?? b || c && d == e > f + g * h ** i").unwrap();
+    let ExprKind::Binary {
+        op: BinOp::Assign,
+        right,
+        ..
+    } = &expr.kind
+    else {
+        panic!("expected assignment at the root, got {:?}", expr.kind);
+    };
+    assert!(
+        matches!(right.kind, ExprKind::NullCoalesce { .. }),
+        "expected `??` directly under the assignment, got {:?}",
+        right.kind
+    );
+
+    // The full ladder — all 50+ groupings — lives in
+    // `operator_ladder_tests.rs`.
+}
+
+#[test]
+fn test_assignment_is_looser_than_null_coalesce() {
+    // `f ?? y` is not an assignable place, so this cannot parse once
+    // assignment is the looser operator.  Pinning the refusal keeps the
+    // two from being swapped back silently.
+    assert_fails("f ?? y = a");
 }
 
 #[test]
