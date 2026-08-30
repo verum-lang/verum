@@ -1,0 +1,39 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: types, pure, purity, order, E503, T0985
+// @expected-error: E503
+// @description: A pure function calling an impure one declared LATER is refused, exactly as when it is declared first
+
+// The callee is written BELOW its caller on purpose. With the two
+// declarations swapped this file was already refused; in this order it
+// was ACCEPTED — the same program, the same rule, and the verdict
+// decided by which line came first (T0985).
+//
+// `pure` is a checked claim, and that is the whole argument for it over
+// a naming convention. A claim checked or not depending on the author's
+// editing order is not checked.
+//
+// MECHANISM: properties were registered as the walker went, in source
+// order, and the `Call` arm treats a callee it cannot find as
+// contributing NOTHING — so a forward reference read as pure. The
+// module walk already registers function SIGNATURES in a phase of its
+// own, precisely so forward references resolve; properties never got
+// that phase, and now do.
+//
+// The sibling `purity_violation_io_is_refused.vr` covers the same rule
+// with the callee above. Both must stay red-when-broken: a repair that
+// only seeds one direction passes one file and not the other.
+
+pure fn caller() -> Int {
+    helper()
+}
+
+fn helper() -> Int {
+    print("x");
+    1
+}
+
+fn main() {
+    print(f"{caller()}");
+}
