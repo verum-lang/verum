@@ -1122,15 +1122,32 @@ impl<'s> CompilationPipeline<'s> {
                     checker: &mut TypeChecker,
                     items: &[verum_ast::Item],
                     current_module_path: &str,
-                    registry: &verum_modules::ModuleRegistry,
+                    registry: &verum_common::Shared<
+                        parking_lot::RwLock<verum_modules::ModuleRegistry>,
+                    >,
                     session: &crate::session::Session,
                 ) {
                     for item in items {
                         match &item.kind {
                             verum_ast::ItemKind::Mount(import) => {
-                                if let Err(type_error) =
-                                    checker.process_import(import, current_module_path, registry)
-                                {
+                                // Cloned PER MOUNT, not once for the walk.
+                                // A single snapshot taken before the walk
+                                // also breaks the deadlock, and silently
+                                // costs freshness: a module registered by an
+                                // earlier mount would be invisible to a later
+                                // one, turning a hang into a sporadic E401
+                                // that depends on the ORDER of mount lines.
+                                // The sibling repair in
+                                // `phases_orchestration.rs` says the same in
+                                // its own comment — "so a module registered
+                                // by an earlier mount is visible to a later
+                                // one".
+                                let registry_snapshot = registry.read().clone();
+                                if let Err(type_error) = checker.process_import(
+                                    import,
+                                    current_module_path,
+                                    &registry_snapshot,
+                                ) {
                                     let diag = type_error_to_diagnostic(&type_error, Some(session));
                                     session.emit_diagnostic(diag);
                                 }
@@ -1178,12 +1195,11 @@ impl<'s> CompilationPipeline<'s> {
                 //
                 // A snapshot costs one clone per module and releases the
                 // reader immediately.
-                let registry_snapshot = registry.read().clone();
                 process_imports_recursive(
                     &mut checker,
                     module.items.as_slice(),
                     path.as_str(),
-                    &registry_snapshot,
+                    &registry,
                     self.session,
                 );
 

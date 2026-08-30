@@ -1706,10 +1706,25 @@ impl<'s> CompilationPipeline<'s> {
                         if let verum_ast::ItemKind::Mount(import_decl) = &item.kind {
                             // Process the full import (not just aliases) to bring
                             // cross-module types into scope for this module
+                            // Third sibling of the argument-position guard
+                            // (T0981). `&registry.read()` holds the reader
+                            // for the whole call, and `process_import`'s
+                            // lazy-load branch takes a WRITE lock on the same
+                            // registry — a self-deadlock, not a slow pass.
+                            //
+                            // On THIS path that would read as "the bake is
+                            // just long", which is the costliest possible
+                            // disguise: the bake is expected to take tens of
+                            // minutes, so nobody would sample it.
+                            //
+                            // Cloned per mount, like the two siblings, so a
+                            // module registered by an earlier mount stays
+                            // visible to a later one.
+                            let registry_snapshot = registry.read().clone();
                             if let Err(e) = type_checker.process_import(
                                 import_decl,
                                 &current_module_path,
-                                &registry.read(),
+                                &registry_snapshot,
                             ) {
                                 debug!("Stdlib import warning in {}: {:?}", current_module_path, e);
                             }
