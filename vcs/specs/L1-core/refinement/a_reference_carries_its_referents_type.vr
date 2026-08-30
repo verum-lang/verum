@@ -8,7 +8,7 @@
 ///
 /// The three reference tiers are three AST variants of one idea — a
 /// value of `T` reached through a reference — and the SMT translators
-/// listed only the first. `TypeKind::Reference` recursed to its
+/// listed only the first. The `Reference` variant of TypeKind recursed to its
 /// referent; `CheckedReference` and `UnsafeReference` fell to the
 /// catch-all and became an opaque shape with no NAME. Everything
 /// downstream then stopped: a field access on such a value could not be
