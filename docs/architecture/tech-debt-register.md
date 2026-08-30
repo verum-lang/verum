@@ -214,9 +214,15 @@ T0705.
 4,158 + types 1,124 unskipped + verification 1,537). The first two
 sleeping pins it exposed are already adjudicated: T0713 (affine pin
 — falsified, enforcement was live on the diagnostics channel) and
-T0712 (attestation debt, real). Pending tiers: smt (one 10ms timing
-pin needs headroom), vbc (T0714 envelope-rewind pins), AOT-heavy
-nightly lane (draft below). INVENTORY liveness T0220. FORCE_VERIFY
+T0712 (attestation debt, real). Pending tiers: ~~smt (one 10ms timing
+pin needs headroom)~~ — **CLOSED 2026-08-30 (T0955, de5b65ed1)**: it
+needed no headroom. `[profile.dev]` left DEPENDENCIES unoptimised, so
+`cargo test` linked a Z3 compiled at `opt-level = 0` and the pin was
+measuring a solver nobody ships. Found by `sample` — the top
+non-waiting leaves were `assertions_enabled()`, `tag_enabled(TraceTag)`
+and atomic bool loads. 14.41ms -> 0.86ms against the unchanged 10ms
+threshold; a verification obligation end-to-end 18.0ms -> 6.3ms. vbc
+(T0714 envelope-rewind pins), AOT-heavy nightly lane (draft below). INVENTORY liveness T0220. FORCE_VERIFY
 sweep T0278.
 
 **R5b. Release-blocking closures, 2026-08-14.** Four things that made a
