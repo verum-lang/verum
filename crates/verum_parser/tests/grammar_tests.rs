@@ -1829,7 +1829,7 @@ mod expression_tests {
 
         // Test operator precedence (from lowest to highest)
 
-        // Level 20: Pipeline (lowest)
+        // Pipeline (lowest)
         #[test]
         fn test_precedence_pipeline() {
             assert_expr_parses("x |> f |> g");
@@ -1840,7 +1840,7 @@ mod expression_tests {
             assert_expr_parses("x + 1 |> f"); // Should parse as (x + 1) |> f
         }
 
-        // Level 17: Null coalescing
+        // Null coalescing
         #[test]
         fn test_precedence_null_coalesce() {
             assert_expr_parses("a ?? b ?? c");
@@ -1852,7 +1852,7 @@ mod expression_tests {
             assert_expr_parses("a ?? b ?? c");
         }
 
-        // Level 18: Assignment
+        // Assignment
         #[test]
         fn test_precedence_assignment() {
             assert_expr_parses("x = 10"); // Simple assignment
@@ -1869,7 +1869,7 @@ mod expression_tests {
             assert_expr_parses("x += y");
         }
 
-        // Level 15: Logical OR
+        // Logical OR
         #[test]
         fn test_precedence_logical_or() {
             assert_expr_parses("a || b || c");
@@ -1880,13 +1880,13 @@ mod expression_tests {
             assert_expr_parses("a && b || c && d"); // Should parse as (a && b) || (c && d)
         }
 
-        // Level 14: Logical AND
+        // Logical AND
         #[test]
         fn test_precedence_logical_and() {
             assert_expr_parses("a && b && c");
         }
 
-        // Level 13: Comparison
+        // Comparison
         #[test]
         fn test_precedence_comparison() {
             assert_expr_parses("a == b");
@@ -1897,25 +1897,25 @@ mod expression_tests {
             assert_expr_parses("a + b == c + d"); // Should parse as (a + b) == (c + d)
         }
 
-        // Level 12: Bitwise OR
+        // Bitwise OR
         #[test]
         fn test_precedence_bitwise_or() {
             assert_expr_parses("a | b | c");
         }
 
-        // Level 11: Bitwise XOR
+        // Bitwise XOR
         #[test]
         fn test_precedence_bitwise_xor() {
             assert_expr_parses("a ^ b ^ c");
         }
 
-        // Level 10: Bitwise AND
+        // Bitwise AND
         #[test]
         fn test_precedence_bitwise_and() {
             assert_expr_parses("a & b & c");
         }
 
-        // Level 9: Shift
+        // Shift
         #[test]
         fn test_precedence_shift() {
             assert_expr_parses("a << 2");
@@ -1926,7 +1926,7 @@ mod expression_tests {
             assert_expr_parses("a + b << 2"); // Should parse as (a + b) << 2
         }
 
-        // Level 8: Addition/Subtraction
+        // Addition/Subtraction
         #[test]
         fn test_precedence_addition() {
             assert_expr_parses("a + b + c");
@@ -1942,7 +1942,7 @@ mod expression_tests {
             assert_expr_parses("a + b - c + d");
         }
 
-        // Level 7: Multiplication/Division
+        // Multiplication/Division
         #[test]
         fn test_precedence_multiplication() {
             assert_expr_parses("a * b * c");
@@ -1963,7 +1963,7 @@ mod expression_tests {
             assert_expr_parses("a + b * c"); // Should parse as a + (b * c)
         }
 
-        // Level 5: Exponentiation (right-associative!)
+        // Exponentiation (right-associative!)
         #[test]
         fn test_precedence_power() {
             assert_expr_parses("2 ** 3 ** 4"); // Should parse as 2 ** (3 ** 4)
@@ -1974,7 +1974,7 @@ mod expression_tests {
             assert_expr_parses("a * b ** c"); // Should parse as a * (b ** c)
         }
 
-        // Level 6: Unary
+        // Unary
         #[test]
         fn test_precedence_unary_minus() {
             assert_expr_parses("-a");

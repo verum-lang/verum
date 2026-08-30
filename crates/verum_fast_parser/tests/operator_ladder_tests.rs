@@ -162,6 +162,18 @@ const LADDER: &[(&str, &str)] = &[
     ("x = a |> f", "(|> (Assign x a) f)"),
     ("a ?? b |> f", "(|> (?? a b) f)"),
     ("a |> f ?? b", "(|> a (?? f b))"),
+    // --- claims that lived only in comments ---------------------------
+    //
+    // Eight groupings were stated in `grammar_tests.rs` comments beside
+    // a body that only called `assert_expr_parses`, so the claim was
+    // never compared against anything.  Checked here instead.
+    ("x + 1 |> f", "(|> (Add x 1) f)"),
+    ("a && b || c && d", "(Or (And a b) (And c d))"),
+    ("a + b == c + d", "(Eq (Add a b) (Add c d))"),
+    ("a + b << 2", "(Shl (Add a b) 2)"),
+    ("a + b * c", "(Add a (Mul b c))"),
+    ("a * b ** c", "(Mul a (Pow b c))"),
+
     // --- parentheses survive into the AST -----------------------------
     // The pretty-printer relies on this: it prints binary operands with
     // no parentheses of its own, so a dropped `Paren` node would silently
