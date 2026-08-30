@@ -2257,6 +2257,48 @@ impl<'s> VerifyCommand<'s> {
                         why
                     );
                 }
+                // A body that is a RECORD LITERAL binds nothing above:
+                // it translates to no Int, Bool or Real, so `result`
+                // stayed free and a postcondition naming one of its
+                // FIELDS could never be discharged. Measured:
+                // `ensures result.v > b.v` on `Box { v: b.v + 1 }`
+                // FAILED, while `ensures result > n` on a scalar body
+                // proved — and it failed on a record carrying no
+                // refinement at all, so this is not the refinement
+                // question (T0995).
+                //
+                // Bind the FIELDS instead. A field access `p.x`
+                // translates to the constant `field_p__x`, so binding
+                // `field_result__v` to the literal's own field
+                // expression gives the postcondition exactly what it
+                // reads. Per field, mirroring how a record-typed
+                // PARAMETER hands over one hypothesis per field
+                // (T0994).
+                if let ExprKind::Record { fields, .. } = &e.kind {
+                    for f in fields.iter() {
+                        let verum_common::Maybe::Some(value) = &f.value else {
+                            // Shorthand `{ x }` means `{ x: x }`; the
+                            // name is in scope and translating it is
+                            // the same work, but it is not written
+                            // here, so decline rather than guess.
+                            continue;
+                        };
+                        let Ok(field_z3) = translator.translate_expr(value) else {
+                            continue;
+                        };
+                        let key = format!("field_result__{}", f.name.name.as_str());
+                        if let Some(field_int) = field_z3.as_int() {
+                            let lhs = z3::ast::Int::new_const(key.as_str());
+                            solver.assert(&lhs.eq(&field_int));
+                        } else if let Some(field_bool) = field_z3.as_bool() {
+                            let lhs = z3::ast::Bool::new_const(key.as_str());
+                            solver.assert(&lhs.iff(&field_bool));
+                        } else if let Some(field_real) = field_z3.as_real() {
+                            let lhs = z3::ast::Real::new_const(key.as_str());
+                            solver.assert(&lhs.eq(&field_real));
+                        }
+                    }
+                }
                 if let Ok(body_z3) = translated {
                     if std::env::var("VERUM_TRACE_RESULT_BIND").is_ok() {
                         eprintln!(
