@@ -87,6 +87,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
         content_hash: [0u8; 32],
         context_declarations: List::new(),
         context_decl_nodes: OrderedMap::new(),
+        context_declaring_modules: OrderedMap::new(),
         // Re-export chains are captured at archive precompile time;
         // archive→metadata convert path leaves the map empty (the
         // typechecker's re-export resolver degrades to a no-op when

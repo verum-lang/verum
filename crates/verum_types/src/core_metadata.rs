@@ -85,6 +85,25 @@ pub struct CoreMetadata {
     #[serde(default)]
     pub context_decl_nodes: OrderedMap<Text, verum_ast::decl::ContextDecl>,
 
+    /// The module that DECLARES each context, keyed by context name.
+    ///
+    /// `context_declarations` and `context_decl_nodes` are both keyed by
+    /// the BARE name and carry no trace of where the context came from —
+    /// the bootstrap scanner has each file's path in hand and drops it.
+    /// Without this map a module's own export surface cannot include its
+    /// contexts, because there is nothing to ask: nine contexts declared
+    /// in `core/context/standard.vr` and one in `core/context/random.vr`
+    /// sit in one flat table, indistinguishable. A user's project then
+    /// gets `E605: undefined context: Logger` for a context the same
+    /// file resolves fine outside a project (T0974).
+    ///
+    /// A separate map rather than a qualified key on the existing two:
+    /// every current consumer looks those up by bare name, and a
+    /// qualified key would return `None` to each of them — silently,
+    /// down a fallback path.
+    #[serde(default)]
+    pub context_declaring_modules: OrderedMap<Text, Text>,
+
     /// Re-export chains captured at precompile time, indexed by the
     /// **enclosing** module path. Each entry is a list of
     /// `(local_name, true_name, source_module_path)` triples that
