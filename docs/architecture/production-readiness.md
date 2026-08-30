@@ -192,7 +192,10 @@ Two of the five are ratchets that moved by ONE (`panic-surface`) or
 name a known class (`dup-emitters`), which is what a ratchet is for.
 The point is not the individual rows: it is that the wall as a whole
 does not currently hold, and `make` stopping at the first failure means
-a green run of the later gates has never been observed on this state.
+a green run of the later gates had never been observed on this state.
+
+`make gates-source-report` now runs all 21 past the first failure and
+prints a line per gate — the wall reported one failure and had four.
 
 ### A measurement rule this session paid for
 
