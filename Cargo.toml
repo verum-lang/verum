@@ -246,6 +246,25 @@ split-debuginfo = "packed"
 lto = false          # Disable LTO for faster compilation
 codegen-units = 16   # Balanced parallelism
 
+# DEPENDENCIES ARE OPTIMISED EVEN IN A DEV BUILD.
+#
+# `opt-level = 0` above is about OUR crates, where it buys build speed
+# and costs little: our hot loops are short. It is the wrong setting for
+# a dependency that is itself a solver. `z3-sys` compiles Z3 from source
+# and follows cargo's profile, so a debug build ships an UNOPTIMISED Z3
+# — and the profile says so: the heaviest non-waiting leaves under a
+# verification run are `std::__cxx_atomic_load<bool>`,
+# `assertions_enabled()`, `tag_enabled(TraceTag)` and
+# `is_trace_enabled()`, which is what a solver looks like when nothing
+# has been inlined away.
+#
+# What that cost, measured: a trivial obligation took ~18ms, and the
+# suite's own `test_performance_target_average` — a 10ms average over
+# 100 `i < i+1` checks — was RED for it. `cargo test` uses this profile,
+# so the pin was measuring a solver nobody ships.
+[profile.dev.package."*"]
+opt-level = 2
+
 [profile.release]
 # Release profile optimized for maximum performance
 # Note: LTO disabled due to rustc SIGSEGV on large projects with LLVM static libs
