@@ -1197,6 +1197,36 @@ fn path_to_smtlib(path: &verum_ast::ty::Path) -> SmtResult {
 /// Extract parameter names from a function's parameter list.
 /// Returns `(name, sort)` pairs suitable for `ReflectedFunction`.
 pub fn extract_params(func: &verum_ast::FunctionDecl) -> Vec<(String, String)> {
+    // The function's OWN type parameters. A parameter typed `T` where
+    // `T` is one of them is not a value of some opaque type the module
+    // declares — it is a HOLE the caller fills, and the sort it gets
+    // must be the sort the CALL SITE gets, or the definition axiom
+    // describes a different function than the goal mentions.
+    //
+    // Measured (T0980), `VERUM_DUMP_SMT_DIR` on
+    // `fn always_true<T>(_x: T) -> Bool { true }` +
+    // `theorem t: always_true(42) == true`:
+    //
+    //     (declare-fun always_true (Verum!T) Bool)   <- the definition
+    //     (declare-fun always_true (Int) Bool)       <- the goal's call
+    //     (assert (forall ((_x Verum!T)) (= (always_true _x) true)))
+    //     (assert (not (= (always_true 42) true)))
+    //
+    // Two declarations of one name: Z3 reads them as two functions, and
+    // the axiom never touches the goal. Drop the `<T>` and the same
+    // theorem discharges in 10ms. The goal side already spells such a
+    // parameter with the ordinary default (`declared_sort_of` in
+    // `verify_cmd`), so agreeing with it is what makes the axiom reach
+    // the goal — the divergence was between two renderers of one
+    // signature, not a missing capability.
+    let type_params: std::collections::HashSet<&str> = func
+        .generics
+        .iter()
+        .filter_map(|g| match &g.kind {
+            verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name.name.as_str()),
+            _ => None,
+        })
+        .collect();
     let mut out = Vec::new();
     for p in func.params.iter() {
         if let verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } = &p.kind {
@@ -1206,11 +1236,35 @@ pub fn extract_params(func: &verum_ast::FunctionDecl) -> Vec<(String, String)> {
                 }
                 _ => continue,
             };
-            let sort = type_to_sort(ty);
+            let sort = if is_own_type_parameter(ty, &type_params) {
+                "Int".to_string()
+            } else {
+                type_to_sort(ty)
+            };
             out.push((name, sort));
         }
     }
     out
+}
+
+/// Whether `ty` is a bare reference to one of the enclosing function's
+/// own type parameters — `T` in `fn f<T>(x: T)`, through any number of
+/// reference tiers.
+fn is_own_type_parameter(
+    ty: &verum_ast::ty::Type,
+    type_params: &std::collections::HashSet<&str>,
+) -> bool {
+    use verum_ast::ty::TypeKind;
+    match &ty.kind {
+        TypeKind::Reference { inner, .. }
+        | TypeKind::CheckedReference { inner, .. }
+        | TypeKind::UnsafeReference { inner, .. } => is_own_type_parameter(inner, type_params),
+        TypeKind::Path(path) => path
+            .as_ident()
+            .map(|id| type_params.contains(id.as_str()))
+            .unwrap_or(false),
+        _ => false,
+    }
 }
 
 /// Try to translate a function declaration into a `ReflectedFunction`.
@@ -1832,10 +1886,30 @@ pub fn try_reflect_function_with_env(
         return decline("no regular parameters");
     }
 
+    // The RETURN type gets the same rule as the parameters: `T` in
+    // `fn ident<T>(x: T) -> T` is the caller's type, not an opaque one
+    // this module declares. Fixing only the parameter side left
+    // `theorem t(n: Int): ident(n) == n` failing, because the
+    // definition still returned `Verum!T` where the goal wanted Int —
+    // half a signature agreeing is still two functions (T0980).
+    let own_type_params: std::collections::HashSet<&str> = func
+        .generics
+        .iter()
+        .filter_map(|g| match &g.kind {
+            verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name.name.as_str()),
+            _ => None,
+        })
+        .collect();
     let return_sort = func
         .return_type
         .as_ref()
-        .map(type_to_sort)
+        .map(|t| {
+            if is_own_type_parameter(t, &own_type_params) {
+                "Int".to_string()
+            } else {
+                type_to_sort(t)
+            }
+        })
         .unwrap_or_else(|| "Int".to_string());
 
     // Parameter sorts may themselves be opaque (`Verum!T`) — their

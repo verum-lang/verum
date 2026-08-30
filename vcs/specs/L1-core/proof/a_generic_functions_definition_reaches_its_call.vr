@@ -1,0 +1,74 @@
+// @test: verify-pass
+// @level: L1
+// @tier: 0
+// @tags: proofs, smt, reflection, generics
+//
+// Pin (T0980) — a generic function's definition must describe the function
+// the GOAL mentions.
+//
+// The difference was one word:
+//
+//     fn always_true(_x: Int) -> Bool { true }
+//     theorem t: always_true(42) == true      Proved
+//
+//     fn always_true<T>(_x: T) -> Bool { true }
+//     theorem t: always_true(42) == true      FAILED
+//
+// `VERUM_DUMP_SMT_DIR` named the reason without a word of inference — the
+// query carried TWO declarations of one name:
+//
+//     (declare-sort Verum!T 0)
+//     (declare-fun always_true (Verum!T) Bool)   <- the definition
+//     (declare-fun always_true (Int) Bool)       <- the goal's call
+//     (assert (forall ((_x Verum!T)) (= (always_true _x) true)))
+//     (assert (not (= (always_true 42) true)))
+//
+// To Z3 those are two different functions. The definitional axiom said
+// nothing whatever about the term in the goal, so a body the reflector had
+// accepted, translated and asserted still could not close a one-line claim.
+//
+// The root was two renderers of one signature: reflection asked
+// `type_to_sort_and_name` and got `Verum!T`; the callee-signature registry
+// asked `declared_sort_of` and got the ordinary default. Neither is wrong
+// alone — what was wrong is that there were two. `T` in `fn f<T>(x: T)` is
+// not a value of some opaque type this module declares; it is a hole the
+// CALLER fills, so its sort has to be the sort the call site gets.
+//
+// Both halves are needed, and the first alone measured half-green:
+// repairing the parameter sorts turned `always_true` green and left
+// `ident` red, because `ident<T>(x: T) -> T` carries `T` in its RETURN as
+// well. Half a signature agreeing is still two functions.
+
+fn always_true<T>(_x: T) -> Bool {
+    true
+}
+
+fn ident<T>(x: T) -> T {
+    x
+}
+
+/// The parameter half.
+theorem generic_param_reaches_the_call: always_true(42) == true {
+    proof by smt
+}
+
+/// The return half — red until the return sort followed the same rule.
+theorem generic_return_reaches_the_call(n: Int): ident(n) == n {
+    proof by smt
+}
+
+/// The control that neither theorem above is about tautologies. The SAME
+/// bodies without the type parameter discharged before this fix and must
+/// keep discharging; if these ever go red, the fix broke the ordinary path
+/// and the two above prove nothing about generics.
+fn always_true_mono(_x: Int) -> Bool {
+    true
+}
+
+theorem monomorphic_still_discharges: always_true_mono(42) == true {
+    proof by smt
+}
+
+fn main() {
+    print("ok");
+}
