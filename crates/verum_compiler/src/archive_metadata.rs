@@ -1919,15 +1919,31 @@ fn type_ref_to_text_with_params(
             "[{}]",
             type_ref_to_text_with_params(inner, type_id_to_name, param_id_to_name)
         ),
-        // `TypeRef::Rank2Function` deliberately keeps the placeholder: its
-        // spelling `fn<N>(…) -> R` does NOT round-trip — the parser's
-        // function arm matches the `fn(` prefix only, so `fn<` would fall
-        // through to the generic-instantiation arm and land as a rigid
+        // `TypeRef::Rank2Function` keeps the placeholder: its spelling
+        // `fn<N>(…) -> R` does NOT round-trip — the parser's function arm
+        // matches the `fn(` prefix only, so `fn<` would fall through to the
+        // generic-instantiation arm and land as a rigid
         // `Type::Named { "fn<2>(A) -> B" }`, which is strictly worse than an
         // honest existential.  Rendering it as a rank-1 `fn(…)` instead
-        // would silently drop the universal quantifier.  Zero occurrences in
-        // the shipped archive, so the placeholder costs nothing today;
-        // giving it a real spelling is a parser-side change first.
+        // would silently drop the universal quantifier.  Giving it a real
+        // spelling is a parser-side change first.
+        //
+        // THIS DECISION HAD A CONDITION, AND THE CONDITION EXPIRED. It read
+        // "Zero occurrences in the shipped archive, so the placeholder costs
+        // nothing today". True when written. Measured 2026-08-30:
+        //
+        //     grep -rcE ': *fn<[A-Z]' core --include='*.vr'   ->  4
+        //
+        // all four in `core/base/iterator.vr` (3956, 4250, 4260, 4311):
+        // `Transducer` and `StatefulTransducer` with their iterator forms.
+        // The placeholder is therefore NOT free — the archive bakes ONE
+        // instantiation of the quantified variable, so a second use of such
+        // a type at a different element type inherits the first one's and
+        // fails `E400: expected 'Int', found 'Text'` (T0997).
+        //
+        // The count above is the whole check; it is written here so the next
+        // reader can re-test the condition in one command instead of
+        // trusting a sentence.
         _ => "__opaque_typeref".to_string(),
     }
 }
