@@ -1,0 +1,52 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: names, collision, codegen, T0946
+// @timeout: 60000
+// @expected-stdout-begin
+// control=42
+// resolve=42
+// @expected-stdout-end
+// @description: A locally declared function whose simple name collides with a stdlib one of the SAME arity keeps its own return type
+
+// `resolve` collides with `core.encoding.json_pointer.resolve`, which
+// takes two arguments and returns `Maybe<JsonValue>`. Before T0946 the
+// local one printed `None`.
+//
+// The value was never wrong — `v == 42` held and `v + 0` printed 42.
+// Only the recorded TYPE NAME came from the wrong function, so an `Int`
+// formatted as a `Maybe` rendered `None`.
+//
+// ROOT: the registration writes two keys with OPPOSITE collision
+// policies. `functions[name]` is last-wins, so it held the local
+// function correctly; `functions[name#arity]` was created with
+// `or_insert` — first-wins — for the bake's byte-determinism, and its
+// comment claimed "extra mirrors are semantically inert". They are not:
+// the arity-aware lookup reads them.
+//
+// BOTH lines are pinned, and the second is the one that discriminates.
+// A first draft of this file expected only `control=42` — a line that
+// is green before AND after the repair, so the spec would have passed
+// on the broken compiler. `resolve=42` is the claim.
+//
+// `uniquely_named_thing` is the control. It is the same function with a
+// name nothing collides with, so a repair that breaks name resolution
+// outright fails here first.
+
+type Holder is { id: Int };
+type Key is { k: Int };
+
+fn resolve(h: &List<Holder>, k: &Key) -> Int {
+    k.k + h.len()
+}
+
+fn uniquely_named_thing(h: &List<Holder>, k: &Key) -> Int {
+    k.k + h.len()
+}
+
+fn main() {
+    let hs = [Holder { id: 1 }, Holder { id: 2 }];
+    let k = Key { k: 40 };
+    print(f"control={uniquely_named_thing(&hs, &k)}");
+    print(f"resolve={resolve(&hs, &k)}");
+}
