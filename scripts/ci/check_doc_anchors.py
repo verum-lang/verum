@@ -84,7 +84,7 @@ def anchors_of(path: Path) -> set[str]:
     return found
 
 
-def resolve(src: Path, target: str) -> Path | None:
+def resolve(src: Path, target: str, docs_root: Path = DOCS) -> Path | None:
     """The .md file a link target names, or None if it leaves the docs."""
     if not target:
         return src
@@ -92,7 +92,11 @@ def resolve(src: Path, target: str) -> Path | None:
         return None
     if target.startswith("/docs/"):
         rel = target[len("/docs/") :].rstrip("/")
-        for cand in (DOCS / f"{rel}.md", DOCS / rel / "index.md", DOCS / f"{rel}.mdx"):
+        for cand in (
+            docs_root / f"{rel}.md",
+            docs_root / rel / "index.md",
+            docs_root / f"{rel}.mdx",
+        ):
             if cand.is_file():
                 return cand
         return None
@@ -109,6 +113,17 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument(
+        "--docs",
+        type=Path,
+        default=DOCS,
+        help="documentation tree to check (default: internal/website/docs)",
+    )
+    ap.add_argument(
+        "--require-docs",
+        action="store_true",
+        help="fail instead of skipping when the documentation tree is absent",
+    )
     args = ap.parse_args()
 
     if args.self_test:
@@ -135,19 +150,28 @@ def main() -> int:
         print("self-test: ok" if ok else "self-test: FAILED")
         return 0 if ok else 1
 
-    if not DOCS.is_dir():
-        print("check-doc-anchors: docs tree not present, nothing to check")
-        return 0
+    docs_root = args.docs
+    if not docs_root.is_dir():
+        # NOT a pass — see T0971. `internal/` is gitignored and the
+        # website is a separate repository, so this is the branch CI
+        # takes on every run.
+        print(
+            "check-doc-anchors: SKIPPED — NOT CHECKED "
+            f"(no documentation tree at {docs_root}; pass --docs PATH, "
+            "or --require-docs to make this a failure)",
+            file=sys.stderr,
+        )
+        return 1 if args.require_docs else 0
 
     cache: dict[Path, set[str]] = {}
     broken: list[tuple[str, int, str]] = []
     total = 0
-    for src in sorted(DOCS.rglob("*.md")):
+    for src in sorted(docs_root.rglob("*.md")):
         text = src.read_text(errors="ignore")
         body = CODE_FENCE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
         for m in LINK.finditer(body):
             target, anchor = m.group(1), m.group(2)
-            dest = resolve(src, target)
+            dest = resolve(src, target, docs_root)
             if dest is None:
                 continue          # external, or a link the site resolves elsewhere
             total += 1
@@ -155,7 +179,7 @@ def main() -> int:
                 cache[dest] = anchors_of(dest)
             if anchor not in cache[dest]:
                 line = body[: m.start()].count("\n") + 1
-                broken.append((str(src.relative_to(DOCS.parent)), line, f"{target}#{anchor}"))
+                broken.append((str(src.relative_to(docs_root.parent)), line, f"{target}#{anchor}"))
 
     for f, line, link in broken:
         print(f"  {f}:{line}  {link}")
