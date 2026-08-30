@@ -442,6 +442,67 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
+    /// Every variant, in declaration order.
+    ///
+    /// The canonical iteration source: a gate outside this crate cannot
+    /// enumerate a Rust enum, so without this list it has to guess the
+    /// codes by grepping for spellings — which is how 150 of these came
+    /// to be absent from `verum_error`'s registry while the gate that
+    /// exists to prevent exactly that reported green (T0973). Adding a
+    /// variant requires one entry here and one arm in `as_str`.
+    pub const ALL: &'static [Self] = &[
+        Self::UnterminatedChar, Self::InvalidEscape, Self::InvalidNumber, Self::EmptyChar,
+        Self::InvalidInterpolation, Self::UnknownToken, Self::MissingSemicolon, Self::UnclosedAttribute,
+        Self::InvalidAttributeArgs, Self::MissingAttributeName, Self::InvalidNestedAttribute, Self::InvalidEmptyCfg,
+        Self::InvalidEmptyRequires, Self::InvalidEmptyEnsures, Self::UnexpectedToken, Self::MissingBlock,
+        Self::InvalidTheorem, Self::MissingTheoremName, Self::InvalidLemma, Self::UnclosedForall,
+        Self::UnclosedExists, Self::InvalidProofKeyword, Self::InvalidAssert, Self::InvalidAssume,
+        Self::MalformedTactic, Self::ProofNotTerminated, Self::MissingFnName, Self::MissingFnParams,
+        Self::MissingFnBody, Self::InvalidFnVisibility, Self::DuplicateFnModifier, Self::InvalidFnParam,
+        Self::MissingParamType, Self::InvalidReturnType, Self::InvalidWhereClauseSyntax, Self::InvalidUsingClauseSyntax,
+        Self::InvalidThrowsClause, Self::MissingGenericClose, Self::EmptyGenericParams, Self::MissingTypeName,
+        Self::MissingTypeIs, Self::MissingTypeBody, Self::InvalidRecordField, Self::MissingFieldType,
+        Self::InvalidVariantSyntax, Self::DuplicateFieldName, Self::InvalidGenericConstraint, Self::MissingProtocolBrace,
+        Self::InvalidProtocolMethod, Self::InvalidRefinementSyntax, Self::MissingImplType, Self::MissingImplFor,
+        Self::InvalidImplMethod, Self::MissingImplBrace, Self::MissingContextName, Self::MissingContextBody,
+        Self::InvalidContextMethod, Self::MissingModuleName, Self::MissingModuleBrace, Self::InvalidMountSyntax,
+        Self::InvalidPubUseSyntax, Self::MissingConstType, Self::MissingConstValue, Self::MissingStaticType,
+        Self::InvalidConstExpr, Self::DuplicateGenericParam, Self::UnclosedArrayType, Self::ArrayMissingSize,
+        Self::ArrayNegativeSize, Self::ArrayDoubleSemicolon, Self::ArrayMissingElement, Self::UnclosedCapability,
+        Self::EmptyCapability, Self::CapabilityNoWith, Self::UnclosedRefinement, Self::RefinementNoBase,
+        Self::InvalidIntSuffix, Self::UnclosedConstraintGeneric, Self::EmptyGenericArgs, Self::DoubleCommaCapability,
+        Self::TrailingCommaCapability, Self::DoubleAngleBracket, Self::DoubleAmpersandRef, Self::RefWithoutType,
+        Self::DoubleCheckedRef, Self::ConflictingRefModifiers, Self::Rank2MissingParams, Self::UnclosedFnParams,
+        Self::FnTypeMissingReturn, Self::WrongArrowOperator, Self::UnclosedThrows, Self::UsingWithoutContext,
+        Self::AsyncWrongPosition, Self::UnclosedTupleType, Self::SingleElementTuple, Self::UnitWithContent,
+        Self::ThrowNoExpression, Self::FinallyNoBlock, Self::RecoverMalformedClosure, Self::InvalidAsyncBlock,
+        Self::InvalidAwaitExpr, Self::InvalidSelectArm, Self::InvalidSpawnExpr, Self::MissingChannelOp,
+        Self::UnclosedSelect, Self::InvalidBreak, Self::InvalidContinue, Self::InvalidReturn,
+        Self::InvalidYield, Self::UnclosedGenericArgs, Self::TurbofishMissingType, Self::InvalidTupleIndex,
+        Self::InvalidFieldAccess, Self::InvalidMethodCall, Self::InvalidIndexExpr, Self::InvalidCallArgs,
+        Self::InvalidClosure, Self::InvalidMatch, Self::InvalidIf, Self::InvalidFor,
+        Self::InvalidWhile, Self::InvalidLoop, Self::InvalidRange, Self::InvalidBinaryOp,
+        Self::InvalidUnaryOp, Self::TaggedLiteralMissing, Self::TypeofNoArg, Self::ForallMissingDot,
+        Self::ExistsMissingDot, Self::InvalidComprehension, Self::InvalidPipeline, Self::InvalidTryExpr,
+        Self::InvalidDefer, Self::InvalidProvide, Self::InvalidLetPattern, Self::RustKeywordUsed,
+        Self::RustTypeUsed, Self::RustMacroSyntax, Self::TrailingSeparator, Self::EmptyConstruct,
+        Self::DuplicateClause, Self::InvalidSplice, Self::MissingBlockExpr, Self::EmptyShapeParams,
+        Self::PatternInvalidAt, Self::PatternInvalidIdentifier, Self::PatternInvalidRest, Self::PatternInvalidMut,
+        Self::PatternEmptyTuple, Self::PatternInvalidActiveArgs, Self::PatternInvalidField, Self::PatternDuplicateField,
+        Self::PatternNestedOr, Self::PatternOrBinding, Self::PatternInvalidType, Self::PatternInvalidSlice,
+        Self::PatternInvalidUnicode, Self::PatternInvalidVariantArgs, Self::PatternInvalidAnd, Self::PatternTrailingPipe,
+        Self::PatternInvalidGuard, Self::PatternInvalidMatchArm, Self::PatternInvalidLet, Self::PatternEmptyOr,
+        Self::StmtUnclosedBlock, Self::StmtUnclosedCall, Self::StmtUnclosedIndex, Self::LetMissingPattern,
+        Self::LetMissingValue, Self::LetMissingEquals, Self::LetInvalidTypeOrPattern, Self::ProvideInvalid,
+        Self::DeferInvalid, Self::AssignmentInvalid, Self::CompoundAssignInvalid, Self::ExprStmtInvalid,
+        Self::ControlFlowInvalid, Self::MetaInvalidStage, Self::MetaDuplicateUsing, Self::MetaInvalidQuote,
+        Self::MetaSpliceOutsideQuote, Self::MetaHygieneViolation, Self::MetaGensymCollision, Self::MetaScopeResolutionFailed,
+        Self::MetaQuoteStageError, Self::MetaLiftTypeMismatch, Self::MetaInvalidTokenTree, Self::MetaCaptureNotDeclared,
+        Self::MetaRepetitionMismatch,
+    ];
+}
+
+impl ErrorCode {
     /// Convert error code to its string representation (e.g., "E001", "E0A0")
     pub fn as_str(&self) -> &'static str {
         match self {

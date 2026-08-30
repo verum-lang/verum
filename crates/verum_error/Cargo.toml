@@ -38,6 +38,10 @@ serde_json = { version = "1.0", optional = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+# The registry gate asks the parser's `ErrorCode::ALL` directly instead of
+# grepping for code spellings — see tests/registry_covers_parser_codes.rs.
+# `verum_fast_parser` does not depend on `verum_error`, so this is not a cycle.
+verum_fast_parser = { workspace = true }
 tokio = { workspace = true, features = ["full", "test-util"] }
 criterion = { workspace = true }
 serial_test = "3.2"
