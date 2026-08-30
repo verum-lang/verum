@@ -3211,10 +3211,14 @@ impl<'ctx> Translator<'ctx> {
 
         // Handle domain constraint: forall x in S. P(x) → forall x. x ∈ S → P(x)
         if let verum_common::Maybe::Some(domain) = &binding.domain {
-            let domain_z3 = inner_translator.translate_expr(domain)?;
-            // Create membership constraint (simplified: domain_z3 is assumed boolean)
-            if let Some(domain_bool) = domain_z3.as_bool() {
-                body_bool = domain_bool.implies(&body_bool);
+            if let Some(member) = Self::range_membership(&inner_translator, &bound_var, domain)? {
+                body_bool = member.implies(&body_bool);
+            } else {
+                let domain_z3 = inner_translator.translate_expr(domain)?;
+                // Create membership constraint (simplified: domain_z3 is assumed boolean)
+                if let Some(domain_bool) = domain_z3.as_bool() {
+                    body_bool = domain_bool.implies(&body_bool);
+                }
             }
         }
 
@@ -3299,9 +3303,13 @@ impl<'ctx> Translator<'ctx> {
         inner_translator.bind(var_name.clone(), bound_var.clone());
 
         if let verum_common::Maybe::Some(domain) = &binding.domain {
-            let domain_z3 = inner_translator.translate_expr(domain)?;
-            if let Some(domain_bool) = domain_z3.as_bool() {
-                body_bool = domain_bool.implies(&body_bool);
+            if let Some(member) = Self::range_membership(&inner_translator, &bound_var, domain)? {
+                body_bool = member.implies(&body_bool);
+            } else {
+                let domain_z3 = inner_translator.translate_expr(domain)?;
+                if let Some(domain_bool) = domain_z3.as_bool() {
+                    body_bool = domain_bool.implies(&body_bool);
+                }
             }
         }
 
@@ -3351,6 +3359,63 @@ impl<'ctx> Translator<'ctx> {
     /// Note: For exists, domain and guard are conjoined (∧) not implication (→)
     ///
     /// Quantifier expressions: translated to Z3 forall_const/exists_const with domain guards
+    /// `x in a..b` as an interval on the bound variable, or `None` when
+    /// the domain is not a range.
+    ///
+    /// A range is not a boolean expression, and translating it as one
+    /// failed the WHOLE quantifier: `forall k in 0..3 => P` answered
+    /// "unsupported expression: Range" and the obligation could not be
+    /// stated at all. That is the form the corpus is written in —
+    /// `forall i in 0..(len(lst) - 1) => …` and its kin — while
+    /// `forall k: Int. …` worked, so one concept had a working spelling
+    /// and a failing one (T0964).
+    ///
+    /// One function, three callers: the two universal sites and the
+    /// existential one. They had three copies of the boolean-domain
+    /// line between them, which is how a rule taught to one of them
+    /// stays untaught to the others.
+    fn range_membership(
+        inner: &Translator<'ctx>,
+        bound_var: &Dynamic,
+        domain: &Expr,
+    ) -> Result<Option<Bool>, TranslationError> {
+        let ExprKind::Range {
+            start,
+            end,
+            inclusive,
+        } = &domain.kind
+        else {
+            return Ok(None);
+        };
+        let Some(x) = bound_var.as_int() else {
+            return Err(TranslationError::QuantifierError(
+                "a range domain needs an integer-sorted bound variable".to_text(),
+            ));
+        };
+        let mut parts: Vec<Bool> = Vec::new();
+        if let verum_common::Maybe::Some(lo) = start {
+            let lo_z3 = inner.translate_expr(lo)?;
+            if let Some(lo_int) = lo_z3.as_int() {
+                parts.push(x.ge(&lo_int));
+            }
+        }
+        if let verum_common::Maybe::Some(hi) = end {
+            let hi_z3 = inner.translate_expr(hi)?;
+            if let Some(hi_int) = hi_z3.as_int() {
+                parts.push(if *inclusive {
+                    x.le(&hi_int)
+                } else {
+                    x.lt(&hi_int)
+                });
+            }
+        }
+        if parts.is_empty() {
+            return Ok(None);
+        }
+        let refs: Vec<&Bool> = parts.iter().collect();
+        Ok(Some(Bool::and(&refs)))
+    }
+
     fn translate_exists(
         &self,
         bindings: &[verum_ast::expr::QuantifierBinding],
@@ -3429,9 +3494,13 @@ impl<'ctx> Translator<'ctx> {
 
         // Handle domain constraint: exists x in S. P(x) → exists x. x ∈ S ∧ P(x)
         if let verum_common::Maybe::Some(domain) = &binding.domain {
-            let domain_z3 = inner_translator.translate_expr(domain)?;
-            if let Some(domain_bool) = domain_z3.as_bool() {
-                body_bool = Bool::and(&[&domain_bool, &body_bool]);
+            if let Some(member) = Self::range_membership(&inner_translator, &bound_var, domain)? {
+                body_bool = Bool::and(&[&member, &body_bool]);
+            } else {
+                let domain_z3 = inner_translator.translate_expr(domain)?;
+                if let Some(domain_bool) = domain_z3.as_bool() {
+                    body_bool = Bool::and(&[&domain_bool, &body_bool]);
+                }
             }
         }
 

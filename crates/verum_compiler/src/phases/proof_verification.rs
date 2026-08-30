@@ -3133,8 +3133,60 @@ pub fn substitute_ident(expr: &Expr, from_to: &[(Text, Ident)]) -> Expr {
             },
             expr.span,
         ),
-        _ => expr.clone(),
+        // Everything else is STRUCTURAL: rebuild with each child
+        // substituted, through the `verum_ast` walk that covers all 73
+        // variants.
+        //
+        // This arm was `expr.clone()`, so substitution stopped at every
+        // form not listed above — including the QUANTIFIERS. Measured:
+        // `type B is m: Int where forall k in 0..3 => m >= k` had its
+        // binder normalised to `self` and then `self` replaced by
+        // `result` everywhere EXCEPT inside the quantifier body, so the
+        // obligation spoke about a free `m` and came back with the
+        // counterexample `m = 0, result = 9` — a claim about a variable
+        // nothing constrained (T0964).
+        //
+        // A binder is entered only when it does not rebind one of the
+        // names being replaced; that keeps `forall k. … self …`
+        // substitutable while refusing `forall self. … self …`. This is
+        // the third copy of this rule in the tree — the others are
+        // `verum_types::refinement::substitute_in_expr` and
+        // `verum_smt::expr_to_smtlib::substitute_ident`, both fixed the
+        // same way and both found the same way: by a name surviving a
+        // walk that was supposed to replace it.
+        _ => {
+            if verum_ast::visit_mut::introduces_bindings(&expr.kind)
+                && binder_shadows_any(&expr.kind, from_to)
+            {
+                return expr.clone();
+            }
+            let mut rebuilt = expr.clone();
+            verum_ast::visit_mut::each_child_expr_mut(&mut rebuilt, &mut |child| {
+                *child = substitute_ident(child, from_to);
+            });
+            rebuilt
+        }
     }
+}
+
+/// Does this binding form rebind one of the names being substituted?
+///
+/// Only the quantifiers are answered precisely, because they are the
+/// forms a refinement predicate actually contains; every other binder
+/// answers `true` and is left alone, which is the sound direction.
+fn binder_shadows_any(kind: &ExprKind, from_to: &[(Text, Ident)]) -> bool {
+    use verum_ast::pattern::PatternKind;
+    let bindings = match kind {
+        ExprKind::Forall { bindings, .. } | ExprKind::Exists { bindings, .. } => bindings,
+        _ => return true,
+    };
+    bindings.iter().any(|b| match &b.pattern.kind {
+        PatternKind::Ident { name, .. } => {
+            from_to.iter().any(|(from, _)| name.name == *from)
+        }
+        // A pattern this does not read could bind anything.
+        _ => true,
+    })
 }
 
 // ---------------------------------------------------------------------------

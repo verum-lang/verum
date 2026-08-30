@@ -64,6 +64,25 @@ public fn takes_an_inline(p: Int{it > 0}) -> Int
     p
 }
 
+/// A refinement whose predicate is QUANTIFIED, in both spellings the
+/// corpus uses. `forall k in 0..3` is a range domain — not a boolean
+/// expression — and translating it as one failed the whole quantifier
+/// with "unsupported expression: Range", so the obligation could not be
+/// stated. The other spelling, `forall k: Int. …`, worked; one concept,
+/// two surfaces, one of them dead.
+///
+/// The range form is now the interval it means, in all three places
+/// that handle a quantifier domain rather than only the one that was
+/// noticed.
+type BeatsAllRange is m: Int where forall k in 0..3 => m >= k;
+type BeatsAllTyped is m: Int where forall k: Int. k >= 0 && k < 3 => m >= k;
+
+@verify(formal)
+public fn returns_a_range_quantified(n: Int) -> BeatsAllRange { 9 }
+
+@verify(formal)
+public fn returns_a_typed_quantified(n: Int) -> BeatsAllTyped { 9 }
+
 mount core.prelude.*;
 
 fn main() {
