@@ -97,6 +97,56 @@ impl TypeChecker {
     }
 
     /// Inner implementation of check_item
+    /// Every module in the registry that exports `name`.
+    ///
+    /// Runs only on the E401 path, so its cost is paid once per error
+    /// rather than per import. A mount naming the wrong module is the
+    /// common shape — measured on the registry project, 10 of 24
+    /// unresolved names exist in `core/` one module over — and the
+    /// existing note (ten exports of the named module, alphabetically)
+    /// answers a question nobody asked.
+    fn modules_declaring(&self, name: &str) -> verum_common::List<Text> {
+        // Asked of the METADATA, not of the module registry.
+        //
+        // The registry's `ModuleInfo.exports` is EMPTY for stdlib
+        // modules built from `CoreMetadata` — the pipeline's own debug
+        // line says so ("Module 'core.base.iterator': 0 exports"), and
+        // a first version of this search scanned it and returned
+        // nothing every time. The registry is also SCOPED to the
+        // modules a file actually mounts, so it could not see the
+        // module the name really lives in even when populated.
+        //
+        // `CoreMetadata.types` carries `name` and `module_path` per
+        // descriptor, which is exactly the reverse index this needs.
+        let Maybe::Some(meta) = &self.core_metadata else {
+            return verum_common::List::new();
+        };
+        let mut out: Vec<Text> = meta
+            .types
+            .values()
+            .filter(|d| d.name.as_str() == name)
+            // The PRECISE declaring module, not the archive entry.
+            //
+            // `module_path` is the DIRECTORY module every resolver route
+            // keys on, and a first version of this help printed it:
+            // `Severity` is declared in `core.architecture`. Measured,
+            // `mount architecture.{Severity}` is E401 and only
+            // `architecture.anti_patterns.{Severity}` resolves — so the
+            // help named a path that does not work, which is worse than
+            // no help at all. `origin_module_path` exists for exactly
+            // this question (T0555) and falls back to `module_path` for
+            // single-file modules.
+            .map(|d| match &d.origin_module_path {
+                Maybe::Some(origin) if !origin.as_str().is_empty() => origin.clone(),
+                _ => d.module_path.clone(),
+            })
+            .filter(|m| !m.as_str().is_empty())
+            .collect();
+        out.sort();
+        out.dedup();
+        out.into_iter().collect()
+    }
+
     fn check_item_inner(&mut self, item: &verum_ast::Item) -> Result<()> {
         use verum_ast::ItemKind;
 
@@ -2531,6 +2581,7 @@ impl TypeChecker {
                             item_name: Text::from(item_name),
                             module_path: module_path.clone(),
                             available_items,
+                            declared_in: self.modules_declaring(Text::from(item_name).as_str()),
                             span,
                         });
                     }
@@ -3227,6 +3278,7 @@ impl TypeChecker {
                                     item_name: Text::from(item_name),
                                     module_path: resolved_module_path.clone(),
                                     available_items,
+                                    declared_in: self.modules_declaring(Text::from(item_name).as_str()),
                                     span,
                                 });
                             }
@@ -3508,6 +3560,7 @@ impl TypeChecker {
                             item_name: Text::from(item_name),
                             module_path: module_path.clone(),
                             available_items,
+                            declared_in: self.modules_declaring(Text::from(item_name).as_str()),
                             span,
                         });
                     }
@@ -3552,6 +3605,7 @@ impl TypeChecker {
                         item_name: Text::from(item_name),
                         module_path: module_path.clone(),
                         available_items,
+                        declared_in: self.modules_declaring(Text::from(item_name).as_str()),
                         span,
                     });
                 }

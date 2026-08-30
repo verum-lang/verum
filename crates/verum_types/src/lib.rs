@@ -1445,6 +1445,14 @@ pub enum TypeError {
         module_path: Text,
         /// Available exports in the module (for suggestions)
         available_items: List<Text>,
+        /// Modules that DO export this name.
+        ///
+        /// A mount naming the wrong module is the common shape — the
+        /// item exists, one module over. Listing the ten exports the
+        /// named module happens to have alphabetically first answers a
+        /// question nobody asked; saying WHERE the name lives turns a
+        /// dead end into an edit.
+        declared_in: List<Text>,
         /// Span of the import statement
         span: verum_ast::span::Span,
     },
@@ -3659,6 +3667,7 @@ impl TypeError {
                 item_name,
                 module_path,
                 available_items,
+                declared_in,
                 span,
             } => {
                 let mut builder = DiagnosticBuilder::error().code("E401").message(format!(
@@ -3696,6 +3705,26 @@ impl TypeError {
                     // reads as the whole surface, and "my name is not in the
                     // ten shown" gets mistaken for "the module does not export
                     // it" — that misreading cost a full investigation once.
+                    // WHERE THE NAME ACTUALLY LIVES, first, because it is
+                    // the only line that can be acted on directly.
+                    if !declared_in.is_empty() {
+                        let shown: Vec<&str> =
+                            declared_in.iter().take(3).map(|s| s.as_str()).collect();
+                        builder = builder.help(format!(
+                            "`{}` is declared in {}{}",
+                            item_name,
+                            shown
+                                .iter()
+                                .map(|m| format!("`{}`", m))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            if declared_in.len() > 3 {
+                                format!(" (and {} more)", declared_in.len() - 3)
+                            } else {
+                                String::new()
+                            }
+                        ));
+                    }
                     let mut sorted: Vec<&str> =
                         available_items.iter().map(|s| s.as_str()).collect();
                     sorted.sort_unstable_by(|a, b| {
