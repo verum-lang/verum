@@ -28898,8 +28898,29 @@ impl VbcCodegen {
                             }
                         }
 
-                        // Look up regular Verum functions by return type name
-                        if let Some(func_info) = self.ctx.lookup_function_in_scope(&func_name)
+                        // Look up regular Verum functions by return type name.
+                        //
+                        // ARITY IS PART OF THE QUESTION. Asking for the bare
+                        // name alone answered with whichever registration held
+                        // the key, and a simple name is a shared bucket: eight
+                        // `resolve`s live in the stdlib with arities 1, 2 and 3
+                        // and return types from `Maybe<JsonValue>` to
+                        // `CompileOptionAvailability`. A project's own
+                        // `resolve(&List<Holder>, &Key) -> Int` printed `None`,
+                        // because formatting took the winner's return type
+                        // (T0946) — while the same file's
+                        // `uniquely_named_thing`, identical body and signature,
+                        // printed 42.
+                        //
+                        // `lookup_function_with_arity_in_scope` already exists
+                        // and already consults the `name#arity` mirror keys the
+                        // registrar mints for collisions; this call site simply
+                        // was not asking it. Same-arity collisions remain
+                        // unresolved — that half needs a local-declaration
+                        // channel codegen does not have.
+                        if let Some(func_info) = self
+                            .ctx
+                            .lookup_function_with_arity_in_scope(&func_name, args.len())
                             && let Some(ref ret_name) = func_info.return_type_name
                         {
                             return self.type_name_to_type_kind(ret_name);
