@@ -159,6 +159,30 @@ public fn main() { print(caller()); }
     # opposite things. The official runner may well check this; measured
     # here only for `verum check`, which is what a person reaches for
     # when the runner is not built.
+    # Protocol conformance checks the method NAME and not its SIGNATURE,
+    # so a generic bound compiled against the protocol reaches a method
+    # that takes and returns something else. This row is the day's only
+    # instance where the un-honoured input reaches EXECUTION as a wrong
+    # value rather than stopping at a verdict (T1029).
+    #
+    # The positive control for it lives in the same task, not here: an
+    # implementation MISSING a method is refused with E405, so the
+    # conformance phase runs and this is a gap in what it compares.
+    (
+        "protocol-signature-mismatch",
+        "T1029",
+        """type Greeter is protocol {
+    fn greet(&self, times: Int) -> Int;
+};
+type P is { tag: Int };
+implement Greeter for P {
+    fn greet(&self, name: Text) -> Bool { true }
+}
+fn use_it<T: Greeter>(g: &T) -> Int { g.greet(42) }
+public fn main() { print(use_it(&P { tag: 1 })); }
+""",
+        "refuse an implementation whose method signature differs from the protocol's",
+    ),
     # `verum check` accepts a program the interpreter then panics on.
     # Found by verum-2b (T1010): the SHORT mount spelling does not merely
     # fail to help, it REPLACES a working binding with one that never
@@ -243,6 +267,7 @@ public fn main() {
 # will flip it. Shrinking this set is the point; growing it needs a reason
 # in the commit message.
 BASELINE = {
+    "protocol-signature-mismatch",
     "short-mount-passes-check",
     "unknown-attribute",
     "attribute-name-typo",

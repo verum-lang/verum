@@ -649,6 +649,8 @@ already existed for three of them.
 | **Const generic values at run time** | **BROKEN** | the type-level distinction works (row 3); reading the parameter as a value yields `nil`, and the recommended `meta` replacement does too | T1015 |
 | **Rank-2 function types** — `fn<R>(...)` as a record field | **BROKEN** | the field bakes as `Unit` | T0997, G11 |
 | **Visibility modifiers** | **RESTRICT NOTHING** | from another module a bare `fn`, an `internal fn`, a non-public type and its fields all mount and run | T1023 |
+| **Protocol conformance** — `implement Protocol for T` | **NAMES ONLY** | a missing method is refused with E405, and a method whose signature differs entirely from the protocol's is accepted; a generic function bounded by the protocol then passes an `Int` into a `Text` parameter and returns the `Bool` it gets back where it promised an `Int` | T1029 |
+| **Generic associated types** — `type Item<T>` in a protocol | **WORK, UNENFORCED** | declared, bound and called end to end with the correct result; but an implementation may bind `Item<T> = Maybe<T>` and return `List<Int>` from the method that uses it, and that is accepted — the same defect as the row above, seen through GATs | T1029 |
 | **A file that declares it must fail** — `@expected-error` in a conformance spec | **NOT ENFORCED** | when the declared error does not appear, `verum check` prints an ordinary success line and exits 0 — the same exit code as when it does appear | T1028 |
 | **An explicit mount path binds what it names** | **BROKEN** | `mount a.b.{Secret}` falls back to the bare name and binds the stdlib's `Secret` | T1022, T0782 |
 
