@@ -611,3 +611,52 @@ pillar plan retiring §40/§46/#27), `docs/architecture/intrinsic-dispatch-contr
 (Rules 4–5 open work), `core-tests/INVENTORY.md` (per-module truth),
 memory session file `session_2026-07-09_tracing_analysis_and_docs.md`
 (18 toolchain-constraint classes with repros).
+
+## H. Distinctive capabilities — claimed vs. measured (2026-08-31)
+
+Verum's argument is not that it has types, loops and generics. It is the
+short list of things its neighbours do not do: laws the compiler
+enforces, effects in the signature, sizes in the type, a size of proof
+per function. Those are what a reader evaluates the language on, and
+until today none of them had a measured verdict in one place — each was
+either prose in a guide, a chapter in the registry showcase, or a
+sentence beside a grammar production.
+
+Every row below was measured on a release binary on 2026-08-31, each
+with a control: a WORKS row means the correct form passes AND the
+incorrect form is refused; a BROKEN row means the incorrect form is
+accepted, or the correct one is refused. A row with only one half
+measured says so.
+
+**Read this table before writing documentation or a showcase chapter.**
+Four capabilities on this list are inert, and prose asserting otherwise
+already existed for three of them.
+
+| Capability | Verdict | Measured | Task |
+|---|---|---|---|
+| **Purity / computational properties** — a `pure fn` may not do I/O, spawn, or mutate through `&mut` | **WORKS** | four E503 forms refused, one at a time; gated in the registry showcase | — |
+| **Affine and linear types** — affine is used at most once, linear exactly once | **WORKS** | E310 on second use; gated | — |
+| **Sizes in the type** — `Digest<32>` and `Digest<8>` are different types | **WORKS** | E400 "expected '32', found '8'"; gated | — |
+| **Refinement types on scalars** — `type NonNeg is n: Int where n >= 0` | **WORKS** | hypothesis reaches the solver on a parameter | G10 |
+| **Refinements through record fields** | **FIXED, NOT ON MAIN** | fix committed on `lang/grammar-authority`; main still gives 4 proved / 2 failed on `versions.vr` | T0994, T0995, T1024 |
+| **Loop termination** under `@verify(thorough)` | **WORKS** | a `while` whose counter never changes reports `1 proved, 1 FAILED` | T0671 |
+| **Loop invariant preservation** | **WORKS** | a false invariant is refused with a counterexample naming the breaking state | — |
+| **Postcondition proved FROM a loop invariant** | **BROKEN** | `result` is unconstrained after a loop — fails even where the loop is not entered (`n = 0`); bisected to one token: `u + 1` proves, `u + i` and `u + k` do not | T0905 |
+| **Recursion termination** — a declared `decreases` measure | **NOT CHECKED** | a measure that INCREASES verifies clean under `check`, `verify`, `@verify(thorough)` and `@total` | T1026 |
+| **Protocol axioms as implement-site obligations** — trait laws the compiler enforces | **INERT** | a violating implementation, a conforming one, and a `proof` clause naming an axiom that does not exist all produce identical output | T0989 |
+| **Attribute validation** | **UNWIRED** | a typo in `@verify(thorough)` — name or argument — turns a FAILING verification green with no diagnostic; the validator exists and the compile path never constructs it | T1025 |
+| **Contexts in the signature** — a function that uses a capability must name it | **NOT ENFORCED** | a function with no `using [Clock]` reaches the clock, compiles, runs, and returns a value of an unrelated type | T1027 |
+| **Const generic values at run time** | **BROKEN** | the type-level distinction works (row 3); reading the parameter as a value yields `nil`, and the recommended `meta` replacement does too | T1015 |
+| **Rank-2 function types** — `fn<R>(...)` as a record field | **BROKEN** | the field bakes as `Unit` | T0997, G11 |
+| **Visibility modifiers** | **RESTRICT NOTHING** | from another module a bare `fn`, an `internal fn`, a non-public type and its fields all mount and run | T1023 |
+| **An explicit mount path binds what it names** | **BROKEN** | `mount a.b.{Secret}` falls back to the bare name and binds the stdlib's `Secret` | T1022, T0782 |
+
+**The pattern across the broken rows, and it is one pattern.** Nine of
+the sixteen fail in the same direction: an input the compiler cannot
+honour is counted in favour of the thing being checked. An unknown
+attribute, an absent axiom, a growing measure and an undeclared context
+all produce *success*, not silence. That property now has a gate of its
+own — `scripts/ci/check_silent_acceptance.py`, a ratchet carrying one
+row per instance plus a positive control — so the fifth instance is
+caught without anyone having to think of it first.
+
