@@ -612,6 +612,27 @@ pillar plan retiring §40/§46/#27), `docs/architecture/intrinsic-dispatch-contr
 memory session file `session_2026-07-09_tracing_analysis_and_docs.md`
 (18 toolchain-constraint classes with repros).
 
+**Roots found 2026-09-01, and they fall into three mechanisms rather than
+one.** The observable is always the same — accepted in silence — and the
+cause is in a different place each time. The distinction is worth keeping
+because it predicts the COST:
+
+| Task | Mechanism | Root | Cost |
+|---|---|---|---|
+| T1025 | machinery exists, nobody asks | `Parser::new` instead of `with_attr_validation`; and `take_attr_warnings` has ZERO callers in production code — the defect is two floors deep | a call, then a warning channel through an API whose every caller expects `Result<Module, errors>` |
+| T1029 | machinery exists, nobody asks | conformance compares NAME sets; the protocol registry holds the full declaration one line below where the map drops the signatures | assembly — two of four normalisations already existed |
+| T1026 | the input is destroyed at the door | a function's `decreases` measure is parsed into `let _expr` and thrown away; `FunctionDecl` has no field for it | 112 construction sites, 61 of them tests, no `Default` to lean on |
+| T1027 | the wrong question is asked | `is_available` correctly answers "is a DECLARED requirement satisfied" — a propagation check. Nothing asks "does a function declare what it USES" | a new check at the use site, not an edit to the existing one |
+| T1028 | the wrong question is asked | both branches printed `ui::success`; "did errors appear" was asked, "did the DECLARED errors appear" was not | five lines — LANDED f2794378b |
+| T1023 | machinery exists, nobody asks | `E202 "private item imported"` is in the error registry with ZERO emitters; all 8 visibility comparisons in the inferrer decide RE-EXPORT, never refusal | deciding what seven visibility forms mean at a resolution site, before the first diagnostic settles it by accident |
+
+**The measurement discipline that produced these, stated once because it
+was violated three times:** every blast-radius estimate made by reading
+code was wrong — by factors of six, seven and seventeen. The numbers that
+held were taken from the compiler itself, and every census filter was
+checked against known-positive and known-negative cases before its number
+was reported.
+
 ## H. Distinctive capabilities — claimed vs. measured (2026-08-31)
 
 Verum's argument is not that it has types, loops and generics. It is the
