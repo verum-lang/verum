@@ -342,9 +342,20 @@ pub(in super::super) fn handle_call_method(
         let cbgr = super::cbgr_helpers::is_cbgr_ref(&receiver);
         let is_int = receiver.is_int();
         let is_nil = receiver.is_nil();
+        // `reg` and `argc` alongside: a receiver that is neither pointer
+        // nor int nor nil nor a CBGR ref — raw bits like 0x58d1 — says the
+        // REGISTER holds something never boxed, and the next question is
+        // WHICH register was read (T1021 family A).
         eprintln!(
-            "[callm] method='{}' is_ptr={} is_int={} is_nil={} is_cbgr_ref={} bits=0x{:x}",
-            mname, receiver.is_ptr(), is_int, is_nil, cbgr, receiver.to_bits(),
+            "[callm] method='{}' reg={} argc={} is_ptr={} is_int={} is_nil={} is_cbgr_ref={} bits=0x{:x}",
+            mname,
+            receiver_reg.0,
+            args.count,
+            receiver.is_ptr(),
+            is_int,
+            is_nil,
+            cbgr,
+            receiver.to_bits(),
         );
     }
 
