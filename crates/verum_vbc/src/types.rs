@@ -2205,6 +2205,7 @@ mod tests {
             methods: vec![1, 2, 3],
             associated_types: Vec::new(),
             protocol_args_text: Vec::new(),
+                    type_param_fn_bounds: Vec::new(),
         });
         assert_eq!(td.protocols.len(), 1);
         assert_eq!(td.protocols[0].methods.len(), 3);
@@ -2356,6 +2357,7 @@ mod tests {
             methods: vec![100, 101, 102],
             associated_types: Vec::new(),
             protocol_args_text: Vec::new(),
+                    type_param_fn_bounds: Vec::new(),
         };
         assert_eq!(pi.protocol, ProtocolId(50));
         assert_eq!(pi.methods.len(), 3);
@@ -2368,6 +2370,7 @@ mod tests {
             methods: vec![],
             associated_types: Vec::new(),
             protocol_args_text: Vec::new(),
+                    type_param_fn_bounds: Vec::new(),
         };
         assert!(pi.methods.is_empty());
     }
@@ -2654,6 +2657,7 @@ mod tests {
             methods: vec![1, 2, 3],
             associated_types: Vec::new(),
             protocol_args_text: Vec::new(),
+                    type_param_fn_bounds: Vec::new(),
         };
 
         let json = serde_json::to_string(&pi).unwrap();

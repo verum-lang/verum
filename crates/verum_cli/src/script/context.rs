@@ -475,7 +475,10 @@ mod tests {
         assert!(ctx.cache_lookup(&cache).unwrap().is_none());
 
         // Store + re-lookup hits.
-        ctx.cache_store(&cache, b"\x01\x02\x03 fake VBC").unwrap();
+        // Empty dep list: this test is about the entry itself, and the
+        // closure it records is covered by tests/script_cache_closure.rs.
+        ctx.cache_store(&cache, b"\x01\x02\x03 fake VBC", Vec::new())
+            .unwrap();
         let entry = ctx.cache_lookup(&cache).unwrap().expect("hit");
         assert_eq!(entry.vbc, b"\x01\x02\x03 fake VBC");
         assert_eq!(entry.meta.compiler_version, "0.1.0");
