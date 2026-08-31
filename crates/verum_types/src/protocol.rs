@@ -7494,7 +7494,48 @@ impl ProtocolChecker {
     }
 
     /// Associated type bounds: constraining associated types in where clauses (where T.Item: Display) — Associated Type Resolution
+    /// Thin wrapper so the ANSWER can be seen, not just the question.
+    ///
+    /// `VERUM_TRACE_ASSOC` printed which projection was being resolved and
+    /// how many impls were registered, and nothing about what came back —
+    /// so a reduction returning the WRONG associated type looked exactly
+    /// like a correct one. The three obvious reduction sites were all
+    /// measured SILENT on the T0997 repro while this function fired 46
+    /// times, which is what forced the instrument down to here.
     pub fn try_find_associated_type(&self, ty: &Type, assoc_name: &Text) -> Option<Type> {
+        let out = self.try_find_associated_type_impl(ty, assoc_name);
+        if std::env::var("VERUM_TRACE_ASSOC").is_ok() {
+            eprintln!(
+                "[assoc-answer] ::{} of {} -> {}",
+                assoc_name,
+                ty.to_text(),
+                out.as_ref()
+                    .map(|t| {
+                        // Rendered AND identified: `to_text` prints every
+                        // variable as `_`, so two answers over different
+                        // variables look the same — and that sameness is
+                        // exactly what has to be decided here (T0997).
+                        let dbg = format!("{t:?}");
+                        let mut ids: Vec<String> = Vec::new();
+                        let mut rest = dbg.as_str();
+                        while let Some(i) = rest.find("TypeVar(") {
+                            rest = &rest[i + "TypeVar(".len()..];
+                            if let Some(j) = rest.find(')') {
+                                let id = rest[..j].to_string();
+                                if !ids.contains(&id) {
+                                    ids.push(id);
+                                }
+                            }
+                        }
+                        format!("{}{:?}", t.to_text(), ids)
+                    })
+                    .unwrap_or_else(|| "<none>".to_string())
+            );
+        }
+        out
+    }
+
+    fn try_find_associated_type_impl(&self, ty: &Type, assoc_name: &Text) -> Option<Type> {
         // Cycle detection: if we're already resolving this (type, assoc_name) pair,
         // we've hit an infinite loop (e.g., blanket impl FutureExt.Output = F.Output
         // recursing back to the same type). Break the cycle by returning None.
@@ -7667,6 +7708,35 @@ impl ProtocolChecker {
         }
 
         // Apply the substitution to the associated type
+        // An impl's OWN type variable must never escape into a caller's
+        // type. `Iterator for MappedIter<I, fn(I.Item) -> B>` declares
+        // `type Item = B`; when the receiver match cannot recover `B` — it
+        // sits in a function type's return position — `B` is left unbound
+        // and the impl's variable is handed back verbatim. Every query for
+        // `::Item of MappedIter<…>` then receives THE SAME variable, so the
+        // first call site binds it and every later one is measured against
+        // that binding: `expected 'Int', found 'Text'` at a second call with
+        // a different element type (T0997).
+        //
+        // Unbound impl variables are therefore freshened per query. Vars
+        // that came from the RECEIVER are left alone — they are the
+        // caller's, and rewriting them would sever the answer from the type
+        // it is an answer about.
+        if std::env::var("VERUM_TRACE_ASSOC").is_ok() {
+            eprintln!(
+                "[impl-bounds] for={} fn_bounds={} subst={}",
+                impl_.for_type.to_text(),
+                impl_.type_param_fn_bounds.len(),
+                substitution.len()
+            );
+        }
+        let receiver_vars = crate::dependent_helpers::collect_type_vars(concrete_ty);
+        for tv in crate::dependent_helpers::collect_type_vars(assoc_ty) {
+            if !substitution.contains_key(&tv) && !receiver_vars.contains(&tv) {
+                substitution.insert(tv, Type::Var(crate::ty::TypeVar::fresh()));
+            }
+        }
+
         self.apply_type_substitution(assoc_ty, &substitution)
     }
 

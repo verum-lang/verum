@@ -5940,7 +5940,23 @@ impl Unifier {
 
         let resolver = crate::projection::ProjectionResolver::new(protocol_checker, span);
         match resolver.normalize(ty) {
-            Ok(normalized) => normalized,
+            Ok(normalized) => {
+                // The unifier's own projection reduction, with BOTH sides.
+                // Two earlier candidates (`normalize_projection_type` in the
+                // protocol registry, `reduce_projection_shape` in infer) are
+                // silent on the T0997 repro; the reduction that hands back
+                // the first call site's element type has to be reached from
+                // somewhere, and this is the one the raise stack passes
+                // through.
+                if std::env::var("VERUM_TRACE_ASSOC").is_ok() {
+                    eprintln!(
+                        "[unify-norm] {} -> {}",
+                        ty.to_text(),
+                        normalized.to_text()
+                    );
+                }
+                normalized
+            }
             Err(e) => {
                 // #306-followup: surface projection-resolution
                 // failures so a `<X as Iterator>::Item` that can't

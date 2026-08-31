@@ -8139,6 +8139,19 @@ fn substitute_refinement_binder(
                     self.try_resolve_associated_type_projection(&args[0], assoc)
                 && &resolved != ty
             {
+                // The projection reduction that the argument check goes
+                // through. Prints the RECEIVER and the ANSWER: a reduction
+                // that hands back the first call site's element type is
+                // indistinguishable from a correct one until both are shown
+                // (T0997).
+                if std::env::var("VERUM_TRACE_ASSOC").is_ok() {
+                    eprintln!(
+                        "[reduce-shape] ::{} of {} -> {}",
+                        assoc,
+                        args[0].to_text(),
+                        resolved.to_text()
+                    );
+                }
                 return self.reduce_projection_shape(&resolved);
             }
         }
