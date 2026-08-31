@@ -3718,16 +3718,27 @@ impl TypeError {
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
-                // Add suggestions for similar modules
-                if !similar_modules.is_empty() {
+                // `similar_modules` carries two kinds of entry, and folding
+                // them together produced a "did you mean one of these
+                // modules?" line whose suggestion was a paragraph of prose
+                // (T1008). A name never contains a space; an explanation
+                // always does, so the split needs no extra field on the
+                // error and no change at any producer.
+                let (names, notes): (Vec<&Text>, Vec<&Text>) = similar_modules
+                    .iter()
+                    .partition(|s| !s.as_str().contains(' '));
+                if !names.is_empty() {
                     builder = builder.help(format!(
                         "did you mean one of these modules? {}",
-                        similar_modules
+                        names
                             .iter()
                             .map(|s| format!("`{}`", s))
                             .collect::<Vec<_>>()
                             .join(", ")
                     ));
+                }
+                for note in notes {
+                    builder = builder.add_note(note.as_str());
                 }
                 builder = builder
                     .add_note("check that the module path is correct and the module is available");

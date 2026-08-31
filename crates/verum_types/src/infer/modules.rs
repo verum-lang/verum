@@ -1545,7 +1545,66 @@ impl TypeChecker {
     /// and registers them in the type environment so they can be used during type checking.
     ///
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Cross-module resolution
+    /// T1008 — a mount whose path OPENED with a keyword segment reports a
+    /// name shorter than the one written, because the keyword rewrites the
+    /// path before resolution: `mount cog.resolve.{X}` answers ``module
+    /// `resolve` not found``. The parse is right — a keyword must beat a
+    /// directory name — but the message reported the consequence and hid
+    /// the cause, and the cause is exactly what the author cannot derive
+    /// from their own text.
+    ///
+    /// The enrichment lives HERE, wrapping the whole resolution, rather
+    /// than at the site that builds the error: by then the path has been
+    /// normalised and the keyword segment is gone. It also has to cover
+    /// every mount FORM — the first attempt put the hint in the
+    /// single-segment branch of the `Path` arm and measured inert on the
+    /// reported case, which is `Nested` and resolves through a different
+    /// path entirely.
     pub fn process_import(
+        &mut self,
+        import: &verum_ast::MountDecl,
+        current_module_path: &str,
+        registry: &verum_modules::ModuleRegistry,
+    ) -> Result<()> {
+        let outcome = self.process_import_inner(import, current_module_path, registry);
+        let Err(TypeError::ImportModuleNotFound {
+            module_path,
+            mut similar_modules,
+            span,
+        }) = outcome
+        else {
+            return outcome;
+        };
+        let leading = match &import.tree.kind {
+            verum_ast::MountTreeKind::Path(p) => p.segments.first(),
+            verum_ast::MountTreeKind::Glob(p) => p.segments.first(),
+            verum_ast::MountTreeKind::Nested { prefix, .. } => prefix.segments.first(),
+            verum_ast::MountTreeKind::File { .. } => None,
+        };
+        if let Some(kw) = leading.and_then(|seg| match seg {
+            verum_ast::ty::PathSegment::Cog => Some("cog"),
+            verum_ast::ty::PathSegment::Super => Some("super"),
+            verum_ast::ty::PathSegment::SelfValue => Some("self"),
+            _ => None,
+        }) {
+            similar_modules.push(Text::from(format!(
+                "the path opened with `{}`, which is a path keyword and not a module name; it rewrites the path before resolution, so the name reported above is shorter than the one written",
+                kw
+            )));
+            if kw == "cog" {
+                similar_modules.push(Text::from(
+                    "`core/cog/` is a stdlib directory that shares the keyword's spelling; reach it as `core.cog....`",
+                ));
+            }
+        }
+        Err(TypeError::ImportModuleNotFound {
+            module_path,
+            similar_modules,
+            span,
+        })
+    }
+
+    fn process_import_inner(
         &mut self,
         import: &verum_ast::MountDecl,
         current_module_path: &str,
@@ -1964,6 +2023,31 @@ impl TypeChecker {
                             import.tree.span,
                         )?;
                     }
+                } else {
+                    // T1011: the arm that was missing. A path with no dot
+                    // that resolves to no module used to fall out of this
+                    // chain and be ACCEPTED — `mount zzz;` compiled, exit
+                    // code zero, nothing bound. The multi-segment form has
+                    // always reported E402, so the diagnostic existed and
+                    // simply did not cover the single-segment case.
+                    //
+                    // Reaching here means every authority has already said
+                    // no: not an inline module (checked at the top of this
+                    // arm), not in the registry, and the normaliser found
+                    // nothing in the archive metadata either. A project
+                    // module of its own is exactly what `found_module`
+                    // answers for, so refusing here cannot shadow one.
+                    //
+                    // The keyword hint is NOT built here: `process_import`
+                    // wraps this whole resolution and adds it for every mount
+                    // FORM. Putting it in this branch alone was tried and
+                    // measured inert on the reported case, which is a braced
+                    // mount and never reaches here.
+                    return Err(TypeError::ImportModuleNotFound {
+                        module_path: full_normalized.clone(),
+                        similar_modules: List::new(),
+                        span: import.tree.span,
+                    });
                 }
             }
 

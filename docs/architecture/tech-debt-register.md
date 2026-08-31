@@ -95,7 +95,22 @@ independent instances measured in one day:
       choice", and justified it with a claim true in only one direction —
       every name IS a directory, but not every directory is a name, and
       nothing re-checked the converse as `core/` grew.
-    The cure for both was one: ask an AUTHORITY instead of a list —
+    * **A mount that resolved to nothing was ACCEPTED** (T1011, fixed) —
+      `mount zzz;` compiled with exit code zero and bound nothing, while
+      the multi-segment `mount nosuch.module.at.all;` had always reported
+      E402. The diagnostic existed; the chain had a branch for "module
+      found" and one for "the path contains a dot", and nothing else, so a
+      single-segment path that resolved to nothing fell out of it. Two
+      names of the deleted list were reachable only through that hole:
+      `async_` (no directory) and `target` (the Cargo build directory).
+    * **A keyword segment ate the path and the message did not say so**
+      (T1008, fixed) — `mount cog.resolve.{X}` answered ``module `resolve`
+      not found``, one segment short of what was written, because `cog` is
+      a path keyword whose parse arm CLEARS the accumulated path. The
+      parse is right; the message reported the consequence and hid the
+      cause. `core/cog/` exists, so its short form is unreachable by
+      construction while `core.cog.resolve.{X}` resolves.
+    The cure for the first two was one: ask an AUTHORITY instead of a list —
     registry first (so a project module keeps its own identity), then the
     archive metadata via a prefix range. Measured rather than assumed at
     each step: an earlier registry-only attempt was INERT (`core.id` is
