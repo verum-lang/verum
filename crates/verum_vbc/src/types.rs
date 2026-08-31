@@ -1194,6 +1194,24 @@ pub struct ProtocolImpl {
     /// the scan remains a fallback for pre-carry archives only.
     #[serde(default)]
     pub protocol_args_text: Vec<StringId>,
+    /// Impl-level generic parameters whose bound is a FUNCTION type:
+    /// `implement<I: Iterator, B, F: fn(I.Item) -> B> Iterator for
+    /// MappedIter<I, F>` carries `("F", fn(::Item<I>) -> B)`.
+    ///
+    /// Without it the typechecker cannot recover `B` from a concrete
+    /// receiver, so `type Item = B` never reduces and the parameter it
+    /// appears in accepts anything. The whole impl generic list used to
+    /// stop at this boundary — the archive reported `params=0` for every
+    /// stdlib impl — which is the same loss `associated_types` above was
+    /// added to repair, one level out (T0997).
+    ///
+    /// Both halves are StringIds — the parameter's name and the bound
+    /// rendered in SOURCE spelling (`fn(::Item<I>) -> B`). Text rather
+    /// than a `TypeRef` on purpose: a TypeRef's `Generic(n)` indices are
+    /// meaningless without the impl's own parameter list, which is the
+    /// very thing being carried, and the metadata format this feeds
+    /// (`GenericParam::bounds`) is already text.
+    pub type_param_fn_bounds: Vec<(StringId, StringId)>,
 }
 
 // ============================================================================

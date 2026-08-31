@@ -100,7 +100,7 @@ pub const VERSION_MAJOR: u16 = 2;
 /// the prelude re-exports through a glob.  The type namespace hid the
 /// same hole behind `ensure_stdlib_type_loaded`; the value namespace has
 /// no lookup-on-miss, so there the hole was fatal.
-pub const VERSION_MINOR: u16 = 13;
+pub const VERSION_MINOR: u16 = 14; // 14: per-impl generic params with fn-typed bounds (T0997)
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

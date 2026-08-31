@@ -954,11 +954,39 @@ impl<'a> Deserializer<'a> {
  } else {
  Vec::new()
  };
+ // v14: impl generic params with FUNCTION-typed bounds. Same
+ // shape and gating as the associated-type bindings above;
+ // pre-14 data has none and defaults EMPTY, which is exactly
+ // today's behaviour (T0997).
+ let type_param_fn_bounds = if self
+     .header
+     .as_ref()
+     .map_or(false, |h| h.version_minor >= 14)
+ {
+     let n = decode_varint(self.data, &mut self.offset)? as usize;
+     if n > MAX_ASSOC_TYPES_PER_PROTOCOL_IMPL {
+         return Err(VbcError::TableTooLarge {
+             field: "type_param_fn_bounds",
+             count: n.min(u32::MAX as usize) as u32,
+             max: MAX_ASSOC_TYPES_PER_PROTOCOL_IMPL as u32,
+         });
+     }
+     let mut v = Vec::with_capacity(n);
+     for _ in 0..n {
+         let name = StringId(decode_u32(self.data, &mut self.offset)?);
+         let bound = StringId(decode_u32(self.data, &mut self.offset)?);
+         v.push((name, bound));
+     }
+     v
+ } else {
+     Vec::new()
+ };
  protocols.push(ProtocolImpl {
  protocol,
  methods,
  associated_types,
  protocol_args_text,
+     type_param_fn_bounds,
  });
  }
 

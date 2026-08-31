@@ -1751,10 +1751,40 @@ fn collect_type_impls(
             }
             m
         };
+        // The impl's generic params, carried for the ones whose bound is a
+        // FUNCTION type. Only those are emitted: they are what lets the
+        // typechecker recover an associated type declared as a bare impl
+        // parameter (`type Item = B` under `F: fn(I.Item) -> B`), and
+        // without them that associated type never reduces and the
+        // parameter it sits in accepts anything (T0997). This list was
+        // `List::new()` for every archived impl, so the recovery stage was
+        // unreachable for the whole baked stdlib.
+        let generic_params: List<verum_types::core_metadata::GenericParam> = proto_impl
+            .type_param_fn_bounds
+            .iter()
+            .filter_map(|(name_sid, bound_sid)| {
+                let name = module.strings.get(*name_sid)?;
+                let bound = module.strings.get(*bound_sid)?;
+                // `type_bounds`, not `bounds`: the field doc separates them
+                // deliberately — `bounds` holds nominal protocol names
+                // ("Eq", "Hash"), `type_bounds` holds a structural type
+                // rendered as `fn(arg, …) -> ret` text, which is exactly
+                // what this carries.
+                let mut type_bounds: List<Text> = List::new();
+                type_bounds.push(Text::from(bound));
+                Some(verum_types::core_metadata::GenericParam {
+                    name: Text::from(name),
+                    bounds: List::new(),
+                    default: Maybe::None,
+                    type_bounds,
+                    pid: Maybe::None,
+                })
+            })
+            .collect();
         let descriptor = ImplementationDescriptor {
             protocol: protocol_name,
             target_type: target_name.clone(),
-            generic_params: List::new(),
+            generic_params,
             where_clause: List::new(),
             associated_types,
             methods: proto_impl

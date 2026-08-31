@@ -9148,6 +9148,55 @@ impl VbcCodegen {
                                     pn, ty_name, tid.map(|t| t.0), has_desc
                                 );
                             }
+                            // v14 carry: impl generic params whose bound is a
+                            // FUNCTION type. `implement<I, B, F: fn(I.Item) -> B>`
+                            // is exactly the shape the typechecker needs to recover
+                            // `B` from a concrete receiver; without it `type Item = B`
+                            // never reduces and the parameter it sits in accepts
+                            // anything (T0997).
+                            //
+                            // Interned HERE, before the `&mut self.types` loop below:
+                            // the interner takes `&mut self` too and the two borrows
+                            // cannot overlap.
+                            let fn_bound_ids: Vec<(StringId, StringId)> = {
+                                let pairs: Vec<(String, String)> = impl_decl
+                                    .generics
+                                    .iter()
+                                    .filter_map(|g| match &g.kind {
+                                        verum_ast::ty::GenericParamKind::Type {
+                                            name,
+                                            bounds,
+                                            ..
+                                        } => {
+                                            let fb = bounds.iter().find_map(|b| match &b.kind {
+                                                verum_ast::ty::TypeBoundKind::Equality(t)
+                                                    if matches!(
+                                                        t.kind,
+                                                        verum_ast::ty::TypeKind::Function { .. }
+                                                    ) =>
+                                                {
+                                                    Some(t)
+                                                }
+                                                _ => None,
+                                            })?;
+                                            Some((
+                                                name.name.to_string(),
+                                                Self::extract_type_name_from_ast(fb),
+                                            ))
+                                        }
+                                        _ => None,
+                                    })
+                                    .collect();
+                                pairs
+                                    .iter()
+                                    .map(|(n, b)| {
+                                        (
+                                            StringId(self.ctx.intern_string_raw(n)),
+                                            StringId(self.ctx.intern_string_raw(b)),
+                                        )
+                                    })
+                                    .collect()
+                            };
                             // Push protocol impl onto the concrete type's descriptor
                             if let Some(&concrete_type_id) =
                                 self.type_name_to_id.get(ty_name.as_str())
@@ -9159,6 +9208,7 @@ impl VbcCodegen {
                                             methods: method_fn_ids,
                                             associated_types: assoc_bindings,
                                             protocol_args_text,
+                                            type_param_fn_bounds: fn_bound_ids,
                                         });
                                         break;
                                     }
@@ -14386,6 +14436,8 @@ impl VbcCodegen {
                                 // concrete `implement P for T` records.
                                 associated_types: Vec::new(),
                                 protocol_args_text: Vec::new(),
+                                // No impl-level fn bounds carried on this path (T0997).
+                                type_param_fn_bounds: Vec::new(),
                             });
                         }
                     }
@@ -23978,6 +24030,17 @@ impl VbcCodegen {
                         .protocol_args_text
                         .iter()
                         .map(|sid| intern(self, *sid))
+                        .collect(),
+                    // Both halves are StringIds into the SOURCE module's
+                    // table, so they need re-interning here exactly like
+                    // `protocol_args_text` above. Dropping them instead —
+                    // which an "empty default" on this path does — erases
+                    // the carry on every import remap, which is where the
+                    // baked stdlib's impls come through (T0997).
+                    type_param_fn_bounds: pi
+                        .type_param_fn_bounds
+                        .iter()
+                        .map(|(n, b)| (intern(self, *n), intern(self, *b)))
                         .collect(),
                 }
             })

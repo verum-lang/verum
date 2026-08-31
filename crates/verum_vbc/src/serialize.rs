@@ -400,6 +400,15 @@ impl Serializer {
             for sid in &proto_impl.protocol_args_text {
                 encode_u32(sid.0, &mut self.output);
             }
+            // v14: impl generic params with FUNCTION-typed bounds —
+            // varint count + [u32 name-StringId, TypeRef]*. Same shape and
+            // same gating as the associated-type bindings above; pre-14
+            // data has none and defaults EMPTY (T0997).
+            encode_varint(proto_impl.type_param_fn_bounds.len() as u64, &mut self.output);
+            for (name, bound) in &proto_impl.type_param_fn_bounds {
+                encode_u32(name.0, &mut self.output);
+                encode_u32(bound.0, &mut self.output);
+            }
         }
 
         // Alias target (TypeKind::Alias only — encoded for every
