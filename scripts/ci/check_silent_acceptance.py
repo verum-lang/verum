@@ -141,6 +141,29 @@ public fn main() { print(caller()); }
 """,
         "refuse a pure function calling an impure one regardless of declaration order",
     ),
+    # A file DECLARES that it must fail, and does not. `verum check`
+    # consults `@expected-error` only when errors exist: when the
+    # expected error is ABSENT it prints an ordinary success line and
+    # exits 0, the same exit code as a file whose expected error WAS
+    # found. Two opposite outcomes, one verdict.
+    #
+    # Found by running a conformance spec directly, without vtest, and
+    # nearly reading "both binaries pass" off two zeros that meant
+    # opposite things. The official runner may well check this; measured
+    # here only for `verum check`, which is what a person reaches for
+    # when the runner is not built.
+    (
+        "unmet-expected-error",
+        "T1028",
+        """// @test: typecheck-fail
+// @expected-error: E503
+// @description: declares it must be refused, and is not
+
+pure fn clean(n: Int) -> Int { n + 1 }
+public fn main() { print(clean(1)); }
+""",
+        "refuse a file whose declared @expected-error never appeared",
+    ),
     (
         "nonexistent-protocol-axiom",
         "T0989",
@@ -194,6 +217,7 @@ BASELINE = {
     "attribute-name-typo",
     "attribute-argument-typo",
     "nonexistent-protocol-axiom",
+    "unmet-expected-error",
     "pure-calls-impure-declared-later",
     "decreases-measure-grows",
     "undeclared-context-use",
