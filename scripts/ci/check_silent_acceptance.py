@@ -273,7 +273,6 @@ BASELINE = {
     "attribute-name-typo",
     "attribute-argument-typo",
     "nonexistent-protocol-axiom",
-    "unmet-expected-error",
     "decreases-measure-grows",
     "undeclared-context-use",
 }
