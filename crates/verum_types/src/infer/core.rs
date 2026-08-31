@@ -975,6 +975,7 @@ impl TypeChecker {
             function_param_names: Map::new(),
             function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
+            stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,
             operator_protocols: OperatorProtocols::standard(),
@@ -1256,8 +1257,14 @@ impl TypeChecker {
             Maybe::Some(m) => m.clone(),
             Maybe::None => return,
         };
+        // T1013: `metadata` above is a LOCAL clone of the Arc, so a reference
+        // into it does not borrow `self` and can be held across the `&mut self`
+        // registration calls below. The clone was copying a whole
+        // `TypeDescriptor` — fields, variants, spans, texts — once per type in
+        // the transitive closure, and `sample` put this function at the top of
+        // the profile with its leaves in memmove/malloc.
         let type_desc = match metadata.types.get(name) {
-            Some(td) => td.clone(),
+            Some(td) => td,
             None => {
                 if crate::ctor_trace_enabled() {
                     eprintln!("[ctor-trace] ensure-load MISS name={}", name);
@@ -1589,6 +1596,30 @@ impl TypeChecker {
         // IoResult, …) load transitively — needed for alias
         // resolution + variant pattern matching at user-code
         // call sites.
+        // T1013 — THE MEMO GOES HERE, and the placement is the whole fix.
+        //
+        // Everything above is already guarded: the type DEFINITION by
+        // `lookup_type(name).is_none()` at the top of the block, the
+        // `__type_params_` / defaults / newtype-inner writes each by their own
+        // key. A repeat call skips all of it cheaply. What it does NOT skip is
+        // the three registrations below, which are documented as always-run and
+        // are the reason a four-line `Set` program spends 2.9s where the same
+        // program on `List` spends 0.5s: `ensure_stdlib_type_loaded` is entered
+        // 66_846 times, 259 distinct names, 64_228 of them repeats — `Iterator`
+        // alone 13_106 times.
+        //
+        // MEASURED WRONG PLACEMENT FIRST, and it is worth recording because it
+        // looked obviously right: memoising at the TOP of the function made the
+        // same program 30x SLOWER (list 542ms -> 17_346ms). The deps captured
+        // there include the ones pushed from inside the
+        // `lookup_type(name).is_none()` block, which a repeat call never pushed
+        // — so replaying them added worklist entries that had never existed and
+        // the drain exploded. The memo has to cover exactly the span that
+        // actually re-runs, which is this one.
+        if self.stdlib_tail_registered.contains(name) {
+            return;
+        }
+
         let referenced = self.register_inherent_methods_from_metadata(name, &type_desc, &metadata);
         for r in referenced {
             pending.push(r);
@@ -1629,6 +1660,10 @@ impl TypeChecker {
         for proto_name in proto_deps {
             pending.push(proto_name);
         }
+
+        // Recorded HERE and nowhere earlier: a name marked before its
+        // registration finished would freeze a half-built type.
+        self.stdlib_tail_registered.insert(name.clone());
     }
 
     /// Bounded-drain wrapper over [`Self::ensure_stdlib_type_loaded`]:
@@ -3499,6 +3534,7 @@ impl TypeChecker {
             function_param_names: Map::new(),
             function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
+            stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,
             operator_protocols: OperatorProtocols::standard(),

@@ -1178,6 +1178,33 @@ pub struct TypeChecker {
     /// can hand it off without paying the 15ms cost of a 3MB deep
     /// clone.  Reads dereference the `Arc` transparently.
     core_metadata: Maybe<std::sync::Arc<crate::core_metadata::CoreMetadata>>,
+    /// Names whose always-run stdlib registration tail has already executed.
+    ///
+    /// `ensure_stdlib_type_loaded` is called **66_846 times** while checking a
+    /// four-line program that says `Set.new(); s.insert(1)` — against 5_107
+    /// for the same program on `List`, which is where the 2.9s-versus-0.5s
+    /// gap comes from (T1013). Of those calls, **259 name distinct types** and
+    /// **64_228 are repeats of a type already loaded**; `Iterator` alone is
+    /// asked 13_106 times.
+    ///
+    /// The repeats were not free. The function's own doc claimed
+    /// "already-loaded types short-circuit on `ctx.lookup_type`" and the body
+    /// deliberately does not — the `__type_params_<name>` write has to happen
+    /// outside that guard or archive-imported generic records lose their
+    /// parameters (T0724, and the comment at the site says so). So every
+    /// repeat re-ran the whole registration.
+    ///
+    /// A NAME SET, not a dependency cache, and the difference was measured:
+    /// caching what the first call pushed into the caller's worklist and
+    /// replaying it on every repeat made the same program **52x slower**
+    /// (list 1_027ms -> 54_114ms). The tail's own registrars are idempotent by
+    /// SKIPPING — `register_inherent_methods_from_metadata` walks the method
+    /// list, `continue`s on every name already in the bucket, and returns an
+    /// EMPTY referenced-list on a repeat. So a repeat pushed nothing, and
+    /// replaying the first call's list added worklist entries that had never
+    /// existed. Skipping the tail outright is what the original did, only
+    /// without paying for it.
+    stdlib_tail_registered: Set<Text>,
     /// Lazy module resolver for on-demand module loading.
     /// When a module import fails because the module isn't in the registry,
     /// this resolver is called to load the module on-demand.
