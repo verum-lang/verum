@@ -231,11 +231,15 @@ pub fn check(file: &str, continue_on_error: bool, parse_only: bool) -> Result<()
                     ui::format_duration(start.elapsed())
                 ));
             } else {
-                ui::success(&format!(
-                    "parsing {} in {}",
-                    file,
-                    ui::format_duration(start.elapsed())
-                ));
+                // The file DECLARED that it must fail, and it did not.
+                // Printing the ordinary success line here made an unmet
+                // expectation indistinguishable from a clean parse — same
+                // text, same exit code — so a conformance spec whose
+                // defect had returned reported success (T1028).
+                return Err(CliError::CompilationFailed(format!(
+                    "{file}: declares `@expect: errors` (or a *-fail test type) \
+                     and parsed cleanly — the expected errors never appeared"
+                )));
             }
         } else {
             result.map_err(|e| CliError::CompilationFailed(e.to_string()))?;
@@ -255,11 +259,15 @@ pub fn check(file: &str, continue_on_error: bool, parse_only: bool) -> Result<()
                 ui::format_duration(start.elapsed())
             ));
         } else {
-            ui::success(&format!(
-                "checking {} in {}",
-                file,
-                ui::format_duration(start.elapsed())
-            ));
+            // Same as the parse branch above: a file that declares
+            // `@expected-error` and then type-checks cleanly is a
+            // FAILURE, not a quiet success. This is the shape that made
+            // main and a fixed branch produce identical exit codes for
+            // opposite outcomes (T1028).
+            return Err(CliError::CompilationFailed(format!(
+                "{file}: declares `@expected-error` (or a typecheck-fail test type) \
+                 and checked cleanly — the expected errors never appeared"
+            )));
         }
     } else {
         pipeline
