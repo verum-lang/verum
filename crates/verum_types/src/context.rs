@@ -173,6 +173,21 @@ impl TypeScheme {
 
     /// Instantiate the type scheme with fresh type variables
     pub fn instantiate(&self) -> Type {
+        // FILTER, not a flag: set it to a substring of the type you are
+        // chasing (`VERUM_TRACE_INSTANTIATE=StatefulTransducer`). Every
+        // scheme whose text contains it reports whether this call
+        // FRESHENED anything — `vars=0` means the scheme carries no
+        // quantifier here and every caller shares one copy (T0997).
+        if let Ok(want) = std::env::var("VERUM_TRACE_INSTANTIATE") {
+            let text = format!("{:?}", self.ty);
+            if !want.is_empty() && text.contains(&want) {
+                eprintln!(
+                    "[instantiate] vars={} ty={}",
+                    self.vars.len(),
+                    &text[..text.len().min(140)]
+                );
+            }
+        }
         if self.vars.is_empty() {
             return self.ty.clone();
         }

@@ -3084,6 +3084,24 @@ fn substitute_refinement_binder(
                     return_type,
                 );
             }
+            // What the call site RECEIVES, before this function
+            // substitutes anything. If a parameter already names a
+            // concrete element type here on the SECOND call, the pinning
+            // happened upstream — at the fetch — and not in the
+            // substitution below (T0997).
+            if std::env::var("VERUM_TRACE_SCHEME_VARS").is_ok() {
+                let ps: Vec<String> = params.iter().map(|p| p.to_text().to_string()).collect();
+                eprintln!(
+                    "[inst-in] tparams=[{}] params={:?} ret={}",
+                    type_params
+                        .iter()
+                        .map(|t| t.name.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    ps,
+                    return_type.to_text()
+                );
+            }
             if type_params.is_empty() {
                 // No type parameters to instantiate - return as-is
                 // But if type_args were provided, that's an error
