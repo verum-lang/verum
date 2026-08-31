@@ -127,6 +127,13 @@ public fn main() { print(spin(1)); }
     # rule is testing the side that works, which is why this row exists
     # beside the showcase's.
     #
+    # BOUNDED, so nobody over-generalises from it: the showcase's other
+    # rejection rows were re-measured with their declarations moved BELOW
+    # the use — affine use-after-move (E310), the const-generic width
+    # mismatch (E400) and `spawn` inside a `pure fn` (E503) all still
+    # fire. Order-sensitivity here is a property of purity crossing a
+    # CALL, not of checking in general, and one row is the right number.
+    #
     # FIXED on lang/grammar-authority and not on main. When that branch
     # lands (T1024) this row starts being diagnosed, the gate fails with
     # "fixed but still listed in BASELINE", and the landing commit is the
