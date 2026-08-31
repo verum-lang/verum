@@ -33,7 +33,7 @@ use super::{
     GlobalDepthGuard, InferMode, InferResult, TypeChecker,
     WKT_HEAP, WKT_RESULT, WKT_SHARED,
     DEREF_COERCION_DEPTH, GLOBAL_CALL_DEPTH,
-    is_stdlib_toplevel_path, span_to_line_col, expr_kind_description,
+    span_to_line_col, expr_kind_description,
     read_param_classification,
 };
 #[allow(unused_imports)]

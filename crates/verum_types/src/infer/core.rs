@@ -39,7 +39,7 @@ use super::{
     DEREF_COERCION_DEPTH, GLOBAL_CALL_DEPTH, NORMALIZE_DEPTH,
     AST_TO_TYPE_DEPTH, TYPE_RESOLUTION_STACK, NORMALIZE_TYPE_STACK,
     MAX_INFERENCE_DEPTH,
-    read_param_classification, is_stdlib_toplevel_path,
+    read_param_classification,
     collect_inline_mount_reexports_recursive, has_declassify_attr_on_function,
     collect_named_types_from_item, parse_descriptor_type_string,
     register_variant_signature_for_lazy,

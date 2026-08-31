@@ -79,24 +79,32 @@ independent instances measured in one day:
       a file IS its module's entry. Fixed: 17 of the 18 (the 18th is
       `cog.resolve`, unreachable because `cog` is a keyword — T1008);
       0 of the 72 moved.
-    * **The verdict depends on how the path is SPELLED** (T1005, open).
-      For one module `core.security.tuf.types` there are two surfaces:
-      `probed-exports` answers with 61 names, `metadata_known_module_items`
-      with 24, and the presence of a `core.` prefix decides which is
-      asked. Both reject a merely-imported name, so the larger one is
-      not "everything visible"; what makes it larger is not established.
-    * **The stdlib top-level list is hardcoded and incomplete** (T1006,
-      open). `verum_types/src/infer/mod.rs` holds 49 `core/`
-      subdirectory names as a constant against 52 actual: `hash`, `id`,
-      `mac`, `random`, `script`, `subtle` are absent, and
-      `mount id.{SnowflakeError}` answers E402 "module not found" while
-      `core.id.{…}` resolves. The comment there knows the no-hardcoded-
-      stdlib rule and calls the violation "a clarity choice", justifying
-      it with a claim true in only one direction.
-    The cure for the second and third is one: ask the authority
-    (`get_module_with_path_aliases`) instead of a list, after which the
-    spelling stops changing the verdict. That — not one `mount` turning
-    green — is what a fix here has to be measured by.
+    * **The verdict depended on how the path was SPELLED** (T1005,
+      fixed with T1006). One module `core.security.tuf.types` had two
+      surfaces — `probed-exports` answering with 61 names,
+      `metadata_known_module_items` with 24 — and the presence of a
+      `core.` prefix decided which was asked. Both rejected a
+      merely-imported name, so the larger was never "everything visible".
+    * **The stdlib top-level list was hardcoded and incomplete** (T1006,
+      fixed). `verum_types/src/infer/mod.rs` held 49 `core/` subdirectory
+      names as a constant against 52 actual: `hash`, `id`, `mac`,
+      `random`, `script`, `subtle` were absent, so
+      `mount id.snowflake.{SnowflakeError}` answered E402 "module not
+      found" while the `core.`-prefixed form resolved. The comment there
+      knew the no-hardcoded-stdlib rule, called the violation "a clarity
+      choice", and justified it with a claim true in only one direction —
+      every name IS a directory, but not every directory is a name, and
+      nothing re-checked the converse as `core/` grew.
+    The cure for both was one: ask an AUTHORITY instead of a list —
+    registry first (so a project module keeps its own identity), then the
+    archive metadata via a prefix range. Measured rather than assumed at
+    each step: an earlier registry-only attempt was INERT (`core.id` is
+    absent from the registry under every spelling, which also explains
+    why `mac.hmac` worked without being listed — it IS in the registry);
+    before removal, `in_list && !registry && !metadata` was false for 48
+    of the 49 names and the 49th (`cog`) was unreachable as a path prefix
+    because it is a keyword (T1008); after removal, all 49 answer E401
+    rather than E402, and bare vs `core.`-prefixed agree 49 of 49.
 * **Execution pipeline ×2 — the conformance suite runs the OTHER one**
   (T0732, measured 2026-08-14). `verum run` calls
   `run_interpreter` (`pipeline/dispatch.rs:316`): stdlib + project +
