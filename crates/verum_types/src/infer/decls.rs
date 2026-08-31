@@ -8189,7 +8189,7 @@ impl TypeChecker {
 
     /// Describe how two function types disagree, or None when they do not
     /// disagree in a way worth counting.
-    fn signature_disagreement(proto: &Type, imp: &Type) -> Option<String> {
+    pub fn signature_disagreement(proto: &Type, imp: &Type) -> Option<String> {
         let (Type::Function { params: pp, return_type: pr, .. }, Type::Function { params: ip, return_type: ir, .. }) =
             (proto, imp)
         else {
@@ -8212,7 +8212,7 @@ impl TypeChecker {
 
     /// Compare two types by their rendered form, declining to judge any
     /// pair that mentions `Self` — see the note on the caller.
-    fn type_disagreement(a: &Type, b: &Type) -> Option<String> {
+    pub fn type_disagreement(a: &Type, b: &Type) -> Option<String> {
         let (ta, tb) = (a.to_text(), b.to_text());
         if ta == tb || ta.as_str().contains("Self") || tb.as_str().contains("Self") {
             return None;
