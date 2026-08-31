@@ -372,7 +372,17 @@ fn register_module_metadata(
                             &type_id_to_name,
                             &record_param_id_to_name,
                         );
-                        let ty = if rendered.contains("__opaque_type_") {
+                        // `__opaque_typeref` joins the list, and not as
+                        // tidiness: it is what a `TypeRef::Rank2Function`
+                        // renders to, and the verbatim carrier is the ONLY
+                        // channel that keeps `fn<R>(Reducer<B, R>) ->
+                        // Reducer<A, R>` apart from `fn(Reducer<B, R>) ->
+                        // Reducer<A, R>`. Rendering from the TypeRef cannot:
+                        // the local `R` and the enclosing `A`/`B` share one
+                        // index space there (T0997).
+                        let ty = if rendered.contains("__opaque_type_")
+                            || rendered == "__opaque_typeref"
+                        {
                             match module.strings.get(f.type_name) {
                                 Some(carried) if !carried.is_empty() => carried.to_string(),
                                 _ => rendered,

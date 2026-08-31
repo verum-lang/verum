@@ -16167,6 +16167,52 @@ impl VbcCodegen {
                 contexts: ctx_refs,
             };
         }
+        // Rank-2 function type. Without this arm it fell through to the
+        // map-unaware `ast_type_to_type_ref`, whose catch-all is
+        // `TypeRef::Concrete(TypeId::UNIT)` — so `transform: fn<R>(…)`
+        // was baked as the field type `Unit` (archive-proven), and the
+        // record's own params `A`/`B` were then mentioned by NO field at
+        // all. A collapse to a plausible concrete type is worse than an
+        // opaque one: nothing downstream can tell it from a real `Unit`
+        // (T0997).
+        //
+        // The quantified params are deliberately NOT added to the map.
+        // Their indices would share the enclosing type's index space,
+        // where `Generic(0)` for a local `R` and `Generic(0)` for the
+        // outer `A` are the same value — the name channel for this shape
+        // is the source-verbatim spelling carried alongside
+        // (`extract_type_name_from_ast`), which keeps them apart.
+        if let TypeKind::Rank2Function {
+            type_params,
+            params,
+            return_type,
+            contexts,
+            ..
+        } = &ty.kind
+        {
+            let param_refs: Vec<TypeRef> = params
+                .iter()
+                .map(|p| self.resolve_field_type_ref(p, generic_param_map))
+                .collect();
+            let ret_ref = self.resolve_field_type_ref(return_type, generic_param_map);
+            let ctx_refs: smallvec::SmallVec<[crate::types::ContextRef; 2]> = contexts
+                .requirements
+                .iter()
+                .filter_map(|req| {
+                    let ctx_name = format!("{}", req.path);
+                    self.context_name_to_id
+                        .get(&ctx_name)
+                        .copied()
+                        .map(crate::types::ContextRef)
+                })
+                .collect();
+            return TypeRef::Rank2Function {
+                type_param_count: type_params.len() as u16,
+                params: param_refs,
+                return_type: Box::new(ret_ref),
+                contexts: ctx_refs,
+            };
+        }
         // Tuple: recurse elements with the SAME map. `type Item =
         // (Int, I.Item)` (EnumerateIter) and `(A.Item, B.Item)`
         // (ZipIter) previously fell through to the map-UNAWARE
@@ -21253,7 +21299,66 @@ impl VbcCodegen {
                     Self::extract_type_name_from_ast(return_type)
                 )
             }
-            _ => format!("{:?}", ty.kind).chars().take(20).collect(),
+            TypeKind::Rank2Function {
+                type_params,
+                params,
+                return_type,
+                ..
+            } => {
+                // The `<R>` is the meaning, not decoration: it says the
+                // CALLEE works for every R while the caller chooses
+                // nothing. Spelling this shape as a plain `fn(…)` would
+                // silently demote a rank-2 type to rank-1, and letting
+                // it reach the catch-all below spelled it as the first
+                // twenty characters of a Rust `Debug` dump (T0997).
+                let quantified: Vec<String> = type_params
+                    .iter()
+                    .filter_map(|p| match &p.kind {
+                        verum_ast::ty::GenericParamKind::Type { name, .. } => {
+                            Some(name.name.to_string())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let param_names: Vec<String> = params
+                    .iter()
+                    .map(Self::extract_type_name_from_ast)
+                    .collect();
+                format!(
+                    "fn<{}>({}) -> {}",
+                    quantified.join(", "),
+                    param_names.join(", "),
+                    Self::extract_type_name_from_ast(return_type)
+                )
+            }
+            // Projection spellings must MATCH the archive renderer's
+            // (`::Assoc<Base>`), which `parse_descriptor_type_string`
+            // decodes back into a projection. Without these arms the
+            // catch-all below emitted the first twenty characters of a
+            // Rust `Debug` dump, and once the rank-2 arm above began
+            // recursing into these positions that dump reached the
+            // shipped archive verbatim, as
+            // `Reducer<Qualified { self_ty:, R>` (T0997).
+            TypeKind::AssociatedType { base, assoc } => format!(
+                "::{}<{}>",
+                assoc.name,
+                Self::extract_type_name_from_ast(base)
+            ),
+            TypeKind::Qualified {
+                self_ty,
+                assoc_name,
+                ..
+            } => format!(
+                "::{}<{}>",
+                assoc_name.name,
+                Self::extract_type_name_from_ast(self_ty)
+            ),
+            // A shape with no spelling is named as such rather than as a
+            // truncated debug dump. `__opaque_src` is the decoder's
+            // agreed "unknown = fresh var" token; a `Debug` prefix is a
+            // rigid name that unifies with nothing and reads, in a
+            // metadata dump, like a real type.
+            _ => "__opaque_src".to_string(),
         }
     }
 

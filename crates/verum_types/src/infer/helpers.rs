@@ -1508,6 +1508,87 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
+/// Bind `names` as rank-2 binders for the duration of `f`, SELECTIVELY.
+///
+/// Both thread-locals are edited in place rather than replaced, and the
+/// difference is the whole point. A rank-2 body mentions two kinds of
+/// variable:
+///
+///     fn<R>(Reducer<B, R>) -> Reducer<A, R>
+///
+/// `R` is local and must be fresh at every use site; `A` and `B` belong
+/// to the ENCLOSING descriptor and must stay linked to it. Entering a
+/// nested scope would shadow `R` correctly and disconnect `A`/`B` at
+/// the same time — turning an existential into a confidently WRONG
+/// concrete type, which is worse than refusing to parse the shape at
+/// all (T0997).
+///
+/// So: only the binder names are overridden, their previous entries are
+/// remembered, and everything else in scope keeps working. Returns the
+/// fresh vars in binder order.
+fn with_rank2_binders<R>(
+    names: &[String],
+    f: impl FnOnce() -> R,
+) -> (List<crate::ty::TypeVar>, R) {
+    // Save the entries these names had, if any, then override.
+    let mut saved: Vec<(String, Option<crate::ty::TypeVar>)> = Vec::new();
+    let mut vars: List<crate::ty::TypeVar> = List::new();
+    let had_scope = GENERIC_VAR_SCOPE.with(|s| s.borrow().is_some());
+    if !had_scope {
+        // No active scope means no bare name interns at all, so nothing
+        // can be disconnected — open one just for the body.
+        GENERIC_VAR_SCOPE.with(|s| *s.borrow_mut() = Some(indexmap::IndexMap::new()));
+    }
+    GENERIC_VAR_SCOPE.with(|s| {
+        if let Some(map) = s.borrow_mut().as_mut() {
+            for n in names {
+                let fresh = crate::ty::TypeVar::fresh();
+                saved.push((n.clone(), map.insert(n.clone(), fresh)));
+                vars.push(fresh);
+            }
+        }
+    });
+
+    let added: Vec<String> = DECLARED_GENERIC_NAMES.with(|s| {
+        let mut guard = s.borrow_mut();
+        let set = guard.get_or_insert_with(std::collections::HashSet::new);
+        names
+            .iter()
+            .filter(|n| set.insert((*n).clone()))
+            .cloned()
+            .collect()
+    });
+
+    let out = f();
+
+    DECLARED_GENERIC_NAMES.with(|s| {
+        if let Some(set) = s.borrow_mut().as_mut() {
+            for n in &added {
+                set.remove(n);
+            }
+        }
+    });
+    if had_scope {
+        GENERIC_VAR_SCOPE.with(|s| {
+            if let Some(map) = s.borrow_mut().as_mut() {
+                for (n, prev) in saved.into_iter().rev() {
+                    match prev {
+                        Some(tv) => {
+                            map.insert(n, tv);
+                        }
+                        None => {
+                            map.shift_remove(&n);
+                        }
+                    }
+                }
+            }
+        });
+    } else {
+        GENERIC_VAR_SCOPE.with(|s| *s.borrow_mut() = None);
+    }
+    (vars, out)
+}
+
 /// Whether `name` is a declared generic param of the descriptor whose
 /// signature is currently being parsed (see DECLARED_GENERIC_NAMES).
 fn is_declared_generic_name(name: &str) -> bool {
@@ -1740,7 +1821,7 @@ mod build_metadata_function_scheme_tests {
 /// degrade to opaque `Type::Named { path: "IoResult<Metadata>" }`
 /// blobs that never unify with `Type::Generic { name: "IoResult",
 /// args: [Type::Named { Metadata }] }` at call sites.
-pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
+pub fn parse_descriptor_type_string(raw: &str) -> Type {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed == "()" {
         return Type::Unit;
@@ -1917,6 +1998,64 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
     //
     // Parse shape: find the matching `)` at depth 0, split args at
     // top-level commas, parse args + return-type recursively.
+    // **Rank-2 function spelling** (`fn<R>(args) -> ret`) — MUST precede
+    // both the `fn(` arm and the generic-instantiation `<>` arm below,
+    // or `fn<R>(Reducer<B, R>) -> Reducer<A, R>` is captured as a rigid
+    // `Type::Named { path: "fn<R>(…) -> Reducer", args: [A, R] }`.
+    //
+    // The quantifier is the meaning, not decoration: `fn<R>(…)` says the
+    // CALLEE works for every R, while `fn(…)` says the caller picks one.
+    // Parsing the body without binding R leaves it an ordinary free
+    // variable, which the FIRST use site then fixes for every later one
+    // — one instantiation per compilation unit, and a second with a
+    // different element type failed with the first one's type in the
+    // message (T0997).
+    if let Some(rest) = trimmed.strip_prefix("fn<") {
+        // Depth-aware scan for the binder list's closing `>`: a bound
+        // (`R: Reducer<A, B>`) may contain nested angle brackets.
+        let mut depth = 1usize;
+        let mut close: Option<usize> = None;
+        for (i, ch) in rest.char_indices() {
+            match ch {
+                '<' => depth += 1,
+                '>' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(gt) = close {
+            let body_text = rest[gt + 1..].trim_start();
+            if body_text.starts_with('(') {
+                let names: Vec<String> = split_top_level_commas(&rest[..gt])
+                    .into_iter()
+                    // Keep the NAME only: `R: Bound` binds `R`.
+                    .map(|n| {
+                        n.split(':')
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .to_string()
+                    })
+                    .filter(|n| !n.is_empty())
+                    .collect();
+                if !names.is_empty() {
+                    let spelling = format!("fn{}", body_text);
+                    let (vars, body) = with_rank2_binders(&names, || {
+                        parse_descriptor_type_string(&spelling)
+                    });
+                    return Type::Forall {
+                        vars,
+                        body: Box::new(body),
+                    };
+                }
+            }
+        }
+    }
     if let Some(rest) = trimmed.strip_prefix("fn(") {
         let bytes = rest.as_bytes();
         let mut depth = 1usize;

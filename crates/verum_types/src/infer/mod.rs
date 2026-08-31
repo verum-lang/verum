@@ -1615,13 +1615,20 @@ pub(crate) use gat::{GATConstraint, GATInferenceError, GATInferenceStats, Optimi
 // expr_kind_description, HKT methods, QTT helpers, type-size, meta_value_to_literal, …)
 // → see infer/helpers.rs in this module
 pub(crate) mod helpers;
+/// The archive-descriptor type decoder, exposed for the conformance gate.
+///
+/// It is the ONLY place a baked spelling becomes a `Type` again, so its
+/// rank-2 arm (`fn<R>(…)` → `Type::Forall`) has no other observable: the
+/// end-to-end symptom needs a rebaked stdlib, which no unit test can
+/// stand up (T0997).
+pub use helpers::parse_descriptor_type_string;
 // Re-export helpers so sibling submodules can access them via `super::`
 pub(crate) use helpers::{
     mount_tree_exports_name, resolve_builtin_meta_type, levenshtein_distance,
     expr_kind_description, type_kind_description, extract_quantity_from_attrs,
     walk_stmt_for_qtt_usage, resolve_primitive_method, meta_value_to_literal,
     make_maybe_type, span_to_line_col,
-    collect_named_types_from_item, parse_descriptor_type_string,
+    collect_named_types_from_item,
     register_variant_signature_for_lazy,
 };
 
