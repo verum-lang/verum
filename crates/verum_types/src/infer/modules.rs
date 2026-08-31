@@ -1983,12 +1983,23 @@ impl TypeChecker {
                     full_path_str,
                     full_normalized.as_str()
                 );
-                let found_module = registry.get_by_path(full_normalized.as_str());
+                // T1030: the REGISTRY alone is the wrong authority here.
+                // Archive modules never enter it, so `mount configuration.toml;`
+                // — the short spelling the library itself writes — missed and
+                // fell into the "the path has a dot, so it is module.item"
+                // branch below, which then reported ``cannot find `toml` in
+                // module `core.configuration` ``. The same mount written
+                // `core.configuration.toml` resolved, and so did
+                // `configuration.value.{ConfigValue}`: measured, the variable
+                // is the SHORT FORM on a WHOLE-MODULE path, not the alias and
+                // not the brace list.
+                let module_target = self.mount_module_target(full_normalized.as_str(), registry);
                 tracing::debug!(
-                    "mount Path: module found in registry = {}",
-                    found_module.is_some()
+                    "mount Path: module target = {:?}",
+                    module_target.as_ref().map(|t| t.as_str())
                 );
-                if found_module.is_some() {
+                if let Some(ref resolved) = module_target {
+                    let full_normalized = resolved.clone();
                     // `mount X as A;` where X resolves to a module:
                     // register a module alias so that later `A.method(...)`
                     // routes through module-path dispatch rather than
@@ -2337,6 +2348,32 @@ impl TypeChecker {
                         // explicit import takes precedence.
                         let register_name = local_name.unwrap_or(item_name.as_str());
                         self.explicit_imports.insert(register_name.to_string());
+
+                        // T1030: a brace-list entry may name a SUBMODULE, not
+                        // an item. `mount core.configuration.toml;` resolves,
+                        // and `mount core.configuration.{ConfigValue};`
+                        // resolves — but `mount core.configuration.{toml};`
+                        // reported ``cannot find `toml` in module
+                        // `core.configuration` ``, because the only surface
+                        // this arm consults is the module's ITEM list, and a
+                        // submodule is not an item.
+                        //
+                        // Measured on 74656bd14: of the 96 E401 diagnostics
+                        // the failing `core/` files produce, 36 are this —
+                        // a re-export of a submodule that exists on disk.
+                        //
+                        // Answered with the same call the whole-module arm
+                        // makes, so the two spellings cannot drift apart.
+                        {
+                            let sub_path = verum_common::Text::from(
+                                format!("{}.{}", module_path.as_str(), item_name).as_str(),
+                            );
+                            if let Some(m) = self.mount_module_target(sub_path.as_str(), registry)
+                            {
+                                self.import_all_from_module(&m, registry)?;
+                                continue;
+                            }
+                        }
 
                         // §Y close: track the source module path for
                         // `lookup_record_type` mount-scoped resolution.
@@ -3824,6 +3861,59 @@ impl TypeChecker {
     /// `module_reexports` leaves.  `std.`-prefix spelling normalises to
     /// `core.`; `cog.` prefixes are stripped, matching the descriptors'
     /// own `module_path` spelling.
+    /// Which spelling of this path names a MODULE, if any?
+    ///
+    /// Returns the path a whole-module import should use, or `None` when the
+    /// path does not name a module at all.
+    ///
+    /// Two callers need this and used to answer it differently. The
+    /// whole-module arm asked `registry.get_by_path` alone — but archive
+    /// modules never enter the registry, so `mount configuration.toml;`
+    /// fell through to the "path contains a dot, so it is module.item"
+    /// branch and reported ``cannot find `toml` in module
+    /// `core.configuration` ``, while `mount core.configuration.toml;`
+    /// resolved (T1030). The brace-list arm did not ask at all, so
+    /// `mount M.{sub}` was refused where `mount M.sub` worked.
+    ///
+    /// Both spellings are tried, because the short form is what the library
+    /// writes and the `core.`-prefixed one is what the archive is keyed by —
+    /// and the metadata is keyed BOTH ways, since some stdlib files declare
+    /// `module sys.mmio;` without the cog segment.
+    fn mount_module_target(
+        &self,
+        candidate: &str,
+        registry: &verum_modules::ModuleRegistry,
+    ) -> Option<Text> {
+        if candidate.is_empty() {
+            return None;
+        }
+        let prefixed = format!("core.{}", candidate);
+        let spellings: [&str; 2] = [candidate, prefixed.as_str()];
+        for sp in spellings {
+            if registry.get_by_path(sp).is_some() {
+                return Some(Text::from(sp));
+            }
+        }
+        let Maybe::Some(md) = &self.core_metadata else {
+            return None;
+        };
+        let probe = |m: &str| -> bool {
+            if m.is_empty() {
+                return false;
+            }
+            let lo = Text::from(format!("{}.", m).as_str());
+            let hi = Text::from(format!("{}/", m).as_str());
+            md.functions.range(lo.clone()..hi.clone()).next().is_some()
+                || md.types.range(lo..hi).next().is_some()
+        };
+        for sp in spellings {
+            if probe(sp) || sp.strip_prefix("core.").is_some_and(&probe) {
+                return Some(Text::from(sp));
+            }
+        }
+        None
+    }
+
     fn metadata_known_module_items(&self, module_path: &str) -> Option<List<Text>> {
         if matches!(self.core_metadata, Maybe::None) {
             return None;
