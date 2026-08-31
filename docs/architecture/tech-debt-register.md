@@ -639,6 +639,7 @@ already existed for three of them.
 | **Sizes in the type** — `Digest<32>` and `Digest<8>` are different types | **WORKS** | E400 "expected '32', found '8'"; gated | — |
 | **Refinement types on scalars** — `type NonNeg is n: Int where n >= 0` | **WORKS** | hypothesis reaches the solver on a parameter | G10 |
 | **Refinements through record fields** | **FIXED, NOT ON MAIN** | fix committed on `lang/grammar-authority`; main still gives 4 proved / 2 failed on `versions.vr` | T0994, T0995, T1024 |
+| **Three-tier references (CBGR)** — `&T`, `&checked T`, `&unsafe T` | **WORKS** | a reference that escapes its scope is refused at tier 0 AND tier 1 with `error<E312>: \`x\` does not live long enough`; a correct borrow through `&checked` compiles and runs. The headline memory-safety claim is the one distinctive feature measured today that holds in both directions without qualification | — |
 | **Loop termination** under `@verify(thorough)` | **WORKS** | a `while` whose counter never changes reports `1 proved, 1 FAILED` | T0671 |
 | **Loop invariant preservation** | **WORKS** | a false invariant is refused with a counterexample naming the breaking state | — |
 | **Postcondition proved FROM a loop invariant** | **BROKEN** | `result` is unconstrained after a loop — fails even where the loop is not entered (`n = 0`); bisected to one token: `u + 1` proves, `u + i` and `u + k` do not | T0905 |
