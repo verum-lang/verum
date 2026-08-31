@@ -446,7 +446,31 @@ fn main() {
             // first run pays for itself by eliminating the multi-
             // hour stalls we hit when the outer build invalidates
             // the precompile checksum.
-            let nested_target = project_root.join("target").join("precompile-bootstrap");
+            // …and PER TARGET DIR, for the same reason the archive above is
+            // (`derive_target_root`, ~110 lines up). The sibling-dir trick
+            // solves the ONE-outer-cargo case and creates an N-outer-cargo
+            // case: the path was `<project_root>/target/...` regardless of
+            // where the outer build lives, so every concurrent cargo on the
+            // machine funnelled its nested bake into one lock.
+            //
+            // MEASURED 2026-08-31 (T1031). A release build in a private
+            // CARGO_TARGET_DIR sat 11 minutes without compiling anything.
+            // `rust-analyzer`'s background `cargo check --workspace` had
+            // reached this same line first, and its nested cargo held
+            // `precompile-bootstrap/release/.cargo-build-lock` — while
+            // itself accumulating 0.83s of CPU in 17 minutes, i.e. not
+            // working either. Stopping MY build gave the holder a working
+            // `rustc` within seconds: a queue would have had it busy all
+            // along, so the two were blocking each other, not queueing.
+            //
+            // Deriving the bootstrap from the ACTIVE target root gives each
+            // outer cargo its own, and leaves the default build resolving to
+            // exactly the old path — so a single-session tree sees no change.
+            // Cost: one small bin crate rebuilt per distinct target dir,
+            // which this comment block already prices at ~30s.
+            let nested_target = derive_target_root(&out_dir)
+                .unwrap_or_else(|| project_root.join("target"))
+                .join("precompile-bootstrap");
             // BAKE-RACE-LOCK-1(3): stage, then atomically publish.
             let staging_dir = precompile_dir.join(format!(".staging-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&staging_dir);
