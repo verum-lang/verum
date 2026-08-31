@@ -449,6 +449,46 @@ impl AttributeValidator {
                 true
             }
 
+            // ------------------------------------------------------------------
+            // Attributes the COMPILER CONSUMES that this validator did not know.
+            //
+            // Measured 2026-08-31 (T1025): core/ uses 80 distinct attribute
+            // names and 57 of them were unknown here — 3889 uses in total,
+            // 2490 of them `@arch_module` alone. Wiring the validator into the
+            // compile path without this arm would have produced a warning for
+            // every one of them, which is not a diagnostic, it is noise that
+            // gets suppressed within a day.
+            //
+            // Each name below was verified to be read by compiler code
+            // (`grep -rl "\"name\"" crates/`), and each was verified to be a
+            // real attribute in core/ rather than an artefact of the census
+            // regex — `@arg(help = ...)`, `@size(64)`, `@command(` and
+            // `@line` all appear as written.
+            //
+            // TARGETS ARE DELIBERATELY UNRESTRICTED. This arm answers "is this
+            // name known", which is the question a misspelling gets wrong; it
+            // does not claim to know where each may legally appear. Narrowing
+            // a name later is a smaller and safer change than rejecting a live
+            // attribute today.
+            "accessibility" | "arch_module" | "arg" | "asm" |
+            "column" | "command" | "compiler_intrinsic" | "compiler_provided" |
+            "compiler_type" | "const" | "cost" | "debug_assert" |
+            "deterministic_fp" | "discharges" | "enact" | "ensures" |
+            "ffi" | "ffi_name" | "file" | "framework" |
+            "framework_translate" | "ghost" | "internal" | "kernel_discharge" |
+            "line" | "llvm_only" | "multiversion" | "naked" |
+            "no_inline" | "opaque" | "size" | "size_of" |
+            "stub_runtime" | "unsafe_required" | "vbc" | "vjp_rule" |
+            "with_params"
+            => true,
+
+            // `@builtin_*` is consumed by a PREFIX arm in the type checker
+            // (verum_types/src/infer/expr.rs, `n if n.starts_with("builtin_")`),
+            // so the known set cannot be a flat list of strings. Seventeen of
+            // the fifty-seven live under this prefix; a literal list would have
+            // rejected every one of them.
+            n if n.starts_with("builtin_") => true,
+
             // Universe polymorphism attribute
             // @universe_poly marks a fn/type declaration as universe-polymorphic.
             // It signals that the declaration uses universe level parameters (introduced
