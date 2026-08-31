@@ -62,7 +62,7 @@ pub struct Unifier {
     /// `&mut DefaultHasher`), mirroring the DynProtocol arm's
     /// documented trust discipline (impl registration is validated at
     /// call sites by the protocol checker). Stdlib-agnostic: the set
-    /// carries whatever the program registered, никогда hardcode.
+    /// carries whatever the program registered; never hardcode.
     protocol_names: std::collections::HashSet<Text>,
     /// Type variable orders for each variant type.
     /// Key is the type name, value is the list of TypeVars in declaration order.

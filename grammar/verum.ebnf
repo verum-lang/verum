@@ -471,7 +471,7 @@ attribute_item  = '@' , attribute , item ;
  *                                  lifecycle/composes_with/strict.
  *                                  Spec: ats-v spec §8.
  *                                  Dispatch: verum_kernel::arch +
- *                                  ATS-V phase 6.5 (Сезон 1).
+ *                                  ATS-V phase 6.5 (Season 1).
  *
  * META-SYSTEM ADVISORY ATTRIBUTES (parsed via the generic
  * `identifier(args)` form below; semantic validation lives in

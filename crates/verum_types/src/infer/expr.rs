@@ -1341,7 +1341,7 @@ impl TypeChecker {
     /// Synthesize then check subsumption.
     ///
     /// Includes auto-borrow coercion: T → &T when expected is immutable reference.
-    /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 3 (Auto-Borrow в позиции вызова)
+    /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 3 (Auto-Borrow at a call position)
     /// Bidirectional type-check a closure expression.
     /// When `expected` is a `Forall` (rank-2), instantiates the quantified
     /// variables. When a `Function` type is known, uses it to bind params;
@@ -2465,7 +2465,7 @@ impl TypeChecker {
                 }
 
                 // Unification failed - try auto-borrow coercion (T → &T)
-                // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 3 (Auto-Borrow в позиции вызова)
+                // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 3 (Auto-Borrow at a call position)
                 //
 
                 // Auto-borrow is only allowed for IMMUTABLE references.

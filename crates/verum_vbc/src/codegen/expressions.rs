@@ -11523,7 +11523,7 @@ impl VbcCodegen {
                             crate::types::TypeParamId(idx as u16),
                         ),
                     });
-                        // второй свидетель (LoadT{Generic}) — считаем, чтобы веер имел имена (T0753).
+                        // second witness (LoadT{Generic}) — counted so the fan-out has names (T0753).
                         crate::codegen::bare_method::record("<witness>", method.name.as_str());
                     let method_id =
                         self.ctx.intern_string_raw(method.name.as_str());
