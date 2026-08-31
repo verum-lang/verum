@@ -259,6 +259,20 @@ impl TypeScheme {
     /// Returns: (instantiated_type, fresh_vars, type_bounds_for_fresh_vars)
     /// The Map maps fresh TypeVar to its type bounds (if any).
     pub fn instantiate_with_type_bounds(&self) -> (Type, List<TypeVar>, Map<TypeVar, List<Type>>) {
+        // Same filter as `instantiate` — and it MUST be here too. The
+        // method-call path uses this entry, not that one, so a probe on
+        // `instantiate` alone reports zero and reads as "never
+        // instantiated" (T0997).
+        if let Ok(want) = std::env::var("VERUM_TRACE_INSTANTIATE") {
+            let text = format!("{:?}", self.ty);
+            if !want.is_empty() && text.contains(&want) {
+                eprintln!(
+                    "[inst-bounds] vars={} ty={}",
+                    self.vars.len(),
+                    &text[..text.len().min(140)]
+                );
+            }
+        }
         if self.vars.is_empty() {
             return (self.ty.clone(), List::new(), Map::new());
         }

@@ -3334,6 +3334,33 @@ impl TypeChecker {
                     // instrument that is silent for the wrong reason is
                     // worse than none.
                     if std::env::var("VERUM_TRACE_SCHEME_VARS").is_ok() {
+                        // DEEP enumeration, independent of the collector.
+                        // Scanning the Debug text for `TypeVar(` finds every
+                        // occurrence wherever it sits, including positions
+                        // `collect_type_vars` treats as intentional no-ops
+                        // (`Forall`, `Exists`, records, …).
+                        //
+                        // Comparing `collect_type_vars` against a var_list
+                        // BUILT from `collect_type_vars` can only ever report
+                        // FREE=[]; that comparison is true by construction
+                        // and says nothing (T0997).
+                        let deep: Vec<String> = {
+                            let text = format!("{:?}", fn_ty);
+                            let mut out: Vec<String> = Vec::new();
+                            let mut rest = text.as_str();
+                            while let Some(i) = rest.find("TypeVar(") {
+                                rest = &rest[i + "TypeVar(".len()..];
+                                if let Some(j) = rest.find(')') {
+                                    let id = &rest[..j];
+                                    let name = format!("TypeVar({id})");
+                                    if !out.contains(&name) {
+                                        out.push(name);
+                                    }
+                                }
+                            }
+                            out.sort();
+                            out
+                        };
                         let mut mentioned: Vec<String> =
                             vars.iter().map(|t| format!("{t:?}")).collect();
                         mentioned.sort();
@@ -3343,6 +3370,17 @@ impl TypeChecker {
                             .iter()
                             .filter(|m| !quantified.contains(m))
                             .collect();
+                        let deep_free: Vec<&String> = deep
+                            .iter()
+                            .filter(|d| !quantified.contains(d))
+                            .collect();
+                        eprintln!(
+                            "[implvc-deep] method={} deep={} quantified={} DEEP_FREE={:?}",
+                            method_name.as_str(),
+                            deep.len(),
+                            quantified.len(),
+                            deep_free
+                        );
                         eprintln!(
                             "[implvc-vars] method={} mentioned={:?} quantified={:?} FREE={:?}",
                             method_name.as_str(),
