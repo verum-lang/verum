@@ -2338,6 +2338,31 @@ impl TypeChecker {
                         let register_name = local_name.unwrap_or(item_name.as_str());
                         self.explicit_imports.insert(register_name.to_string());
 
+                        // T1030: a brace-list entry may name a SUBMODULE, not
+                        // an item. `mount core.configuration.toml;` resolves,
+                        // and `mount core.configuration.{ConfigValue};`
+                        // resolves — but `mount core.configuration.{toml};`
+                        // reported ``cannot find `toml` in module
+                        // `core.configuration` ``, because the only surface
+                        // this arm consults is the module's ITEM list, and a
+                        // submodule is not an item.
+                        //
+                        // Measured on 74656bd14: of the 96 E401 diagnostics
+                        // the failing `core/` files produce, 36 are this —
+                        // a re-export of a submodule that exists on disk.
+                        //
+                        // Answered with the same call the whole-module arm
+                        // makes, so the two spellings cannot drift apart.
+                        {
+                            let sub_path = verum_common::Text::from(
+                                format!("{}.{}", module_path.as_str(), item_name).as_str(),
+                            );
+                            if self.mount_target_is_module(sub_path.as_str(), registry) {
+                                self.import_all_from_module(&sub_path, registry)?;
+                                continue;
+                            }
+                        }
+
                         // §Y close: track the source module path for
                         // `lookup_record_type` mount-scoped resolution.
                         // Mirror of the population in the
@@ -3824,6 +3849,45 @@ impl TypeChecker {
     /// `module_reexports` leaves.  `std.`-prefix spelling normalises to
     /// `core.`; `cog.` prefixes are stripped, matching the descriptors'
     /// own `module_path` spelling.
+    /// Does this path name a MODULE (as opposed to an item inside one)?
+    ///
+    /// Asked by the brace-list arm before it reports E401: `mount M.{sub}`
+    /// must mean what `mount M.sub` means when `sub` is a submodule (T1030).
+    /// The registry is asked first, exactly as the whole-module arm does;
+    /// archive modules that never enter the registry are then probed in the
+    /// metadata by prefix range, which is the same test the mount-path
+    /// normaliser uses — including its `core.`-stripped retry, because some
+    /// stdlib files declare `module sys.mmio;` without the cog segment and
+    /// their descriptors are keyed accordingly.
+    fn mount_target_is_module(
+        &self,
+        candidate: &str,
+        registry: &verum_modules::ModuleRegistry,
+    ) -> bool {
+        if candidate.is_empty() {
+            return false;
+        }
+        if registry.get_by_path(candidate).is_some() {
+            return true;
+        }
+        let Maybe::Some(md) = &self.core_metadata else {
+            return false;
+        };
+        let probe = |m: &str| -> bool {
+            if m.is_empty() {
+                return false;
+            }
+            let lo = Text::from(format!("{}.", m).as_str());
+            let hi = Text::from(format!("{}/", m).as_str());
+            md.functions.range(lo.clone()..hi.clone()).next().is_some()
+                || md.types.range(lo..hi).next().is_some()
+        };
+        probe(candidate)
+            || candidate
+                .strip_prefix("core.")
+                .is_some_and(|stripped| probe(stripped))
+    }
+
     fn metadata_known_module_items(&self, module_path: &str) -> Option<List<Text>> {
         if matches!(self.core_metadata, Maybe::None) {
             return None;
