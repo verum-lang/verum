@@ -1573,8 +1573,21 @@ pub struct MaybeResolution {
     pub inner: Type,
 }
 
+/// Is the `?`-resolution trace on?
+///
+/// Read ONCE. The three call sites are on the protocol-resolution hot path —
+/// `implements` alone is entered tens of times per `?` operator — and a
+/// `getenv` per call is the shape that has already cost this project an
+/// interpreter's throughput once.
+fn trygate_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VERUM_TRACE_TRYGATE").is_some())
+}
+
+
 /// Protocol checking and resolution engine
 #[derive(Clone)]
+
 pub struct ProtocolChecker {
     /// Registered protocols
     protocols: Map<Text, Protocol>,
@@ -1614,6 +1627,31 @@ pub struct ProtocolChecker {
     /// them back to their declared named type (e.g., "Variant(None|Some)" -> "Maybe")
     /// Spec: stdlib-agnostic protocol resolution
     variant_type_names: Map<Text, Text>,
+
+    /// Every type that declares a given variant signature, not just the one
+    /// that registered first.
+    ///
+    /// `variant_type_names` above keeps ONE winner per signature, first-wins.
+    /// For the *exact* signature — which carries the payload type names — that
+    /// is almost always unambiguous. For the RELAXED signature, which is built
+    /// from the variant NAMES ALONE, it is not: measured over `core/`, 58 of
+    /// 1564 relaxed signatures are claimed by two or more types, and
+    /// `Variant(Err|Ok)` is claimed by SEVEN — `Result` alongside
+    /// `ScriptResult`, `HashGateResult`, `PrecomputeResult`, `SrsLoadResult`
+    /// and `SrsSetupResult`.
+    ///
+    /// Which of them won was decided by registration order, i.e. by hash
+    /// iteration order, so the same source gave a different answer on
+    /// different runs (T0927): `implements_protocol(ty, "Try")` said `true`
+    /// when `Result` had won and `false` when `ScriptResult` had, and
+    /// `core/logic/kripke.vr` reported 0 or 20 errors accordingly.
+    ///
+    /// The winner is the wrong thing to ask for. A caller matching a variant
+    /// against a named pattern already knows which name it wants, so it can
+    /// ask whether that name is AMONG the claimants — a question whose answer
+    /// does not depend on who registered first. Kept sorted for a stable
+    /// rendering.
+    variant_type_name_candidates: Map<Text, List<Text>>,
 
     /// Cache for method resolution: (type_key, protocol_key, method_name) -> MethodResolution
     /// Avoids repeated find_impl + method lookup for the same type/protocol/method triple
@@ -1758,6 +1796,7 @@ impl ProtocolChecker {
             impl_check_cache: Map::new(),
             method_registry: Map::new(),
             variant_type_names: Map::new(),
+            variant_type_name_candidates: Map::new(),
             method_resolution_cache: Map::new(),
             checker_id: allocate_checker_id(),
             resolution_strategy: Text::from("most_specific"),
@@ -1793,6 +1832,7 @@ impl ProtocolChecker {
             impl_check_cache: Map::new(),
             method_registry: Map::new(),
             variant_type_names: Map::new(),
+            variant_type_name_candidates: Map::new(),
             method_resolution_cache: Map::new(),
             checker_id: allocate_checker_id(),
             resolution_strategy: Text::from("most_specific"),
@@ -1927,6 +1967,23 @@ impl ProtocolChecker {
     ///
     /// Spec: stdlib-agnostic protocol resolution
     pub fn register_variant_type_name(&mut self, signature: Text, type_name: Text) {
+        // Every claimant is recorded, not only the first. See the field's own
+        // documentation: for the relaxed signature "first" is decided by hash
+        // iteration order, and 58 signatures in `core/` have more than one
+        // claimant to decide between (T0927).
+        let claimants = self
+            .variant_type_name_candidates
+            .entry(signature.clone())
+            .or_insert_with(List::new);
+        if !claimants.iter().any(|c| c == &type_name) {
+            claimants.push(type_name.clone());
+            // Sorted so the list renders the same way whatever order the
+            // declarations arrived in — the whole point of the field.
+            let mut sorted: Vec<Text> = claimants.iter().cloned().collect();
+            sorted.sort();
+            *claimants = List::from(sorted);
+        }
+
         // First-wins: stdlib types registered first take precedence
         self.variant_type_names
             .entry(signature)
@@ -1936,6 +1993,35 @@ impl ProtocolChecker {
     /// Look up the named type for a variant signature
     pub fn get_variant_type_name(&self, signature: &Text) -> Option<&Text> {
         self.variant_type_names.get(signature)
+    }
+
+    /// Does `type_name` declare a variant shape with this signature?
+    ///
+    /// The question `get_variant_type_name` answers — "which type owns this
+    /// signature?" — has no well-defined answer for a relaxed signature shared
+    /// by several types, and answering it anyway is what made the type checker
+    /// non-deterministic (T0927). This one is well-defined whoever registered
+    /// first.
+    /// Has any type registered this variant signature?
+    ///
+    /// Lets a caller keep the old exact-then-relaxed precedence: an exact
+    /// signature that names somebody decides, and only a signature nobody
+    /// claimed falls through to the relaxed form.
+    pub fn variant_signature_is_claimed(&self, signature: &Text) -> bool {
+        self.variant_type_name_candidates.contains_key(signature)
+            || self.variant_type_names.contains_key(signature)
+    }
+
+    pub fn variant_signature_admits(&self, signature: &Text, type_name: &str) -> bool {
+        match self.variant_type_name_candidates.get(signature) {
+            Some(claimants) => claimants.iter().any(|c| c.as_str() == type_name),
+            // Nothing registered this signature: fall back to the single-winner
+            // map so a checker populated through some other path still answers.
+            None => self
+                .variant_type_names
+                .get(signature)
+                .is_some_and(|n| n.as_str() == type_name),
+        }
     }
 
     /// Check if a type implements a protocol by name (string version)
@@ -5114,7 +5200,86 @@ impl ProtocolChecker {
 
         // Use find_impl which handles exact matching, generic matching, and where clauses
         // This ensures implements() and find_impl() have consistent behavior
-        if self.find_impl(ty, protocol).is_some() {
+        let found = self.find_impl(ty, protocol).is_some();
+        if trygate_trace()
+            && protocol.as_ident().map(|i| i.as_str()) == Some("Try")
+        {
+            // T0927: the query key is identical across runs and the answer
+            // is not, so the divergence is the INDEX CONTENT, not the key.
+            // Print what the index holds for this key at the moment of asking.
+            let tk = self.make_type_key(ty);
+            let pk = self.make_protocol_key(protocol);
+            let indexed = self.impl_index.contains_key(&(tk.clone(), pk.clone()));
+            let by_scan = self
+                .impls
+                .iter()
+                .filter(|i| self.make_type_key(&i.for_type) == tk)
+                .count();
+            // T0927 round 2: impls_total and vtn_total were IDENTICAL across a
+            // green and a red run, and `indexed` was false in both — so neither
+            // the index content nor the table SIZE moves. What remains is the
+            // table's CONTENT at equal size, i.e. a first-wins race for one
+            // signature. Print what the two signatures of THIS type map to.
+            let (sig_exact, sig_relaxed) = match ty {
+                Type::Variant(v) => (
+                    Some(Self::variant_type_signature_static(v)),
+                    Some(Self::variant_type_signature_relaxed(v)),
+                ),
+                _ => (None, None),
+            };
+            let map_of = |s: &Option<Text>| -> String {
+                match s {
+                    Some(sig) => format!(
+                        "{} => {}",
+                        sig,
+                        self.variant_type_names
+                            .get(sig)
+                            .map(|t| t.to_string())
+                            .unwrap_or_else(|| "<нет>".to_string())
+                    ),
+                    None => "-".to_string(),
+                }
+            };
+            eprintln!(
+                "[trygate] implements: key={} find_impl={} indexed={} scan_same_key={} impls_total={} vtn_total={} exact[{}] relaxed[{}]",
+                tk,
+                found,
+                indexed,
+                by_scan,
+                self.impls.len(),
+                self.variant_type_names.len(),
+                map_of(&sig_exact),
+                map_of(&sig_relaxed)
+            );
+            if matches!(ty, Type::Variant(_)) {
+                // Enumerate every Try impl and say WHERE it dropped out, so the
+                // green/red diff names one impl and one stage instead of a
+                // subsystem. `find_impl` Stage 2 is the only remaining suspect:
+                // Stage 1 never fires here (indexed=false in both verdicts).
+                // Printed for BOTH verdicts — an enumeration only on failure
+                // cannot be diffed against the passing run.
+                for (i, impl_) in self.impls.iter().enumerate() {
+                    if self.make_protocol_key(&impl_.protocol) != pk {
+                        continue;
+                    }
+                    let ftk = self.make_type_key(&impl_.for_type);
+                    match self.try_match_type(&impl_.for_type, ty) {
+                        Some(subst) => {
+                            let wc = self.check_where_clauses_satisfied(&impl_.where_clauses, &subst);
+                            eprintln!(
+                                "[trygate]   impl#{} for={} match=YES where={} nclauses={}",
+                                i,
+                                ftk,
+                                wc,
+                                impl_.where_clauses.len()
+                            );
+                        }
+                        None => eprintln!("[trygate]   impl#{} for={} match=no", i, ftk),
+                    }
+                }
+            }
+        }
+        if found {
             return true;
         }
 
@@ -5597,65 +5762,81 @@ impl ProtocolChecker {
                         // where the concrete type is expanded to None(Unit) | Some(T)
                         // Look up the variant's signature to see if it maps to this generic type
                         let signature = Self::variant_type_signature_static(variants);
-                        let named_type_opt =
-                            self.variant_type_names.get(&signature).or_else(|| {
-                                let relaxed = Self::variant_type_signature_relaxed(variants);
-                                self.variant_type_names.get(&relaxed)
-                            });
-                        if let Some(named_type) = named_type_opt {
-                            if named_type.as_str() == n1.as_str() {
-                                // Type names match! Extract type arguments from variant payloads.
-                                // Uses positional matching: non-Unit payloads are matched to type
-                                // parameters in the order they appear in the variant map.
-                                // This is stdlib-agnostic - no hardcoded variant names.
-                                // BY NAME, because the map has no order to
-                                // offer and the comment above asks for one.
-                                //
-                                // "in the order they appear in the variant
-                                // map" is HASH ORDER: `variants` is a
-                                // `Map`, so for a two-payload variant the
-                                // pattern's parameters were zipped against
-                                // the payloads in whichever order the table
-                                // handed them over — and `unify_types`
-                                // MUTATES the substitution and returns false
-                                // on conflict, so the match itself succeeded
-                                // or failed by the seed. Measured (T0927):
-                                // `implements_protocol(ty, "Try")` answered
-                                // `true` 57 times in one run of
-                                // `core/logic/kripke.vr` and `false` 19 of
-                                // 57 in another, with IDENTICAL lookup keys.
-                                //
-                                // Sorting makes the answer STABLE. It does
-                                // not make it RIGHT: the honest pairing is
-                                // DECLARATION order — `Ok(T) | Err(E)` names
-                                // T first — and `Type::Variant` does not
-                                // keep it. That is the same missing fact
-                                // T0928 needs, and until it exists a stable
-                                // wrong answer at least stays diagnosable
-                                // where a random one cannot.
-                                let mut payload_names: Vec<&verum_common::Text> = variants
-                                    .iter()
-                                    .filter(|(_, payload)| **payload != Type::Unit)
-                                    .map(|(name, _)| name)
-                                    .collect();
-                                payload_names.sort();
-                                let non_unit_payloads: List<&Type> = payload_names
-                                    .into_iter()
-                                    .map(|n| &variants[n])
-                                    .collect();
+                        // ASK WHETHER `n1` IS ADMITTED, not who owns the
+                        // signature. The old form read the single first-wins
+                        // winner and compared it for equality, so a signature
+                        // with several claimants answered by registration order:
+                        // measured (T0927), the relaxed signature
+                        // `Variant(Err|Ok)` is claimed by SEVEN types in
+                        // `core/`, and a run where `ScriptResult` had won made
+                        // this arm reject a perfectly good `Result` — one run in
+                        // five, from the same binary on the same file. The
+                        // membership question has the same answer whoever
+                        // registered first, and for the 1506 signatures with a
+                        // single claimant it is the same answer as before.
+                        // Precedence is the old code's, exactly: the exact
+                        // signature is consulted first and, when it names
+                        // anyone at all, it DECIDES — falling through to the
+                        // relaxed one after a precise answer would widen
+                        // matching beyond the defect being fixed.
+                        let admits = if self.variant_signature_is_claimed(&signature) {
+                            self.variant_signature_admits(&signature, n1.as_str())
+                        } else {
+                            self.variant_signature_admits(
+                                &Self::variant_type_signature_relaxed(variants),
+                                n1.as_str(),
+                            )
+                        };
+                        if admits {
+                            // Type names match! Extract type arguments from variant payloads.
+                            // Uses positional matching: non-Unit payloads are matched to type
+                            // parameters in the order they appear in the variant map.
+                            // This is stdlib-agnostic - no hardcoded variant names.
+                            // BY NAME, because the map has no order to
+                            // offer and the comment above asks for one.
+                            //
+                            // "in the order they appear in the variant
+                            // map" is HASH ORDER: `variants` is a
+                            // `Map`, so for a two-payload variant the
+                            // pattern's parameters were zipped against
+                            // the payloads in whichever order the table
+                            // handed them over — and `unify_types`
+                            // MUTATES the substitution and returns false
+                            // on conflict, so the match itself succeeded
+                            // or failed by the seed. Measured (T0927):
+                            // `implements_protocol(ty, "Try")` answered
+                            // `true` 57 times in one run of
+                            // `core/logic/kripke.vr` and `false` 19 of
+                            // 57 in another, with IDENTICAL lookup keys.
+                            //
+                            // Sorting makes the answer STABLE. It does
+                            // not make it RIGHT: the honest pairing is
+                            // DECLARATION order — `Ok(T) | Err(E)` names
+                            // T first — and `Type::Variant` does not
+                            // keep it. That is the same missing fact
+                            // T0928 needs, and until it exists a stable
+                            // wrong answer at least stays diagnosable
+                            // where a random one cannot.
+                            let mut payload_names: Vec<&verum_common::Text> = variants
+                                .iter()
+                                .filter(|(_, payload)| **payload != Type::Unit)
+                                .map(|(name, _)| name)
+                                .collect();
+                            payload_names.sort();
+                            let non_unit_payloads: List<&Type> = payload_names
+                                .into_iter()
+                                .map(|n| &variants[n])
+                                .collect();
 
-                                // Match pattern args to non-unit payloads positionally
-                                for (pattern_arg, payload) in
-                                    a1.iter().zip(non_unit_payloads.iter())
-                                {
-                                    if !self.unify_types(pattern_arg, payload, subst) {
-                                        return false;
-                                    }
+                            // Match pattern args to non-unit payloads positionally
+                            for (pattern_arg, payload) in
+                                a1.iter().zip(non_unit_payloads.iter())
+                            {
+                                if !self.unify_types(pattern_arg, payload, subst) {
+                                    return false;
                                 }
-                                true
-                            } else {
-                                false
                             }
+                            true
                         } else {
                             false
                         }
@@ -8051,7 +8232,7 @@ impl ProtocolChecker {
     /// Check if a type implements a protocol (by name)
     pub fn implements_protocol(&self, ty: &Type, protocol_name: &str) -> bool {
         let protocol_text: Text = protocol_name.into();
-        if std::env::var_os("VERUM_TRACE_TRYGATE").is_some() && protocol_name == "Try" {
+        if trygate_trace() && protocol_name == "Try" {
             // T0927: the KEY the index is asked with. If it differs
             // between two runs, the key is not a function of the value;
             // if it is the same and the answer differs, the divergence is
@@ -8111,7 +8292,7 @@ impl ProtocolChecker {
         // =========================================================================
         // Try protocol-based resolution first (doesn't require hardcoded type knowledge)
         let has_try = self.implements_protocol(ty, "Try");
-        if std::env::var_os("VERUM_TRACE_TRYGATE").is_some() {
+        if trygate_trace() {
             eprintln!("[trygate] resolve_try: implements_protocol(Try) = {}", has_try);
         }
         if has_try {

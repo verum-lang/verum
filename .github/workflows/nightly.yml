@@ -38,6 +38,21 @@ jobs:
       - name: Build runners
         run: cargo build -p vtest -p verum_vfuzz -p vbench -p verum_cli --release --locked
 
+      # The SURVEY half of the type-checker determinism gate (T0927). The PR
+      # gate re-checks six cheap files as a tripwire; this one sweeps the full
+      # 25-file list, ~14 minutes, which is affordable here and is not on a
+      # PR. Advisory: a finding here is a real defect, but it must not block a
+      # nightly whose job is measurement.
+      - name: Type-checker determinism sweep (full list)
+        continue-on-error: true
+        run: |
+          ../scripts/ci/check_typecheck_determinism.sh --selftest
+          ../scripts/ci/check_typecheck_determinism.sh \
+            --bin ../target/release/verum \
+            --sample ../scripts/ci/typecheck_determinism_sample_full.txt \
+            --runs 15
+        working-directory: vcs
+
       - name: Run VCS L0+L1+L2+L3 full
         working-directory: vcs
         # The vtest RUNNER process (not a test child) has died SIGSEGV

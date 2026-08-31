@@ -1,0 +1,39 @@
+# FULL list — for the nightly lane. The blocking CI gate uses the short
+# list in typecheck_determinism_sample.txt; this one costs ~55s per pass,
+# i.e. ~14 minutes at the default 15 runs.
+#
+# Files re-checked N times by scripts/ci/check_typecheck_determinism.sh.
+#
+# Chosen for CONTENT, not at random: the defect this gate exists for
+# (T0927) lived in protocol resolution, and it showed up on a file with
+# many '?' operators inside protocol impls. A uniform sample of core/
+# would spend most of its runs on files that resolve nothing.
+#
+# Rule, so the list can be regenerated: core/ files with the most '?'
+# operators, plus core/logic/kripke.vr, which is the case that was
+# actually measured to vary.
+core/logic/kripke.vr
+core/security/tuf/client.vr
+core/net/dns.vr
+core/configuration/toml.vr
+core/encoding/der.vr
+core/security/sigstore/rekor.vr
+core/net/tls13/handshake/messages.vr
+core/database/mysql/wire/backend.vr
+core/database/mysql/connection.vr
+core/io/fs.vr
+core/logic/linear.vr
+core/security/x509/algorithm.vr
+core/database/postgres/connection.vr
+core/net/quic/frame.vr
+core/net/tls13/handshake/extension.vr
+core/database/postgres/wire/typed.vr
+core/security/x509/certificate.vr
+core/database/postgres/pgoutput.vr
+core/database/mysql/json_binary.vr
+core/net/udp.vr
+core/text/format.vr
+core/term/raw/termios.vr
+core/net/tls13/handshake/client_sm.vr
+core/eval/cbpv.vr
+core/security/secrets/core_protocol.vr

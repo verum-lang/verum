@@ -1,0 +1,20 @@
+# Files re-checked N times by scripts/ci/check_typecheck_determinism.sh on
+# every PR. This is a TRIPWIRE for one class, not a survey of core/ — the
+# survey is typecheck_determinism_sample_full.txt in the nightly lane.
+#
+# Chosen for CONTENT then trimmed by COST. The defect this gate exists for
+# (T0927) lived in protocol resolution and showed up on a file with many '?'
+# operators inside protocol impls, so a uniform sample of core/ would spend
+# most of its runs on files that resolve nothing. Of those, these are the
+# cheapest: ~8.4s per pass, ~2 minutes at 15 runs. The full list costs ~55s
+# per pass and would put ~14 minutes on every PR.
+#
+# core/logic/kripke.vr is not optional: it is the file that was MEASURED to
+# vary, so it is this gate's one piece of evidence that the sample can catch
+# anything at all. Keep it first.
+core/logic/kripke.vr
+core/logic/linear.vr
+core/eval/cbpv.vr
+core/security/secrets/core_protocol.vr
+core/security/x509/algorithm.vr
+core/text/format.vr
