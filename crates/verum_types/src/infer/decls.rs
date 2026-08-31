@@ -8200,11 +8200,45 @@ impl TypeChecker {
 
     /// Put a type into the spelling the protocol matcher uses, so an
     /// alias and its expansion do not read as a disagreement.
+    ///
+    /// RECURSIVE, and that is the whole point. The authority itself
+    /// matches only `Type::Variant` at the top level and lets everything
+    /// else through untouched (protocol.rs:9078, `_ => ty.clone()`), so a
+    /// variant NESTED inside a tuple or a generic argument survives it.
+    /// Measured: normalising only the top level took core/base from 61
+    /// disagreements to 54, and 49 of the survivors were one shape —
+    /// `Iterator::size_hint` returning `(Int, None(Unit) | Some(Int))`
+    /// against `(Int, Maybe<Int>)`, a variant one level down inside a
+    /// tuple. The authority is not widened here: protocol matching relies
+    /// on its current behaviour, and this walk is the caller's business.
     fn normalise_for_comparison(
         checker: &crate::protocol::ProtocolChecker,
         ty: &Type,
     ) -> Type {
         match ty {
+            Type::Tuple(elems) => Type::Tuple(
+                elems
+                    .iter()
+                    .map(|e| Self::normalise_for_comparison(checker, e))
+                    .collect(),
+            ),
+            Type::Named { path, args } if !args.is_empty() => {
+                let normalised = Type::Named {
+                    path: path.clone(),
+                    args: args
+                        .iter()
+                        .map(|a| Self::normalise_for_comparison(checker, a))
+                        .collect(),
+                };
+                checker.normalize_variant_to_generic(&normalised)
+            }
+            Type::Reference { mutable, inner } => Type::Reference {
+                mutable: *mutable,
+                inner: Box::new(Self::normalise_for_comparison(checker, inner)),
+            },
+            Type::Slice { element } => Type::Slice {
+                element: Box::new(Self::normalise_for_comparison(checker, element)),
+            },
             Type::Function {
                 params,
                 return_type,
