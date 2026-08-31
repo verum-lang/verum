@@ -7989,6 +7989,26 @@ impl ProtocolChecker {
                 let assoc_text: Text = assoc_name.into();
                 if let Some(resolved) = self.try_find_associated_type(&normalized_base, &assoc_text)
                 {
+                    // The ANSWER, not the question. `VERUM_TRACE_ASSOC`
+                    // prints which projection is being resolved and how many
+                    // impls are registered; it never printed what came back,
+                    // so a reduction that returns the WRONG associated type
+                    // looks identical to one that returns the right one
+                    // (T0997).
+                    //
+                    // On the T0997 repro it prints NOTHING while
+                    // `[assoc-trace]` prints 46 lines, so this normaliser is
+                    // not the path that reduces `Item<MappedIter<…>>` there.
+                    // That is the datum: the reduction which returns the
+                    // first call site's answer happens somewhere else.
+                    if std::env::var("VERUM_TRACE_ASSOC").is_ok() {
+                        eprintln!(
+                            "[assoc-result] ::{} of {} -> {}",
+                            assoc_name,
+                            normalized_base.to_text(),
+                            resolved.to_text()
+                        );
+                    }
                     // Recursively normalize the result in case it contains more projections
                     self.normalize_projection_type(&resolved)
                 } else {

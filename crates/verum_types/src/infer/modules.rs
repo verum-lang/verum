@@ -18416,6 +18416,23 @@ impl TypeChecker {
                                 // Type check each argument with substituted param types
                                 for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
                                     let subst_param_ty = param_ty.apply_subst(&combined_subst);
+                                    // The EXPECTED type the argument is checked
+                                    // against — the last thing the pipeline
+                                    // computes before the mismatch is raised
+                                    // (T0997). Backtrace from VERUM_TRACE_E400
+                                    // puts the raise exactly here.
+                                    if let Ok(want) = std::env::var("VERUM_TRACE_INSTANTIATE")
+                                        && !want.is_empty()
+                                        && method_name_text.as_str().contains(want.as_str())
+                                    {
+                                        eprintln!(
+                                            "[arg-expect] {}.{} expect={} resolved={}",
+                                            type_name_text,
+                                            method_name_text,
+                                            subst_param_ty.to_text(),
+                                            self.unifier.apply(&subst_param_ty).to_text()
+                                        );
+                                    }
                                     self.check_expr(arg, &subst_param_ty)?;
                                 }
 
