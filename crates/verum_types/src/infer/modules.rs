@@ -23774,12 +23774,30 @@ impl TypeChecker {
                         span,
                     };
                     self.ctx.env.push_scope();
-                    let imported = self.check_import(&decl).is_ok();
+                    let import_res = self.check_import(&decl);
+                    let imported = import_res.is_ok();
                     let found = if imported {
                         self.ctx.env.lookup(method_name).cloned()
                     } else {
                         None
                     };
+                    if crate::ctor_trace_enabled() {
+                        // T1032: the synthetic mount works for some modules
+                        // and not others, while mounting the SAME path by
+                        // hand works for all of them. Say which of the two
+                        // steps gives up.
+                        eprintln!(
+                            "[ctor-trace] alias-mount path={}.{} import_ok={} bare_found={} err={}",
+                            module_path,
+                            method_name,
+                            imported,
+                            found.is_some(),
+                            match &import_res {
+                                Ok(_) => "-".to_string(),
+                                Err(e) => format!("{}", e),
+                            }
+                        );
+                    }
                     self.ctx.env.pop_scope();
                     found
                 }
