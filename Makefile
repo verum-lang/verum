@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: gates-source check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-name-census check-panic-surface check-dup-emitters
+.PHONY: gates-source check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-silent-acceptance check-name-census check-panic-surface check-dup-emitters
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -142,6 +142,9 @@ check-inventory: ## Gate (T0220): core-tests/INVENTORY.md structural integrity (
 
 check-name-census: ## Ratchet (T0690): name-keyed identity surfaces may only shrink (DefId migration)
 	python3 scripts/ci/census_name_keyed_surfaces.py --check
+
+check-silent-acceptance: ## Gate: an input the compiler cannot honour must not be counted in favour of the checked (T1025/T1026/T1027/T0989); needs a built binary — VERUM=path
+	python3 scripts/ci/check_silent_acceptance.py $(or $(VERUM),target/release/verum)
 
 check-inventory-live: ## Gate (T0220): INVENTORY liveness — green claims re-verified against a real interp run (INVENTORY_RESULTS=results.json, or it runs the suite)
 	@if [ -n "$(INVENTORY_RESULTS)" ]; then \
