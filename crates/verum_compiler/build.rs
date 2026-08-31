@@ -2011,6 +2011,42 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         "crates/verum_vbc/src/module.rs",
         "crates/verum_vbc/src/format.rs",
         "crates/verum_vbc/src/archive.rs",
+        // NO verum_types path belongs here, and that is MEASURED, not
+        // assumed (T1009). The list's own criterion — "a change here
+        // changes what the precompiled stdlib MEANS" — appears to apply
+        // to the typechecker, since the bake DOES build and drive a
+        // `verum_types::infer::TypeChecker` (stdlib_bootstrap.rs) for
+        // type registration, import validation and the coercion scan.
+        //
+        // It does not. Three bakes, 2026-08-31:
+        //
+        //   A  tree as-is                       core_metadata 51246c4b…
+        //   B  comment-only change in the key   core_metadata 51246c4b…
+        //   C  a REAL semantic change in
+        //      verum_types (the impl-var
+        //      freshening in
+        //      substitute_impl_type_params,
+        //      which demonstrably changes what
+        //      typechecks)                      core_metadata 51246c4b…
+        //
+        // A = B is the determinism control, without which the comparison
+        // says nothing; B = C is the answer. The metadata is built FROM
+        // the VBC archive (archive_metadata.rs) plus a source scan, and
+        // the typechecker's own state never reaches it — `precompile.rs`
+        // calls it "typecheck-READY metadata", i.e. data FOR the checker,
+        // not FROM it.
+        //
+        // What a verum_types change CAN still do is make the bake fail or
+        // reject a module. That is a build failure, not a stale archive,
+        // and it is loud.
+        //
+        // CAVEAT worth knowing before anyone repeats this: `runtime.vbca`
+        // is NOT byte-reproducible. Two bakes of identical semantics (A
+        // and B) differ in 856 bytes scattered across 25 MB at identical
+        // total size — small per-record values, consistent with an
+        // iteration-order-dependent id assignment. Compare
+        // `runtime.core_metadata`, which IS reproducible; a `.vbca`
+        // byte-diff answers nothing.
     ];
     hasher.update(b"codegen:");
     for rel in codegen_paths {
