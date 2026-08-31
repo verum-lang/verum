@@ -6457,6 +6457,43 @@ impl VbcCodegen {
         )
     }
 
+    /// TYPE-ORIGIN-MODULE (T1002): every type descriptor's name paired
+    /// with the module its descriptor says declared it.
+    ///
+    /// `origin_module: None` is not neutral.  The archive writer falls
+    /// back to the type's ENTRY path, so a type declared in a nested file
+    /// gets attributed to whichever parent re-exports it — and then
+    /// `mount a.b.c.{X}`, the path `a/b/c.vr` itself states, answers E401
+    /// while `mount a.b.{X}` resolves.  One name, two spellings, and the
+    /// working one is not the one the source says.
+    ///
+    /// It went unnoticed because WHICH SYNTAX the author chose decided
+    /// whether attribution happened.  `Record` and `Sum` stamped;
+    /// `Unit`, `Newtype`, single-element `Tuple` and `Quotient` reached
+    /// `..Default::default()`.  `type KeyId is (Text);` — the ordinary
+    /// parenthesised newtype — parses as a one-element TUPLE, so the
+    /// most common spelling sat on the unstamped path.
+    ///
+    /// The function side already carries this discipline through the one
+    /// `new_fn_descriptor` constructor; this returns the raw pairs so a
+    /// caller that knows which names a SOURCE FILE declares can check the
+    /// rule actually holds for each of them.
+    ///
+    /// `None` in the second position is the defect shape: the descriptor
+    /// names nobody, so the archive attributes the type to its entry path.
+    pub fn type_origin_modules(&self) -> Vec<(String, Option<String>)> {
+        self.types
+            .iter()
+            .filter_map(|ty| {
+                let name = self.ctx.strings.get(ty.name.0 as usize)?.clone();
+                let origin = ty
+                    .origin_module
+                    .and_then(|sid| self.ctx.strings.get(sid.0 as usize).cloned());
+                Some((name, origin))
+            })
+            .collect()
+    }
+
     /// Scan every emitted function body for `MakeVariant` instructions
     /// whose `(tag, field_count)` doesn't match any variant in the
     /// unified type table. At the per-module level this is a warn
@@ -14720,11 +14757,17 @@ impl VbcCodegen {
                 // archive boundary and `FileDesc.STDIN.as_raw()`
                 // dispatched on the bare inner value (Int) — losing
                 // the wrapper's static type identity.
+                //
+                // TYPE-ORIGIN-MODULE — the unparenthesised newtype form
+                // `type X is T;`.  Same rule as the Tuple arm below and the
+                // Record / Sum arms above: the declaring file, not the
+                // archive entry that re-exports it (T1002).
                 let mut type_desc = TypeDescriptor {
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Record,
                     is_transparent_wrapper: true,
+                    origin_module: self.current_origin_module_sid(),
                     ..Default::default()
                 };
                 type_desc.fields.push(crate::types::FieldDescriptor {
@@ -14804,11 +14847,22 @@ impl VbcCodegen {
                 // Canonical descriptor — flips the transparent flag for
                 // single-element tuples; multi-element tuples remain
                 // boxed records (one slot per element).
+                //
+                // TYPE-ORIGIN-MODULE.  `type KeyId is (Text);` — the
+                // parenthesised newtype — parses as a ONE-ELEMENT TUPLE and
+                // lands here, not in the `Newtype` arm above.  Without this
+                // stamp the archive attributes the type to its ENTRY path
+                // (the re-exporting parent), so `mount security.tuf.types.{KeyId}`
+                // — the path `core/security/tuf/types.vr` itself declares —
+                // answered E401 while `mount security.tuf.{KeyId}` resolved.
+                // One name, two spellings, and the working one is not the one
+                // the source states (T1002).
                 let mut type_desc = TypeDescriptor {
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Record,
                     is_transparent_wrapper: is_transparent,
+                    origin_module: self.current_origin_module_sid(),
                     ..Default::default()
                 };
                 // Push the inner-type fields into `type_desc.fields` —
@@ -14891,10 +14945,17 @@ impl VbcCodegen {
                 // ships to consumers; the bare-value fallback in
                 // compile_simple_path keys on `TypeKind::Unit`.
                 let type_id = self.claim_local_type_id(&type_name);
+                // TYPE-ORIGIN-MODULE: stamp the declaring file, exactly as
+                // the Record and Sum arms do. `..Default::default()` leaves
+                // this `None`, and a `None` origin makes the archive
+                // attribute the type to its ENTRY path — the re-exporting
+                // parent — so the type cannot be mounted by the path its own
+                // file declares (T1002).
                 let type_desc = crate::types::TypeDescriptor {
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Unit,
+                    origin_module: self.current_origin_module_sid(),
                     ..Default::default()
                 };
                 self.push_type_dedupe(type_desc);
@@ -15056,11 +15117,15 @@ impl VbcCodegen {
                 // as Newtype/single-element-Tuple.  See
                 // `TypeDescriptor::is_transparent_wrapper`.
                 let type_id = self.claim_local_type_id(&type_name);
+                // TYPE-ORIGIN-MODULE — the quotient form.  A quotient is a
+                // transparent wrapper like the newtype arms, and takes the
+                // same rule: attribute to the declaring file (T1002).
                 let mut type_desc = TypeDescriptor {
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Record,
                     is_transparent_wrapper: true,
+                    origin_module: self.current_origin_module_sid(),
                     ..Default::default()
                 };
                 type_desc.size = 8;

@@ -62,6 +62,41 @@ independent instances measured in one day:
   (`metadata_known_module_items`) existed but drove only E401's
   "module exports:" *text*, while mounts walked a synthesized mirror
   that had drifted.
+  * **Continued, measured 2026-08-31.** The split did not close, and a
+    third mechanism sits in front of both. Three legs:
+    * **A module's surface lost types by DECLARATION FORM** (T1002,
+      fixed). `core/security/tuf/types.vr` declares seventeen public
+      types; the compiler listed 24 names for that module and `KeyId`
+      from line 146 of that same file was not among them. Four codegen
+      arms built their `TypeDescriptor` through the struct-update
+      default, leaving `origin_module` at `None` — and `None` is not
+      neutral: the archive writer then attributes the type to the
+      archive ENTRY path. The costly form is the least suspicious one,
+      `type X is (T);`, which parses as a ONE-ELEMENT TUPLE and lowers
+      through the `Tuple` arm. Radius measured over 90 single-line
+      newtypes: 18 could not be mounted by the path their own file
+      declares, 72 could — the fallback is accidentally right whenever
+      a file IS its module's entry. Fixed: 17 of the 18 (the 18th is
+      `cog.resolve`, unreachable because `cog` is a keyword — T1008);
+      0 of the 72 moved.
+    * **The verdict depends on how the path is SPELLED** (T1005, open).
+      For one module `core.security.tuf.types` there are two surfaces:
+      `probed-exports` answers with 61 names, `metadata_known_module_items`
+      with 24, and the presence of a `core.` prefix decides which is
+      asked. Both reject a merely-imported name, so the larger one is
+      not "everything visible"; what makes it larger is not established.
+    * **The stdlib top-level list is hardcoded and incomplete** (T1006,
+      open). `verum_types/src/infer/mod.rs` holds 49 `core/`
+      subdirectory names as a constant against 52 actual: `hash`, `id`,
+      `mac`, `random`, `script`, `subtle` are absent, and
+      `mount id.{SnowflakeError}` answers E402 "module not found" while
+      `core.id.{…}` resolves. The comment there knows the no-hardcoded-
+      stdlib rule and calls the violation "a clarity choice", justifying
+      it with a claim true in only one direction.
+    The cure for the second and third is one: ask the authority
+    (`get_module_with_path_aliases`) instead of a list, after which the
+    spelling stops changing the verdict. That — not one `mount` turning
+    green — is what a fix here has to be measured by.
 * **Execution pipeline ×2 — the conformance suite runs the OTHER one**
   (T0732, measured 2026-08-14). `verum run` calls
   `run_interpreter` (`pipeline/dispatch.rs:316`): stdlib + project +
