@@ -119,6 +119,28 @@ public fn main() { print(spin(1)); }
 """,
         "not silently drop a verification the author asked for",
     ),
+    # Declaration ORDER decides whether purity is checked at all. The
+    # registry showcase already gates `pure fn b() { impure_helper() }`
+    # and it passes — but only because that probe happens to declare the
+    # helper ABOVE its caller. Move the helper below and the same program
+    # is accepted (T0985). A gate that tests one spelling of a two-sided
+    # rule is testing the side that works, which is why this row exists
+    # beside the showcase's.
+    #
+    # FIXED on lang/grammar-authority and not on main. When that branch
+    # lands (T1024) this row starts being diagnosed, the gate fails with
+    # "fixed but still listed in BASELINE", and the landing commit is the
+    # one that removes it. That failure is the ratchet working, not a
+    # regression.
+    (
+        "pure-calls-impure-declared-later",
+        "T0985",
+        """pure fn caller() -> Int { helper() }
+fn helper() -> Int { print("io"); 1 }
+public fn main() { print(caller()); }
+""",
+        "refuse a pure function calling an impure one regardless of declaration order",
+    ),
     (
         "nonexistent-protocol-axiom",
         "T0989",
@@ -172,6 +194,7 @@ BASELINE = {
     "attribute-name-typo",
     "attribute-argument-typo",
     "nonexistent-protocol-axiom",
+    "pure-calls-impure-declared-later",
     "decreases-measure-grows",
     "undeclared-context-use",
 }
