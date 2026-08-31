@@ -274,7 +274,6 @@ BASELINE = {
     "attribute-argument-typo",
     "nonexistent-protocol-axiom",
     "unmet-expected-error",
-    "pure-calls-impure-declared-later",
     "decreases-measure-grows",
     "undeclared-context-use",
 }
