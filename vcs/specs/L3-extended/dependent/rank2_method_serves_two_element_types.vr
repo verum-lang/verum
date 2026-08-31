@@ -1,0 +1,41 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L3
+// @tags: types, generics, associated-types, iterator, T0997
+// @description: One protocol method, one implementor, two element types — the second call must not be measured against the first call's type
+
+// RED until T0997. Measured 2026-08-31: `expected 'Int', found 'Text'`
+// at the SECOND call's argument, naming the FIRST call's element type.
+//
+// This is the minimised form, and every removed part is a refuted
+// suspicion: `.collect()` is gone (fails without it), the two calls now
+// use the SAME constructor (fails with one constructor), and the return
+// annotations are gone (fails without them). What remains is the whole
+// requirement: TWO calls, the SAME implementor, DIFFERENT element types.
+//
+// Each of those three matters. Two calls at the SAME element type pass.
+// Two `let`s from the constructor at different element types, with no
+// method call, pass. The same two calls split across two implementors
+// (`MappedIter` and `Cloned`) pass.
+//
+// Measured NOT to be the cause, each with an instrument rather than a
+// reading: the registered scheme is fully generalised (deep enumeration
+// of the signature, not the shallow collector that builds the
+// quantifier); it IS instantiated per call site, with fresh vars, and
+// both sites receive the same correct signature
+// `fn(StatefulTransducer<Item<MappedIter<_, _>>, _, _>) -> …`; the
+// projection resolves separately for each receiver under distinct type
+// keys; and the protocol impl is not mutated by matching.
+
+mount core.base.iterator.{StatefulTransducer, Transducer};
+fn first_int() {
+    let data = [1, 1, 2];
+    let xform: StatefulTransducer<Int, Int, Maybe<Int>> = Transducer.dedupe();
+    let r = data.iter().map(|x| *x).transduce_stateful(xform);
+}
+fn then_text() {
+    let data = ["a", "b", "c"];
+    let xform: StatefulTransducer<Text, Text, Maybe<Text>> = Transducer.dedupe();
+    let r = data.iter().map(|x| *x).transduce_stateful(xform);
+}
+fn main() { first_int(); then_text(); }

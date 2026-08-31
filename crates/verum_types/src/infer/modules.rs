@@ -18254,6 +18254,22 @@ impl TypeChecker {
                                 type_name_text, method_name_text, impl_vc, ty
                             );
                         }
+                        // The instantiated signature this call site got,
+                        // RENDERED, not debug-printed: the Debug spelling of
+                        // every Ident contains `Text { inner: … }`, so a
+                        // Debug dump reports the type `Text` at every name
+                        // and cannot be read for element types (T0997).
+                        if let Ok(want) = std::env::var("VERUM_TRACE_INSTANTIATE")
+                            && !want.is_empty()
+                            && method_name_text.as_str().contains(want.as_str())
+                        {
+                            eprintln!(
+                                "[early-inherent] {}.{} inst={}",
+                                type_name_text,
+                                method_name_text,
+                                ty.to_text()
+                            );
+                        }
                         ((ty, fresh_vars, impl_vc), type_bounds)
                     })
                 };
