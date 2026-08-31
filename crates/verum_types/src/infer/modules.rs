@@ -23724,6 +23724,66 @@ impl TypeChecker {
                     .as_ref()
                     .and_then(|s| self.lookup_static_or_load_from_metadata(s.as_str())),
             };
+            // T1032 — LAST RESORT: mount the path on demand, the way the
+            // fully-qualified form already does.
+            //
+            // `mount core.configuration.toml as tf; tf.parse(s)` reported
+            // `unbound variable: core.configuration.toml.parse` while the
+            // same string written out — `core.configuration.toml.parse(s)`
+            // — type-checks WITH NO MOUNT AT ALL. Measured, and the reason
+            // is not a spelling: `resolve_qualified_path_expr`
+            // (infer/expr.rs) does not look the name up, it SYNTHESISES a
+            // `MountDecl` for the path, runs `check_import` inside a pushed
+            // scope, and reads the item out by its bare name. A qualified
+            // path IS a mount of that symbol used once, as the comment
+            // there says.
+            //
+            // The alias branch above only ever performed lookups, so every
+            // name that needs the archive walked in through a door it never
+            // opened. Adding a seventh spelling would not have helped, and
+            // was measured not to: probing the lazy loader with all three
+            // forms instead of one left the verdict byte-identical.
+            //
+            // The scope is pushed and popped exactly as there, so `parse`
+            // stays unbound afterwards and the aliased form does not
+            // silently act as an import.
+            let env_hit = match env_hit {
+                Some(s) => Some(s),
+                None => {
+                    let mount_path = verum_ast::ty::Path::new(
+                        module_path
+                            .as_str()
+                            .split('.')
+                            .chain(std::iter::once(method_name))
+                            .map(|seg| {
+                                verum_ast::ty::PathSegment::Name(verum_ast::ty::Ident::new(
+                                    seg, span,
+                                ))
+                            })
+                            .collect(),
+                        span,
+                    );
+                    let decl = verum_ast::MountDecl {
+                        visibility: verum_ast::decl::Visibility::Private,
+                        tree: verum_ast::decl::MountTree {
+                            kind: verum_ast::decl::MountTreeKind::Path(mount_path),
+                            alias: verum_common::Maybe::None,
+                            span,
+                        },
+                        alias: verum_common::Maybe::None,
+                        span,
+                    };
+                    self.ctx.env.push_scope();
+                    let imported = self.check_import(&decl).is_ok();
+                    let found = if imported {
+                        self.ctx.env.lookup(method_name).cloned()
+                    } else {
+                        None
+                    };
+                    self.ctx.env.pop_scope();
+                    found
+                }
+            };
             if let Some(scheme) = env_hit {
                 // INSTANTIATE-AT-USE (persistent-var-leak class, the
                 // [[persistent-var-leak-value-position-variant]] twin):
