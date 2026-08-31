@@ -1,0 +1,34 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: types, pure, purity, contexts, context-groups, E503, T0986
+// @expected-error: E503
+// @description: A group that mixes promises with an injection is still an injection — a pure function may not declare it
+
+// The control for "look through the group" (T0986). Once the gate stops
+// reading a group's NAME as a positive context, the risk moves to the
+// other side: a group whose members are mostly negative must not smuggle
+// a positive one past the rule.
+//
+// `Mixed` promises not to touch `IO` and injects `Random`. The body here
+// is deliberately a constant, so nothing in it could produce the
+// diagnostic: the only thing on trial is the DECLARATION reaching a
+// positive context through a group.
+
+context IO {
+    fn write(message: Text);
+}
+
+context Random {
+    fn next_int(&self) -> Int;
+}
+
+using Mixed = [!IO, Random];
+
+pure fn hidden_injection() -> Int using Mixed {
+    42
+}
+
+fn main() {
+    print(hidden_injection());
+}

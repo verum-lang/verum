@@ -1,0 +1,41 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, pure, purity, contexts, context-groups, T0986
+// @description: A pure function may declare NEGATIVE contexts, spelled directly or through a group — a promise not to use one is not an injection
+
+// The other half of T0986, and the half that a rule about contexts gets
+// wrong by being too eager. `pure fn f() using [!IO]` promises MORE than
+// `pure` alone: not merely that the result is a function of the
+// arguments, but that a named capability is never touched. A rule that
+// refuses every context makes the stronger statement unsayable.
+//
+// BOTH spellings are pinned because they disagreed. Measured
+// 2026-08-31: the direct form was accepted and the GROUP form was
+// refused with E503 naming `Strict`, because a group's own reference
+// carries `is_negative: false` and the gate read that name instead of
+// looking through it. One rule, two spellings of the same thing, two
+// answers.
+
+context IO {
+    fn write(message: Text);
+}
+
+context Random {
+    fn next_int(&self) -> Int;
+}
+
+using Strict = [!IO, !Random];
+
+pure fn direct(x: Int) -> Int using [!IO] {
+    x + 1
+}
+
+pure fn through_a_group(x: Int) -> Int using Strict {
+    x + 2
+}
+
+fn main() {
+    print(direct(1));
+    print(through_a_group(2));
+}

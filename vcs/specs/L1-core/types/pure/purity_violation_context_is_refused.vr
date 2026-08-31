@@ -5,7 +5,8 @@
 // @expected-error: E503
 // @description: A pure function may not declare a context — an injected capability is a hidden argument
 
-// RED until T0986. Measured 2026-08-30: both are ACCEPTED.
+// GREEN since T0986 (2026-08-31). Measured 2026-08-30, before the
+// fix: both were ACCEPTED.
 //
 // Under the reading that makes `pure` worth anything — the result is a
 // function of the arguments — an injected capability is a hidden

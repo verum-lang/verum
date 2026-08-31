@@ -10220,6 +10220,63 @@ impl TypeChecker {
     }
 
     /// Inner implementation of check_function
+    /// The context half of the purity rule, stated ONCE (T0986).
+    ///
+    /// A POSITIVE context is an injected capability — a hidden argument
+    /// — so a `pure fn` declaring one is not a function of its arguments
+    /// alone. A NEGATIVE one (`using [!IO]`) is the opposite claim, a
+    /// promise NOT to touch it, and never defeats purity.
+    ///
+    /// Returns the offending leaf context and, when it was reached
+    /// through a group, that group's name; `None` when this declaration
+    /// leaves purity intact.
+    fn context_defeating_purity(
+        &self,
+        ctx: &verum_ast::context::ContextRequirement,
+        depth: usize,
+    ) -> Option<(String, Option<String>)> {
+        if ctx.is_negative {
+            return None;
+        }
+        let name = ctx.path.segments.last().and_then(|seg| match seg {
+            verum_ast::ty::PathSegment::Name(id) => Some(id.name.to_string()),
+            _ => None,
+        })?;
+        match self.positive_leaf_context(&name, depth) {
+            Some(leaf) if leaf == name => Some((leaf, None)),
+            Some(leaf) => Some((leaf, Some(name))),
+            None => None,
+        }
+    }
+
+    /// First positive leaf reachable from a context name, descending
+    /// through groups. A plain context IS its own leaf; a group is one
+    /// only through its members.
+    ///
+    /// Today a group cannot name another group — `using Outer =
+    /// [Inner];` is refused earlier with E605 "undefined context" —
+    /// so the recursion below does not fire in this tree. It is written
+    /// anyway because `register_group` stores members verbatim rather
+    /// than flattening them: the day nesting is allowed, this walk is
+    /// already correct instead of silently reading a group name as a
+    /// leaf. `depth` bounds it so that day cannot bring a loop, and
+    /// giving up at the bound returns None — refusing to recurse must
+    /// not invent a purity violation the source does not contain.
+    fn positive_leaf_context(&self, name: &str, depth: usize) -> Option<String> {
+        const MAX_GROUP_DEPTH: usize = 16;
+        if depth >= MAX_GROUP_DEPTH {
+            return None;
+        }
+        let Some(group) = self.context_resolver.get_group(name) else {
+            return Some(name.to_string());
+        };
+        group
+            .contexts
+            .iter()
+            .filter(|member| !member.is_negative)
+            .find_map(|member| self.positive_leaf_context(member.name.as_str(), depth + 1))
+    }
+
     fn check_function_inner(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
         let _global_guard = GlobalDepthGuard::enter()?;
 
@@ -12258,28 +12315,40 @@ impl TypeChecker {
         // NEGATIVE contexts are the opposite claim and stay legal —
         // `pure fn f() using [!IO, !Database]` promises it touches
         // NEITHER, which is a stronger statement than `pure` alone, and
-        // the tree already uses that form. Rejecting every context, as
-        // the other `is_pure` in this crate does, would refuse it.
-        if func.is_pure
-            && let Some(positive) = func.contexts.iter().find(|c| !c.is_negative)
-        {
-            let ctx_name = positive
-                .path
-                .segments
-                .last()
-                .and_then(|seg| match seg {
-                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.to_string()),
-                    _ => None,
-                })
-                .unwrap_or_else(|| "?".to_string());
-            return Err(TypeError::ImpurePureFunction {
-                func_name: func.name.name.clone(),
-                properties: verum_common::Text::from(format!(
-                    "declares context `{}`, whose value is not one of its arguments",
-                    ctx_name
-                )),
-                span: func.span,
-            });
+        // the tree already uses that form. This is the ONE place the
+        // rule is decided; `ComputationalSignature::is_pure` records the
+        // same rule and says so, and its `contexts` field is documented
+        // to hold positives alone so the two cannot drift apart.
+        //
+        // A GROUP must be looked THROUGH rather than read as a name.
+        // `using Pure = [!IO, !Random]` names two promises and injects
+        // nothing, but the group's own reference carries `is_negative:
+        // false`, so reading it as a positive context refused every pure
+        // function written in the group form while the spelled-out
+        // `using [!IO]` on the same function was accepted — one rule
+        // answering differently for two spellings of one thing.
+        if func.is_pure {
+            for ctx in func.contexts.iter() {
+                let Some((offender, via_group)) = self.context_defeating_purity(ctx, 0) else {
+                    continue;
+                };
+                let detail = match via_group {
+                    Some(group) => format!(
+                        "declares context `{}` through group `{}`, whose value is not one \
+                         of its arguments",
+                        offender, group
+                    ),
+                    None => format!(
+                        "declares context `{}`, whose value is not one of its arguments",
+                        offender
+                    ),
+                };
+                return Err(TypeError::ImpurePureFunction {
+                    func_name: func.name.name.clone(),
+                    properties: verum_common::Text::from(detail),
+                    span: func.span,
+                });
+            }
         }
         if func.is_pure {
             if let Err(impure_props) = inferred_properties.validate_for_pure_fn() {

@@ -1648,9 +1648,17 @@ impl Default for PropertyInferrer {
 ///  `Type::Function` keeps the two fields separate.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ComputationalSignature {
-    /// Context names declared in the function's `using [...]` clause.
-    /// Strings to keep the API serde-friendly without dragging in
-    /// the full Context AST. Empty list = no context dependencies.
+    /// POSITIVE context names declared in the function's `using [...]`
+    /// clause — the capabilities the function has injected into it.
+    /// Strings to keep the API serde-friendly without dragging in the
+    /// full Context AST. Empty list = no context dependencies.
+    ///
+    /// NEGATIVE contexts (`using [!IO]`) are NOT recorded here, and the
+    /// distinction is load-bearing rather than cosmetic: a negative
+    /// context is a promise NOT to use one, so it is a restriction, not
+    /// a dependency. A caller that stores negatives in this list turns
+    /// `is_pure` below into the opposite of the rule the compiler
+    /// enforces (T0986).
     pub contexts: List<Text>,
     /// Compile-time computational properties. Empty set = no
     /// declared / inferred properties (typically a fully pure
@@ -1696,8 +1704,16 @@ impl ComputationalSignature {
         !self.properties.is_empty()
     }
 
-    /// Whether this signature is fully pure — no contexts AND
+    /// Whether this signature is fully pure — no POSITIVE contexts AND
     /// either empty properties or only the `Pure` property.
+    ///
+    /// This is the same rule the compiler enforces, not a second one.
+    /// The authority is the E503 gate in `infer/modules.rs`, which asks
+    /// it over the AST (where negativity is a flag and a group must be
+    /// looked through); here the two agree only because `contexts`
+    /// holds positives alone. They used to disagree: this side refused
+    /// EVERY context, which would have rejected the legal
+    /// `pure fn f() using [!IO]` (T0986).
     pub fn is_pure(&self) -> bool {
         if !self.contexts.is_empty() {
             return false;
