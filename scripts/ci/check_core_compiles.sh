@@ -59,14 +59,36 @@ fi
 count=$(printf '%s\n' "$files" | wc -l | tr -d ' ')
 
 failed=""
+mute=""
 for f in $files; do
-  if ! (cd "$REPO" && timeout 120 "$VERUM" check "$f" >/dev/null 2>&1); then
+  out=$(cd "$REPO" && timeout 120 "$VERUM" check "$f" 2>&1) && rc=0 || rc=$?
+  # A THIRD OUTCOME: the checker did not run. Distinguishing it from "ran
+  # and found errors" is not pedantry — measured 2026-08-31, when the disk
+  # hit 100% `verum check` printed NOTHING and exited non-zero, so every
+  # remaining file read as a plain failure and a sweep that counted output
+  # lines instead read them as PASSES. Either way the run stops answering
+  # its question, and it must say so rather than produce a number.
+  if ! printf '%s' "$out" | grep -q 'Checking\|Finished\|error'; then
+    mute="$mute$f
+"
+  elif [ "$rc" -ne 0 ]; then
     failed="$failed$f
 "
   fi
 done
 failed=$(printf '%s' "$failed" | sed '/^$/d')
 nfailed=$(printf '%s' "$failed" | grep -c . || true)
+mute=$(printf '%s' "$mute" | sed '/^$/d')
+nmute=$(printf '%s' "$mute" | grep -c . || true)
+
+if [ "$nmute" -gt 0 ]; then
+  printf '[fail] %s file(s) produced NO output at all — the checker did not run.\n' "$nmute" >&2
+  printf '%s\n' "$mute" | head -5 | sed 's/^/         /' >&2
+  printf '       Check `df -h` and `sysctl vm.swapusage` FIRST: a full disk and\n' >&2
+  printf '       an exhausted swap both kill this binary without a message, and\n' >&2
+  printf '       the resulting run reports a number that means nothing.\n' >&2
+  exit 1
+fi
 
 if [ "$WRITE_BASELINE" -eq 1 ]; then
   {
