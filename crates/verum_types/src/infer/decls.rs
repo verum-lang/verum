@@ -8264,6 +8264,41 @@ impl TypeChecker {
         if ta == tb || absent(&ta) || absent(&tb) {
             return None;
         }
+
+        // A qualified path and a bare one name the SAME type:
+        // `&mut core.base.protocols.Hasher` against `&mut Hasher` was
+        // six of the eleven distinct messages in the first measurement.
+        // Compare on the last component of every dotted name. The real
+        // repair should resolve paths to identity; for an instrument
+        // whose job is to produce a countable number, dropping the
+        // module prefix is the same answer for less machinery.
+        let strip_paths = |t: &verum_common::Text| -> String {
+            t.as_str()
+                .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+                .map(|w| w.rsplit('.').next().unwrap_or(w))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        if strip_paths(&ta) == strip_paths(&tb) {
+            return None;
+        }
+
+        // Generic parameters that differ only by NAME are the same
+        // signature: `Into::into` reported protocol `T` against
+        // implementation `U`. Alpha-equivalence proper needs the
+        // declaration's parameter list; the instrument approximates it
+        // by the convention every one of them follows — a single
+        // segment, one or two characters, starting uppercase. Labelled
+        // as the approximation it is, because a heuristic presented as
+        // a rule is how a measurement turns into a false finding.
+        let looks_like_a_type_parameter = |t: &verum_common::Text| {
+            let s = t.as_str();
+            (1..=2).contains(&s.len())
+                && s.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        };
+        if looks_like_a_type_parameter(&ta) && looks_like_a_type_parameter(&tb) {
+            return None;
+        }
         Some(format!("protocol `{}`, implementation `{}`", ta.as_str(), tb.as_str()))
     }
 

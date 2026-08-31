@@ -116,3 +116,43 @@ fn an_inference_hole_is_declined_rather_than_counted() {
         "an inference hole must be declined"
     );
 }
+
+#[test]
+fn a_qualified_path_and_a_bare_one_are_the_same_type() {
+    // Measured on core/base: `Hash::hash` reported protocol
+    // `&mut core.base.protocols.Hasher` against implementation
+    // `&mut Hasher` — one type, two spellings.
+    let proto = func(vec![named("core.base.protocols.Hasher")], Type::Unit);
+    let imp = func(vec![named("Hasher")], Type::Unit);
+    assert!(
+        TypeChecker::signature_disagreement(&proto, &imp).is_none(),
+        "a module prefix is not a difference"
+    );
+}
+
+#[test]
+fn generic_parameters_differing_only_by_name_agree() {
+    // Measured on core/base: `Into::into` reported protocol `T` against
+    // implementation `U`.
+    let proto = func(vec![named("Int")], named("T"));
+    let imp = func(vec![named("Int")], named("U"));
+    assert!(
+        TypeChecker::signature_disagreement(&proto, &imp).is_none(),
+        "type parameters are alpha-equivalent"
+    );
+}
+
+#[test]
+fn two_different_concrete_types_still_disagree_after_all_the_leniency() {
+    // The control for the four declines above: after Self, Unknown, `_`,
+    // path-stripping and alpha-equivalence, a genuine mismatch must
+    // still be reported. Without this the leniency could have grown
+    // until the instrument reported nothing at all — which is the
+    // failure mode every other test here is blind to.
+    let proto = func(vec![named("Int")], named("Int"));
+    let imp = func(vec![named("Text")], named("Int"));
+    assert!(
+        TypeChecker::signature_disagreement(&proto, &imp).is_some(),
+        "Int against Text must survive every decline"
+    );
+}
