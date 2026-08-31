@@ -18263,10 +18263,32 @@ impl TypeChecker {
                             && !want.is_empty()
                             && method_name_text.as_str().contains(want.as_str())
                         {
+                            // `to_text` renders EVERY type variable as `_`,
+                            // so two signatures over different vars print
+                            // identically. The ids come from the Debug text
+                            // alongside, or the probe cannot tell a fresh
+                            // instantiation from a shared one — which is the
+                            // whole question (T0997).
+                            let ids: Vec<String> = {
+                                let dbg = format!("{:?}", ty);
+                                let mut out: Vec<String> = Vec::new();
+                                let mut rest = dbg.as_str();
+                                while let Some(i) = rest.find("TypeVar(") {
+                                    rest = &rest[i + "TypeVar(".len()..];
+                                    if let Some(j) = rest.find(')') {
+                                        let id = rest[..j].to_string();
+                                        if !out.contains(&id) {
+                                            out.push(id);
+                                        }
+                                    }
+                                }
+                                out
+                            };
                             eprintln!(
-                                "[early-inherent] {}.{} inst={}",
+                                "[early-inherent] {}.{} vars={:?} inst={}",
                                 type_name_text,
                                 method_name_text,
+                                ids,
                                 ty.to_text()
                             );
                         }
