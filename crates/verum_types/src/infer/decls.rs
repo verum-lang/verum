@@ -8198,6 +8198,44 @@ impl TypeChecker {
         }
     }
 
+    /// Name a type's structural variant, for the kind trace only.
+    fn type_kind_name(t: &Type) -> String {
+        // One level deep for tuples: the outer kind alone said `Tuple` on
+        // both sides of all 49 disagreements, which is true and useless —
+        // the difference is an element down. Naming the elements is the
+        // question the previous iteration could not answer.
+        if let Type::Tuple(elems) = t {
+            return format!(
+                "Tuple({})",
+                elems
+                    .iter()
+                    .map(Self::type_kind_name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        Self::type_kind_leaf(t).to_string()
+    }
+
+    fn type_kind_leaf(t: &Type) -> &'static str {
+        match t {
+            Type::Generic { .. } => "Generic",
+            Type::Record(_) => "Record",
+            Type::Var(_) => "Var",
+            Type::Variant(_) => "Variant",
+            Type::Tuple(_) => "Tuple",
+            Type::Named { .. } => "Named",
+            Type::Reference { .. } => "Reference",
+            Type::Slice { .. } => "Slice",
+            Type::Function { .. } => "Function",
+            Type::Unit => "Unit",
+            Type::Never => "Never",
+            Type::Unknown => "Unknown",
+            Type::Bool => "Bool",
+            _ => "other",
+        }
+    }
+
     /// Put a type into the spelling the protocol matcher uses, so an
     /// alias and its expansion do not read as a disagreement.
     ///
@@ -8246,16 +8284,41 @@ impl TypeChecker {
                 type_params,
                 properties,
             } => Type::Function {
+                // RECURSE, do not call the authority directly. Written the
+                // other way this arm made the whole recursive walk dead for
+                // function types — which is every type reaching here — and
+                // the walk read as landed while changing nothing: 54
+                // disagreements before it and 54 after. The kind trace is
+                // what exposed it: `protocol=Tuple(other, Variant)` after
+                // normalisation means the Variant was never visited.
                 params: params
                     .iter()
-                    .map(|p| checker.normalize_variant_to_generic(p))
+                    .map(|p| Self::normalise_for_comparison(checker, p))
                     .collect(),
-                return_type: Box::new(checker.normalize_variant_to_generic(return_type)),
+                return_type: Box::new(Self::normalise_for_comparison(checker, return_type)),
                 contexts: contexts.clone(),
                 type_params: type_params.clone(),
                 properties: properties.clone(),
             },
-            other => checker.normalize_variant_to_generic(other),
+            other => {
+                let normalised = checker.normalize_variant_to_generic(other);
+                // A MISS is silent by construction: the authority returns
+                // its input unchanged when the variant signature is not in
+                // `variant_type_names` (protocol.rs:9086, `else ty.clone()`),
+                // so "did not know" and "nothing to do" are the same value.
+                // That is this session's own class inside the mechanism, and
+                // the only way to see it is to notice the identity.
+                if std::env::var("VERUM_TRACE_PROTO_SIG_MISS").is_ok()
+                    && matches!(other, Type::Variant(_))
+                    && normalised.to_text() == other.to_text()
+                {
+                    eprintln!(
+                        "[proto-sig-miss] variant not normalised: {}",
+                        other.to_text().as_str()
+                    );
+                }
+                normalised
+            }
         }
     }
 
@@ -8332,6 +8395,18 @@ impl TypeChecker {
         };
         if looks_like_a_type_parameter(&ta) && looks_like_a_type_parameter(&tb) {
             return None;
+        }
+        if std::env::var("VERUM_TRACE_PROTO_SIG_KIND").is_ok() {
+            // The miss-trace fired ZERO times while 49 disagreements were
+            // reported, so the thing rendering as `None(Unit) | Some(Int)`
+            // is not a `Type::Variant` and never reaches the arm that would
+            // notice a normalisation miss. Rather than guess again at what
+            // it IS, print the structural kind of both sides.
+            eprintln!(
+                "[proto-sig-kind] protocol={} impl={}",
+                Self::type_kind_name(a),
+                Self::type_kind_name(b)
+            );
         }
         Some(format!("protocol `{}`, implementation `{}`", ta.as_str(), tb.as_str()))
     }
