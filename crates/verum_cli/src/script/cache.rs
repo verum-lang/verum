@@ -243,7 +243,28 @@ fn compute_compiler_identity() -> Vec<u8> {
 
 /// Schema version for `meta.toml`. Bumped on incompatible layout changes
 /// so older cache entries are evicted automatically (see `lookup`).
-const META_SCHEMA_VERSION: u32 = 1;
+const META_SCHEMA_VERSION: u32 = 2; // 2: `deps` — the recorded mount closure (T1003).
+
+/// One source file the compile read besides the entry itself. `hash` is
+/// the blake3 digest of the bytes that were COMPILED; `lookup` re-reads
+/// `path` and compares, so a changed — or deleted — dependency reads as
+/// a miss rather than as a hit on bytecode built from other text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CacheDep {
+    /// Absolute, canonicalised path. Re-read verbatim on lookup.
+    pub path: String,
+    /// Byte length at compile time. Cheap pre-check before hashing.
+    pub len: u64,
+    /// blake3 of the compile-time bytes, hex.
+    pub hash: String,
+}
+
+/// The single hashing authority for dependency bytes. Store and lookup
+/// both go through it so the two sides cannot drift into disagreeing
+/// about what "unchanged" means.
+pub fn dep_hash(bytes: &[u8]) -> String {
+    blake3::hash(bytes).to_hex().to_string()
+}
 
 /// Metadata for one cache entry. Round-trips through TOML.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -267,6 +288,22 @@ pub struct CacheMeta {
     pub last_accessed_at: u64,
     /// Compiled VBC byte length. Authoritative; used by GC sizing.
     pub vbc_len: u64,
+    /// Source files the compile read BEYOND the entry — the transitive
+    /// mount closure. Empty for a single-file script.
+    ///
+    /// The cache key digests the ENTRY BYTES ALONE, so a script that
+    /// mounts a sibling module was measured serving the OLD bytecode
+    /// after that module changed: editing `src/showcase/sizes.vr` and
+    /// re-running `src/main.vr` printed the pre-edit text, and only an
+    /// edit to `main.vr` itself picked the change up (T1003).
+    ///
+    /// Folding the closure INTO the key is not possible: the key is
+    /// needed at lookup, and the closure is not known until after the
+    /// compile the lookup exists to avoid. So the closure is recorded
+    /// here on store and VERIFIED on lookup — the same shape as
+    /// `source_len`, one level out.
+    #[serde(default)]
+    pub deps: Vec<CacheDep>,
 }
 
 impl CacheMeta {
@@ -450,6 +487,7 @@ impl ScriptCache {
         source_path: impl Into<String>,
         source_len: u64,
         compiler_version: impl Into<String>,
+        deps: Vec<CacheDep>,
     ) -> CacheResult<()> {
         let dir = self.entry_dir(key);
         let nonce = TEMPDIR_NONCE.fetch_add(1, Ordering::Relaxed);
@@ -476,6 +514,7 @@ impl ScriptCache {
             created_at: now,
             last_accessed_at: now,
             vbc_len: vbc.len() as u64,
+            deps,
         };
         let meta_str =
             toml::to_string(&meta).expect("CacheMeta serialise — pure data, never fails");
@@ -791,7 +830,7 @@ mod tests {
         let key = key_for(b"fn main() {}", "0.6", &["tier=0"]);
         let bytecode = b"VBC\x00\x01\x02fake".as_ref();
         cache
-            .store(key, bytecode, "/tmp/x.vr", 100, "0.6.0")
+            .store(key, bytecode, "/tmp/x.vr", 100, "0.6.0", vec![])
             .unwrap();
         let entry = cache.lookup(key).unwrap().expect("hit");
         assert_eq!(entry.vbc, bytecode);
@@ -817,8 +856,8 @@ mod tests {
         let root = temp_root("overwrite");
         let cache = ScriptCache::at(root.clone()).unwrap();
         let key = key_for(b"src", "0.6", &[]);
-        cache.store(key, b"first", "p", 1, "0.6.0").unwrap();
-        cache.store(key, b"second", "p", 1, "0.6.0").unwrap();
+        cache.store(key, b"first", "p", 1, "0.6.0", vec![]).unwrap();
+        cache.store(key, b"second", "p", 1, "0.6.0", vec![]).unwrap();
         let e = cache.lookup(key).unwrap().expect("hit");
         assert_eq!(e.vbc, b"second");
         let _ = fs::remove_dir_all(&root);
@@ -829,7 +868,7 @@ mod tests {
         let root = temp_root("evict");
         let cache = ScriptCache::at(root.clone()).unwrap();
         let key = key_for(b"x", "0.6", &[]);
-        cache.store(key, b"v", "p", 1, "0.6.0").unwrap();
+        cache.store(key, b"v", "p", 1, "0.6.0", vec![]).unwrap();
         assert!(cache.lookup(key).unwrap().is_some());
         cache.evict(key).unwrap();
         assert!(cache.lookup(key).unwrap().is_none());
@@ -852,7 +891,7 @@ mod tests {
         let cache = ScriptCache::at(root.clone()).unwrap();
         // Stash a real entry, plus a junk dir, plus an orphan tempdir.
         let key = key_for(b"x", "0.6", &[]);
-        cache.store(key, b"v", "p", 1, "0.6.0").unwrap();
+        cache.store(key, b"v", "p", 1, "0.6.0", vec![]).unwrap();
         fs::create_dir_all(root.join("not-a-key")).unwrap();
         fs::create_dir_all(root.join("aaaa.tmp.99.123")).unwrap();
         let listed = cache.list().unwrap();
@@ -870,7 +909,7 @@ mod tests {
         let root = temp_root("corrupt");
         let cache = ScriptCache::at(root.clone()).unwrap();
         let key = key_for(b"x", "0.6", &[]);
-        cache.store(key, b"v", "p", 1, "0.6.0").unwrap();
+        cache.store(key, b"v", "p", 1, "0.6.0", vec![]).unwrap();
         // Trash the meta.toml.
         let meta_path = cache.entry_dir(key).join("meta.toml");
         fs::write(&meta_path, "this is = not [valid] [[[[ TOML").unwrap();
@@ -886,7 +925,7 @@ mod tests {
         let root = temp_root("schema");
         let cache = ScriptCache::at(root.clone()).unwrap();
         let key = key_for(b"x", "0.6", &[]);
-        cache.store(key, b"v", "p", 1, "0.6.0").unwrap();
+        cache.store(key, b"v", "p", 1, "0.6.0", vec![]).unwrap();
         // Manually rewrite meta with a bumped schema version.
         let meta_path = cache.entry_dir(key).join("meta.toml");
         let text = fs::read_to_string(&meta_path).unwrap();
@@ -908,9 +947,9 @@ mod tests {
         let k1 = key_for(b"1", "0.6", &[]);
         let k2 = key_for(b"2", "0.6", &[]);
         let k3 = key_for(b"3", "0.6", &[]);
-        cache.store(k1, &vec![0xAA; 1024], "p", 1, "0.6.0").unwrap();
-        cache.store(k2, &vec![0xBB; 1024], "p", 1, "0.6.0").unwrap();
-        cache.store(k3, &vec![0xCC; 1024], "p", 1, "0.6.0").unwrap();
+        cache.store(k1, &vec![0xAA; 1024], "p", 1, "0.6.0", vec![]).unwrap();
+        cache.store(k2, &vec![0xBB; 1024], "p", 1, "0.6.0", vec![]).unwrap();
+        cache.store(k3, &vec![0xCC; 1024], "p", 1, "0.6.0", vec![]).unwrap();
 
         // Backdate k1 to oldest, k2 to middle, k3 stays newest.
         for (k, ts) in [(k1, 1u64), (k2, 100u64), (k3, CacheMeta::now_secs())] {
@@ -939,7 +978,7 @@ mod tests {
         let cache = ScriptCache::at(root.clone()).unwrap();
         for i in 0u8..5 {
             let key = key_for(&[i], "0.6", &[]);
-            cache.store(key, b"v", "p", 1, "0.6.0").unwrap();
+            cache.store(key, b"v", "p", 1, "0.6.0", vec![]).unwrap();
         }
         assert_eq!(cache.list().unwrap().len(), 5);
         let removed = cache.clear().unwrap();
@@ -953,7 +992,7 @@ mod tests {
         let root = temp_root("touch");
         let cache = ScriptCache::at(root.clone()).unwrap();
         let key = key_for(b"x", "0.6", &[]);
-        cache.store(key, b"v", "p", 1, "0.6.0").unwrap();
+        cache.store(key, b"v", "p", 1, "0.6.0", vec![]).unwrap();
         // Manually backdate the last-access time.
         let meta_path = cache.entry_dir(key).join("meta.toml");
         let mut meta: CacheMeta = toml::from_str(&fs::read_to_string(&meta_path).unwrap()).unwrap();
@@ -985,7 +1024,7 @@ mod tests {
             .map(|_| {
                 let c = cache.clone();
                 thread::spawn(move || {
-                    c.store(key, bytecode, "p", 4, "0.6.0").unwrap();
+                    c.store(key, bytecode, "p", 4, "0.6.0", vec![]).unwrap();
                 })
             })
             .collect();

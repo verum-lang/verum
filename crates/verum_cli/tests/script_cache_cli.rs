@@ -31,6 +31,7 @@ fn populate(root: &Path, n: u64) {
                 format!("/tmp/script_{i}.vr"),
                 src.len() as u64,
                 "0.1.0",
+                Vec::new(),
             )
             .expect("store");
     }

@@ -28,7 +28,9 @@
 //! when to consult them via [`ScriptContext::cache_lookup`] /
 //! [`ScriptContext::cache_store`] / [`ScriptContext::lockfile_path`].
 
-use crate::script::cache::{CacheEntry, CacheError, CacheKey, ScriptCache, key_for};
+use crate::script::cache::{
+    CacheDep, CacheEntry, CacheError, CacheKey, ScriptCache, dep_hash, key_for,
+};
 use crate::script::frontmatter::{self, Frontmatter, FrontmatterError};
 use crate::script::lockfile::ScriptLockfile;
 use crate::script::permission_flags::{
@@ -223,19 +225,71 @@ impl ScriptContext {
                 return Ok(None);
             }
         }
+
+        // Same argument as `source_len`, one level out. The key digests
+        // the ENTRY bytes, so a changed MOUNTED module leaves it
+        // untouched and the stale entry looks perfectly valid: editing
+        // a mounted file and re-running the entry was measured printing
+        // the pre-edit text, while editing the entry itself picked the
+        // change up (T1003). `CacheMeta::deps` records what the compile
+        // actually read; verify it before trusting the bytecode.
+        if let Some(entry) = &hit {
+            for dep in &entry.meta.deps {
+                let path = Path::new(&dep.path);
+                let stale = match fs::read(path) {
+                    Ok(bytes) => {
+                        bytes.len() as u64 != dep.len || dep_hash(&bytes) != dep.hash
+                    }
+                    // Unreadable NOW: deleted, moved, or permissions
+                    // changed. An entry whose closure cannot be
+                    // re-verified is not trustworthy, and recompiling
+                    // re-diagnoses the missing module properly instead
+                    // of running yesterday's bytecode for it.
+                    Err(_) => true,
+                };
+                if stale {
+                    // DEBUG, not warn. A changed dependency is the
+                    // ROUTINE path — every edit to a mounted module
+                    // takes it — unlike the `source_len` mismatch
+                    // above, which means the entry itself is corrupt.
+                    // Logging it at warn put the line into the stdout
+                    // of anything capturing both streams: the registry
+                    // showcase gate diffs `verum run` output, and the
+                    // first run after any legitimate chapter edit
+                    // failed on the warning rather than on the program.
+                    tracing::debug!(
+                        "script cache: dependency {} of {} changed since the entry was \
+                         built — treating as a MISS and recompiling",
+                        dep.path,
+                        self.source_path.display(),
+                    );
+                    return Ok(None);
+                }
+            }
+        }
         Ok(hit)
     }
 
     /// Cache store for the compiled VBC produced from this context's
     /// source. Consistent metadata: source path + length + compiler
     /// version are pinned to the values this context already holds.
-    pub fn cache_store(&self, cache: &ScriptCache, vbc: &[u8]) -> Result<(), CacheError> {
+    /// `deps` is the transitive mount closure the compile read — see
+    /// [`CacheMeta::deps`]. Pass an empty vector only for a source with
+    /// no mounts; passing one for a script that HAS mounts re-opens
+    /// T1003 (a stale hit after a mounted module changes).
+    pub fn cache_store(
+        &self,
+        cache: &ScriptCache,
+        vbc: &[u8],
+        deps: Vec<CacheDep>,
+    ) -> Result<(), CacheError> {
         cache.store(
             self.cache_key,
             vbc,
             self.source_path.display().to_string(),
             self.source.len() as u64,
             self.compiler_version.clone(),
+            deps,
         )
     }
 

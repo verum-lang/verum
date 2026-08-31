@@ -682,6 +682,77 @@ fn check_frontmatter_version(fm: &crate::script::frontmatter::Frontmatter) -> Re
     Ok(())
 }
 
+/// The transitive mount closure the compile actually read, hashed for
+/// `CacheMeta::deps`.
+///
+/// `Session::all_sources` IS the read set — every file the pipeline
+/// loaded, entry and mounted modules alike. Two filters apply:
+///
+/// * the entry itself is dropped: the cache key already digests its
+///   bytes, and `cache_lookup` re-checks its length;
+/// * a source whose path does not resolve on disk is dropped. `verum -e`,
+///   the embedded stdlib and desugar output carry virtual paths that a
+///   later lookup could never re-read, and a dependency that can never
+///   verify would turn every lookup into a permanent MISS — the cache
+///   would look present and never be used.
+///
+/// The digest is taken over the bytes the compiler HELD rather than a
+/// fresh read of the file: those are the bytes the bytecode was built
+/// from, so an edit landing between compile and store shows up as a miss
+/// on the next run instead of being blessed as current.
+fn script_cache_deps(
+    session: &Session,
+    entry: &std::path::Path,
+) -> Vec<crate::script::cache::CacheDep> {
+    use crate::script::cache::{CacheDep, dep_hash};
+
+    let entry_canon = std::fs::canonicalize(entry).unwrap_or_else(|_| entry.to_path_buf());
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut deps: Vec<CacheDep> = Vec::new();
+
+    for src in session.all_sources() {
+        // Expansion output (macro / derive / monomorphisation) has no
+        // file behind it, and `path` is None for anything the session
+        // did not load from disk. Both are unverifiable on lookup.
+        if src.synthetic_origin.is_some() {
+            continue;
+        }
+        let Some(path) = src.path.as_ref() else {
+            continue;
+        };
+        let canon = match std::fs::canonicalize(path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if canon == entry_canon || !seen.insert(canon.clone()) {
+            continue;
+        }
+        let bytes = src.source.as_bytes();
+        deps.push(CacheDep {
+            path: canon.display().to_string(),
+            len: bytes.len() as u64,
+            hash: dep_hash(bytes),
+        });
+    }
+
+    // Stable order — `meta.toml` is read by humans and compared as text
+    // by the cache tests.
+    deps.sort_by(|a, b| a.path.cmp(&b.path));
+
+    if std::env::var_os("VERUM_TRACE_SCRIPT_DEPS").is_some() {
+        eprintln!(
+            "[script-deps] {} recorded for {}",
+            deps.len(),
+            entry.display()
+        );
+        for d in &deps {
+            eprintln!("[script-deps]   {} ({} bytes)", d.path, d.len);
+        }
+    }
+
+    deps
+}
+
 /// Script-mode interpreted run with full ScriptContext wiring:
 /// frontmatter version validation, CLI permission flag merge,
 /// persistent VBC cache lookup-and-store, and lockfile capture.
@@ -889,7 +960,11 @@ fn run_script_interpreted(
                 verum_vbc::compression::CompressionOptions::zstd(),
             ) {
                 Ok(bytes) => {
-                    if let Err(e) = ctx.cache_store(c, &bytes) {
+                    // Record what the compile READ, not just what it was
+                    // asked to compile — the key covers the entry alone
+                    // (T1003).
+                    let deps = script_cache_deps(&session, &ctx.source_path);
+                    if let Err(e) = ctx.cache_store(c, &bytes, deps) {
                         ui::warn(&format!("script cache store failed: {e}"));
                     }
                 }
