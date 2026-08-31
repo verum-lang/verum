@@ -9016,7 +9016,7 @@ impl ProtocolChecker {
     /// This is used for protocol matching since implementations are typically
     /// registered with Generic types (e.g., Maybe<T>) while concrete types
     /// may be in Variant form (e.g., None | Some(Int)).
-    fn normalize_variant_to_generic(&self, ty: &Type) -> Type {
+    pub(crate) fn normalize_variant_to_generic(&self, ty: &Type) -> Type {
         let normalized = self.normalize_variant_to_generic_inner(ty);
         Self::canonicalize_never(&normalized)
     }

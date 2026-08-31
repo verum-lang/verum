@@ -89,3 +89,30 @@ fn a_non_function_pair_is_declined_rather_than_guessed_at() {
     let b = named("Text");
     assert!(TypeChecker::signature_disagreement(&a, &b).is_none());
 }
+
+#[test]
+fn an_unresolved_side_is_declined_rather_than_counted() {
+    // Measured on core/base: `Hasher::write` reported protocol `&[Byte]`
+    // against implementation `&Unknown`. `Unknown` is a side that did not
+    // resolve, not a different type, and reporting it inflates the count
+    // with non-defects — the same error this whole task is about, aimed
+    // the other way.
+    let proto = func(vec![named("Byte")], Type::Unit);
+    let imp = func(vec![Type::Unknown], Type::Unit);
+    assert!(
+        TypeChecker::signature_disagreement(&proto, &imp).is_none(),
+        "an Unknown side must be declined"
+    );
+}
+
+#[test]
+fn an_inference_hole_is_declined_rather_than_counted() {
+    // Measured on core/base: `Iterator::fold` reported protocol `_`
+    // against implementation `B`. `_` is a hole, not a type.
+    let proto = func(vec![named("_")], Type::Unit);
+    let imp = func(vec![named("B")], Type::Unit);
+    assert!(
+        TypeChecker::signature_disagreement(&proto, &imp).is_none(),
+        "an inference hole must be declined"
+    );
+}

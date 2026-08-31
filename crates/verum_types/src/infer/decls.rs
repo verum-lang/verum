@@ -8176,7 +8176,18 @@ impl TypeChecker {
                 verum_common::Maybe::None => continue,
             };
             let impl_ty = crate::method_resolution::function_decl_to_type(func);
-            if let Some(reason) = Self::signature_disagreement(&proto_method.ty, &impl_ty) {
+            // Both sides go through the protocol matcher's own
+            // normalisation before comparison. Its doc-comment names
+            // exactly the noise the first measurement produced —
+            // "implementations are typically registered with Generic
+            // types (e.g. Maybe<T>) while concrete types may be in
+            // Variant form (e.g. None | Some(Int))" — and a sibling in
+            // the same file states the principle: ONE canonical spelling
+            // at the ONE authority every protocol-matching site
+            // consults. Conformance is such a site and was not asking.
+            let proto_ty = Self::normalise_for_comparison(&guard, &proto_method.ty);
+            let impl_ty = Self::normalise_for_comparison(&guard, &impl_ty);
+            if let Some(reason) = Self::signature_disagreement(&proto_ty, &impl_ty) {
                 eprintln!(
                     "[proto-sig] {}::{} — {}",
                     proto_ident.as_str(),
@@ -8184,6 +8195,33 @@ impl TypeChecker {
                     reason
                 );
             }
+        }
+    }
+
+    /// Put a type into the spelling the protocol matcher uses, so an
+    /// alias and its expansion do not read as a disagreement.
+    fn normalise_for_comparison(
+        checker: &crate::protocol::ProtocolChecker,
+        ty: &Type,
+    ) -> Type {
+        match ty {
+            Type::Function {
+                params,
+                return_type,
+                contexts,
+                type_params,
+                properties,
+            } => Type::Function {
+                params: params
+                    .iter()
+                    .map(|p| checker.normalize_variant_to_generic(p))
+                    .collect(),
+                return_type: Box::new(checker.normalize_variant_to_generic(return_type)),
+                contexts: contexts.clone(),
+                type_params: type_params.clone(),
+                properties: properties.clone(),
+            },
+            other => checker.normalize_variant_to_generic(other),
         }
     }
 
@@ -8214,7 +8252,16 @@ impl TypeChecker {
     /// pair that mentions `Self` — see the note on the caller.
     pub fn type_disagreement(a: &Type, b: &Type) -> Option<String> {
         let (ta, tb) = (a.to_text(), b.to_text());
-        if ta == tb || ta.as_str().contains("Self") || tb.as_str().contains("Self") {
+        // `Self`, `Unknown` and `_` are all ABSENCES rather than types:
+        // Self is what the real repair must substitute, Unknown is a
+        // side that did not resolve, `_` is an inference hole. Counting
+        // an absence as a difference is this task's own defect pointed
+        // the other way, so all three decline.
+        let absent = |t: &verum_common::Text| {
+            let s = t.as_str();
+            s.contains("Self") || s.contains("Unknown") || s == "_" || s.contains("`_`")
+        };
+        if ta == tb || absent(&ta) || absent(&tb) {
             return None;
         }
         Some(format!("protocol `{}`, implementation `{}`", ta.as_str(), tb.as_str()))
