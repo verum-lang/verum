@@ -280,49 +280,73 @@ BASELINE = {
 }
 
 
-def diagnosed(verum: str, src: str, work: Path) -> bool:
-    """True when the compiler says something about the file.
+def probe(verum: str, src: str, work: Path) -> str:
+    """One of "diagnosed", "silent", "mute".
 
-    Both commands are consulted because the four defects live in
-    different phases: a parser-level refusal shows up in `check`, a
-    verification one only in `verify`. Silence from BOTH is the failure
-    this gate is named after.
+    MUTE is a THIRD outcome and exists because of a measured failure, not
+    a hypothesis: with the volume full, `verum check` stopped printing
+    entirely — no "Checking", no "error", no "Finished" — and every
+    sweep written as `errors == 0 -> PASS` turned green. A peer's 372-file
+    sweep reported 34 newly-passing files; re-measured, three were real.
+
+    A tool that cannot speak is indistinguishable from a program with
+    nothing wrong, unless absence of output is checked for separately.
+    So silence with no sign of life is never counted as either verdict:
+    it fails the gate, because a run with mutes has not answered its
+    question.
     """
-    probe = work / "probe.vr"
-    probe.write_text(src)
-    for args in (["check", str(probe)], ["verify", str(probe)]):
+    probe_file = work / "probe.vr"
+    probe_file.write_text(src)
+    alive = False
+    for args in (["check", str(probe_file)], ["verify", str(probe_file)]):
         try:
             r = subprocess.run(
                 [verum, *args], capture_output=True, text=True, timeout=300
             )
         except (subprocess.TimeoutExpired, FileNotFoundError):
             continue
-        if r.returncode != 0:
-            return True
         blob = r.stdout + r.stderr
+        if any(k in blob for k in ("Checking", "Verifying", "Finished", "Summary")):
+            alive = True
+        if r.returncode != 0:
+            return "diagnosed"
         if "error<" in blob or "warning<" in blob:
-            return True
+            return "diagnosed"
         # `verify` reporting a failed obligation is also the compiler
         # saying so — it just says it in the summary rather than as a
         # diagnostic.
         if "failed" in blob and "0 failed" not in blob:
-            return True
-    return False
+            return "diagnosed"
+    return "silent" if alive else "mute"
 
 
 def main() -> int:
     verum = sys.argv[1] if len(sys.argv) > 1 else "verum"
-    silent, spoke = [], []
+    silent, spoke, mute = [], [], []
 
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         for name, task, src, expectation in CASES:
-            if diagnosed(verum, src, work):
+            verdict = probe(verum, src, work)
+            if verdict == "mute":
+                mute.append(name)
+                print(f"  {name:28s} MUTE — the tool printed nothing  ({task})")
+            elif verdict == "diagnosed":
                 spoke.append(name)
                 print(f"  {name:28s} diagnosed          ({task})")
             else:
                 silent.append(name)
                 print(f"  {name:28s} SILENTLY ACCEPTED  ({task}) — must {expectation}")
+
+    if mute:
+        print(
+            "\nFAIL: the tool printed nothing for: "
+            + ", ".join(sorted(mute))
+            + "\n  A mute run has not answered the question. Check `df -h` and"
+            "\n  `sysctl vm.swapusage` before reading anything else here.",
+            file=sys.stderr,
+        )
+        return 1
 
     regressed = sorted(set(silent) - BASELINE)
     fixed = sorted(set(spoke) & BASELINE)
