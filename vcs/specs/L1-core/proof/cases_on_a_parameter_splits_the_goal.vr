@@ -18,7 +18,7 @@
 // The goal is a tautology the solver closes in 10ms. Adding a case analysis
 // — the most ordinary thing a person writes in a proof — lost it.
 //
-//   1. The step walker had no goal. `ProofStepKind::Cases` therefore built
+//   1. The step walker had no goal, so the `Cases` proof-step kind built
 //      one out of the SCRUTINEE: `cases b` case-split on the goal `b`
 //      instead of on `b || !b`, so the theorem's own goal was never reached.
 //

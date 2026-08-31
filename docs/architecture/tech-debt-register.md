@@ -62,6 +62,64 @@ independent instances measured in one day:
   (`metadata_known_module_items`) existed but drove only E401's
   "module exports:" *text*, while mounts walked a synthesized mirror
   that had drifted.
+  * **Continued, measured 2026-08-31.** The split did not close, and a
+    third mechanism sits in front of both. Three legs:
+    * **A module's surface lost types by DECLARATION FORM** (T1002,
+      fixed). `core/security/tuf/types.vr` declares seventeen public
+      types; the compiler listed 24 names for that module and `KeyId`
+      from line 146 of that same file was not among them. Four codegen
+      arms built their `TypeDescriptor` through the struct-update
+      default, leaving `origin_module` at `None` — and `None` is not
+      neutral: the archive writer then attributes the type to the
+      archive ENTRY path. The costly form is the least suspicious one,
+      `type X is (T);`, which parses as a ONE-ELEMENT TUPLE and lowers
+      through the `Tuple` arm. Radius measured over 90 single-line
+      newtypes: 18 could not be mounted by the path their own file
+      declares, 72 could — the fallback is accidentally right whenever
+      a file IS its module's entry. Fixed: 17 of the 18 (the 18th is
+      `cog.resolve`, unreachable because `cog` is a keyword — T1008);
+      0 of the 72 moved.
+    * **The verdict depended on how the path was SPELLED** (T1005,
+      fixed with T1006). One module `core.security.tuf.types` had two
+      surfaces — `probed-exports` answering with 61 names,
+      `metadata_known_module_items` with 24 — and the presence of a
+      `core.` prefix decided which was asked. Both rejected a
+      merely-imported name, so the larger was never "everything visible".
+    * **The stdlib top-level list was hardcoded and incomplete** (T1006,
+      fixed). `verum_types/src/infer/mod.rs` held 49 `core/` subdirectory
+      names as a constant against 52 actual: `hash`, `id`, `mac`,
+      `random`, `script`, `subtle` were absent, so
+      `mount id.snowflake.{SnowflakeError}` answered E402 "module not
+      found" while the `core.`-prefixed form resolved. The comment there
+      knew the no-hardcoded-stdlib rule, called the violation "a clarity
+      choice", and justified it with a claim true in only one direction —
+      every name IS a directory, but not every directory is a name, and
+      nothing re-checked the converse as `core/` grew.
+    * **A mount that resolved to nothing was ACCEPTED** (T1011, fixed) —
+      `mount zzz;` compiled with exit code zero and bound nothing, while
+      the multi-segment `mount nosuch.module.at.all;` had always reported
+      E402. The diagnostic existed; the chain had a branch for "module
+      found" and one for "the path contains a dot", and nothing else, so a
+      single-segment path that resolved to nothing fell out of it. Two
+      names of the deleted list were reachable only through that hole:
+      `async_` (no directory) and `target` (the Cargo build directory).
+    * **A keyword segment ate the path and the message did not say so**
+      (T1008, fixed) — `mount cog.resolve.{X}` answered ``module `resolve`
+      not found``, one segment short of what was written, because `cog` is
+      a path keyword whose parse arm CLEARS the accumulated path. The
+      parse is right; the message reported the consequence and hid the
+      cause. `core/cog/` exists, so its short form is unreachable by
+      construction while `core.cog.resolve.{X}` resolves.
+    The cure for the first two was one: ask an AUTHORITY instead of a list —
+    registry first (so a project module keeps its own identity), then the
+    archive metadata via a prefix range. Measured rather than assumed at
+    each step: an earlier registry-only attempt was INERT (`core.id` is
+    absent from the registry under every spelling, which also explains
+    why `mac.hmac` worked without being listed — it IS in the registry);
+    before removal, `in_list && !registry && !metadata` was false for 48
+    of the 49 names and the 49th (`cog`) was unreachable as a path prefix
+    because it is a keyword (T1008); after removal, all 49 answer E401
+    rather than E402, and bare vs `core.`-prefixed agree 49 of 49.
 * **Execution pipeline ×2 — the conformance suite runs the OTHER one**
   (T0732, measured 2026-08-14). `verum run` calls
   `run_interpreter` (`pipeline/dispatch.rs:316`): stdlib + project +
@@ -267,6 +325,49 @@ precondition T0657; higher-order reflection T0490; excluded-middle on
 opaque calls T0487; five ProofTerm types T0637; refinement
 value-free-validity class (register §refinement).
 
+**R6-addendum, MEASURED 2026-08-30 — a red verification spec has FIVE
+distinct causes, and they must not be added together.**
+
+The L3 proofs corpus stands at 27/71 specs, 265 unproved obligations
+(from 23/68 and 275 the same day). Triaging what remains gave five
+kinds of red, only the first of which is prover debt:
+
+1. **A weak tactic or a missing theory.** The real debt: list theory
+   (`len(xs.concat(ys)) == len(xs) + len(ys)` and its family, 14 goals),
+   Peano over a user `Nat`, induction, existential witnesses.
+2. **A compiler defect.** A `cases` block built its goal from the
+   SCRUTINEE, so a proof structure destroyed a goal the solver closes
+   in 10ms (T0960); a generic function's definition was declared over
+   its type parameter's sort while the goal's call declared the same
+   name over the instantiated sort, so the definitional axiom described
+   a different function (T0980).
+3. **The spec asserts something its author did not mean.** `==` binds
+   tighter than `&&`, so `p && true == p` is `p && (true == p)` — false
+   at `p = false`. The verifier refused correctly and the refusal was
+   counted as prover weakness. A census over the corpus for that shape
+   found 18 sites, of which 3 were mis-grouped.
+4. **The spec declares its expectation where the runner never looks.**
+   `// @test: verify-fail` on an individual theorem inside a file whose
+   own directive says `verify-pass`. vtest reads the file's first
+   directive and nothing else, so six theorems across three tactic
+   files were punished for declining correctly.
+5. **The verifier answers FALSE** — the worst, and the one that makes
+   the other four cheap by comparison.
+
+Two instrument defects were found while measuring, and both would have
+falsified the numbers: `cargo build -p A --bin X -p B` builds only `X`
+(the `--bin` filter silences every other `-p`, exit 0, no warning), so
+a suite run by `B`'s binary measures the previous build; and a full
+disk wears other defects' symptoms — a name-resolution census taken at
+100% disk did not survive re-measurement and was retracted.
+
+Structural finding, filed as T0983: the parser accepts a theorem body
+with NO closing brace, silently. Four of 68 files in the proofs corpus
+are unbalanced; `blast_tactic.vr` is missing 24. Bodies close on the
+next keyword, so nothing shows until a file is cut. A spec whose
+structure depends on error recovery is a spec whose content is decided
+by a heuristic rather than by its author.
+
 **R7. Product surface.** Format-spec pipeline T0700; effect
 polymorphism T0696; QTT channels T0697; region polymorphism T0698;
 contract-carrying archives T0699 — the innovation tier, after R1-R6
@@ -384,6 +485,7 @@ while closing T0272/T0555/T0165/T0463/T0523/T0424/T0438/T0485).**
 | A48 | **The type-check phase self-deadlocks on a relative glob mount.** `verum check core/intrinsics/mod.vr` never returns; sampled after 17 minutes the stack ends in `RawRwLock::lock_exclusive_slow -> wait_for_readers` under `process_import`, and only one thread is doing work — so the readers it waits for are its own. `checker.process_import(…, &registry.read())` keeps the guard alive for the whole call (a temporary in argument position lives to the end of the statement) while the lazy loader inside registers what it resolved under a WRITE lock on the same registry; `parking_lot`'s RwLock is not reentrant. IT BECAME REACHABLE WHEN A DIFFERENT BUG WAS FIXED: `set_module_registry` now shares ONE handle for `module_registry` and `session_registry`, deliberately, to stop the two copies drifting as lazy loads landed in one and not the other — turning a harmless lock on two objects into a self-deadlock on one. Three call sites had the shape (`phases_orchestration.rs`, `cross_file.rs`, `audit.rs`); all three now snapshot instead of holding. Found by a full core/ sweep that stopped advancing: a slow suite is a hang until sampled. | P0 | T0926 | CLOSED — pre-fix exit 124 after 90s, post-fix 5.48s; regression test asserts by timeout and names a real file because three synthetic projects were measured and none reproduced; full 2560-file sweep completes |
 | A44 | **`type linear` was parsed, registered, tracked — and never enforced.** `check_linear_consumed` produces the only `LinearNotConsumed` in the tree and had NO caller anywhere in the compiler, so the exactly-once obligation the modifier exists for did not exist. The spec that names it, `cbgr-analysis/linear_types.vr`, was `@test: parse-pass`: ten cases named for linear semantics, verifying only that the text parses — which it would have done with every rule in the file broken. Third instance of declared-not-enforced found in one day, beside capability attenuation (T0918) and the unproduced module fields (A43). Now asked at the end of each function body; parameters are exempt, because a parameter arrives by being moved in and its scope end is its destruction site — otherwise `fn close(h: Handle) { }`, the canonical consumer, would be the one thing a linear type could not have. | P1 | T0920 | CLOSED — obligation enforced at every `return` as well as at the end of the body, parameters (including `self`) exempt, spec upgraded from `parse-pass` to `typecheck-pass`, both poles pinned |
 | A49 | **A capability-restricted record was not a record, and widening was accepted.** `Store with [Read]` reported `error<E103>: Cannot access field 'n' on non-record type`, so attenuation was unusable on the shape it exists for — while WIDENING, the thing the feature exists to refuse, compiled silently. There was therefore no program that told a working check from a broken one. TWO CORRECTIONS TO MY OWN EARLIER DIAGNOSIS, both from one instrument at the binding: the binding does NOT erase the capability (`CapabilityRestricted { base: Named{Store}, capabilities: {ReadOnly} }`), and `Display` does not strip it — the misleading `expected 'Int', found 'Store'` comes from INSIDE the unifier's deliberate peel, so the message names the base because the comparison at that depth is the base. And the soundness trade-off the fix was held for did not exist: E103 appeared only on FIELD ACCESS, while a widening CALL already compiled. Field access now peels the wrapper where the refinement arm already peeled its own, one arm away; `check_capability_attenuation` refuses widening with E411 naming both sets. An UNRESTRICTED value satisfies any restriction — my own probe had that labelled backwards, and refusing it would make every capability parameter unreachable from ordinary code. | P2 | T0918 | CLOSED for the language — 7 unit tests, both .vr specs un-skipped; registry views remain |
+| A50 | **The type checker gave one file two verdicts, and the deciding table was asked the wrong question.** (2026-08-31, T0927) `verum check core/logic/kripke.vr` reported **0 errors on some runs and 20 on others** from ONE binary on an unedited file — 7 of 15 runs on the pre-fix binary. Threads were ruled out first (`verum_types` has no `par_iter`, no `rayon::`, no `thread::spawn`, and `RAYON_NUM_THREADS=1` did not reduce the spread). The instruments that localised it were **already in the tree** from an earlier session on the same task (`VERUM_TRACE_TRY`, `VERUM_TRACE_TRYGATE`); they showed the `?`-operator trace and the 20-error set to be **byte-identical** between a green and a red run, with exactly one line differing — `implements_protocol(Try)` answering `true` or `false`. A further instrument in `implements()` then showed `impls_total`, `vtn_total`, `indexed` and `scan_same_key` **all identical**, refuting both the obvious hypotheses (index content; table not yet populated), and named the divergence: **one impl, `for=generic:Result[var,var]`, matched in the green run and did not in the red**. Root: `unify_types`' `Variant` arm resolved a variant to a named type through `variant_type_names`, whose RELAXED signature is built **from the variant NAMES ALONE** and stored **first-wins**. Measured over `core/` with a multi-line census (a single-line one misses `ScriptResult`, declared with a leading `|` across three lines): **1564 distinct relaxed signatures, 58 claimed by two or more types**, and `Variant(Err|Ok)` claimed by **seven** — `Result` alongside `ScriptResult`, `HashGateResult`, `PrecomputeResult`, `SrsLoadResult`, `SrsSetupResult`. Whichever registered first owned the key; when `ScriptResult` won, a perfectly good `Result` was rejected, `?` fell through to the structural fallback, and that fallback's malformed `Ok(Unit) | Err(!)` (T0928) produced 20 errors. **T0928 is therefore the SHADOW, not the cause** — it is observable only when the protocol lookup missed, so fixing it first would have turned the file green and left the P0 deciding verdicts elsewhere. **The fix changes the QUESTION, not the choice.** The code asked "who owns this signature?" and compared the single winner for equality, although the caller — matching a variant against a NAMED pattern — already holds the name it wants. It now records every claimant and asks whether the expected name is **among** them: an answer that does not depend on who registered first, identical to the old one for the 1506 single-claimant signatures. Making `first_wins` merely deterministic would have produced a stable WRONG answer on the 58 contested keys. Measured: kripke 50/50 runs at 0 errors after (probability 0.4% under the pre-fix rate); `r1`/`r2`/`logic/mod`/`async/executor` (9=9)/`async/stream` (33=33)/`base/result`/`script/engine` unmoved. **Gate**: `scripts/ci/check_typecheck_determinism.sh` re-checks a content-chosen sample 15 times and fails on any file with two verdicts; it carries a `--selftest` that feeds the same comparison a subject known to vary, because a green sweep and a broken detector look identical from outside — the first sweep written for this task reported "151 of 151 stable" while its positive control was not in the sample. Controls: the gate FAILS on the pre-fix binary and passes on the fixed one. **Residual, measured but not fixed**: the same instrument showed one impl standing at **different indices** in two runs (`impl#115` vs `impl#136`) with the total unchanged at 673 — `self.impls` registration order is itself non-deterministic, so any decision of the form "first match wins" or "specificity ties" is a coin flip. Filed by the peer session as T1019; no victim identified yet (both obvious candidates were checked and ruled out). | ~~P0~~ done | T0927; `crates/verum_types/src/protocol.rs`; `scripts/ci/check_typecheck_determinism.sh` | ✅ 50/50 stable; gate proven to catch the pre-fix binary |
 | A45 | **Generic arity is checked in one direction only.** `provided > expected` is refused; `Pair<Int>` for a two-parameter `Pair` is accepted, leaving a parameter free for inference to unify with whatever arrives first — the program does not fail, it means something else. THE FIRST ESTIMATE OF THE BLAST RADIUS WAS WRONG AND IS RECORDED HERE BECAUSE THE MISTAKE IS THE LESSON: a grep for `Result<[A-Za-z_][A-Za-z0-9_.]*>` reported 194 single-argument uses across 31 core/ files and led to the conclusion that the missing half was blocked on default type parameters. The filter matched `IoResult<Int>` — 118 of them — and every other alias ending in `Result`, each of which genuinely takes one parameter. With a word boundary the count is ZERO. A proper census (declared arity of all 690 generic types in core/, against every application) finds 24 under-applied occurrences in 7 files. Default type parameters landed and are a real feature; they were not the precondition. The refusal now carries `E407`; it was plain `error:`, invisible to any gate keyed on `error<E…>`. | P1 | T0922 | `provided != expected` lands, with the blast radius MEASURED by a full core/ sweep rather than estimated by a grep; the skipped spec and two ignored tests turn on |
 | A46 | **The interior of a type declaration is not checked.** One annotation, three positions, two verdicts: `let p: Pair<Int, Text, Bool>` and `fn take(p: Pair<Int, Text, Bool>)` are both refused, `type Bad is { p: Pair<Int, Text, Bool> };` is accepted. Signatures and statements are checked; a record field is reached through neither, so whatever the checker knows about a written type — arity, kinds, meta-parameter refinements, alias saturation — it does not apply where a type says what its data IS. Found while probing A45; the arity case is the visible edge and the same hole should be probed for every other check that runs on annotations. | P1 | T0924 | the discriminating triple gives one verdict in all three positions |
 | A47 | **86 of 1619 `pub fn`s in `verum_types` are called only from tests** (5.3%), measured with the same filter on both sides of the comparison — a naive single-crate reading says 111 and counts everything `verum_compiler` calls as dead. Not all are debt: constructors and accessors legitimately have no internal caller. But the list is where declared-not-enforced rules hide, and two probes into it produced A44 and A45 within the hour. The census plus deliberate falsification is the reusable pairing; the remaining names in `context_check.rs` (10), `kind_inference.rs` (9) and `protocol.rs` (8) are unprobed. | P2 | — | each name classified: used-externally / genuinely-unasked / removable |

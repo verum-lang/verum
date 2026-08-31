@@ -877,17 +877,57 @@ fn parse_invariant(expr: &Expr) -> Result<BoundaryInvariant, ArchParseError> {
 }
 
 fn parse_tier(expr: &Expr) -> Result<Tier, ArchParseError> {
- // Accept either bare identifier (Tier::Aot) or
- // `Tier::MultiTier([...])` call.
-    if let ExprKind::Call { func, args, .. } = &expr.kind {
-        let path = parse_path_string(func, "tier")?;
+    // Accept the bare identifier (`Tier.Aot`) or the payload form
+    // `Tier.MultiTier([...])` — in BOTH the shapes the surface can
+    // produce for the latter.
+    //
+    // `X.Y(args)` parses as `ExprKind::MethodCall`, not `Call`, and this
+    // function knew only `Call`. So the four `core/security/zk/**` files
+    // that write
+    //
+    //     at_tier: Tier.MultiTier([Tier.Aot, Tier.Interp])
+    //
+    // fell through to the identifier branch, where `parse_path_string`
+    // refused a call outright: "InvalidValue { field: at_tier, expected:
+    // identifier path or string literal }". The library was writing a
+    // form its own attribute parser could not read.
+    //
+    // The MethodCall shape is not a discovery — `parse_capability` in
+    // this same file handles it, with a comment calling it "the surface
+    // used by `@arch_module(...)` declarations". One rule, several
+    // implementations, and this one was missing the arm.
+    //
+    // It surfaced through the exit code, never through the text: the
+    // diagnostic carries NO error code, so a sweep filtering on
+    // `error<` counted these four files as clean while
+    // `check_core_compiles.sh`, which reads the process status, called
+    // them newly broken.
+    let call_parts: Option<(String, Vec<&Expr>)> = match &expr.kind {
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            let recv = parse_path_string(receiver, "tier")?;
+            Some((
+                format!("{}.{}", recv, method.name.as_str()),
+                args.iter().collect(),
+            ))
+        }
+        ExprKind::Call { func, args, .. } => {
+            Some((parse_path_string(func, "tier")?, args.iter().collect()))
+        }
+        _ => None,
+    };
+    if let Some((path, args)) = call_parts {
         let last = path.split('.').next_back().unwrap_or(&path);
         if last == "MultiTier" {
-            let inner = args.iter().next().ok_or(ArchParseError::InvalidValue {
+            let inner = args.first().copied().ok_or(ArchParseError::InvalidValue {
                 field: "at_tier".to_string(),
                 expected: "Tier::MultiTier(allowed_list)",
             })?;
- // The arg should itself be an array literal.
+            // The arg should itself be an array literal.
             let allowed = parse_tier_list(inner)?;
             return Ok(Tier::MultiTier { allowed });
         }

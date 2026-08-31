@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: modules, mount, name-resolution, stdlib
+//
+// Pin (T1006, T1005) — which stdlib modules exist is a question for an
+// AUTHORITY, not for a list kept in the compiler; and the spelling of a
+// path must not change the answer.
+//
+// Two symptoms, one cause. Before this fix:
+//
+//     mount id.snowflake.{SnowflakeError};
+//     error<E402>: module `id` not found
+//
+//     mount core.id.snowflake.{SnowflakeError};      // resolved
+//
+// `core/id/snowflake.vr` declares `module core.id.snowflake;` and the
+// type on line 80. The short form is what `core/` itself and the docs
+// use everywhere; the long form is what happened to work.
+//
+// WHY. `verum_types/src/infer/mod.rs` held `STDLIB_TOPS` — forty-nine
+// `core/` directory names, hardcoded in the compiler, against fifty-two
+// that exist. Six were missing: `hash`, `id`, `mac`, `random`, `script`,
+// `subtle`. A path whose first segment was not on the list was never
+// rewritten to `core.<path>`; it went to RELATIVE resolution instead,
+// which is meaningless for a stdlib path, and the E402 then reported
+// whatever came out of that.
+//
+// The comment above the list knew the rule it broke — `verum_types`
+// forbids hardcoded stdlib knowledge — and called the violation "a
+// clarity choice", justified by "every name on this list IS the name of
+// a `core/` subdirectory". True, and useless: the claim holds in the
+// direction that does not matter. The converse is what the code needs,
+// and nothing re-checked it as `core/` grew.
+//
+// MEASURED before removing the list, so that removing it was a result
+// and not a conviction: for each of the 49 names, is the list the ONLY
+// authority that knows it — `in_list && !registry && !metadata`? That
+// came back false for 48 of them. The 49th, `cog`, produced no reading
+// at all, because `cog` is a keyword that resets a path to the cog root
+// (T1008) and can never be reached as a path prefix. Redundant on 48,
+// unreachable on one.
+//
+// After removal, each of the 49 was mounted with a deliberately absent
+// item: all 49 answer E401 (module found, name absent), none E402. The
+// list lost nothing.
+//
+// The second symptom was that one module had two surfaces — 61 names
+// through one route and 24 through another — and the presence of a
+// `core.` prefix decided which was consulted. Normalising the bare form
+// first makes both spellings take the same route: measured across all 49
+// modules, bare and `core.`-prefixed now agree 49 of 49 (T1005).
+
+// A directory the hardcoded list omitted. E402 before this fix.
+mount id.snowflake.{SnowflakeError};
+
+// A second one, from a different subtree and a different declaration
+// form, because one repaired name is not the rule holding.
+mount subtle.constant_time.{constant_time_eq};
+
+// Both spellings of ONE name. If the two ever diverge again, this file
+// goes red on the half that broke — which is the property the fix is
+// about, not the resolution of any single mount.
+mount collections.{List};
+mount core.collections.{Map};
+
+// The control: a module that WAS on the list resolved before this fix
+// and must keep resolving. If this goes red, the authority the fix now
+// asks knows less than the list did, and the two mounts above prove
+// nothing.
+mount math.elementary.{sin};
+
+fn main() {
+    print("ok");
+}

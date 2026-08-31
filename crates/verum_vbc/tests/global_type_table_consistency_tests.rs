@@ -392,6 +392,127 @@ fn global_type_table_clean_for_fresh_codegen() {
 // class wholesale; pinned at zero so it can never silently return.
 const RESULT_ORPHAN_BASELINE: usize = 0;
 
+/// TYPE-ORIGIN-MODULE (T1002) — a type's DECLARATION FORM must not decide
+/// whether the compiler records who declared it.
+///
+/// `core/security/tuf/types.vr` is the fixture because it holds seventeen
+/// public declarations in three forms — three sums, thirteen records, and
+/// exactly ONE parenthesised newtype, `public type KeyId is (Text);`,
+/// which was the only one on the unstamped path. Its records and sums were
+/// stamped all along, so a file-wide check reads as green while one syntax
+/// silently loses attribution. A fixture where every declaration shares one
+/// form could not have caught this.
+///
+/// What the loss costs: with `origin_module: None` the archive writer falls
+/// back to the type's ENTRY path, so `KeyId` was attributed to the parent
+/// that re-exports it. `mount security.tuf.types.{KeyId}` — the path this
+/// very file declares — answered E401, while `mount security.tuf.{KeyId}`
+/// resolved. Measured over 90 single-line newtypes across `core/`: 18 could
+/// not be mounted by the path their own source states.
+///
+/// The reason one spelling was different is not visible from the source:
+/// `is (Text)` parses as a ONE-ELEMENT TUPLE and lowers through
+/// `TypeDeclBody::Tuple`, not `TypeDeclBody::Newtype`. Four arms —
+/// `Unit`, `Newtype`, single-element `Tuple`, `Quotient` — reached
+/// `..Default::default()`, where `origin_module` is `None`.
+///
+/// The expected set is read from the SOURCE, not from codegen bookkeeping.
+/// `mark_user_defined_types` — the obvious filter — is called only from
+/// `verum_compiler`, never from `compile_module_with_mounts`, so a gate
+/// keyed on it would report an empty list forever and pass under the very
+/// defect it names. The two counters below are the control against that:
+/// the file must declare types, and its declarations must be FOUND in the
+/// type table, before "none of them is missing" means anything.
+///
+/// The assertion is on the module NAME, not merely on presence. A wrong
+/// origin would repair the mount that failed and silently break the ones
+/// that worked — the 18 red probes are the visible half, the 72 green ones
+/// are the half that a presence-only check could not defend.
+#[test]
+fn declared_types_carry_their_declaring_module() {
+    const FIXTURE: &str = "security/tuf/types.vr";
+    const DECLARING_MODULE_SUFFIX: &str = "security.tuf.types";
+
+    let core = core_root();
+    let path = format!("{}/{}", core, FIXTURE);
+    if !std::path::Path::new(&path).exists() {
+        eprintln!("[declared_types_carry_their_declaring_module] {} absent — skipping", path);
+        return;
+    }
+    let source = std::fs::read_to_string(&path).expect("read fixture");
+    let mut parser = Parser::new(&source);
+    let module = parser.parse_module().expect("parse fixture");
+
+    let declared: Vec<String> = module
+        .items
+        .iter()
+        .filter_map(|item| match &item.kind {
+            verum_ast::ItemKind::Type(td) => Some(td.name.name.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !declared.is_empty(),
+        "control failed: `{}` declares no types, so this test asserts nothing",
+        FIXTURE,
+    );
+
+    let codegen = compile_stdlib_subgraph(FIXTURE);
+    // Grouped, not a plain map: one name can own SEVERAL descriptors (a
+    // re-export from another module contributes a second under the same
+    // name), and `collect()` into a HashMap keeps whichever came last —
+    // which could hide a correctly stamped descriptor behind a foreign
+    // one and fail on a defect that isn't there.
+    let mut by_name: std::collections::HashMap<String, Vec<Option<String>>> =
+        std::collections::HashMap::new();
+    for (name, origin) in codegen.type_origin_modules() {
+        by_name.entry(name).or_default().push(origin);
+    }
+
+    let mut found = 0usize;
+    let mut wrong: Vec<String> = Vec::new();
+    for name in &declared {
+        let Some(origins) = by_name.get(name) else {
+            continue;
+        };
+        found += 1;
+        if origins
+            .iter()
+            .any(|o| o.as_deref().is_some_and(|m| m.ends_with(DECLARING_MODULE_SUFFIX)))
+        {
+            continue;
+        }
+        let seen: Vec<String> = origins
+            .iter()
+            .map(|o| o.clone().unwrap_or_else(|| "<none>".to_string()))
+            .collect();
+        wrong.push(format!("{} -> {}", name, seen.join(", ")));
+    }
+    assert!(
+        found > 0,
+        "control failed: none of the {} types declared by `{}` appear in the type table, \
+         so the check below compares an empty set",
+        declared.len(),
+        FIXTURE,
+    );
+    assert!(
+        wrong.is_empty(),
+        "types declared by `{}` are attributed elsewhere (expected a module ending in \
+         `{}`):\n  {}\n\n\
+         A `<none>` here cannot be mounted by the path its own file states — the archive \
+         falls back to the ENTRY path, so `mount a.b.c.{{X}}` answers E401 while \
+         `mount a.b.{{X}}` resolves. A WRONG module is worse: it moves types that \
+         resolved before.\n\
+         Look for a `TypeDescriptor` literal built with `..Default::default()` and no \
+         `origin_module: self.current_origin_module_sid()`. The declaration arms in \
+         `codegen/mod.rs` are Alias / Record / Sum / Unit / Newtype / Tuple / Quotient, \
+         and `type X is (T);` lowers through TUPLE, not Newtype (T1002).",
+        FIXTURE,
+        DECLARING_MODULE_SUFFIX,
+        wrong.join("\n  "),
+    );
+}
+
 #[test]
 fn orphan_make_variants_baseline_for_result() {
     let codegen = compile_stdlib_subgraph("base/result.vr");

@@ -1,0 +1,41 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @expected-error: E402
+// @tags: modules, mount, name-resolution, diagnostics
+//
+// Pin (T1011) — mounting a module nobody knows must be refused, whether
+// the path has one segment or several.
+//
+// Before this fix:
+//
+//     mount nosuch.module.at.all;    error<E402>: module not found
+//     mount zzz;                     compiled. exit code zero.
+//
+// The diagnostic existed and simply did not cover the one-segment case.
+// The mount arm read
+//
+//     if <module found in registry>            { import everything }
+//     else if <the path contains a dot>        { treat as module.item }
+//
+// and there was no third branch, so a single-segment path that resolved
+// to nothing fell out of the chain and was ACCEPTED. Nothing was bound.
+// A typo in a one-segment mount produced a green compile, and the
+// failure surfaced later at the use site — or never, because every
+// public stdlib name is visible without a mount anyway.
+//
+// Two entries in the compiler's since-deleted list of `core/` directory
+// names were reachable only through this hole: `async_`, which has no
+// directory at all, and `target`, which is the gitignored Cargo build
+// directory. Both were "accepted" mounts of modules that do not exist.
+//
+// Refusing here cannot shadow a legitimate module: by the time control
+// reaches this branch, the inline modules, the registry and the archive
+// metadata have all been asked and all said no. A project module of its
+// own name is answered by the registry branch, which runs first.
+
+mount zzz;
+
+fn main() {
+    print("ok");
+}

@@ -1,0 +1,46 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: ats-v, arch_module, attributes
+//
+// Pin (T0755 sweep) — the ATS-V attribute parser reads `at_tier` in the
+// form the standard library actually writes.
+//
+//     at_tier: Tier.MultiTier([Tier.Aot, Tier.Interp])
+//
+//     error: [ATS-V] @arch_module parse error in `…`:
+//       InvalidValue { field: "at_tier",
+//                      expected: "identifier path or string literal" }
+//
+// `parse_tier` DID handle `MultiTier` — through the `Call` expression kind. But
+// `X.Y(args)` parses as a MethodCall, not a Call, so the arm never fired
+// and the value fell through to the identifier branch, which refuses a
+// call outright. Four files under `core/security/zk/**` write this form;
+// all four failed `verum check` while the bake stayed green.
+//
+// The MethodCall shape was no discovery: `parse_capability`, in the same
+// file, handles it and its comment calls it "the surface used by
+// `@arch_module(...)` declarations". Nine sites in that file know about
+// MethodCall. One rule, several implementations, one missing the arm.
+//
+// HOW IT HID. The diagnostic carries NO error code. A sweep filtering on
+// `error<` counted these files as clean; `check_core_compiles.sh`, which
+// reads the process exit status, called them broken. Two instruments,
+// two answers, and the coded-error filter was the one that lied.
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Definition,
+    at_tier: Tier.MultiTier([Tier.Aot, Tier.Interp])
+)
+module spec.architecture.multi_tier;
+
+public fn answer() -> Int {
+    42
+}
+
+fn main() {
+    let _ = answer();
+    print("ok");
+}

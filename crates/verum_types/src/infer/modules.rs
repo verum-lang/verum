@@ -40,7 +40,7 @@ use super::{
     DEREF_COERCION_DEPTH, GLOBAL_CALL_DEPTH, NORMALIZE_DEPTH,
     TYPE_RESOLUTION_STACK, NORMALIZE_TYPE_STACK, AST_TO_TYPE_DEPTH,
     span_to_line_col, levenshtein_distance,
-    collect_inline_mount_reexports_recursive, is_stdlib_toplevel_path,
+    collect_inline_mount_reexports_recursive,
     mount_tree_exports_name, extract_quantity_from_attrs, walk_stmt_for_qtt_usage,
     resolve_primitive_method, meta_value_to_literal,
 };
@@ -1607,7 +1607,66 @@ impl TypeChecker {
     /// and registers them in the type environment so they can be used during type checking.
     ///
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Cross-module resolution
+    /// T1008 — a mount whose path OPENED with a keyword segment reports a
+    /// name shorter than the one written, because the keyword rewrites the
+    /// path before resolution: `mount cog.resolve.{X}` answers ``module
+    /// `resolve` not found``. The parse is right — a keyword must beat a
+    /// directory name — but the message reported the consequence and hid
+    /// the cause, and the cause is exactly what the author cannot derive
+    /// from their own text.
+    ///
+    /// The enrichment lives HERE, wrapping the whole resolution, rather
+    /// than at the site that builds the error: by then the path has been
+    /// normalised and the keyword segment is gone. It also has to cover
+    /// every mount FORM — the first attempt put the hint in the
+    /// single-segment branch of the `Path` arm and measured inert on the
+    /// reported case, which is `Nested` and resolves through a different
+    /// path entirely.
     pub fn process_import(
+        &mut self,
+        import: &verum_ast::MountDecl,
+        current_module_path: &str,
+        registry: &verum_modules::ModuleRegistry,
+    ) -> Result<()> {
+        let outcome = self.process_import_inner(import, current_module_path, registry);
+        let Err(TypeError::ImportModuleNotFound {
+            module_path,
+            mut similar_modules,
+            span,
+        }) = outcome
+        else {
+            return outcome;
+        };
+        let leading = match &import.tree.kind {
+            verum_ast::MountTreeKind::Path(p) => p.segments.first(),
+            verum_ast::MountTreeKind::Glob(p) => p.segments.first(),
+            verum_ast::MountTreeKind::Nested { prefix, .. } => prefix.segments.first(),
+            verum_ast::MountTreeKind::File { .. } => None,
+        };
+        if let Some(kw) = leading.and_then(|seg| match seg {
+            verum_ast::ty::PathSegment::Cog => Some("cog"),
+            verum_ast::ty::PathSegment::Super => Some("super"),
+            verum_ast::ty::PathSegment::SelfValue => Some("self"),
+            _ => None,
+        }) {
+            similar_modules.push(Text::from(format!(
+                "the path opened with `{}`, which is a path keyword and not a module name; it rewrites the path before resolution, so the name reported above is shorter than the one written",
+                kw
+            )));
+            if kw == "cog" {
+                similar_modules.push(Text::from(
+                    "`core/cog/` is a stdlib directory that shares the keyword's spelling; reach it as `core.cog....`",
+                ));
+            }
+        }
+        Err(TypeError::ImportModuleNotFound {
+            module_path,
+            similar_modules,
+            span,
+        })
+    }
+
+    fn process_import_inner(
         &mut self,
         import: &verum_ast::MountDecl,
         current_module_path: &str,
@@ -1695,6 +1754,40 @@ impl TypeChecker {
                 Ok(verum_common::Text::from(resolved.to_string()))
             };
 
+        // T1006: the AUTHORITY on which stdlib modules exist, for the
+        // shorthand-normalisation below.  Measured, not assumed: the module
+        // REGISTRY does not hold every stdlib module — `core.id` and
+        // `core.script.engine` are absent from it under every spelling
+        // (bare, `core.`-prefixed, and through the alias map), while
+        // `core.mac.hmac` is present. So a normaliser that asks the
+        // registry is inert on exactly the paths that need it, which is
+        // what an earlier attempt measured. The archive metadata is what
+        // knows them, and it is cheap to ask: `functions` and `types` are
+        // BTreeMap-backed, so a prefix RANGE settles the question in
+        // O(log n) rather than a scan.
+        let meta_for_norm = self.core_metadata.clone();
+        let metadata_knows_module = |candidate: &str| -> bool {
+            let Maybe::Some(md) = &meta_for_norm else {
+                return false;
+            };
+            let probe = |m: &str| -> bool {
+                if m.is_empty() {
+                    return false;
+                }
+                let lo = Text::from(format!("{}.", m).as_str());
+                let hi = Text::from(format!("{}/", m).as_str());
+                md.functions.range(lo.clone()..hi.clone()).next().is_some()
+                    || md.types.range(lo..hi).next().is_some()
+            };
+            // Some stdlib files declare `module sys.mmio;` without the cog
+            // segment, so their descriptors are keyed without `core.` —
+            // the same retry `metadata_own_surface_inner` makes.
+            probe(candidate)
+                || candidate
+                    .strip_prefix("core.")
+                    .is_some_and(|stripped| probe(stripped))
+        };
+
         // Unified module path normalization.
         // `core.*` and `std.*` are equivalent stdlib prefixes: `core.X.Y` → `std.X.Y`
         // All stdlib imports MUST use `core.` or `std.` prefix.
@@ -1736,34 +1829,98 @@ impl TypeChecker {
                 // Check if this is a known stdlib top-level module path
                 // These correspond to core/ subdirectories and are registered
                 // in the module registry with a "core." prefix
-                // Stdlib top-level prefixes — every immediate subdirectory
-                // of `core/` is a candidate target for `mount X.…` as
-                // shorthand for `mount core.X.…`.  Centralised through
-                // `is_stdlib_toplevel_path` so that all three sites that
-                // need this check stay in lockstep.
-                let is_stdlib_toplevel = is_stdlib_toplevel_path(path_str);
-                if is_stdlib_toplevel {
-                    Text::from(format!("core.{}", path_str))
-                } else {
-                    // Check if this path directly exists as a module in the registry
-                    // before trying relative resolution. This handles project modules
-                    // like "bootstrap.token" that should be used as-is.
-                    if registry.get_by_path(path_str).is_some() {
+                let core_form = format!("core.{}", path_str);
+                let meta_knows_core_form = metadata_knows_module(&core_form);
+                // T1006 instrument: which authority knows this path, and under
+                // which spelling? Reading the code answered this wrongly twice,
+                // and the repair built on the second answer measured inert.
+                if std::env::var("VERUM_TRACE_MODNORM").is_ok() {
+                    let reg_canon = match registry.get_by_path(path_str) {
+                        verum_common::Maybe::Some(m) => m.path.to_string(),
+                        verum_common::Maybe::None => "-".to_string(),
+                    };
+                    eprintln!(
+                        "[modnorm] path={} reg_bare={} reg_core={} meta_core={} reg_canon={}",
+                        path_str,
+                        registry.get_by_path(path_str).is_some(),
+                        registry.get_by_path(&core_form).is_some(),
+                        meta_knows_core_form,
+                        reg_canon,
+                    );
+                }
+                // ORDER MATTERS, and it was established by measurement, not
+                // by preference — the other order regressed two specs.
+                //
+                // NOT FIXED HERE, and worth stating: a stdlib name still wins
+                // over a project module that shares it, because the metadata
+                // is asked first. That was true of the hardcoded list too —
+                // all 49 of its names shadowed any project module — so this
+                // change neither introduces nor removes the shadowing. Making
+                // the project module win is a separate change with its own
+                // controls; bundling it here is what caused the regression
+                // above.
+                //
+                // The ARCHIVE METADATA decides first, and answers with the
+                // `core.`-prefixed form — the spelling every consumer
+                // downstream keys on. It is what the list was standing in
+                // for, and strictly better: the list was short by six
+                // directories (`hash`, `id`, `mac`, `random`, `script`,
+                // `subtle`), so `mount id.snowflake.{X}` answered E402
+                // "module not found" — the path was never rewritten, and
+                // relative resolution, meaningless for a stdlib path,
+                // produced the name the error then reported.
+                //
+                // The registry comes SECOND, for paths the archive does not
+                // know — project modules. Answering from it FIRST was tried
+                // and REGRESSED two specs: `mount sys.mmio;` still resolved,
+                // but bound nothing (`E100: unbound variable: barrier`),
+                // because the registry's canonical path is not always the
+                // `core.`-prefixed form the binder expects. The lookup
+                // succeeded and the binding missed — the two paths have to
+                // be the same string, and the metadata's is the one that is.
+                //
+                // The list is GONE, and that is measured rather than assumed:
+                // with the instrument above extended to print
+                // `in_list && !reg_bare && !meta_core`, all 49 of its names
+                // came back false — every one already known to the registry or
+                // the metadata. The 49th, `cog`, produced no trace line at all,
+                // because `cog` is a KEYWORD that resets the path to the cog
+                // root (T1008): it could never have been reached as a path
+                // prefix. So the list was redundant on 48 names and unreachable
+                // on one.
+                if meta_knows_core_form {
+                    Text::from(core_form)
+                } else if let verum_common::Maybe::Some(found) =
+                    registry.get_by_path(path_str)
+                {
+                    // A registry HIT does not mean the spelling we were handed is
+                    // the key that matched: `get_by_path` probes three of them —
+                    // as given, `core.`-stripped, `core.`-prefixed — so answering
+                    // with `path_str` throws away a prefix the probe supplied and
+                    // every consumer downstream, keyed on `core.…`, then misses.
+                    // Answer with the module's OWN canonical path.
+                    //
+                    // An empty path renders as the literal `<root>` (ModulePath's
+                    // Display), which is a marker of absence, not a module name —
+                    // never propagate it into a mount path.
+                    if found.path.segments().is_empty() {
                         Text::from(path_str)
                     } else {
-                        // Non-stdlib path - resolve relative to current module
-                        let resolved =
-                            resolve_path(path_str).unwrap_or_else(|_| Text::from(path_str));
-                        // Re-check if the resolved path is a known stdlib toplevel
-                        // This handles super/self paths that resolve to stdlib modules
-                        // e.g., super.epoch from mem.segment -> mem.epoch -> core.mem.epoch
-                        let resolved_str = resolved.as_str();
-                        let resolved_is_stdlib = is_stdlib_toplevel_path(resolved_str);
-                        if resolved_is_stdlib {
-                            Text::from(format!("core.{}", resolved_str))
-                        } else {
-                            resolved
-                        }
+                        Text::from(found.path.to_string())
+                    }
+                } else {
+                    // Non-stdlib path - resolve relative to current module
+                    let resolved =
+                        resolve_path(path_str).unwrap_or_else(|_| Text::from(path_str));
+                    // Re-check if the resolved path is a known stdlib toplevel
+                    // This handles super/self paths that resolve to stdlib modules
+                    // e.g., super.epoch from mem.segment -> mem.epoch -> core.mem.epoch
+                    let resolved_str = resolved.as_str();
+                    let resolved_core = format!("core.{}", resolved_str);
+                    if metadata_knows_module(&resolved_core) {
+                        Text::from(resolved_core)
+                    } else {
+                        resolved
                     }
                 }
             }
@@ -1928,6 +2085,31 @@ impl TypeChecker {
                             import.tree.span,
                         )?;
                     }
+                } else {
+                    // T1011: the arm that was missing. A path with no dot
+                    // that resolves to no module used to fall out of this
+                    // chain and be ACCEPTED — `mount zzz;` compiled, exit
+                    // code zero, nothing bound. The multi-segment form has
+                    // always reported E402, so the diagnostic existed and
+                    // simply did not cover the single-segment case.
+                    //
+                    // Reaching here means every authority has already said
+                    // no: not an inline module (checked at the top of this
+                    // arm), not in the registry, and the normaliser found
+                    // nothing in the archive metadata either. A project
+                    // module of its own is exactly what `found_module`
+                    // answers for, so refusing here cannot shadow one.
+                    //
+                    // The keyword hint is NOT built here: `process_import`
+                    // wraps this whole resolution and adds it for every mount
+                    // FORM. Putting it in this branch alone was tried and
+                    // measured inert on the reported case, which is a braced
+                    // mount and never reaches here.
+                    return Err(TypeError::ImportModuleNotFound {
+                        module_path: full_normalized.clone(),
+                        similar_modules: List::new(),
+                        span: import.tree.span,
+                    });
                 }
             }
 

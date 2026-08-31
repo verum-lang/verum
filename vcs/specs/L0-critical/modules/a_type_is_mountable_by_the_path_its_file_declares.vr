@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: modules, mount, name-resolution, stdlib, newtype
+//
+// Pin (T1002) — a module's surface must list the types that module
+// declares, whatever syntax declared them.
+//
+// `core/security/tuf/types.vr` declares seventeen public types. Before
+// this fix the compiler answered:
+//
+//     mount security.tuf.types.{KeyId};
+//     error<E401>: cannot find `KeyId` in module `core.security.tuf.types`
+//       note: module `core.security.tuf.types` exports 24 item(s);
+//             showing 10: DelegatedRole, Delegations, MetafileSpec,
+//             RoleDef, RoleName, RootMetadata, RootRoles, Signature, …
+//
+// The note contradicts the source. `KeyId` is declared on line 146 of the
+// very file whose surface is being listed, and its siblings on lines 130,
+// 155, 166, 176 are all present. One file, one `public type` each, and one
+// of them is not in its own module.
+//
+// The cause is not in the module system. The archive writer attributes a
+// type to the module its DESCRIPTOR names, and falls back to the archive
+// ENTRY path when the descriptor names nobody:
+//
+//     ty.origin_module … .unwrap_or_else(|| module_path.clone())
+//
+// Four of codegen's type-declaration arms — `Unit`, `Newtype`,
+// single-element `Tuple`, `Quotient` — built their descriptor through the
+// struct-update default, where `origin_module` is `None`. `Record`,
+// `Sum` and `Alias` stamped it. So the DECLARATION FORM decided whether
+// the compiler recorded who declared the type: a nested file's surface
+// kept its records and sums and lost its newtypes and unit types. In
+// `core/compress/mod_gzip.vr` that meant three of its names — `Gzip`,
+// `Deflate`, `Zlib`, all `is ()` — leaving a surface of one.
+//
+// The form that hurt most is the least suspicious one: `type KeyId is
+// (Text);` — the ordinary parenthesised newtype — parses as a ONE-ELEMENT
+// TUPLE and lowers through the `Tuple` arm, not the `Newtype` arm. That
+// is why the first repair, which stamped `Unit`, moved three named cases
+// and none of the ninety measured ones.
+//
+// Radius, measured on one binary over 90 single-line newtypes in `core/`:
+// 18 could not be mounted by the path their own source states; 72 could.
+// The fallback usually lands right — when a file IS its module's entry,
+// the entry path and the declaring path are the same string. Only a
+// nested file that a parent re-exports diverges. The 72 are the control:
+// a WRONG declaring module would repair the 18 and break them.
+//
+// The carry this depends on is v2.12 / T0555, which taught the archive to
+// prefer the declaring FILE over the directory entry. It built the
+// channel; nothing checked that every declaration arm fills it.
+//
+// Why it stayed invisible: the same mount written `core.security.tuf.
+// types.{KeyId}` resolved all along — that spelling reaches a different
+// surface (61 items, and `KeyId` is in it) and never consults the one
+// this file is about. That divergence is its own defect, T1005; this
+// spec pins the bare spelling, which is the one `core/` and the docs use.
+
+mount security.tuf.types.{KeyId};
+
+// The `is ()` form, from a different arm and a different subtree. It is
+// here because the first repair stamped ONLY this arm: it moved this
+// case and two siblings (`compress.mod_gzip.{Gzip}`,
+// `tracing.sampler.{AlwaysOn}`) while moving none of the ninety
+// parenthesised newtypes. One form green is not the rule holding — that
+// is precisely the reading that sent the first fix out half-done.
+mount tracing.id.{DefaultIdGenerator};
+
+// The control, and the reason this file is not merely "a mount works":
+// a sibling declared in the SAME file, in a form that was stamped all
+// along, resolved before this fix and must keep resolving. If it ever
+// goes red, the declaring module now being stamped is the WRONG one, and
+// the mount above proves nothing.
+mount security.tuf.types.{RoleName};
+
+fn main() {
+    print("ok");
+}

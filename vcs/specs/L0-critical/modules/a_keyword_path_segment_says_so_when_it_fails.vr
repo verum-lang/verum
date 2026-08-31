@@ -1,0 +1,43 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @expected-error: E402
+// @tags: modules, mount, diagnostics, keywords
+//
+// Pin (T1008) — when a mount path opens with a KEYWORD segment and then
+// fails, the diagnostic has to say which segment was consumed.
+//
+// The reported case:
+//
+//     mount cog.resolve.{PackageName};
+//     error<E402>: module `resolve` not found
+//
+// The author wrote two segments; the message names one. `cog` is a path
+// keyword meaning "the root of the current cog", and the path-segment
+// match handles it by CLEARING every segment accumulated so far. The
+// path is reset, only `resolve` survives to be looked up, and that is
+// the name the error reports. The parse is CORRECT: a keyword beats a
+// directory name.
+//
+// The message is what was wrong — it reported the consequence and hid
+// the cause, and the cause is precisely the thing the author cannot
+// derive from their own text.
+//
+// It bites in the stdlib because `core/cog/` exists: `core/cog/resolve.vr`
+// declares `module core.cog.resolve;`, so the directory is real and its
+// short form is unreachable by construction. `mount core.cog.resolve.{X}`
+// resolves; the short form never can.
+//
+// The same holds for `super` and `self`, which also rewrite the path
+// before resolution, so the hint is emitted for all three rather than
+// special-cased to the one that was reported.
+//
+// This is the third defect of the day whose shape is "the message
+// contradicts the source it describes" — the first was a module surface
+// listing 24 names while omitting one declared in the file being listed.
+
+mount cog.resolve.{PackageName};
+
+fn main() {
+    print("ok");
+}

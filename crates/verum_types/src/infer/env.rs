@@ -41,7 +41,7 @@ use super::{
     WKT_HEAP, WKT_RESULT, WKT_SHARED,
     DEREF_COERCION_DEPTH, GLOBAL_CALL_DEPTH, NORMALIZE_DEPTH,
     AST_TO_TYPE_DEPTH, TYPE_RESOLUTION_STACK, NORMALIZE_TYPE_STACK,
-    is_stdlib_toplevel_path, span_to_line_col,
+    span_to_line_col,
     ConversionPath, ConversionStep, NormalizeTypeCycleGuard, ThreadLocalDepthGuard,
     resolve_builtin_meta_type, type_kind_description,
     read_param_classification, expr_kind_description,

@@ -298,6 +298,7 @@ theorem field_complex(a: Complex, b: Complex)
 {
     proof by field
 
+}
 /// Gaussian rationals
 theorem field_gaussian(a: GaussianRational, b: GaussianRational)
     requires b.norm() != 0
@@ -305,6 +306,7 @@ theorem field_gaussian(a: GaussianRational, b: GaussianRational)
 {
     proof by field
 
+}
 // ------------------------------------------------------------
 // Field Tactic Configuration
 // ------------------------------------------------------------
@@ -318,6 +320,7 @@ theorem field_with_assumptions(a: Rational, b: Rational, c: Rational)
 {
     proof by field
 
+}
 /// Field with simplification depth
 theorem field_deep_simplify(x: Rational)
     requires x != 0
@@ -326,27 +329,4 @@ theorem field_deep_simplify(x: Rational)
 {
     proof by field
 
-// ------------------------------------------------------------
-// Field Failures
-// ------------------------------------------------------------
-
-/// Field cannot prove without nonzero condition
-// @test: verify-fail
-// @expected-error: cannot prove denominator nonzero
-theorem field_missing_nonzero_fail(a: Rational, b: Rational):
-    a / b == a * (1/b)
-{
-    // Missing requires b != 0
-    proof by field  // FAILS
-}
-
-/// Field cannot prove ordering
-// @test: verify-fail
-// @expected-error: field cannot prove inequalities
-theorem field_ordering_fail(a: Rational)
-    requires a > 0
-    ensures 1/a > 0
-{
-    // Field handles equalities, not inequalities
-    proof by field  // FAILS
 }

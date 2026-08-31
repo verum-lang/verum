@@ -571,6 +571,22 @@ jobs:
       - name: Build verum CLI
         run: cargo build -p verum_cli --release --locked
 
+      # T0927: `verum check` answered core/logic/kripke.vr with 0 errors on
+      # some runs and 20 on others, from one binary on one unedited file, and
+      # nothing noticed — every other gate in this file runs a file ONCE, and
+      # one run cannot see a verdict that varies. Runs here because this is the
+      # job that already has a RELEASE binary; a debug one would make the
+      # repeat-N sweep cost more than the job.
+      #
+      # The self-test runs first and is not decoration: a green sweep and a
+      # broken detector look identical from outside. It feeds the same
+      # comparison a subject known to vary and fails if the gate calls it
+      # stable.
+      - name: Type-checker determinism gate
+        run: |
+          scripts/ci/check_typecheck_determinism.sh --selftest
+          scripts/ci/check_typecheck_determinism.sh --bin ./target/release/verum --runs 15
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:

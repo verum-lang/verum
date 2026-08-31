@@ -1,0 +1,43 @@
+// @test: verify-fail
+// @level: L3
+// @tier: 3
+// @tags: proofs, tactics, field, limits
+// @timeout: 15000
+//
+// The LIMITS of the `field` tactic — theorems it is expected NOT to close.
+//
+// These lived at the bottom of `field_tactic.vr`, each carrying its own
+// `// @test: verify-fail` and `// @expected-error:` lines. The runner reads
+// the directive at the TOP OF THE FILE and nothing else, so those lines
+// were inert: the file said `verify-pass`, the tactic correctly declined,
+// and the correct decline was counted as an unproved obligation — the
+// tactic punished for knowing its own boundary (T0960).
+//
+// Six theorems across three tactic files were in that state. Moving them
+// into files whose OWN directive says `verify-fail` is what turns the
+// authors' stated expectation into something the runner can act on.
+
+// ------------------------------------------------------------
+// Field Failures
+// ------------------------------------------------------------
+
+/// Field cannot prove without nonzero condition
+// @test: verify-fail
+// @expected-error: cannot prove denominator nonzero
+theorem field_missing_nonzero_fail(a: Rational, b: Rational):
+    a / b == a * (1/b)
+{
+    // Missing requires b != 0
+    proof by field  // FAILS
+}
+
+/// Field cannot prove ordering
+// @test: verify-fail
+// @expected-error: field cannot prove inequalities
+theorem field_ordering_fail(a: Rational)
+    requires a > 0
+    ensures 1/a > 0
+{
+    // Field handles equalities, not inequalities
+    proof by field  // FAILS
+}

@@ -137,9 +137,20 @@ public type MockFile is {
 };
 
 // Private helpers — operate on the MockVfs + MockFile pair.
+//
+// `Map.get` answers `Maybe<V>`; this returns `MockBlob`. Both exits were
+// handing the `Maybe` back unopened, and `verum check` says so:
+//
+//     error<E400>: Type mismatch: expected 'MockBlob', found 'Maybe<MockBlob>'
+//
+// The bake accepted it — the file is in the archive — which is the whole
+// point of T0755: baking builds the artifact, it does not compile the
+// library the way a user's compile does, and here it let a real type error
+// through. The `contains_key` guard above and the `insert` below are what
+// make each `unwrap` sound.
 fn blob_get_or_create(vfs: &mut MockVfs, name: &Text) -> MockBlob {
     if vfs.blobs.contains_key(name.clone()) {
-        return vfs.blobs.get(name.clone());
+        return vfs.blobs.get(name.clone()).unwrap();
     }
     let empty = MockBlob {
         name: name.clone(),
@@ -148,7 +159,7 @@ fn blob_get_or_create(vfs: &mut MockVfs, name: &Text) -> MockBlob {
         pending_offset: 0,
     };
     let _ = vfs.blobs.insert(name.clone(), empty);
-    vfs.blobs.get(name.clone())
+    vfs.blobs.get(name.clone()).unwrap()
 }
 
 fn blob_put(vfs: &mut MockVfs, blob: MockBlob) {
