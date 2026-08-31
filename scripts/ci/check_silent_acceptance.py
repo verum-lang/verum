@@ -57,6 +57,31 @@ public fn main() { print(spin(1)); }
 """,
         "always be diagnosed — the loop cannot terminate",
     ),
+    # SECOND POSITIVE CONTROL, also not in the baseline. Loop invariant
+    # preservation is one of the seven capabilities that genuinely work
+    # (debt register section H) and the only one with no gate of its own,
+    # because the showcase chapter that would have carried it was drafted
+    # and deleted — the postcondition half is still open (T0905). A false
+    # invariant must stay refused; if it ever goes quiet, a working
+    # guarantee has been lost with nothing else watching.
+    (
+        "false-loop-invariant",
+        "-",
+        """@verify(thorough)
+pure fn g(n: Int) -> Int requires n >= 0 {
+    let mut i = 0;
+    let mut u = 0;
+    while i < n
+        invariant i >= 0
+        invariant u < 0
+        decreases n - i
+    { u = u + 1; i = i + 1; }
+    u
+}
+public fn main() { print(g(3)); }
+""",
+        "always be diagnosed — the invariant is false on entry",
+    ),
     (
         "unknown-attribute",
         "T1025",
