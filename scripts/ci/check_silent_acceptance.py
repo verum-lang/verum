@@ -159,6 +159,29 @@ public fn main() { print(caller()); }
     # opposite things. The official runner may well check this; measured
     # here only for `verum check`, which is what a person reaches for
     # when the runner is not built.
+    # `verum check` accepts a program the interpreter then panics on.
+    # Found by verum-2b (T1010): the SHORT mount spelling does not merely
+    # fail to help, it REPLACES a working binding with one that never
+    # resolves — the same program with no mount at all runs correctly,
+    # and with the full path runs correctly.
+    #
+    # Baseline taken on both binaries before landing T1024: identical
+    # panic on main and on lang/grammar-authority, so the branch neither
+    # fixes nor worsens it.
+    #
+    # COUPLING, stated because it is the one row that has it: this probe
+    # needs `math.tactics.TacticProp` to exist in the baked stdlib. If it
+    # is renamed the row starts being diagnosed for the wrong reason and
+    # the gate will say "fixed but still in BASELINE" — noisy, but it
+    # fails toward someone looking rather than away.
+    (
+        "short-mount-passes-check",
+        "T1010",
+        """mount math.tactics.{TacticProp};
+fn main() { let x = TacticProp(1); print("ok"); }
+""",
+        "refuse, or resolve, a mount path it cannot bind — not accept and panic at run time",
+    ),
     (
         "unmet-expected-error",
         "T1028",
@@ -220,6 +243,7 @@ public fn main() {
 # will flip it. Shrinking this set is the point; growing it needs a reason
 # in the commit message.
 BASELINE = {
+    "short-mount-passes-check",
     "unknown-attribute",
     "attribute-name-typo",
     "attribute-argument-typo",
