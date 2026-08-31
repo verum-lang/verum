@@ -2,8 +2,23 @@
 // @tier: 0
 // @level: L1
 // @tags: set, higher_order, iterator, closure
-// @timeout: 5000
+// @timeout: 30000
 // @expect: pass
+//
+// The budget is 30s for a 58-line program over a four-element set, and
+// that is not a typo (T1012).  Measured 2026-08-31: this file takes 11.6s
+// to typecheck, against a declared 5s — so whether it passed was decided
+// by how busy the machine was, and a corpus run could report it as a
+// regression of whatever change happened to land nearby.  It cost exactly
+// that once: a one-test L1 difference chased through 214 specs before the
+// name turned up.
+//
+// The 11.6s is NOT this file's fault and raising the budget does not fix
+// it.  A three-line program is enough to show it: `Set.new()` costs 0.6s,
+// adding one `s.insert(1)` takes it to 4.5s, and the same shape on `List`
+// stays at 0.6s.  `sample` puts `ensure_stdlib_type_loaded` at the top.
+// That is tracked as T1013; when it lands, this budget should come back
+// down, and the number here is the measurement to beat.
 //
 // Regression: Set's higher-order methods (filter/map/fold/count_where/
 // for_each) previously dispatched through the generic array path and
