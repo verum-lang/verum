@@ -1505,7 +1505,7 @@ impl<'s> CompilationPipeline<'s> {
                 );
 
                 // Convert cached metadata to TypeChecker-compatible format
-                let stdlib_meta = self.convert_cached_metadata_to_stdlib(&entry.metadata);
+                let stdlib_meta = Self::convert_cached_metadata_to_stdlib(&entry.metadata);
                 self.stdlib_metadata = StdlibMetadataState::Eager(Some(
                     std::sync::Arc::new(stdlib_meta),
                 ));
@@ -1529,8 +1529,12 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Convert cached stdlib metadata to TypeChecker-compatible format.
-    fn convert_cached_metadata_to_stdlib(
-        &self,
+    /// `pub` for the conformance gate: the attribution below has no other
+    /// observable, and it was wrong in a way a reader cannot see (T1004).
+    /// Takes no receiver: the body never touched `self`, and an
+    /// associated function is reachable from the gate without standing up
+    /// a whole pipeline.
+    pub fn convert_cached_metadata_to_stdlib(
         cached: &crate::core_cache::CachedCoreMetadata,
     ) -> verum_types::core_metadata::CoreMetadata {
         use verum_types::core_metadata::*;
@@ -1539,6 +1543,11 @@ impl<'s> CompilationPipeline<'s> {
 
         // Convert types
         for cached_type in &cached.types {
+            let declaring_module = cached_type
+                .path
+                .rsplit_once('.')
+                .map(|(p, _)| p)
+                .unwrap_or("");
             let type_desc = TypeDescriptor {
                 name: Text::from(
                     cached_type
@@ -1547,14 +1556,28 @@ impl<'s> CompilationPipeline<'s> {
                         .next_back()
                         .unwrap_or(&cached_type.path),
                 ),
-                module_path: Text::from(
-                    cached_type
-                        .path
-                        .rsplit_once('.')
-                        .map(|(p, _)| p)
-                        .unwrap_or(""),
-                ),
-                origin_module_path: verum_common::Maybe::None,
+                module_path: Text::from(declaring_module),
+                // `Some`, not `None`. The cache builds each entry's path as
+                // `<declaring module>.<name>` (core_cache.rs, the type-scan
+                // loop), so the prefix IS the declarer — the same string
+                // `module_path` above already derives from it. Writing
+                // `None` here unconditionally reproduced T1002 exactly: the
+                // type loses its declarer and is attributed to the entry
+                // path instead, and it was written as policy rather than as
+                // a missing arm.
+                //
+                // WORTH KNOWING BEFORE REVIVING ANY OF THIS: the cache is
+                // populated by a LINE SCAN of source text — a declaration
+                // is anything starting `public type `, and its kind is
+                // "enum" if the line contains `|`. Attribution is the
+                // smallest of the problems that path carries, and the right
+                // end state is deleting the subsystem, which is T0692's
+                // radius (bake-driver consolidation), not this fix's.
+                origin_module_path: if declaring_module.is_empty() {
+                    verum_common::Maybe::None
+                } else {
+                    verum_common::Maybe::Some(Text::from(declaring_module))
+                },
                 generic_params: Self::parse_generic_params_from_definition(&cached_type.definition),
                 kind: match cached_type.kind.as_str() {
                     "struct" | "record" => TypeDescriptorKind::Record {
