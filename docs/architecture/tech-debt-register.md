@@ -634,7 +634,7 @@ already existed for three of them.
 
 | Capability | Verdict | Measured | Task |
 |---|---|---|---|
-| **Purity / computational properties** — a `pure fn` may not do I/O, spawn, or mutate through `&mut` | **WORKS** | four E503 forms refused, one at a time; gated in the registry showcase | — |
+| **Purity / computational properties** — a `pure fn` may not do I/O, spawn, or mutate through `&mut` | **WORKS, ORDER-DEPENDENT ON MAIN** | four E503 forms refused, one at a time, and gated in the registry showcase — but the call case is refused only when the callee is declared ABOVE its caller; move it below and main accepts it. Fixed on `lang/grammar-authority`. Bounded by measurement: E310, E400 and `spawn`-in-`pure` all still fire with declarations moved below | T0985, T1024 |
 | **Affine and linear types** — affine is used at most once, linear exactly once | **WORKS** | E310 on second use; gated | — |
 | **Sizes in the type** — `Digest<32>` and `Digest<8>` are different types | **WORKS** | E400 "expected '32', found '8'"; gated | — |
 | **Refinement types on scalars** — `type NonNeg is n: Int where n >= 0` | **WORKS** | hypothesis reaches the solver on a parameter | G10 |
@@ -649,6 +649,7 @@ already existed for three of them.
 | **Const generic values at run time** | **BROKEN** | the type-level distinction works (row 3); reading the parameter as a value yields `nil`, and the recommended `meta` replacement does too | T1015 |
 | **Rank-2 function types** — `fn<R>(...)` as a record field | **BROKEN** | the field bakes as `Unit` | T0997, G11 |
 | **Visibility modifiers** | **RESTRICT NOTHING** | from another module a bare `fn`, an `internal fn`, a non-public type and its fields all mount and run | T1023 |
+| **A file that declares it must fail** — `@expected-error` in a conformance spec | **NOT ENFORCED** | when the declared error does not appear, `verum check` prints an ordinary success line and exits 0 — the same exit code as when it does appear | T1028 |
 | **An explicit mount path binds what it names** | **BROKEN** | `mount a.b.{Secret}` falls back to the bare name and binds the stdlib's `Secret` | T1022, T0782 |
 
 **The pattern across the broken rows, and it is one pattern.** Nine of
