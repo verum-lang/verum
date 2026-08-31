@@ -876,7 +876,7 @@ fn receiver_info_from_decl(func: &verum_ast::decl::FunctionDecl) -> (ReceiverKin
 }
 
 /// Convert a function declaration to a Type::Function
-fn function_decl_to_type(func: &verum_ast::decl::FunctionDecl) -> Type {
+pub(crate) fn function_decl_to_type(func: &verum_ast::decl::FunctionDecl) -> Type {
     let params: List<Type> = func
         .params
         .iter()

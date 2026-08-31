@@ -8083,6 +8083,28 @@ impl TypeChecker {
         if provided.iter().any(|name| !declared.contains(name)) {
             return;
         }
+        // MEASUREMENT ONLY, off by default (T1029). Conformance compares
+        // the method NAME and never its SIGNATURE, so an implementation
+        // may promise one thing and be another — measured: a generic
+        // function bounded by the protocol passes an `Int` into a `Text`
+        // parameter and returns the `Bool` it gets back where it
+        // promised an `Int`, and nothing complains.
+        //
+        // The repair needs a number before it needs a diagnostic: the
+        // consumer's own comment above records 124 protocol methods in
+        // core/ with default bodies, and turning comparison on blind
+        // would repeat T1025's mistake where the blast radius is the
+        // standard library. So this prints, and does not judge.
+        //
+        // Both sides are already available and neither is rebuilt here:
+        // the protocol registry holds the full declaration
+        // (protocol.rs:5015 `register_protocol` keeps it, 7458
+        // `get_protocol` returns it) and `function_decl_to_type` turns
+        // the implementation's declaration into the same shape.
+        if std::env::var("VERUM_TRACE_PROTO_SIG").is_ok() {
+            self.report_protocol_signature_drift(impl_decl, &proto_ident);
+        }
+
 
         let mut missing: List<Text> = required
             .into_iter()
@@ -8121,6 +8143,82 @@ impl TypeChecker {
         });
     }
 
+
+    /// Print protocol/implementation signature disagreements (T1029).
+    ///
+    /// MEASUREMENT ONLY — behind `VERUM_TRACE_PROTO_SIG`, prints and
+    /// never judges. Conformance today compares the method NAME and not
+    /// its signature, and the number this produces over `core/` is what
+    /// decides whether the real check can reject or must warn.
+    ///
+    /// Deliberately LENIENT: a pair is reported only when both sides are
+    /// function types of the same shape and neither mentions `Self`.
+    /// Substituting `Self` correctly is the real fix's job; over-reporting
+    /// here would hand the next step a number made mostly of noise, which
+    /// is worse than no number.
+    fn report_protocol_signature_drift(
+        &self,
+        impl_decl: &verum_ast::decl::ImplDecl,
+        proto_ident: &Text,
+    ) {
+        let guard = self.protocol_checker.read();
+        let protocol = match guard.get_protocol(proto_ident) {
+            verum_common::Maybe::Some(p) => p,
+            verum_common::Maybe::None => return,
+        };
+        for item in impl_decl.items.iter() {
+            let verum_ast::decl::ImplItemKind::Function(func) = &item.kind else {
+                continue;
+            };
+            let name = func.name.name.clone();
+            let proto_method = match protocol.methods.get(&name) {
+                verum_common::Maybe::Some(m) => m,
+                verum_common::Maybe::None => continue,
+            };
+            let impl_ty = crate::method_resolution::function_decl_to_type(func);
+            if let Some(reason) = Self::signature_disagreement(&proto_method.ty, &impl_ty) {
+                eprintln!(
+                    "[proto-sig] {}::{} — {}",
+                    proto_ident.as_str(),
+                    name.as_str(),
+                    reason
+                );
+            }
+        }
+    }
+
+    /// Describe how two function types disagree, or None when they do not
+    /// disagree in a way worth counting.
+    fn signature_disagreement(proto: &Type, imp: &Type) -> Option<String> {
+        let (Type::Function { params: pp, return_type: pr, .. }, Type::Function { params: ip, return_type: ir, .. }) =
+            (proto, imp)
+        else {
+            return None;
+        };
+        if pp.len() != ip.len() {
+            return Some(format!(
+                "arity: protocol {} parameter(s), implementation {}",
+                pp.len(),
+                ip.len()
+            ));
+        }
+        for (i, (a, b)) in pp.iter().zip(ip.iter()).enumerate() {
+            if let Some(d) = Self::type_disagreement(a, b) {
+                return Some(format!("parameter {}: {}", i + 1, d));
+            }
+        }
+        Self::type_disagreement(pr, ir).map(|d| format!("return type: {}", d))
+    }
+
+    /// Compare two types by their rendered form, declining to judge any
+    /// pair that mentions `Self` — see the note on the caller.
+    fn type_disagreement(a: &Type, b: &Type) -> Option<String> {
+        let (ta, tb) = (a.to_text(), b.to_text());
+        if ta == tb || ta.as_str().contains("Self") || tb.as_str().contains("Self") {
+            return None;
+        }
+        Some(format!("protocol `{}`, implementation `{}`", ta.as_str(), tb.as_str()))
+    }
 
     /// Check if a type represents the Never (bottom) type.
     ///
