@@ -2363,6 +2363,29 @@ impl TypeChecker {
                 span: Span::default(),
                 type_param_fn_bounds: verum_common::Map::new(),
             };
+            // Its OWN variable, not `VERUM_TRACE_ASSOC`: this fires once
+            // per archived impl — 36111 times on a two-function program —
+            // and would swamp any trace it shared a gate with.
+            //
+            // What it measured, and it is the reason the gap above is a
+            // bake gap rather than a load gap: every `MappedIter` impl
+            // arrives with `params=0`. The archive carries NO generic
+            // parameter list for implementations, so the bound
+            // `F: fn(I.Item) -> B` that `type_param_fn_bounds` would be
+            // built from is not merely unread — it is not there (T0997).
+            if std::env::var("VERUM_TRACE_IMPLLOAD").is_ok() {
+                eprintln!(
+                    "[impl-load] for={} proto={} params={} bounds={:?}",
+                    impl_desc.target_type,
+                    impl_desc.protocol,
+                    impl_desc.generic_params.len(),
+                    impl_desc
+                        .generic_params
+                        .iter()
+                        .map(|gp| format!("{}:{:?}", gp.name, gp.bounds))
+                        .collect::<Vec<_>>()
+                );
+            }
             let _ = self.protocol_checker.write().register_impl(protocol_impl);
             proto_deps.push(impl_desc.protocol.clone());
         }
