@@ -3316,6 +3316,41 @@ impl TypeChecker {
                             s = s.with_type_bounds(tb_map);
                         }
                     }
+                    // Which vars the signature MENTIONS versus which the
+                    // scheme QUANTIFIES. A mentioned-but-free var is shared
+                    // by every call site, so the first call would bind it
+                    // for all — the shape T0997 looks like from outside.
+                    //
+                    // IT IS NOT THAT, and this instrument is what says so:
+                    // on the failing program all 3150 registered schemes
+                    // report FREE=[], `transduce_stateful` for `MappedIter`
+                    // among them. Generalisation is complete; the loss is
+                    // later. Kept because the question recurs and reading
+                    // the code answered it wrongly twice.
+                    //
+                    // Gated on ITS OWN variable and nothing else. Nested
+                    // inside the METHOD_LOOKUP block it needed both, and
+                    // then reported nothing when asked with one — an
+                    // instrument that is silent for the wrong reason is
+                    // worse than none.
+                    if std::env::var("VERUM_TRACE_SCHEME_VARS").is_ok() {
+                        let mut mentioned: Vec<String> =
+                            vars.iter().map(|t| format!("{t:?}")).collect();
+                        mentioned.sort();
+                        let quantified: Vec<String> =
+                            s.vars.iter().map(|t| format!("{t:?}")).collect();
+                        let free: Vec<&String> = mentioned
+                            .iter()
+                            .filter(|m| !quantified.contains(m))
+                            .collect();
+                        eprintln!(
+                            "[implvc-vars] method={} mentioned={:?} quantified={:?} FREE={:?}",
+                            method_name.as_str(),
+                            mentioned,
+                            quantified,
+                            free
+                        );
+                    }
                     if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() {
                         let p0 = if let crate::ty::Type::Function { params, .. } = &fn_ty {
                             params.first().map(|p| format!("{:?}", p)).unwrap_or_default()
