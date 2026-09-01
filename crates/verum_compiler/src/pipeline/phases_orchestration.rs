@@ -940,18 +940,39 @@ impl<'s> CompilationPipeline<'s> {
         // may not be fully loaded in single-file check mode. Lenient
         // mode defers method-level validation to the call site where
         // the context is `provide`d with a concrete implementation.
-        let is_stdlib_file = self
-            .session
-            .options()
-            .input
-            .to_str()
-            .map(|p| {
-                p.contains("/core/")
-                    || p.contains("\\core\\")
-                    || p.starts_with("core/")
-                    || p.starts_with("core\\")
-            })
-            .unwrap_or(false);
+        // T1041 — decided by the STANDARD LIBRARY's root, not by a path
+        // substring.  `contains("/core/")` gives this mode to any file
+        // under any directory that happens to be called `core`: a copy of
+        // one file placed in `<scratchpad>/core/` was checked under stdlib
+        // rules and reported 52 errors where the same bytes beside it
+        // reported 10.  A user's `src/core/` got the standard library's
+        // leniency without asking for it and without being told.
+        //
+        // The anchor is the tree's own marker: an ancestor directory named
+        // `core` that holds `mod.vr` IS the standard library's root — that
+        // file is what makes it one.  Every real `core/**` source keeps
+        // the mode it had; nothing else acquires it.
+        //
+        // The mode's EFFECT is a separate question and deliberately not
+        // touched here.  Measured over 25 files, it changes the verdict
+        // for 13 of them in BOTH directions (182 errors with, 189
+        // without): it is not simply lenient, because several of its arms
+        // answer `Type::Unknown` rather than suppressing, and an unknown
+        // surfaces later as "not fully determined".  Changing what it does
+        // is a design decision; changing WHO it applies to is a repair.
+        let is_stdlib_file = {
+            let input = &self.session.options().input;
+            let mut dir = input.parent();
+            let mut found = false;
+            while let Some(d) = dir {
+                if d.file_name().is_some_and(|n| n == "core") && d.join("mod.vr").is_file() {
+                    found = true;
+                    break;
+                }
+                dir = d.parent();
+            }
+            found
+        };
         if is_stdlib_file {
             checker.context_resolver_mut().set_lenient_contexts(true);
             checker.set_lenient_context_checking(true);

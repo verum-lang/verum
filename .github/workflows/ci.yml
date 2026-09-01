@@ -607,6 +607,24 @@ jobs:
           scripts/ci/check_typecheck_determinism.sh --selftest
           scripts/ci/check_typecheck_determinism.sh --bin ./target/release/verum --runs 15
 
+      # T1041, and the sibling question to the one above: that gate asks
+      # whether one file gets one verdict across RUNS; this one asks
+      # whether it gets one verdict across LOCATIONS. `is_stdlib_file`
+      # was a substring test on the input path, so a file in any
+      # directory named `core` was checked under the standard library's
+      # rules — measured, that changed the verdict for 13 of 25 files in
+      # both directions, and this gate's own subject had two real errors
+      # SUPPRESSED by sitting in a `core/` folder.
+      #
+      # Runs here for the same reason as its neighbour: this job already
+      # has a release binary. Self-test first, and for the same reason —
+      # a comparison that always reports "equal" is indistinguishable
+      # from a clean tree.
+      - name: File location does not change the verdict
+        run: |
+          scripts/ci/check_path_does_not_change_verdict.sh --selftest ./target/release/verum
+          scripts/ci/check_path_does_not_change_verdict.sh ./target/release/verum
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:
