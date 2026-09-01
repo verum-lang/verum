@@ -32619,6 +32619,35 @@ impl VbcCodegen {
         info: &IntrinsicInfo,
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
+        // ARITY IS PART OF THE OPCODE CONTRACT (T0693). An intrinsic
+        // called with the wrong number of arguments does not fail here
+        // unless it is asked to: the emitter writes one register per
+        // argument given, so a short call writes a short operand
+        // stream, and the AOT lowering — which reads the DECLARED
+        // operand count — dies on it:
+        //
+        //   Skipping function 'Channel.new':
+        //     Internal("read_reg_varlen: operand stream exhausted")
+        //
+        // and the function is dropped from the binary with a WARN
+        // nothing counts. `core/async/channel.vr` called
+        // `alloc(buf_size)` on a 2-parameter intrinsic for exactly
+        // this reason; the interpreter ran it, AOT skipped it, and the
+        // two tiers disagreed.
+        //
+        // The existing `declared_arities_match_the_registry` gate
+        // covers `@intrinsic(...)` DECLARATIONS. Bare intrinsic calls
+        // resolve straight through `lookup_intrinsic` without one, so
+        // nothing compared the CALL to the registry.
+        if args.len() != info.intrinsic.param_count as usize {
+            return Err(CodegenError::internal(format!(
+                "intrinsic `{}` takes {} argument(s), called with {} —                  the operand stream an intrinsic emits is fixed by its                  registry arity, and a short call produces bytecode the                  AOT lowering cannot decode",
+                info.intrinsic.name,
+                info.intrinsic.param_count,
+                args.len()
+            )));
+        }
+
         let dest = self.ctx.alloc_temp();
 
         // Compile arguments

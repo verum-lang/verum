@@ -94,7 +94,7 @@ implement Channel<T> {
         // Allocate backing ring buffer sized by T — not hardcoded to 8 bytes,
         // otherwise any T larger than an Int would overflow the buffer.
         let buf_size = capacity * T.size;
-        let buf = alloc(buf_size) as &unsafe T;
+        let buf = alloc(buf_size, T.alignment) as &unsafe T;
         Channel {
             len: AtomicInt.new(0),
             cap: capacity,

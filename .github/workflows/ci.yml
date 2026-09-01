@@ -209,12 +209,13 @@ jobs:
           shared-key: vbc-guardrails
           cache-on-failure: true
 
-      - name: Run the three gated targets
+      - name: Run the four gated targets
         timeout-minutes: 120
         run: >
           cargo test --locked -p verum_vbc --features codegen
           --test layout_invariant_verifier_tests
           --test intrinsic_key_resolution_gate
+          --test intrinsic_call_arity_tests
           --test global_type_table_consistency_tests
 
       # The workspace unit-test job runs with DEFAULT features, and
