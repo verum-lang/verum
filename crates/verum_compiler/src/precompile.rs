@@ -2619,9 +2619,32 @@ fn inject_declared_module_free_fn_keys(
                     format!("{}<{}>", render_type(base), rendered.join(", "))
                 }
             }
-            K::Reference { inner, .. }
-            | K::CheckedReference { inner, .. }
-            | K::UnsafeReference { inner, .. } => render_type(inner),
+            // ARCHIVE-REF-TIER-DROP-1 has a sibling here (T1033). This
+            // renderer discarded the reference entirely and emitted only
+            // the inner type, so every archived protocol-method parameter
+            // lost `&`, `mut` and its CBGR tier. The repair marked
+            // ARCHIVE-REF-TIER-DROP-1 fixed the function-signature
+            // renderer at archive_metadata.rs:1890 and left this one —
+            // measured: core/async/future.vr declares
+            // `fn poll(&mut self, cx: &mut Context)` and the loaded
+            // protocol arrives as `fn(Context)`.
+            //
+            // Grammar spelling: `&[checked|unsafe] [mut] T`.
+            K::Reference { inner, mutable } => format!(
+                "&{}{}",
+                if *mutable { "mut " } else { "" },
+                render_type(inner)
+            ),
+            K::CheckedReference { inner, mutable } => format!(
+                "&checked {}{}",
+                if *mutable { "mut " } else { "" },
+                render_type(inner)
+            ),
+            K::UnsafeReference { inner, mutable } => format!(
+                "&unsafe {}{}",
+                if *mutable { "mut " } else { "" },
+                render_type(inner)
+            ),
             K::Tuple(types) => {
                 let rendered: Vec<String> = types.iter().map(render_type).collect();
                 format!("({})", rendered.join(", "))

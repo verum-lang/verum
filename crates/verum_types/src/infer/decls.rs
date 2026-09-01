@@ -8198,6 +8198,21 @@ impl TypeChecker {
             // the same file states the principle: ONE canonical spelling
             // at the ONE authority every protocol-matching site
             // consults. Conformance is such a site and was not asking.
+            // T1033: seven readings eliminated seven candidates for where
+            // the `&mut` is lost, so the question moves to the artefact:
+            // print WHAT the comparison reads and WHERE the protocol came
+            // from. Identity by module path, not by name — a same-named
+            // stranger is a standing hazard in this codebase (T0782 counts
+            // 136 colliding type names in core/).
+            if std::env::var("VERUM_TRACE_PROTO_ORIGIN").is_ok() {
+                eprintln!(
+                    "[proto-origin] {}::{} raw=`{}` protocol_span={:?}",
+                    proto_ident.as_str(),
+                    name.as_str(),
+                    proto_method.ty.to_text().as_str(),
+                    protocol.span
+                );
+            }
             let proto_ty = Self::normalise_for_comparison(&guard, &proto_method.ty);
             let impl_ty = Self::normalise_for_comparison(&guard, &impl_ty);
             if let Some(reason) =
