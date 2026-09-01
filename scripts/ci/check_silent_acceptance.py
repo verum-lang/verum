@@ -266,9 +266,11 @@ public fn main() {
 # Rows known to be silently accepted today. Each cites the open task that
 # will flip it. Shrinking this set is the point; growing it needs a reason
 # in the commit message.
-BASELINE = {
-    "protocol-signature-mismatch",
-}
+BASELINE: set[str] = set()
+# EMPTY, and that is the point: every row in this file is now diagnosed.
+# The ratchet started at eight silent rows (T1025 x3, T1026, T1027,
+# T1028, T1029, T0989). An addition here is a REGRESSION, not a
+# baseline — a row may only enter with a task id and a measurement.
 
 # Rows whose stated expectation has TWO satisfying arms — "refuse, OR
 # resolve" — and whose second arm lives at run time.
