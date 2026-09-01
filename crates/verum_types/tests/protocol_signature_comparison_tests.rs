@@ -156,3 +156,33 @@ fn two_different_concrete_types_still_disagree_after_all_the_leniency() {
         "Int against Text must survive every decline"
     );
 }
+
+#[test]
+fn a_protocols_own_parameter_instantiated_by_the_impl_is_not_a_disagreement() {
+    // `Module::forward(In)` implemented for `AttentionInput` is what
+    // implementing a generic protocol MEANS. The earlier heuristic
+    // declined only pairs where BOTH sides were one or two uppercase
+    // characters, so this slipped through and would have inflated a
+    // corpus-wide count by every generic protocol in core/.
+    let params: std::collections::HashSet<String> = ["In".to_string()].into_iter().collect();
+    let proto = func(vec![named("In")], Type::Unit);
+    let imp = func(vec![named("AttentionInput")], Type::Unit);
+    assert!(
+        TypeChecker::signature_disagreement_with_params(&proto, &imp, &params).is_none(),
+        "an instantiated protocol parameter is not a disagreement"
+    );
+}
+
+#[test]
+fn a_name_that_is_not_a_protocol_parameter_still_disagrees() {
+    // The control for the decline above: knowing the parameter list must
+    // not turn the comparison into a blanket yes. `Int` is not a
+    // parameter of this protocol, so `Int` against `Text` survives.
+    let params: std::collections::HashSet<String> = ["In".to_string()].into_iter().collect();
+    let proto = func(vec![named("Int")], Type::Unit);
+    let imp = func(vec![named("Text")], Type::Unit);
+    assert!(
+        TypeChecker::signature_disagreement_with_params(&proto, &imp, &params).is_some(),
+        "a non-parameter mismatch must survive"
+    );
+}

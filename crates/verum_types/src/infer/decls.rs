@@ -8166,6 +8166,19 @@ impl TypeChecker {
             verum_common::Maybe::Some(p) => p,
             verum_common::Maybe::None => return,
         };
+        // The protocol's OWN type parameters, instantiated by every
+        // implementation — `Module::forward(In)` implemented for
+        // `AttentionInput` is what implementing a generic protocol MEANS,
+        // not a disagreement. The registry holds the list, so this is a
+        // question to the authority rather than the name-shape heuristic
+        // it replaces (that one declined only 1-2 character names and let
+        // `In` vs `AttentionInput` through).
+        let proto_params: std::collections::HashSet<String> = protocol
+            .type_params
+            .iter()
+            .map(|tp| tp.name.as_str().to_string())
+            .collect();
+
         for item in impl_decl.items.iter() {
             let verum_ast::decl::ImplItemKind::Function(func) = &item.kind else {
                 continue;
@@ -8187,7 +8200,9 @@ impl TypeChecker {
             // consults. Conformance is such a site and was not asking.
             let proto_ty = Self::normalise_for_comparison(&guard, &proto_method.ty);
             let impl_ty = Self::normalise_for_comparison(&guard, &impl_ty);
-            if let Some(reason) = Self::signature_disagreement(&proto_ty, &impl_ty) {
+            if let Some(reason) =
+                Self::signature_disagreement_with_params(&proto_ty, &impl_ty, &proto_params)
+            {
                 eprintln!(
                     "[proto-sig] {}::{} — {}",
                     proto_ident.as_str(),
@@ -8325,6 +8340,16 @@ impl TypeChecker {
     /// Describe how two function types disagree, or None when they do not
     /// disagree in a way worth counting.
     pub fn signature_disagreement(proto: &Type, imp: &Type) -> Option<String> {
+        Self::signature_disagreement_with_params(proto, imp, &std::collections::HashSet::new())
+    }
+
+    /// As above, plus the protocol's own type-parameter names: a protocol
+    /// side that IS one of them has been instantiated, not contradicted.
+    pub fn signature_disagreement_with_params(
+        proto: &Type,
+        imp: &Type,
+        proto_params: &std::collections::HashSet<String>,
+    ) -> Option<String> {
         let (Type::Function { params: pp, return_type: pr, .. }, Type::Function { params: ip, return_type: ir, .. }) =
             (proto, imp)
         else {
@@ -8338,16 +8363,25 @@ impl TypeChecker {
             ));
         }
         for (i, (a, b)) in pp.iter().zip(ip.iter()).enumerate() {
-            if let Some(d) = Self::type_disagreement(a, b) {
+            if let Some(d) = Self::type_disagreement_with_params(a, b, proto_params) {
                 return Some(format!("parameter {}: {}", i + 1, d));
             }
         }
-        Self::type_disagreement(pr, ir).map(|d| format!("return type: {}", d))
+        Self::type_disagreement_with_params(pr, ir, proto_params)
+            .map(|d| format!("return type: {}", d))
     }
 
     /// Compare two types by their rendered form, declining to judge any
     /// pair that mentions `Self` — see the note on the caller.
     pub fn type_disagreement(a: &Type, b: &Type) -> Option<String> {
+        Self::type_disagreement_with_params(a, b, &std::collections::HashSet::new())
+    }
+
+    pub fn type_disagreement_with_params(
+        a: &Type,
+        b: &Type,
+        proto_params: &std::collections::HashSet<String>,
+    ) -> Option<String> {
         let (ta, tb) = (a.to_text(), b.to_text());
         // `Self`, `Unknown` and `_` are all ABSENCES rather than types:
         // Self is what the real repair must substitute, Unknown is a
@@ -8394,6 +8428,12 @@ impl TypeChecker {
                 && s.chars().next().is_some_and(|c| c.is_ascii_uppercase())
         };
         if looks_like_a_type_parameter(&ta) && looks_like_a_type_parameter(&tb) {
+            return None;
+        }
+
+        // The protocol side is one of the protocol's declared parameters:
+        // the implementation instantiated it, which is the point.
+        if proto_params.contains(ta.as_str()) {
             return None;
         }
         if std::env::var("VERUM_TRACE_PROTO_SIG_KIND").is_ok() {
