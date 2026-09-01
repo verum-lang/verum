@@ -896,31 +896,69 @@ pub fn extract_from_attributes(
     None
 }
 
+/// The NAME an `@verify(...)` argument spells, whatever shape it takes.
+///
+/// One reader for both questions below, so "what did the author write"
+/// and "is it a strategy" cannot drift apart (T1025).
+fn argument_name(expr: &verum_ast::Expr) -> Option<verum_common::Text> {
+    use verum_ast::ty::PathSegment;
+    use verum_ast::{ExprKind, LiteralKind};
+
+    match &expr.kind {
+        ExprKind::Path(path) => match path.segments.last() {
+            Some(PathSegment::Name(ident)) => Some(ident.name.clone()),
+            _ => None,
+        },
+        ExprKind::Literal(lit) => match &lit.kind {
+            LiteralKind::Text(text_lit) => Some(verum_common::Text::from(text_lit.as_str())),
+            _ => None,
+        },
+        ExprKind::Paren(inner) => argument_name(inner),
+        _ => None,
+    }
+}
+
 /// Try to parse a VerifyStrategy from a single AST expression.
 ///
 /// Recognizes:
 /// - `ExprKind::Path` with a single identifier: `@verify(formal)`, `@verify(z3)`, etc.
 /// - `ExprKind::Literal(Text(...))` for quoted forms: `@verify("portfolio")`.
 fn strategy_from_expr(expr: &verum_ast::Expr) -> Option<VerifyStrategy> {
-    use verum_ast::ty::PathSegment;
-    use verum_ast::{ExprKind, LiteralKind};
+    argument_name(expr).and_then(|n| VerifyStrategy::from_attribute_value(n.as_str()))
+}
 
-    match &expr.kind {
-        ExprKind::Path(path) => {
-            if let Some(PathSegment::Name(ident)) = path.segments.last() {
-                return VerifyStrategy::from_attribute_value(ident.name.as_str());
-            }
-            None
+/// The `@verify(...)` arguments that name no known strategy.
+///
+/// T1025: `@verify(thorugh)` used to yield `None` from
+/// [`extract_from_attributes`], indistinguishable from "no attribute at
+/// all", so the function silently fell back to the phase default. A
+/// one-character typo therefore switched off the verification the author
+/// asked for and the file reported everything proved — the strongest
+/// guarantee the language offers, turned off in silence.
+///
+/// The authority for what IS a strategy lives here, so the question of what
+/// is NOT one is answered here too rather than by a second list elsewhere.
+pub fn unrecognised_verify_arguments(
+    attributes: &verum_common::List<verum_ast::attr::Attribute>,
+) -> Vec<verum_common::Text> {
+    let mut out = Vec::new();
+    for attr in attributes.iter() {
+        if attr.name.as_str() != "verify" {
+            continue;
         }
-        ExprKind::Literal(lit) => {
-            if let LiteralKind::Text(text_lit) = &lit.kind {
-                return VerifyStrategy::from_attribute_value(text_lit.as_str());
+        let Some(args) = attr.args.as_ref() else {
+            continue;
+        };
+        for arg in args.iter() {
+            if strategy_from_expr(arg).is_some() {
+                continue;
             }
-            None
+            if let Some(name) = argument_name(arg) {
+                out.push(name);
+            }
         }
-        ExprKind::Paren(inner) => strategy_from_expr(inner),
-        _ => None,
     }
+    out
 }
 
 impl std::str::FromStr for VerifyStrategy {

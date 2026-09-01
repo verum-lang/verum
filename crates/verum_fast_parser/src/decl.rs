@@ -7775,6 +7775,22 @@ impl<'a> RecursiveParser<'a> {
             self.stream.consume(&TokenKind::RBracket);
         }
 
+        // T1025: this is the ONE place every declaration's attributes pass
+        // through, and it is where the target-independent question gets
+        // asked — is this name known AT ALL. `AttributeTarget::all()` makes
+        // every placement rule pass, so exactly the unknown-name arm can
+        // fire; per-target placement stays where it already is (Impl and
+        // Module) rather than being duplicated here.
+        //
+        // Nothing was asking it before. The validator existed, knew the
+        // attribute set and had the message ready, and `Parser::new` never
+        // constructed it — so `@verfiy(thorough)` silently switched off the
+        // verification the author asked for and the file reported "2 proved,
+        // 0 failed". No-op unless a validator was installed.
+        if self.attr_validator.is_some() {
+            self.validate_attrs_for_target(&attrs, verum_ast::attr::AttributeTarget::all());
+        }
+
         Ok(attrs)
     }
 

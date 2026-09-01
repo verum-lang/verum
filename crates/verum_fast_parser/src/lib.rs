@@ -111,14 +111,39 @@ pub use parser::{RecursiveParser, TokenStream, merge_spans, span_from_tokens};
 /// This parser is optimized for compilation speed, building AST directly
 /// without intermediate lossless syntax trees.
 pub struct FastParser {
-    _phantom: std::marker::PhantomData<()>,
+    /// Attribute-validation warnings from the most recent parse.
+    ///
+    /// T1025: the validator existed, knew the attribute set and had its
+    /// message ready, and nothing constructed it — so a one-character typo
+    /// in `@verify(thorough)` switched off the verification the author
+    /// asked for and the file reported everything proved. Wiring the
+    /// validator alone was not enough: `RecursiveParser` collects warnings
+    /// into a vector whose only production reader was a doc-comment
+    /// example. This is the channel out.
+    ///
+    /// A `Mutex` rather than a `RefCell` because `parse_module` takes
+    /// `&self` and callers hand `FastParser` across threads.
+    attr_warnings: std::sync::Mutex<Vec<attr_validation::AttributeValidationWarning>>,
 }
 
 impl FastParser {
     /// Create a new fast parser instance.
     pub fn new() -> Self {
         Self {
-            _phantom: std::marker::PhantomData,
+            attr_warnings: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Take the attribute-validation warnings produced by the most recent
+    /// parse, leaving the channel empty.
+    ///
+    /// A caller that does not drain this is back where T1025 started — the
+    /// validator runs and its answer is discarded — so the compile path
+    /// drains it and turns each warning into a reported diagnostic.
+    pub fn take_attr_warnings(&self) -> Vec<attr_validation::AttributeValidationWarning> {
+        match self.attr_warnings.lock() {
+            Ok(mut w) => std::mem::take(&mut *w),
+            Err(poisoned) => std::mem::take(&mut *poisoned.into_inner()),
         }
     }
 
@@ -224,11 +249,28 @@ impl FastParser {
             Span::new(last_span.end, last_span.end, file_id),
         ));
 
-        // Use RecursiveParser for module parsing
-        let mut parser = RecursiveParser::new(&tokens_with_eof, file_id);
+        // Use RecursiveParser for module parsing.
+        //
+        // T1025: WITH attribute validation. This is the single site every
+        // entry point funnels through, so switching it on here covers the
+        // compile path without touching a dozen call sites.
+        let mut parser = RecursiveParser::with_attr_validation(&tokens_with_eof, file_id);
         parser.set_script_mode(script_mode);
 
-        match parser.parse_module() {
+        let result = parser.parse_module();
+        // Drain BEFORE the early returns below: a parse that fails still
+        // produced whatever attribute warnings it saw, and a channel only
+        // drained on the success path is the same silence one layer in.
+        {
+            let taken = parser.take_attr_warnings();
+            if !taken.is_empty()
+                && let Ok(mut sink) = self.attr_warnings.lock()
+            {
+                sink.extend(taken);
+            }
+        }
+
+        match result {
             Ok(items) => {
                 // Check if there were any errors during parsing
                 if !parser.errors.is_empty() {

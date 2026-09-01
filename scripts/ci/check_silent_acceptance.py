@@ -269,9 +269,6 @@ public fn main() {
 BASELINE = {
     "protocol-signature-mismatch",
     "short-mount-passes-check",
-    "unknown-attribute",
-    "attribute-name-typo",
-    "attribute-argument-typo",
     "nonexistent-protocol-axiom",
     "undeclared-context-use",
 }

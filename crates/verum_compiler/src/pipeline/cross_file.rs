@@ -1327,6 +1327,26 @@ impl<'s> CompilationPipeline<'s> {
             let lexer = Lexer::new(&source.source, file_id);
             parser.parse_module(lexer, file_id)
         };
+        // T1025: the parse that `verum check` actually runs. Drained here,
+        // before the error path below, so a file that fails to parse still
+        // reports the attribute problems the parser saw on the way.
+        for warning in parser.take_attr_warnings() {
+            let message = match &warning.hint {
+                Some(hint) => format!("{} — {}", warning.message, hint),
+                None => warning.message.as_str().to_string(),
+            };
+            self.session.emit_diagnostic(
+                DiagnosticBuilder::warning()
+                    .code(warning.code.as_str())
+                    .message(message)
+                    .span(crate::phases::ast_span_to_diagnostic_span(
+                        warning.span,
+                        Some(self.session),
+                    ))
+                    .build(),
+            );
+        }
+
         let mut module = parse_result.map_err(|errors| {
             // Convert parser errors to diagnostics
             let error_count = errors.len();
@@ -1343,6 +1363,50 @@ impl<'s> CompilationPipeline<'s> {
             let _ = self.session.display_diagnostics();
             anyhow::anyhow!("Parsing failed with {} error(s)", error_count)
         })?;
+
+        // T1025: `@verify(thorugh)` — a KNOWN attribute with an argument
+        // that names no strategy. `extract_from_attributes` returns None
+        // for it, indistinguishable from "no attribute at all", so the
+        // function silently fell back to the phase default and the file
+        // reported everything proved. Reported HERE rather than at the
+        // consumption site, because the consumption site only runs when
+        // SMT does, and `verum check` would stay silent.
+        {
+            let mut report = |attrs: &verum_common::List<verum_ast::attr::Attribute>,
+                              span: verum_ast::Span,
+                              owner: &str| {
+                for bad in verum_smt::verify_strategy::unrecognised_verify_arguments(attrs) {
+                    self.session.emit_diagnostic(
+                        DiagnosticBuilder::warning()
+                            .code("W0401")
+                            .message(format!(
+                                "`@verify({})` on `{}` names no verification strategy —                                  the attribute is ignored and the function falls back to                                  the default mode",
+                                bad, owner
+                            ))
+                            .span(crate::phases::ast_span_to_diagnostic_span(
+                                span,
+                                Some(self.session),
+                            ))
+                            .build(),
+                    );
+                }
+            };
+            for item in module.items.iter() {
+                match &item.kind {
+                    verum_ast::ItemKind::Function(f) => {
+                        report(&f.attributes, f.span, f.name.name.as_str())
+                    }
+                    verum_ast::ItemKind::Impl(i) => {
+                        for it in i.items.iter() {
+                            if let verum_ast::decl::ImplItemKind::Function(f) = &it.kind {
+                                report(&f.attributes, f.span, f.name.name.as_str());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
 
         // Apply @cfg conditional compilation filtering
         let cfg_evaluator = self.session.cfg_evaluator();

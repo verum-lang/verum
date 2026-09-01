@@ -786,6 +786,27 @@ impl<'s> CompilationPipeline<'s> {
             let parser = VerumParser::new();
             let module_result = parser.parse_module(lexer, file_id);
 
+            // T1025: drain the attribute-validation warnings the parse just
+            // produced. Without this the validator runs and its answer is
+            // discarded — the same silence one layer in, and harder to see
+            // because the code now LOOKS wired. Drained before the match so a
+            // module that failed to parse still reports what it saw.
+            for warning in parser.take_attr_warnings() {
+                let message = match &warning.hint {
+                    Some(hint) => format!("{} — {}", warning.message, hint),
+                    None => warning.message.as_str().to_string(),
+                };
+                let diag = DiagnosticBuilder::warning()
+                    .code(warning.code.as_str())
+                    .message(message)
+                    .span(crate::phases::ast_span_to_diagnostic_span(
+                        warning.span,
+                        Some(self.session),
+                    ))
+                    .build();
+                self.session.emit_diagnostic(diag);
+            }
+
             match module_result {
                 Ok(mut module) => {
                     // Apply @cfg conditional compilation filtering
