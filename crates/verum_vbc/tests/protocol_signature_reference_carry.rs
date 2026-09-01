@@ -74,18 +74,28 @@ fn compile_probe() -> (Vec<(String, Vec<TypeRef>)>, Vec<TypeRef>) {
         })
         .collect();
 
-    let layout: Vec<TypeRef> = module
-        .functions
-        .iter()
-        .find(|f| {
+    // Match by suffix: a module-qualified name is still this function, and
+    // a silent `unwrap_or_default()` here would report "0 parameters" for a
+    // function that was never found — a green-or-misleading outcome either
+    // way. Name what was searched instead.
+    let layout_fn = module.functions.iter().find(|f| {
+        module
+            .strings
+            .get(f.name)
+            .map(|n| n == "layout_control" || n.ends_with(".layout_control"))
+            .unwrap_or(false)
+    });
+    let layout: Vec<TypeRef> = match layout_fn {
+        Some(f) => f.params.iter().map(|p| p.type_ref.clone()).collect(),
+        None => panic!(
+            "`layout_control` not among the module's functions: {:?}",
             module
-                .strings
-                .get(f.name)
-                .map(|n| n == "layout_control")
-                .unwrap_or(false)
-        })
-        .map(|f| f.params.iter().map(|p| p.type_ref.clone()).collect())
-        .unwrap_or_default();
+                .functions
+                .iter()
+                .filter_map(|f| module.strings.get(f.name))
+                .collect::<Vec<_>>()
+        ),
+    };
 
     (methods, layout)
 }
