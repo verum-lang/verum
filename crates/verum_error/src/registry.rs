@@ -296,8 +296,8 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
 
         // ── E1xx: Name resolution ─────────────────────────────────────────────
         ErrorCodeEntry { code: "E100", numeric: 100, category: ErrorCategory::NameResolution, description: "undefined variable" },
-        ErrorCodeEntry { code: "E101", numeric: 101, category: ErrorCategory::NameResolution, description: "undefined type" },
-        ErrorCodeEntry { code: "E102", numeric: 102, category: ErrorCategory::NameResolution, description: "undefined function" },
+        ErrorCodeEntry { code: "E101", numeric: 101, category: ErrorCategory::NameResolution, description: "type not found — no declaration of that name is in scope" },
+        ErrorCodeEntry { code: "E102", numeric: 102, category: ErrorCategory::NameResolution, description: "wrong number of arguments to a function or method" },
         ErrorCodeEntry { code: "E103", numeric: 103, category: ErrorCategory::NameResolution, description: "field not found on type" },
         ErrorCodeEntry { code: "E104", numeric: 104, category: ErrorCategory::NameResolution, description: "duplicate definition" },
         ErrorCodeEntry { code: "E105", numeric: 105, category: ErrorCategory::NameResolution, description: "ambiguous name" },
@@ -316,7 +316,7 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
         ErrorCodeEntry { code: "E304", numeric: 304, category: ErrorCategory::Memory, description: "affine value used more than once" },
         ErrorCodeEntry { code: "E305", numeric: 305, category: ErrorCategory::Memory, description: "use of an uninitialized or partially initialized value" },
         ErrorCodeEntry { code: "E306", numeric: 306, category: ErrorCategory::Memory, description: "capability violation" },
-        ErrorCodeEntry { code: "E310", numeric: 310, category: ErrorCategory::Memory, description: "use after move" },
+        ErrorCodeEntry { code: "E310", numeric: 310, category: ErrorCategory::Memory, description: "borrow conflict; also an invalid index, and a `&checked` reference that may escape" },
         ErrorCodeEntry { code: "E311", numeric: 311, category: ErrorCategory::Memory, description: "double move" },
         ErrorCodeEntry { code: "E312", numeric: 312, category: ErrorCategory::Memory, description: "lifetime error" },
         ErrorCodeEntry { code: "E313", numeric: 313, category: ErrorCategory::Memory, description: "dangling reference" },
@@ -332,13 +332,13 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
 
         // ── E4xx: Type system ─────────────────────────────────────────────────
         ErrorCodeEntry { code: "E400", numeric: 400, category: ErrorCategory::Type, description: "type mismatch" },
-        ErrorCodeEntry { code: "E401", numeric: 401, category: ErrorCategory::Type, description: "invalid cast" },
-        ErrorCodeEntry { code: "E402", numeric: 402, category: ErrorCategory::Type, description: "Send bound not satisfied" },
-        ErrorCodeEntry { code: "E403", numeric: 403, category: ErrorCategory::Type, description: "Sync bound not satisfied" },
-        ErrorCodeEntry { code: "E404", numeric: 404, category: ErrorCategory::Type, description: "missing protocol implementation" },
+        ErrorCodeEntry { code: "E401", numeric: 401, category: ErrorCategory::Type, description: "a name is not found in the module named; also an invalid assignment or cast" },
+        ErrorCodeEntry { code: "E402", numeric: 402, category: ErrorCategory::Type, description: "module not found; also `Send` not implemented, and mixed Int/Float arithmetic" },
+        ErrorCodeEntry { code: "E403", numeric: 403, category: ErrorCategory::Type, description: "infinite (self-referential) type; also `Sync` not implemented, and undefined function" },
+        ErrorCodeEntry { code: "E404", numeric: 404, category: ErrorCategory::Type, description: "inferred type is not fully determined — annotate it; also a missing protocol implementation, and an unknown field or method" },
         ErrorCodeEntry { code: "E405", numeric: 405, category: ErrorCategory::Type, description: "protocol method not implemented" },
         ErrorCodeEntry { code: "E406", numeric: 406, category: ErrorCategory::Type, description: "type inference failure" },
-        ErrorCodeEntry { code: "E407", numeric: 407, category: ErrorCategory::Type, description: "recursive type without indirection" },
+        ErrorCodeEntry { code: "E407", numeric: 407, category: ErrorCategory::Type, description: "recursive type without indirection; also wrong number of type arguments" },
         ErrorCodeEntry { code: "E408", numeric: 408, category: ErrorCategory::Type, description: "dependent value-argument arity mismatch" },
         ErrorCodeEntry { code: "E409", numeric: 409, category: ErrorCategory::Type, description: "dereference of a non-reference type" },
         ErrorCodeEntry { code: "E410", numeric: 410, category: ErrorCategory::Type, description: "integer literal does not fit its type" },
@@ -445,6 +445,188 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
         ErrorCodeEntry { code: "E1003", numeric: 1003, category: ErrorCategory::Lint, description: "denied lint: stage overflow" },
         ErrorCodeEntry { code: "E1004", numeric: 1004, category: ErrorCategory::Lint, description: "denied lint: cyclic stage dependency" },
         ErrorCodeEntry { code: "E1005", numeric: 1005, category: ErrorCategory::Lint, description: "denied lint: invalid stage escape" },
+
+        // ── Codes the compiler PRINTS that this table did not hold ────────────
+        //
+        // Measured 2026-09-01 (T1035): 291 code-shaped literals live in
+        // `crates/**/src`, 85 of them absent here, and 68 of those got
+        // "Error code 'X' not found" from `verum explain`.  The diagnostic
+        // tells the user to look the code up and the lookup denies the code
+        // exists — the exact failure `explain`'s own test names, with a
+        // hand-written six-code list that missed every case below.
+        //
+        // `E0319` alone appears 77 times across 24 core/ files.
+        //
+        // They hid because the coverage gate matched SPELLINGS — four of
+        // them — and these arrive by others: a positional third argument
+        // (`Diagnostic::new_error(msg, span, "E0319")`), a `pub const`
+        // table, a `match` arm returning a tag, a `code:` field on an LSP
+        // diagnostic.  The gate now matches any `"[EW]nnn(n)"` literal, so
+        // the delivery route stopped mattering.
+        //
+        // Descriptions are taken from each code's OWN emission site — the
+        // message it formats, or the doc comment on the constant that
+        // names it — never from the band it happens to sit in.
+        //
+        // `numeric` is a SORT KEY and nothing else (`sorted_by_category`
+        // is its only reader), so these entries carry offset values —
+        // 2xxx/3xxx for warnings, 6xxxx for the two compile-time
+        // passthroughs — rather than colliding with the three-digit
+        // bands that already mean something.
+
+        // Lexer / parser, from verum_lsp's recovery diagnostics and
+        // verum_fast_parser's attribute validation.
+        ErrorCodeEntry { code: "E000",  numeric: 0,    category: ErrorCategory::Parse, description: "parse error (uncategorised fast-parser failure)" },
+        ErrorCodeEntry { code: "E0001", numeric: 1,    category: ErrorCategory::Parse, description: "expected function body or semicolon" },
+        ErrorCodeEntry { code: "E0002", numeric: 2,    category: ErrorCategory::Parse, description: "expected type definition body" },
+        ErrorCodeEntry { code: "E0003", numeric: 3,    category: ErrorCategory::Parse, description: "expected expression or statement" },
+        ErrorCodeEntry { code: "E0004", numeric: 4,    category: ErrorCategory::Parse, description: "expected parameter or ')'" },
+        ErrorCodeEntry { code: "E0010", numeric: 10,   category: ErrorCategory::Parse, description: "missing closing brace '}'" },
+        ErrorCodeEntry { code: "E0011", numeric: 11,   category: ErrorCategory::Parse, description: "missing closing parenthesis ')'" },
+        ErrorCodeEntry { code: "E0012", numeric: 12,   category: ErrorCategory::Parse, description: "missing closing bracket ']'" },
+        ErrorCodeEntry { code: "E0013", numeric: 13,   category: ErrorCategory::Parse, description: "unclosed delimiter" },
+        ErrorCodeEntry { code: "E0020", numeric: 20,   category: ErrorCategory::Parse, description: "missing semicolon" },
+        ErrorCodeEntry { code: "E0099", numeric: 99,   category: ErrorCategory::Parse, description: "syntax error near the reported token" },
+        ErrorCodeEntry { code: "E0410", numeric: 410,  category: ErrorCategory::Parse, description: "compile-time construct written without its `@` prefix" },
+
+        // Compile-time (meta) code raising its own diagnostic. The message
+        // is supplied by the macro, not by the compiler, so the code names
+        // the MECHANISM: there is nothing else it could describe.
+        ErrorCodeEntry { code: "E0000", numeric: 60000, category: ErrorCategory::Internal, description: "diagnostic raised by compile-time code (`@compile_error` builtin) — the message is the macro's own" },
+
+        // `?` operator, contexts, and the async-context pair, from the
+        // doc-commented constant tables in verum_diagnostics.
+        ErrorCodeEntry { code: "E0204", numeric: 204,  category: ErrorCategory::Type, description: "missing From implementation, or several conversion paths, for `?`" },
+        ErrorCodeEntry { code: "E0803", numeric: 803,  category: ErrorCategory::Context, description: "async context used from a sync function" },
+        ErrorCodeEntry { code: "E0804", numeric: 804,  category: ErrorCategory::Context, description: "async context method awaited wrongly, or not at all" },
+
+        // VBC codegen phase.
+        ErrorCodeEntry { code: "E0701", numeric: 701,  category: ErrorCategory::Internal, description: "VBC codegen error (uncategorised)" },
+        ErrorCodeEntry { code: "E0702", numeric: 702,  category: ErrorCategory::Context, description: "context method called outside its `using` scope" },
+
+        // Exhaustiveness, both the checker's and the LSP's.
+        ErrorCodeEntry { code: "E0601", numeric: 601,  category: ErrorCategory::Type, description: "non-exhaustive patterns: a value is not covered" },
+        ErrorCodeEntry { code: "E0604", numeric: 604,  category: ErrorCategory::Type, description: "invalid pattern for the scrutinee's type" },
+
+        // LANGUAGE LAWS. E430/E431/E432 are WARN by default and become
+        // errors under VERUM_LANGUAGE_LAWS=strict, so both spellings of
+        // the same rule reach a user.
+        ErrorCodeEntry { code: "E430",  numeric: 430,  category: ErrorCategory::NameResolution, description: "bare constructor resolves outside this file's mount horizon" },
+        ErrorCodeEntry { code: "E432",  numeric: 432,  category: ErrorCategory::NameResolution, description: "language law: name resolved by an ambient fallback, not by a binding" },
+
+        // Missing import, as classified by the LSP's quick-fix router.
+        ErrorCodeEntry { code: "E0412", numeric: 412,  category: ErrorCategory::NameResolution, description: "name is not imported into this file" },
+
+        // ── Warnings ──────────────────────────────────────────────────────────
+        //
+        // The table held no W code at all before this block, while the
+        // compiler printed at least forty. A warning is as unlookupable as
+        // an error when `verum explain` denies it exists.
+        ErrorCodeEntry { code: "W0000", numeric: 60001, category: ErrorCategory::Internal, description: "warning raised by compile-time code (`@compile_warning` builtin) — the message is the macro's own" },
+
+        // Module system (verum_modules::WarningKind).
+        ErrorCodeEntry { code: "W001",  numeric: 2001, category: ErrorCategory::Module, description: "a declaration shadows a prelude name" },
+        ErrorCodeEntry { code: "W002",  numeric: 2002, category: ErrorCategory::Module, description: "unused import" },
+        ErrorCodeEntry { code: "W003",  numeric: 2003, category: ErrorCategory::Module, description: "a glob import shadows an existing name" },
+        ErrorCodeEntry { code: "W004",  numeric: 2004, category: ErrorCategory::Module, description: "deprecated item used" },
+        ErrorCodeEntry { code: "W005",  numeric: 2005, category: ErrorCategory::Module, description: "`self` shadowed by a binding" },
+        ErrorCodeEntry { code: "W006",  numeric: 2006, category: ErrorCategory::Module, description: "two modules claim the same name" },
+
+        // General lints (verum_diagnostics::warning_codes).
+        ErrorCodeEntry { code: "W0042", numeric: 2042, category: ErrorCategory::Async, description: "async placeholder future generated — async resolution is incomplete" },
+        ErrorCodeEntry { code: "W0101", numeric: 2101, category: ErrorCategory::Lint, description: "unused variable" },
+        ErrorCodeEntry { code: "W0102", numeric: 2102, category: ErrorCategory::Lint, description: "unused import" },
+        ErrorCodeEntry { code: "W0103", numeric: 2103, category: ErrorCategory::Lint, description: "dead code" },
+        ErrorCodeEntry { code: "W0104", numeric: 2104, category: ErrorCategory::Lint, description: "unnecessary refinement" },
+        ErrorCodeEntry { code: "W0105", numeric: 2105, category: ErrorCategory::Lint, description: "false positive detected by an analysis" },
+
+        // Attribute validation (verum_fast_parser::attr_validation).
+        ErrorCodeEntry { code: "W0400", numeric: 2400, category: ErrorCategory::Parse, description: "attribute problem (uncategorised)" },
+        ErrorCodeEntry { code: "W0401", numeric: 2401, category: ErrorCategory::Parse, description: "attribute is not valid on this item" },
+        ErrorCodeEntry { code: "W0402", numeric: 2402, category: ErrorCategory::Parse, description: "unknown attribute" },
+        ErrorCodeEntry { code: "W0403", numeric: 2403, category: ErrorCategory::Parse, description: "attribute repeated on one item" },
+
+        // Refinement and select (verum_types::infer).
+        ErrorCodeEntry { code: "W0500", numeric: 2500, category: ErrorCategory::Verification, description: "refinement not verified against a compile-time value — the constraint is not enforced here" },
+        ErrorCodeEntry { code: "W0501", numeric: 2501, category: ErrorCategory::Async, description: "`select` may block forever: every arm is guarded and there is no `else`" },
+        ErrorCodeEntry { code: "W0701", numeric: 2701, category: ErrorCategory::Verification, description: "refinement could not be validated by the IDE's checker" },
+
+        // Exhaustiveness warnings.
+        ErrorCodeEntry { code: "W0601", numeric: 2601, category: ErrorCategory::Type, description: "non-exhaustive patterns among complex nested patterns" },
+        ErrorCodeEntry { code: "W0602", numeric: 2602, category: ErrorCategory::Type, description: "unreachable pattern" },
+        ErrorCodeEntry { code: "W0603", numeric: 2603, category: ErrorCategory::Type, description: "every arm is guarded — no arm runs if all guards are false" },
+        ErrorCodeEntry { code: "W0605", numeric: 2605, category: ErrorCategory::Type, description: "type-test pattern on a type already known concretely" },
+        ErrorCodeEntry { code: "W0606", numeric: 2606, category: ErrorCategory::Type, description: "range pattern overlaps another range" },
+        ErrorCodeEntry { code: "W0607", numeric: 2607, category: ErrorCategory::Type, description: "range pattern is a subset of another and never matches" },
+
+        // Intrinsic and stage lints (verum_compiler::lint).
+        ErrorCodeEntry { code: "W0505", numeric: 2505, category: ErrorCategory::Lint, description: "map lookup whose miss is not handled" },
+        ErrorCodeEntry { code: "W0900", numeric: 2900, category: ErrorCategory::Lint, description: "intrinsic called with the wrong argument count" },
+        ErrorCodeEntry { code: "W0901", numeric: 2901, category: ErrorCategory::Lint, description: "intrinsic named by an `@intrinsic` body is not in the registry" },
+        ErrorCodeEntry { code: "W0902", numeric: 2902, category: ErrorCategory::Lint, description: "deprecated intrinsic" },
+        ErrorCodeEntry { code: "W0903", numeric: 2903, category: ErrorCategory::Lint, description: "unstable intrinsic" },
+        ErrorCodeEntry { code: "W1000", numeric: 3000, category: ErrorCategory::Lint, description: "stage mismatch in a quote expression" },
+        ErrorCodeEntry { code: "W1001", numeric: 3001, category: ErrorCategory::Lint, description: "unused stage" },
+        ErrorCodeEntry { code: "W1002", numeric: 3002, category: ErrorCategory::Lint, description: "stage downgrade" },
+
+        // Stdlib bootstrap, per registration phase.
+        ErrorCodeEntry { code: "W0910", numeric: 2910, category: ErrorCategory::Internal, description: "type registration warning while baking the standard library" },
+        ErrorCodeEntry { code: "W0911", numeric: 2911, category: ErrorCategory::Internal, description: "function signature warning while baking the standard library" },
+        ErrorCodeEntry { code: "W0912", numeric: 2912, category: ErrorCategory::Internal, description: "protocol registration warning while baking the standard library" },
+        ErrorCodeEntry { code: "W0913", numeric: 2913, category: ErrorCategory::Internal, description: "impl-block registration warning while baking the standard library" },
+
+        // CBGR (verum_cbgr::diagnostics::codes).
+        ErrorCodeEntry { code: "W1003", numeric: 3003, category: ErrorCategory::Memory, description: "potential memory leak" },
+        ErrorCodeEntry { code: "W1009", numeric: 3009, category: ErrorCategory::Memory, description: "reference kept at Tier 0 — the checked/unsafe tiers were not proven" },
+
+        // SMT trigger diagnostics (verum_smt::translate::TriggerDiagnostic).
+        ErrorCodeEntry { code: "W502",  numeric: 2502, category: ErrorCategory::Verification, description: "quantifier trigger references none of the bound variables" },
+        ErrorCodeEntry { code: "W503",  numeric: 2503, category: ErrorCategory::Verification, description: "quantifier trigger omits some bound variables" },
+        ErrorCodeEntry { code: "W504",  numeric: 2504, category: ErrorCategory::Verification, description: "quantifier trigger head is an interpreted symbol" },
+
+        // Proof obligations (verum_compiler::pipeline::theorem_proofs).
+        ErrorCodeEntry { code: "E0319", numeric: 60319, category: ErrorCategory::Verification, description: "a written proof does not discharge its goals" },
+        ErrorCodeEntry { code: "W0319", numeric: 2319, category: ErrorCategory::Verification, description: "proof admitted with `admit` / `sorry` — the proposition is UNVERIFIED" },
+
+        // ── Codes `verum_diagnostics` explains and nothing emits ──────────────
+        //
+        // These seventeen ALREADY answer `verum explain` — they resolve
+        // through `verum_diagnostics/src/explanations.rs`, the rustc-style
+        // four-digit table this file's header records as a separate
+        // numbering.  They are registered here so ONE table answers "is
+        // this a code", which is what the coverage gate has to ask.
+        //
+        // The descriptions are the titles a user sees today.  Two of them
+        // cannot be checked against an emission, because NOTHING emits
+        // them: `E0304` and `E0305` exist only as declarations, and the
+        // three places that declare them disagree —
+        //
+        //     E0304   explanations.rs   "circular context dependency"
+        //             lib.rs            "context not available in this scope"
+        //             context_error.rs  (context band, unlabelled)
+        //     E0305   explanations.rs   "affine type used multiple times"
+        //             lib.rs            "duplicate context declaration"
+        //
+        // — so the meaning is asserted three times and decided by none.
+        // Recorded rather than resolved: picking one is a diagnostic
+        // decision, and the code has no behaviour to check it against.
+        ErrorCodeEntry { code: "E0101", numeric: 5101, category: ErrorCategory::Memory, description: "use-after-free detected" },
+        ErrorCodeEntry { code: "E0102", numeric: 5102, category: ErrorCategory::Memory, description: "double-free detected" },
+        ErrorCodeEntry { code: "E0103", numeric: 5103, category: ErrorCategory::Memory, description: "null-pointer dereference" },
+        ErrorCodeEntry { code: "E0201", numeric: 5201, category: ErrorCategory::Type, description: "type inference failed" },
+        ErrorCodeEntry { code: "E0202", numeric: 5202, category: ErrorCategory::Type, description: "method not found" },
+        ErrorCodeEntry { code: "E0301", numeric: 5301, category: ErrorCategory::Context, description: "context used but not declared" },
+        ErrorCodeEntry { code: "E0302", numeric: 5302, category: ErrorCategory::Context, description: "context dependency not declared" },
+        ErrorCodeEntry { code: "E0303", numeric: 5303, category: ErrorCategory::Context, description: "required context not provided" },
+        ErrorCodeEntry { code: "E0304", numeric: 5304, category: ErrorCategory::Context, description: "circular context dependency (declared three ways, emitted by nothing — see the note above)" },
+        ErrorCodeEntry { code: "E0305", numeric: 5305, category: ErrorCategory::Context, description: "affine type used more than once (declared two ways, emitted by nothing — see the note above)" },
+        ErrorCodeEntry { code: "E0306", numeric: 5306, category: ErrorCategory::Context, description: "capability violation — an undeclared capability was used" },
+        ErrorCodeEntry { code: "E0313", numeric: 5313, category: ErrorCategory::Verification, description: "integer overflow detected" },
+        ErrorCodeEntry { code: "E0314", numeric: 5314, category: ErrorCategory::Verification, description: "division by zero" },
+        ErrorCodeEntry { code: "E0315", numeric: 5315, category: ErrorCategory::Verification, description: "postcondition not satisfied" },
+        ErrorCodeEntry { code: "E0316", numeric: 5316, category: ErrorCategory::Verification, description: "resource already consumed" },
+        ErrorCodeEntry { code: "E0318", numeric: 5318, category: ErrorCategory::Verification, description: "precondition not established" },
+        ErrorCodeEntry { code: "E0501", numeric: 5501, category: ErrorCategory::Verification, description: "security violation detected" },
     ];
 
     let mut map = HashMap::with_capacity(entries.len());

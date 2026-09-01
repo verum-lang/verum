@@ -133,9 +133,89 @@ fn message_prefix_codes(source: &str) -> BTreeSet<String> {
     found
 }
 
+/// EVERY code-shaped literal, however it reaches a diagnostic.
+///
+/// The four spellings above key on HOW a code is written, and a gate
+/// keyed on spelling lags the next spelling.  It did: sixty-eight codes
+/// the compiler prints had no entry here, arriving by a fifth route
+/// (`Diagnostic::new_error(msg, span, "E0319")` — a positional third
+/// argument), a `pub const` table, a `match` arm returning a tag, and a
+/// `code:` field on an LSP diagnostic.  `E0319` alone appears 77 times
+/// across 24 `core/` files, and `verum explain E0319` answered "Error
+/// code not found" — the diagnostic telling the user to look a code up
+/// and the lookup denying it exists (T1035).
+///
+/// So this asks what the literal IS, not how it got there.  Nothing in
+/// the workspace spells `"E0319"` for a reason other than the code, so
+/// over-detection costs nothing; under-detection is what this whole
+/// file exists to prevent.
+///
+/// The remaining blind spot, stated so it is not mistaken for coverage:
+/// a code ASSEMBLED at run time (`format!("E{:04}", n)`, a lookup by
+/// index) is invisible to any literal scan.  There are none today.
+fn all_code_literals(source: &str) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    for line in source.lines() {
+        if line.trim_start().starts_with("//") {
+            continue;
+        }
+        let bytes = line.as_bytes();
+        let mut i = 0;
+        while let Some(off) = line[i..].find('"') {
+            let start = i + off + 1;
+            let Some(len) = line[start..].find('"') else {
+                break;
+            };
+            let lit = &line[start..start + len];
+            if is_error_code(lit) {
+                found.insert(lit.to_string());
+            }
+            i = start + len + 1;
+            if i >= bytes.len() {
+                break;
+            }
+        }
+    }
+    found
+}
+
+/// Inline `#[cfg(test)]` modules, blanked out.
+///
+/// The file walk skips `tests/` directories, but a sentinel written
+/// inside `mod tests` in `src/` is not an emission either — `explain`'s
+/// own test asserts that `E999` is in NO table, and a scan that counted
+/// it would demand the registry register a code whose whole purpose is
+/// to be absent.
+fn without_inline_tests(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut lines = source.lines().peekable();
+    while let Some(line) = lines.next() {
+        if line.trim_start().starts_with("#[cfg(test)]") {
+            let mut depth: i32 = 0;
+            let mut opened = false;
+            let mut cur = Some(line);
+            while let Some(l) = cur {
+                depth += l.matches('{').count() as i32;
+                depth -= l.matches('}').count() as i32;
+                if l.contains('{') {
+                    opened = true;
+                }
+                if opened && depth <= 0 {
+                    break;
+                }
+                cur = lines.next();
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 fn is_error_code(s: &str) -> bool {
     let mut chars = s.chars();
-    chars.next() == Some('E')
+    matches!(chars.next(), Some('E') | Some('W'))
         && s.len() >= 4
         && s.len() <= 5
         && chars.all(|c| c.is_ascii_digit())
@@ -188,8 +268,10 @@ fn every_emitted_code_is_registered() {
         let Ok(text) = std::fs::read_to_string(file) else {
             continue;
         };
+        let text = without_inline_tests(&text);
         let mut file_codes = codes_in(&text);
         file_codes.extend(message_prefix_codes(&text));
+        file_codes.extend(all_code_literals(&text));
         for code in file_codes {
             emitted.insert(code.clone());
             if !verum_error::registry::is_known(&code) {
@@ -275,11 +357,69 @@ fn registered_codes_that_nothing_emits_are_listed() {
 fn code_literal_recogniser_accepts_both_widths_and_rejects_neighbours() {
     assert!(is_error_code("E400"), "three-digit codes are the main scheme");
     assert!(is_error_code("E1001"), "four-digit lint codes are codes too");
-    assert!(!is_error_code("W1003"), "warning codes are a separate namespace");
+    // Warning codes WERE excluded here, and that exclusion was the reason
+    // the registry held no `W` entry at all while the compiler printed at
+    // least forty of them.  `verum explain W0319` answered "Error code not
+    // found" for a warning a user had just been shown; a warning nobody
+    // can look up is exactly as unhelpful as an error nobody can look up
+    // (T1035).
+    assert!(is_error_code("W1003"), "warnings reach a user and must be lookupable");
     assert!(!is_error_code("E40"), "too short to be a code");
     assert!(!is_error_code("E40000"), "too long to be a code");
     assert!(!is_error_code("Error"), "letters after E are not a code");
+    assert!(!is_error_code("X0319"), "only E and W name codes");
     assert!(!is_error_code(""), "the empty string is not a code");
+}
+
+/// The spelling-independent scan must SEE a code the four spellings miss,
+/// and must stay quiet on prose.
+///
+/// Without the first assertion this test would pass on a scanner that
+/// found nothing, which is what the four-spelling scanner did for
+/// sixty-eight codes.
+#[test]
+fn every_literal_is_found_however_the_code_reaches_the_diagnostic() {
+    let positional = all_code_literals(
+        r#"Diagnostic::new_error(message.to_string(), span, "E0319")"#,
+    );
+    assert!(
+        positional.contains("E0319"),
+        "a code passed as a positional argument is still a code: {positional:?}"
+    );
+    let constant = all_code_literals(r#"pub const W0319: &str = "W0319";"#);
+    assert!(
+        constant.contains("W0319"),
+        "a code declared as a constant is still a code: {constant:?}"
+    );
+    let arm = all_code_literals(r#"Self::NoBoundVarsReferenced => "W502","#);
+    assert!(
+        arm.contains("W502"),
+        "a code returned from a match arm is still a code: {arm:?}"
+    );
+    let prose = all_code_literals(r#"let msg = "cannot borrow `x` as mutable";"#);
+    assert!(prose.is_empty(), "ordinary strings are not codes: {prose:?}");
+    let commented = all_code_literals(r#"    // historical: "E0811" was retired"#);
+    assert!(
+        commented.is_empty(),
+        "a code named in a comment is not an emission: {commented:?}"
+    );
+}
+
+/// An inline `#[cfg(test)]` module is not an emission site.
+#[test]
+fn inline_test_modules_are_not_scanned() {
+    let src = "fn real() { let c = \"E400\"; }\n\
+               #[cfg(test)]\n\
+               mod tests {\n\
+               fn t() { let sentinel = \"E999\"; }\n\
+               }\n\
+               fn also_real() { let c = \"E401\"; }\n";
+    let kept = all_code_literals(&without_inline_tests(src));
+    assert!(kept.contains("E400") && kept.contains("E401"), "{kept:?}");
+    assert!(
+        !kept.contains("E999"),
+        "a sentinel inside `mod tests` must not demand a registry entry: {kept:?}"
+    );
 }
 
 #[test]
@@ -303,5 +443,146 @@ fn definition_sites_are_excluded_but_ordinary_files_are_not() {
     assert!(
         !is_definition_site(Path::new("/x/crates/verum_types/src/lib.rs")),
         "the type checker EMITS codes; excluding it would make the gate vacuous"
+    );
+}
+
+// ============================================================================
+// AGREEMENT, which is a different question from COVERAGE
+// ============================================================================
+//
+// Everything above asks "is this code in the table".  That question was
+// answered YES for seven codes whose description contradicted what the
+// compiler prints with them:
+//
+//     E402  table: "Send bound not satisfied"   printed: "module `X` not found"
+//     E401  table: "invalid cast"               printed: "cannot find X in module Y"
+//     E404  table: "missing protocol impl"      printed: "Ambiguous type… annotate"
+//     E403  table: "Sync bound not satisfied"   printed: "Infinite type: _ = X<_>"
+//     E407  table: "recursive type…"            printed: "takes 1 type arg, got 2"
+//     E310  table: "use after move"             printed: "cannot borrow as mutable"
+//     E102  table: "undefined function"         printed: "method expects 2 args"
+//
+// A green coverage gate over that is worse than no gate: its colour reads
+// as "the registry was checked", so nobody checks it.  `verum explain
+// E402` told users about thread-safety while their error was a missing
+// module (T1035).
+//
+// The pairs below are the compiler's OWN messages, taken from a sweep of
+// 372 core/ files (2195 diagnostics, 0 mute).  The check is deliberately
+// coarse — one shared word — because the alternative is pinning prose,
+// which drifts on every rewording.  A code whose description shares
+// NOTHING with its message is the failure this catches, and it catches
+// every one of the seven above.
+
+/// Words that appear in both prose and diagnostics without meaning anything.
+const STOPWORDS: &[&str] = &[
+    "type", "this", "that", "with", "from", "into", "here", "value", "used",
+    "also", "which", "cannot", "does", "have", "been", "must", "will", "there",
+];
+
+fn significant_words(s: &str) -> BTreeSet<String> {
+    s.to_ascii_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| w.len() >= 4 && !STOPWORDS.contains(w))
+        .map(|w| w.trim_end_matches('s').to_string())
+        .collect()
+}
+
+/// Two words agree when one is a prefix of the other and the shorter is
+/// at least five characters.
+///
+/// Plain set intersection was tried first and reported E405 as drifted:
+/// the table said "not implemented", the message says "does not
+/// implement", and nothing else was shared.  A checker that calls a
+/// correct description wrong teaches its readers to silence it — which
+/// is how the coverage gate beside this one came to be trusted while it
+/// was answering a different question.
+fn words_agree(a: &str, b: &str) -> bool {
+    let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    short.len() >= 5 && long.starts_with(short)
+}
+
+fn descriptions_agree(description: &str, message: &str) -> bool {
+    let d = significant_words(description);
+    let m = significant_words(message);
+    d.iter().any(|x| m.iter().any(|y| x == y || words_agree(x, y)))
+}
+
+/// (code, a message the compiler really prints with it).
+const MEASURED_PAIRS: &[(&str, &str)] = &[
+    ("E100", "unbound variable: ptr_write"),
+    ("E101", "type not found: Size"),
+    ("E102", "method `f` expects 2 argument(s), but 1 were provided"),
+    ("E103", "field 'kind' not found on type 'Finding'"),
+    ("E310", "cannot borrow `x` as mutable because it is already borrowed"),
+    ("E321", "potential stack overflow: unbounded recursion detected"),
+    ("E400", "Type mismatch: expected 'Unit', found 'DbError'"),
+    ("E401", "cannot find `Duration` in module `core.sys.io_engine`"),
+    ("E402", "module `core.redis` not found"),
+    ("E403", "Infinite type: _ = TrieNode<_>"),
+    ("E404", "Ambiguous type for `x`: the inferred type is not fully determined"),
+    ("E405", "type `T` does not implement `P`, required by this call's bound"),
+    ("E407", "type `X` takes 1 type argument(s), but 2 were supplied"),
+    ("E409", "Cannot dereference non-reference type: Process"),
+    ("E412", "not a function: Heap"),
+    ("E0319", "theorem 'T' proof failed verification: 1 unproved goal(s)"),
+    ("E0601", "non-exhaustive patterns: `X` not covered"),
+];
+
+#[test]
+fn a_registered_description_agrees_with_what_the_compiler_prints() {
+    let mut disagree = Vec::new();
+    let mut absent = Vec::new();
+    for (code, message) in MEASURED_PAIRS {
+        // "absent" is a THIRD outcome, kept apart from "disagrees": a code
+        // missing from the table is the coverage gate's finding, and
+        // folding it in here would report one defect as two.
+        let Some(entry) = verum_error::registry::lookup(code) else {
+            absent.push(*code);
+            continue;
+        };
+        if !descriptions_agree(entry.description, message) {
+            disagree.push(format!(
+                "  {code}\n    table:   {}\n    printed: {message}",
+                entry.description
+            ));
+        }
+    }
+    assert!(
+        absent.is_empty(),
+        "these codes have a measured message and no registry entry: {absent:?}"
+    );
+    assert!(
+        disagree.is_empty(),
+        "these registry descriptions share no word with the message the \
+         compiler prints under that code.\n`verum explain` would tell the \
+         user about something else entirely:\n\n{}",
+        disagree.join("\n")
+    );
+}
+
+/// The check must be able to come back POSITIVE.
+///
+/// Without this, `descriptions_agree` returning `true` unconditionally
+/// would look exactly like a consistent registry — and the coverage gate
+/// it sits beside failed in precisely that way for seven codes.
+#[test]
+fn the_agreement_check_rejects_a_description_that_means_something_else() {
+    assert!(
+        descriptions_agree("module not found", "module `core.redis` not found"),
+        "a description sharing its subject with the message must pass"
+    );
+    assert!(
+        !descriptions_agree("Send bound not satisfied", "module `core.redis` not found"),
+        "the real E402 drift must be REJECTED, or this check measures nothing"
+    );
+    assert!(
+        !descriptions_agree("invalid cast", "cannot find `D` in module `m`"),
+        "the real E401 drift must be REJECTED"
+    );
+    assert!(
+        !descriptions_agree("use after move", "cannot borrow `x` as mutable"),
+        "the real E310 drift must be REJECTED — 'cannot' is a stopword \
+         precisely so that pairs like this cannot pass on filler"
     );
 }

@@ -10,8 +10,17 @@ use verum_diagnostics::{get_explanation, list_error_codes, render_explanation, s
 
 /// Execute the explain command
 pub fn execute(code: &str, no_color: bool) -> Result<()> {
-    // Normalize error code (handle with or without 'E' prefix)
-    let normalized_code = if code.starts_with('E') || code.starts_with('e') {
+    // Normalize the code, handling it with or without its letter.
+    //
+    // `W` belongs here as much as `E` does. Until T1035 the registry held
+    // no warning at all, so this branch had nothing to look up and the
+    // omission was invisible; with warnings registered, `verum explain
+    // W0319` still failed — the bare-number arm turned it into "EW0319",
+    // a code no table can hold. A warning the compiler shows and the user
+    // cannot look up is exactly as unhelpful as an error they cannot look
+    // up, which is the whole reason this command exists.
+    let first = code.chars().next().map(|c| c.to_ascii_uppercase());
+    let normalized_code = if matches!(first, Some('E') | Some('W')) {
         code.to_uppercase()
     } else {
         format!("E{}", code)
@@ -261,6 +270,42 @@ mod tests {
                 "`verum explain {code}` failed, but the compiler can print {code}"
             );
         }
+    }
+
+    /// The cases the six-code list above did not reach.
+    ///
+    /// That list is hand-written, and being hand-written it missed every
+    /// code that was actually broken. `E0319` is printed 77 times across
+    /// 24 `core/` files and answered "not found"; no `W` code could be
+    /// looked up at all, because the registry held none AND the
+    /// normaliser above turned `W0319` into `EW0319` (T1035).
+    ///
+    /// Exhaustive coverage is enforced elsewhere — `verum_error`'s
+    /// `registry_covers_every_emitted_code` scans every code-shaped
+    /// literal in the workspace — so what these add is the END-TO-END
+    /// path: registry entry present AND reachable through this command.
+    #[test]
+    fn warnings_and_four_digit_codes_are_explainable_too() {
+        for code in ["E0319", "E0601", "E0000", "E430"] {
+            assert!(
+                execute(code, true).is_ok(),
+                "`verum explain {code}` failed, but the compiler prints {code}"
+            );
+        }
+        for code in ["W0319", "W0500", "W0601", "W1003", "W502", "W001"] {
+            assert!(
+                execute(code, true).is_ok(),
+                "`verum explain {code}` failed — a warning a user was just \
+                 shown must be lookupable"
+            );
+        }
+    }
+
+    /// Lower case reaches the same entry, for both letters.
+    #[test]
+    fn the_letter_is_case_insensitive_for_warnings_as_well_as_errors() {
+        assert!(execute("e400", true).is_ok());
+        assert!(execute("w0319", true).is_ok());
     }
 
     /// And a code that exists in NEITHER table is still an error — the
