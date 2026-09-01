@@ -3909,21 +3909,27 @@ impl TypeChecker {
             let mut methods = verum_common::Map::new();
             for m in protocol_desc.required_methods.iter() {
                 // Build function type from method signature
+                // Use the descriptor parser, as the sibling builder at
+                // ~2121 already does (`let to_type = |s| ->
+                // parse_descriptor_type_string(s)`). The "simplified for
+                // now" version this replaces wrapped the rendered text in
+                // `Type::Named { args: EMPTY }`, which discarded BOTH the
+                // reference qualifiers and every type argument.
+                //
+                // Measured (T1033): `core/async/future.vr` declares
+                // `fn poll(&mut self, cx: &mut Context)`, the metadata
+                // file carries `&mut Context` 253 times, the parser has
+                // arms for all three reference tiers — and the protocol
+                // side still arrived as bare `Context`, because this path
+                // never asked the parser. Two producers of one role, one
+                // of them correct.
                 let params: verum_common::List<Type> = m
                     .params
                     .iter()
-                    .map(|p| {
-                        // Parse type name - simplified for now
-                        Type::Named {
-                            path: Self::text_to_path(&p.ty),
-                            args: verum_common::List::new(),
-                        }
-                    })
+                    .map(|p| crate::infer::helpers::parse_descriptor_type_string(p.ty.as_str()))
                     .collect();
-                let return_type = Type::Named {
-                    path: Self::text_to_path(&m.return_type.clone()),
-                    args: verum_common::List::new(),
-                };
+                let return_type =
+                    crate::infer::helpers::parse_descriptor_type_string(m.return_type.as_str());
                 let method_type = Type::function(params, return_type);
 
                 let protocol_method = ProtocolMethod::simple(
@@ -3934,20 +3940,21 @@ impl TypeChecker {
                 methods.insert(m.name.clone(), protocol_method);
             }
 
-            // Add default methods
+            // Add default methods — same parser as the required loop
+            // above and as the sibling builder at ~2121. This copy of the
+            // "simplified" conversion discarded references and type
+            // arguments exactly like the other one; fixing only the
+            // required loop left half the protocols still wrong, which is
+            // how the measurement went from 2 disagreements to 1 instead
+            // of to 0.
             for m in protocol_desc.default_methods.iter() {
                 let params: verum_common::List<Type> = m
                     .params
                     .iter()
-                    .map(|p| Type::Named {
-                        path: Self::text_to_path(&p.ty),
-                        args: verum_common::List::new(),
-                    })
+                    .map(|p| crate::infer::helpers::parse_descriptor_type_string(p.ty.as_str()))
                     .collect();
-                let return_type = Type::Named {
-                    path: Self::text_to_path(&m.return_type.clone()),
-                    args: verum_common::List::new(),
-                };
+                let return_type =
+                    crate::infer::helpers::parse_descriptor_type_string(m.return_type.as_str());
                 let method_type = Type::function(params, return_type);
 
                 let protocol_method = ProtocolMethod::simple(
