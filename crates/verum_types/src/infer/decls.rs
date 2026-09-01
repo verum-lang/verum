@@ -5277,13 +5277,45 @@ impl TypeChecker {
                             if let verum_ast::ty::TypeKind::Path(path) = &ty.kind {
                                 if let Some(ident) = path.as_ident() {
                                     let name = ident.name.as_str();
-                                    // Type parameters are conventionally uppercase single letters or short names
+                                    // A leftover impl PARAMETER is not a type
+                                    // (T1040).
+                                    //
+                                    // The guard used to be
+                                    // `lookup_type(name).is_none()` — "is
+                                    // this name free?" — and the answer for
+                                    // `T` is no, because every impl block
+                                    // registered before this one defined its
+                                    // own `T` into the same global type
+                                    // namespace, and nothing takes it back
+                                    // out. After the first stdlib
+                                    // `implement<T> …` is registered, `T`
+                                    // looks occupied to every later impl, so
+                                    // this extraction never ran for it.
+                                    //
+                                    // The effect is that the same file
+                                    // compiles or does not depending on the
+                                    // LETTER the author chose:
+                                    //
+                                    //     implement Bag<T>   E404, `List<_>`
+                                    //     implement Bag<Wq>  clean
+                                    //
+                                    // — identical otherwise. A parameter
+                                    // registration is a bare `Type::Var`; a
+                                    // real type declaration never is. Asking
+                                    // that distinguishes "occupied by a type"
+                                    // from "occupied by someone else's
+                                    // parameter", which is the question this
+                                    // guard meant to ask.
+                                    let occupied_by_a_real_type = !matches!(
+                                        self.ctx.lookup_type(name),
+                                        None | Some(Type::Var(_))
+                                    );
                                     if name
                                         .chars()
                                         .next()
                                         .map(|c| c.is_uppercase())
                                         .unwrap_or(false)
-                                        && self.ctx.lookup_type(name).is_none()
+                                        && !occupied_by_a_real_type
                                     {
                                         let type_var = Type::Var(TypeVar::fresh());
                                         let name_text: Text = name.into();

@@ -625,6 +625,25 @@ jobs:
           scripts/ci/check_path_does_not_change_verdict.sh --selftest ./target/release/verum
           scripts/ci/check_path_does_not_change_verdict.sh ./target/release/verum
 
+      # T1040, third on the same axis: one file, one verdict — across
+      # runs (above), across locations (above), and here across the NAME
+      # of a type parameter. `implement Bag<T>` binds T by extracting it
+      # from the target type, and the guard asked "is this name free?"
+      # rather than "is it occupied by a TYPE" — so every letter some
+      # earlier impl had registered stopped working, while an unusual one
+      # kept working. Measured: `implement Bag<T>` 2 errors,
+      # `implement Bag<Wq>` 0, the files identical but for the letter.
+      #
+      # A unit test was tried twice and could not reach it: a bare
+      # TypeChecker has no `List`, and with a hand-rolled container the
+      # bound parameter is a fresh type variable that unifies with
+      # anything. The first attempt asserted an ABSENCE and passed on
+      # broken code.
+      - name: Type-parameter name does not change the verdict
+        run: |
+          scripts/ci/check_type_parameter_letter_is_irrelevant.sh --selftest ./target/release/verum
+          scripts/ci/check_type_parameter_letter_is_irrelevant.sh ./target/release/verum
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:
