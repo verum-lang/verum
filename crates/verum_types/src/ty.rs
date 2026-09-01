@@ -545,6 +545,35 @@ impl PathConstructor {
         }
     }
 }
+/// A skolemised rank-2 binder: a rigid constant standing for a
+/// universally quantified parameter while the quantifier is being
+/// checked. A value that works for EVERY instantiation still unifies
+/// against it; a value that needs the parameter to be one PARTICULAR
+/// type cannot, which is exactly the promise a rank-2 field makes.
+///
+/// The constant has to live somewhere in [`Type`], and it is encoded as
+/// a [`Type::Named`] carrying a reserved name. Producer and reader sit
+/// here TOGETHER on purpose: the one consumer that needed to recognise
+/// it — the field-mismatch diagnostic — had no way to ask, so it showed
+/// the user the raw constant (`?skolem$TypeVar(3853)`), which names
+/// nothing in their program (T1038). A consumer matching the spelling
+/// by hand would also go stale the moment the spelling changed.
+pub mod skolem {
+    /// Reserved prefix. Not writable in Verum source (`?` cannot start
+    /// an identifier), so it cannot collide with a user type.
+    const PREFIX: &str = "?forall-bound#";
+
+    /// The only producer of a skolem's name.
+    pub fn name(var_id: usize) -> String {
+        format!("{PREFIX}{var_id}")
+    }
+
+    /// The only reader: is this RENDERED type a skolem constant?
+    pub fn is_rendered(rendered: &str) -> bool {
+        rendered.starts_with(PREFIX)
+    }
+}
+
 
 // =============================================================================
 // END DEPENDENT TYPES INFRASTRUCTURE

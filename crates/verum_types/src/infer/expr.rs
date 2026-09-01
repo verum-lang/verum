@@ -1791,13 +1791,31 @@ impl TypeChecker {
             Err(TypeError::Mismatch {
                 expected, actual, ..
             }) if self.diagnostics.len() == diag_len_before => {
-                let msg = format!(
-                    "Type mismatch in field '{}' of '{}': expected '{}', found '{}'",
-                    field_init.name.name.as_str(),
-                    type_name,
-                    expected,
-                    actual
-                );
+                // T1038: a rank-2 field is checked by SKOLEMISING its
+                // binder — the expected type is then a rigid constant that
+                // names nothing in the author's program. Printing it
+                // (`expected '?forall-bound#3853'`) taught them nothing and
+                // read like a compiler bug. Say what the field promises
+                // instead; the constant is an implementation detail of the
+                // check, not a type the author can write.
+                let msg = if crate::ty::skolem::is_rendered(expected.as_str()) {
+                    format!(
+                        "Type mismatch in field '{}' of '{}': the field's type is \
+                         universally quantified, so a value stored here must work \
+                         for EVERY instantiation of it — this one is fixed to '{}'",
+                        field_init.name.name.as_str(),
+                        type_name,
+                        actual
+                    )
+                } else {
+                    format!(
+                        "Type mismatch in field '{}' of '{}': expected '{}', found '{}'",
+                        field_init.name.name.as_str(),
+                        type_name,
+                        expected,
+                        actual
+                    )
+                };
                 let diag =
                     Diagnostic::new_error(msg, span_to_line_col(value_expr.span), "E400");
                 self.diagnostics.push(diag);

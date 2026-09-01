@@ -4388,7 +4388,7 @@ impl Unifier {
             (ty, Forall { vars, body }) => {
                 let mut skolemize = Substitution::new();
                 for v in vars.iter() {
-                    let skolem_name = format!("?skolem${:?}", TypeVar::fresh());
+                    let skolem_name = crate::ty::skolem::name(TypeVar::fresh().id());
                     skolemize.insert(
                         *v,
                         Type::Named {
