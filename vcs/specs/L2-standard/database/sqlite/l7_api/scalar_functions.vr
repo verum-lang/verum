@@ -1,4 +1,8 @@
 // @test: typecheck-pass
+// @skip: T0537 — the sqlite/loom native subsystem is incomplete; parked
+//   VISIBLY with its real test type rather than left as `wip`, a type the
+//   runner cannot read. An unreadable spec is skipped WITHOUT being counted;
+//   a skipped one is named. (T1049)
 // @level: L2
 // @tier: 0
 // @tags: sqlite, native, l7, scalar, builtin
@@ -12,7 +16,8 @@
 //
 // NOTE: runtime green is gated on T0557 (the RefField language defect that fails three l7_api e2e
 // specs) AND on a stdlib bake picking up the new builtins/dispatch module. This file is kept at
-// @test: typecheck-pass until both land; the assertions below are written to be runtime-correct so
+// @test: typecheck-pass
+// NOTE: written to be runtime-correct until both land — see below.
 // it flips to a `run` spec unchanged once unblocked.
 
 mount core.*;

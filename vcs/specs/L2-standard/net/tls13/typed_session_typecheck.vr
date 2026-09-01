@@ -1,4 +1,8 @@
-// @test: integration
+// @test: typecheck-pass
+// @skip: T1051 — three typed-session transitions return `Unit` where the
+//   state type is expected. Parked VISIBLY with its real test type rather
+//   than left as `integration`, a type the runner cannot read: an
+//   unreadable spec is skipped without being counted. (T1049)
 // @tier: 0
 // @level: L2
 // @tags: tls13, session, typed-state, phase-2

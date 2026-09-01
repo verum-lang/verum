@@ -1,5 +1,9 @@
-// @test: wip
-// @tier: 0 | 3
+// @test: run
+// @skip: T0537 — the sqlite/loom native subsystem is incomplete; parked
+//   VISIBLY with its real test type rather than left as `wip`, a type the
+//   runner cannot read. An unreadable spec is skipped WITHOUT being counted;
+//   a skipped one is named. (T1049)
+// @tier: 0, 3
 // @level: L2
 // @tags: sqlite, native, sql, parser, ast
 // @timeout: 3000
