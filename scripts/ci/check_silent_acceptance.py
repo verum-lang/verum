@@ -268,12 +268,29 @@ public fn main() {
 # in the commit message.
 BASELINE = {
     "protocol-signature-mismatch",
+}
+
+# Rows whose stated expectation has TWO satisfying arms — "refuse, OR
+# resolve" — and whose second arm lives at run time.
+#
+# `short-mount-passes-check` is the one: its expectation reads "refuse,
+# or resolve, a mount path it cannot bind — not accept and panic at run
+# time". `probe()` runs only `check` and `verify`, so it could see the
+# first arm and never the second, and reported the row SILENT for a
+# program that compiles AND runs correctly. Measured 2026-09-01 on a
+# binary carrying T1010's repair (e0052cf26): five runs, exit 0, "ok"
+# printed each time.
+#
+# Counting a clean compile as "silently accepted" is right for every
+# other row here, because every other row describes a program that must
+# NOT be accepted. This one describes a mount that must WORK.
+RESOLVED_IF_IT_RUNS = {
     "short-mount-passes-check",
 }
 
 
-def probe(verum: str, src: str, work: Path) -> str:
-    """One of "diagnosed", "silent", "mute".
+def probe(verum: str, src: str, work: Path, name: str = "") -> str:
+    """One of "diagnosed", "resolved", "silent", "mute".
 
     MUTE is a THIRD outcome and exists because of a measured failure, not
     a hypothesis: with the volume full, `verum check` stopped printing
@@ -309,7 +326,27 @@ def probe(verum: str, src: str, work: Path) -> str:
         # diagnostic.
         if "failed" in blob and "0 failed" not in blob:
             return "diagnosed"
-    return "silent" if alive else "mute"
+    if not alive:
+        return "mute"
+    # The second arm, for the rows that have one: a clean compile is the
+    # right answer when the program is supposed to WORK, and only running
+    # it can tell.
+    if name in RESOLVED_IF_IT_RUNS:
+        try:
+            r = subprocess.run(
+                [verum, "run", str(probe_file)],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return "silent"
+        blob = r.stdout + r.stderr
+        if not any(k in blob for k in ("Running", "ok", "error", "panic")):
+            return "mute"
+        if r.returncode == 0 and "panic" not in blob:
+            return "resolved"
+    return "silent"
 
 
 def main() -> int:
@@ -319,13 +356,16 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         for name, task, src, expectation in CASES:
-            verdict = probe(verum, src, work)
+            verdict = probe(verum, src, work, name)
             if verdict == "mute":
                 mute.append(name)
                 print(f"  {name:28s} MUTE — the tool printed nothing  ({task})")
             elif verdict == "diagnosed":
                 spoke.append(name)
                 print(f"  {name:28s} diagnosed          ({task})")
+            elif verdict == "resolved":
+                spoke.append(name)
+                print(f"  {name:28s} resolved at run    ({task})")
             else:
                 silent.append(name)
                 print(f"  {name:28s} SILENTLY ACCEPTED  ({task}) — must {expectation}")
