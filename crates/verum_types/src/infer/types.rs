@@ -8208,8 +8208,34 @@ fn substitute_refinement_binder(
         // may already have resolved C to a concrete type (e.g., CloneableWrapper).
         let resolved_base = self.unifier.apply(base_ty);
 
-        // If base type still has unresolved variables, try to resolve via bounds
-        if self.has_unresolved_vars(&resolved_base) {
+        // If the base's HEAD is unresolved, try to resolve via bounds.
+        //
+        // The guard used to be `has_unresolved_vars(&resolved_base)` — does
+        // the base contain any open variable ANYWHERE — and that is a
+        // different question from the one that decides whether an impl can
+        // be selected (T0741).  `ListIter<τ>` contains an open variable and
+        // names its constructor outright: `implement<T> Iterator for
+        // ListIter<T> { type Item = T; }` matches it structurally and
+        // yields `Item = τ` whatever τ turns out to be.  Under the old
+        // guard that base took the bare-variable path, fell past the
+        // `if let`, and hit the blanket `return None` below without ever
+        // consulting the impl.
+        //
+        // What followed is the E404 class this task owns.  The projection
+        // stayed unreduced as `Item<ListIter<τ>>`, unification then bound
+        // τ to it, and the type grew on every use —
+        // `SetIter<Item<SetIter<Item<SetIter<_>>>>>` — until it was
+        // reported as "not fully determined by this function", blaming the
+        // author for a missing annotation.  Ten lines reproduce it, and the
+        // control is the same shape with a LOCAL impl, which was always
+        // clean:
+        //
+        //     self.items.iter().all(|v| other.holds(v))
+        //     error<E403>: Infinite type: _ = Item<ListIter<_>>
+        //
+        // A bare `Type::Var` still defers, and for the reason the comment
+        // below gives: with no head there is no impl to select.
+        if self.head_is_unresolved(&resolved_base) {
             // CRITICAL FIX: For bounded type variables (e.g., T: Iterator),
             // look up the associated type from the protocol bounds.
             // This enables T.Item resolution when T: Iterator.

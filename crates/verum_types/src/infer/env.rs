@@ -4325,6 +4325,29 @@ impl TypeChecker {
         }
     }
 
+    /// Is the type's HEAD unresolved — as distinct from the type merely
+    /// CONTAINING an unresolved variable?
+    ///
+    /// The two questions look alike and decide different things.
+    /// `ListIter<τ>` contains an open variable, and it also names its
+    /// constructor, so an impl written `implement<T> Iterator for
+    /// ListIter<T>` selects against it and reduces `Item` to τ whatever τ
+    /// becomes.  A bare `τ` names nothing, so no impl can be selected and
+    /// a projection over it has to stay deferred.
+    ///
+    /// Associated-type projection asked the first question and acted on
+    /// the second, giving up on every generic container (T0741).
+    pub(super) fn head_is_unresolved(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Var(_) => true,
+            // A type application whose CONSTRUCTOR is still open: `F<Int>`
+            // where `F` is a variable. The arguments say nothing about
+            // which impl applies.
+            Type::TypeApp { constructor, .. } => self.head_is_unresolved(constructor),
+            _ => false,
+        }
+    }
+
     /// Check if a type contains unresolved type variables
     pub(super) fn has_unresolved_vars(&self, ty: &Type) -> bool {
         match ty {
