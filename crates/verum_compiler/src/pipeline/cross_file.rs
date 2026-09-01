@@ -1372,7 +1372,7 @@ impl<'s> CompilationPipeline<'s> {
         // consumption site, because the consumption site only runs when
         // SMT does, and `verum check` would stay silent.
         {
-            let mut report = |attrs: &verum_common::List<verum_ast::attr::Attribute>,
+            let report = |attrs: &verum_common::List<verum_ast::attr::Attribute>,
                               span: verum_ast::Span,
                               owner: &str| {
                 for bad in verum_smt::verify_strategy::unrecognised_verify_arguments(attrs) {

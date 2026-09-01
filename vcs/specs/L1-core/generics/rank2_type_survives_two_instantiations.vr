@@ -1,9 +1,17 @@
 // @test: typecheck-pass
 // @tier: 0
-// @level: L3
+// @level: L1
 // @tags: rank2, generics, archive, T0997
 // @timeout: 60000
 // @description: Two DIFFERENT instantiations of a rank-2 method in one file each get their own quantified variable
+//
+// LEVEL. Filed under L3-extended because "rank-2" and "dependent types"
+// sound experimental. The DEFECT is not: a second call site silently
+// inherited the first one's element type, so a program got the wrong
+// type and the mismatch was reported at the wrong place. That is
+// "type system, inference" — L1-core — and it matters because only
+// L0 and L1 gate a merge. A pin for a soundness hole that does not
+// gate is a pin that records the fix rather than protecting it.
 
 // A rank-2 function type — `fn<R>(Reducer<B, R>) -> Reducer<A, R>` —
 // promises that R is chosen by the CALLEE, for every R. Two call sites
