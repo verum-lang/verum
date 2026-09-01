@@ -4,6 +4,7 @@
 // @tags: protocols, conformance, soundness
 // @timeout: 30000
 // @expected-error: E405
+// @expected-error: E405
 // @expected-error-count: 2
 // @description: An `implement P for T` block must provide every method P
 //   requires, and the diagnostic must name the ones it does not.

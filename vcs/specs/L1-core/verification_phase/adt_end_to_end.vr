@@ -1,4 +1,4 @@
-// @test: integration
+// @test: verify-pass
 // @tier: 0
 // @level: L1
 // @tags: verify, variant, adt, match, disjointness, exhaustiveness

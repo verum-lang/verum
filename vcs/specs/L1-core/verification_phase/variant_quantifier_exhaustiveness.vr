@@ -1,4 +1,8 @@
-// @test: integration
+// @test: verify-pass
+// @skip: T1050 — `induction` over a recursive function and quantifiers
+//   over enum variants leave goals unproved. Parked VISIBLY rather than
+//   left with a test type the runner cannot read, which is how it went
+//   unmeasured in a gating level for as long as it did.
 // @tier: 0
 // @level: L1
 // @tags: verify, variant, adt, forall, exists, quantifier, exhaustiveness

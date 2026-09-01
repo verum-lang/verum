@@ -1,4 +1,4 @@
-// @test: unit
+// @test: typecheck-fail
 // @tier: 0
 // @level: L1
 // @tags: types, diagnostics, totality, T0563

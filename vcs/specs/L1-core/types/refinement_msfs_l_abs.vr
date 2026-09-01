@@ -14,7 +14,7 @@
 // Per VVA §4.4: `dp(predicate) < dp(Int) + 1` ⇒ K-Refine accepts.
 // =============================================================================
 //
-// @test:check
+// @test: typecheck-pass
 // @level: L1
 // @tags: types, refinement, msfs, k-refine
 // @expect: pass

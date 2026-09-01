@@ -4,6 +4,8 @@
 // @tags: generics, soundness, parametricity
 // @timeout: 30000
 // @expected-error: E400
+// @expected-error: E400
+// @expected-error: E400
 // @expected-error-count: 3
 // @description: A function's type parameters are RIGID inside its own body.
 //

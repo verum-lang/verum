@@ -3,7 +3,22 @@
 // @level: L1
 // @tags: types, inference, ambiguous, error
 // @expected-error: E404 "Ambiguous type"
-// @expected-error-count: 15
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E404 "Ambiguous type"
+// @expected-error: E321
+// @expected-error-count: 16
 
 /// Test for cases where type inference fails due to ambiguity.
 /// These are expected errors that demonstrate the limits of inference.

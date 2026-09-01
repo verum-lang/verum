@@ -1,4 +1,4 @@
-// @test: integration
+// @test: verify-pass
 // @tier: 0
 // @level: L1
 // @tags: verify, user-function, bool, reflection, quantifier, exists

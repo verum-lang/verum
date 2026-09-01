@@ -4,6 +4,7 @@
 // @tags: generics, protocols, soundness, where-clause
 // @timeout: 30000
 // @expected-error: E405
+// @expected-error: E405
 // @expected-error-count: 2
 // @description: `where T: P` constrains exactly as much as `<T: P>`.
 //

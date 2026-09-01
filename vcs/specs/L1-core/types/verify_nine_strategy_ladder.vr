@@ -9,7 +9,7 @@
 // `allows_runtime_fallback` / `is_stricter_than`.
 // =============================================================================
 //
-// @test:check
+// @test: typecheck-pass
 // @level: L1
 // @tags: types, verify, ladder, vva-2-3
 // @expect: pass
