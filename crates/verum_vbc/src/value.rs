@@ -1213,6 +1213,35 @@ impl Value {
             // Reconstruct original NaN
             f64::from_bits(self.0 & PAYLOAD_MASK | 0x7FF8_0000_0000_0000)
         } else {
+            // T1048. An INTEGER reaching here is a caller's mistake — but
+            // the behaviour it used to get was strictly worse than the
+            // mistake: `debug_assert!` is compiled OUT in release, so a
+            // debug build ABORTED while a release build read the integer's
+            // NaN-box through `f64::from_bits` and returned a quiet NaN.
+            // The two builds disagreed about the VALUE, and the release
+            // one lied.
+            //
+            // Widening an integer is the answer every caller wanted
+            // anyway: every site measured was a float method reading an
+            // ARGUMENT (`min`, `max`, `clamp`, `pow`), where an Int
+            // argument means 2, not NaN. `try_as_f64` remains the strict
+            // question for callers that need one.
+            if self.is_int() {
+                return self.as_i64() as f64;
+            }
+            // Neither float nor integer is a genuine type confusion — a
+            // pointer or a boolean read as a number — and that still trips
+            // in debug. `VERUM_TRACE_ASF64=1` names the caller without
+            // aborting, because 221 call sites cannot be audited by
+            // reading.
+            if std::env::var("VERUM_TRACE_ASF64").is_ok() {
+                eprintln!(
+                    "[as_f64] non-numeric tag={:?} raw=0x{:016x}\n{}",
+                    self.tag(),
+                    self.0,
+                    std::backtrace::Backtrace::force_capture()
+                );
+            }
             debug_assert!(self.is_float(), "Expected float, got {:?}", self.tag());
             f64::from_bits(self.0)
         }
