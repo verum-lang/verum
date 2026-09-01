@@ -24279,6 +24279,120 @@ fn lower_cbgr_extended<'ctx>(
             // whole-value replacement `*r = v` through a retained slot
             // pointer routes via the DerefMut opcode path, same
             // trade the 0x0B arm documents.
+            // BODY-FACT-RET-ADDR-1 (T1056): the ONE position where the
+            // address is the right answer and is not a dangling stack
+            // slot — the RefField result is RETURNED, and the enclosing
+            // function is declared to return a reference.
+            //
+            // The load below is correct for value consumers and for
+            // record-typed fields, and returning the address
+            // unconditionally was tried and reverted
+            // (REFFIELD-SCALAR-ADDR-1: `d.as_nanos()` handed back a
+            // stack address, dp AOT 53 -> 9).  The argument side already
+            // has its narrow compensation (BODY-FACT-ARG-SPILL); the
+            // RETURN side had none, so `fn get(&self) -> &Int {
+            // &self.inner.v }` handed the caller the VALUE and the
+            // caller's `*r` dereferenced it — faulting at exactly the
+            // stored number (0x2a for 42).  Every `*guard` in the
+            // language goes through this: `MutexGuard.data()` is
+            // `&self.mutex.data`, so `m.lock().unwrap()` SIGSEGVed under
+            // AOT while the interpreter printed the value.
+            //
+            // The fact is read from THIS function's own body — the same
+            // trick the argument spill uses on the callee's — so the
+            // address leaves only where a reference was promised.
+            // THE DESCRIPTOR CANNOT BE ASKED. Measured with
+            // VERUM_TRACE_REFFIELD on the repro:
+            //
+            //   fn="Holder.get" ret=Some("Concrete(TypeId(2))")
+            //
+            // for `fn get(&self) -> &Int` — the `&` is ERASED in the
+            // descriptor's return type, exactly as the argument spill's
+            // own comment says of parameters ("Archive descriptors erase
+            // `&T` params to bare types, so the callee BODY is the
+            // carried fact"). The same is true of returns, and asking
+            // `return_type` here answered `false` on every one of 125
+            // RefField sites in the probe.
+            //
+            // The BODY carries the fact instead, and unambiguously: a
+            // `RefField` result that reaches `Ret` with no intervening
+            // `Deref` IS a returned reference — `RefField` is what the
+            // compiler emits for `&expr`, and a by-value return of
+            // `&self.x` would have to deref first.
+            let returns_this_slot = {
+                {
+                    ctx.vbc_module()
+                        .and_then(|vbc| {
+                            ctx.func_name_index()
+                                .and_then(|ix| ix.find_by_name(ctx.function_name().as_str()))
+                                .and_then(|entry| vbc.functions.get(entry.index))
+                                .and_then(|fd| fd.instructions.as_ref())
+                        })
+                        .map(|instrs| {
+                            // Registers aliasing `dst` through Mov, in
+                            // program order.  A `Ret` of any of them
+                            // means this slot address is what leaves.
+                            let mut alias: std::collections::HashSet<u16> =
+                                std::collections::HashSet::new();
+                            alias.insert(dst);
+                            for ins in instrs.iter() {
+                                match ins {
+                                    verum_vbc::Instruction::Mov { dst: d, src }
+                                        if alias.contains(&src.0) =>
+                                    {
+                                        alias.insert(d.0);
+                                    }
+                                    // A write that is NOT a Mov from an
+                                    // alias kills the alias: the
+                                    // register now holds something else.
+                                    verum_vbc::Instruction::Mov { dst: d, .. } => {
+                                        alias.remove(&d.0);
+                                    }
+                                    // A Deref of an alias means the
+                                    // VALUE is what leaves, not the
+                                    // slot — the load below is right.
+                                    verum_vbc::Instruction::Deref { ref_reg, .. }
+                                        if alias.contains(&ref_reg.0) =>
+                                    {
+                                        return false;
+                                    }
+                                    verum_vbc::Instruction::Ret { value } => {
+                                        if alias.contains(&value.0) {
+                                            return true;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            false
+                        })
+                        .unwrap_or(false)
+                }
+            };
+            if std::env::var("VERUM_TRACE_REFFIELD").is_ok() {
+                let fd_found = ctx.vbc_module().and_then(|vbc| {
+                    ctx.func_name_index()
+                        .and_then(|ix| ix.find_by_name(ctx.function_name().as_str()))
+                        .and_then(|entry| vbc.functions.get(entry.index))
+                });
+                eprintln!(
+                    "[reffield] fn={:?} dst={} descriptor={} ret={:?} instrs={:?} verdict={}",
+                    ctx.function_name().as_str(),
+                    dst,
+                    fd_found.is_some(),
+                    fd_found.map(|fd| format!("{:?}", fd.return_type)),
+                    fd_found.map(|fd| fd.instructions.as_ref().map(|i| i.len())),
+                    returns_this_slot
+                );
+            }
+            if returns_this_slot {
+                let addr = ctx
+                    .builder()
+                    .build_ptr_to_int(field_ptr, i64_type, "refield_slot_addr")
+                    .or_llvm_err()?;
+                ctx.set_register(dst, addr.into());
+                return Ok(());
+            }
             let loaded = ctx
                 .builder()
                 .build_load(i64_type, field_ptr, "refield_loaded")

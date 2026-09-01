@@ -1,0 +1,60 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, references, tier-identity
+// @timeout: 20000
+// @expected-exit: 0
+// @description: taking the ADDRESS of a field reached THROUGH a reference field, and RETURNING it (T1056)
+
+// Pre-fix this program printed 42 under the interpreter and SIGSEGVed
+// under AOT at address 0x2a — the stored value used as a pointer.
+//
+// The AOT lowering of RefField (CbgrExtended 0x0C) deliberately returns
+// the field's VALUE rather than its address: the interpreter's slot
+// pointers auto-deref through runtime tracking that AOT does not have,
+// and returning the address unconditionally was tried and reverted
+// because it broke every value consumer.
+//
+// The compensation for deref consumers covered ARGUMENTS and RECEIVERS
+// (BODY-FACT-ARG-SPILL) and not RETURNS, so a function handing back
+// `&self.inner.v` returned the number and the caller's `*r`
+// dereferenced it.
+//
+// Every `*guard` in the language goes through this shape:
+//   core/sync/mutex.vr — MutexGuard<T> is { mutex: &Mutex<T> }
+//                        fn data(&self) -> &T { &self.mutex.data }
+// so `m.lock().unwrap()` trapped under AOT while the interpreter was
+// green.
+
+mount core.prelude.*;
+
+public type Inner is { v: Int };
+
+public type Holder is { inner: &Inner };
+
+implement Holder {
+    // The shape under test: address of a field, reached through a
+    // reference-typed field, RETURNED across the call boundary.
+    public fn get(&self) -> &Int { &self.inner.v }
+}
+
+fn main() -> Int {
+    let i: Inner = Inner { v: 42 };
+    let h: Holder = Holder { inner: &i };
+
+    // The deref consumer. Pre-fix this dereferenced the number 42.
+    let r = h.get();
+    assert_eq(*r, 42);
+
+    // A second value, so a fixed-address accident cannot pass.
+    let j: Inner = Inner { v: 7 };
+    let g: Holder = Holder { inner: &j };
+    assert_eq(*g.get(), 7);
+
+    // The value path must still work — it is what the returned-address
+    // rule must NOT capture.
+    assert_eq(h.inner.v, 42);
+
+    print("ref-field-through-ref: ok");
+    0
+}
