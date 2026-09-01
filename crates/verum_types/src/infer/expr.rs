@@ -2910,6 +2910,31 @@ impl TypeChecker {
         if matches!(ty, Type::Var(_) | Type::Unknown | Type::Never) {
             return;
         }
+        // A SIZED numeric alias (`UInt64`, `Int32`, `USize`, `Float32`, …)
+        // is a `Type::Named`, not `Type::Int` — and the runtime orders it
+        // natively, so it needs no `Ord` implementation.
+        //
+        // MEASURED, and it is why this arm exists: the first version of
+        // this check fired 140 times over 200 core/ files and EVERY ONE
+        // was one of these. A ten-run probe on `UInt64 < UInt64` gives the
+        // right answer ten times out of ten. So the warning was reporting
+        // the CHECKER's gap as the author's mistake — the exact failure
+        // this file's sibling check (`unambiguous_signature_disagreement`,
+        // T1029) was written to avoid, committed here anyway (T1017/T1046).
+        //
+        // Asked of `IntegerKind::from_name`, the authority that already
+        // decides what an integer alias is, rather than a second list.
+        if let Type::Named { path, .. } = ty {
+            let name = self.path_to_string(path);
+            if crate::integer_hierarchy::IntegerKind::from_name(name.as_str()).is_some()
+                || matches!(
+                    name.as_str(),
+                    "Float32" | "Float64" | "Byte" | "Int" | "Float" | "Char" | "Text"
+                )
+            {
+                return;
+            }
+        }
         let has_order = {
             let pc = self.protocol_checker.read();
             pc.implements_protocol(ty, "Ord") || pc.implements_protocol(ty, "PartialOrd")
