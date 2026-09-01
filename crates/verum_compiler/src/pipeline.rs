@@ -84,6 +84,20 @@ mod cbgr;
 mod coherence;
 mod compile_orchestration;
 mod cross_file;
+mod derive_inject;
+
+/// Test-only door onto the derive injection: the pass itself runs inside
+/// `phase_parse`, where a test cannot reach it without building a whole
+/// session. Returns `(type, protocol)` for each derive it could not
+/// honour.
+pub fn inject_derived_impls_for_test(
+    module: &mut verum_ast::Module,
+) -> Vec<(String, String)> {
+    derive_inject::inject_derived_impls(module)
+        .into_iter()
+        .map(|u| (u.type_name, u.protocol))
+        .collect()
+}
 mod dispatch;
 mod gpu_detect;
 mod impl_axioms;

@@ -1420,6 +1420,30 @@ impl<'s> CompilationPipeline<'s> {
             crate::pipeline::inject_implicit_prelude_mount(&mut module);
         }
 
+        // T1018: `@derive(...)` becomes real `implement` blocks here, so
+        // everything downstream sees an ordinary implementation. Until
+        // now the attribute was parsed, accepted as known, and applied by
+        // nobody — the dispatcher that would apply it has zero callers,
+        // and the subtree below it produces a DESCRIPTION of a body that
+        // nothing turns into code.
+        for u in crate::pipeline::derive_inject::inject_derived_impls(&mut module) {
+            self.session.emit_diagnostic(
+                DiagnosticBuilder::warning()
+                    .code("W0507")
+                    .message(format!(
+                        "`@derive({})` on `{}` was not applied — {}\n  \
+                         help: write `implement {} for {}` by hand; the \
+                         attribute is accepted but generates nothing here",
+                        u.protocol, u.type_name, u.reason, u.protocol, u.type_name
+                    ))
+                    .span(crate::phases::ast_span_to_diagnostic_span(
+                        u.span,
+                        Some(self.session),
+                    ))
+                    .build(),
+            );
+        }
+
         let parse_time = start.elapsed();
         debug!(
             "Parsed module with {} items ({} filtered by @cfg) in {:.2}ms",
