@@ -545,6 +545,25 @@ impl<'ctx> Translator<'ctx> {
     /// The set is `variant_registry`, which the engine already fills
     /// for quantifier exhaustiveness — a second copy would be one more
     /// thing to keep in step.
+    /// Report a qualified path that could not be resolved to a variant
+    /// sort and is about to become an `Int` constant.
+    ///
+    /// The same name at two sorts in one Z3 context is what Z3 calls an
+    /// "ambiguous constant reference", and it is invisible in the
+    /// verdict — the goal is simply decided against constants carrying
+    /// none of the type's facts.  Set `VERUM_TRACE_PATHSORT` to see
+    /// which translator did it; the backtrace names the caller, which
+    /// is the whole question when several translators share a context.
+    fn trace_path_sort_fallback(key: &str) {
+        if std::env::var("VERUM_TRACE_PATHSORT").is_ok() {
+            eprintln!(
+                "[pathsort] `{}` has no variant sort -> Int\n{}",
+                key,
+                std::backtrace::Backtrace::force_capture()
+            );
+        }
+    }
+
     fn variant_path_sort(&self, segments: &[String]) -> Option<z3::Sort> {
         let head = segments.first()?;
         if segments.len() < 2 || !self.variant_registry.borrow().contains_key(head) {
@@ -652,7 +671,7 @@ impl<'ctx> Translator<'ctx> {
     pub fn build_variant_exhaustiveness(
         &self,
         ty: &verum_ast::ty::Type,
-        var_name: &str,
+        bound_var: &Dynamic,
     ) -> Option<Bool> {
         let type_name = match &ty.kind {
             verum_ast::ty::TypeKind::Path(p) => p.as_ident()?.name.as_str().to_string(),
@@ -664,14 +683,29 @@ impl<'ctx> Translator<'ctx> {
         }
 
         // Build x == path_T.A || x == path_T.B || ...
-        // The bound-variable symbol is keyed by its name; each
-        // constructor uses the `path_T.C` canonical key.
-        let x_const = Int::new_const(var_name);
+        //
+        // EVERY constant here carries the type's own sort.  Built at
+        // `Int` — as this was, for both the variable and the
+        // constructors — the disjunction constrains a DIFFERENT `x`
+        // than the quantifier binds, so the constraint was correct,
+        // injected in the right place, and about the wrong object.
+        //
+        // It also put `path_Color.Red` into the context at two sorts
+        // at once, the variant one from `translate_expr` and the `Int`
+        // one from here.  Z3's own words for the result:
+        //
+        //     ambiguous constant reference, more than one constant
+        //     with the same sort … to disambiguate path_Color.Red
+        //
+        // The bound variable arrives as the `Dynamic` the caller
+        // actually quantifies over, so there is no second chance to
+        // disagree about its sort (T1050).
+        let sort = Self::sort_from_name(&crate::solver_symbols::opaque_sort(&type_name));
         let mut equalities: Vec<Bool> = Vec::with_capacity(ctors.len());
         for ctor in &ctors {
             let ctor_key = format!("path_{}.{}", type_name, ctor);
-            let ctor_const = Int::new_const(ctor_key.as_str());
-            equalities.push(x_const.eq(&ctor_const));
+            let ctor_const = z3::ast::Dynamic::new_const(ctor_key.as_str(), &sort);
+            equalities.push(bound_var.eq(&ctor_const));
         }
         let refs: Vec<&Bool> = equalities.iter().collect();
         Some(Bool::or(&refs))
@@ -1198,6 +1232,7 @@ impl<'ctx> Translator<'ctx> {
                     if let Some(sort) = self.variant_path_sort(&segs) {
                         return Ok(z3::ast::Dynamic::new_const(key.as_str(), &sort));
                     }
+                    Self::trace_path_sort_fallback(key.as_str());
                     let int_var = Int::new_const(key.as_str());
                     Ok(Dynamic::from_ast(&int_var))
                 }
@@ -1329,6 +1364,7 @@ impl<'ctx> Translator<'ctx> {
                             if let Some(sort) = self.variant_path_sort(&segs) {
                                 return Ok(z3::ast::Dynamic::new_const(key.as_str(), &sort));
                             }
+                            Self::trace_path_sort_fallback(key.as_str());
                             let int_var = Int::new_const(key.as_str());
                             return Ok(Dynamic::from_ast(&int_var));
                         }
@@ -3236,7 +3272,7 @@ impl<'ctx> Translator<'ctx> {
         // `forall x. (x == T.A || x == T.B || ... ) → P(x)`. Same
         // contract the top-level parameter-exhaustiveness pass
         // provides for theorem-level parameters.
-        if let Some(exhaust) = inner_translator.build_variant_exhaustiveness(&ty, &var_name) {
+        if let Some(exhaust) = inner_translator.build_variant_exhaustiveness(&ty, &bound_var) {
             body_bool = exhaust.implies(&body_bool);
         }
 
@@ -3244,33 +3280,26 @@ impl<'ctx> Translator<'ctx> {
         let patterns = self.generate_quantifier_patterns(&bound_var, body)?;
 
         // Create the Z3 forall quantifier based on variable type
-        match (bound_var.as_int(), bound_var.as_bool(), bound_var.as_real()) {
-            (Some(_), _, _) => {
-                let int_const = Int::new_const(var_name.as_str());
-                let pattern_refs: Vec<&Z3Pattern> = patterns.iter().collect();
-                let forall = forall_const(&[&int_const as &dyn Ast], &pattern_refs, &body_bool);
-                Ok(Dynamic::from_ast(&forall))
-            }
-            (_, Some(_), _) => {
-                let bool_const = Bool::new_const(var_name.as_str());
-                let pattern_refs: Vec<&Z3Pattern> = patterns.iter().collect();
-                let forall = forall_const(&[&bool_const as &dyn Ast], &pattern_refs, &body_bool);
-                Ok(Dynamic::from_ast(&forall))
-            }
-            (_, _, Some(_)) => {
-                let real_const = Real::new_const(var_name.as_str());
-                let pattern_refs: Vec<&Z3Pattern> = patterns.iter().collect();
-                let forall = forall_const(&[&real_const as &dyn Ast], &pattern_refs, &body_bool);
-                Ok(Dynamic::from_ast(&forall))
-            }
-            _ => {
-                // Default to Int for unknown types
-                let int_const = Int::new_const(var_name.as_str());
-                let pattern_refs: Vec<&Z3Pattern> = patterns.iter().collect();
-                let forall = forall_const(&[&int_const as &dyn Ast], &pattern_refs, &body_bool);
-                Ok(Dynamic::from_ast(&forall))
-            }
-        }
+        // Quantify over the constant the BODY was translated against.
+        // `bound_var` already carries the DECLARED sort, including an
+        // opaque one like `Verum!Color` — which `as_int`, `as_bool`
+        // and `as_real` all answer None for, so every non-primitive
+        // type fell to the `_` arm and was re-created as an `Int`.
+        //
+        // The quantifier then bound a DIFFERENT constant from the one
+        // the body mentions: `forall c: Color. P(c)` emitted
+        // `(forall ((c Int)) …)` around a body still referring to a
+        // free `c : Verum!Color`.  The exhaustiveness constraint was
+        // injected correctly and landed on the wrong variable.
+        //
+        // Int/Bool/Real only ever worked because the re-created
+        // constant happened to be identical to this one — same name,
+        // same sort, same Z3 AST.  Using `bound_var` directly is that
+        // coincidence made into the rule, and it is correct for every
+        // sort rather than for three of them.
+        let pattern_refs: Vec<&Z3Pattern> = patterns.iter().collect();
+        let forall = forall_const(&[&bound_var as &dyn Ast], &pattern_refs, &body_bool);
+        Ok(Dynamic::from_ast(&forall))
     }
 
     /// Translate a single forall binding with an already-translated body.
@@ -3321,28 +3350,25 @@ impl<'ctx> Translator<'ctx> {
         }
 
         // Create the Z3 forall quantifier
-        match (bound_var.as_int(), bound_var.as_bool(), bound_var.as_real()) {
-            (Some(_), _, _) => {
-                let int_const = Int::new_const(var_name.as_str());
-                let forall = forall_const(&[&int_const as &dyn Ast], &[], &body_bool);
-                Ok(Dynamic::from_ast(&forall))
-            }
-            (_, Some(_), _) => {
-                let bool_const = Bool::new_const(var_name.as_str());
-                let forall = forall_const(&[&bool_const as &dyn Ast], &[], &body_bool);
-                Ok(Dynamic::from_ast(&forall))
-            }
-            (_, _, Some(_)) => {
-                let real_const = Real::new_const(var_name.as_str());
-                let forall = forall_const(&[&real_const as &dyn Ast], &[], &body_bool);
-                Ok(Dynamic::from_ast(&forall))
-            }
-            _ => {
-                let int_const = Int::new_const(var_name.as_str());
-                let forall = forall_const(&[&int_const as &dyn Ast], &[], &body_bool);
-                Ok(Dynamic::from_ast(&forall))
-            }
-        }
+        // Quantify over the constant the BODY was translated against.
+        // `bound_var` already carries the DECLARED sort, including an
+        // opaque one like `Verum!Color` — which `as_int`, `as_bool`
+        // and `as_real` all answer None for, so every non-primitive
+        // type fell to the `_` arm and was re-created as an `Int`.
+        //
+        // The quantifier then bound a DIFFERENT constant from the one
+        // the body mentions: `forall c: Color. P(c)` emitted
+        // `(forall ((c Int)) …)` around a body still referring to a
+        // free `c : Verum!Color`.  The exhaustiveness constraint was
+        // injected correctly and landed on the wrong variable.
+        //
+        // Int/Bool/Real only ever worked because the re-created
+        // constant happened to be identical to this one — same name,
+        // same sort, same Z3 AST.  Using `bound_var` directly is that
+        // coincidence made into the rule, and it is correct for every
+        // sort rather than for three of them.
+        let forall = forall_const(&[&bound_var as &dyn Ast], &[], &body_bool);
+        Ok(Dynamic::from_ast(&forall))
     }
 
     /// Translate an existential quantifier (exists) to Z3.
@@ -3518,7 +3544,7 @@ impl<'ctx> Translator<'ctx> {
         // mirrors the forall transformation with AND instead of
         // implication, which matches the existential semantics
         // (we're asserting *some* inhabitant satisfies P).
-        if let Some(exhaust) = inner_translator.build_variant_exhaustiveness(&ty, &var_name) {
+        if let Some(exhaust) = inner_translator.build_variant_exhaustiveness(&ty, &bound_var) {
             body_bool = Bool::and(&[&exhaust, &body_bool]);
         }
 
@@ -3526,33 +3552,26 @@ impl<'ctx> Translator<'ctx> {
         let patterns = self.generate_quantifier_patterns(&bound_var, body)?;
 
         // Create the Z3 exists quantifier based on variable type
-        match (bound_var.as_int(), bound_var.as_bool(), bound_var.as_real()) {
-            (Some(_), _, _) => {
-                let int_const = Int::new_const(var_name.as_str());
-                let pattern_refs: Vec<&Z3Pattern> = patterns.iter().collect();
-                let exists = exists_const(&[&int_const as &dyn Ast], &pattern_refs, &body_bool);
-                Ok(Dynamic::from_ast(&exists))
-            }
-            (_, Some(_), _) => {
-                let bool_const = Bool::new_const(var_name.as_str());
-                let pattern_refs: Vec<&Z3Pattern> = patterns.iter().collect();
-                let exists = exists_const(&[&bool_const as &dyn Ast], &pattern_refs, &body_bool);
-                Ok(Dynamic::from_ast(&exists))
-            }
-            (_, _, Some(_)) => {
-                let real_const = Real::new_const(var_name.as_str());
-                let pattern_refs: Vec<&Z3Pattern> = patterns.iter().collect();
-                let exists = exists_const(&[&real_const as &dyn Ast], &pattern_refs, &body_bool);
-                Ok(Dynamic::from_ast(&exists))
-            }
-            _ => {
-                // Default to Int for unknown types
-                let int_const = Int::new_const(var_name.as_str());
-                let pattern_refs: Vec<&Z3Pattern> = patterns.iter().collect();
-                let exists = exists_const(&[&int_const as &dyn Ast], &pattern_refs, &body_bool);
-                Ok(Dynamic::from_ast(&exists))
-            }
-        }
+        // Quantify over the constant the BODY was translated against.
+        // `bound_var` already carries the DECLARED sort, including an
+        // opaque one like `Verum!Color` — which `as_int`, `as_bool`
+        // and `as_real` all answer None for, so every non-primitive
+        // type fell to the `_` arm and was re-created as an `Int`.
+        //
+        // The quantifier then bound a DIFFERENT constant from the one
+        // the body mentions: `forall c: Color. P(c)` emitted
+        // `(forall ((c Int)) …)` around a body still referring to a
+        // free `c : Verum!Color`.  The exhaustiveness constraint was
+        // injected correctly and landed on the wrong variable.
+        //
+        // Int/Bool/Real only ever worked because the re-created
+        // constant happened to be identical to this one — same name,
+        // same sort, same Z3 AST.  Using `bound_var` directly is that
+        // coincidence made into the rule, and it is correct for every
+        // sort rather than for three of them.
+        let pattern_refs: Vec<&Z3Pattern> = patterns.iter().collect();
+        let exists = exists_const(&[&bound_var as &dyn Ast], &pattern_refs, &body_bool);
+        Ok(Dynamic::from_ast(&exists))
     }
 
     /// Translate a single exists binding with an already-translated body.
@@ -3594,28 +3613,25 @@ impl<'ctx> Translator<'ctx> {
             }
         }
 
-        match (bound_var.as_int(), bound_var.as_bool(), bound_var.as_real()) {
-            (Some(_), _, _) => {
-                let int_const = Int::new_const(var_name.as_str());
-                let exists = exists_const(&[&int_const as &dyn Ast], &[], &body_bool);
-                Ok(Dynamic::from_ast(&exists))
-            }
-            (_, Some(_), _) => {
-                let bool_const = Bool::new_const(var_name.as_str());
-                let exists = exists_const(&[&bool_const as &dyn Ast], &[], &body_bool);
-                Ok(Dynamic::from_ast(&exists))
-            }
-            (_, _, Some(_)) => {
-                let real_const = Real::new_const(var_name.as_str());
-                let exists = exists_const(&[&real_const as &dyn Ast], &[], &body_bool);
-                Ok(Dynamic::from_ast(&exists))
-            }
-            _ => {
-                let int_const = Int::new_const(var_name.as_str());
-                let exists = exists_const(&[&int_const as &dyn Ast], &[], &body_bool);
-                Ok(Dynamic::from_ast(&exists))
-            }
-        }
+        // Quantify over the constant the BODY was translated against.
+        // `bound_var` already carries the DECLARED sort, including an
+        // opaque one like `Verum!Color` — which `as_int`, `as_bool`
+        // and `as_real` all answer None for, so every non-primitive
+        // type fell to the `_` arm and was re-created as an `Int`.
+        //
+        // The quantifier then bound a DIFFERENT constant from the one
+        // the body mentions: `forall c: Color. P(c)` emitted
+        // `(forall ((c Int)) …)` around a body still referring to a
+        // free `c : Verum!Color`.  The exhaustiveness constraint was
+        // injected correctly and landed on the wrong variable.
+        //
+        // Int/Bool/Real only ever worked because the re-created
+        // constant happened to be identical to this one — same name,
+        // same sort, same Z3 AST.  Using `bound_var` directly is that
+        // coincidence made into the rule, and it is correct for every
+        // sort rather than for three of them.
+        let exists = exists_const(&[&bound_var as &dyn Ast], &[], &body_bool);
+        Ok(Dynamic::from_ast(&exists))
     }
 
     /// Extract the variable name from a quantifier pattern.
@@ -5229,6 +5245,7 @@ impl<'ctx> Translator<'ctx> {
                     if let Some(sort) = self.variant_path_sort(&segs) {
                         return Ok(z3::ast::Dynamic::new_const(path_str.as_str(), &sort));
                     }
+                    Self::trace_path_sort_fallback(path_str.as_str());
                     let int_var = Int::new_const(path_str.as_str());
                     Ok(Dynamic::from_ast(&int_var))
                 }

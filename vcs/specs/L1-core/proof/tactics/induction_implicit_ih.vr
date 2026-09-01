@@ -1,8 +1,4 @@
 // @test: verify-pass
-// @skip: T1050 — `induction` over a recursive function and quantifiers
-//   over enum variants leave goals unproved. Parked VISIBLY rather than
-//   left with a test type the runner cannot read, which is how it went
-//   unmeasured in a gating level for as long as it did.
 // @tier: 0
 // @level: L1
 // @tags: proof, induction, IH, admit, have, soundness
@@ -18,7 +14,18 @@
 // is still rejected — otherwise anyone could smuggle `false` in and
 // derive anything.
 
-fn sum_to(n: Int) -> Int;
+// `sum_to` must have a BODY.  Declared without one it is an
+// uninterpreted function: nothing constrains it, `sum_to(n) >= 0` does
+// not follow from anything, and the verifier is right to refuse — which
+// says nothing about the `have ih` admission this spec is here to
+// check.  With the definition, the claim is a real theorem whose proof
+// genuinely needs the induction hypothesis (T1050).
+pure fn sum_to(n: Int) -> Int
+    requires n >= 0
+    decreases n
+{
+    if n <= 0 { 0 } else { n + sum_to(n - 1) }
+}
 
 @verify(formal)
 theorem gauss_style_induction(n: Int)

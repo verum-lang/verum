@@ -1513,6 +1513,16 @@ pub fn verify_proof_body_with_aliases_and_graph(
                 if sort == "Bool" {
                     engine.register_bool_hypothesis(name.name.clone());
                 }
+                // Likewise for integers, and for the same reason: an
+                // `Int` parameter has no constructors, so `induction n`
+                // could not infer a type for it and the tactic failed
+                // outright.  The sort is the property that matters —
+                // every type translating to SMT `Int` inducts the same
+                // way — so this is keyed on the sort, not on a list of
+                // type spellings.
+                if sort == "Int" {
+                    engine.register_integer_variable(name.name.clone());
+                }
             }
         }
     }
@@ -2435,10 +2445,15 @@ fn build_suggestions_from_pv_error(err: &ProofVerificationError) -> List<Text> {
                 "A subgoal remained after tactic execution — try adding explicit proof steps",
             ));
         }
-        ProofVerificationError::MethodFailed { method, .. } => {
+        ProofVerificationError::MethodFailed { method, reason } => {
+            // The reason is the whole answer here: it distinguishes "your
+            // induction variable is wrong" from "induction over this type
+            // is not implemented".  Every sibling arm renders its reason;
+            // this one used to drop it with `..` and replace it with advice
+            // that named a cause the author had no way to act on.
             suggestions.push(Text::from(format!(
-                "Proof method '{}' failed — verify the induction variable or case split is correct",
-                method
+                "Proof method '{}' failed: {}",
+                method, reason
             )));
         }
         ProofVerificationError::IncompleteCases {

@@ -2424,6 +2424,20 @@ pub struct ProofSearchEngine {
     /// holds zero hardcoded knowledge of which variables are Bool —
     /// the truth comes from registration, never from name matching.
     bool_typed_hypotheses: std::collections::HashSet<Text>,
+
+    /// Variables whose declared type is an integer sort, and which may
+    /// therefore be inducted on arithmetically.
+    ///
+    /// Structural induction needs a variant type with constructors; an
+    /// `Int` has neither, so `infer_variable_type` correctly refuses it
+    /// and — before this registry existed — the whole tactic failed.
+    /// Peano induction is the principle that applies, and the proof text
+    /// already writes it (`case 0` / `case succ(k)`).
+    ///
+    /// Same architectural shape as `bool_typed_hypotheses` and
+    /// `variant_map`: the truth arrives by registration from the
+    /// declared parameter type, never from matching the variable's name.
+    integer_induction_vars: std::collections::HashSet<Text>,
 }
 
 /// Record of an incomplete proof (accepted via Sorry tactic)
@@ -2458,6 +2472,7 @@ impl ProofSearchEngine {
             variant_map: std::collections::HashMap::new(),
             variant_recursive_args: std::collections::HashMap::new(),
             bool_typed_hypotheses: std::collections::HashSet::new(),
+            integer_induction_vars: std::collections::HashSet::new(),
         }
     }
 
@@ -2481,6 +2496,7 @@ impl ProofSearchEngine {
             variant_map: std::collections::HashMap::new(),
             variant_recursive_args: std::collections::HashMap::new(),
             bool_typed_hypotheses: std::collections::HashSet::new(),
+            integer_induction_vars: std::collections::HashSet::new(),
         }
     }
 
@@ -2652,6 +2668,19 @@ impl ProofSearchEngine {
     /// silently broke every Bool case-split.
     pub fn register_bool_hypothesis(&mut self, name: Text) {
         self.bool_typed_hypotheses.insert(name);
+    }
+
+    /// Mark a variable as integer-sorted so `induction n` on it runs the
+    /// arithmetic (Peano) principle rather than looking for constructors.
+    /// Idempotent.
+    ///
+    /// This registry is read by `try_induction` alone.  It deliberately
+    /// does not touch the solver context: pushing parameter sorts into
+    /// the context at large was measured to make the corpus WORSE
+    /// (23/68 specs -> 21/68), which is a separate question from
+    /// unlocking a tactic that otherwise cannot run at all.
+    pub fn register_integer_variable(&mut self, name: Text) {
+        self.integer_induction_vars.insert(name);
     }
 
     /// Read-only access to the variant registry.
@@ -2852,6 +2881,86 @@ impl ProofSearchEngine {
         }
     }
 
+    /// Give a freshly created `Translator` everything this engine
+    /// knows about the module: callee signatures, record and tuple
+    /// layouts, value types and sorts, and the variant registry.
+    ///
+    /// ONE carrier, because a translator that misses any of it does
+    /// not fail — it silently picks the `Int` default for whatever it
+    /// could not resolve, and then the same name exists at two sorts
+    /// in one Z3 context.  Z3's own words for the result:
+    ///
+    /// ```text
+    /// ambiguous constant reference, more than one constant with the
+    /// same sort … to disambiguate path_Color.Red
+    /// ```
+    ///
+    /// This block used to exist at exactly one of the three sites that
+    /// build a translator here; `apply_decision_procedure` and
+    /// `sat_decide` created bare ones.  So `exists c: Color.
+    /// c == Color.Red` emitted the variant-sorted family from the
+    /// configured translator and an Int-sorted family from the bare
+    /// one, and the goal was decided against constants that carried
+    /// none of the type's facts (T1050).
+    fn configure_translator(&self, translator: &Translator<'_>) {
+
+        // Populate callee signatures from the reflection registry so
+        // the translator's UF-fallback emits Bool/Real-returning
+        // `FuncDecl`s where appropriate (instead of defaulting every
+        // call to `Int` and conflicting with the registry's SMT-LIB
+        // declaration block).
+        for rf in self.reflection_registry.iter() {
+            let param_sorts: Vec<String> = rf
+                .parameter_sorts
+                .iter()
+                .map(|s| s.as_str().to_string())
+                .collect();
+            translator.register_callee_signature(
+                rf.name.as_str(),
+                param_sorts,
+                rf.return_sort.as_str().to_string(),
+            );
+        }
+        // Also register signatures for body-less / extern / unreflected
+        // module functions (populated by the caller via
+        // `register_callee_signature`). These won't have defining
+        // axioms — they stay opaque — but the UF sort signature is
+        // correct, so `exists p: Nat. is_prime(p)` can at least
+        // translate without the "not boolean" failure.
+        for (name, (ps, r)) in &self.callee_signatures {
+            let param_sorts: Vec<String> = ps.iter().map(|s| s.as_str().to_string()).collect();
+            translator.register_callee_signature(
+                name.as_str(),
+                param_sorts,
+                r.as_str().to_string(),
+            );
+        }
+
+        // Record layouts and value types: without them a field
+        // access has no sort and every field became an Int constant,
+        // so a Bool field could not even be stated as a goal.
+        for (type_name, fields) in &self.record_layouts {
+            translator.register_record_type(type_name.as_str(), fields.clone());
+        }
+        for (type_name, positions) in &self.positional_layouts {
+            translator.register_positional_type(type_name.as_str(), positions.clone());
+        }
+        for (value, type_name) in &self.value_type_bindings {
+            translator.register_value_type(value.as_str(), type_name.as_str());
+        }
+        for (value, sort_name) in &self.value_sort_bindings {
+            translator.register_value_sort(value.as_str(), sort_name.as_str());
+        }
+
+        // Push the variant registry into the translator so
+        // quantifier-bound variables typed as variants get the
+        // exhaustiveness constraint automatically applied.
+        for (type_name, ctors) in &self.variant_map {
+            let ctor_names: Vec<String> = ctors.iter().map(|c| c.as_str().to_string()).collect();
+            translator.register_variant_type(type_name.as_str(), ctor_names);
+        }
+    }
+
     /// Apply decision procedure
     fn apply_decision_procedure(
         &mut self,
@@ -2860,6 +2969,7 @@ impl ProofSearchEngine {
         proc: &DecisionProcedure,
     ) -> VerificationResult {
         let translator = Translator::new(context);
+        self.configure_translator(&translator);
 
         // Translate goal to Z3
         let z3_goal = translator.translate_expr(goal)?;
@@ -3807,10 +3917,18 @@ impl ProofSearchEngine {
         var: &Text,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        // Determine the type of the induction variable
-        // For now, we'll use a heuristic: look for the variable in the goal expression
-        // In a full implementation, this would query the type context
-        let var_type = self.infer_variable_type(var, goal)?;
+        // Determine the type of the induction variable.  Structural
+        // induction needs a variant type; when none is observable, an
+        // integer-sorted variable still has an induction principle.
+        let var_type = match self.infer_variable_type(var, goal) {
+            Ok(t) => t,
+            Err(e) => {
+                if self.integer_induction_vars.contains(var) {
+                    return Ok(Self::integer_induction_subgoals(var, goal));
+                }
+                return Err(e);
+            }
+        };
 
         // Get constructors for this type
         let constructors = self.get_type_constructors(&var_type)?;
@@ -3884,6 +4002,90 @@ impl ProofSearchEngine {
     /// is observable in the goal — the caller is expected to either
     /// register the type via `register_variant_type` or provide an
     /// explicit type annotation. No silent fallback.
+    /// Peano induction subgoals for an integer-sorted variable.
+    ///
+    /// The theorem under proof is `H(n) => P(n)`, and splitting it keeps
+    /// the precondition inside the induction:
+    ///
+    /// ```text
+    ///   base:  H(0)                          |-  P(0)
+    ///   step:  k >= 0,  H(k+1),  H(k) => P(k) |-  P(k+1)
+    /// ```
+    ///
+    /// The step assumes the IMPLICATION `H(k) => P(k)`, not `H(k)` on its
+    /// own.  Admitting `H(k)` unconditionally would hand a precondition
+    /// like `n >= 5` to the base case, where it does not hold — the base
+    /// case would then be provable from a false assumption and the whole
+    /// principle would be unsound.
+    ///
+    /// The two subgoals line up one-for-one with the `case 0` and
+    /// `case succ(k)` arms the proof text writes.
+    fn integer_induction_subgoals(var: &Text, goal: &ProofGoal) -> List<ProofGoal> {
+        use verum_ast::literal::{IntLit, Literal, LiteralKind};
+        use verum_ast::span::Span;
+
+        let sp = Span::dummy();
+        let int_lit = |v: i128| {
+            Expr::new(
+                ExprKind::Literal(Literal::new(LiteralKind::Int(IntLit::new(v)), sp)),
+                sp,
+            )
+        };
+        let bin = |op: BinOp, l: Expr, r: Expr| {
+            Expr::new(
+                ExprKind::Binary {
+                    op,
+                    left: Heap::new(l),
+                    right: Heap::new(r),
+                },
+                sp,
+            )
+        };
+        let var_expr = Expr::new(
+            ExprKind::Path(Path::from_ident(Ident::new(var.as_str(), sp))),
+            sp,
+        );
+
+        let mut subgoals = List::new();
+
+        // Base case: H(0) |- P(0)
+        let zero = int_lit(0);
+        let mut base = goal.clone();
+        base.goal = Self::substitute_var_with_expr(&goal.goal, var, &zero);
+        base.hypotheses = goal
+            .hypotheses
+            .iter()
+            .map(|h| Self::substitute_var_with_expr(h, var, &zero))
+            .collect();
+        base.label = Maybe::Some(Text::from("base_case_0"));
+        subgoals.push(base);
+
+        // Inductive case: k >= 0, H(k+1), H(k) => P(k) |- P(k+1)
+        let succ = bin(BinOp::Add, var_expr.clone(), int_lit(1));
+        let mut step = goal.clone();
+        step.hypotheses = goal
+            .hypotheses
+            .iter()
+            .map(|h| Self::substitute_var_with_expr(h, var, &succ))
+            .collect();
+        step.add_hypothesis(bin(BinOp::Ge, var_expr.clone(), int_lit(0)));
+        let ih = match goal
+            .hypotheses
+            .iter()
+            .cloned()
+            .reduce(|a, b| bin(BinOp::And, a, b))
+        {
+            Some(h) => bin(BinOp::Imply, h, goal.goal.clone()),
+            None => goal.goal.clone(),
+        };
+        step.add_hypothesis(ih);
+        step.goal = Self::substitute_var_with_expr(&goal.goal, var, &succ);
+        step.label = Maybe::Some(Text::from("inductive_case_succ"));
+        subgoals.push(step);
+
+        subgoals
+    }
+
     fn infer_variable_type(&self, var: &Text, goal: &ProofGoal) -> Result<Text, ProofError> {
         if let Some(ty) = self.find_variant_type_for_var(var, &goal.goal) {
             return Ok(ty);
@@ -5028,61 +5230,7 @@ impl ProofSearchEngine {
         // Translate goal to Z3
         let translator = Translator::new(context);
 
-        // Populate callee signatures from the reflection registry so
-        // the translator's UF-fallback emits Bool/Real-returning
-        // `FuncDecl`s where appropriate (instead of defaulting every
-        // call to `Int` and conflicting with the registry's SMT-LIB
-        // declaration block).
-        for rf in self.reflection_registry.iter() {
-            let param_sorts: Vec<String> = rf
-                .parameter_sorts
-                .iter()
-                .map(|s| s.as_str().to_string())
-                .collect();
-            translator.register_callee_signature(
-                rf.name.as_str(),
-                param_sorts,
-                rf.return_sort.as_str().to_string(),
-            );
-        }
-        // Also register signatures for body-less / extern / unreflected
-        // module functions (populated by the caller via
-        // `register_callee_signature`). These won't have defining
-        // axioms — they stay opaque — but the UF sort signature is
-        // correct, so `exists p: Nat. is_prime(p)` can at least
-        // translate without the "not boolean" failure.
-        for (name, (ps, r)) in &self.callee_signatures {
-            let param_sorts: Vec<String> = ps.iter().map(|s| s.as_str().to_string()).collect();
-            translator.register_callee_signature(
-                name.as_str(),
-                param_sorts,
-                r.as_str().to_string(),
-            );
-        }
-
-        // Record layouts and value types: without them a field
-        // access has no sort and every field became an Int constant,
-        // so a Bool field could not even be stated as a goal.
-        for (type_name, fields) in &self.record_layouts {
-            translator.register_record_type(type_name.as_str(), fields.clone());
-        }
-        for (type_name, positions) in &self.positional_layouts {
-            translator.register_positional_type(type_name.as_str(), positions.clone());
-        }
-        for (value, type_name) in &self.value_type_bindings {
-            translator.register_value_type(value.as_str(), type_name.as_str());
-        }
-        for (value, sort_name) in &self.value_sort_bindings {
-            translator.register_value_sort(value.as_str(), sort_name.as_str());
-        }
-
-        // Push the variant registry into the translator so
-        // quantifier-bound variables typed as variants get the
-        // exhaustiveness constraint automatically applied.
-        for (type_name, ctors) in &self.variant_map {
-            let ctor_names: Vec<String> = ctors.iter().map(|c| c.as_str().to_string()).collect();
-            translator.register_variant_type(type_name.as_str(), ctor_names);
-        }
+        self.configure_translator(&translator);
 
         // Build formula: hypotheses ⇒ goal
         let mut formula = goal.goal.clone();
@@ -8229,6 +8377,7 @@ impl ProofSearchEngine {
     ) -> Result<(bool, Maybe<ProofTerm>), ProofError> {
         // Translate formula to Z3
         let translator = Translator::new(context);
+        self.configure_translator(&translator);
         let z3_formula = translator
             .translate_expr(formula)
             .map_err(|_| ProofError::TacticFailed("Failed to translate formula".into()))?;
