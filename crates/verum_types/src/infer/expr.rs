@@ -2895,6 +2895,43 @@ impl TypeChecker {
     ///
     /// Extracted from infer_binop to support iterative inference.
     /// Takes the types of left and right operands and computes the result type.
+    /// `<` on a type that declares no ordering (T1017).
+    ///
+    /// Reported rather than refused for now, and the number is the reason:
+    /// the fall-through this guards has been the accepted spelling for
+    /// long enough that `core/` relies on it, so an error here would
+    /// refuse the standard library before it refused a mistake. The
+    /// measurement is recorded in the task; when the count reaches zero
+    /// this becomes an error, which is the only honest end state for a
+    /// silently wrong VALUE.
+    fn warn_comparison_without_ordering(&mut self, ty: &Type, span: verum_ast::span::Span) {
+        // A type variable is not yet known — asking now would report the
+        // checker's own incompleteness.
+        if matches!(ty, Type::Var(_) | Type::Unknown | Type::Never) {
+            return;
+        }
+        let has_order = {
+            let pc = self.protocol_checker.read();
+            pc.implements_protocol(ty, "Ord") || pc.implements_protocol(ty, "PartialOrd")
+        };
+        if has_order {
+            return;
+        }
+        let diag = Diagnostic::new_warning(
+            format!(
+                "`{}` declares no ordering, so `<` compares ADDRESSES here — the \
+                 answer depends on where the values happen to be allocated and \
+                 changes between runs\n  help: `implement Ord for {}` (or \
+                 `PartialOrd`) to give the comparison a meaning",
+                ty.to_text(),
+                ty.to_text()
+            ),
+            span_to_line_col(span),
+            "W0506",
+        );
+        self.diagnostics.push(diag);
+    }
+
     fn compute_binop_result(
         &mut self,
         op: BinOp,
@@ -3099,9 +3136,25 @@ impl TypeChecker {
                         self.unifier.unify(left_deref, right_deref, span)?;
                         Ok(Type::bool())
                     }
+                    // T1017: `Text` and `Char` have a natural order and are
+                    // compared directly, like Int and Float above.
+                    Type::Text | Type::Char => {
+                        let _ = self.unifier.unify(left_deref, right_deref, span);
+                        Ok(Type::bool())
+                    }
                     _ => {
                         // For all other types: try unification first (same-type comparison)
                         if self.unifier.unify(left_deref, right_deref, span).is_ok() {
+                            // T1017: the comment at the head of this arm states the
+                            // rule — "T implements Ord/PartialOrd" — and the code
+                            // never asked it. It checked only that both sides are
+                            // the SAME type, so `a < b` on a record with no
+                            // ordering type-checked, and codegen then fell through
+                            // to a POINTER comparison. The answer was
+                            // allocation-order dice: consistent within a run,
+                            // INVERTED between runs, 4 times in 10 on a 7-line
+                            // program. A silent wrong value in a base operator.
+                            self.warn_comparison_without_ordering(left_deref, span);
                             Ok(Type::bool())
                         } else {
                             // Cross-type: allow if both implement Numeric (literal coercion)

@@ -565,6 +565,7 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
 
         // Intrinsic and stage lints (verum_compiler::lint).
         ErrorCodeEntry { code: "W0505", numeric: 2505, category: ErrorCategory::Lint, description: "map lookup whose miss is not handled" },
+        ErrorCodeEntry { code: "W0506", numeric: 2506, category: ErrorCategory::Type, description: "`<` on a type that declares no ordering — the comparison reads addresses, not values" },
         ErrorCodeEntry { code: "W0900", numeric: 2900, category: ErrorCategory::Lint, description: "intrinsic called with the wrong argument count" },
         ErrorCodeEntry { code: "W0901", numeric: 2901, category: ErrorCategory::Lint, description: "intrinsic named by an `@intrinsic` body is not in the registry" },
         ErrorCodeEntry { code: "W0902", numeric: 2902, category: ErrorCategory::Lint, description: "deprecated intrinsic" },
