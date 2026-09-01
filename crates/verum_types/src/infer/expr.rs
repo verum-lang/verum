@@ -7091,63 +7091,22 @@ impl TypeChecker {
                     ..
                 } = func_ty
                 {
-                    // AMBIENT-CTOR-LOSES-TO-LOCAL-BINDING (T1034).
-                    // `variant_constructor_parents` is the ambient,
-                    // flat, bare-name table described in
-                    // `try_resolve_variant_constructor_with_arity_for`
-                    // (infer/modules.rs, T0525): it is the OUTERMOST
-                    // binding and must lose to every explicit one.
-                    // T0704 enforced that for an explicitly MOUNTED
-                    // function; the sibling case — a function declared
-                    // in the very file being checked — was not
-                    // covered, so `fn push(dst: &mut Text, s: &Text)`
-                    // plus `push(&mut out, &s)` resolved to
-                    // `Pushout.push(c: C)` from core/math/hott.vr and
-                    // died on arity 1≠2.  Same file, same type, the
-                    // sibling constructor of the one T0704 names.
-                    //
-                    // The check is deliberately confined to the arity
-                    // MISMATCH leg, which today always returns Err:
-                    // where it fires, the alternative was a certain
-                    // error, so no correct resolution can regress —
-                    // in particular the `Some(x)` / `Ok(v)` fast path
-                    // this block exists for keeps taking the
-                    // constructor, its arity matching by construction.
+                    // An arity mismatch here is genuine over- or
+                    // under-application of the constructor: the
+                    // resolver has already declined in favour of an
+                    // explicit binding of the right arity where one
+                    // exists (AMBIENT-CTOR-LOSES-TO-LOCAL-BINDING,
+                    // T1034, in infer/modules.rs).
                     if params.len() != args.len() {
-                        let shadowed_by_binding = self
-                            .ctx
-                            .env
-                            .lookup(name.as_str())
-                            .cloned()
-                            .map(|scheme| scheme.instantiate())
-                            .is_some_and(|bound| {
-                                matches!(
-                                    &bound,
-                                    Type::Function { params: p, .. }
-                                        if p.len() == args.len()
-                                )
-                            });
-                        if !shadowed_by_binding {
-                            return Err(TypeError::Other(
-                                verum_common::Text::from(format!(
-                                    "{} expects {} argument(s), got {}",
-                                    name.as_str(),
-                                    params.len(),
-                                    args.len()
-                                )),
-                            ));
-                        }
-                        if crate::ctor_trace_enabled() {
-                            eprintln!(
-                                "[ctor-trace] ambient-ctor DECLINE '{}': \
-                                 an explicit binding of arity {} shadows \
-                                 the ctor of arity {}",
+                        return Err(TypeError::Other(
+                            verum_common::Text::from(format!(
+                                "{} expects {} argument(s), got {}",
                                 name.as_str(),
-                                args.len(),
-                                params.len()
-                            );
-                        }
-                    } else {
+                                params.len(),
+                                args.len()
+                            )),
+                        ));
+                    }
                     let old_call_context = self.in_call_arg_context;
                     self.in_call_arg_context = true;
                     for (arg, param_ty) in
@@ -7176,7 +7135,6 @@ impl TypeChecker {
                         resolved_return
                     };
                     return Ok(InferResult::new(resolved_return));
-                    }
                 }
             }
         }

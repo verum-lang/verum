@@ -16017,6 +16017,52 @@ impl TypeChecker {
     /// for any variant whose parent type was registered via
     /// `register_inductive_type` / `register_variant_signature_for_lazy`,
     /// stdlib or user-defined.
+    /// AMBIENT-CTOR-LOSES-TO-LOCAL-BINDING (T1034): is the ambient
+    /// constructor table about to answer, wrongly, a question an
+    /// explicit binding already answers?
+    ///
+    /// True when the call site's scope binds `name` to a function of
+    /// `arity` and NO registered parent's constructor for `name`
+    /// accepts that arity.  Both halves matter.  Without the first the
+    /// rule would mute genuine over-application; without the second it
+    /// would steal `Some(x)` / `Ok(v)` from the constructor whenever a
+    /// same-named function happened to be in scope.
+    ///
+    /// One predicate, because the answer has two consumers that must
+    /// not drift: the resolver declines on it, and the E430 horizon
+    /// warning stays silent on it — advising `Parent.name` for a call
+    /// that reaches the author's own function is wrong advice about a
+    /// resolution that did not happen.
+    fn explicit_binding_outranks_ambient_ctor(
+        &self,
+        name: &str,
+        parents: &List<Text>,
+        arity: usize,
+    ) -> bool {
+        let ctor_text = verum_common::Text::from(name);
+        let bound_at_arity = self
+            .ctx
+            .env
+            .lookup(name)
+            .cloned()
+            .map(|scheme| scheme.instantiate())
+            .is_some_and(|bound| {
+                matches!(&bound, Type::Function { params, .. } if params.len() == arity)
+            });
+        if !bound_at_arity {
+            return false;
+        }
+        let some_ctor_fits = parents.iter().any(|parent| {
+            match self.ctx.get_constructors(parent) {
+                Maybe::Some(ctors) => ctors
+                    .iter()
+                    .any(|c| c.name == ctor_text && c.args.len() == arity),
+                Maybe::None => false,
+            }
+        });
+        !some_ctor_fits
+    }
+
     pub(super) fn try_resolve_variant_constructor(&self, name: &str) -> Option<Type> {
         self.try_resolve_variant_constructor_with_arity(name, None)
     }
@@ -16070,6 +16116,33 @@ impl TypeChecker {
         let parents = self.variant_constructor_parents.get(&ctor_text)?;
         if crate::ctor_trace_enabled() {
             eprintln!("[ctor-trace]   parents={:?}", parents.iter().map(|p| p.as_str()).collect::<Vec<_>>());
+        }
+        // ── AMBIENT-CTOR-LOSES-TO-LOCAL-BINDING (T1034) ───────────
+        // The rule the T0525 block below states — this table is the
+        // OUTERMOST binding and must lose to every explicit one —
+        // applied here, before any parent is picked and before the
+        // E430 horizon warning is spoken.  T0704 enforced it for an
+        // explicitly MOUNTED function; a function declared in the file
+        // being checked was the sibling case, and `push` from
+        // `core/math/hott.vr`'s `Pushout` took 117 call sites away from
+        // the `core/database/**` helpers that declare their own.
+        //
+        // Confined to the case where the ambient answer is WRONG BY
+        // ARITY and an explicit binding of the right arity is in scope:
+        // there the constructor path could only have ended in
+        // `X expects N argument(s), got M`, so declining cannot cost a
+        // resolution that would have succeeded.
+        if let Some(arity) = expected_arity
+            && self.explicit_binding_outranks_ambient_ctor(name, parents, arity)
+        {
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace]   T1034 decline: '{}' is bound in scope at \
+                     arity {}, and no registered parent's constructor accepts it",
+                    name, arity
+                );
+            }
+            return None;
         }
         // ── T0525: NAMESPACE PRECEDENCE ───────────────────────────
         // `variant_constructor_parents` is an AMBIENT, flat, bare-name
