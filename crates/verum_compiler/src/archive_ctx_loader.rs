@@ -1323,6 +1323,36 @@ fn build_wanted_module_prefixes(
                     break;
                 }
             }
+            // …and the SAME prefixes with the cog root put back on (T1010).
+            //
+            // Archive entries are named `core.security.tuf.types`. A mount
+            // written in the short form the library itself uses —
+            // `mount security.tuf.types.{KeyId};` — contributes
+            // `security.tuf.types.KeyId` and `tuf.types.KeyId` to `wanted`
+            // and nothing beginning with `core.`, so no prefix derived from
+            // it ever equals an entry name and the module is NOT DECODED.
+            // Measured with VERUM_TRACE_DECODE: for that mount the run
+            // decodes `core`, `core.sys`, `core.sys.darwin`, `core.text`,
+            // `core.io` — and `core.security` is absent. An undecoded module
+            // never reaches the newtype-constructor synthesis below, codegen
+            // finds no constructor, mints a stage-5 stub, and the program
+            // dies at run time on a mount that type-checks clean.
+            //
+            // This also explains the split that twelve other hypotheses did
+            // not: `sys`, `text`, `io` and `base` mounts worked because
+            // those entries are decoded ANYWAY for the prelude and `print`,
+            // so their newtypes got constructors as a side effect. The
+            // working set was never a property of those directories.
+            //
+            // Widening only ADDS candidate entries, and only ones the
+            // fully-qualified spelling of the same mount would have added,
+            // so a decode that already happened cannot be lost.
+            let rooted: Vec<String> = prefixes
+                .iter()
+                .filter(|p| !p.starts_with("core.") && !p.starts_with("cog.") && *p != "core")
+                .map(|p| format!("core.{}", p))
+                .collect();
+            prefixes.extend(rooted);
             prefixes
         })
         .collect();
@@ -2213,11 +2243,22 @@ impl ArchiveCtxCache {
             wanted.insert("format_debug_text".to_string());
         }
         if std::env::var("VERUM_TRACE_WANTED").is_ok() {
-            let dbg: Vec<&String> = wanted
-                .iter()
-                .filter(|n| n.contains("format_debug"))
-                .collect();
-            eprintln!("[wanted] apply_lazy fmt-related: {:?} (total {})", dbg, wanted.len());
+            // Filter comes from the environment, not from a name baked in
+            // here (T1010). The hardcoded `format_debug` answered the one
+            // question its author had; every later reader got a count and a
+            // list about somebody else's defect. I eliminated the `wanted`
+            // axis once on that count alone — 4 lines for a failing mount
+            // and 4 for a working one — and had to reopen it, because the
+            // count never said WHICH names were in the set.
+            let needle = std::env::var("VERUM_TRACE_WANTED").unwrap_or_default();
+            let needle = if needle == "1" { "format_debug".to_string() } else { needle };
+            let dbg: Vec<&String> = wanted.iter().filter(|n| n.contains(&needle)).collect();
+            eprintln!(
+                "[wanted] apply_lazy filter='{}': {:?} (total {})",
+                needle,
+                dbg,
+                wanted.len()
+            );
         }
         if wanted.is_empty() {
             return;
@@ -2922,6 +2963,18 @@ impl ArchiveCtxCache {
             .filter(|(_, e)| wanted_module_prefixes.contains(&e.name))
             .map(|(i, e)| (i, e.name.clone()))
             .collect();
+        if std::env::var_os("VERUM_TRACE_DECODE").is_some() {
+            // T1010: which archive entries this run decodes at all. A module
+            // that is not decoded never reaches the newtype-constructor
+            // synthesis further down, and from outside the compiler that is
+            // indistinguishable from a constructor that failed to bind.
+            eprintln!(
+                "[decode] prefixes={} decoding={} entries={:?}",
+                wanted_module_prefixes.len(),
+                target_entries.len(),
+                target_entries.iter().map(|(_, n)| n).collect::<Vec<_>>(),
+            );
+        }
         let decoded: Vec<(String, VbcModule)> = loadcost::timed("decode_entries", || {
             use rayon::prelude::*;
             target_entries
