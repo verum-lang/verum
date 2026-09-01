@@ -863,6 +863,12 @@ pub enum TypeError {
         method: Text,
         span: verum_ast::span::Span,
         did_you_mean: Option<Text>,
+        /// The receiver HAS a field of this name holding a function, and
+        /// this is its rendered type (T1037).  A bare `x.f(a)` is a
+        /// method call; calling a function-typed field needs `(x.f)(a)`.
+        /// Without this channel the diagnostic told the author to check
+        /// their spelling while the compiler could already see the field.
+        field_fn: Option<Text>,
     },
 
     /// Capability violation - method requires a capability not available in the restricted type.
@@ -2740,9 +2746,22 @@ impl TypeError {
                 method,
                 span,
                 did_you_mean,
+                field_fn,
             } => {
                 let mut msg = format!("no method named `{}` found for type `{}`", method, ty);
-                if let Some(suggestion) = did_you_mean {
+                if let Some(field_ty) = field_fn {
+                    // The receiver does have this name — as a FIELD holding a
+                    // function.  Say so and show the spelling that works,
+                    // instead of the three generic helps below, all of which
+                    // point away from the answer (T1037).
+                    msg.push_str(&format!(
+                        "\n  help: `{}` has a field `{}` of type `{}` — a field \
+                         holding a function is called as `(receiver.{})(…)`\n  \
+                         help: bare `receiver.{}(…)` is a method call; the \
+                         parentheses select the field's value first",
+                        ty, method, field_ty, method, method
+                    ));
+                } else if let Some(suggestion) = did_you_mean {
                     msg.push_str(&format!("\n  help: did you mean `{}`?", suggestion));
                 } else {
                     msg.push_str(

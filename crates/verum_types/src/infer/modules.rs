@@ -18563,6 +18563,7 @@ impl TypeChecker {
                         method: method.name.as_str().to_text(),
                         span: method.span,
                         did_you_mean: verum_common::Maybe::None,
+                        field_fn: verum_common::Maybe::None,
                     });
                 }
                 let early_method_info = {
@@ -23234,6 +23235,10 @@ impl TypeChecker {
                                             proto_name
                                         )),
                                     ),
+                                    // This arm already has a precise
+                                    // suggestion; the field channel stays
+                                    // empty rather than competing with it.
+                                    field_fn: verum_common::Maybe::None,
                                 });
                             }
                         }
@@ -23310,11 +23315,34 @@ impl TypeChecker {
             }
             best.map(|(_, n)| n)
         };
+        // T1037: before reporting the name as absent, ask whether the
+        // receiver HAS it — as a field holding a function.  `x.f(a)` is a
+        // method call, so a function-typed field needs `(x.f)(a)`; the
+        // author who wrote the bare form was being told to check their
+        // spelling while this answer was one lookup away.  Asked of
+        // `lookup_field_type`, the same authority the field-access path
+        // uses, rather than re-derived here.
+        let field_fn: Option<verum_common::Text> = self
+            .lookup_field_type(&recv_ty, method_str)
+            .and_then(|ft| match &ft {
+                Type::Function { .. } => Some(ft.to_text()),
+                // A RANK-2 function type is `Forall { vars, body: Function }`
+                // internally — the standard representation, and the shape a
+                // transducer field has. Matching only `Type::Function` here
+                // missed exactly the case that motivates the diagnostic;
+                // a generic record with a rank-1 field was already matched,
+                // which is how genericity was ruled out as the cause.
+                Type::Forall { body, .. } if matches!(**body, Type::Function { .. }) => {
+                    Some(ft.to_text())
+                }
+                _ => None,
+            });
         return Err(TypeError::MethodNotFound {
             ty: recv_ty.to_text(),
             method: method.name.as_str().to_text(),
             span,
             did_you_mean,
+            field_fn,
         });
     }
 
@@ -26840,6 +26868,7 @@ impl TypeChecker {
                         method: method_name.clone(),
                         span,
                         did_you_mean: None,
+                        field_fn: None,
                     }
                 })?;
 
