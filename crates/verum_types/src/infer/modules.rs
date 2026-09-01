@@ -17659,6 +17659,77 @@ impl TypeChecker {
         }
     }
 
+    /// Does a user type of this name shadow the context of the same name?
+    ///
+    /// `type X is ...` pass-1 registers as Placeholder; pass-2 resolves to
+    /// Named / Record / Variant. Anything other than absence means the author
+    /// has a concrete shape for the name and expects `X.method(...)` to
+    /// dispatch on it, not on a context record.
+    fn user_type_shadows_context(&self, context_name: &str) -> bool {
+        let has_inherent = self
+            .inherent_methods
+            .read()
+            .get(&Text::from(context_name))
+            .map(|m| !m.is_empty())
+            .unwrap_or(false);
+        let has_type_params = matches!(
+            self.ctx
+                .lookup_type(format!("__type_params_{}", context_name).as_str()),
+            Option::Some(_)
+        );
+        // T1027: a `context protocol X` registers `X` as `Named { path: X }`
+        // — a self-reference, not a competing user type. Counting it made
+        // this guard fire for EVERY declared context, so the honesty check
+        // below it was unreachable for exactly the shape it exists to
+        // police. A real shadow is a concrete shape (Record / Variant /
+        // Placeholder) or an alias pointing at some OTHER name.
+        let has_type = match self.ctx.lookup_type(context_name) {
+            Option::Some(Type::Named { path, .. }) => {
+                self.path_to_string(&path) != context_name
+            }
+            Option::Some(Type::Record(_))
+            | Option::Some(Type::Variant(_))
+            | Option::Some(Type::Placeholder { .. }) => true,
+            _ => false,
+        };
+        has_inherent || has_type_params || has_type
+    }
+
+    /// A context REACHED inside a function that neither declares it in
+    /// `using [...]` nor provides it locally (T1027).
+    ///
+    /// This is the honesty question, and it is not the one `is_available`
+    /// was written for: that predicate answers PROPAGATION — "does a
+    /// function that declared a requirement have it satisfied". Asked at a
+    /// USE site it happens to be exactly right, because `required` is the
+    /// enclosing function's own `using` clause and `env.has_context` covers
+    /// a local `provide`. It simply was never asked here: an earlier
+    /// resolution path returns first.
+    fn context_use_is_undeclared(&self, context_name: &str) -> bool {
+        // Kept because it is what isolated the root: reading the code
+        // said the check was present and correct, and it was — the guard
+        // above it counted the context's OWN registration as a competing
+        // user type, so the check was unreachable for every declared
+        // context. Four flags, one line, one second (T1027).
+        if std::env::var("VERUM_TRACE_CTXUSE").is_ok() {
+            eprintln!(
+                "[ctxuse] name={} shadowed={} declared={} available={} lenient={}",
+                context_name,
+                self.user_type_shadows_context(context_name),
+                self.context_declarations
+                    .contains_key(&Text::from(context_name)),
+                self.context_checker.is_available(context_name),
+                self.context_resolver.is_lenient_contexts()
+            );
+        }
+        !self.user_type_shadows_context(context_name)
+            && self
+                .context_declarations
+                .contains_key(&Text::from(context_name))
+            && !self.context_checker.is_available(context_name)
+            && !self.context_resolver.is_lenient_contexts()
+    }
+
     fn infer_method_call_inner_impl(
         &mut self,
         receiver: &Expr,
@@ -17742,6 +17813,25 @@ impl TypeChecker {
         if let Some(r) = self.try_resolve_pre_receiver_method(
             receiver, method, type_args, args, span, skip_static_lookup,
         )? {
+            // T1027: this early return is where the honesty check was
+            // being lost. `Clock.now()` resolves HERE — for the declared
+            // form, the undeclared form and a `pure fn` alike — and
+            // returns before "Step 1: check for context method calls"
+            // below ever runs. So a function that never named a context
+            // acquired one, compiled, and returned a value from an
+            // unrelated type at run time.
+            //
+            // The predicate is asked, not re-derived: same carrier as the
+            // Step-1 block uses.
+            if let verum_ast::ExprKind::Path(path) = &receiver.kind
+                && let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.last()
+                && self.context_use_is_undeclared(ident.name.as_str())
+            {
+                return Err(TypeError::MissingContext {
+                    context: ident.name.clone(),
+                    span,
+                });
+            }
             return Ok(r);
         }
 
@@ -17902,31 +17992,7 @@ impl TypeChecker {
             // Any of those indicate the user intends `X` as a type, not
             // as context-record dispatch, so we bypass the synthetic
             // context Record lookup.
-            let user_type_shadows_context = {
-                let has_inherent = self
-                    .inherent_methods
-                    .read()
-                    .get(&context_name_text)
-                    .map(|m| !m.is_empty())
-                    .unwrap_or(false);
-                let has_type_params = matches!(
-                    self.ctx
-                        .lookup_type(format!("__type_params_{}", context_name).as_str()),
-                    Option::Some(_)
-                );
-                // `type X is ...` pass-1 registers as Placeholder; pass-2
-                // resolves to Named / Record / Variant. Anything other than
-                // absence (None) means the user has some concrete shape for
-                // this name and expects `X.method(...)` to dispatch on it.
-                let has_type = matches!(
-                    self.ctx.lookup_type(context_name),
-                    Option::Some(Type::Named { .. })
-                        | Option::Some(Type::Record(_))
-                        | Option::Some(Type::Variant(_))
-                        | Option::Some(Type::Placeholder { .. })
-                );
-                has_inherent || has_type_params || has_type
-            };
+            let user_type_shadows_context = self.user_type_shadows_context(context_name);
 
             // Check if this is a declared context (whether or not it's available)
             if !user_type_shadows_context
