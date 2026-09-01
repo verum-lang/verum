@@ -7441,6 +7441,52 @@ impl TypeChecker {
         ) =
             crate::infer::helpers::with_declared_generic_names(declared_names.clone(), || {
                 crate::infer::helpers::with_generic_var_scope_capture(|| {
+                    // PARAMNAME-CARRY bridge (T0701) — the twin of the
+                    // loop in `env.rs::metadata_fn_scheme`, which this
+                    // builder otherwise mirrors.  It was missing here,
+                    // and the two spellings of one declared generic
+                    // stayed disconnected:
+                    //
+                    //   tensor.mul  gp=["T"]
+                    //     params=[a: `&DynTensor<T>`, b: `&DynTensor<T>`]
+                    //     ret=`DynTensor<__generic_0>`
+                    //
+                    // The renderer spells a generic by SOURCE NAME when
+                    // it sits inside a parameter's type arguments, and
+                    // by POSITIONAL PLACEHOLDER in the return.  Solving
+                    // the arguments bound the `T` var; the return's
+                    // `__generic_0` var was a different one and stayed
+                    // free, so `let z = mul(y, y);` on a concrete
+                    // `&DynTensor<Float>` judged `DynTensor<_>` — E404,
+                    // "add a type annotation".
+                    //
+                    // A generic that ALSO appears bare at a parameter's
+                    // top level was rendered `__generic_0` there and
+                    // therefore worked by coincidence, which is why
+                    // `mul_scalar(x: &DynTensor<T>, scalar: T)` and
+                    // `full(shape: &[USize], value: T)` were clean while
+                    // `mul` and `neg` were not.
+                    //
+                    // Seeding both spellings onto ONE scope var, in
+                    // serialisation order (impl-level first, as the
+                    // descriptor doc pins `__generic_i` for
+                    // `i < impl_generic_names.len()` to impl params),
+                    // removes the coincidence.
+                    for (i, name) in fd
+                        .impl_generic_names
+                        .iter()
+                        .chain(fd.generic_params.iter().map(|gp| &gp.name))
+                        .enumerate()
+                    {
+                        if let Some(tv) =
+                            crate::infer::helpers::intern_scope_generic(name.as_str())
+                        {
+                            crate::infer::helpers::alias_scope_generic(
+                                &format!("__generic_{i}"),
+                                tv,
+                            );
+                        }
+                    }
                     // HOF reconnection (T0702) — the free-fn twin of the
                     // method-path leg; see env.rs metadata_fn_scheme.
                     let mut hof_reconnect: Vec<(Text, Type)> = Vec::new();

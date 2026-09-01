@@ -644,6 +644,25 @@ jobs:
           scripts/ci/check_type_parameter_letter_is_irrelevant.sh --selftest ./target/release/verum
           scripts/ci/check_type_parameter_letter_is_irrelevant.sh ./target/release/verum
 
+      # T0741, fourth on the same axis: one file, one verdict — and here
+      # across WHERE a generic sits in the callee's signature. A scheme
+      # built from the archive spells a generic by source name inside a
+      # parameter's type arguments and by positional placeholder in the
+      # return; the bridge that ties the two spellings to one variable
+      # lives in env.rs and was missing from its twin in modules.rs.
+      # Measured: `mul(y, y)` (T only inside `&DynTensor<T>`) 2 errors,
+      # `mul_scalar(y, 2.0)` (T also bare) 0 — the second worked only
+      # because one of its parameters happened to carry the return's
+      # spelling.
+      #
+      # Agreement between the two is not sufficient on its own: two
+      # broken subjects agree too, so the gate also requires the verdict
+      # to be clean.
+      - name: Generic's position in a signature does not change the verdict
+        run: |
+          scripts/ci/check_generic_position_does_not_decide_inference.sh --selftest ./target/release/verum
+          scripts/ci/check_generic_position_does_not_decide_inference.sh ./target/release/verum
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:
