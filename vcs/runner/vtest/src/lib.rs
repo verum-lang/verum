@@ -111,6 +111,21 @@ pub enum RunnerError {
 
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+
+    /// A spec whose directives do not parse is SKIPPED — it cannot fail and
+    /// it cannot pass, so it has left the set the run reports a percentage
+    /// of. Warning was right for a tool exploring a tree and wrong for a
+    /// gate; worse, the warning was behind `--verbose`, so by default the
+    /// subject vanished in silence.
+    ///
+    /// Forty-four specs were in this state when it was first measured, and
+    /// that number was a LOWER BOUND: only the first error per file is
+    /// reported, so each repair uncovered the next (T1049).
+    #[error("{0} spec(s) could not be read, so they were neither run nor counted:\n{1}\n  \
+             A spec that fails to parse its directives is not a skipped test — it is an \
+             absent one, and a level cannot claim a percentage of a set it did not read. \
+             Fix the directive, or mark the spec `@skip: <reason>` so it is counted and named.")]
+    UnreadableSpecs(usize, Text),
 }
 
 /// Configuration for the test runner.
@@ -366,6 +381,7 @@ impl VTestRunner {
     /// Discover all tests matching the configuration.
     pub fn discover(&self) -> Result<List<TestDirectives>, RunnerError> {
         let mut all_tests = List::new();
+        let mut unreadable: Vec<String> = Vec::new();
         let exclude_refs: List<&str> = self
             .config
             .exclude_patterns
@@ -409,12 +425,19 @@ impl VTestRunner {
                         continue;
                     }
                     Err(e) => {
-                        if self.config.verbose {
-                            eprintln!("Warning: Failed to parse {}: {}", path, e);
-                        }
+                        // NOT a warning, and not gated on --verbose: see
+                        // `RunnerError::UnreadableSpecs`.
+                        unreadable.push(format!("    {}: {}", path, e));
                     }
                 }
             }
+        }
+
+        if !unreadable.is_empty() {
+            return Err(RunnerError::UnreadableSpecs(
+                unreadable.len(),
+                unreadable.join("\n").into(),
+            ));
         }
 
         Ok(all_tests)
