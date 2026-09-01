@@ -3,6 +3,8 @@
 // @tier: 0
 // @tags: properties, purity, soundness, computational-properties, builtins
 // @expected-error: E503
+// @expected-error: E503
+// @expected-error: E503
 // @expected-error-count: 3
 //
 // Pin (T0792, first part) — printing inside a `pure fn` is a side effect and

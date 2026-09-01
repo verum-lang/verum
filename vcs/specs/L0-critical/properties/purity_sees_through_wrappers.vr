@@ -3,6 +3,9 @@
 // @tier: 0
 // @tags: properties, purity, soundness, computational-properties
 // @expected-error: E503
+// @expected-error: E503
+// @expected-error: E503
+// @expected-error: E503
 // @expected-error-count: 4
 //
 // Pin (T0791) — the purity gate must see an impure expression through any

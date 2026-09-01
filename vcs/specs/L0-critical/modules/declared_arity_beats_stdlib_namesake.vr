@@ -1,4 +1,4 @@
-// @test: run-pass
+// @test: run
 // @level: L0
 // @tier: 0
 // @tags: modules, name-resolution, shadowing, arity, generics

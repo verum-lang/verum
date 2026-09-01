@@ -1,10 +1,17 @@
-// @test: parse-pass
+// @test: typecheck-fail
 // @tier: all
 // @level: L0
 // @tags: memory-safety, use-after-move, ownership, cbgr, error-detection
 // @expected-error: E302
 // @active: testing ownership analysis
 // @description: CBGR detects use-after-move at compile time
+//
+// The test type was `parse-pass`, which stops the tool after PARSING —
+// so the type check that produces E302 never ran, and the spec could
+// not have failed no matter what CBGR did. The runner meanwhile refused
+// the file outright ("parse-pass test should not have @expected-error
+// directives") and skipped it, so a memory-safety spec sat inside a
+// blocking 100% gate without being measured at all (T1049).
 
 /// Use-After-Move Detection Test
 ///

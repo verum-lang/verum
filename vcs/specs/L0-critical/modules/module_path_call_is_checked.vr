@@ -3,6 +3,7 @@
 // @tier: 0
 // @tags: modules, name-resolution, arity, silent-failure
 // @expected-error: E100
+// @expected-error: E100
 // @expected-error-count: 2
 // @description: A call through a module path is resolved and counted,
 //   like every other call.

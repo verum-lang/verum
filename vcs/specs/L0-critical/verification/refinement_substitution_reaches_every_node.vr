@@ -3,6 +3,9 @@
 // @tier: 0
 // @tags: verification, refinement, soundness, substitution, smt
 // @expected-error: E500
+// @expected-error: E500
+// @expected-error: E500
+// @expected-error: E500
 // @expected-error-count: 4
 //
 // Pin (T0789) — substituting the refinement's subject must reach EVERY node

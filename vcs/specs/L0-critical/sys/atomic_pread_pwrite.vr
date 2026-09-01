@@ -1,4 +1,4 @@
-// @test: wip
+// @test: run
 // @tier: 0
 // @level: L0
 // @tags: sys, io, pread, pwrite, atomicity, sqlite-gap-3
