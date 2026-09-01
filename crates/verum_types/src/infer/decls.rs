@@ -8137,6 +8137,50 @@ impl TypeChecker {
             self.report_protocol_signature_drift(impl_decl, &proto_ident);
         }
 
+        // T1029: and the part that JUDGES rather than prints. The probe
+        // this closes is `fn greet(&self, times: Int) -> Int` implemented
+        // as `fn greet(&self, name: Text) -> Bool` — a caller behind the
+        // bound passes an Int, gets a Bool back where an Int was promised,
+        // and nothing complained. Only unambiguous scalar disagreements
+        // are reported; see `unambiguous_signature_disagreement` for why
+        // the lenient comparison beside it must not be turned on as a
+        // diagnostic.
+        let mismatches: Vec<(Text, String, verum_ast::span::Span)> = {
+            let guard = self.protocol_checker.read();
+            match guard.get_protocol(&proto_ident) {
+                verum_common::Maybe::Some(protocol) => impl_decl
+                    .items
+                    .iter()
+                    .filter_map(|item| {
+                        let verum_ast::decl::ImplItemKind::Function(func) = &item.kind else {
+                            return None;
+                        };
+                        let proto_method = match protocol.methods.get(&func.name.name) {
+                            verum_common::Maybe::Some(m) => m,
+                            verum_common::Maybe::None => return None,
+                        };
+                        let impl_ty = crate::method_resolution::function_decl_to_type(func);
+                        Self::unambiguous_signature_disagreement(&proto_method.ty, &impl_ty)
+                            .map(|why| (func.name.name.clone(), why, func.span))
+                    })
+                    .collect(),
+                verum_common::Maybe::None => Vec::new(),
+            }
+        };
+        for (method, why, span) in mismatches {
+            self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
+                code: Text::from("E427"),
+                msg: Text::from(format!(
+                    "`{}` does not match the signature `{}` declares: {}\n  \
+                     note: a caller behind the bound `{}` uses the PROTOCOL's \
+                     signature, so the mismatch is invisible at the call site \
+                     and wrong at run time",
+                    method, proto_ident, why, proto_ident
+                )),
+                span,
+            });
+        }
+
 
         let mut missing: List<Text> = required
             .into_iter()
@@ -8386,6 +8430,82 @@ impl TypeChecker {
 
     /// Describe how two function types disagree, or None when they do not
     /// disagree in a way worth counting.
+    /// A type this comparison can judge with CERTAINTY: the built-in
+    /// scalars, and nothing else.
+    ///
+    /// `Unknown` is excluded on purpose — it is the ABSENCE of an answer,
+    /// not an answer, and treating it as one is how a checker starts
+    /// reporting its own gaps as the author's mistakes.
+    fn is_decidable_scalar(t: &Type) -> bool {
+        matches!(
+            t,
+            Type::Unit
+                | Type::Never
+                | Type::Bool
+                | Type::Int
+                | Type::Float
+                | Type::Char
+                | Type::Text
+        )
+    }
+
+    /// A disagreement between a protocol method and its implementation
+    /// that admits NO benign reading.
+    ///
+    /// `signature_disagreement` below is a MEASUREMENT instrument, not a
+    /// judge: a 2560-file sweep produced 267 messages and every class
+    /// examined turned out to be a comparison artefact — an alias pair, a
+    /// variant expanded on one side only, a protocol parameter
+    /// instantiated by the implementation, a reference lost in a
+    /// round-trip. Turning that on as a diagnostic would report the
+    /// checker's own gaps as the author's mistakes.
+    ///
+    /// So this speaks only where both sides of a differing position are
+    /// built-in scalars, where none of those readings is possible:
+    /// `Int` against `Text` is a disagreement in any normalisation.
+    ///
+    /// ARITY IS DELIBERATELY NOT CHECKED here. The two sides may or may
+    /// not count the receiver the same way, and that is not established —
+    /// reporting on it would be a guess wearing a diagnostic's clothes.
+    pub fn unambiguous_signature_disagreement(proto: &Type, imp: &Type) -> Option<String> {
+        let (
+            Type::Function {
+                params: pp,
+                return_type: pr,
+                ..
+            },
+            Type::Function {
+                params: ip,
+                return_type: ir,
+                ..
+            },
+        ) = (proto, imp)
+        else {
+            return None;
+        };
+        if pp.len() != ip.len() {
+            return None;
+        }
+        for (i, (a, b)) in pp.iter().zip(ip.iter()).enumerate() {
+            if Self::is_decidable_scalar(a) && Self::is_decidable_scalar(b) && a != b {
+                return Some(format!(
+                    "parameter {} is `{}`, but the protocol declares `{}`",
+                    i + 1,
+                    b.to_text(),
+                    a.to_text()
+                ));
+            }
+        }
+        if Self::is_decidable_scalar(pr) && Self::is_decidable_scalar(ir) && pr != ir {
+            return Some(format!(
+                "returns `{}`, but the protocol declares `{}`",
+                ir.to_text(),
+                pr.to_text()
+            ));
+        }
+        None
+    }
+
     pub fn signature_disagreement(proto: &Type, imp: &Type) -> Option<String> {
         Self::signature_disagreement_with_params(proto, imp, &std::collections::HashSet::new())
     }

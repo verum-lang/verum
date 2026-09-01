@@ -358,6 +358,7 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
         ErrorCodeEntry { code: "E424", numeric: 424, category: ErrorCategory::Type, description: "negative bound violated" },
         ErrorCodeEntry { code: "E425", numeric: 425, category: ErrorCategory::Type, description: "specialization overlap" },
         ErrorCodeEntry { code: "E426", numeric: 426, category: ErrorCategory::Type, description: "higher-kinded bound not satisfied" },
+        ErrorCodeEntry { code: "E427", numeric: 427, category: ErrorCategory::Type, description: "an implementation's method signature differs from the protocol's declaration" },
 
         // ── E5xx: Verification ────────────────────────────────────────────────
         ErrorCodeEntry { code: "E500", numeric: 500, category: ErrorCategory::Verification, description: "contract violated" },
