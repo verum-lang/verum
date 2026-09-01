@@ -8805,10 +8805,50 @@ impl TypeChecker {
             let field_name = field.name.as_str();
             let qualified_name = format!("{}.{}", type_name, field_name);
 
+            // MOUNT-AUTHORITY-OUTRANKS-THE-FLAT-SLOT (T0755).
+            //
+            // Strategy 1.5 below IS the mount authority for
+            // `Type.Variant` syntax, and its own comment names this
+            // failure.  It could not fire, because Strategy 1 answers
+            // first from the flat `Type.Variant` env slot — and that
+            // slot is written with an unguarded `insert_mono`, i.e.
+            // LAST-WRITE-WINS across every same-named stdlib type.
+            //
+            // `core/` declares FOUR public types named `Capability`.
+            // Measured before this guard, with the right one mounted:
+            //
+            //     mount core.mem.capability.{Capability};
+            //     let c: Capability = Capability.Read;
+            //
+            //     error<E400>: Type mismatch:
+            //       expected 'Read(Unit) | Write(Unit) | …'
+            //       found    'Read(ResourceTag) | Exec(ExecTarget) | …'
+            //
+            // BOTH sides are types named `Capability`.  The annotation
+            // went through mount authority and got the mounted one;
+            // the constructor took the flat slot and got another
+            // module's.  Two registries, opposite winners.
+            //
+            // The guard is narrow on purpose: it steps aside only when
+            // the constructor name has MORE THAN ONE registered parent,
+            // which is exactly the case the flat slot cannot decide.
+            // With one parent there is nothing to arbitrate and the
+            // fast path stands.  A contested name falls through to
+            // Strategy 1.5, and — when the file mounts nothing that
+            // claims it — on to the flat strategies below, which is
+            // where it would have landed anyway.
+            let contested = self
+                .variant_constructor_parents
+                .get(&verum_common::Text::from(field_name))
+                .map(|parents| parents.len() > 1)
+                .unwrap_or(false);
+
             // Strategy 1: env, falling back to the baked metadata's
             // static-method schemes on first touch (lazy twin of the
             // retired eager 30k-scheme scan).
-            if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified_name) {
+            if !contested
+                && let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified_name)
+            {
                 let ty = scheme.instantiate();
                 return Ok(InferResult::new(ty));
             }

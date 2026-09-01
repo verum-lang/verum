@@ -664,6 +664,21 @@ jobs:
           scripts/ci/check_generic_position_does_not_decide_inference.sh --selftest ./target/release/verum
           scripts/ci/check_generic_position_does_not_decide_inference.sh ./target/release/verum
 
+      # T0755, fifth on the same axis: one file, one verdict — here
+      # across how many OTHER modules happen to reuse a type's name.
+      # `core/` declares four public `Capability` types. With the
+      # intended one mounted, the ANNOTATION went through mount
+      # authority and the CONSTRUCTOR took the flat `Type.Variant` env
+      # slot (unguarded `insert_mono`, last-write-wins), so one line
+      # got two different types of the same name:
+      #   expected 'Read(Unit) | …'  found 'Read(ResourceTag) | …'
+      # The mount-authority strategy for constructor syntax already
+      # existed and simply sat after the strategy that answers first.
+      - name: A mount decides which same-named type a constructor means
+        run: |
+          scripts/ci/check_mount_decides_which_same_named_type.sh --selftest ./target/release/verum
+          scripts/ci/check_mount_decides_which_same_named_type.sh ./target/release/verum
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:
