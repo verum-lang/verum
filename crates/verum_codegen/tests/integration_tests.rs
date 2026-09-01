@@ -43,6 +43,7 @@ fn simple_function(name: &str, return_value: i128) -> Item {
 
     Item {
         kind: ItemKind::Function(FunctionDecl {
+            decreases: Default::default(),
             visibility: Visibility::Public,
             is_async: false,
             is_meta: false,
@@ -111,6 +112,7 @@ fn function_with_params(name: &str, param_names: &[&str]) -> Item {
 
     Item {
         kind: ItemKind::Function(FunctionDecl {
+            decreases: Default::default(),
             visibility: Visibility::Public,
             is_async: false,
             is_meta: false,

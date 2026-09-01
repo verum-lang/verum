@@ -414,6 +414,7 @@ impl VbcExecutor {
         };
 
         FunctionDecl {
+            decreases: Default::default(),
             visibility: Visibility::Private,
             is_async: meta_func.is_async,
             is_meta: false, // Runtime equivalent for VBC execution
@@ -540,6 +541,7 @@ impl VbcExecutor {
         // Return type is supplied by the caller (TokenStream on the classic
         // path, the meta function's own return type on the raw path).
         FunctionDecl {
+            decreases: Default::default(),
             visibility: Visibility::Private,
             is_async: false,
             is_meta: false,

@@ -59,6 +59,7 @@ fn test_module_with_items() {
     let mut items = List::new();
     items.push(Item::new(
         ItemKind::Function(FunctionDecl {
+            decreases: Default::default(),
             visibility: Visibility::Public,
             is_async: false,
             is_meta: false,
@@ -203,6 +204,7 @@ fn test_function_with_refinement_return_type() {
     let return_type = Maybe::Some(Type::new(TypeKind::Refined { base, predicate }, span));
 
     let func_decl = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,
@@ -389,6 +391,7 @@ fn test_context_declaration() {
 
     let mut methods = List::new();
     methods.push(FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,
@@ -478,6 +481,7 @@ fn test_complete_program() {
     // Function declaration
     items.push(Item::new(
         ItemKind::Function(FunctionDecl {
+            decreases: Default::default(),
             visibility: Visibility::Public,
             is_async: false,
             is_meta: false,

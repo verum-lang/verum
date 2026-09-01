@@ -705,6 +705,7 @@ mod tests {
             span: Span::dummy(),
         };
         let func = FunctionDecl {
+            decreases: Default::default(),
             visibility: Default::default(),
             name: verum_ast::ty::Ident::new("main", Span::dummy()),
             generics: List::new(),
@@ -775,6 +776,7 @@ mod tests {
 
     fn mk_module_with_function(is_unsafe: bool, extern_abi: Maybe<verum_common::Text>) -> Module {
         let func = FunctionDecl {
+            decreases: Default::default(),
             visibility: Default::default(),
             name: verum_ast::ty::Ident::new("native_fn", Span::dummy()),
             generics: List::new(),
@@ -918,6 +920,7 @@ mod tests {
         attributes: List<verum_ast::attr::Attribute>,
     ) -> Module {
         let func = FunctionDecl {
+            decreases: Default::default(),
             visibility: Default::default(),
             name: verum_ast::ty::Ident::new("native_fn", Span::dummy()),
             generics: List::new(),
@@ -1175,6 +1178,7 @@ mod tests {
         params.push(param);
 
         let func = FunctionDecl {
+            decreases: Default::default(),
             visibility: Default::default(),
             name: verum_ast::ty::Ident::new("handler", Span::dummy()),
             generics: List::new(),
@@ -1446,6 +1450,7 @@ mod tests {
         contexts.push(ctx_req);
 
         let func = FunctionDecl {
+            decreases: Default::default(),
             visibility: Default::default(),
             name: verum_ast::ty::Ident::new("logger_handler", Span::dummy()),
             generics: List::new(),

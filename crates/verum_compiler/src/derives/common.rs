@@ -679,6 +679,7 @@ impl DeriveContext {
         span: Span,
     ) -> FunctionDecl {
         FunctionDecl {
+            decreases: Default::default(),
             visibility: Visibility::Public,
             is_async: false,
             is_pure: false, // Derive-generated methods are not pure

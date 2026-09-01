@@ -89,6 +89,7 @@ fn test_non_recursive_function() {
 
     // fn simple(x: Int) -> Int { x + 1 }
     let decl = FunctionDecl {
+        decreases: Default::default(),
         visibility: verum_ast::decl::Visibility::Private,
         is_async: false,
         is_meta: false,
@@ -130,6 +131,7 @@ fn test_simple_recursive_function() {
     let body_expr = call_expr("factorial", vec![path_expr("n")]);
 
     let decl = FunctionDecl {
+        decreases: Default::default(),
         visibility: verum_ast::decl::Visibility::Private,
         is_async: false,
         is_meta: false,
@@ -178,6 +180,7 @@ fn test_function_with_no_body() {
 
     // External function with no body
     let decl = FunctionDecl {
+        decreases: Default::default(),
         visibility: verum_ast::decl::Visibility::Public,
         is_async: false,
         is_meta: false,
@@ -221,6 +224,7 @@ fn test_block_body_function() {
     };
 
     let decl = FunctionDecl {
+        decreases: Default::default(),
         visibility: verum_ast::decl::Visibility::Private,
         is_async: false,
         is_meta: false,

@@ -2017,6 +2017,7 @@ mod tests {
             span,
         };
         let func = FunctionDecl {
+            decreases: Default::default(),
             visibility: Default::default(),
             name: Ident::new("f", span),
             generics: List::new(),

@@ -80,6 +80,7 @@ fn make_function(name: &str, params: Vec<Type>, return_type: Maybe<Type>) -> Fun
         p_list.push(regular_param(ty));
     }
     FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Private,
         is_async: false,
         is_meta: false,

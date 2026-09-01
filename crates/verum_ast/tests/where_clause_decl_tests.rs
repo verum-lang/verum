@@ -56,6 +56,7 @@ fn test_function_with_generic_where_clause() {
     );
 
     let func = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,
@@ -116,6 +117,7 @@ fn test_function_with_meta_where_clause() {
     );
 
     let func = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,
@@ -195,6 +197,7 @@ fn test_function_with_both_where_clauses() {
     );
 
     let func = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,
@@ -445,6 +448,7 @@ fn test_function_with_context_requirements() {
     ];
 
     let func = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,
@@ -541,6 +545,7 @@ fn test_complete_function_declaration() {
     );
 
     let func = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,

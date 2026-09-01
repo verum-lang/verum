@@ -287,6 +287,7 @@ impl<'a> RecursiveParser<'a> {
             span,
         };
         let func = FunctionDecl {
+            decreases: Default::default(),
             visibility: Visibility::Private,
             is_async: needs_async,
             is_meta: false,
@@ -956,6 +957,13 @@ impl<'a> RecursiveParser<'a> {
         // being consumed as a struct literal in the contract expression
         let mut requires = Vec::new();
         let mut ensures = Vec::new();
+        // T1026: the termination measure is an ASSERTION BY THE AUTHOR and
+        // has to reach the AST for anything to check it. It used to be
+        // parsed into `let _expr` and dropped, so `decreases n` on a
+        // function whose recursion grows `n` verified clean under every
+        // instrument — the checkers were not failing to check it, they
+        // never received it.
+        let mut decreases = Vec::new();
 
         loop {
             // Safety: prevent infinite loop
@@ -1022,7 +1030,7 @@ impl<'a> RecursiveParser<'a> {
                     self.stream.advance();
                     // Parse decreases expression(s) - supports comma-separated for lexicographic ordering
                     // e.g., `decreases m, n` means lexicographic ordering on (m, n)
-                    let _expr = self.parse_expr_no_struct()?;
+                    decreases.push(self.parse_expr_no_struct()?);
                     // Consume additional comma-separated decreases expressions
                     while self.stream.check(&TokenKind::Comma) {
                         // Look ahead: if comma is followed by `ident :` it's a parameter, not another decreases expr
@@ -1034,7 +1042,7 @@ impl<'a> RecursiveParser<'a> {
                             break;
                         }
                         self.stream.advance(); // consume comma
-                        let _next_expr = self.parse_expr_no_struct()?;
+                        decreases.push(self.parse_expr_no_struct()?);
                     }
                 }
                 // GRAMMAR: ensures_clause = 'where' , ensures_item , { ',' , ensures_item } ;
@@ -1188,6 +1196,7 @@ impl<'a> RecursiveParser<'a> {
                 contexts: contexts.into_iter().collect(),
                 generic_where_clause: generic_where,
                 meta_where_clause: meta_where,
+                decreases: decreases.into_iter().collect(),
                 requires: requires.into_iter().collect(),
                 ensures: ensures.into_iter().collect(),
                 attributes: filtered_attrs.into_iter().collect(),
@@ -1298,6 +1307,7 @@ impl<'a> RecursiveParser<'a> {
 
             // Create the function declaration with extern ABI
             let func = FunctionDecl {
+                decreases: Default::default(),
                 visibility: vis,
                 is_async: false,
                 is_meta: false,
@@ -4639,6 +4649,7 @@ impl<'a> RecursiveParser<'a> {
 
             let span = self.stream.make_span(start_pos);
             let decl = FunctionDecl {
+                decreases: Default::default(),
                 visibility: Visibility::Private,
                 is_async,
                 is_meta,
@@ -5321,6 +5332,7 @@ impl<'a> RecursiveParser<'a> {
 
             let span = self.stream.make_span(start_pos);
             let decl = FunctionDecl {
+                decreases: Default::default(),
                 visibility: vis.clone(),
                 is_async,
                 is_meta,
@@ -6559,6 +6571,7 @@ impl<'a> RecursiveParser<'a> {
 
         let span = self.stream.make_span(start_pos);
         Ok(FunctionDecl {
+            decreases: Default::default(),
             visibility: Visibility::Public,
             is_async,
             is_meta: false,

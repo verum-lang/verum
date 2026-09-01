@@ -29,6 +29,7 @@ use verum_compiler::phases::mir_lowering::{LoweringContext, MirType};
 /// Helper to create a module with a simple function
 fn create_test_module(body_expr: Expr) -> Module {
     let func = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Private,
         is_async: false,
         is_meta: false,

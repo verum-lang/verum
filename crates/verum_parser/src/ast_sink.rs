@@ -297,6 +297,7 @@ impl AstSink {
         let is_transparent = attributes.iter().any(|a| a.name.as_str() == "transparent");
 
         Some(FunctionDecl {
+            decreases: Default::default(),
             visibility,
             is_async,
             is_meta,

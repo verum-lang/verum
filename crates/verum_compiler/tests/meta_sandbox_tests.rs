@@ -28,6 +28,7 @@ fn create_function_with_attribute(attr_name: &str) -> FunctionDecl {
     use verum_common::{List, Maybe};
 
     FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: true,
@@ -86,6 +87,7 @@ fn create_function_with_context(context_name: &str) -> FunctionDecl {
     };
 
     FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: true,

@@ -726,7 +726,23 @@ impl TerminationChecker {
         //  if x < 0.5 { ... gamma(1.0 - x) ... } // recursive branch
         //  else { ... } // base case (no recursion)
         //  }
-        if self.has_guarded_recursion(block, func_name) {
+        // T1026: a base case is NECESSARY for termination and nowhere near
+        // SUFFICIENT. `if n <= 0 { 0 } else { forever(n + 1) }` has one and
+        // never reaches it, and this early return made every per-call check
+        // below unreachable — which is why a declared measure that provably
+        // INCREASES verified clean under `verum check`, `verum verify`,
+        // `@verify(thorough)` and `@total` alike.
+        //
+        // The leniency is not a mistake in general: it suppresses false
+        // positives on code that terminates for reasons a syntactic walk
+        // cannot see (`gamma(1.0 - x)` recursing on a Float, named in the
+        // comment above). What changes is WHO it applies to. An author who
+        // writes `decreases n` has asserted what decreases and asked to be
+        // held to it, so a measure this walk can DECIDE removes the
+        // leniency; an undecidable one (`decreases a + b`) keeps it.
+        if Self::decidable_measure_params(decl, params).is_none()
+            && self.has_guarded_recursion(block, func_name)
+        {
             return Ok(());
         }
 
@@ -903,6 +919,34 @@ impl TerminationChecker {
     }
 
     /// Check that a recursive call has at least one decreasing argument
+    /// The parameter names a declared `decreases` measure refers to, in
+    /// the order written — or `None` when this syntactic walk cannot
+    /// decide the measure.
+    ///
+    /// Decidable means every component is a bare parameter name:
+    /// `decreases n`, `decreases m, n`. A compound measure
+    /// (`decreases a + b`, `decreases t.size()`, `decreases len(list)`)
+    /// needs arithmetic this walk does not do, and the conformance suite
+    /// declares all three — so those keep the lenient treatment rather
+    /// than turning red for a measure nobody can yet check (T1026).
+    fn decidable_measure_params(
+        decl: &FunctionDecl,
+        params: &List<ParamInfo>,
+    ) -> Option<Vec<Text>> {
+        if decl.decreases.is_empty() {
+            return None;
+        }
+        let mut names = Vec::new();
+        for e in decl.decreases.iter() {
+            let name = Self::extract_inner_var_name(e)?;
+            if !params.iter().any(|p| p.name == name) {
+                return None;
+            }
+            names.push(name);
+        }
+        Some(names)
+    }
+
     fn check_call_decreases(
         &self,
         decl: &FunctionDecl,
@@ -913,6 +957,38 @@ impl TerminationChecker {
 
         // Extract context from the call site (pattern matching, etc.)
         let context = self.extract_call_context(call);
+
+        // T1026: a DECLARED measure is the author's own assertion about what
+        // decreases, so it is what gets checked — not "some argument happens
+        // to be smaller". With `decreases n`, a call `f(n + 1, m - 1)` must
+        // be refused even though `m - 1` is smaller than `m`.
+        if let Some(measure) = Self::decidable_measure_params(decl, params) {
+            let index_of = |name: &Text| params.iter().position(|p| &p.name == name);
+            // Lexicographic: a component may decrease only if every component
+            // written BEFORE it is passed through unchanged. That is exactly
+            // the fragment a syntactic walk can decide, and it is what
+            // `decreases m, n` means — Ackermann's inner call
+            // `ackermann(m, n - 1)` keeps `m` and shrinks `n`.
+            for (k, name) in measure.iter().enumerate() {
+                let Some(pi) = index_of(name) else { continue };
+                let Some(arg) = call.args.get(pi) else { continue };
+                let earlier_unchanged = measure[..k].iter().all(|prev| {
+                    index_of(prev)
+                        .and_then(|j| call.args.get(j))
+                        .and_then(Self::extract_inner_var_name)
+                        .map(|v| &v == prev)
+                        .unwrap_or(false)
+                });
+                if earlier_unchanged && self.is_smaller_argument(&context, arg, name) {
+                    return Ok(());
+                }
+            }
+            return Err(TerminationError::NoDecreasingArgument {
+                function: func_name.clone(),
+                call_site: call.span,
+                available_args: measure.into_iter().collect(),
+            });
+        }
 
         // Check if call is in a pattern match that guarantees structural recursion
         if self.is_structurally_recursive(&context, params, &call.args) {

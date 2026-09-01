@@ -112,6 +112,7 @@ fn make_abs_function() -> FunctionDecl {
     );
 
     FunctionDecl {
+        decreases: Default::default(),
         visibility: verum_ast::decl::Visibility::Private,
         is_async: false,
         is_meta: false,

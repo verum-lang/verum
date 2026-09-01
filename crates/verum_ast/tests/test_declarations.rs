@@ -80,6 +80,7 @@ fn test_function_declaration() {
 
     // Simple function: pub fn foo() -> Int
     let simple_fn = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,
@@ -142,6 +143,7 @@ fn test_function_with_parameters() {
     ]);
 
     let add_fn = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Private,
         is_async: false,
         is_meta: false,
@@ -189,6 +191,7 @@ fn test_async_function() {
     let span = test_span();
 
     let async_fn = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: true,
         is_meta: false,
@@ -249,6 +252,7 @@ fn test_generic_function() {
     }]);
 
     let generic_fn = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,
@@ -303,6 +307,7 @@ fn test_method_declaration() {
     };
 
     let method = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,
@@ -520,6 +525,7 @@ fn test_protocol_declaration() {
         items: List::from(vec![ProtocolItem {
             kind: ProtocolItemKind::Function {
                 decl: FunctionDecl {
+                    decreases: Default::default(),
                     visibility: Visibility::Public,
                     is_async: false,
                     is_meta: false,
@@ -610,6 +616,7 @@ fn test_impl_block() {
             attributes: List::new(),
             visibility: Visibility::Public,
             kind: ImplItemKind::Function(FunctionDecl {
+                decreases: Default::default(),
                 visibility: Visibility::Public,
                 is_async: false,
                 is_meta: false,
@@ -697,6 +704,7 @@ fn test_trait_impl() {
             attributes: List::new(),
             visibility: Visibility::Public,
             kind: ImplItemKind::Function(FunctionDecl {
+                decreases: Default::default(),
                 visibility: Visibility::Public,
                 is_async: false,
                 is_meta: false,
@@ -806,6 +814,7 @@ fn test_module_declaration() {
         name: test_ident("utils"),
         items: Maybe::Some(List::from(vec![Item::new(
             ItemKind::Function(FunctionDecl {
+                decreases: Default::default(),
                 visibility: Visibility::Public,
                 is_async: false,
                 is_meta: false,
@@ -1082,6 +1091,7 @@ fn test_context_declaration() {
     ]);
 
     let risky_fn = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,
@@ -1213,6 +1223,7 @@ fn test_associated_type_in_protocol() {
             ProtocolItem {
                 kind: ProtocolItemKind::Function {
                     decl: FunctionDecl {
+                        decreases: Default::default(),
                         visibility: Visibility::Public,
                         is_async: false,
                         is_meta: false,
@@ -1497,6 +1508,7 @@ fn test_context_decl_with_sub_contexts() {
     let span = test_span();
 
     let read_method = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,
@@ -1554,6 +1566,7 @@ fn test_context_decl_with_sub_contexts() {
     };
 
     let write_method = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,
@@ -1719,6 +1732,7 @@ fn test_context_decl_methods_and_sub_contexts() {
     let span = test_span();
 
     let main_method = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,

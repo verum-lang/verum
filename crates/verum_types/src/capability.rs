@@ -1181,6 +1181,7 @@ mod tests {
 
         // Add a method to the Query sub-context
         let query_method = FunctionDecl {
+            decreases: Default::default(),
             visibility: Visibility::Private,
             is_async: false,
             is_meta: false,

@@ -1028,6 +1028,7 @@ mod tests {
 
     fn build_fn(name: &str, is_async: bool) -> verum_ast::Item {
         let func = verum_ast::decl::FunctionDecl {
+            decreases: Default::default(),
             visibility: verum_ast::decl::Visibility::Private,
             is_async,
             is_meta: false,

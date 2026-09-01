@@ -2235,6 +2235,7 @@ mod tests {
         use verum_ast::ty::Ident;
 
         verum_ast::decl::FunctionDecl {
+            decreases: Default::default(),
             visibility: verum_ast::decl::Visibility::Private,
             is_async,
             is_meta: false,

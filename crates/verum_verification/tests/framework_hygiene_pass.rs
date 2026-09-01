@@ -199,6 +199,7 @@ fn make_function_with_attrs(name: &str, attrs: Vec<Attribute>) -> FunctionDecl {
         a_list.push(a);
     }
     FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,

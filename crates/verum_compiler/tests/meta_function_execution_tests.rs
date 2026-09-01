@@ -389,6 +389,7 @@ fn test_meta_registry_register_function() {
     let module = Text::from("test_module");
 
     let func_decl = FunctionDecl {
+        decreases: Default::default(),
         visibility: verum_ast::decl::Visibility::Public,
         is_async: false,
         is_meta: true,
@@ -432,6 +433,7 @@ fn test_meta_registry_duplicate_function() {
     let module = Text::from("test_module");
 
     let func_decl = FunctionDecl {
+        decreases: Default::default(),
         visibility: verum_ast::decl::Visibility::Public,
         is_async: false,
         is_meta: true,

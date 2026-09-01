@@ -11775,10 +11775,30 @@ impl TypeChecker {
                             span,
                             ..
                         } => {
+                            // T1026: an author who wrote `decreases n` is owed a
+                            // refusal about THAT, not about a stack they never
+                            // mentioned. Every termination error used to be
+                            // flattened into one generic message at this
+                            // boundary, discarding the reason it carried.
+                            let detail = if func.decreases.is_empty() {
+                                None
+                            } else {
+                                let measure = func
+                                    .decreases
+                                    .iter()
+                                    .map(|e| verum_ast::pretty::format_expr(e).as_str().to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                Some(verum_common::Text::from(format!(
+                                    "`{}` declares `decreases {}`, and it does not decrease at this recursive call — a declared measure is an assertion about termination, so it is checked",
+                                    function, measure
+                                )))
+                            };
                             return Err(TypeError::UnboundedRecursionDetected {
                                 func_name: function,
                                 span,
                                 cycle: List::from(vec![func.name.name.clone()]),
+                                detail,
                             });
                         }
                         crate::termination::TerminationError::MutualRecursionCycle {
@@ -11789,6 +11809,7 @@ impl TypeChecker {
                                 func_name: func.name.name.clone(),
                                 span: func.span,
                                 cycle,
+                                detail: None,
                             });
                         }
                         crate::termination::TerminationError::UnguardedCorecursion {
@@ -11799,6 +11820,7 @@ impl TypeChecker {
                                 func_name: function,
                                 span,
                                 cycle: List::from(vec![func.name.name.clone()]),
+                                detail: None,
                             });
                         }
                     }

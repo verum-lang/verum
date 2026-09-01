@@ -65,6 +65,7 @@ fn make_meta_function(name: &str, is_transparent: bool, body: Expr) -> FunctionD
     let span = Span::dummy();
 
     FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Private,
         is_async: false,
         is_meta: true, // This is a meta function
@@ -142,6 +143,7 @@ fn test_non_meta_function_ignores_transparent() {
     // (though it's semantically odd to use it there)
     let span = Span::dummy();
     let func = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Private,
         is_async: false,
         is_meta: false, // NOT a meta function

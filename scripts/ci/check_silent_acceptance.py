@@ -273,7 +273,6 @@ BASELINE = {
     "attribute-name-typo",
     "attribute-argument-typo",
     "nonexistent-protocol-axiom",
-    "decreases-measure-grows",
     "undeclared-context-use",
 }
 
@@ -340,8 +339,12 @@ def main() -> int:
         print(
             "\nFAIL: the tool printed nothing for: "
             + ", ".join(sorted(mute))
-            + "\n  A mute run has not answered the question. Check `df -h` and"
-            "\n  `sysctl vm.swapusage` before reading anything else here.",
+            + "\n  A mute run has not answered the question."
+            f"\n  First: does `{verum}` exist and run? The binary is a POSITIONAL"
+            "\n  argument — a flag like `--verum path` becomes the path itself,"
+            "\n  every probe raises FileNotFoundError, and EVERY row goes mute."
+            "\n  Then: `df -h` and `sysctl vm.swapusage` — a full volume silences"
+            "\n  the compiler outright, which is why this outcome exists.",
             file=sys.stderr,
         )
         return 1

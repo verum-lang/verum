@@ -508,6 +508,7 @@ fn char_lit(c: char, span: Span) -> Expr {
 
 fn make_top_fn(name: &str, return_ty: Type, body: Block, span: Span) -> FunctionDecl {
     FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_pure: false,

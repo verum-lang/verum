@@ -1428,6 +1428,13 @@ pub enum TypeError {
         span: verum_ast::span::Span,
         /// Optional: functions involved in mutual recursion cycle
         cycle: List<Text>,
+        /// What the author is owed instead of the generic wording: when the
+        /// function DECLARED a `decreases` measure, the refusal is about
+        /// that measure, not about a stack the author never mentioned
+        /// (T1026). Every termination error used to be flattened into the
+        /// generic message at the mapping boundary, so an author who wrote
+        /// `decreases n` was told "potential stack overflow".
+        detail: Option<Text>,
     },
 
     // =====================================================================
@@ -3641,11 +3648,16 @@ impl TypeError {
                 func_name,
                 span,
                 cycle,
+                detail,
             } => {
-                let mut builder = DiagnosticBuilder::error().code("E321").message(format!(
-                    "potential stack overflow: unbounded recursion detected in function `{}`",
-                    func_name
-                ));
+                let msg = match detail {
+                    Some(d) => d.as_str().to_string(),
+                    None => format!(
+                        "potential stack overflow: unbounded recursion detected in function `{}`",
+                        func_name
+                    ),
+                };
+                let mut builder = DiagnosticBuilder::error().code("E321").message(msg);
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }

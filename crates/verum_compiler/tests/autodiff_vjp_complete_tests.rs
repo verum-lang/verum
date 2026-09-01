@@ -100,6 +100,7 @@ fn create_test_function(
     }
 
     FunctionDecl {
+        decreases: Default::default(),
         visibility: verum_ast::decl::Visibility::Public,
         is_async: false,
         is_meta: false,

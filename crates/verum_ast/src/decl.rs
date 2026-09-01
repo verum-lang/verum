@@ -528,6 +528,22 @@ pub struct FunctionDecl {
     /// Example: `where meta N > 0, meta M > 0`
     pub meta_where_clause: Maybe<WhereClause>,
 
+    /// Termination measure (decreases clauses).
+    ///
+    /// A comma-separated list is compared LEXICOGRAPHICALLY, so
+    /// `decreases m, n` means the pair (m, n) strictly decreases at every
+    /// recursive call.
+    ///
+    /// This is an ASSERTION BY THE AUTHOR, not a hint: writing it says the
+    /// recursion terminates and asks the compiler to hold them to it. The
+    /// parser used to discard the parsed expression into `let _expr`, so no
+    /// downstream check ever received a measure — which is why a declared
+    /// measure that provably INCREASES verified clean under `verum check`,
+    /// `verum verify`, `@verify(thorough)` and `@total` alike (T1026).
+    ///
+    /// Example: `decreases n`
+    pub decreases: List<Expr>,
+
     /// Preconditions (requires clauses)
     /// Example: `requires b != 0`
     pub requires: List<Expr>,

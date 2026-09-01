@@ -524,6 +524,7 @@ fn test_verification_pipeline() {
     let func_name = Ident::new("increment", Span::dummy());
     let int_ident = Ident::new("Int", Span::dummy());
     let func = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,

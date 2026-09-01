@@ -344,6 +344,7 @@ impl DeriveBuilder {
         let return_type = Type::new(TypeKind::Path(Path::single(Ident::new("Self", span))), span);
 
         FunctionDecl {
+            decreases: Default::default(),
             visibility: Visibility::Public,
             is_async: false,
             is_pure: false,
@@ -560,6 +561,7 @@ impl DeriveBuilder {
         let return_type = type_info.as_type(span);
 
         FunctionDecl {
+            decreases: Default::default(),
             visibility: Visibility::Public,
             is_async: false,
             is_pure: false,
@@ -691,6 +693,7 @@ impl DeriveBuilder {
         );
 
         FunctionDecl {
+            decreases: Default::default(),
             visibility: Visibility::Public,
             is_async: false,
             is_pure: false,

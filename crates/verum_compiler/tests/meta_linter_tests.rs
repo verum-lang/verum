@@ -108,6 +108,7 @@ fn make_function(
     let params = params.into_iter().map(make_param).collect();
 
     FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Private,
         is_async: false,
         is_meta: true,
@@ -564,6 +565,7 @@ fn test_external_input_propagation() {
     };
 
     let func = FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Private,
         is_async: false,
         is_meta: true,

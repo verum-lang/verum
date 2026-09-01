@@ -722,6 +722,7 @@ impl DerivativeGenerator {
         let return_type = self.build_vjp_return_type(span);
 
         let vjp_func = FunctionDecl {
+            decreases: Default::default(),
             visibility: self.func.visibility.clone(),
             is_async: false,
             is_pure: false, // Generated VJP functions are not pure
@@ -778,6 +779,7 @@ impl DerivativeGenerator {
         let return_type = self.build_jvp_return_type(span);
 
         let jvp_func = FunctionDecl {
+            decreases: Default::default(),
             visibility: self.func.visibility.clone(),
             is_async: false,
             is_pure: false, // Generated JVP functions are not pure
@@ -826,6 +828,7 @@ impl DerivativeGenerator {
         let return_type = self.build_grad_return_type(span);
 
         let grad_func = FunctionDecl {
+            decreases: Default::default(),
             visibility: self.func.visibility.clone(),
             is_async: false,
             is_pure: false, // Generated gradient functions are not pure

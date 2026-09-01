@@ -32,6 +32,7 @@ use verum_types::{
 /// Helper to create a dummy function declaration
 fn make_function_decl(name: &str, has_return_type: bool) -> FunctionDecl {
     FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Public,
         is_async: false,
         is_meta: false,

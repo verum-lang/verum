@@ -86,6 +86,7 @@ fn make_function(name: &str, params: Vec<Type>, return_type: Maybe<Type>) -> Fun
         p_list.push(regular_param(ty));
     }
     FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Private,
         is_async: false,
         is_meta: false,
@@ -223,6 +224,7 @@ fn make_function_with_body(
         p_list.push(regular_param(ty));
     }
     FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Private,
         is_async: false,
         is_meta: false,
@@ -503,6 +505,7 @@ fn make_function_with_contract(
         ens_list.push(e);
     }
     FunctionDecl {
+        decreases: Default::default(),
         visibility: Visibility::Private,
         is_async: false,
         is_meta: false,

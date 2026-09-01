@@ -898,6 +898,7 @@ mod mount_cycle_tests {
         params: List<verum_ast::decl::FunctionParam>,
     ) -> verum_ast::FunctionDecl {
         verum_ast::FunctionDecl {
+            decreases: Default::default(),
             visibility: Default::default(),
             name: verum_ast::ty::Ident::new("test_fn", Span::default()),
             generics: List::new(),
