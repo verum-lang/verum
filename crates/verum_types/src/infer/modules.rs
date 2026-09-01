@@ -14376,11 +14376,25 @@ impl TypeChecker {
     /// 5. Unify original with substituted type to get TypeVar -> concrete type mapping
     /// 6. Return type args in the correct declaration order
     fn extract_type_args_from_variant(&self, substituted_ty: &Type) -> List<Type> {
+        // T0741 instrument: this is where a STRUCTURAL receiver
+        // (`None(Unit) | Some(t)`) is turned back into type ARGUMENTS so
+        // the method's impl-level parameter can be bound to them. An
+        // empty answer here and a fresh, unbound return variable are the
+        // same observation from two ends.
+        let trace = std::env::var("VERUM_TRACE_VARARGS").is_ok();
         // Step 1: Get variant signature
         let sig = match Self::variant_type_signature(substituted_ty) {
             Some(s) => s,
-            None => return List::new(),
+            None => {
+                if trace {
+                    eprintln!("[varargs] no signature for {}", substituted_ty.to_text());
+                }
+                return List::new();
+            }
         };
+        if trace {
+            eprintln!("[varargs] sig={}", sig.as_str());
+        }
 
         // Step 2: Look up type name (try full signature, then relaxed)
         let type_name = match self.variant_type_names.get(&sig) {
@@ -18507,6 +18521,40 @@ impl TypeChecker {
         args: &[Expr],
         span: Span,
     ) -> Result<Option<InferResult>> {
+        // T0741 instrument: does an inherent method of an ARCHIVE
+        // generic type reach this resolver at all?  `Maybe.expect`
+        // showed no `early-inherent` and no `inherent-resolver` line,
+        // and those two trace only their SUCCESS paths — "did not
+        // print" was compatible with three different stories.
+        if std::env::var("VERUM_TRACE_MRESOLVE").is_ok() {
+            // Rendered AND identified. `to_text` prints EVERY variable as
+            // `_`, so `Some(_)` is the same picture whether the payload is
+            // the caller's `T` or a fresh unrelated var — and telling those
+            // two apart is the whole question here. The peer's
+            // `[assoc-answer]` trace carries the same note for the same
+            // reason (T0997).
+            let ids = {
+                let dbg = format!("{recv_ty:?}");
+                let mut out: Vec<String> = Vec::new();
+                let mut rest = dbg.as_str();
+                while let Some(i) = rest.find("TypeVar(") {
+                    rest = &rest[i + "TypeVar(".len()..];
+                    if let Some(j) = rest.find(')') {
+                        let id = rest[..j].to_string();
+                        if !out.contains(&id) {
+                            out.push(id);
+                        }
+                    }
+                }
+                out
+            };
+            eprintln!(
+                "[mresolve] enter recv={}{:?} method={}",
+                recv_ty.to_text(),
+                ids,
+                method_name_str
+            );
+        }
         // ============================================================
         // EARLY INHERENT_METHODS LOOKUP: Before hardcoded stdlib overrides,
         // check if the method was registered from parsed .vr stdlib files
@@ -18579,6 +18627,39 @@ impl TypeChecker {
                     Type::Named { path, .. } => path
                         .as_ident()
                         .map(|id| verum_common::Text::from(id.name.as_str())),
+                    // A STRUCTURAL variant still has a nominal name, and
+                    // this arm is where it was thrown away (T0741).
+                    //
+                    // `m: Maybe<T>` reaches here as
+                    // `None(Unit) | Some(t)` — the expansion is correct,
+                    // and the payload really is the caller's `t`
+                    // (measured: receiver carries TypeVar(15605), the
+                    // function's own parameter).  But `_ => None` gave
+                    // the lookup below no key, so the early-inherent
+                    // path — the one carrying the `[self-bind]` step
+                    // that unifies the method's impl-level parameter
+                    // with the receiver's argument — was skipped
+                    // entirely.  `expect(self, msg: &Text) -> T` then
+                    // returned a FRESH variable (TypeVar(15606)) that
+                    // nothing ever constrained, and the binding was
+                    // reported as "not fully determined".
+                    //
+                    // Which is why `unwrap_or(d: T) -> T` was clean on
+                    // the identical receiver: its argument re-links the
+                    // two variables, so the missing step never showed.
+                    // The parameter had to appear ONLY in the return for
+                    // the gap to be visible at all.
+                    //
+                    // The recovery is the registry the substituter
+                    // already uses for the same purpose — signature to
+                    // nominal name, with the relaxed spelling as the
+                    // fallback for payload drift.
+                    Type::Variant(_) => Self::variant_type_signature(&recv_ty)
+                        .and_then(|sig| self.variant_type_names.get(&sig).cloned())
+                        .or_else(|| {
+                            Self::variant_type_signature_relaxed(&recv_ty)
+                                .and_then(|sig| self.variant_type_names.get(&sig).cloned())
+                        }),
                     _ => None,
                 }
             };
@@ -18801,6 +18882,38 @@ impl TypeChecker {
                                     let mut l: List<Type> = List::new();
                                     l.push((**element).clone());
                                     l
+                                }
+                                // A STRUCTURAL variant receiver carries its
+                                // arguments in its payloads, and the sibling
+                                // bind-site already recovers them — this one
+                                // did not (T0741).
+                                //
+                                // `bind_limit` is
+                                // `min(impl_var_count, fresh, receiver_args)`,
+                                // so an empty list here zeroes it however
+                                // well the other two are known.  Measured on
+                                // `m: Maybe<T>` calling `m.expect(msg)`:
+                                //
+                                //     early-inherent HIT Maybe.expect
+                                //       impl_vc=1 fresh=1 bind_limit=0
+                                //       ty=fn(&Text) -> _
+                                //
+                                // impl_vc and fresh both 1, and the bind
+                                // still could not happen.  The method's
+                                // return took a fresh variable nothing
+                                // constrained, and the binding was reported
+                                // as "not fully determined by this
+                                // function" — the largest single class in
+                                // the core/ corpus.
+                                //
+                                // `unwrap_or(d: T) -> T` was clean on the
+                                // identical receiver because its ARGUMENT
+                                // re-links the two variables; the parameter
+                                // had to appear only in the RETURN for the
+                                // gap to be visible.
+                                Type::Variant(variants) => {
+                                    let variant_ty = Type::Variant(variants.clone());
+                                    self.extract_type_args_from_variant(&variant_ty)
                                 }
                                 _ => List::new(),
                             };
@@ -22922,6 +23035,13 @@ impl TypeChecker {
                             // 5. Return type args in the correct declaration order
                             let variant_ty = Type::Variant(variants.clone());
                             let extracted = self.extract_type_args_from_variant(&variant_ty);
+                            if std::env::var("VERUM_TRACE_VARARGS").is_ok() {
+                                eprintln!(
+                                    "[varargs] caller got {} arg(s) for {}",
+                                    extracted.len(),
+                                    variant_ty.to_text()
+                                );
+                            }
                             if !extracted.is_empty() {
                                 for arg in extracted {
                                     args.push(arg);

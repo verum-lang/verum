@@ -74,6 +74,29 @@
 # `xargs` with no input succeeds.  An empty input and a clean result are
 # indistinguishable by exit code.  Any sweep here must assert its input
 # is non-empty before believing its output.
+#
+# 2026-09-01 (T0741, second route): 350 -> 348.
+#
+#   core/async/future.vr   3 errors -> 0
+#   core/base/cell.vr      4 errors -> 0
+#
+# `m.expect(msg)` on a `Maybe<T>` whose `T` is a type parameter answered
+# `_`.  Two match arms, one after the other, dropped what they were
+# given: the first threw away the nominal name of a STRUCTURAL variant
+# receiver (`None(Unit) | Some(t)` → no key → the early-inherent path,
+# and with it the receiver-binding step, skipped entirely), and once
+# that was repaired the second threw away the receiver's type arguments
+# (`bind_limit = min(impl_var_count, fresh, receiver_args)` → 0 with the
+# other two correctly 1).
+#
+# `unwrap_or(d: T) -> T` was clean throughout on the identical receiver,
+# because its ARGUMENT re-links the variables.  The parameter had to
+# appear ONLY in the return for either gap to be visible at all — which
+# is why the class hid behind a method that worked.
+#
+# Corpus effect: 96 files carrying the ambiguity, 868 errors -> 856,
+# six files improved, none regressed, no mutes.  1.4% of the class; the
+# rest arrives by routes not yet named.
 core/action/effects.vr
 core/action/enactments.vr
 core/action/gauge.vr
@@ -90,10 +113,8 @@ core/action/verify.vr
 core/archive/tar.vr
 core/async/cancellation.vr
 core/async/executor.vr
-core/async/future.vr
 core/async/select.vr
 core/async/stream.vr
-core/base/cell.vr
 core/base/data.vr
 core/base/iterator.vr
 core/base/memory.vr
