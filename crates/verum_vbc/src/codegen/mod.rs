@@ -14577,7 +14577,7 @@ impl VbcCodegen {
                                 if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } =
                                     &p.kind
                                 {
-                                    Some(self.resolve_field_type_ref(ty, &combined_map))
+                                    Some(self.resolve_signature_type_ref(ty, &combined_map))
                                 } else {
                                     None // Skip self params
                                 }
@@ -14586,7 +14586,7 @@ impl VbcCodegen {
 
                         let ret_ref = match &decl.return_type {
                             verum_common::Maybe::Some(ty) => {
-                                self.resolve_field_type_ref(ty, &combined_map)
+                                self.resolve_signature_type_ref(ty, &combined_map)
                             }
                             verum_common::Maybe::None => {
                                 TypeRef::Concrete(crate::types::TypeId::UNIT)
@@ -16176,10 +16176,34 @@ impl VbcCodegen {
         resolved
     }
 
+    /// The LAYOUT question: what a value of this type IS at runtime.
+    /// Reference wrappers are erased on purpose — see the T0846 note
+    /// inside the carrier.  This is what record fields and function
+    /// parameter registration want.
     fn resolve_field_type_ref(
         &self,
         ty: &verum_ast::ty::Type,
         generic_param_map: &std::collections::HashMap<String, u16>,
+    ) -> TypeRef {
+        self.resolve_type_ref_scoped(ty, generic_param_map, false)
+    }
+
+    /// The SIGNATURE question: what the SOURCE said, so a reader on the
+    /// far side of the archive gets the declaration back unchanged.
+    /// Same walk, opposite verdict on reference wrappers (T1033).
+    fn resolve_signature_type_ref(
+        &self,
+        ty: &verum_ast::ty::Type,
+        generic_param_map: &std::collections::HashMap<String, u16>,
+    ) -> TypeRef {
+        self.resolve_type_ref_scoped(ty, generic_param_map, true)
+    }
+
+    fn resolve_type_ref_scoped(
+        &self,
+        ty: &verum_ast::ty::Type,
+        generic_param_map: &std::collections::HashMap<String, u16>,
+        preserve_refs: bool,
     ) -> TypeRef {
         use verum_ast::ty::{PathSegment, TypeKind};
         // Generic instantiation: recurse into args with the same map
@@ -16188,13 +16212,17 @@ impl VbcCodegen {
         // T → TypeRef::Generic(0) instead of degrading to
         // TypeRef::Concrete(PTR) via the un-aware fallback.
         if let TypeKind::Generic { base, args } = &ty.kind {
-            let base_ref = self.resolve_field_type_ref(base, generic_param_map);
+            let base_ref = self.resolve_type_ref_scoped(base, generic_param_map, preserve_refs);
             if let TypeRef::Concrete(base_id) = base_ref {
                 let arg_refs: Vec<TypeRef> = args
                     .iter()
                     .filter_map(|arg| match arg {
                         verum_ast::ty::GenericArg::Type(inner_ty) => {
-                            Some(self.resolve_field_type_ref(inner_ty, generic_param_map))
+                            Some(self.resolve_type_ref_scoped(
+                                inner_ty,
+                                generic_param_map,
+                                preserve_refs,
+                            ))
                         }
                         // CONST-GENERIC-VALUE-CARRY-1: a LITERAL const arg
                         // carries its value (`StackAllocator<1024>` →
@@ -16216,6 +16244,51 @@ impl VbcCodegen {
             }
             return base_ref;
         }
+        // T1033 (ARCHIVE-DROPS-REFERENCE-QUALIFIERS-1) — the SIGNATURE
+        // question, asked before the layout one below.  A protocol
+        // method's parameter types are baked into the archive as
+        // rendered text and re-parsed on load, so a wrapper erased here
+        // is erased from every archive consumer's view of the protocol:
+        // `fn poll(&mut self, cx: &mut Context)` arrived as
+        // `fn(Context)`, a by-value parameter where the language
+        // declared a mutable borrow.  The archive renderer already
+        // prints all three tiers faithfully
+        // (`type_ref_to_text_with_params`, ARCHIVE-REF-TIER-DROP-1) —
+        // it was never handed a `TypeRef::Reference` to print.
+        //
+        // This is the "re-wrap from the AST" remedy the assoc-binding
+        // site applies for its own load-bearing `&`, generalised to all
+        // three tiers and carried through recursion, so a reference one
+        // level down (`Maybe<&mut T>`) does not decay either.
+        if preserve_refs {
+            let reference = match &ty.kind {
+                TypeKind::Reference { inner, mutable } => {
+                    Some((inner, *mutable, crate::types::CbgrTier::Tier0))
+                }
+                TypeKind::CheckedReference { inner, mutable } => {
+                    Some((inner, *mutable, crate::types::CbgrTier::Tier1))
+                }
+                TypeKind::UnsafeReference { inner, mutable } => {
+                    Some((inner, *mutable, crate::types::CbgrTier::Tier2))
+                }
+                _ => None,
+            };
+            if let Some((inner, mutable, tier)) = reference {
+                return TypeRef::Reference {
+                    inner: Box::new(self.resolve_type_ref_scoped(
+                        inner,
+                        generic_param_map,
+                        preserve_refs,
+                    )),
+                    mutability: if mutable {
+                        crate::types::Mutability::Mutable
+                    } else {
+                        crate::types::Mutability::Immutable
+                    },
+                    tier,
+                };
+            }
+        }
         // A Tier-2 raw reference IS a machine word — descriptor says
         // PTR, never the pointee (same T0846 law as
         // ast_type_to_type_ref; THIS is the mapper the function-param
@@ -16228,7 +16301,7 @@ impl VbcCodegen {
         if let TypeKind::Reference { inner, .. }
         | TypeKind::CheckedReference { inner, .. } = &ty.kind
         {
-            return self.resolve_field_type_ref(inner, generic_param_map);
+            return self.resolve_type_ref_scoped(inner, generic_param_map, preserve_refs);
         }
         // Refinement types erase to their base at the descriptor layer
         // — the runtime representation of `Float{>= 0.0, <= 1.0}` IS a
@@ -16242,7 +16315,7 @@ impl VbcCodegen {
         // compared 0.4 < 0.7 → false). The refinement PREDICATE is not
         // lost — assert emission reads the AST, never descriptors.
         if let TypeKind::Refined { base, .. } = &ty.kind {
-            return self.resolve_field_type_ref(base, generic_param_map);
+            return self.resolve_type_ref_scoped(base, generic_param_map, preserve_refs);
         }
         // #131 Layer E — nested function types must preserve the
         // map through recursion.  The standard `ast_type_to_type_ref`
@@ -16264,9 +16337,9 @@ impl VbcCodegen {
         {
             let param_refs: Vec<TypeRef> = params
                 .iter()
-                .map(|p| self.resolve_field_type_ref(p, generic_param_map))
+                .map(|p| self.resolve_type_ref_scoped(p, generic_param_map, preserve_refs))
                 .collect();
-            let ret_ref = self.resolve_field_type_ref(return_type, generic_param_map);
+            let ret_ref = self.resolve_type_ref_scoped(return_type, generic_param_map, preserve_refs);
             let ctx_refs: smallvec::SmallVec<[crate::types::ContextRef; 2]> = contexts
                 .requirements
                 .iter()
@@ -16309,9 +16382,9 @@ impl VbcCodegen {
         {
             let param_refs: Vec<TypeRef> = params
                 .iter()
-                .map(|p| self.resolve_field_type_ref(p, generic_param_map))
+                .map(|p| self.resolve_type_ref_scoped(p, generic_param_map, preserve_refs))
                 .collect();
-            let ret_ref = self.resolve_field_type_ref(return_type, generic_param_map);
+            let ret_ref = self.resolve_type_ref_scoped(return_type, generic_param_map, preserve_refs);
             let ctx_refs: smallvec::SmallVec<[crate::types::ContextRef; 2]> = contexts
                 .requirements
                 .iter()
@@ -16344,7 +16417,7 @@ impl VbcCodegen {
             }
             let elem_refs: Vec<TypeRef> = elements
                 .iter()
-                .map(|e| self.resolve_field_type_ref(e, generic_param_map))
+                .map(|e| self.resolve_type_ref_scoped(e, generic_param_map, preserve_refs))
                 .collect();
             return TypeRef::Tuple(elem_refs);
         }
@@ -16438,10 +16511,10 @@ impl VbcCodegen {
             // function's parameter binds — the link the fix depends on.
             let base_ref = match &ty.kind {
                 TypeKind::AssociatedType { base, .. } => {
-                    self.resolve_field_type_ref(base, generic_param_map)
+                    self.resolve_type_ref_scoped(base, generic_param_map, preserve_refs)
                 }
                 TypeKind::Qualified { self_ty, .. } => {
-                    self.resolve_field_type_ref(self_ty, generic_param_map)
+                    self.resolve_type_ref_scoped(self_ty, generic_param_map, preserve_refs)
                 }
                 _ => TypeRef::Concrete(crate::types::TypeId::UNIT),
             };

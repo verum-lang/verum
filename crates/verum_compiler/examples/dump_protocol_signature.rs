@@ -4,11 +4,39 @@
 // and the diagnostic names a BARE `Result`. The declaration says
 // `-> Result<(), FormatError>`, so this prints what actually survived
 // into the metadata the type checker reads.
+//
+// Second argument (optional): a path to a `runtime.core_metadata` FILE.
+// Without it the EMBEDDED metadata is read, which is whatever the
+// running binary was built with — so a before/after comparison made
+// that way silently compares one bake with itself. Point it at a saved
+// copy of the pre-change bake and at the fresh one to measure a change
+// with a single instrument.
 fn main() {
     let protocol = std::env::args().nth(1).unwrap_or_else(|| "Debug".to_string());
-    let Some(meta) = verum_compiler::embedded_stdlib_metadata::get_runtime_metadata() else {
-        eprintln!("no embedded runtime metadata");
-        return;
+    let meta = match std::env::args().nth(2) {
+        Some(path) => {
+            let bytes = match std::fs::read(&path) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("cannot read {path}: {e}");
+                    return;
+                }
+            };
+            match bincode::deserialize::<verum_types::core_metadata::CoreMetadata>(&bytes) {
+                Ok(m) => std::sync::Arc::new(m),
+                Err(e) => {
+                    eprintln!("cannot decode {path}: {e}");
+                    return;
+                }
+            }
+        }
+        None => match verum_compiler::embedded_stdlib_metadata::get_runtime_metadata() {
+            Some(m) => m,
+            None => {
+                eprintln!("no embedded runtime metadata");
+                return;
+            }
+        },
     };
     let mut found = false;
     for (name, desc) in meta.protocols.iter() {
