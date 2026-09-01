@@ -16548,6 +16548,53 @@ impl TypeChecker {
         let mut var_subst: indexmap::IndexMap<crate::ty::TypeVar, Type> =
             indexmap::IndexMap::new();
         if !ctor.type_params.is_empty() {
+            // This branch indexes `fresh_args` — which is the PARENT's
+            // argument list — by the CONSTRUCTOR's own parameter
+            // position.  That is right only while the two orders
+            // coincide.  The `else` branch below reads the parent's
+            // order explicitly (that asymmetry is the T0741 defect);
+            // this one does not, and nothing here establishes that the
+            // two lists agree.
+            //
+            // Before changing it, measure whether it runs.  With
+            // `VERUM_TRACE_CTORPARAM=1`, over five real `core/` files
+            // plus the T0741 probes:
+            //
+            //     [ctorparam-else]   99 passes
+            //     [ctorparam]         0 passes
+            //
+            // and a source-declared `type MyRes<A,B> is MOk(A)|MErr(B)`
+            // reaches this function not at all — neither label prints.
+            // So the branch is UNREACHED BY EVERYTHING MEASURED, which
+            // is weaker than dead: source-registered constructors
+            // (priority 1 above) are its stated audience and none of
+            // them arrived here.  Instrumented rather than "corrected"
+            // blind — a plausible fix here would be inert, and the
+            // next reader would draw the opposite conclusion from that
+            // inertness.
+            if std::env::var("VERUM_TRACE_CTORPARAM").is_ok() {
+                let params_key: verum_common::Text =
+                    format!("__type_params_{}", parent_name).into();
+                let parent_order: Vec<String> =
+                    match self.ctx.lookup_type(params_key.as_str()) {
+                        Option::Some(Type::Record(param_record)) => param_record
+                            .keys()
+                            .map(|k| k.as_str().to_string())
+                            .collect(),
+                        _ => vec!["<НЕТ ЗАПИСИ>".to_string()],
+                    };
+                eprintln!(
+                    "[ctorparam] {}.{} ctor_params={:?} parent_order={:?} fresh={}",
+                    parent_name.as_str(),
+                    ctor_text.as_str(),
+                    ctor.type_params
+                        .iter()
+                        .map(|(n, _)| n.as_str().to_string())
+                        .collect::<Vec<_>>(),
+                    parent_order,
+                    fresh_args.len()
+                );
+            }
             for (i, (param_name, persistent_ty)) in ctor.type_params.iter().enumerate() {
                 if let Some(fresh_arg) = fresh_args.get(i) {
                     tv_subst.insert(param_name.clone(), fresh_arg.clone());
@@ -16559,12 +16606,66 @@ impl TypeChecker {
         } else {
             let params_key: verum_common::Text =
                 format!("__type_params_{}", parent_name).into();
+            if std::env::var("VERUM_TRACE_CTORPARAM").is_ok() {
+                eprintln!(
+                    "[ctorparam-else] {}.{} ctor.args={:?} fresh={} parent_params={:?}",
+                    parent_name.as_str(),
+                    ctor_text.as_str(),
+                    ctor.args.iter().map(|a| format!("{a:?}")
+                        .split("TypeVar(").nth(1)
+                        .and_then(|r| r.split(')').next().map(|s| format!("var{s}")))
+                        .unwrap_or_else(|| a.to_text().to_string()))
+                        .collect::<Vec<_>>(),
+                    fresh_args.iter().map(|a| format!("{a:?}")
+                        .split("TypeVar(").nth(1)
+                        .and_then(|r| r.split(')').next().map(|s| format!("var{s}")))
+                        .unwrap_or_else(|| a.to_text().to_string()))
+                        .collect::<Vec<_>>().join(","),
+                    match self.ctx.lookup_type(params_key.as_str()) {
+                        Option::Some(Type::Record(r)) =>
+                            r.keys().map(|k| k.as_str().to_string()).collect::<Vec<_>>(),
+                        _ => vec!["<НЕТ ЗАПИСИ>".to_string()],
+                    }
+                );
+            }
             if let Option::Some(Type::Record(param_record)) =
                 self.ctx.lookup_type(params_key.as_str())
             {
-                for (i, (param_name, _)) in param_record.iter().enumerate() {
+                for (i, (param_name, param_type)) in param_record.iter().enumerate() {
                     if let Some(fresh_arg) = fresh_args.get(i) {
                         tv_subst.insert(param_name.clone(), fresh_arg.clone());
+                        // …and by VARIABLE, which is the spelling the
+                        // payloads actually carry (T0741).
+                        //
+                        // The `if` branch above fills both maps; this one
+                        // filled only the by-name map, and a constructor
+                        // registered from archive metadata holds its
+                        // payload as a `Type::Var`, not as `Named{"E"}`.
+                        // Measured on `Result`:
+                        //
+                        //   Result.Ok  payload=var14510  fresh=[15610,15611]
+                        //   Result.Err payload=var14511  fresh=[15617,15618]
+                        //   parent_params=["T","E"]
+                        //
+                        // The two payloads are correctly DISTINCT — the
+                        // registration is not at fault — but with nothing
+                        // to match them by name, a later positional
+                        // fallback mapped each constructor's single free
+                        // var onto `fresh_args[0]`, so `Err`'s payload
+                        // became the parent's FIRST parameter.
+                        //
+                        // `match r { Ok(_) => Ok(7), Err(e) => Err(e) }`
+                        // with an unannotated result then reported
+                        // `expected 'Int', found 'DbErr5'`: both arms
+                        // wrote into the same slot.  `Ok` worked by
+                        // coincidence, its `T` being parameter zero.
+                        //
+                        // `__type_params_<Name>` records the persistent
+                        // var beside each parameter name, which is what
+                        // makes the correction positional-free.
+                        if let Type::Var(persistent_tv) = param_type {
+                            var_subst.insert(*persistent_tv, fresh_arg.clone());
+                        }
                     }
                 }
             } else if let Maybe::Some(metadata) = &self.core_metadata {
