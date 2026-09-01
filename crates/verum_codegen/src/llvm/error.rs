@@ -828,9 +828,13 @@ pub fn check_no_unresolved_generic_calls() -> Result<()> {
     // Full-list report channel for the strict-mono campaign (T0103):
     // the console warning caps at MAX_SHOWN for readability, but
     // classification work needs every unique site. When
-    // VERUM_MONO_REPORT names a path, the complete list is written
-    // there as `caller\tdetail` lines (best-effort — a write failure
-    // must not change compilation semantics).
+    // VERUM_MONO_REPORT names a path, every unique site of THIS
+    // lowering is APPENDED there as
+    // `caller \t reachable|dead \t detail` (best-effort — a write
+    // failure must not change compilation semantics).  Appending is
+    // what makes the file comparable with the count channel's
+    // total across a multi-module or multi-probe run; truncate it
+    // once before the run, not once per module.
     if let Some(path) = std::env::var_os("VERUM_MONO_REPORT") {
         let mut body = String::with_capacity(unique.len() * 96);
         for c in unique.iter() {
@@ -841,7 +845,21 @@ pub fn check_no_unresolved_generic_calls() -> Result<()> {
             body.push_str(c.detail.as_str());
             body.push('\n');
         }
-        if let Err(e) = std::fs::write(&path, body) {
+        // APPEND, like the sibling `write_degrade_report` does.  A
+        // truncating write made the two channels disagree by
+        // construction: over a multi-probe run the COUNT channel
+        // accumulated (398 -> 1149 reachable degrades on the ratchet's
+        // five probes) while the NAME channel kept only the LAST
+        // lowering's sites, so the sites behind the count could not be
+        // named at all — which is the one thing this channel exists
+        // for.  Callers truncate the file once before a run.
+        use std::io::Write;
+        let appended = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .and_then(|mut f| f.write_all(body.as_bytes()));
+        if let Err(e) = appended {
             eprintln!(
                 "[codegen-warn] VERUM_MONO_REPORT write to {:?} failed: {}",
                 path, e
