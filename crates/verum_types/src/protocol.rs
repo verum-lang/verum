@@ -4680,8 +4680,25 @@ impl ProtocolChecker {
                     let assoc_name: Text = name.as_str().trim_start_matches("::").into();
                     let base_type = &new_args[0];
 
-                    // Check if base type is concrete (no unresolved type variables)
-                    if !self.type_has_unresolved_vars(base_type) {
+                    // The question is whether an impl can be SELECTED,
+                    // which needs a known head — not whether the base is
+                    // concrete (T0741; see `type_head_is_unresolved`).
+                    // Its OWN variable, on the `[impl-load]` precedent:
+                    // this fires 880 times on ONE file and would swamp
+                    // any trace it shared a gate with. What it measured
+                    // is why the widened guard is not merely harmless —
+                    // over twelve files, 978 passes, 8 of them are the
+                    // case the old guard refused: head known, argument
+                    // open.
+                    if std::env::var("VERUM_TRACE_PROJSITE").is_ok() {
+                        eprintln!(
+                            "[proj-site] head_open={} had_vars={} base={}",
+                            self.type_head_is_unresolved(base_type),
+                            self.type_has_unresolved_vars(base_type),
+                            base_type.to_text()
+                        );
+                    }
+                    if !self.type_head_is_unresolved(base_type) {
                         // Try to resolve the projection
                         if let Some(resolved) =
                             self.try_find_associated_type(base_type, &assoc_name)
@@ -6587,8 +6604,25 @@ impl ProtocolChecker {
                     let assoc_name: Text = name.trim_start_matches("::");
                     let base_type = &substituted_args[0];
 
-                    // Check if base type is concrete (no unresolved type variables)
-                    if !self.type_has_unresolved_vars(base_type) {
+                    // The question is whether an impl can be SELECTED,
+                    // which needs a known head — not whether the base is
+                    // concrete (T0741; see `type_head_is_unresolved`).
+                    // Its OWN variable, on the `[impl-load]` precedent:
+                    // this fires 880 times on ONE file and would swamp
+                    // any trace it shared a gate with. What it measured
+                    // is why the widened guard is not merely harmless —
+                    // over twelve files, 978 passes, 8 of them are the
+                    // case the old guard refused: head known, argument
+                    // open.
+                    if std::env::var("VERUM_TRACE_PROJSITE").is_ok() {
+                        eprintln!(
+                            "[proj-site] head_open={} had_vars={} base={}",
+                            self.type_head_is_unresolved(base_type),
+                            self.type_has_unresolved_vars(base_type),
+                            base_type.to_text()
+                        );
+                    }
+                    if !self.type_head_is_unresolved(base_type) {
                         // Try to resolve the projection
                         if let Some(resolved) =
                             self.try_find_associated_type(base_type, &assoc_name)
@@ -8116,8 +8150,25 @@ impl ProtocolChecker {
                     let assoc_name: Text = name.as_str().trim_start_matches("::").into();
                     let base_type = &new_args[0];
 
-                    // Check if base type is concrete (no unresolved type variables)
-                    if !self.type_has_unresolved_vars(base_type) {
+                    // The question is whether an impl can be SELECTED,
+                    // which needs a known head — not whether the base is
+                    // concrete (T0741; see `type_head_is_unresolved`).
+                    // Its OWN variable, on the `[impl-load]` precedent:
+                    // this fires 880 times on ONE file and would swamp
+                    // any trace it shared a gate with. What it measured
+                    // is why the widened guard is not merely harmless —
+                    // over twelve files, 978 passes, 8 of them are the
+                    // case the old guard refused: head known, argument
+                    // open.
+                    if std::env::var("VERUM_TRACE_PROJSITE").is_ok() {
+                        eprintln!(
+                            "[proj-site] head_open={} had_vars={} base={}",
+                            self.type_head_is_unresolved(base_type),
+                            self.type_has_unresolved_vars(base_type),
+                            base_type.to_text()
+                        );
+                    }
+                    if !self.type_head_is_unresolved(base_type) {
                         // Try to resolve the projection
                         if let Some(resolved) =
                             self.try_find_associated_type(base_type, &assoc_name)
@@ -8168,10 +8219,41 @@ impl ProtocolChecker {
         }
     }
 
+    /// Is the type's HEAD unresolved — as distinct from the type merely
+    /// CONTAINING an unresolved variable?
+    ///
+    /// The three deferred-projection sites in this file gate on
+    /// `!type_has_unresolved_vars(base)` under the comment "check if
+    /// base type is concrete", and concreteness is not what decides
+    /// whether the projection can be reduced.  `ListIter<t>` is not
+    /// concrete and still names its constructor, so
+    /// `implement<T> Iterator for ListIter<T> { type Item = T; }`
+    /// selects against it and yields `Item = t` whatever `t` becomes.
+    ///
+    /// The same guard, spelled the same way, was the root of T0741 in
+    /// `infer/types.rs`: the projection stayed unreduced as
+    /// `Item<ListIter<t>>`, unification bound `t` to it, and the type
+    /// grew on every use until it was reported as "not fully determined
+    /// by this function".  These three are its siblings, found by
+    /// looking for the shape rather than the symptom.
+    ///
+    /// A bare `Type::Var` still defers: with no head there is no impl to
+    /// select, which is the case the original comment was really about.
+    fn type_head_is_unresolved(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Var(_) => true,
+            // `F<Int>` where `F` is itself a variable: the arguments say
+            // nothing about which impl applies.
+            Type::TypeApp { constructor, .. } => self.type_head_is_unresolved(constructor),
+            _ => false,
+        }
+    }
+
     /// Check if a type contains any unresolved type variables.
     ///
     /// This is used to determine if a deferred projection can be resolved.
     /// A projection like `::Item[A]` can only be resolved if `A` is concrete.
+    #[allow(dead_code)]
     fn type_has_unresolved_vars(&self, ty: &Type) -> bool {
         match ty {
             Type::Var(_) => true,
