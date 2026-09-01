@@ -144,12 +144,16 @@ impl MlirError {
 /// lowering path has its own `MlirError` enum, so it gets its own
 /// helper trait.  Replaces the verbose
 ///
-///     .ok_or_else(|| MlirError::internal("<msg>"))
+/// ```text
+/// .ok_or_else(|| MlirError::internal("<msg>"))
+/// ```
 ///
 /// pattern repeated 32+ times across `crates/verum_codegen/src/mlir/`
 /// with the much shorter
 ///
-///     .or_internal("<msg>")?
+/// ```text
+/// .or_internal("<msg>")?
+/// ```
 pub trait OptionExt<T> {
     /// Convert `None` into `MlirError::InternalError { message: <msg> }`.
     fn or_internal(self, msg: &str) -> Result<T>;

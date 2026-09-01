@@ -338,15 +338,35 @@ jobs:
       # 2026-08-28, one of them written the same day the other four were
       # cleared.
       #
-      # This step is the whole check and there is no cheaper one. A
-      # token-matching gate was written first and DELETED: it reported
+      # A token-matching gate was written first and DELETED: it reported
       # clean on the very block it was written for, because a Verum
       # snippet that fails as Rust can be indistinguishable from Rust by
       # inspection (`loop { if i >= n { … } }` is a syntax rustc accepts
-      # and a program it cannot resolve). Only the compiler knows.
+      # and a program it cannot resolve). Only the compiler knows what a
+      # block MEANS — and the step below is still the only thing that
+      # asks that.
+      #
+      # It is not, however, the whole check, and the sentence that said
+      # so was wrong: this step stayed RED on main from 2026-08-28 to
+      # 2026-09-01 while the class it guards came back twice. It sees a
+      # block only in the four crates it names, and only when the block
+      # FAILS to parse — `verum_codegen` and `verum_vbc` held nine more,
+      # two of which were accidentally valid Rust and said nothing.
+      #
+      # So the structural check runs FIRST, and asks a question the
+      # compiler cannot: is there an indented block at all? No content
+      # is classified, so the deleted gate's failure mode cannot recur,
+      # and it carries its own positive control (`--selftest`) because a
+      # detector reporting nothing looks exactly like a clean tree.
+      - name: Doc comments fence their code blocks
+        timeout-minutes: 2
+        run: |
+          python3 scripts/ci/check_doc_indented_blocks.py --selftest
+          python3 scripts/ci/check_doc_indented_blocks.py
+
       - name: Doc examples compile
         timeout-minutes: 20
-        run: cargo test --locked --doc -p verum_types -p verum_smt -p verum_common -p verum_ast
+        run: cargo test --locked --doc -p verum_types -p verum_smt -p verum_common -p verum_ast -p verum_vbc -p verum_codegen
 
       # verum_verification tier: 1,537 tests measured green 2026-08-03,
       # zero carve-outs.

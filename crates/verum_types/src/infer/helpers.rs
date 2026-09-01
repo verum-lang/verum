@@ -1514,7 +1514,9 @@ thread_local! {
 /// difference is the whole point. A rank-2 body mentions two kinds of
 /// variable:
 ///
-///     fn<R>(Reducer<B, R>) -> Reducer<A, R>
+/// ```text
+/// fn<R>(Reducer<B, R>) -> Reducer<A, R>
+/// ```
 ///
 /// `R` is local and must be fresh at every use site; `A` and `B` belong
 /// to the ENCLOSING descriptor and must stay linked to it. Entering a

@@ -269,12 +269,16 @@ impl CodegenError {
 /// — the codegen path has its own `CodegenError` enum, so it gets
 /// its own helper trait.  Replaces the verbose
 ///
-///     .ok_or_else(|| CodegenError::internal("<msg>"))
+/// ```text
+/// .ok_or_else(|| CodegenError::internal("<msg>"))
+/// ```
 ///
 /// pattern repeated 175+ times across `crates/verum_vbc/src/codegen/`
 /// with the much shorter
 ///
-///     .or_internal("<msg>")?
+/// ```text
+/// .or_internal("<msg>")?
+/// ```
 ///
 /// while preserving the "internal compiler error: <msg>" diagnostic.
 pub trait CodegenOptionExt<T> {

@@ -24401,11 +24401,13 @@ impl TypeChecker {
     /// MEASURED before this arm existed, with a positive control in the
     /// same batch (`a.b.f()` prints `true`):
     ///
-    ///     a.b.absent()        3 segments, real module, no leaf   E100
-    ///     a.zzz.f()           3 segments, real module, no mid    E100
-    ///     zz.absent()         2 segments, unknown root           E100
-    ///     zz.a.b.c.absent()   5 segments, unknown root           E100
-    ///     zz.nope.absent()    3 segments, unknown root           SILENT -> nil
+    /// ```text
+    /// a.b.absent()        3 segments, real module, no leaf   E100
+    /// a.zzz.f()           3 segments, real module, no mid    E100
+    /// zz.absent()         2 segments, unknown root           E100
+    /// zz.a.b.c.absent()   5 segments, unknown root           E100
+    /// zz.nope.absent()    3 segments, unknown root           SILENT -> nil
+    /// ```
     ///
     /// One shape, and only because it fell between two gates: short
     /// enough that the longer-path route did not judge it, unknown

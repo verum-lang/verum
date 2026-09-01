@@ -14781,8 +14781,10 @@ mod tests {
     ///
     /// `core/time/instant.vr` is the motivating case:
     ///
-    ///     implement Sub<Duration> for Instant { type Output = Instant; }
-    ///     implement Sub<Instant>  for Instant { type Output = Duration; }
+    /// ```text
+    /// implement Sub<Duration> for Instant { type Output = Instant; }
+    /// implement Sub<Instant>  for Instant { type Output = Duration; }
+    /// ```
     ///
     /// `instant - instant` must reach the second.  Until 2026-08-15 it
     /// reached the first and typed as `Instant`, because a caller in

@@ -171,9 +171,11 @@ pub struct VbcModule {
     /// archive-derived functions (`archive_func_name_to_fid`) against
     /// position in `functions`:
     ///
-    ///     hello.vr  1979 functions, first_user=0, 1955 interleavings
-    ///     a script mounting core.io.fs
-    ///               22865 functions, first_user=0, 22816 interleavings
+    /// ```text
+    /// hello.vr  1979 functions, first_user=0, 1955 interleavings
+    /// a script mounting core.io.fs
+    ///           22865 functions, first_user=0, 22816 interleavings
+    /// ```
     ///
     /// The first function is already the user's and the last
     /// archive-derived one sits at the end, so no index exists. A

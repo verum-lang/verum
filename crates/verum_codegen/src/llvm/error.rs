@@ -203,11 +203,15 @@ impl<T, E: std::fmt::Display> BuildExt<T> for std::result::Result<T, E> {
 /// the canonical `.basic_or_internal(MSG)` helper that collapses
 /// the verbose
 ///
-///     ...build_call(...)?.try_as_basic_value().basic().or_internal(MSG)?
+/// ```text
+/// ...build_call(...)?.try_as_basic_value().basic().or_internal(MSG)?
+/// ```
 ///
 /// chain into a single call:
 ///
-///     ...build_call(...)?.basic_value_or(MSG)?
+/// ```text
+/// ...build_call(...)?.basic_value_or(MSG)?
+/// ```
 ///
 /// Repeated 38 times in `instruction.rs` after `build_call` for
 /// runtime helpers / generator opcodes / strcmp / etc.  Each site
@@ -363,9 +367,11 @@ impl LlvmLoweringError {
 ///
 /// This collapses the very common pattern
 ///
-///     let func = module
-///         .get_function("llvm.floor.f64")
-///         .unwrap_or_else(|| module.add_function("llvm.floor.f64", fn_type, None));
+/// ```text
+/// let func = module
+///     .get_function("llvm.floor.f64")
+///     .unwrap_or_else(|| module.add_function("llvm.floor.f64", fn_type, None));
+/// ```
 ///
 /// repeated 240+ times across `instruction.rs` / `runtime.rs` /
 /// `platform_ir.rs` for declaring LLVM intrinsics, the FFI runtime
@@ -878,14 +884,16 @@ pub fn check_no_unresolved_generic_calls() -> Result<()> {
 ///
 /// Centralises the verbose
 ///
-///     let exit_fn = module.get_function(NAME).unwrap_or_else(|| {
-///         let f = module.add_function(NAME, fn_type, None);
-///         f.add_attribute(
-///             AttributeLoc::Function,
-///             ctx.create_string_attribute("noreturn", ""),
-///         );
-///         f
-///     });
+/// ```text
+/// let exit_fn = module.get_function(NAME).unwrap_or_else(|| {
+///     let f = module.add_function(NAME, fn_type, None);
+///     f.add_attribute(
+///         AttributeLoc::Function,
+///         ctx.create_string_attribute("noreturn", ""),
+///     );
+///     f
+/// });
+/// ```
 ///
 /// pattern that decorates `verum_internal_exit_i64` and similar
 /// process-terminating runtime helpers.
