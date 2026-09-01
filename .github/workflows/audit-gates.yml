@@ -86,6 +86,17 @@ jobs:
           cd core
           ../target/release/verum audit --differential-kernel-fuzz
 
+      # The silent-acceptance ratchet needs a built binary, which this job
+      # already has. It was a Makefile target with no CI caller — the gate
+      # existed and nobody asked it, which is the exact class it was
+      # written to catch (T1025/T1026/T1027/T0989).
+      #
+      # It carries its own positive control and a MUTE outcome: a run that
+      # printed nothing fails rather than passing, because a tool that
+      # cannot speak is otherwise indistinguishable from a clean tree.
+      - name: silent-acceptance ratchet
+        run: make check-silent-acceptance VERUM=target/release/verum
+
       - name: Upload audit reports
         if: always()
         uses: actions/upload-artifact@v4

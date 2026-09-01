@@ -549,6 +549,9 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
         // Refinement and select (verum_types::infer).
         ErrorCodeEntry { code: "W0500", numeric: 2500, category: ErrorCategory::Verification, description: "refinement not verified against a compile-time value — the constraint is not enforced here" },
         ErrorCodeEntry { code: "W0501", numeric: 2501, category: ErrorCategory::Async, description: "`select` may block forever: every arm is guarded and there is no `else`" },
+        ErrorCodeEntry { code: "W0502", numeric: 2502, category: ErrorCategory::Verification, description: "`@verify(...)` argument names no verification strategy — the attribute is ignored" },
+        ErrorCodeEntry { code: "W0503", numeric: 2503, category: ErrorCategory::Verification, description: "`proof` clause names no axiom of the implemented protocol" },
+        ErrorCodeEntry { code: "W0504", numeric: 2504, category: ErrorCategory::Verification, description: "protocol axiom not discharged at an `implement` site" },
         ErrorCodeEntry { code: "W0701", numeric: 2701, category: ErrorCategory::Verification, description: "refinement could not be validated by the IDE's checker" },
 
         // Exhaustiveness warnings.

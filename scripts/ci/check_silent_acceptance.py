@@ -269,7 +269,6 @@ public fn main() {
 BASELINE = {
     "protocol-signature-mismatch",
     "short-mount-passes-check",
-    "nonexistent-protocol-axiom",
 }
 
 

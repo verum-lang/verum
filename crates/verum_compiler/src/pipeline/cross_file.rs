@@ -1378,7 +1378,7 @@ impl<'s> CompilationPipeline<'s> {
                 for bad in verum_smt::verify_strategy::unrecognised_verify_arguments(attrs) {
                     self.session.emit_diagnostic(
                         DiagnosticBuilder::warning()
-                            .code("W0401")
+                            .code("W0502")
                             .message(format!(
                                 "`@verify({})` on `{}` names no verification strategy —                                  the attribute is ignored and the function falls back to                                  the default mode",
                                 bad, owner

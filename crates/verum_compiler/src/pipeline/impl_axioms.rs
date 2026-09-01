@@ -72,10 +72,61 @@ impl<'s> CompilationPipeline<'s> {
                     "model verification: `implement {} for <type>` does not discharge axiom `{}` ({})",
                     report.protocol_name, failure.axiom_name, failure.reason,
                 );
+                // A code and a location, because a warning without either
+                // cannot be looked up and cannot be found in a file of any
+                // size (T0989).
                 let diag = DiagnosticBuilder::new(Severity::Warning)
+                    .code("W0504")
                     .message(diag_msg)
+                    .span(crate::phases::ast_span_to_diagnostic_span(
+                        failure.origin_span,
+                        Some(self.session),
+                    ))
                     .build();
                 self.session.emit_diagnostic(diag);
+            }
+
+            // T0989: a `proof X by …` naming an axiom the protocol does NOT
+            // declare proves nothing, and was dropped in silence. So a
+            // misspelled axiom name left the real obligation to auto_prove
+            // — or unverified — while the author believed they had
+            // discharged it by hand. The clause looks like work done.
+            //
+            // The declared set is taken FROM THE REPORT rather than
+            // re-derived: the obligations it verified plus the ones it
+            // could not ARE this protocol's axioms for this impl, so there
+            // is no second list to drift.
+            let declared: Vec<&str> = report
+                .verified
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .chain(report.unverified.iter().map(|f| f.axiom_name.as_str()))
+                .collect();
+            for it in impl_decl.items.iter() {
+                if let verum_ast::decl::ImplItemKind::Proof { axiom_name, .. } = &it.kind
+                    && !declared.contains(&axiom_name.name.as_str())
+                {
+                    let known = if declared.is_empty() {
+                        format!("`{}` declares no axioms", report.protocol_name)
+                    } else {
+                        format!("declared axioms: {}", declared.join(", "))
+                    };
+                    self.session.emit_diagnostic(
+                        DiagnosticBuilder::new(Severity::Warning)
+                            .code("W0503")
+                            .message(format!(
+                                "`proof {}` names no axiom of protocol `{}` — the \
+                                 clause discharges nothing, and every axiom the \
+                                 protocol does declare is left to auto_prove ({})",
+                                axiom_name.name, report.protocol_name, known
+                            ))
+                            .span(crate::phases::ast_span_to_diagnostic_span(
+                                axiom_name.span,
+                                Some(self.session),
+                            ))
+                            .build(),
+                    );
+                }
             }
         }
 
