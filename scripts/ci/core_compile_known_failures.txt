@@ -52,6 +52,28 @@
 # the tail is a change of conditions during the run, not a repair.  Any
 # sweep over this list must treat "printed nothing" as a THIRD outcome and
 # count it separately — see check_core_compiles.sh.
+#
+# 2026-09-01 (T0755 third pass, T1034): 369 -> 350.  A sweep that
+# collected the compiler's MESSAGES rather than counting its exit codes
+# ran over every listed file: 2195 messages, 0 mute.  Thirteen entries
+# had been repaired by earlier commits and were re-verified one at a
+# time; the other six went green with T1034 below.
+#
+#   T1034 — the ambient bare-name constructor table beat a function
+#   declared in the file itself.  `core/math/hott.vr` gives `Pushout` a
+#   one-argument variant `push`, so every `core/database/**` file with
+#   its own two-argument `push` helper died on
+#   `push expects 1 argument(s), got 2`.  117 messages across 8 files —
+#   the largest single homogeneous class in this corpus — and all eight
+#   now check clean (125 errors -> 0, measured A/B on one machine with
+#   both binaries live).
+#
+# That sweep also needed a control this file's own history did not yet
+# name: the FIRST run of it returned zero lines and exit status 0,
+# because a relative path to the input list broke after a `cd` and
+# `xargs` with no input succeeds.  An empty input and a clean result are
+# indistinguishable by exit code.  Any sweep here must assert its input
+# is non-empty before believing its output.
 core/action/effects.vr
 core/action/enactments.vr
 core/action/gauge.vr
@@ -122,7 +144,6 @@ core/database/postgres/async_pool.vr
 core/database/postgres/async_replication.vr
 core/database/postgres/async_transaction.vr
 core/database/postgres/async_typed_database.vr
-core/database/postgres/base_backup.vr
 core/database/postgres/connection.vr
 core/database/postgres/migrations/store.vr
 core/database/postgres/mod.vr
@@ -132,14 +153,12 @@ core/database/postgres/row.vr
 core/database/postgres/typed_database.vr
 core/database/postgres/wire/typed.vr
 core/database/sqlite/mod.vr
-core/database/sqlite/native/alter/engine.vr
 core/database/sqlite/native/bind_blob_v2/engine.vr
 core/database/sqlite/native/bind_clear_api/engine.vr
 core/database/sqlite/native/bind_parameter_api/table.vr
 core/database/sqlite/native/bind_pointer/engine.vr
 core/database/sqlite/native/bind_text_v2/engine.vr
 core/database/sqlite/native/bind_zeroblob/engine.vr
-core/database/sqlite/native/builtins/dispatch.vr
 core/database/sqlite/native/builtins/numeric_fns.vr
 core/database/sqlite/native/client_data/registry.vr
 core/database/sqlite/native/concat_ws_fn/fn_.vr
@@ -147,15 +166,10 @@ core/database/sqlite/native/context_api/auxdata.vr
 core/database/sqlite/native/datetime/format.vr
 core/database/sqlite/native/datetime/iso.vr
 core/database/sqlite/native/datetime/modifier.vr
-core/database/sqlite/native/differential/oracle.vr
 core/database/sqlite/native/encryption/cipher.vr
 core/database/sqlite/native/exec/engine.vr
-core/database/sqlite/native/export/data_dump.vr
-core/database/sqlite/native/export/schema_dump.vr
-core/database/sqlite/native/export/value.vr
 core/database/sqlite/native/fts5/query/ast.vr
 core/database/sqlite/native/fts5_offsets_fn_api/auxdata.vr
-core/database/sqlite/native/fuzz/grammar.vr
 core/database/sqlite/native/get_table_api/engine.vr
 core/database/sqlite/native/hash_api/table.vr
 core/database/sqlite/native/hooks_api/mod.vr
@@ -168,12 +182,10 @@ core/database/sqlite/native/l1_pager/wal_page_arena.vr
 core/database/sqlite/native/l1_pager/wal_reader.vr
 core/database/sqlite/native/l1_pager/wal_writer.vr
 core/database/sqlite/native/l2_record/mod.vr
-core/database/sqlite/native/l2_record/record.vr
 core/database/sqlite/native/l3_btree/btree_ops.vr
 core/database/sqlite/native/l3_btree/cursor_seek.vr
 core/database/sqlite/native/l3_btree/integrity.vr
 core/database/sqlite/native/l3_btree/mod.vr
-core/database/sqlite/native/l3_btree/page_layout.vr
 core/database/sqlite/native/l3_btree/page_writer.vr
 core/database/sqlite/native/l4_vdbe/cursor_btree_bridge.vr
 core/database/sqlite/native/l4_vdbe/interpreter.vr
@@ -196,7 +208,6 @@ core/database/sqlite/native/l7_api/database.vr
 core/database/sqlite/native/migrations/store.vr
 core/database/sqlite/native/mutex_assertions/engine.vr
 core/database/sqlite/native/pcache_api/cache.vr
-core/database/sqlite/native/profiler/report.vr
 core/database/sqlite/native/returning_clause_api/spec.vr
 core/database/sqlite/native/rtree/tree.vr
 core/database/sqlite/native/txn/engine.vr
@@ -262,15 +273,11 @@ core/meta/quote.vr
 core/meta/reflection.vr
 core/meta/token.vr
 core/net/h3/connection.vr
-core/net/h3/qpack/decoder.vr
-core/net/h3/qpack/encoder.vr
-core/net/h3/qpack/instructions.vr
 core/net/h3/qpack/mod.vr
 core/net/h3/qpack/session.vr
 core/net/h3/server.vr
 core/net/http.vr
 core/net/proxy/health_check.vr
-core/net/proxy/retry.vr
 core/net/quic/connection_sm/aead.vr
 core/net/quic/connection_sm/dispatch.vr
 core/net/quic/crypto/header_protection.vr
@@ -342,13 +349,9 @@ core/security/webauthn/attestation.vr
 core/security/webauthn/authenticate.vr
 core/security/webauthn/cose_key.vr
 core/security/webauthn/register.vr
-core/security/x509/algorithm.vr
 core/security/x509/chain.vr
 core/security/x509/credential.vr
 core/security/x509/crl_client.vr
-core/security/x509/ext/ext_key_usage.vr
-core/security/x509/ext/mod.vr
-core/security/x509/name.vr
 core/security/x509/ocsp_client.vr
 core/security/x509/path_validation.vr
 core/security/x509/verifier.vr
