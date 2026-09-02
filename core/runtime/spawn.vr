@@ -410,8 +410,11 @@ implement SupervisorSpawnConfig {
     /// - 0ns (inline)
     @inline
     public fn with_retry(mut self, config: RuntimeRetryConfig) -> Self {
+        // `Retry` CARRIES the config — see recovery.vr:404. Passing it
+        // bare put the constructor FUNCTION in a field that wants a
+        // strategy, so the retry policy never reached `recovery`.
         self.retry = Maybe.Some(config);
-        self.recovery = Maybe.Some(RuntimeRecoveryStrategy.Retry);
+        self.recovery = Maybe.Some(RuntimeRecoveryStrategy.Retry(config));
         self
     }
 
@@ -429,13 +432,17 @@ implement SupervisorSpawnConfig {
         // `RecoveryBackoffStrategy.Fixed` bare even though `Fixed` is a
         // RECORD variant carrying the delay. The delay was therefore never
         // reaching the strategy at all.
-        self.retry = Maybe.Some(RuntimeRetryConfig {
+        //
+        // The same repair stopped one line short: `Retry` carries the
+        // config too, and was still passed bare below.
+        let cfg = RuntimeRetryConfig {
             max_attempts: max_attempts as Int,
             backoff: RecoveryBackoffStrategy.Fixed { delay_ms: delay_ms as UInt64 },
             jitter: JitterConfig.None,
             retry_on: RetryPredicate.AllErrors,
-        });
-        self.recovery = Maybe.Some(RuntimeRecoveryStrategy.Retry);
+        };
+        self.retry = Maybe.Some(cfg);
+        self.recovery = Maybe.Some(RuntimeRecoveryStrategy.Retry(cfg));
         self
     }
 
@@ -455,7 +462,7 @@ implement SupervisorSpawnConfig {
         // Same four-field shape as `with_simple_retry` above. `jitter` is a
         // 0.0–1.0 fraction at this API; `JitterConfig.Proportional` takes a
         // 0–100 percentage, so it is scaled rather than handed over raw.
-        self.retry = Maybe.Some(RuntimeRetryConfig {
+        let cfg = RuntimeRetryConfig {
             max_attempts: max_attempts as Int,
             backoff: RecoveryBackoffStrategy.Exponential {
                 base_ms: base_ms as UInt64,
@@ -464,8 +471,9 @@ implement SupervisorSpawnConfig {
             },
             jitter: JitterConfig.Proportional((jitter * 100.0) as UInt8),
             retry_on: RetryPredicate.AllErrors,
-        });
-        self.recovery = Maybe.Some(RuntimeRecoveryStrategy.Retry);
+        };
+        self.retry = Maybe.Some(cfg);
+        self.recovery = Maybe.Some(RuntimeRecoveryStrategy.Retry(cfg));
         self
     }
 
