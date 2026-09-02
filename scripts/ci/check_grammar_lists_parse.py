@@ -17,7 +17,9 @@ three separate sites, so
 
 was `E032: expected `{` to start function body` — blaming the body for a
 comma — while the same clause on a THEOREM parsed. The grammar defines
-the list once, for both (T0988).
+the list once, for both (T0988).  FIXED and re-measured 2026-09-02:
+both rows parse, and the two `T0988` markers are cleared — a gate that
+keeps naming a closed defect teaches the next reader to expect the red.
 
 WHAT THIS COVERS: 11 of the 53 productions, named below. Not a survey —
 the sample is the clauses a program can exercise in a few lines. Adding
@@ -66,10 +68,10 @@ CASES: list[tuple[str, str, bool, str]] = [
      'fn main() { print("x"); }\n', True, ""),
     ("function requires_clause",
      'pure fn f(a: Int, b: Int) -> Int requires a >= 0, b >= 0 { a + b }\n'
-     'fn main() { print(f"{f(1, 2)}"); }\n', True, "T0988"),
+     'fn main() { print(f"{f(1, 2)}"); }\n', True, ""),
     ("function ensures_clause",
      'pure fn f(a: Int, b: Int) -> Int ensures result >= 0, result >= a { a + b }\n'
-     'fn main() { print(f"{f(1, 2)}"); }\n', True, "T0988"),
+     'fn main() { print(f"{f(1, 2)}"); }\n', True, ""),
 ]
 
 
