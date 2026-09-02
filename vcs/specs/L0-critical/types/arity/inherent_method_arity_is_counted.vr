@@ -1,0 +1,44 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: arity, methods, inherent, check-run-agreement
+// @expected-error: E102
+// @description: An inherent method called with the wrong number of
+//   arguments is refused by `verum check`, not only by VBC codegen.
+
+// Pre-fix `verum check` exited 0 on this file and `verum run` exited 1
+// on it, with an UNCODED codegen message ("wrong number of arguments
+// for static method: expected 3, found 1"). The one promise `check`
+// makes is that the compiler will accept what it accepted.
+//
+// The count WAS computed — the early-inherent resolver compares it —
+// but it was used as a GUARD ("is this the method?") rather than as a
+// CHECK ("is this call well-formed?"), and a mismatch fell through
+// silently to recovery paths that answer with the method's own return
+// type without looking at the arguments either.
+//
+// Falling through is right: the same name can belong to a protocol
+// method of a different arity (`add` is both an inherent method and
+// `Add::add`). So the mismatch is remembered rather than raised, and it
+// becomes the verdict only where protocol search produced NO candidates
+// — at which point the declined hit was the only method there was.
+//
+// The method name here is deliberately unique. A first attempt used
+// `add`, which resolved LEGITIMATELY to `Add::add` (arity 1) — a probe
+// that could not have come back positive (T1060).
+
+mount core.prelude.*;
+
+public type Box7 is { v: Int };
+
+implement Box7 {
+    public fn zqx_combine(&self, a: Int, b: Int) -> Int {
+        self.v + a * 10 + b
+    }
+}
+
+fn main() {
+    let x: Box7 = Box7 { v: 100 };
+    // One argument to a two-parameter method.
+    print(f"short={x.zqx_combine(3)}");
+}

@@ -1266,6 +1266,15 @@ pub struct TypeChecker {
     /// Type::Unknown rather than erroring — sibling module types
     /// may not be fully loaded. Set by pipeline for core/*.vr.
     pub stdlib_single_file_mode: bool,
+
+    /// A method found BY NAME on the early-inherent path whose declared
+    /// parameter count did not match the call's argument count (T1060).
+    ///
+    /// The hit is DECLINED on a mismatch — the same name can belong to a
+    /// protocol method of a different arity — so resolution continues.
+    /// This note is what lets the terminal say the arity instead of
+    /// "method not found", which is the fact actually known.
+    pub(crate) pending_arity_mismatch: Option<(Text, usize, usize, verum_ast::span::Span)>,
     /// Deferred verification goals accumulated during type checking.
     /// When the unifier encounters a `Type::Eq` that can't be
     /// resolved even after the cubical bridge, it pushes a

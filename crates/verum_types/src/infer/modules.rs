@@ -17891,6 +17891,13 @@ impl TypeChecker {
             && !self.context_resolver.is_lenient_contexts()
     }
 
+    /// Clear the pending arity note at the top of every method-call
+    /// inference so a mismatch recorded for one call cannot be reported
+    /// against the next (T1060).
+    fn clear_pending_arity(&mut self) {
+        self.pending_arity_mismatch = None;
+    }
+
     fn infer_method_call_inner_impl(
         &mut self,
         receiver: &Expr,
@@ -17901,6 +17908,7 @@ impl TypeChecker {
         precomputed_recv_ty: Option<Type>,
         skip_static_lookup: bool,
     ) -> Result<InferResult> {
+        self.clear_pending_arity();
         self.infer_method_call_inner_impl_traced_entry(receiver, method);
         if crate::ctor_trace_enabled() {
             eprintln!(
@@ -18906,7 +18914,7 @@ impl TypeChecker {
                                     })
                                 })
                         });
-                    scheme_opt.map(|scheme| {
+                    scheme_opt.and_then(|scheme| {
                         let impl_vc = scheme.impl_var_count;
                         let (ty, fresh_vars, type_bounds) =
                             scheme.instantiate_with_type_bounds();
@@ -18954,7 +18962,33 @@ impl TypeChecker {
                                 ty.to_text()
                             );
                         }
-                        ((ty, fresh_vars, impl_vc), type_bounds)
+                        // T1060: the early-inherent path returned this
+                        // signature WITHOUT looking at how many arguments
+                        // the call passes, so `x.m(1)` and `x.m(1, 2, 3)`
+                        // on a two-parameter `m` both type-checked and
+                        // were then refused by VBC codegen — `verum check`
+                        // exiting 0 on a program `verum run` exits 1 on.
+                        //
+                        // A mismatch is NOT reported here: the same name
+                        // can belong to a protocol method of a different
+                        // arity (`add` is both an inherent method and
+                        // `Add::add`), so the honest reading is "not this
+                        // method" — decline the hit and let resolution
+                        // continue. The note is what turns the eventual
+                        // "method not found" into the arity, which is the
+                        // fact actually known.
+                        if let Type::Function { params, .. } = &ty
+                            && params.len() != args.len()
+                        {
+                            self.pending_arity_mismatch = Some((
+                                method_name_text.clone(),
+                                params.len(),
+                                args.len(),
+                                span,
+                            ));
+                            return None;
+                        }
+                        Some(((ty, fresh_vars, impl_vc), type_bounds))
                     })
                 };
                 if crate::ctor_trace_enabled() && early_method_info.is_none() {
@@ -21309,6 +21343,27 @@ impl TypeChecker {
                 "[ctor-trace] handle_empty_candidates method={} recv={}",
                 method_name_str, recv_ty
             );
+        }
+
+        // T1060: reaching HERE with a pending arity note settles it.
+        //
+        // The early-inherent path found a method of this name and
+        // declined the hit because the counts differ — correctly, since
+        // the name could also belong to a protocol method of another
+        // arity. This handler runs only when protocol search produced
+        // NO candidates, so no such method exists: the declined hit was
+        // the only one, and the arity is the verdict.
+        //
+        // Reported before the recovery paths below, because several of
+        // them answer with the method's own return type WITHOUT looking
+        // at the arguments either — which is how `x.m(1)` on a
+        // two-parameter `m` passed `verum check` and was then refused by
+        // VBC codegen ("expected 3, found 1"), one program with two
+        // answers from the toolchain about itself.
+        if let Some((name, expected, actual, aspan)) = self.pending_arity_mismatch.take()
+            && name.as_str() == method_name_str
+        {
+            return Err(self.arity_error(name, expected, actual, aspan));
         }
         if let Some(r) = self.try_type_var_bound_dispatch(&recv_ty, method, type_args, args, span)? {
             return Ok(r);
