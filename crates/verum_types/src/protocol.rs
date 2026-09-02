@@ -4100,6 +4100,30 @@ impl ProtocolChecker {
         }
 
         // =========================================================================
+        // 0. Universal methods, BEFORE `extract_type_info`.
+        //
+        // The universal fallback used to sit at step 2 — after
+        // `extract_type_info(ty)?`, which maps a receiver to its
+        // method-registry key.  That mapping has no arm for a non-empty
+        // tuple, so `?` returned from the whole function first: the
+        // fallback for types with no registry entry was placed BEHIND a
+        // guard that requires one.  Unreachable for exactly the set it
+        // exists to serve.
+        //
+        // Measured: `p.clone()` on `(Int, Float)` reported "no method
+        // named `clone`", while a record gets `clone` without even
+        // `@derive(Clone)`; 9 such call sites in `core/` under
+        // VERUM_STRICT_STDLIB.
+        // =========================================================================
+        // Only the STRUCTURAL arm is hoisted.  The registry-backed part
+        // stays at step 2, where a type's own `implement` block still
+        // outranks it — hoisting that too would let a future
+        // `_Universal` entry shadow a real method.
+        if let Some(result) = self.lookup_structural_universal_method(ty, method_name) {
+            return Some(result);
+        }
+
+        // =========================================================================
         // 1. CBGR Tier Conversion Methods (handle before extracting inner type)
         // CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — Section 3 - Reference Tiers
         // =========================================================================
@@ -4197,6 +4221,20 @@ impl ProtocolChecker {
         method_name: &str,
         arg_types: &[Type],
     ) -> Option<MethodLookupResult> {
+        // Shape-only methods first, for the same reason as in
+        // `lookup_method` — this function also opens the registry path
+        // with `extract_type_info(ty)?`, and a receiver with no key
+        // leaves before any fallback speaks.
+        //
+        // Both entry points need it: inference calls THIS one
+        // (`infer/modules.rs` → `lookup_method_with_args`), while
+        // `lookup_method` is reached from `infer/expr.rs`.  Hoisting it
+        // into one of the pair and measuring the other is how the first
+        // attempt at this repair came back inert.
+        if let Some(result) = self.lookup_structural_universal_method(ty, method_name) {
+            return Some(result);
+        }
+
         // Try all non-protocol lookups first (same as lookup_method)
         if let Some(result) = self.lookup_cbgr_conversion(ty, method_name) {
             return Some(result);
@@ -4381,7 +4419,59 @@ impl ProtocolChecker {
         })
     }
 
+    /// Methods a type has by its SHAPE, with no registry entry needed.
+    ///
+    /// Called at step 0 of `lookup_method`, before `extract_type_info`.
+    /// That mapping answers for Int, Text, Array, Slice, variants, named
+    /// types and the EMPTY tuple (canonically `Unit`), and falls through
+    /// for `(A, B)` — and `lookup_method` opens with
+    /// `extract_type_info(ty)?`, so a receiver with no registry key left
+    /// the whole function before any fallback could speak.  The fallback
+    /// for types with no entry sat behind a guard requiring one.
+    ///
+    /// Measured 2026-09-02: `p.clone()` on `(Int, Float)` reported "no
+    /// method named `clone`", while a record gets `clone` without even
+    /// `@derive(Clone)`.  Nine such call sites in `core/` under
+    /// `VERUM_STRICT_STDLIB`.  The runtime already copies tuples — a
+    /// record holding `(Int, Float)` clones and prints its components —
+    /// so this grants no ability the lowering lacks; it stops the
+    /// typechecker refusing what already works.
+    ///
+    /// Scope is deliberately `clone` only.  `to_string` on a tuple needs
+    /// every component to be renderable, a per-element judgement this
+    /// arm cannot make; answering it here would trade one wrong verdict
+    /// for another.
+    fn lookup_structural_universal_method(
+        &self,
+        ty: &Type,
+        method_name: &str,
+    ) -> Option<MethodLookupResult> {
+        if method_name != "clone" {
+            return None;
+        }
+        let Type::Tuple(elems) = ty else { return None };
+        if elems.is_empty() {
+            return None;
+        }
+        Some(MethodLookupResult {
+            signature: MethodSignature::immutable("clone", List::new(), ty.clone()),
+            substitution: Default::default(),
+            resolved_receiver_type: ty.clone(),
+        })
+    }
+
     /// Look up universal methods that work on all types
+    ///
+    /// NOTE, measured 2026-09-02: the `_Universal` registry key below is
+    /// READ here and WRITTEN NOWHERE — one occurrence in the whole tree.
+    /// So `method_registry.get` has always returned `None` and this
+    /// function has never produced a result.  The per-method return-type
+    /// table under it records what was intended and has never run.
+    ///
+    /// It is left in place rather than deleted because populating it is a
+    /// DESIGN decision, not a repair: `clone` granted to every type would
+    /// reach affine ones, which must not be cloneable.  What is repaired
+    /// here is the one case that was measured — see below.
     fn lookup_universal_method(&self, ty: &Type, method_name: &str) -> Option<MethodLookupResult> {
         let universal_key = ("_Universal".into(), Text::from(method_name));
         let sig = self.method_registry.get(&universal_key)?;

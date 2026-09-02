@@ -696,6 +696,23 @@ jobs:
           scripts/ci/check_strict_stdlib_flag_reaches_core.sh --selftest ./target/release/verum
           scripts/ci/check_strict_stdlib_flag_reaches_core.sh ./target/release/verum
 
+      # A tuple must not lose methods a record of the same components
+      # keeps. Both method-lookup entry points open with
+      # `extract_type_info(ty)?`, which has no arm for a non-empty tuple,
+      # so the receiver left the function before the "universal methods"
+      # fallback at step 2 could speak — a fallback for types with no
+      # registry entry, placed behind a guard requiring one.
+      # Measured: `(Int, Float).clone()` E400, the record twin clean.
+      #
+      # The gate runs the program too, not just `check`: this tree has a
+      # live class where the two disagree (T1060/T1062), and a
+      # typechecker taught to accept what the lowering cannot do would
+      # pass a check-only gate.
+      - name: A tuple keeps the methods its shape gives
+        run: |
+          scripts/ci/check_tuple_has_the_methods_its_shape_gives.sh --selftest ./target/release/verum
+          scripts/ci/check_tuple_has_the_methods_its_shape_gives.sh ./target/release/verum
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:
