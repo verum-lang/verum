@@ -989,8 +989,28 @@ impl TypeChecker {
                 for bound_name in &bound_names {
                     let pc = self.protocol_checker.read();
                     if let Err(errors) = pc.check_object_safety(bound_name) {
-                        let error_msgs: Vec<String> =
+                        // SORTED, and not for tidiness: `check_object_safety`
+                        // walks the protocol's method table, which is a
+                        // hash map, so the violations come back in
+                        // per-PROCESS random order.  Measured 2026-09-02 on
+                        // `core/configuration/toml.vr` — twelve `verum
+                        // check` runs of the same binary produced TEN
+                        // distinct message sets while the verdict (35
+                        // errors) never moved; the only difference was
+                        // which of `ConfigFormat`'s methods the list named
+                        // first.
+                        //
+                        // That is the cheap half of the non-determinism
+                        // class (T1065): the diagnostic varies, the
+                        // decision does not.  The expensive half — a
+                        // method that resolves on some runs and not others
+                        // — is a different repair and is NOT addressed
+                        // here.  Sorting removes the cheap half from every
+                        // determinism measurement so the expensive half
+                        // stops being buried in it.
+                        let mut error_msgs: Vec<String> =
                             errors.iter().map(|e| format!("{}", e)).collect();
+                        error_msgs.sort();
                         return Err(TypeError::Other(verum_common::Text::from(format!(
                             "Protocol '{}' is not object-safe and cannot be used with `dyn`: {}",
                             bound_name,

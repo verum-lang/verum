@@ -37,3 +37,9 @@ core/term/raw/termios.vr
 core/net/tls13/handshake/client_sm.vr
 core/eval/cbpv.vr
 core/security/secrets/core_protocol.vr
+
+# T1065 — verdict varies 9:3 over 12 runs under VERUM_STRICT_STDLIB:
+# `IpAddr.contains` resolves on some runs and not others. Kept in the
+# nightly list rather than the PR one because it is a KNOWN red: the
+# nightly lane measures, the PR lane blocks.
+core/net/cidr.vr

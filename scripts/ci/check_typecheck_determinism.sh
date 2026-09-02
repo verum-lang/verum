@@ -46,13 +46,47 @@ done
 # different comparison proves nothing about the sweep.
 verdict_of() { "$@" 2>&1 | grep -c '^error'; }
 
+# A subject inside `core/` must be measured under the SAME rules as user
+# code, or the sweep measures the lenient answer and calls it stable.
+#
+# Measured 2026-09-02 on `core/net/cidr.vr`, one binary, no rebuild:
+#
+#     lenient:  0 0 0 0 0 0        <- stable, and silent
+#     strict:   5 2 5 5 2 2        <- the verdict itself moves
+#
+# `IpAddr.contains` resolves on some runs and not others; leniently an
+# unmatched method answers `Type::Unknown` instead of an error (T1044),
+# so the variation cannot surface at all.  Without this the gate reports
+# a file as deterministic precisely when it cannot see the defect —
+# green because it is blind, not because the property holds.
+#
+# `VERUM_STRICT_STDLIB` was added the same day (2d37f3721); before it the
+# question could not be asked.  Reproduced independently by a second
+# session on its own tree and binary.
+verum_check_of() { # $1 = binary, $2 = repo-relative .vr path
+  case "$2" in
+    core/*) VERUM_STRICT_STDLIB=1 verdict_of "$1" check "$2" ;;
+    *)      verdict_of "$1" check "$2" ;;
+  esac
+}
+
 # Run `verdict_of` RUNS times over one subject; echo "STABLE <v>" or
 # "VARY <v1>/<v2>/...".
+#
+# The first argument names the MEASURING function (`verdict_of` for the
+# self-test's raw command, `verum_check_of` for a sweep subject that may
+# need the stdlib-strict environment).  It used to call `verdict_of`
+# unconditionally, so passing a wrapper made the wrapper's NAME the
+# command — bash ran `verum_check_of <bin> <file>` through `verdict_of`,
+# which found no such executable, counted zero `error` lines, and
+# reported every subject as a stable 0.  Caught because `core/net/cidr.vr`
+# — measured by hand as varying 5/2 — came back "ok (0/0/0/…)".
 verdicts_for() {
+  local measure="$1"; shift
   local seen="" all=""
   local i v
   for ((i = 0; i < RUNS; i++)); do
-    v="$(verdict_of "$@")"
+    v="$("$measure" "$@")"
     all="$all$v/"
     case "/$seen/" in
       */"$v"/*) ;;
@@ -79,7 +113,7 @@ exit 0
 PROBE
   chmod +x "$probe"
   # 15 coin flips call it stable with probability 2 * 0.5^15 ~= 6e-5.
-  result="$(verdicts_for "$probe")"
+  result="$(verdicts_for verdict_of "$probe")"
   rm -f "$probe"
   echo "   $result"
   case "$result" in
@@ -112,7 +146,7 @@ while IFS= read -r rel; do
   case "$rel" in ''|\#*) continue ;; esac
   [ -f "$REPO_ROOT/$rel" ] || { echo "   SKIP (gone) $rel"; continue; }
   checked=$((checked + 1))
-  line="$(cd "$REPO_ROOT" && verdicts_for "$VERUM_BIN" check "$rel")"
+  line="$(cd "$REPO_ROOT" && verdicts_for verum_check_of "$VERUM_BIN" "$rel")"
   case "$line" in
     VARY*) varied=$((varied + 1)); echo "   VARY   $rel  ${line#VARY }" ;;
     # Named as they pass, not only when they fail: this sweep is minutes long
