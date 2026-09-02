@@ -78,43 +78,35 @@ fn archive_carries_autodiff_protocol_impls() {
     eprintln!("[t0460] modules={modules} types_with_protocols={types_with_protocols}");
     eprintln!("[t0460] distinct protocol ids used = {}", per_proto.len());
     eprintln!("[t0460] autodiff types = {autodiff_types:?}");
-    // Protocol ids are opaque numbers; a protocol is itself a type, so
-    // resolve them through the descriptor table.  Without this the probe
-    // can only count impls, not say WHICH protocol landed — and the
-    // cross-module question is precisely about a named protocol.
-    let mut proto_names: std::collections::BTreeMap<u32, String> =
-        Default::default();
+    // A ProtocolId is MODULE-LOCAL.  A global id -> name map built
+    // across modules answers confidently and wrongly: measured on this
+    // archive, 55062 collisions — id 110 is `Clone` in one module and
+    // `Display` in another.  The first version of this probe did
+    // exactly that and reported protocol names for `Text` that no
+    // `implement` in the source ever wrote.  Resolve WITHIN the module.
     for raw in archive.module_data.iter() {
         let Ok(m) = verum_vbc::deserialize::deserialize_module(raw) else {
             continue;
         };
+        let mut local: std::collections::BTreeMap<u32, &str> = Default::default();
         for td in m.types.iter() {
             if td.kind == verum_vbc::types::TypeKind::Protocol
                 && let Some(n) = m.strings.get(td.name)
             {
-                proto_names.entry(td.id.0).or_insert_with(|| n.to_string());
+                local.insert(td.id.0, n);
             }
         }
-    }
-    // The cross-module case: `implement TypedRow for Text` is written in
-    // core/database/postgres/typed_row.vr, while `Text` is declared in
-    // core/text/text.vr.  If the impl is carried, cross-module attach
-    // works and the T1068 defect is scalar-only; if it is absent while
-    // same-module impls on Text are present, the two are one root.
-    for raw in archive.module_data.iter() {
-        let Ok(m) = verum_vbc::deserialize::deserialize_module(raw) else {
-            continue;
-        };
         for td in m.types.iter() {
             if m.strings.get(td.name) == Some("Text") && !td.protocols.is_empty() {
-                let named: Vec<&str> = td
+                // An id with no local protocol descriptor is NOT a name —
+                // print it as unresolved rather than borrowing one from
+                // another module.
+                let named: Vec<String> = td
                     .protocols
                     .iter()
-                    .map(|pi| {
-                        proto_names
-                            .get(&pi.protocol.0)
-                            .map(|s| s.as_str())
-                            .unwrap_or("?")
+                    .map(|pi| match local.get(&pi.protocol.0) {
+                        Some(n) => (*n).to_string(),
+                        None => format!("<unresolved:{}>", pi.protocol.0),
                     })
                     .collect();
                 eprintln!("[t0460] Text@{} protocols = {named:?}", m.name);
