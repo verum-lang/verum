@@ -948,7 +948,7 @@ implement<T> GPUBuffer<T> {
     // Allocate buffer in specific memory space
     public fn allocate_in(size: USize, space: MemorySpace, device: DeviceId) -> Self {
         with_device(device, || {
-            let ptr = @vbc(GPU_MALLOC, size * T.size, space);
+            let ptr: DevicePtr<T> = @vbc(GPU_MALLOC, size * T.size, space);
             GPUBuffer {
                 ptr,
                 size,
@@ -961,7 +961,7 @@ implement<T> GPUBuffer<T> {
 
     // Allocate unified memory accessible from CPU and GPU
     public fn allocate_unified(size: USize) -> Self {
-        let ptr = @vbc(GPU_MALLOC_MANAGED, size * T.size);
+        let ptr: DevicePtr<T> = @vbc(GPU_MALLOC_MANAGED, size * T.size);
         GPUBuffer {
             ptr,
             size,
@@ -1428,7 +1428,7 @@ implement CudaGraph {
 
     // End capture and return graph
     public fn end_capture(stream: &GpuStream) -> Self {
-        let handle = @vbc(GPU_GRAPH_END, stream.handle);
+        let handle: U64 = @vbc(GPU_GRAPH_END, stream.handle);
         CudaGraph {
             handle,
             exec_handle: 0,

@@ -886,7 +886,7 @@ implement RateLimitGuardrail {
     // Returns `true` if the request fits within the configured
     // window's quota and pushes its timestamp; `false` otherwise.
     fn is_allowed(&self) -> Bool {
-        let now = @vbc(TIME_NOW_UNIX);
+        let now: U64 = @vbc(TIME_NOW_UNIX);
         let window_start = now - (self.window_seconds as U64);
 
         // Acquire the lock. Poisoning isn't fatal here — a poisoned

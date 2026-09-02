@@ -213,7 +213,7 @@ where
     // GRAD_END stops recording and retains the tape, yielding the handle that
     // reaches it. Reverse mode runs the backward sweep only when the pullback
     // is applied, so the tape must outlive this call.
-    let tape = @vbc(GRAD_END, primal);
+    let tape: Int = @vbc(GRAD_END, primal);
     let pullback = |seed| @vbc(GRAD_BACKWARD, tape, seed);
     VJPResult { primal, pullback }
 }
@@ -253,7 +253,7 @@ where
 {
     @vbc(JVP_BEGIN, tangent);
     let primal = f(x);
-    let tangent_out = @vbc(JVP_END);
+    let tangent_out: Out.Tangent = @vbc(JVP_END);
     JVPResult { primal, tangent: tangent_out }
 }
 
@@ -286,7 +286,7 @@ where
     |x| {
         @vbc(GRAD_BEGIN, x);
         let primal = f(x);
-        let tape = @vbc(GRAD_END, primal);
+        let tape: Int = @vbc(GRAD_END, primal);
         @vbc(GRAD_BACKWARD, tape, 1.0)
     }
 }
@@ -312,7 +312,7 @@ where
     |x| {
         @vbc(GRAD_BEGIN, x);
         let primal = f(x);
-        let tape = @vbc(GRAD_END, primal);
+        let tape: Int = @vbc(GRAD_END, primal);
         (primal, @vbc(GRAD_BACKWARD, tape, 1.0))
     }
 }
@@ -764,8 +764,8 @@ fn conv2d_vjp<T: RealField>(
     weight: &DynTensor<T>,
     grad_output: &DynTensor<T>,
 ) -> (DynTensor<T>, DynTensor<T>) {
-    let grad_input = @vbc(TENSOR_CONV2D_BACKWARD_INPUT, grad_output, weight);
-    let grad_weight = @vbc(TENSOR_CONV2D_BACKWARD_WEIGHT, grad_output, input);
+    let grad_input: DynTensor<T> = @vbc(TENSOR_CONV2D_BACKWARD_INPUT, grad_output, weight);
+    let grad_weight: DynTensor<T> = @vbc(TENSOR_CONV2D_BACKWARD_WEIGHT, grad_output, input);
     (grad_input, grad_weight)
 }
 

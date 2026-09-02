@@ -494,7 +494,7 @@ implement<T: RealField> DynTensor<T> {
 
     // Clone tensor data
     public fn clone(&self) -> Self {
-        let new_data = @vbc(TENSOR_CLONE, self.data);
+        let new_data: TensorHandle = @vbc(TENSOR_CLONE, self.data);
         DynTensor {
             data: new_data,
             shape: self.shape.clone(),
@@ -1062,7 +1062,7 @@ public fn top_k_accuracy<T: RealField>(
 ) -> Float {
     assert(pred.rank() == 2, "top_k_accuracy requires [N, C] pred");
     assert(target.rank() == 1, "top_k_accuracy requires [N] target");
-    let topk = @vbc(TENSOR_TOPK, pred.data, k, -1 as ISize);
+    let topk: DynTensor<USize> = @vbc(TENSOR_TOPK, pred.data, k, -1 as ISize);
     // topk is the indices tensor [N, k]
     let target_2d = unsqueeze(target, 1);
     let matches = eq(&topk, &target_2d);  // [N, k]
