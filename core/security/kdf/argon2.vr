@@ -285,7 +285,7 @@ fn parse_phc(phc: &Text) -> Result<ParsedPhc, PasswordHashError> {
     // Version segment.
     let v_seg = parts[1].clone();
     if !v_seg.starts_with("v=") { return Result.Err(PasswordHashError.MalformedHash); }
-    let v_val: Int = v_seg.byte_substring(2, v_seg.len()).parse_int()
+    let v_val: Int = v_seg.substring(2, v_seg.len()).parse_int()
         .map_err(|_| PasswordHashError.MalformedHash)?;
     if v_val != ARGON2_VERSION { return Result.Err(PasswordHashError.MalformedHash); }
 
@@ -298,8 +298,8 @@ fn parse_phc(phc: &Text) -> Result<ParsedPhc, PasswordHashError> {
         if kv_bytes.len() < 3 || kv_bytes[1] != b'=' {
             return Result.Err(PasswordHashError.MalformedHash);
         }
-        let key  = kv.byte_substring(0, 1);
-        let v_text = kv.byte_substring(2, kv.len());
+        let key  = kv.substring(0, 1);
+        let v_text = kv.substring(2, kv.len());
         let v_int: Int = v_text.parse_int().map_err(|_| PasswordHashError.MalformedHash)?;
         match key.as_str() {
             "m" => memory_kib  = v_int,

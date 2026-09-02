@@ -409,8 +409,8 @@ fn decode_verbatim(cur: &Cursor) -> Result<(RespValue, Cursor), RespError> {
         Result.Ok(t) => t,
         Result.Err(e) => return Result.Err(RespError.InvalidUtf8(f"{e}")),
     };
-    let format = s.byte_substring(0, 3);
-    let content = s.byte_substring(4, s.len());
+    let format = s.substring(0, 3);
+    let content = s.substring(4, s.len());
     let after = advance(&c, len + 2);
     Result.Ok((RespValue.VerbatimString { format, content }, after))
 }
@@ -498,8 +498,8 @@ fn parse_integer(s: &Text) -> Result<Int, RespError> {
 fn split_first_space(s: &Text) -> (Text, Text) {
     match s.find_byte(b' ') {
         Maybe.Some(idx) => (
-            s.byte_substring(0, idx),
-            s.byte_substring(idx + 1, s.len()),
+            s.substring(0, idx),
+            s.substring(idx + 1, s.len()),
         ),
         Maybe.None => (s.clone(), "".to_text()),
     }

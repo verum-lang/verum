@@ -372,7 +372,7 @@ fn parse_search_results(v: &JsonValue) -> Result<SearchResults, SearchError> {
 
 fn compose_url(cfg: &MeiliConfig, path: &Text) -> Text {
     if cfg.base_url.ends_with("/") && path.starts_with("/") {
-        f"{cfg.base_url.byte_substring(0, cfg.base_url.len() - 1)}{path}"
+        f"{cfg.base_url.substring(0, cfg.base_url.len() - 1)}{path}"
     } else if !cfg.base_url.ends_with("/") && !path.starts_with("/") {
         f"{cfg.base_url}/{path}"
     } else {

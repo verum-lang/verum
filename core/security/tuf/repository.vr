@@ -286,8 +286,8 @@ public fn compose_target_url(
             if last_slash < 0 {
                 f"{base}{separator}{h}.{path}"
             } else {
-                let dir = path.byte_substring(0, last_slash + 1);
-                let basename = path.byte_substring(last_slash + 1, path.len());
+                let dir = path.substring(0, last_slash + 1);
+                let basename = path.substring(last_slash + 1, path.len());
                 f"{base}{separator}{dir}{h}.{basename}"
             }
         }

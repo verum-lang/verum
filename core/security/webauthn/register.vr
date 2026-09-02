@@ -374,7 +374,7 @@ fn check_origin(found: &Text, allowed: &List<Text>) -> Result<(), WebAuthnError>
 
 fn is_localhost_http(origin: &Text) -> Bool {
     if !origin.starts_with("http://") { return false; }
-    let after_scheme = origin.byte_substring(7, origin.len());
+    let after_scheme = origin.substring(7, origin.len());
     after_scheme.starts_with("localhost") || after_scheme.starts_with("127.0.0.1")
 }
 

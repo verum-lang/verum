@@ -665,7 +665,7 @@ fn dns_within_subtree(dns: &Text, subtree: &Text) -> Bool {
     let suffix_start = dns_lc.len() - st_lc.len();
     if suffix_start == 0 { return false; }
     if dns_lc.byte_at(suffix_start - 1) != b'.' { return false; }
-    dns_lc.byte_substring(suffix_start, dns_lc.len()) == st_lc
+    dns_lc.substring(suffix_start, dns_lc.len()) == st_lc
 }
 
 fn ip_within_subtree(addr: &List<Byte>, subtree: &IpSubtree) -> Bool {
@@ -733,30 +733,30 @@ fn email_within_subtree(email: &Text, subtree: &Text) -> Bool {
         Maybe.Some(p) => p,
         Maybe.None    => return false,
     };
-    let domain = elc.byte_substring(at_pos + 1, elc.len());
+    let domain = elc.substring(at_pos + 1, elc.len());
     if !slc.starts_with(".") {
         return domain == slc;
     }
     // ".example.com" — domain must be subdomain of the bit AFTER the dot.
-    let parent = slc.byte_substring(1, slc.len());
+    let parent = slc.substring(1, slc.len());
     if domain == parent { return true; }
     if domain.len() <= parent.len() { return false; }
     let suffix_start = domain.len() - parent.len();
     if domain.byte_at(suffix_start - 1) != b'.' { return false; }
-    domain.byte_substring(suffix_start, domain.len()) == parent
+    domain.substring(suffix_start, domain.len()) == parent
 }
 
 fn extract_uri_host(uri: &Text) -> Text {
     // Naive URI parse: scheme://host[:port]/...
     let after_scheme = match uri.find_str("://") {
-        Maybe.Some(p) => uri.byte_substring(p + 3, uri.len()),
+        Maybe.Some(p) => uri.substring(p + 3, uri.len()),
         Maybe.None    => uri.clone(),
     };
     let host_end = match after_scheme.find_byte_any(b"/?#:") {
         Maybe.Some(p) => p,
         Maybe.None    => after_scheme.len(),
     };
-    after_scheme.byte_substring(0, host_end)
+    after_scheme.substring(0, host_end)
 }
 
 // =============================================================================

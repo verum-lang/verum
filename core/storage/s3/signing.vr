@@ -136,7 +136,7 @@ pub fn sign_request(
     let canonical_request = f"{method.to_upper()}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n{signed_headers}\n{body_hash}";
 
     // Step 2 — string-to-sign.
-    let date_8 = now_iso8601_basic.byte_substring(0, 8); // YYYYMMDD
+    let date_8 = now_iso8601_basic.substring(0, 8); // YYYYMMDD
     let credential_scope = f"{date_8}/{region}/{service}/aws4_request";
     let canonical_request_hash = hex_encode(&hash.crypto.sha256.digest(canonical_request.as_bytes()));
     let string_to_sign = f"AWS4-HMAC-SHA256\n{now_iso8601_basic}\n{credential_scope}\n{canonical_request_hash}";
@@ -181,7 +181,7 @@ pub fn presign(
     if expires_seconds < 1 || expires_seconds > 604800 {
         return Result.Err(f"presign: expires_seconds {expires_seconds} out of range [1, 604800]");
     }
-    let date_8 = now_iso8601_basic.byte_substring(0, 8);
+    let date_8 = now_iso8601_basic.substring(0, 8);
     let credential_scope = f"{date_8}/{region}/{service}/aws4_request";
 
     // Build the canonical query, including the SigV4 query params.

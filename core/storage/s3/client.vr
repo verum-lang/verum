@@ -439,8 +439,8 @@ fn compose_object_url(cfg: &S3Config, key: &Text) -> Text {
             Maybe.Some(i) => i + 3,
             Maybe.None    => 0,
         };
-        let scheme = endpoint.byte_substring(0, after_scheme);
-        let rest   = endpoint.byte_substring(after_scheme, endpoint.len());
+        let scheme = endpoint.substring(0, after_scheme);
+        let rest   = endpoint.substring(after_scheme, endpoint.len());
         f"{scheme}{cfg.bucket}.{trim_trailing_slash(&rest)}/{key}"
     }
 }
@@ -454,8 +454,8 @@ fn compose_bucket_url(cfg: &S3Config) -> Text {
             Maybe.Some(i) => i + 3,
             Maybe.None    => 0,
         };
-        let scheme = endpoint.byte_substring(0, after_scheme);
-        let rest   = endpoint.byte_substring(after_scheme, endpoint.len());
+        let scheme = endpoint.substring(0, after_scheme);
+        let rest   = endpoint.substring(after_scheme, endpoint.len());
         f"{scheme}{cfg.bucket}.{trim_trailing_slash(&rest)}"
     }
 }
@@ -478,16 +478,16 @@ fn extract_host(endpoint: &Text) -> Text {
         Maybe.Some(i) => i + 3,
         Maybe.None    => 0,
     };
-    let rest = endpoint.byte_substring(after_scheme, endpoint.len());
+    let rest = endpoint.substring(after_scheme, endpoint.len());
     let host_end = match rest.find_byte_any(b"/?#") {
         Maybe.Some(p) => p,
         Maybe.None    => rest.len(),
     };
-    rest.byte_substring(0, host_end)
+    rest.substring(0, host_end)
 }
 
 fn trim_trailing_slash(s: &Text) -> Text {
-    if s.ends_with("/") { s.byte_substring(0, s.len() - 1) }
+    if s.ends_with("/") { s.substring(0, s.len() - 1) }
     else { s.clone() }
 }
 
@@ -521,7 +521,7 @@ fn parse_metadata_from_headers(
     let mut user_metadata: Map<Text, Text> = Map.new();
     for (k, v) in headers.iter() {
         if k.starts_with("x-amz-meta-") {
-            let stripped = k.byte_substring(11, k.len());
+            let stripped = k.substring(11, k.len());
             user_metadata.insert(stripped, v.clone());
         }
     }
@@ -538,7 +538,7 @@ fn parse_metadata_from_headers(
 fn strip_quotes(s: &Text) -> Text {
     let mut t = s.clone();
     if t.starts_with("\"") && t.ends_with("\"") && t.len() >= 2 {
-        t = t.byte_substring(1, t.len() - 1);
+        t = t.substring(1, t.len() - 1);
     }
     t
 }
@@ -588,7 +588,7 @@ fn parse_list_v2_response(body: &List<Byte>) -> Result<ListPage, StorageError> {
             Maybe.Some(p) => p,
             Maybe.None    => break,
         };
-        let block = xml.byte_substring(start + 10, end);
+        let block = xml.substring(start + 10, end);
         let key = extract_xml_text(&block, "Key").unwrap_or_else(|| "".to_text());
         let size_text = extract_xml_text(&block, "Size").unwrap_or_else(|| "0".to_text());
         let size = Int.parse(&size_text).unwrap_or(0);
@@ -618,7 +618,7 @@ fn parse_list_v2_response(body: &List<Byte>) -> Result<ListPage, StorageError> {
             Maybe.Some(p) => p,
             Maybe.None    => break,
         };
-        let block = xml.byte_substring(start + 16, end);
+        let block = xml.substring(start + 16, end);
         if let Maybe.Some(p) = extract_xml_text(&block, "Prefix") {
             common.push(p);
         }
@@ -635,5 +635,5 @@ fn extract_xml_text(xml: &Text, tag: &Text) -> Maybe<Text> {
     let close = f"</{tag}>";
     let s = xml.find_str(&open)?;
     let e = xml.find_str_after(&close, s + open.len())?;
-    Maybe.Some(xml.byte_substring(s + open.len(), e))
+    Maybe.Some(xml.substring(s + open.len(), e))
 }

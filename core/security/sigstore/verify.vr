@@ -604,7 +604,7 @@ fn subject_matches(subject: &Text, matcher: &IdentityMatcher) -> Bool {
             // For email-like subjects: match part after '@'
             // For URI: match host portion
             if let Maybe.Some(at) = subject.find_byte(b'@') {
-                let domain = subject.byte_substring(at + 1, subject.len());
+                let domain = subject.substring(at + 1, subject.len());
                 domain == *want
             } else if subject.starts_with("https://") || subject.starts_with("http://") {
                 let host = security.x509.path_validation.extract_uri_host(subject);

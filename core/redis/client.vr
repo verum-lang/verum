@@ -519,28 +519,28 @@ async fn read_one_frame(conn: &mut RedisConnection) -> Result<RespValue, RedisEr
 
 fn parse_redis_url(url: &Text) -> Result<RedisConfig, RedisError> {
     let (stripped, tls) = if url.starts_with("redis://") {
-        (url.byte_substring(8, url.len()), false)
+        (url.substring(8, url.len()), false)
     } else if url.starts_with("rediss://") {
-        (url.byte_substring(9, url.len()), true)
+        (url.substring(9, url.len()), true)
     } else {
         return Result.Err(RedisError.Backend(f"redis url must start with redis:// or rediss://: {url}"));
     };
     let (auth_host, db_text) = match stripped.find_byte(b'/') {
         Maybe.Some(i) => (
-            stripped.byte_substring(0, i),
-            stripped.byte_substring(i + 1, stripped.len()),
+            stripped.substring(0, i),
+            stripped.substring(i + 1, stripped.len()),
         ),
         Maybe.None => (stripped.clone(), "0".to_text()),
     };
     let db = Int.parse(&db_text).unwrap_or(0);
     let (user, password, host) = match auth_host.find_byte(b'@') {
         Maybe.Some(i) => {
-            let auth = auth_host.byte_substring(0, i);
-            let h    = auth_host.byte_substring(i + 1, auth_host.len());
+            let auth = auth_host.substring(0, i);
+            let h    = auth_host.substring(i + 1, auth_host.len());
             match auth.find_byte(b':') {
                 Maybe.Some(j) => (
-                    Maybe.Some(auth.byte_substring(0, j)),
-                    Maybe.Some(auth.byte_substring(j + 1, auth.len())),
+                    Maybe.Some(auth.substring(0, j)),
+                    Maybe.Some(auth.substring(j + 1, auth.len())),
                     h,
                 ),
                 Maybe.None => (Maybe.Some(auth), Maybe.None, h),
