@@ -1,0 +1,63 @@
+// @test: check
+// @level: L0
+// @tier: 0
+// @tags: protocols, associated-types, bounds
+// @timeout: 20000
+// @expected-exit: 0
+// @description: An associated type that satisfies its protocol's bound is
+//   accepted — the half a rejection-only fix could break.
+
+// `grammar/verum.ebnf:1193` allows a protocol to bound its associated
+// type:
+//
+//     protocol_type = 'type' , identifier , [ type_params ]
+//                   , [ ':' , type_bounds ] , [ where_clause ]
+//                   , [ default_type ] , ';' ;
+//
+// Nothing checked it, so a binding that satisfied NOTHING compiled
+// clean. The check had been written twice — `check_associated_type_bound`
+// (projection.rs) and `check_associated_type_conformance` (protocol.rs) —
+// and neither had a production caller: `check_full_conformance`, the only
+// route to the second, is called from tests only.
+//
+// This file is the POSITIVE half. Its sibling
+// `associated_type_bound_violation_is_refused.vr` carries the negative
+// half; both are needed, because a check that rejects everything passes
+// the negative test alone.
+//
+// T1074.
+
+type Shower is protocol {
+    fn show(&self) -> Text;
+};
+
+type Holder is protocol {
+    type Item: Shower;
+    fn item(&self) -> Self.Item;
+};
+
+type Tag is { n: Int };
+
+implement Shower for Tag {
+    public fn show(&self) -> Text {
+        "tag"
+    }
+}
+
+type Box is { p: Tag };
+
+// `Item = Tag`, and `Tag` implements `Shower`. Accepted.
+implement Holder for Box {
+    type Item = Tag;
+
+    public fn item(&self) -> Tag {
+        self.p
+    }
+}
+
+public fn main() -> Int {
+    let b = Box { p: Tag { n: 1 } };
+    let t = b.item();
+    print(t.show());
+    0
+}

@@ -8182,6 +8182,92 @@ impl TypeChecker {
         }
 
 
+        // T1074: an associated type may carry a protocol BOUND —
+        // `grammar/verum.ebnf:1193` spells it
+        // `'type' , identifier , [ type_params ] , [ ':' , type_bounds ]`
+        // — and nothing checked it, so `type Item: Shower` bound to a type
+        // implementing nothing compiled clean.
+        //
+        // The check for this was already WRITTEN, twice over
+        // (`check_associated_type_conformance` in protocol.rs, and
+        // `check_associated_type_bound` in projection.rs), and neither has
+        // a production caller: `check_full_conformance`, which reaches the
+        // first, is called only from tests.  So the rule lives here, beside
+        // the completeness and signature checks that DO run, rather than in
+        // a third copy elsewhere.
+        //
+        // Same restraint as the checks above: report only when the answer
+        // is knowable.  A bound naming a protocol the registry has never
+        // seen is not a violation, it is an unanswerable question, and
+        // `implements_by_name` would say "no" to it just as loudly as to a
+        // real one.
+        // The AST->Type conversion needs `&mut self`, and the registry
+        // read borrows `self` too — so resolve the bindings FIRST, then
+        // judge them under the guard.
+        let assoc_bindings: Vec<(Text, verum_ast::Type, verum_ast::span::Span)> = impl_decl
+            .items
+            .iter()
+            .filter_map(|item| match &item.kind {
+                ImplItemKind::Type { name, ty, .. } => {
+                    Some((name.name.clone(), ty.clone(), item.span))
+                }
+                _ => None,
+            })
+            .collect();
+        let assoc_bindings: Vec<(Text, crate::ty::Type, verum_ast::span::Span)> = assoc_bindings
+            .into_iter()
+            .filter_map(|(n, ast_ty, span)| {
+                self.ast_to_type(&ast_ty).ok().map(|t| (n, t, span))
+            })
+            .collect();
+        let assoc_violations: Vec<(Text, Text, Text, verum_ast::span::Span)> = {
+            let guard = self.protocol_checker.read();
+            match guard.get_protocol(&proto_ident) {
+                verum_common::Maybe::Some(protocol) => assoc_bindings
+                    .iter()
+                    .filter_map(|(name, bound_ty, span)| {
+                        let assoc = match protocol.associated_types.get(name) {
+                            verum_common::Maybe::Some(a) => a,
+                            verum_common::Maybe::None => return None,
+                        };
+                        for bound in assoc.bounds.iter() {
+                            let bound_name = bound.protocol.as_ident()?.name.clone();
+                            if guard.get_protocol(&bound_name).is_none() {
+                                continue;
+                            }
+                            if !guard.implements_by_name(bound_ty, bound_name.as_str()) {
+                                return Some((
+                                    name.clone(),
+                                    bound_name,
+                                    bound_ty.to_text(),
+                                    *span,
+                                ));
+                            }
+                        }
+                        None
+                    })
+                    .collect(),
+                verum_common::Maybe::None => Vec::new(),
+            }
+        };
+        for (assoc_name, bound_name, actual, span) in assoc_violations {
+            self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
+                code: Text::from("E405"),
+                msg: Text::from(format!(
+                    "`type {} = {}` does not satisfy the bound `{}` that `{}` \
+                     declares on it\n  \
+                     help: `{}` must implement `{}`, or the protocol's bound must be relaxed\n  \
+                     note: a caller behind `{}` may use `{}`'s methods on this \
+                     associated type, and without the bound the call is only \
+                     discovered at run time",
+                    assoc_name, actual, bound_name, proto_ident,
+                    actual, bound_name,
+                    proto_ident, bound_name,
+                )),
+                span,
+            });
+        }
+
         let mut missing: List<Text> = required
             .into_iter()
             .filter(|name| !provided.contains(name))
