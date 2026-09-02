@@ -5198,6 +5198,22 @@ impl ProtocolChecker {
             }
         }
 
+        // T0460 instrument: which (protocol, type) pairs actually REACH
+        // registration. `implement Differentiable for Float` is declared
+        // in core/math/autodiff.vr and absent from the 13 impls the
+        // registry holds for Float — and the file IS loaded (its names
+        // mount). So the question is whether this function is called for
+        // it at all, and printing here is the only answer that is not a
+        // guess about which of the six call sites ran.
+        if std::env::var("VERUM_TRACE_REGIMPL").is_ok() {
+            eprintln!(
+                "[regimpl] proto={} for={}",
+                impl_.protocol.as_ident().map(|i| i.as_str().to_string())
+                    .unwrap_or_else(|| format!("{}", impl_.protocol)),
+                impl_.for_type.to_text()
+            );
+        }
+
         // Build index key using stable type representation
         // Spec: Protocol system - implementation indexing
         // IMPORTANT: Include protocol_args in the key to distinguish between
