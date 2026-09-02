@@ -401,6 +401,12 @@ impl<'ctx> PlatformIR<'ctx> {
         self.emit_get_argc(module)?;
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_get_argv"); }
         self.emit_get_argv(module)?;
+        // T1082 — emitted unconditionally, like its neighbours: the
+        // function is small and only CALLED on the Linux leg, so
+        // gating its emission on the triple would add a second place
+        // where the platform decision lives.
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_getenv_linux"); }
+        self.emit_getenv_linux(module)?;
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_runtime_init"); }
         self.emit_runtime_init(module)?;
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_stack_frame_stubs"); }
@@ -2183,6 +2189,16 @@ impl<'ctx> PlatformIR<'ctx> {
             g.set_initializer(&ptr_type.const_null());
             g.set_linkage(verum_llvm::module::Linkage::Internal);
         }
+        // T1082 — the process environment, for the Linux no-libc leg of
+        // `SysSubOpcode::EnvGet`.  It needs no new entry-point plumbing:
+        // the SysV ABI puts `envp` immediately after argv's NULL
+        // terminator, so `envp == &argv[argc + 1]` and
+        // `verum_store_args` derives it from what it already receives.
+        if module.get_global("__verum_envp").is_none() {
+            let g = module.add_global(ptr_type, None, "__verum_envp");
+            g.set_initializer(&ptr_type.const_null());
+            g.set_linkage(verum_llvm::module::Linkage::Internal);
+        }
 
         // Manifest-driven runtime bridge globals (#261).
         //
@@ -2306,7 +2322,232 @@ impl<'ctx> PlatformIR<'ctx> {
                 .build_store(argv_global.as_pointer_value(), argv)
                 .or_llvm_err()?;
         }
+        // T1082 — derive `envp` from what the entry point already hands
+        // us.  The SysV ABI lays the initial stack out as
+        // `argc, argv[0..argc], NULL, envp[0..], NULL`, so the
+        // environment vector starts one pointer past argv's NULL
+        // terminator: `envp == argv + (argc + 1)`.  Deriving it here
+        // means the Linux entry stub and `main`'s signature stay
+        // untouched — the alternative, threading a third parameter
+        // through `_start`, would change an ABI boundary to obtain a
+        // value the ABI already places within reach.
+        if let Some(envp_global) = module.get_global("__verum_envp") {
+            let ctx = self.context;
+            let i64_type = ctx.i64_type();
+            let ptr_type = ctx.ptr_type(AddressSpace::default());
+            let argc_i64 = builder
+                .build_int_s_extend(argc.into_int_value(), i64_type, "argc_i64")
+                .or_llvm_err()?;
+            let one = i64_type.const_int(1, false);
+            let skip = builder
+                .build_int_add(argc_i64, one, "argv_slots")
+                .or_llvm_err()?;
+            let envp = unsafe {
+                // SAFETY: in-bounds by the ABI — argv holds `argc`
+                // entries plus a NULL terminator, so index `argc + 1`
+                // is the first environment slot.  The pointer is only
+                // dereferenced by the EnvGet walk, which stops at the
+                // NULL that terminates envp.
+                builder
+                    .build_in_bounds_gep(ptr_type, argv.into_pointer_value(), &[skip], "envp")
+                    .or_llvm_err()?
+            };
+            builder
+                .build_store(envp_global.as_pointer_value(), envp)
+                .or_llvm_err()?;
+        }
         builder.build_return(None).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// T1082 — `verum_getenv_linux(name: ptr) -> ptr`, the no-libc leg
+    /// of `SysSubOpcode::EnvGet`.
+    ///
+    /// CLAUDE.md's load-bearing invariant is that a Linux binary calls
+    /// no libc; `EnvGet` lowered to libc's `getenv` unconditionally, so
+    /// `make check-dup-emitters` had been RED on main since
+    /// 2026-08-23 (introduced by 6b456d762, T0852).
+    ///
+    /// There is no syscall that reads the environment — it arrives on
+    /// the stack at process entry — so this walks `__verum_envp`
+    /// itself, comparing each `NAME=VALUE` entry byte by byte against
+    /// `name` and returning the pointer just past the `=`.  Semantics
+    /// match libc's: NULL when absent, and a prefix match must be
+    /// followed by `=` so that `PATH` does not match `PATHEXT`.
+    ///
+    /// macOS keeps libSystem's `getenv` (an allowed boundary) and
+    /// Windows kernel32; this is a THIRD leg, not a replacement.
+    pub fn emit_getenv_linux(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i8_type = ctx.i8_type();
+        let i64_type = ctx.i64_type();
+        let ptr_type = ctx.ptr_type(AddressSpace::default());
+
+        let fn_type = ptr_type.fn_type(&[ptr_type.into()], false);
+        let func = super::error::get_or_declare_function(module, "verum_getenv_linux", fn_type);
+        if func.count_basic_blocks() > 0 {
+            return Ok(());
+        }
+        let builder = ctx.create_builder();
+
+        let entry = ctx.append_basic_block(func, "entry");
+        let outer_head = ctx.append_basic_block(func, "outer_head");
+        let outer_body = ctx.append_basic_block(func, "outer_body");
+        let inner_head = ctx.append_basic_block(func, "inner_head");
+        let inner_step = ctx.append_basic_block(func, "inner_step");
+        let matched = ctx.append_basic_block(func, "matched");
+        let next_entry = ctx.append_basic_block(func, "next_entry");
+        let not_found = ctx.append_basic_block(func, "not_found");
+
+        builder.position_at_end(entry);
+        let name = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_pointer_value();
+        let Some(envp_global) = module.get_global("__verum_envp") else {
+            // No environment captured (a target whose entry stub does
+            // not populate it): answer NULL rather than read a wild
+            // pointer.
+            builder
+                .build_return(Some(&ptr_type.const_null()))
+                .or_llvm_err()?;
+            return Ok(());
+        };
+        let envp = builder
+            .build_load(ptr_type, envp_global.as_pointer_value(), "envp")
+            .or_llvm_err()?
+            .into_pointer_value();
+        let idx_slot = builder.build_alloca(i64_type, "idx").or_llvm_err()?;
+        builder
+            .build_store(idx_slot, i64_type.const_zero())
+            .or_llvm_err()?;
+        builder.build_unconditional_branch(outer_head).or_llvm_err()?;
+
+        // outer_head: entry = envp[idx]; if entry == NULL -> not_found
+        builder.position_at_end(outer_head);
+        let idx = builder
+            .build_load(i64_type, idx_slot, "i")
+            .or_llvm_err()?
+            .into_int_value();
+        // SAFETY: envp is NULL-terminated by the ABI and the loop exits
+        // on that NULL, so idx never runs past the terminator.
+        let slot = unsafe {
+            builder
+                .build_in_bounds_gep(ptr_type, envp, &[idx], "slot")
+                .or_llvm_err()?
+        };
+        let entry_ptr = builder
+            .build_load(ptr_type, slot, "entry")
+            .or_llvm_err()?
+            .into_pointer_value();
+        let is_null = builder
+            .build_is_null(entry_ptr, "is_end")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, not_found, outer_body)
+            .or_llvm_err()?;
+
+        // outer_body: j = 0
+        builder.position_at_end(outer_body);
+        let j_slot = builder.build_alloca(i64_type, "j").or_llvm_err()?;
+        builder
+            .build_store(j_slot, i64_type.const_zero())
+            .or_llvm_err()?;
+        builder.build_unconditional_branch(inner_head).or_llvm_err()?;
+
+        // inner_head: compare name[j] with entry[j]
+        builder.position_at_end(inner_head);
+        let j = builder
+            .build_load(i64_type, j_slot, "jv")
+            .or_llvm_err()?
+            .into_int_value();
+        // SAFETY: both strings are NUL-terminated; the loop stops at the
+        // first mismatch, which a NUL on either side guarantees.
+        let np = unsafe {
+            builder
+                .build_in_bounds_gep(i8_type, name, &[j], "np")
+                .or_llvm_err()?
+        };
+        let ep = unsafe {
+            builder
+                .build_in_bounds_gep(i8_type, entry_ptr, &[j], "ep")
+                .or_llvm_err()?
+        };
+        let nc = builder
+            .build_load(i8_type, np, "nc")
+            .or_llvm_err()?
+            .into_int_value();
+        let ec = builder
+            .build_load(i8_type, ep, "ec")
+            .or_llvm_err()?
+            .into_int_value();
+        // name exhausted: a match requires `=` exactly here, so that
+        // `PATH` does not match `PATHEXT`.
+        let name_done = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::EQ,
+                nc,
+                i8_type.const_zero(),
+                "name_done",
+            )
+            .or_llvm_err()?;
+        let is_eq_sign = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::EQ,
+                ec,
+                i8_type.const_int(b'=' as u64, false),
+                "is_eq",
+            )
+            .or_llvm_err()?;
+        let hit = builder
+            .build_and(name_done, is_eq_sign, "hit")
+            .or_llvm_err()?;
+        let same = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, nc, ec, "same")
+            .or_llvm_err()?;
+        let keep = builder
+            .build_and(same, builder.build_not(name_done, "not_done").or_llvm_err()?, "keep")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(hit, matched, inner_step)
+            .or_llvm_err()?;
+
+        // inner_step: continue while the bytes agree, else next entry
+        builder.position_at_end(inner_step);
+        let j_next = builder
+            .build_int_add(j, i64_type.const_int(1, false), "j1")
+            .or_llvm_err()?;
+        builder.build_store(j_slot, j_next).or_llvm_err()?;
+        builder
+            .build_conditional_branch(keep, inner_head, next_entry)
+            .or_llvm_err()?;
+
+        // matched: return entry + j + 1 (just past the `=`)
+        builder.position_at_end(matched);
+        let past = builder
+            .build_int_add(j, i64_type.const_int(1, false), "past_eq")
+            .or_llvm_err()?;
+        // SAFETY: `entry[j]` is the `=` we just matched, so `j + 1` is
+        // at worst the NUL terminating an empty value.
+        let value = unsafe {
+            builder
+                .build_in_bounds_gep(i8_type, entry_ptr, &[past], "value")
+                .or_llvm_err()?
+        };
+        builder.build_return(Some(&value)).or_llvm_err()?;
+
+        // next_entry: idx += 1
+        builder.position_at_end(next_entry);
+        let idx_next = builder
+            .build_int_add(idx, i64_type.const_int(1, false), "i1")
+            .or_llvm_err()?;
+        builder.build_store(idx_slot, idx_next).or_llvm_err()?;
+        builder.build_unconditional_branch(outer_head).or_llvm_err()?;
+
+        builder.position_at_end(not_found);
+        builder
+            .build_return(Some(&ptr_type.const_null()))
+            .or_llvm_err()?;
         Ok(())
     }
 

@@ -1517,6 +1517,18 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             )
             .with_runtime_bridge(self.config.runtime_bridge);
             platform.emit_platform_functions(&self.module)?;
+            // VERUM_DUMP_IR above fires BEFORE this call, so the dump it
+            // writes cannot contain a single platform function —
+            // `verum_store_args`, `verum_get_argv`, `verum_getenv_linux`
+            // and the `__verum_*` globals are all absent from it.  That
+            // made the dump useless for exactly the question it is
+            // reached for ("which env function does this target call?"),
+            // and the absence read as "the emitter did not run" when it
+            // demonstrably had (T1082).
+            if let Ok(path) = std::env::var("VERUM_DUMP_IR_FINAL") {
+                let _ = self.module.print_to_file(std::path::Path::new(&path));
+                tracing::debug!("[IR dump, post-platform] wrote to {}", path);
+            }
 
             // Emit tensor runtime functions as LLVM IR.
             // Replaces verum_tensor.c — uses LLVM intrinsics for math (native HW speed).

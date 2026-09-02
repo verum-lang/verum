@@ -16,4 +16,3 @@ verum_process_wait	[A]	T0208[A] runtime-wins family; divergences tracked as T043
 verum_push_stack_frame	[C]	T0208 intentional last-wins override; consolidation recommended
 verum_tls_get	[C]	T0208 intentional last-wins override; consolidation recommended
 verum_tls_set	[C]	T0208 intentional last-wins override; consolidation recommended
-libc:lower_ffi_extended	[L]	T0310 native-Linux env leg: EnvGet lowers to libc getenv with no target_is_linux syscall path - needs the envp-from-_start machinery

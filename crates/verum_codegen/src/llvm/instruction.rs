@@ -31983,9 +31983,23 @@ fn lower_sys_extended<'ctx>(
             let cstr = emit_env_bytes_to_cstr(ctx, name_reg, "envget_name")?;
             let module = ctx.get_module();
             let i8p = ctx.types().ptr_type();
+            // T1082 — no libc on the Linux leg.  `getenv` is libc's, and
+            // CLAUDE.md's invariant is that a Linux binary calls none;
+            // this reached every target unconditionally and had
+            // `make check-dup-emitters` red on main since 2026-08-23.
+            // The Linux leg walks `__verum_envp` in emitted IR
+            // (`verum_getenv_linux`, platform_ir.rs); macOS keeps
+            // libSystem's `getenv` and Windows kernel32, both allowed
+            // boundaries.  The decision reads the TARGET triple, never
+            // a host `cfg!`.
+            let env_fn_name = if super::target_triple::target_is_linux(&module) {
+                "verum_getenv_linux"
+            } else {
+                "getenv"
+            };
             let getenv_ty = i8p.fn_type(&[i8p.into()], false);
             let getenv_fn =
-                super::error::get_or_declare_function(&module, "getenv", getenv_ty);
+                super::error::get_or_declare_function(&module, env_fn_name, getenv_ty);
             let raw = ctx
                 .builder()
                 .build_call(getenv_fn, &[cstr.into()], "envget_raw")
