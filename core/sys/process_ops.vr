@@ -27,7 +27,16 @@ module core.sys.process_ops;
 
 // =============================================================================
 
-mount core.{List, Text, Maybe, Result, Byte};
+// Ring 1 mounts the DEFINING module, not the root umbrella:
+// `mount core.{…}` is an edge to everything the prelude re-exports, and
+// the prelude publishes `format_debug` from `text.format` (ring 2)
+// because the language emits that name. rings.toml states the same
+// consequence for ring 0 and the same remedy (T1064).
+mount core.base.maybe.{Maybe};
+mount core.base.result.{Result};
+mount core.base.primitives.{Byte};
+mount core.collections.list.{List};
+mount core.text.text.{Text};
 // Raw-intrinsic mount. The pre-migration `mount super.raw.*` pointed
 // at a `core/sys/raw.vr` file that no longer exists — declarations
 // migrated to `core/intrinsics/runtime/os.vr`. Same architectural fix
