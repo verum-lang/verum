@@ -545,6 +545,28 @@ impl ContextChecker {
         self.declarations.insert(name.into(), decl);
     }
 
+    /// Was this name declared as a `context` of either spelling?
+    ///
+    /// NOT sufficient on its own to mean "injectable only".  A
+    /// `context protocol X` parses to a `ProtocolDecl` and is ALSO
+    /// registered here, through a synthetic `ContextDecl`
+    /// (`infer/decls.rs`, "Auto-register context protocols as
+    /// injectable"), so that `using [X]` can find it.  Membership here
+    /// therefore covers both spellings; the caller must subtract the
+    /// ones the protocol registry knows.
+    ///
+    /// Measured 2026-09-02 (T1076): a first version of the
+    /// injectable-as-bound check used this predicate alone and would
+    /// have rejected `context protocol` too — the very form that exists
+    /// to be usable as a bound.  Caught by the gate's control subject
+    /// before it was built, not after.
+    ///
+    /// `has_context` answers a different question again: whether a
+    /// context is PROVIDED in the current scope chain.
+    pub fn is_declared_context(&self, name: &str) -> bool {
+        self.declarations.contains_key(&Text::from(name))
+    }
+
     /// Enter a new scope
     pub fn enter_scope(&mut self) {
         self.env = self.env.child();

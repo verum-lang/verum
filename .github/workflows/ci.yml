@@ -726,6 +726,19 @@ jobs:
           scripts/ci/check_variant_names_do_not_steal_methods.sh --selftest ./target/release/verum
           scripts/ci/check_variant_names_do_not_steal_methods.sh ./target/release/verum
 
+      # A `context` declared without `protocol` is runtime dependency
+      # injection, not a compile-time constraint — CLAUDE.md keeps the two
+      # apart. The compiler accepted one for the other in silence, so the
+      # author learned about it at the CALL site, where the message asked
+      # them to implement a context (T1076). `core/` declares 33
+      # injectable contexts and uses none as a bound, so the radius is
+      # zero and this gate IS the subject: without it the repair has
+      # nothing in the tree to verify it.
+      - name: An injectable context is not a type bound
+        run: |
+          scripts/ci/check_context_is_not_a_type_bound.sh --selftest ./target/release/verum
+          scripts/ci/check_context_is_not_a_type_bound.sh ./target/release/verum
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:

@@ -13287,6 +13287,82 @@ with .to_float() or .to_int() (at {:?})",
             use verum_ast::ty::TypeBoundKind;
             match &bound.kind {
                 TypeBoundKind::Protocol(path) => {
+                    // A `context` declared WITHOUT `protocol` is injectable
+                    // only: it names a runtime dependency, not a
+                    // compile-time constraint.  Those are different
+                    // mechanisms — see CLAUDE.md, "Context System vs
+                    // Computational Properties" — and using one where the
+                    // other belongs was accepted in silence.
+                    //
+                    // Measured 2026-09-02 (T1076):
+                    //
+                    // ```text
+                    // public context Clocky { fn now_ms(&self) -> Int; }
+                    // public fn takes<T: Clocky>(x: T) -> Int { 1 }
+                    //   -> clean, the context is taken as an ordinary bound
+                    // takes(Zed { a: 1 })
+                    //   -> E405: type `Zed` does not implement `Clocky`
+                    // ```
+                    //
+                    // So the author learned about it at the CALL, and the
+                    // message asked them to implement a context — advice
+                    // that cannot be followed.
+                    //
+                    // `ContextResolver::validate_as_type_bound` was written
+                    // for exactly this, with that diagnostic and its help
+                    // text, and had ONE mention in the tree: its own
+                    // definition.  A stub in `type_var_bounds` computes the
+                    // same condition and its body is a comment — "emit
+                    // warning but don't block … Full error would require
+                    // span info not available here".  Here the span exists,
+                    // and this is the one converter every protocol bound
+                    // passes through (30 call sites).
+                    //
+                    // Radius measured BEFORE the change: `core/` declares
+                    // 33 injectable contexts and uses NONE of them as a
+                    // bound, so nothing in the tree changes verdict.
+                    // Asked of the CONTEXT registry, not the protocol one.
+                    // `ProtocolKind::Injectable` is read in three places
+                    // and ASSIGNED IN NONE, so a first attempt that
+                    // consulted `protocol_checker.get_protocol(..).kind`
+                    // was inert — the same "right question, wrong
+                    // authority" that made an earlier repair inert in
+                    // T1069.  A bare `context X` parses to `ContextDecl`
+                    // and lands in `context_checker`; `context protocol X`
+                    // parses to `ProtocolDecl` and does not.
+                    // TWO registries, and neither answers alone:
+                    //
+                    //   context X          -> ContextDecl  -> context_checker
+                    //   context protocol X -> ProtocolDecl -> protocol_checker
+                    //                         AND a synthetic ContextDecl in
+                    //                         context_checker, so `using [X]`
+                    //                         can find it
+                    //
+                    // So "declared as a context" covers both spellings, and
+                    // injectable-only is the DIFFERENCE: in the context
+                    // registry, absent from the protocol one.
+                    if let Some(ident) = path.as_ident() {
+                        let name: Text = ident.name.clone();
+                        let is_injectable = self
+                            .context_checker
+                            .is_declared_context(name.as_str())
+                            && matches!(
+                                self.protocol_checker.read().get_protocol(&name),
+                                verum_common::Maybe::None
+                            );
+                        if is_injectable {
+                            return Err(TypeError::Other(verum_common::Text::from(format!(
+                                "context '{}' cannot be used as a type bound; \
+                                 contexts declared with `context {}` are injectable only.\n  \
+                                 help: use `using [{}]` for dependency injection, \
+                                 or declare as `context protocol {}` to enable both uses",
+                                name.as_str(),
+                                name.as_str(),
+                                name.as_str(),
+                                name.as_str()
+                            ))));
+                        }
+                    }
                     // Simple protocol bound: T: Clone
                     protocol_bounds.push(crate::protocol::ProtocolBound {
                         protocol: path.clone(),
