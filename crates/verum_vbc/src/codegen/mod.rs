@@ -8576,6 +8576,75 @@ impl VbcCodegen {
     }
 
     /// Collects function declarations for forward references.
+    /// Attach a protocol impl whose target type this module does not
+    /// declare (T1068).
+    ///
+    /// Built-in scalars are declared nowhere, so no module holds a
+    /// descriptor for `Float` / `Int` / `USize` / `Byte` / … and the
+    /// attach site above has nothing to push onto.  (The NAME does
+    /// resolve — `type_name_to_id` is seeded from the archive as well
+    /// as from local declarations — which is why the caller asks for
+    /// the descriptor rather than for the id.)  Give it one: a
+    /// `TypeKind::Primitive` carrier named for the scalar, created on
+    /// first use in this module.  `collect_type_impls`
+    /// (verum_compiler/src/archive_metadata.rs) renders
+    /// `ImplementationDescriptor::target_type` from the descriptor's
+    /// NAME, so the carrier needs no wire-format change to reach the
+    /// typechecker's registry.
+    ///
+    /// The carrier is deliberately NOT registered in
+    /// `type_name_to_id`: within this module `Float` must keep
+    /// resolving to the built-in for every other consumer.  Lookup is
+    /// by NAME rather than by id because two spellings can share one
+    /// id (`Byte` == `U8`, `USize` == `ISize`) and they must stay
+    /// distinguishable to the name-keyed reader downstream.
+    ///
+    /// A target that is neither declared here nor a scalar is a real
+    /// gap — an impl on a type owned by another module, which this
+    /// carrier model cannot express.  It is reported rather than
+    /// dropped: loud under `VERUM_STRICT_CODEGEN=1`, traced otherwise.
+    fn attach_impl_to_undeclared_target(
+        &mut self,
+        ty_name: &str,
+        impl_record: crate::types::ProtocolImpl,
+    ) -> CodegenResult<()> {
+        if let Some(canonical) = crate::types::TypeId::from_well_known_scalar_name(ty_name) {
+            let name_sid = StringId(self.ctx.intern_string_raw(ty_name));
+            if let Some(carrier) = self
+                .types
+                .iter_mut()
+                .find(|t| t.name == name_sid && t.kind == crate::types::TypeKind::Primitive)
+            {
+                carrier.protocols.push(impl_record);
+                return Ok(());
+            }
+            let mut carrier = crate::types::TypeDescriptor {
+                id: canonical,
+                name: name_sid,
+                kind: crate::types::TypeKind::Primitive,
+                origin_module: self.current_origin_module_sid(),
+                ..Default::default()
+            };
+            carrier.protocols.push(impl_record);
+            self.types.push(carrier);
+            return Ok(());
+        }
+
+        let detail = format!(
+            "protocol impl on `{ty_name}`, a type this module neither \
+             declares nor recognises as a built-in scalar: the impl has \
+             no descriptor to be carried on and will not reach the \
+             protocol registry (T1068)"
+        );
+        if std::env::var("VERUM_STRICT_CODEGEN").is_ok() {
+            return Err(CodegenError::internal(detail));
+        }
+        if std::env::var("VERUM_TRACE_REGIMPL").is_ok() {
+            eprintln!("[regimpl] DROPPED {detail}");
+        }
+        Ok(())
+    }
+
     fn collect_declarations(&mut self, item: &Item) -> CodegenResult<()> {
         match &item.kind {
             ItemKind::Function(func) => {
@@ -9251,21 +9320,39 @@ impl VbcCodegen {
                                     })
                                     .collect()
                             };
-                            // Push protocol impl onto the concrete type's descriptor
-                            if let Some(&concrete_type_id) =
-                                self.type_name_to_id.get(ty_name.as_str())
-                            {
-                                for type_desc in self.types.iter_mut() {
-                                    if type_desc.id == concrete_type_id {
-                                        type_desc.protocols.push(crate::types::ProtocolImpl {
-                                            protocol: crate::types::ProtocolId(proto_type_id.0),
-                                            methods: method_fn_ids,
-                                            associated_types: assoc_bindings,
-                                            protocol_args_text,
-                                            type_param_fn_bounds: fn_bound_ids,
-                                        });
-                                        break;
-                                    }
+                            // Push protocol impl onto the concrete type's
+                            // descriptor.  The impl is carried BY ITS TARGET
+                            // TYPE, so a target this module does not declare
+                            // used to fall out of a bare `if let` with no
+                            // else — silently, for the life of the archive
+                            // (T1068: 176 `implement P for <primitive>`
+                            // blocks in `core/`, all absent from the shipped
+                            // registry).
+                            let impl_record = crate::types::ProtocolImpl {
+                                protocol: crate::types::ProtocolId(proto_type_id.0),
+                                methods: method_fn_ids,
+                                associated_types: assoc_bindings,
+                                protocol_args_text,
+                                type_param_fn_bounds: fn_bound_ids,
+                            };
+                            // The question is NOT "does this module know the
+                            // name" — `type_name_to_id` is seeded from the
+                            // archive too, so `Float` resolves to a perfectly
+                            // good id with NO descriptor behind it in this
+                            // module.  Ask for the DESCRIPTOR, which is what
+                            // actually carries the impl.
+                            let local_slot = self
+                                .type_name_to_id
+                                .get(ty_name.as_str())
+                                .copied()
+                                .and_then(|id| self.types.iter().position(|t| t.id == id));
+                            match local_slot {
+                                Some(idx) => self.types[idx].protocols.push(impl_record),
+                                None => {
+                                    self.attach_impl_to_undeclared_target(
+                                        ty_name.as_str(),
+                                        impl_record,
+                                    )?;
                                 }
                             }
                         }

@@ -1,0 +1,65 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: bounds, protocols, primitives, stdlib
+// @timeout: 20000
+// @expected-exit: 0
+// @description: A built-in scalar satisfies a protocol the standard
+//   library implements for it.
+
+// `core/math/autodiff.vr:108` declares, in as many words:
+//
+//     implement Differentiable for Float { ... }
+//
+// and yet this program failed to compile:
+//
+//     error<E405>: type `Float` does not implement `Differentiable`,
+//                  required by this call's bound
+//
+// A protocol impl is carried on its TARGET TYPE's descriptor. Built-in
+// scalars are declared nowhere, so no module's `type_name_to_id` holds
+// `Float`, and codegen's attach site was a bare `if let` with no else:
+// the impl fell out silently, never reached the wire, and never reached
+// the registry. Measured on the shipped archive: 3184 protocol impls
+// across 590 modules, and NOT ONE TypeDescriptor for `Float`, `Int`,
+// `Bool` or `USize` anywhere in it. In `core/` that is 176 dropped
+// blocks — Float 41, Int 56, Bool 22, USize 35, Char 12, Byte 10.
+//
+// The same construct written against a locally-declared protocol always
+// worked (the typechecker has its own source-side channel), which is why
+// the gap read as "autodiff is unfinished" rather than as a bake defect.
+// Both halves are pinned below so a future regression cannot pass by
+// breaking the control instead of fixing the subject.
+//
+// T1068.
+
+mount core.math.autodiff.{Differentiable};
+
+// The SUBJECT: a stdlib protocol implemented for a built-in scalar.
+fn needs_stdlib_bound<T: Differentiable>(x: &T) -> Int {
+    0
+}
+
+// The CONTROL: the identical shape against a protocol declared here.
+// If the subject ever fails again, this says whether the machinery for
+// bounds-on-primitives broke, or only the stdlib carry did.
+type Describable is protocol {
+    fn describe(&self) -> Text;
+};
+
+implement Describable for Float {
+    public fn describe(&self) -> Text {
+        "a float"
+    }
+}
+
+fn needs_local_bound<T: Describable>(x: &T) -> Text {
+    x.describe()
+}
+
+public fn main() -> Int {
+    let x: Float = 1.5;
+    let local = needs_local_bound(&x);
+    assert_eq(local, "a float");
+    needs_stdlib_bound(&x)
+}

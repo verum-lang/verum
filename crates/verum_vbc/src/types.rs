@@ -453,6 +453,61 @@ impl TypeId {
             _ => None,
         }
     }
+
+    /// Inverse of [`Self::well_known_name`] over the SCALAR arm.
+    ///
+    /// A built-in scalar is declared nowhere, so it owns no
+    /// `TypeDescriptor` and a module's `type_name_to_id` never holds
+    /// it.  Codegen needs the identity anyway when an
+    /// `implement P for Float` has to be attached to something
+    /// (T1068) — before this existed the attach site simply failed
+    /// its `if let` and dropped 176 stdlib impls without a word.
+    ///
+    /// Deliberately NOT covering the semantic band (List / Map /
+    /// Heap / …): those reach a consumer as
+    /// `TypeRef::Instantiated` with their arguments, and a bare
+    /// arity-0 `List` identity would be a different type from the
+    /// `List<T>` any impl actually targets.
+    ///
+    /// Round-trip with `well_known_name` is pinned by
+    /// `well_known_scalar_names_round_trip` — for the spellings the
+    /// forward direction accepts.  Three more are accepted here only
+    /// (see the comment on their arms).
+    pub fn from_well_known_scalar_name(name: &str) -> Option<Self> {
+        use verum_common::well_known_types::type_names as n;
+        // Same arm, same order, same spellings as `well_known_name`
+        // above — read them as one pair, not as two lists.
+        Some(match name {
+            _ if name == n::UNIT => Self::UNIT,
+            _ if name == n::BOOL => Self::BOOL,
+            _ if name == n::INT => Self::INT,
+            _ if name == n::FLOAT => Self::FLOAT,
+            _ if name == n::TEXT => Self::TEXT,
+            _ if name == n::NEVER => Self::NEVER,
+            _ if name == n::UINT8 => Self::U8,
+            _ if name == n::UINT16 => Self::U16,
+            _ if name == n::UINT32 => Self::U32,
+            _ if name == n::UINT64 => Self::U64,
+            _ if name == n::INT8 => Self::I8,
+            _ if name == n::INT16 => Self::I16,
+            _ if name == n::INT32 => Self::I32,
+            _ if name == n::FLOAT32 => Self::F32,
+            _ if name == n::CHAR => Self::CHAR,
+            _ if name == n::INT128 => Self::I128,
+            _ if name == n::UINT128 => Self::U128,
+            // Present here and ABSENT from `well_known_name` on
+            // purpose: these three share ids with spellings above
+            // (`Byte` == `U8` == 6, `USize` == `ISize` == 14), so
+            // id -> name is ambiguous and the forward direction
+            // declines to guess.  name -> id has no such problem, and
+            // `core/` writes 35 `implement ... for USize` and 10 for
+            // `Byte` that need an identity to attach to.
+            _ if name == n::BYTE => Self::BYTE,
+            _ if name == n::USIZE => Self::USIZE,
+            _ if name == n::ISIZE => Self::ISIZE,
+            _ => return None,
+        })
+    }
 }
 
 /// Type parameter identifier - unique within a function or type definition.
