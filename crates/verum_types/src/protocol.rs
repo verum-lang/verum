@@ -5172,6 +5172,7 @@ impl ProtocolChecker {
     ///  and the impl is still inserted so downstream
     ///  resolution can proceed.
     ///  * `Off`: both checks are skipped entirely.
+    #[track_caller]
     pub fn register_impl(&mut self, impl_: ProtocolImpl) -> Result<(), CoherenceError> {
         match self.coherence_mode {
             CoherenceMode::Strict => {
@@ -5206,11 +5207,19 @@ impl ProtocolChecker {
         // it at all, and printing here is the only answer that is not a
         // guess about which of the six call sites ran.
         if std::env::var("VERUM_TRACE_REGIMPL").is_ok() {
+            // WHICH of the six call sites ran.  `#[track_caller]` makes
+            // the origin a fact rather than a guess — the same idiom
+            // `TypeError::wrong_arg_count` uses for its inline
+            // constructors.  One instrument instead of six, and it is
+            // what found T1068: the trace named the archive path and
+            // the source path as the only two that register user
+            // impls, which moved the measurement down to the archive.
             eprintln!(
-                "[regimpl] proto={} for={}",
+                "[regimpl] proto={} for={} from={}",
                 impl_.protocol.as_ident().map(|i| i.as_str().to_string())
                     .unwrap_or_else(|| format!("{}", impl_.protocol)),
-                impl_.for_type.to_text()
+                impl_.for_type.to_text(),
+                std::panic::Location::caller()
             );
         }
 
