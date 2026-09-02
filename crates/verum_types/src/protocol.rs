@@ -5305,6 +5305,35 @@ impl ProtocolChecker {
             return true;
         }
 
+        // Fn / FnMut / FnOnce are satisfied by CALLABLES, structurally.
+        //
+        // There is no `type Fn is protocol` anywhere in core/ and no
+        // `implement … Fn … for` either, so `find_impl` below could never
+        // answer yes and all 71 `: Fn(…)` / `: FnOnce(…)` bounds across 11
+        // stdlib files were unsatisfiable — a plain function and a closure
+        // failed identically:
+        //
+        //     fn apply<F>(f: F, x: Int) -> Int where F: Fn(Int) -> Int
+        //     apply(square, 3)
+        //     error<E405>: type `fn(Int) -> Int` does not implement `Fn`
+        //
+        // The compiler already HOLDS this fact and used it in one
+        // direction only: `specialization_selection.rs` answers "functions
+        // implement Fn traits" when deciding a NEGATIVE bound (`!Fn`). The
+        // positive side was started and left empty — `infer/decls.rs` has
+        // the `matches!(proto_name, "Fn" | "FnOnce" | "FnMut")` arm with a
+        // comment where the body should be (T1066).
+        //
+        // Same shape as the Deref arm above: a protocol nothing declares,
+        // answered from the type's own structure. NOT a blanket yes — a
+        // non-callable still fails, which is the property that keeps 71
+        // unsatisfiable bounds from becoming 71 unchecked ones.
+        if let Some(protocol_name) = protocol.as_ident().map(|i| i.as_str())
+            && matches!(protocol_name, "Fn" | "FnMut" | "FnOnce")
+        {
+            return matches!(ty, Type::Function { .. });
+        }
+
         // Use find_impl which handles exact matching, generic matching, and where clauses
         // This ensures implements() and find_impl() have consistent behavior
         let found = self.find_impl(ty, protocol).is_some();

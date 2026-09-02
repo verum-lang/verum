@@ -1,0 +1,26 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: bounds, protocols, callables
+// @expected-error: E405
+// @description: A value that is not callable still fails an `Fn` bound.
+
+// The negative pole of `fn_bound_is_satisfied_by_callables.vr`, and the
+// reason it exists: the fix that makes callables satisfy `Fn` could just
+// as easily have satisfied it for everything. Seventy-one unsatisfiable
+// bounds becoming seventy-one UNCHECKED ones reads identically from a
+// test suite — every previously-red case turns green — and is worse than
+// the defect it replaces (T1066).
+
+mount core.prelude.*;
+
+public fn apply<F>(f: F, x: Int) -> Int
+where F: Fn(Int) -> Int
+{
+    f(x)
+}
+
+fn main() {
+    let not_callable: Int = 5;
+    print(f"{apply(not_callable, 3)}");
+}

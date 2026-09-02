@@ -1,0 +1,49 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: bounds, protocols, callables
+// @timeout: 20000
+// @expected-exit: 0
+// @description: A callable satisfies an `Fn` bound — a plain function and
+//   a closure alike.
+
+// There is no `type Fn is protocol` anywhere in core/ and no
+// `implement … Fn … for` either, so `implements` — which answers from the
+// impl registry — could never say yes, and all 71 `: Fn(…)` / `: FnOnce(…)`
+// bounds across 11 stdlib files were unsatisfiable. A plain function and a
+// closure failed identically:
+//
+//     error<E405>: type `fn(Int) -> Int` does not implement `Fn`,
+//                  required by this call's bound
+//
+// The compiler already HELD the fact and used it in one direction only:
+// `specialization_selection.rs` answers "functions implement Fn traits"
+// when deciding a NEGATIVE bound. The positive side was started and left
+// as an empty branch — `infer/decls.rs` carries the
+// `matches!(proto_name, "Fn" | "FnOnce" | "FnMut")` arm with a comment
+// where the body should be.
+//
+// Fn is now answered structurally, like Deref: from the type's own shape,
+// not from a registry entry nothing writes. The companion spec
+// `fn_bound_refuses_a_non_callable.vr` is the half that keeps this from
+// being a blanket yes — 71 unsatisfiable bounds must not become 71
+// unchecked ones (T1066).
+
+mount core.prelude.*;
+
+pure fn square(x: Int) -> Int { x * x }
+
+public fn apply<F>(f: F, x: Int) -> Int
+where F: Fn(Int) -> Int
+{
+    f(x)
+}
+
+fn main() -> Int {
+    // A named function.
+    assert_eq(apply(square, 3), 9);
+    // A closure, through the same bound.
+    assert_eq(apply(|y: Int| y + 1, 41), 42);
+    print("fn-bound: callables accepted");
+    0
+}
