@@ -1,0 +1,38 @@
+// @test: run-panic
+// @level: L0
+// @tier: 0
+// @tags: refinement, gradual-verification, naming
+// @expect: pass
+// @description: A refinement behind a NAMED type is enforced at runtime,
+//   exactly as the inline spelling is.
+
+// Gradual verification has two halves: what the compiler can decide it
+// decides, and what it cannot it checks when the program runs. Before
+// this spec the second half was lost the moment the type was NAMED —
+// the assert emitter matched the annotation's SYNTAX (`TypeKind::Refined`)
+// instead of asking the type for its predicate, so
+//
+//     let a: Int{ it > 0 } = shrink(7)   asserted
+//     let a: Positive      = shrink(7)   printed -93
+//
+// one predicate, two verdicts, decided by the spelling. The static half
+// worked through the name the whole time (a literal `-1` behind
+// `Positive` is refused with E500), which is what made it hard to see:
+// the type looked enforced.
+//
+// The named spelling is the one programs use — you name the domain type
+// once and write the name everywhere after. So the enforced spelling was
+// the one in examples and the silent one was the one in code (T1063).
+
+mount core.prelude.*;
+
+type Positive is Int{ it > 0 };
+
+// The value comes from a call, so nothing here is statically decidable —
+// this is the runtime half or nothing.
+pure fn shrink(n: Int) -> Int { n - 100 }
+
+fn main() {
+    let a: Positive = shrink(7);
+    print(f"unreachable: {a}");
+}
