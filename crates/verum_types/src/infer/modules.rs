@@ -20448,7 +20448,7 @@ impl TypeChecker {
                                         };
                                     let expected_params = &expected_params;
                                     if args.len() != expected_params.len() {
-                                        return Err(TypeError::wrong_arg_count(method.name.as_str().to_text(), expected_params.len(), args.len(), span));
+                                        return Err(self.arity_error(method.name.as_str().to_text(), expected_params.len(), args.len(), span));
                                     }
 
                                     if crate::ctor_trace_enabled() {
@@ -21251,7 +21251,7 @@ impl TypeChecker {
 
                 // Check argument count
                 if args.len() != method_params.len() {
-                    return Err(TypeError::wrong_arg_count(method.name.as_str().to_text(), method_params.len(), args.len(), span));
+                    return Err(self.arity_error(method.name.as_str().to_text(), method_params.len(), args.len(), span));
                 }
 
                 // Type check each argument with substitution
@@ -21850,7 +21850,7 @@ impl TypeChecker {
                                         // (self is handled implicitly as the receiver)
                                         // Check argument count directly
                                         if params.len().abs_diff(args.len()) > 1 {
-                                            return Err(TypeError::wrong_arg_count(method_name.clone(), params.len(), args.len(), span));
+                                            return Err(self.arity_error(method_name.clone(), params.len(), args.len(), span));
                                         }
 
                                         // Type check each argument with substitution
@@ -21999,7 +21999,7 @@ impl TypeChecker {
 
                                         // Check argument count
                                         if args.len() != method_params.len() {
-                                            return Err(TypeError::wrong_arg_count(method_name.clone(), method_params.len(), args.len(), span));
+                                            return Err(self.arity_error(method_name.clone(), method_params.len(), args.len(), span));
                                         }
 
                                         // CRITICAL: Unify receiver type with method's self parameter
@@ -22090,7 +22090,7 @@ impl TypeChecker {
                         // parameter (unlike inherent methods), so the
                         // arity check here must be strict.
                         if params.len() != args.len() {
-                            return Err(TypeError::wrong_arg_count(method.name.as_str().to_text(), params.len(), args.len(), span));
+                            return Err(self.arity_error(method.name.as_str().to_text(), params.len(), args.len(), span));
                         }
 
                         // Check each argument with substitution
@@ -22309,7 +22309,7 @@ impl TypeChecker {
                 } = &method_ty
                 {
                     if params.len().abs_diff(args.len()) > 1 {
-                        return Err(TypeError::wrong_arg_count(verum_common::Text::from(method.name.as_str()), params.len(), args.len(), span));
+                        return Err(self.arity_error(verum_common::Text::from(method.name.as_str()), params.len(), args.len(), span));
                     }
                     for (arg, param_ty) in args.iter().zip(params.iter()) {
                         let resolved_param = self.unifier.apply(param_ty);
@@ -22435,7 +22435,7 @@ impl TypeChecker {
                 } = &method_ty
                 {
                     if params.len().abs_diff(args.len()) > 1 {
-                        return Err(TypeError::wrong_arg_count(method_name_text, params.len(), args.len(), span));
+                        return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
                     }
 
                     // Bind type variables from receiver type args
@@ -22575,7 +22575,7 @@ impl TypeChecker {
             {
                 // Protocol methods don't include self in params (we already excluded it during registration)
                 if params.len().abs_diff(args.len()) > 1 {
-                    return Err(TypeError::wrong_arg_count(method_name_text, params.len(), args.len(), span));
+                    return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
                 }
 
                 // Type check each argument
@@ -22635,7 +22635,7 @@ impl TypeChecker {
                         {
                             // Check argument count
                             if params.len().abs_diff(args.len()) > 1 {
-                                return Err(TypeError::wrong_arg_count(method_name_text, params.len(), args.len(), span));
+                                return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
                             }
 
                             // Type check each argument
@@ -22683,7 +22683,7 @@ impl TypeChecker {
                             } = &method_ty
                             {
                                 if params.len().abs_diff(args.len()) > 1 {
-                                    return Err(TypeError::wrong_arg_count(method_name_text, params.len(), args.len(), span));
+                                    return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
                                 }
                                 for (arg, param_ty) in args.iter().zip(params.iter()) {
                                     let resolved_param = self.unifier.apply(param_ty);
@@ -22741,7 +22741,7 @@ impl TypeChecker {
                                 params.clone()
                             };
                             if args.len() != method_params.len() {
-                                return Err(TypeError::wrong_arg_count(method_name_text.clone(), method_params.len(), args.len(), span));
+                                return Err(self.arity_error(method_name_text.clone(), method_params.len(), args.len(), span));
                             }
                             for (arg, param_ty) in args.iter().zip(method_params.iter()) {
                                 let resolved_param = self.unifier.apply(param_ty);
@@ -22827,7 +22827,7 @@ impl TypeChecker {
                     let remaining_params: List<Type> = params.iter().skip(1).cloned().collect();
 
                     if args.len() != remaining_params.len() {
-                        return Err(TypeError::wrong_arg_count(method_name_str.to_text(), remaining_params.len(), args.len(), span));
+                        return Err(self.arity_error(method_name_str.to_text(), remaining_params.len(), args.len(), span));
                     }
 
                     // Type check each argument against remaining params with substitution
@@ -23131,7 +23131,7 @@ impl TypeChecker {
                     let method_name_text = verum_common::Text::from(method.name.as_str());
                     // Check argument count (method params don't include self)
                     if params.len().abs_diff(args.len()) > 1 {
-                        return Err(TypeError::wrong_arg_count(method_name_text, params.len(), args.len(), span));
+                        return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
                     }
 
                     // CRITICAL FIX: Bind type variables in the method signature to receiver's type args
@@ -23766,7 +23766,7 @@ impl TypeChecker {
                     {
                         // Allow ±1 tolerance for self-param counting
                         if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::wrong_arg_count(method_name.to_text(), params.len(), args.len(), span));
+                            return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
                         }
 
                         for (arg, param_ty) in args.iter().zip(params.iter()) {
@@ -23869,7 +23869,7 @@ impl TypeChecker {
                     if args_pre_compatible {
                         // Allow ±1 tolerance for self-param counting
                         if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::wrong_arg_count(method_name.to_text(), params.len(), args.len(), span));
+                            return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
                         }
 
                         for (arg, param_ty) in args.iter().zip(params.iter()) {
@@ -23944,7 +23944,7 @@ impl TypeChecker {
                     // ±1 tolerance for self-param counting (matches
                     // the env-lookup arm above).
                     if ctor.args.len().abs_diff(args.len()) > 1 {
-                        return Err(TypeError::wrong_arg_count(method_name.to_text(), ctor.args.len(), args.len(), span));
+                        return Err(self.arity_error(method_name.to_text(), ctor.args.len(), args.len(), span));
                     }
                     // Type-check each argument against the
                     // constructor's declared payload types.
@@ -24051,7 +24051,7 @@ impl TypeChecker {
                                     // Check argument count
                                     // Allow ±1 tolerance for self-param counting
                                     if params.len().abs_diff(args.len()) > 1 {
-                                        return Err(TypeError::wrong_arg_count(method.name.clone(), params.len(), args.len(), span));
+                                        return Err(self.arity_error(method.name.clone(), params.len(), args.len(), span));
                                     }
 
                                     // Type check each argument
@@ -24565,7 +24565,7 @@ impl TypeChecker {
                             // `fn g(x: Int)` checked clean and RAN, reading an unset
                             // register as the missing argument (T0806).
                             if args.len() != params.len() {
-                                return Err(TypeError::wrong_arg_count(method.name.clone(), params.len(), args.len(), span));
+                                return Err(self.arity_error(method.name.clone(), params.len(), args.len(), span));
                             }
 
                             // Type check each argument
@@ -24655,7 +24655,7 @@ impl TypeChecker {
                                 // `fn g(x: Int)` checked clean and RAN, reading an unset
                                 // register as the missing argument (T0806).
                                 if args.len() != params.len() {
-                                    return Err(TypeError::wrong_arg_count(method.name.clone(), params.len(), args.len(), span));
+                                    return Err(self.arity_error(method.name.clone(), params.len(), args.len(), span));
                                 }
 
                                 // Type check each argument
@@ -25155,7 +25155,7 @@ impl TypeChecker {
             }
         }
         if let Some(expected) = arity_mismatch {
-            return Err(TypeError::wrong_arg_count(
+            return Err(self.arity_error(
                 method.name.clone(),
                 expected,
                 args.len(),
@@ -25262,7 +25262,7 @@ impl TypeChecker {
                                                         // For STATIC protocol methods (like From::from), there's no self param
                                                         // The params should already be correct
                                                         if params.len().abs_diff(args.len()) > 1 {
-                                                            return Err(TypeError::wrong_arg_count(method_name.to_text(), params.len(), args.len(), span));
+                                                            return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
                                                         }
 
                                                         // Type check each argument
@@ -25333,7 +25333,7 @@ impl TypeChecker {
                         // canonicalization, and reference auto-borrow.
                         // Allow ±1 tolerance for self-param counting.
                         if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::wrong_arg_count(method_name.to_text(), params.len(), args.len(), span));
+                            return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
                         }
 
                         for (arg, param_ty) in args.iter().zip(params.iter()) {
@@ -25415,7 +25415,7 @@ impl TypeChecker {
                             if args_pre_compatible {
                                 // Check argument count
                                 if params.len().abs_diff(args.len()) > 1 {
-                                    return Err(TypeError::wrong_arg_count(method_name.to_text(), params.len(), args.len(), span));
+                                    return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
                                 }
 
                                 // Type check each argument and accumulate substitution
@@ -25457,7 +25457,7 @@ impl TypeChecker {
                         {
                             // ±1 tolerance for self-param counting.
                             if ctor.args.len().abs_diff(args.len()) > 1 {
-                                return Err(TypeError::wrong_arg_count(method_name.to_text(), ctor.args.len(), args.len(), span));
+                                return Err(self.arity_error(method_name.to_text(), ctor.args.len(), args.len(), span));
                             }
                             // GENERIC-CTOR-FRESHNESS-1 (§52, fix A2):
                             // registry InductiveConstructors store
@@ -25823,7 +25823,7 @@ impl TypeChecker {
                                 if let Some(Type::Function { params, .. }) = method_types.first() {
                                     // Allow ±1 tolerance for self-param counting
                                     if params.len().abs_diff(args.len()) > 1 {
-                                        return Err(TypeError::wrong_arg_count(method_name.to_text(), params.len(), args.len(), span));
+                                        return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
                                     }
                                     // Fall through to let regular type checking produce the error
                                 }
