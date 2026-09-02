@@ -344,7 +344,7 @@ implement IntCoercible for Instant {}
 implement SizedNumeric for Instant {}
 
 implement Hash for Instant {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
+    fn hash(&self, hasher: &mut Hasher) {
         self.nanos.hash(hasher);
     }
 }

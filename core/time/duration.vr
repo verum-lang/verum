@@ -570,7 +570,7 @@ implement IntCoercible for Duration {}
 implement SizedNumeric for Duration {}
 
 implement Hash for Duration {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
+    fn hash(&self, hasher: &mut Hasher) {
         self.nanos.hash(hasher);
     }
 }

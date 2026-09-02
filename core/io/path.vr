@@ -578,7 +578,7 @@ implement Eq for Path {
 }
 
 implement Hash for Path {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
+    fn hash(&self, hasher: &mut Hasher) {
         self.inner.hash(hasher);
     }
 }
@@ -883,7 +883,7 @@ implement Eq for PathBuf {
 }
 
 implement Hash for PathBuf {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
+    fn hash(&self, hasher: &mut Hasher) {
         self.path.inner.hash(hasher);
     }
 }

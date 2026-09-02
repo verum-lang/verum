@@ -170,7 +170,7 @@ implement Hash for Method {
     /// Hash via the as_str canonical name. Stable across calls so
     /// `Map<Method, EndpointHandler>` lookups are O(1) amortised.
     /// Routes through Text.hash for the actual mixing.
-    fn hash<H: Hasher>(&self, h: &mut H) {
+    fn hash(&self, h: &mut Hasher) {
         self.as_str().hash(h);
     }
 }
@@ -287,7 +287,7 @@ implement Hash for StatusCode {
     /// Hash via the underlying Int code so `Map<StatusCode,
     /// ResponseTemplate>` lookups (handler tables, retry-policy
     /// dispatch tables) are O(1) amortised.
-    fn hash<H: Hasher>(&self, h: &mut H) {
+    fn hash(&self, h: &mut Hasher) {
         self.code.hash(h);
     }
 }
@@ -342,7 +342,7 @@ implement Eq for Version {
 implement Hash for Version {
     /// Hash via the as_str canonical wire-form. Stable across calls
     /// so `Map<Version, ProtocolStats>` lookups are O(1) amortised.
-    fn hash<H: Hasher>(&self, h: &mut H) {
+    fn hash(&self, h: &mut Hasher) {
         self.as_str().hash(h);
     }
 }

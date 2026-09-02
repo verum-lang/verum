@@ -384,7 +384,7 @@ implement Clone for SystemTime {
 implement Copy for SystemTime {}
 
 implement Hash for SystemTime {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
+    fn hash(&self, hasher: &mut Hasher) {
         self.secs.hash(hasher);
         self.nanos.hash(hasher);
     }

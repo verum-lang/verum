@@ -206,7 +206,7 @@ implement Eq for Ipv4Addr {
 }
 
 implement Hash for Ipv4Addr {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
+    fn hash(&self, hasher: &mut Hasher) {
         self.to_u32().hash(hasher);
     }
 }
@@ -461,7 +461,7 @@ implement Eq for Ipv6Addr {
 }
 
 implement Hash for Ipv6Addr {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
+    fn hash(&self, hasher: &mut Hasher) {
         let (a, b, c, d, e, f, g, h) = self.segments;
         a.hash(hasher);
         b.hash(hasher);
@@ -563,7 +563,7 @@ implement Eq for IpAddr {
 }
 
 implement Hash for IpAddr {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
+    fn hash(&self, hasher: &mut Hasher) {
         match *self {
             V4(addr) => {
                 (0 as Int).hash(hasher);
@@ -633,7 +633,7 @@ implement Eq for SocketAddrV4 {
 }
 
 implement Hash for SocketAddrV4 {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
+    fn hash(&self, hasher: &mut Hasher) {
         self.ip.hash(hasher);
         self.port.hash(hasher);
     }
@@ -690,7 +690,7 @@ implement Eq for SocketAddrV6 {
 }
 
 implement Hash for SocketAddrV6 {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
+    fn hash(&self, hasher: &mut Hasher) {
         self.ip.hash(hasher);
         self.port.hash(hasher);
         self.flowinfo.hash(hasher);
@@ -838,7 +838,7 @@ implement Eq for SocketAddr {
 }
 
 implement Hash for SocketAddr {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
+    fn hash(&self, hasher: &mut Hasher) {
         match *self {
             V4(addr) => {
                 (0 as Int).hash(hasher);
