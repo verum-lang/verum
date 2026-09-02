@@ -10932,7 +10932,12 @@ impl ProtocolChecker {
     fn variant_type_signature_relaxed(variants: &indexmap::IndexMap<Text, Type>) -> Text {
         let mut names: Vec<&str> = variants.keys().map(|k| k.as_str()).collect();
         names.sort();
-        verum_common::Text::from(format!("Variant({})", names.join("|")))
+        // NAMESPACE — see the doc on
+        // `TypeChecker::variant_type_signature_relaxed` in
+        // infer/modules.rs.  All three copies of this pair must
+        // agree on the spelling: registration writes through one
+        // and lookup reads through another (T1069).
+        verum_common::Text::from(format!("VariantRelaxed({})", names.join("|")))
     }
 
     /// Generate a stable key for a type (used for protocol implementation indexing)

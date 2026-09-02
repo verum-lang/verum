@@ -713,6 +713,19 @@ jobs:
           scripts/ci/check_tuple_has_the_methods_its_shape_gives.sh --selftest ./target/release/verum
           scripts/ci/check_tuple_has_the_methods_its_shape_gives.sh ./target/release/verum
 
+      # A structural variant receiver is resolved to a NAME through a flat
+      # first-wins map into which TWO kinds of key were written — the exact
+      # signature and a deliberately coarsened, names-only one — under the
+      # same `Variant(` prefix. A map's discriminating power is that of the
+      # COARSEST key in it, so `Cidr`'s EXACT key collided with `IpAddr`'s
+      # RELAXED one and `Cidr` lost its methods to `IpAddr`'s (T1069).
+      # Three types share `V4|V6` here, so which one won depended on what a
+      # given compilation had loaded.
+      - name: Variant names do not steal a type's methods
+        run: |
+          scripts/ci/check_variant_names_do_not_steal_methods.sh --selftest ./target/release/verum
+          scripts/ci/check_variant_names_do_not_steal_methods.sh ./target/release/verum
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:

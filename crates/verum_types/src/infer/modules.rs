@@ -14331,6 +14331,31 @@ impl TypeChecker {
     pub(super) fn register_variant_type_name_first_wins(&mut self, sig: Text, type_name: Text) {
         if let Some(existing) = self.variant_type_names.get(&sig) {
             if existing != &type_name {
+                // The soundness hole the doc above names is REAL and
+                // reachable — measured 2026-09-02 (T1069), sixteen lines:
+                //
+                //   type Alpha is Va(Int) | Vb(Int);
+                //   type Beta  is Va { x: Int } | Vb { x: Int };
+                //   implement Beta { fn get_int(&self) -> Int { 1 } … }
+                //   -> no method named `get_int` found for type
+                //      `Va({ x: Int }) | Vb({ x: Int })`
+                //
+                // Renaming Beta's variants to Wa|Wb makes it clean.
+                //
+                // `take_variant_collisions()` exists to "surface them as
+                // compile-time diagnostics" and is CALLED BY NOBODY —
+                // one definition, zero callers in the tree.  The
+                // collisions have been detected and recorded all along
+                // and never read.  Until an emitter consumes them, this
+                // trace is the only way to see the population.
+                if std::env::var("VERUM_TRACE_VARCOLLIDE").is_ok() {
+                    eprintln!(
+                        "[varcollide] sig={} kept={} dropped={}",
+                        sig.as_str(),
+                        existing.as_str(),
+                        type_name.as_str()
+                    );
+                }
                 self.variant_collision_log
                     .push((sig.clone(), existing.clone(), type_name.clone()));
             }
@@ -14394,12 +14419,45 @@ impl TypeChecker {
     /// Used as a fallback when the full signature (with payload type names) doesn't match any
     /// registered type. This handles cases like `Ok(PositiveInt) | Err(Text)` which should
     /// resolve to "Result" even though payload types differ from the registered generic definition.
+    /// NAMESPACE, not decoration: the prefix is `VariantRelaxed(`, and
+    /// the exact signature's is `Variant(`.
+    ///
+    /// Both keys go into ONE flat `variant_type_names` map under
+    /// first-registered-wins, so before this they shared a namespace —
+    /// and the map's discriminating power was that of the COARSEST key
+    /// written into it.  Measured 2026-09-02 (T1069):
+    ///
+    ///     IpAddr is V4(Ipv4Addr) | V6(Ipv6Addr)
+    ///       exact   Variant(V4(Ipv4Addr)|V6(Ipv6Addr))
+    ///       relaxed Variant(V4|V6)
+    ///     Cidr   is V4 { … } | V6 { … }
+    ///       EXACT   Variant(V4|V6)          <- the same string
+    ///
+    /// `Cidr`'s EXACT key collided with `IpAddr`'s RELAXED one, first-wins
+    /// kept `IpAddr`, and every method lookup on a `Cidr` receiver
+    /// resolved against `IpAddr`'s methods — `no method named
+    /// last_address found for type IpAddr` on a type that declares it.
+    /// The instrument says it in one line:
+    ///
+    ///     [varcollide] sig=Variant(V4|V6) kept=IpAddr dropped=Cidr
+    ///
+    /// Separating the namespaces leaves the relaxed FALLBACK intact — it
+    /// still answers when asked (T0741 route 2 depends on it) — while an
+    /// exact key can no longer be shadowed by a deliberately coarsened
+    /// one.  The alternative, making the key a `(kind, sig)` tuple, is
+    /// the same idea across 22 call sites and three struct definitions.
+    ///
+    /// Note the exact signature is still not fully exact: its
+    /// `_ => String::new()` arm is justified for Unit, primitives and
+    /// TypeVars ("not distinctive") and also swallows RECORD payloads,
+    /// which are.  That is why `Cidr`'s exact key was coarse in the
+    /// first place, and it is a separate defect from this one.
     pub(super) fn variant_type_signature_relaxed(ty: &Type) -> Option<Text> {
         if let Type::Variant(variants) = ty {
             let mut names: Vec<&str> = variants.keys().map(|k| k.as_str()).collect();
             names.sort();
             let sig = names.join("|");
-            Some(verum_common::Text::from(format!("Variant({})", sig)))
+            Some(verum_common::Text::from(format!("VariantRelaxed({})", sig)))
         } else {
             None
         }

@@ -955,7 +955,12 @@ impl Unifier {
     fn variant_type_signature_relaxed(variants: &IndexMap<Text, Type>) -> Text {
         let mut names: Vec<&str> = variants.keys().map(|k| k.as_str()).collect();
         names.sort();
-        format!("Variant({})", names.join("|")).into()
+        // NAMESPACE — see the doc on
+        // `TypeChecker::variant_type_signature_relaxed` in
+        // infer/modules.rs.  All three copies of this pair must
+        // agree on the spelling: registration writes through one
+        // and lookup reads through another (T1069).
+        format!("VariantRelaxed({})", names.join("|")).into()
     }
 
     /// Recursively extract TypeVar -> Type mappings by matching original and substituted types.
