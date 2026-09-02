@@ -14427,11 +14427,13 @@ impl TypeChecker {
     /// and the map's discriminating power was that of the COARSEST key
     /// written into it.  Measured 2026-09-02 (T1069):
     ///
-    ///     IpAddr is V4(Ipv4Addr) | V6(Ipv6Addr)
-    ///       exact   Variant(V4(Ipv4Addr)|V6(Ipv6Addr))
-    ///       relaxed Variant(V4|V6)
-    ///     Cidr   is V4 { … } | V6 { … }
-    ///       EXACT   Variant(V4|V6)          <- the same string
+    /// ```text
+    /// IpAddr is V4(Ipv4Addr) | V6(Ipv6Addr)
+    ///   exact   Variant(V4(Ipv4Addr)|V6(Ipv6Addr))
+    ///   relaxed Variant(V4|V6)
+    /// Cidr   is V4 { … } | V6 { … }
+    ///   EXACT   Variant(V4|V6)          <- the same string
+    /// ```
     ///
     /// `Cidr`'s EXACT key collided with `IpAddr`'s RELAXED one, first-wins
     /// kept `IpAddr`, and every method lookup on a `Cidr` receiver
@@ -14439,7 +14441,9 @@ impl TypeChecker {
     /// last_address found for type IpAddr` on a type that declares it.
     /// The instrument says it in one line:
     ///
-    ///     [varcollide] sig=Variant(V4|V6) kept=IpAddr dropped=Cidr
+    /// ```text
+    /// [varcollide] sig=Variant(V4|V6) kept=IpAddr dropped=Cidr
+    /// ```
     ///
     /// Separating the namespaces leaves the relaxed FALLBACK intact — it
     /// still answers when asked (T0741 route 2 depends on it) — while an
