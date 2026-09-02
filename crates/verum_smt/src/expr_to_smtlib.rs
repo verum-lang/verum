@@ -1338,10 +1338,24 @@ fn fold_let_bindings(
     // 256 covers both hash widths the showcase uses — 32 rounds of two
     // statements, and 64 of the same — with room over.
     let mut budget: usize = 256;
+    // The SECOND budget, in the unit that actually grows (T1081).  The
+    // default is picked from measurement, not taste: see
+    // `expr_size_capped`.  `VERUM_FOLD_TERM_BUDGET` overrides it so the
+    // ceiling can be measured against a corpus rather than argued about.
+    let mut size_budget: usize = std::env::var("VERUM_FOLD_TERM_BUDGET")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(200_000);
 
     let mut bindings: Vec<(String, Expr)> = Vec::with_capacity(stmts.len());
     let mut guards: Vec<(Expr, Expr)> = Vec::new();
-    fold_stmts(stmts, &mut bindings, &mut guards, &mut budget)?;
+    fold_stmts(
+        stmts,
+        &mut bindings,
+        &mut guards,
+        &mut budget,
+        &mut size_budget,
+    )?;
 
     let mut folded = apply_bindings(tail, &bindings);
     // Innermost guard last: the FIRST guard written is the outermost
@@ -1370,6 +1384,62 @@ fn fold_let_bindings(
 }
 
 /// Substitute every binding seen so far into `e`.
+/// Node count of an expression, abandoned once it passes `cap`.
+///
+/// TERM SIZE IS THE QUANTITY THAT BLOWS UP (T1081).  `fold_let_bindings`
+/// already had a budget, denominated in STATEMENTS PROCESSED, whose own
+/// comment claimed it refuses "a body that doubles its term on every
+/// step".  It cannot: twenty statements are twenty against a budget of
+/// 256 whether the term they build has forty nodes or a million.
+/// Measured — a chain of `let a_i = a_{i-1} + a_{i-1}`:
+///
+///     bindings   peak RSS      wall
+///       8          534 MB      0.32 s
+///      12          534 MB      0.34 s
+///      16          855 MB      0.48 s
+///      20         6028 MB      6.30 s
+///
+/// Doubling per binding, exactly as the substitution predicts, and
+/// `core/database/sqlite/native/builtins/math_fns.vr` — 343 lines —
+/// reached the 24 GB ceiling and was never checked at all.  A guard has
+/// to be denominated in the unit that grows.
+fn expr_size_capped(e: &Expr, cap: usize) -> usize {
+    struct Counter {
+        n: usize,
+        cap: usize,
+    }
+    impl verum_ast::visitor::Visitor for Counter {
+        fn visit_expr(&mut self, expr: &Expr) {
+            if self.n > self.cap {
+                return;
+            }
+            self.n += 1;
+            verum_ast::visitor::walk_expr(self, expr);
+        }
+    }
+    use verum_ast::visitor::Visitor as _;
+    let mut c = Counter { n: 0, cap };
+    c.visit_expr(e);
+    c.n
+}
+
+/// Charge a folded initialiser's size to the shared term budget.
+///
+/// Returns `None` — "this function cannot be reflected" — when the
+/// budget is spent.  Declining to reflect is the safe outcome: the
+/// verifier proves less, never something false.
+fn charge_term_size(e: &Expr, size_budget: &mut usize) -> Option<()> {
+    let n = expr_size_capped(e, *size_budget);
+    if n > *size_budget {
+        if std::env::var("VERUM_TRACE_FOLDSIZE").is_ok() {
+            eprintln!("[foldsize] REFUSED: one binding is >{} nodes", *size_budget);
+        }
+        return None;
+    }
+    *size_budget -= n;
+    Some(())
+}
+
 fn apply_bindings(e: &Expr, bs: &[(String, Expr)]) -> Expr {
     let mut out = e.clone();
     for (bound, replacement) in bs {
@@ -1389,6 +1459,7 @@ fn fold_stmts(
     bindings: &mut Vec<(String, Expr)>,
     guards: &mut Vec<(Expr, Expr)>,
     budget: &mut usize,
+    size_budget: &mut usize,
 ) -> Option<()> {
     use verum_ast::stmt::StmtKind;
     let apply = |e: &Expr, bs: &[(String, Expr)]| -> Expr { apply_bindings(e, bs) };
@@ -1410,6 +1481,7 @@ fn fold_stmts(
                 // initialiser, so `let a = n; let b = a + 1; b` folds to
                 // `n + 1` rather than leaving a dangling `a`.
                 let init = apply(init, &bindings);
+                charge_term_size(&init, size_budget)?;
                 bindings.push((name.name.as_str().to_string(), init));
             }
             StmtKind::Expr { expr, .. } => {
@@ -1456,6 +1528,12 @@ fn fold_stmts(
                         _ => return None,
                     };
                     let resolved = apply(&value_expr, &bindings);
+                    // The REBINDING site grows too, and it is the one an
+                    // unrolled loop drives: `acc = acc + f(i)` stores acc's
+                    // full expansion once per round, so a 64-round loop
+                    // written in three lines pays O(rounds^2) nodes.  The
+                    // statement budget cannot see that either (T1081).
+                    charge_term_size(&resolved, size_budget)?;
                     for b in bindings.iter_mut() {
                         if b.0 == name {
                             b.1 = resolved.clone();
@@ -1496,7 +1574,13 @@ fn fold_stmts(
                         match const_eval_bool(&apply(condition, bindings)) {
                             Some(true) => {
                                 *budget -= 1;
-                                fold_stmts(&body.stmts, bindings, guards, budget)?;
+                                fold_stmts(
+                                    &body.stmts,
+                                    bindings,
+                                    guards,
+                                    budget,
+                                    size_budget,
+                                )?;
                             }
                             Some(false) => break,
                             // Not a constant trip count. Declining is

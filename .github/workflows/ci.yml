@@ -768,6 +768,19 @@ jobs:
           scripts/ci/check_hkt_bound_is_checked.sh --selftest ./target/release/verum
           scripts/ci/check_hkt_bound_is_checked.sh ./target/release/verum
 
+      # Folding `let` bindings for refinement reflection stores every
+      # binding already substituted, so `let a_i = a_{i-1} + a_{i-1}`
+      # DOUBLES the term each step. A guard existed and counted
+      # STATEMENTS — the wrong unit — so 343 lines of stdlib
+      # (core/database/sqlite/native/builtins/math_fns.vr) reached the
+      # 24 GB ceiling and were never checked at all (T1081). The gate
+      # runs the explosive fixture BOTH ways: bounded it must pass,
+      # unbounded it must still explode, or the subject proves nothing.
+      - name: Let-folding is bounded by term size
+        run: |
+          scripts/ci/check_let_folding_is_bounded_by_term_size.sh --selftest ./target/release/verum
+          scripts/ci/check_let_folding_is_bounded_by_term_size.sh ./target/release/verum
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:
