@@ -1193,7 +1193,33 @@ impl TypeChecker {
         // types, field types, super-protocols) that were transitively
         // referenced — those are picked up by repeated passes until
         // the set stabilises.
+        //
+        // SORTED, and this is the whole of T1065's grade A.  `needed` is
+        // a `std::collections::HashSet`, whose iteration order is
+        // randomised PER PROCESS, so `into_iter()` handed the drain a
+        // different starting point on every run — and the order types
+        // are registered in decides which method lookups succeed.
+        //
+        // Measured on `core/net/cidr.vr`, one binary, no rebuild:
+        //
+        //     14 runs -> EIGHT different first-registered types
+        //       Bool.select 4, Maybe.and 2, Ipv4Addr.fmt 2,
+        //       Int.fmt_binary 2, Result.and, List.all, IpAddr.fmt,
+        //       CidrError.fmt
+        //     verdicts: 2 errors or 5, roughly 3:1
+        //
+        // The registrations themselves were never in doubt: comparing
+        // two disagreeing runs gave 5204 lines each, 123 types each,
+        // difference of SETS 0, of MULTISETS 0 — and of SEQUENCES 3492.
+        // Same work, different order, different answer.
+        //
+        // Sorting by name is arbitrary but STABLE, which is the whole
+        // requirement; nothing here depends on a particular order, only
+        // on it being the same one twice.  Same remedy as
+        // `ProtocolRegistry::get_implementations`, which sorts its exact
+        // matches by declaration index for exactly this reason (T0368).
         let mut to_load: Vec<Text> = needed.into_iter().collect();
+        to_load.sort();
         let mut already: std::collections::HashSet<Text> =
             std::collections::HashSet::new();
         while let Some(name) = to_load.pop() {
