@@ -9,7 +9,7 @@
 // Gradual verification has two halves: what the compiler can decide it
 // decides, and what it cannot it checks when the program runs. Before
 // this spec the second half was lost the moment the type was NAMED —
-// the assert emitter matched the annotation's SYNTAX (`TypeKind::Refined`)
+// the assert emitter matched the annotation's SYNTAX (a `Refined` type node)
 // instead of asking the type for its predicate, so
 //
 //     let a: Int{ it > 0 } = shrink(7)   asserted
