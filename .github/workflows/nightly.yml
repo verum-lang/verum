@@ -53,6 +53,25 @@ jobs:
             --runs 15
         working-directory: vcs
 
+      # One source, one verdict — across DRIVERS this time. `verum check
+      # FILE`, `verum check` in a project, and the stdlib bake compile the
+      # same sources; the bake is the softest of the three, so a file it
+      # accepts and the checker refuses is a real divergence, not a
+      # stricter mood. The gate is a ratchet and was reachable from
+      # NOTHING — no workflow, no Makefile target — so its baseline of 6
+      # protected nothing (T1073 class). Measured 2026-09-02: still 6, and
+      # chasing one of them found 68 core/ files whose umbrella `mount
+      # core.{Result}` is refused outright (T1077).
+      #
+      # Advisory here, like its neighbour: it needs a built binary and
+      # ~10 minutes, and a finding is a defect to file rather than a
+      # branch to block.
+      - name: File-vs-project-vs-bake parity (ratchet)
+        continue-on-error: true
+        run: |
+          python3 scripts/ci/check_file_vs_project_parity.py \
+            --verum target/release/verum
+
       - name: Run VCS L0+L1+L2+L3 full
         working-directory: vcs
         # The vtest RUNNER process (not a test child) has died SIGSEGV
