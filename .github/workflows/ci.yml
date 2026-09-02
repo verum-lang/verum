@@ -679,6 +679,23 @@ jobs:
           scripts/ci/check_mount_decides_which_same_named_type.sh --selftest ./target/release/verum
           scripts/ci/check_mount_decides_which_same_named_type.sh ./target/release/verum
 
+      # `verum check` picks a lenient mode from the PATH alone — an
+      # ancestor `core` directory holding `mod.vr` — and until
+      # 2026-09-02 there was no switch, so "what does core/ look like
+      # under user rules" could not be asked. Measured the day the flag
+      # landed: 2560 files, 2182 errors leniently, 3054 strictly, and
+      # 138 files that look clean and are not.
+      #
+      # This gates the FLAG, not the mode: anchored+flag must equal the
+      # same bytes outside the anchor. It also refuses to pass if its
+      # own subject stops distinguishing the two modes — the failure its
+      # predecessor had (a `core` dir with no `mod.vr`, and a subject
+      # that mounted no stdlib) and could not report.
+      - name: VERUM_STRICT_STDLIB reaches inside the stdlib anchor
+        run: |
+          scripts/ci/check_strict_stdlib_flag_reaches_core.sh --selftest ./target/release/verum
+          scripts/ci/check_strict_stdlib_flag_reaches_core.sh ./target/release/verum
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:

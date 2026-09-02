@@ -960,7 +960,27 @@ impl<'s> CompilationPipeline<'s> {
         // answer `Type::Unknown` rather than suppressing, and an unknown
         // surfaces later as "not fully determined".  Changing what it does
         // is a design decision; changing WHO it applies to is a repair.
-        let is_stdlib_file = {
+        // …and until 2026-09-02 there was no way to ASK the question at
+        // all: the mode was decided by the path and by nothing else, so
+        // "what does `core/` look like under the same rules as user
+        // code" could not be measured without moving files out of the
+        // tree one at a time.  Two findings that day were both hidden
+        // behind exactly that:
+        //
+        //   * a mounted enum's inherent `implement` block silently not
+        //     loading (T0755) — invisible in-tree, E400 out of it;
+        //   * `Display.fmt(self, f)` in 33 files, a receiver-first call
+        //     form the language does not have.  The mode does not count
+        //     arguments at all: three arguments against two parameters
+        //     also passes in-tree (T1059).  Chasing that one down led to
+        //     transposed arguments in RSA-PSS signature verification.
+        //
+        // `VERUM_STRICT_STDLIB=1` turns the anchor off, so `core/` can be
+        // swept under user rules.  Opt-in and default-off: unset, every
+        // build behaves exactly as before.  It is a FLAG, not one of the
+        // `VERUM_TRACE_*` substring filters — any value enables it.
+        let strict_stdlib = std::env::var_os("VERUM_STRICT_STDLIB").is_some();
+        let is_stdlib_file = !strict_stdlib && {
             let input = &self.session.options().input;
             let mut dir = input.parent();
             let mut found = false;
