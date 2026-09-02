@@ -284,6 +284,20 @@ fn write_core_metadata_alongside_archive(
         // is declared at `core/base/maybe.vr:606`.
         scan_implementation_protocol_args(&mut metadata, root, verbose);
 
+        // T1074 — populate `protocols[].associated_types` with the
+        // BOUNDS each protocol declares on them.  `archive_metadata.rs`
+        // writes `associated_types: List::new()` for every protocol
+        // (two sites), and there is nothing upstream to copy: the VBC
+        // TypeDescriptor carries an IMPL's associated-type BINDINGS,
+        // never a protocol declaration's BOUNDS.  Without this walk the
+        // bound is unknowable to a user compile, so
+        // `implement Adapter for Junk { type Conn = Junk; }` — where
+        // `core/` declares `type Conn: Connection` — passed the
+        // associated-type bound check that ca2332965 added, while the
+        // identical shape against a locally-declared protocol was
+        // correctly refused.
+        scan_protocol_associated_type_bounds(&mut metadata, root, verbose);
+
         // Fully-qualified free-fn keys at FILE-module granularity
         // (2026-07-09).  `metadata.functions` keys free functions by
         // bare name (first-wins) plus a `<archive_module>.<name>`
@@ -1464,6 +1478,164 @@ fn scan_module_reexports(
 /// Matching is `(target_type, protocol)`-keyed — the most-specific
 /// impl wins under collision (first-wins, BTreeSet iteration
 /// produces deterministic ordering).
+/// T1074 — recover each protocol's associated-type BOUNDS from source.
+///
+/// `grammar/verum.ebnf:1193` lets a protocol bound its associated type
+/// (`type Conn: Connection;`), and `core/` declares 16 of them.  The
+/// bound survives parsing — `ProtocolItemKind::Type` carries
+/// `bounds: List<Path>` — and is then dropped: codegen's `ProtocolInfo`
+/// has no field for it, so `archive_metadata.rs:701`/`:711` write
+/// `associated_types: List::new()` because there is nothing to write.
+///
+/// Same remedy as `scan_implementation_protocol_args` directly below,
+/// for the same reason: the fact exists only in source, so the
+/// source-walk is where it is recovered.  Keyed by protocol simple
+/// name, first-wins, matching that sibling's collision policy.
+fn scan_protocol_associated_type_bounds(
+    metadata: &mut verum_types::core_metadata::CoreMetadata,
+    root: &Path,
+    verbose: bool,
+) {
+    use std::collections::BTreeMap;
+    use verum_ast::ItemKind;
+    use verum_ast::decl::{ProtocolItemKind, TypeDeclBody};
+    use verum_common::{List, Text};
+
+    // protocol simple name → [(assoc type name, [bound names])]
+    let mut found: BTreeMap<String, Vec<(String, Vec<String>)>> = BTreeMap::new();
+    let mut files_parsed = 0usize;
+    let mut bounds_captured = 0usize;
+
+    fn path_simple_name(path: &verum_ast::ty::Path) -> Option<String> {
+        use verum_ast::ty::PathSegment;
+        path.segments.last().and_then(|s| match s {
+            PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
+            _ => None,
+        })
+    }
+
+    fn visit_dir(
+        dir: &Path,
+        found: &mut BTreeMap<String, Vec<(String, Vec<String>)>>,
+        files_parsed: &mut usize,
+        bounds_captured: &mut usize,
+    ) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_name().and_then(|n| n.to_str()) == Some("target") {
+                continue;
+            }
+            if path.is_dir() {
+                visit_dir(&path, found, files_parsed, bounds_captured);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("vr") {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            // Same quick filter as the sibling scan: parse only what can
+            // possibly carry the construct.
+            if !content.contains("protocol") {
+                continue;
+            }
+            let mut parser = verum_fast_parser::Parser::new(&content);
+            let module = match parser.parse_module() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            *files_parsed += 1;
+
+            for item in module.items.iter() {
+                let ItemKind::Type(type_decl) = &item.kind else {
+                    continue;
+                };
+                let TypeDeclBody::Protocol(body) = &type_decl.body else {
+                    continue;
+                };
+                let proto_name = type_decl.name.name.as_str().to_string();
+                let mut assocs: Vec<(String, Vec<String>)> = Vec::new();
+                for pitem in body.items.iter() {
+                    let ProtocolItemKind::Type { name, bounds, .. } = &pitem.kind else {
+                        continue;
+                    };
+                    // An UNBOUNDED associated type is not a finding —
+                    // recording it as an empty bound list would be
+                    // indistinguishable from "not scanned", which is
+                    // exactly the ambiguity this walk exists to remove.
+                    if bounds.is_empty() {
+                        continue;
+                    }
+                    let names: Vec<String> = bounds.iter().filter_map(path_simple_name).collect();
+                    if names.is_empty() {
+                        continue;
+                    }
+                    *bounds_captured += 1;
+                    assocs.push((name.name.as_str().to_string(), names));
+                }
+                if assocs.is_empty() {
+                    continue;
+                }
+                if let std::collections::btree_map::Entry::Vacant(slot) =
+                    found.entry(proto_name)
+                {
+                    slot.insert(assocs);
+                }
+            }
+        }
+    }
+
+    visit_dir(root, &mut found, &mut files_parsed, &mut bounds_captured);
+
+    let mut populated = 0usize;
+    for (name, proto) in metadata.protocols.iter_mut() {
+        let Some(assocs) = found.get(name.as_str()) else {
+            continue;
+        };
+        // Archive-carried entries are authoritative if they ever appear
+        // — today they never do, and saying so here means the day they
+        // start, this walk yields rather than fights.
+        if !proto.associated_types.is_empty() {
+            continue;
+        }
+        let mut list: List<verum_types::core_metadata::AssociatedTypeDescriptor> = List::new();
+        for (assoc_name, bound_names) in assocs.iter() {
+            let mut bounds: List<Text> = List::new();
+            for b in bound_names.iter() {
+                bounds.push(Text::from(b.as_str()));
+            }
+            list.push(verum_types::core_metadata::AssociatedTypeDescriptor {
+                name: Text::from(assoc_name.as_str()),
+                bounds,
+                default: verum_common::Maybe::None,
+            });
+        }
+        proto.associated_types = list;
+        populated += 1;
+    }
+
+    // `verbose` is a config field the baker binary never sets, so gating
+    // this on it alone means the count is unobservable in exactly the
+    // situation it is needed — a bake run by hand to answer "did the
+    // scan find anything". Own env var, same as the codegen traces.
+    if verbose || std::env::var("VERUM_TRACE_ASSOC_BOUNDS").is_ok() {
+        eprintln!(
+            "[precompile] assoc-type bounds: {} file(s) parsed, {} bound(s) captured \
+             across {} protocol(s), {} metadata protocol(s) populated",
+            files_parsed,
+            bounds_captured,
+            found.len(),
+            populated
+        );
+    }
+}
+
 fn scan_implementation_protocol_args(
     metadata: &mut verum_types::core_metadata::CoreMetadata,
     root: &Path,

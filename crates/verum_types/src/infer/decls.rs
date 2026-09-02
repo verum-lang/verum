@@ -8078,6 +8078,167 @@ impl TypeChecker {
         // body, so every method would read as required. Declining is not
         // caution about load order — it is refusing to answer from a source
         // that cannot know.
+        // T1074: the associated-type bound check runs BEFORE the early
+        // return below, because that return is about METHOD
+        // COMPLETENESS and its precondition is narrower than this
+        // check's.  `protocols_with_known_defaults` holds only protocols
+        // whose SOURCE was seen, so an archive-loaded protocol —
+        // `core/database/common/protocol.vr`'s `Adapter`, with
+        // `type Conn: Connection` — left this function before any bound
+        // was judged.  Measured: the reader carries the bound
+        // (`[assoc-read] protocol=Adapter assoc_entries=2 / Conn : 1
+        // bound(s)`) and the violation still compiled clean, through
+        // FIVE earlier layers that each looked like the defect.
+        // T1074: an associated type may carry a protocol BOUND —
+        // `grammar/verum.ebnf:1193` spells it
+        // `'type' , identifier , [ type_params ] , [ ':' , type_bounds ]`
+        // — and nothing checked it, so `type Item: Shower` bound to a type
+        // implementing nothing compiled clean.
+        //
+        // The check for this was already WRITTEN, twice over
+        // (`check_associated_type_conformance` in protocol.rs, and
+        // `check_associated_type_bound` in projection.rs), and neither has
+        // a production caller: `check_full_conformance`, which reaches the
+        // first, is called only from tests.  So the rule lives here, beside
+        // the completeness and signature checks that DO run, rather than in
+        // a third copy elsewhere.
+        //
+        // Same restraint as the checks above: report only when the answer
+        // is knowable.  A bound naming a protocol the registry has never
+        // seen is not a violation, it is an unanswerable question, and
+        // `implements_by_name` would say "no" to it just as loudly as to a
+        // real one.
+        // A/B IN ONE BINARY (T1074 regression triage): the conversion
+        // below is a `&mut self` call on the inference context, so it
+        // can have effects beyond returning a type. Gate it so one
+        // build can be measured both ways instead of two builds being
+        // compared — a second build is a second variable.
+        // A/B in ONE binary: this gate switches the whole
+        // associated-type-bound path off — the collection, the
+        // `&mut self` conversion and the judgement alike — so a
+        // measurement of "did this check cause X" needs one build, not
+        // two. Two builds are two variables.
+        let assoc_check_off = std::env::var_os("VERUM_NO_ASSOC_BOUND_CHECK").is_some();
+        // The AST->Type conversion needs `&mut self`, and the registry
+        // read borrows `self` too — so resolve the bindings FIRST, then
+        // judge them under the guard.
+        let assoc_bindings: Vec<(Text, verum_ast::Type, verum_ast::span::Span)> = if assoc_check_off {
+            Vec::new()
+        } else { impl_decl
+            .items
+            .iter()
+            .filter_map(|item| match &item.kind {
+                ImplItemKind::Type { name, ty, .. } => {
+                    Some((name.name.clone(), ty.clone(), item.span))
+                }
+                _ => None,
+            })
+            .collect() };
+        let assoc_bindings: Vec<(Text, crate::ty::Type, verum_ast::span::Span)> = assoc_bindings
+            .into_iter()
+            .filter_map(|(n, ast_ty, span)| {
+                self.ast_to_type(&ast_ty).ok().map(|t| (n, t, span))
+            })
+            .collect();
+        // T1074, the load: the lazy stdlib loader is RECEIVER-DRIVEN —
+        // a type's protocols register when a method is called on it —
+        // and an associated-type BOUND calls nothing. `Adapter` is
+        // loaded (it is mounted), `Connection` is not (only named by
+        // `type Conn: Connection`), so the guard below correctly
+        // declined to judge a protocol the registry genuinely did not
+        // hold. Measured: `Connection` defined=false has_protocol=false.
+        //
+        // Same shape as ITER-LAZY-LOAD (T0701), whose comment says it
+        // outright: a construct that consumes a type without calling a
+        // method on it leaves that type unloaded. Load the bound's
+        // protocol first, then ask.
+        {
+            let bound_protocols: Vec<Text> = {
+                let guard = self.protocol_checker.read();
+                match guard.get_protocol(&proto_ident) {
+                    verum_common::Maybe::Some(protocol) => assoc_bindings
+                        .iter()
+                        .filter_map(|(name, _, _)| protocol.associated_types.get(name))
+                        .flat_map(|a| {
+                            a.bounds
+                                .iter()
+                                .filter_map(|b| b.protocol.as_ident().map(|i| i.name.clone()))
+                                .collect::<Vec<_>>()
+                        })
+                        .collect(),
+                    verum_common::Maybe::None => Vec::new(),
+                }
+            };
+            for bp in bound_protocols {
+                self.ensure_stdlib_type_loaded_transitive(&bp);
+            }
+        }
+        let assoc_violations: Vec<(Text, Text, Text, verum_ast::span::Span)> = {
+            let guard = self.protocol_checker.read();
+            match guard.get_protocol(&proto_ident) {
+                verum_common::Maybe::Some(protocol) => assoc_bindings
+                    .iter()
+                    .filter_map(|(name, bound_ty, span)| {
+                        let assoc = match protocol.associated_types.get(name) {
+                            verum_common::Maybe::Some(a) => a,
+                            verum_common::Maybe::None => return None,
+                        };
+                        for bound in assoc.bounds.iter() {
+                            // ENTRY of the bound loop, before BOTH exits
+                            // below — `as_ident()?` (which returns from the
+                            // whole closure, not just this iteration) and
+                            // the registry `continue`.
+                            let ident = bound.protocol.as_ident();
+                            let bound_name = match ident {
+                                Some(i) => i.name.clone(),
+                                None => continue,
+                            };
+                            let known = guard.get_protocol(&bound_name).is_some();
+                            // The guard's real question is not "is this
+                            // protocol DEFINED here" but "can the registry
+                            // answer about it at all" — a protocol with
+                            // implementations can be judged even when its
+                            // definition was not loaded.
+                            // Ask the IMPL side, not the definition side:
+                            // does any type implement this protocol?
+                            let any_impl = guard.has_protocol(&bound_name);
+                            if !known {
+                                continue;
+                            }
+                            let sat = guard.implements_by_name(bound_ty, bound_name.as_str());
+                            if !sat {
+                                return Some((
+                                    name.clone(),
+                                    bound_name,
+                                    bound_ty.to_text(),
+                                    *span,
+                                ));
+                            }
+                        }
+                        None
+                    })
+                    .collect(),
+                verum_common::Maybe::None => Vec::new(),
+            }
+        };
+        for (assoc_name, bound_name, actual, span) in assoc_violations {
+            self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
+                code: Text::from("E405"),
+                msg: Text::from(format!(
+                    "`type {} = {}` does not satisfy the bound `{}` that `{}` \
+                     declares on it\n  \
+                     help: `{}` must implement `{}`, or the protocol's bound must be relaxed\n  \
+                     note: a caller behind `{}` may use `{}`'s methods on this \
+                     associated type, and without the bound the call is only \
+                     discovered at run time",
+                    assoc_name, actual, bound_name, proto_ident,
+                    actual, bound_name,
+                    proto_ident, bound_name,
+                )),
+                span,
+            });
+        }
+
         let Some((required_set, declared)) =
             self.protocols_with_known_defaults.get(&proto_ident).cloned()
         else {
@@ -8181,92 +8342,6 @@ impl TypeChecker {
             });
         }
 
-
-        // T1074: an associated type may carry a protocol BOUND —
-        // `grammar/verum.ebnf:1193` spells it
-        // `'type' , identifier , [ type_params ] , [ ':' , type_bounds ]`
-        // — and nothing checked it, so `type Item: Shower` bound to a type
-        // implementing nothing compiled clean.
-        //
-        // The check for this was already WRITTEN, twice over
-        // (`check_associated_type_conformance` in protocol.rs, and
-        // `check_associated_type_bound` in projection.rs), and neither has
-        // a production caller: `check_full_conformance`, which reaches the
-        // first, is called only from tests.  So the rule lives here, beside
-        // the completeness and signature checks that DO run, rather than in
-        // a third copy elsewhere.
-        //
-        // Same restraint as the checks above: report only when the answer
-        // is knowable.  A bound naming a protocol the registry has never
-        // seen is not a violation, it is an unanswerable question, and
-        // `implements_by_name` would say "no" to it just as loudly as to a
-        // real one.
-        // The AST->Type conversion needs `&mut self`, and the registry
-        // read borrows `self` too — so resolve the bindings FIRST, then
-        // judge them under the guard.
-        let assoc_bindings: Vec<(Text, verum_ast::Type, verum_ast::span::Span)> = impl_decl
-            .items
-            .iter()
-            .filter_map(|item| match &item.kind {
-                ImplItemKind::Type { name, ty, .. } => {
-                    Some((name.name.clone(), ty.clone(), item.span))
-                }
-                _ => None,
-            })
-            .collect();
-        let assoc_bindings: Vec<(Text, crate::ty::Type, verum_ast::span::Span)> = assoc_bindings
-            .into_iter()
-            .filter_map(|(n, ast_ty, span)| {
-                self.ast_to_type(&ast_ty).ok().map(|t| (n, t, span))
-            })
-            .collect();
-        let assoc_violations: Vec<(Text, Text, Text, verum_ast::span::Span)> = {
-            let guard = self.protocol_checker.read();
-            match guard.get_protocol(&proto_ident) {
-                verum_common::Maybe::Some(protocol) => assoc_bindings
-                    .iter()
-                    .filter_map(|(name, bound_ty, span)| {
-                        let assoc = match protocol.associated_types.get(name) {
-                            verum_common::Maybe::Some(a) => a,
-                            verum_common::Maybe::None => return None,
-                        };
-                        for bound in assoc.bounds.iter() {
-                            let bound_name = bound.protocol.as_ident()?.name.clone();
-                            if guard.get_protocol(&bound_name).is_none() {
-                                continue;
-                            }
-                            if !guard.implements_by_name(bound_ty, bound_name.as_str()) {
-                                return Some((
-                                    name.clone(),
-                                    bound_name,
-                                    bound_ty.to_text(),
-                                    *span,
-                                ));
-                            }
-                        }
-                        None
-                    })
-                    .collect(),
-                verum_common::Maybe::None => Vec::new(),
-            }
-        };
-        for (assoc_name, bound_name, actual, span) in assoc_violations {
-            self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
-                code: Text::from("E405"),
-                msg: Text::from(format!(
-                    "`type {} = {}` does not satisfy the bound `{}` that `{}` \
-                     declares on it\n  \
-                     help: `{}` must implement `{}`, or the protocol's bound must be relaxed\n  \
-                     note: a caller behind `{}` may use `{}`'s methods on this \
-                     associated type, and without the bound the call is only \
-                     discovered at run time",
-                    assoc_name, actual, bound_name, proto_ident,
-                    actual, bound_name,
-                    proto_ident, bound_name,
-                )),
-                span,
-            });
-        }
 
         let mut missing: List<Text> = required
             .into_iter()

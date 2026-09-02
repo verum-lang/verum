@@ -1289,6 +1289,67 @@ impl TypeChecker {
     /// caller's loop can continue until the closure stabilises.
     /// Idempotent under repeated calls (already-loaded types
     /// short-circuit on `ctx.lookup_type`).
+    /// T1074 — turn a metadata protocol descriptor's associated-type
+    /// entries into registry `AssociatedType`s, so a BOUND declared in
+    /// `core/` (`type Conn: Connection;`) is knowable to a user compile.
+    ///
+    /// Both `Protocol` constructors below used to drop them — one kept
+    /// whatever the registry already held, the other wrote
+    /// `Map::new() // Simplified` — because there was nothing to read:
+    /// `archive_metadata.rs` writes `associated_types: List::new()` for
+    /// every protocol.  `precompile.rs::scan_protocol_associated_type_bounds`
+    /// now recovers them from source; this is the consumer.
+    ///
+    /// Entries whose bound list is empty are skipped rather than
+    /// recorded as an unbounded associated type: an unbounded entry and
+    /// a not-yet-scanned one would be indistinguishable, and the check
+    /// that reads this treats "no bounds" as "nothing to enforce".
+    fn assoc_types_from_metadata(
+        desc: &crate::core_metadata::ProtocolDescriptor,
+    ) -> verum_common::Map<Text, crate::protocol::AssociatedType> {
+        let mut out: verum_common::Map<Text, crate::protocol::AssociatedType> =
+            verum_common::Map::new();
+        if std::env::var("VERUM_TRACE_ASSOC_BOUNDS").is_ok() {
+            // Entry line, BEFORE any narrowing: a silent trace inside the
+            // loop cannot distinguish "no bounds carried" from "this
+            // reader never runs". Five layers of this defect have each
+            // looked like the next one's absence.
+            eprintln!(
+                "[assoc-read] protocol={} assoc_entries={}",
+                desc.name,
+                desc.associated_types.len()
+            );
+        }
+        for assoc in desc.associated_types.iter() {
+            if assoc.bounds.is_empty() {
+                continue;
+            }
+            if std::env::var("VERUM_TRACE_ASSOC_BOUNDS").is_ok() {
+                eprintln!(
+                    "[assoc-read]   {} : {} bound(s)",
+                    assoc.name,
+                    assoc.bounds.len()
+                );
+            }
+            let mut bounds: List<crate::protocol::ProtocolBound> = List::new();
+            for b in assoc.bounds.iter() {
+                bounds.push(crate::protocol::ProtocolBound {
+                    protocol: Self::text_to_path(b),
+                    args: List::new(),
+                    // `type Conn: Connection` is a POSITIVE bound; the
+                    // negative form (`!Send`) is a different construct
+                    // and the scanner does not capture it.
+                    is_negative: false,
+                });
+            }
+            out.insert(
+                assoc.name.clone(),
+                crate::protocol::AssociatedType::simple(assoc.name.clone(), bounds),
+            );
+        }
+        out
+    }
+
     pub fn ensure_stdlib_type_loaded(
         &mut self,
         name: &Text,
@@ -2208,7 +2269,18 @@ impl TypeChecker {
                 })
                 .collect(),
             methods,
-            associated_types: existing_assoc_types,
+            associated_types: {
+                // Metadata-carried bounds win over the registry's
+                // existing entry: the registry's came from an earlier
+                // load of the same descriptor, so they cannot be
+                // richer, and a hardcoded stub must not out-rank the
+                // declaration (T1074).
+                let mut merged = existing_assoc_types;
+                for (k, v) in Self::assoc_types_from_metadata(protocol_desc).into_iter() {
+                    merged.insert(k, v);
+                }
+                merged
+            },
             associated_consts: existing_assoc_consts,
             super_protocols: protocol_desc
                 .super_protocols
@@ -4026,7 +4098,7 @@ impl TypeChecker {
                     })
                     .collect(),
                 methods,
-                associated_types: verum_common::Map::new(), // Simplified
+                associated_types: Self::assoc_types_from_metadata(protocol_desc),
                 associated_consts: verum_common::Map::new(),
                 super_protocols: protocol_desc
                     .super_protocols
