@@ -739,6 +739,21 @@ jobs:
           scripts/ci/check_context_is_not_a_type_bound.sh --selftest ./target/release/verum
           scripts/ci/check_context_is_not_a_type_bound.sh ./target/release/verum
 
+      # A name inside `mount core.{...}` is an ITEM, and a type is not a
+      # submodule because it has methods. `mount core.{Result};` was
+      # refused as "module `core.Result` not found" while
+      # `mount core.{Maybe};` was clean — the resolver asked "does any
+      # metadata key start with `Result.`", and method keys are spelled
+      # exactly that way (T1077). Measured: 75 of 76 files carrying this
+      # mount form improved, none regressed. The gate checks BOTH sides —
+      # a real submodule must still glob-import, and a name that exists
+      # nowhere must still be refused — so that deleting the check
+      # entirely cannot pass it.
+      - name: A group-mount item is not a module
+        run: |
+          scripts/ci/check_group_mount_item_is_not_a_module.sh --selftest ./target/release/verum
+          scripts/ci/check_group_mount_item_is_not_a_module.sh ./target/release/verum
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:

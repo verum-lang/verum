@@ -3906,8 +3906,39 @@ impl TypeChecker {
             md.functions.range(lo.clone()..hi.clone()).next().is_some()
                 || md.types.range(lo..hi).next().is_some()
         };
+        // MOUNT-GROUP-ITEM-IS-NOT-A-MODULE (T1077).  `probe` asks "does
+        // the metadata index hold any key with the prefix `<n>.`" — and
+        // method keys are spelled `Result.map`, `Maybe.unwrap`, so EVERY
+        // type with methods answers yes to "is `core.<Type>` a module?".
+        // The group-mount site (MountTreeKind::Nested) uses that answer
+        // to glob-import the supposed submodule INSTEAD of importing the
+        // named item, so `mount core.{Result}` resolved as though the
+        // author had written `mount core.Result.*` — E402 "module
+        // `core.Result` not found" for a type that plainly exists.
+        //
+        // Two namespaces (module paths, `Type.method`) share one key
+        // space, and a range query cannot tell them apart: the coarser
+        // reading wins.  Measured over the archive — Result 218 method
+        // keys, Maybe 370, Map 237, Ordering 24, all diverted; Add,
+        // Clone, Iterator have 0 and were never diverted.  So ask the
+        // registry that knows what was DECLARED: a name the metadata
+        // holds as a type or a protocol is not a module, whatever prefix
+        // its methods create.  Real submodules are unaffected — they are
+        // answered by `registry.get_by_path` above, before probing.
+        let names_a_type = |n: &str| -> bool {
+            let t = Text::from(n);
+            md.types.get(&t).is_some() || md.protocols.get(&t).is_some()
+        };
         for sp in spellings {
+            if names_a_type(sp) || sp.strip_prefix("core.").is_some_and(names_a_type) {
+                continue;
+            }
             if probe(sp) || sp.strip_prefix("core.").is_some_and(&probe) {
+                if std::env::var("VERUM_TRACE_MOUNTMISS").is_ok() {
+                    // Named for the DECISION, not the line: this is the
+                    // authority that says "treat `<n>` as a module".
+                    eprintln!("[mountmiss] module-target {:?} -> {:?} via=metadata-prefix", candidate, sp);
+                }
                 return Some(Text::from(sp));
             }
         }
