@@ -1,0 +1,38 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: derive, meta, protocols
+// @timeout: 30000
+// @expected-exit: 0
+// @expected-stdout: 0 0 false
+// @description: `@derive(Default)` makes `T.default()` exist, and each
+//   field takes its own type's default.
+
+// Of the fourteen derives the attribute registry documents, exactly ONE
+// had a generator (`Ord`).  The other thirteen were accepted and then
+// reported
+//
+//     warning<W0507>: `@derive(Default)` on `Defs` was not applied
+//                     — no generator for this protocol yet
+//
+// Twelve of those thirteen went unnoticed because a record gets the
+// behaviour structurally whether or not a derive ran: `.clone()`
+// clones, `==` compares, the type serves as a `Map` key.  `Default` is
+// the one the fallback does not cover — `T.default()` simply did not
+// exist, `error<E400>: no method named `default``.
+//
+// The generated body is a record literal asking each FIELD TYPE for its
+// own default, so recursion is the protocol's job rather than the
+// generator's.  Its sibling spec
+// `derive_default_names_the_field_type.vr` pins the consequence.
+//
+// T1072.
+
+@derive(Default)
+type Conf is { retries: Int, ratio: Float, on: Bool };
+
+public fn main() -> Int {
+    let c = Conf.default();
+    print(f"{c.retries} {c.ratio} {c.on}");
+    0
+}

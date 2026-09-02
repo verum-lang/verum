@@ -85,6 +85,37 @@ fn derived_impl_source(td: &TypeDecl, protocol: &str) -> Result<String, &'static
                  {chain}\n    }}\n}}\n"
             ))
         }
+        "Default" => {
+            // `Default.default() -> Self` (core/base/protocols.vr:293)
+            // is STATIC — no receiver — so the generated body is a
+            // record literal whose every field asks its own type for
+            // its default.  Recursion is the protocol's job, not this
+            // generator's: `Defs { x: Int.default(), … }` works
+            // whenever `Int` implements `Default`, and fails with the
+            // ordinary "no method named `default`" when it does not,
+            // which names the offending FIELD TYPE rather than the
+            // derive.
+            //
+            // T1072: without this, `@derive(Default)` was accepted and
+            // then reported W0507, and `T.default()` did not exist —
+            // the one case of the fourteen documented derives where
+            // the structural fallback covers nothing (`.clone()`,
+            // `==`, `Map` keys all work with no derive at all).
+            let inits: Vec<String> = fields
+                .iter()
+                .map(|f| {
+                    let fname = f.name.name.as_str();
+                    let fty = verum_ast::pretty::format_type(&f.ty);
+                    format!("{fname}: {}.default()", fty.as_str())
+                })
+                .collect();
+            Ok(format!(
+                "implement Default for {name} {{\n    \
+                 fn default() -> {name} {{\n        \
+                 {name} {{ {} }}\n    }}\n}}\n",
+                inits.join(", ")
+            ))
+        }
         _ => Err("no generator for this protocol yet"),
     }
 }

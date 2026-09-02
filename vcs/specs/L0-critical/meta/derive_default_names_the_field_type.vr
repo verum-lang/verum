@@ -1,0 +1,30 @@
+// @test: check
+// @level: L0
+// @tier: 0
+// @tags: derive, meta, diagnostics
+// @timeout: 20000
+// @expected-exit: 101
+// @expected-stderr: no method named `default` found for type `NoDef`
+// @description: A derived `Default` whose field type has none blames the
+//   FIELD TYPE, not the derive.
+
+// The negative half of T1072, and it pins WHICH name the message
+// carries.  The generator emits `Holder { inner: NoDef.default() }`, so
+// the failure is an ordinary missing-method error against `NoDef` —
+// the type the author has to fix — rather than a complaint about the
+// attribute, which they cannot act on.
+//
+// A generator that instead refused to emit for such a type would put
+// the reader back where W0507 left them: told that nothing happened,
+// not told why.
+
+type NoDef is { v: Int };
+
+@derive(Default)
+type Holder is { inner: NoDef };
+
+public fn main() -> Int {
+    let h = Holder.default();
+    let _ = h;
+    0
+}
