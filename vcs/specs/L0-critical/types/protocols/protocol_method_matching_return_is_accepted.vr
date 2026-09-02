@@ -1,0 +1,30 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: protocols, signatures
+// @timeout: 30000
+// @expected-exit: 0
+// @expected-stdout: shown
+// @description: An implementation that matches the protocol's signature
+//   is accepted, and the blanket built on it produces the right text.
+
+// The positive half of T1078. A rule that refuses everything satisfies
+// the violation spec alone; this file is what makes that impossible.
+//
+// It also pins the CONSEQUENCE rather than only the diagnostic: `fmt`
+// writes through the formatter, so `to_string()` — the stdlib blanket
+// `implement<T: Display> ToString for T` — returns what was written.
+
+type Shown is { v: Int };
+
+implement Display for Shown {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("shown")
+    }
+}
+
+public fn main() -> Int {
+    let s = Shown { v: 1 };
+    print(s.to_string());
+    0
+}

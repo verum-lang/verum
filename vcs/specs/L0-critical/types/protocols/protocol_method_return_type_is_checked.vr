@@ -1,0 +1,53 @@
+// @test: check
+// @level: L0
+// @tier: 0
+// @tags: protocols, signatures, diagnostics
+// @timeout: 20000
+// @expected-exit: 101
+// @expected-stderr: does not match the signature
+// @description: An implementation whose return type contradicts the
+//   protocol's is refused — including when the protocol comes from the
+//   standard library.
+
+// `core/base/protocols.vr:315` declares
+//
+//     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError>;
+//
+// and this compiled with ZERO diagnostics:
+//
+//     implement Display for Shown {
+//         public fn fmt(&self, f: &mut Formatter) -> Text { "shown" }
+//     }
+//
+// The cost is silence, not a crash: `to_string()` is a blanket that
+// writes THROUGH the formatter, so an impl that returns a `Text` and
+// never touches `f` leaves the buffer empty and prints nothing at
+// exit 0.
+//
+// The check existed and declined: `unambiguous_signature_disagreement`
+// only compared DECIDABLE SCALARS, and `Text` vs
+// `Result<(), FormatError>` is not a scalar pair. Widening it to admit
+// scalar-vs-NAMED is what this pins — deliberately not named-vs-named,
+// where an alias pair or a re-export makes the comparison an artefact
+// (T1029 measured 267 such messages, every class examined benign).
+//
+// `Self` is excluded for the same reason in reverse: `fn clone(&self)
+// -> Self` implemented for `Int` returns `Int`, which is CORRECT.
+// Without that exclusion the rule reported 10 such pairs in
+// core/base/primitives.vr alone, all of them right.
+//
+// T1078.
+
+type Shown is { v: Int };
+
+implement Display for Shown {
+    public fn fmt(&self, f: &mut Formatter) -> Text {
+        "shown"
+    }
+}
+
+public fn main() -> Int {
+    let s = Shown { v: 1 };
+    let _ = s;
+    0
+}

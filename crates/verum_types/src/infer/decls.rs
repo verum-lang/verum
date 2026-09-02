@@ -8239,6 +8239,78 @@ impl TypeChecker {
             });
         }
 
+        // T1078: the SIGNATURE check runs BEFORE the early return
+        // below, for the same reason the bound check does (T1074).
+        // That return exists for METHOD COMPLETENESS and its
+        // precondition — `protocols_with_known_defaults` holds only
+        // protocols whose SOURCE was seen — is narrower than this
+        // check's: comparing two signatures needs the protocol's
+        // declaration, which the archive carries perfectly well.
+        //
+        // Measured: `implement Display for Shown` with
+        // `fn fmt(&self, f: &mut Formatter) -> Text` (the protocol
+        // declares `-> Result<(), FormatError>`) compiled with ZERO
+        // diagnostics, and `to_string()` then printed an empty string,
+        // because the blanket writes through the formatter the impl
+        // never touches.  The identical mistake against a LOCALLY
+        // declared protocol was reported as E427 all along — the
+        // difference was only where the protocol came from.
+        // T1029: and the part that JUDGES rather than prints. The probe
+        // this closes is `fn greet(&self, times: Int) -> Int` implemented
+        // as `fn greet(&self, name: Text) -> Bool` — a caller behind the
+        // bound passes an Int, gets a Bool back where an Int was promised,
+        // and nothing complained. Only unambiguous scalar disagreements
+        // are reported; see `unambiguous_signature_disagreement` for why
+        // the lenient comparison beside it must not be turned on as a
+        // diagnostic.
+        let mismatches: Vec<(Text, String, verum_ast::span::Span)> = {
+            let guard = self.protocol_checker.read();
+            if std::env::var("VERUM_TRACE_PROTO_SIG").is_ok() {
+                // UNCONDITIONAL, before the match: "protocol not in the
+                // registry" and "signatures agree" are indistinguishable
+                // by silence, and they need different repairs.
+                eprintln!(
+                    "[proto-sig] impl of `{}`: in_registry={} items={}",
+                    proto_ident,
+                    guard.get_protocol(&proto_ident).is_some(),
+                    impl_decl.items.len()
+                );
+            }
+            match guard.get_protocol(&proto_ident) {
+                verum_common::Maybe::Some(protocol) => impl_decl
+                    .items
+                    .iter()
+                    .filter_map(|item| {
+                        let verum_ast::decl::ImplItemKind::Function(func) = &item.kind else {
+                            return None;
+                        };
+                        let proto_method = match protocol.methods.get(&func.name.name) {
+                            verum_common::Maybe::Some(m) => m,
+                            verum_common::Maybe::None => return None,
+                        };
+                        let impl_ty = crate::method_resolution::function_decl_to_type(func);
+                        Self::unambiguous_signature_disagreement(&proto_method.ty, &impl_ty)
+                            .map(|why| (func.name.name.clone(), why, func.span))
+                    })
+                    .collect(),
+                verum_common::Maybe::None => Vec::new(),
+            }
+        };
+        for (method, why, span) in mismatches {
+            self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
+                code: Text::from("E427"),
+                msg: Text::from(format!(
+                    "`{}` does not match the signature `{}` declares: {}\n  \
+                     note: a caller behind the bound `{}` uses the PROTOCOL's \
+                     signature, so the mismatch is invisible at the call site \
+                     and wrong at run time",
+                    method, proto_ident, why, proto_ident
+                )),
+                span,
+            });
+        }
+
+
         let Some((required_set, declared)) =
             self.protocols_with_known_defaults.get(&proto_ident).cloned()
         else {
@@ -8296,50 +8368,6 @@ impl TypeChecker {
         // the implementation's declaration into the same shape.
         if std::env::var("VERUM_TRACE_PROTO_SIG").is_ok() {
             self.report_protocol_signature_drift(impl_decl, &proto_ident);
-        }
-
-        // T1029: and the part that JUDGES rather than prints. The probe
-        // this closes is `fn greet(&self, times: Int) -> Int` implemented
-        // as `fn greet(&self, name: Text) -> Bool` — a caller behind the
-        // bound passes an Int, gets a Bool back where an Int was promised,
-        // and nothing complained. Only unambiguous scalar disagreements
-        // are reported; see `unambiguous_signature_disagreement` for why
-        // the lenient comparison beside it must not be turned on as a
-        // diagnostic.
-        let mismatches: Vec<(Text, String, verum_ast::span::Span)> = {
-            let guard = self.protocol_checker.read();
-            match guard.get_protocol(&proto_ident) {
-                verum_common::Maybe::Some(protocol) => impl_decl
-                    .items
-                    .iter()
-                    .filter_map(|item| {
-                        let verum_ast::decl::ImplItemKind::Function(func) = &item.kind else {
-                            return None;
-                        };
-                        let proto_method = match protocol.methods.get(&func.name.name) {
-                            verum_common::Maybe::Some(m) => m,
-                            verum_common::Maybe::None => return None,
-                        };
-                        let impl_ty = crate::method_resolution::function_decl_to_type(func);
-                        Self::unambiguous_signature_disagreement(&proto_method.ty, &impl_ty)
-                            .map(|why| (func.name.name.clone(), why, func.span))
-                    })
-                    .collect(),
-                verum_common::Maybe::None => Vec::new(),
-            }
-        };
-        for (method, why, span) in mismatches {
-            self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
-                code: Text::from("E427"),
-                msg: Text::from(format!(
-                    "`{}` does not match the signature `{}` declares: {}\n  \
-                     note: a caller behind the bound `{}` uses the PROTOCOL's \
-                     signature, so the mismatch is invisible at the call site \
-                     and wrong at run time",
-                    method, proto_ident, why, proto_ident
-                )),
-                span,
-            });
         }
 
 
@@ -8610,6 +8638,35 @@ impl TypeChecker {
         )
     }
 
+    /// One side a built-in scalar, the other a NAMED type (T1078).
+    ///
+    /// Deliberately excludes named-vs-named (alias pairs, re-exports,
+    /// two spellings of one type — T1029 measured 267 such messages and
+    /// every class examined was an artefact), generics, references and
+    /// `Unknown`, which is the ABSENCE of an answer rather than one.
+    fn scalar_vs_named_disagreement(a: &Type, b: &Type) -> bool {
+        // `Self` is the one named type that MUST differ from the
+        // implementation's: `fn clone(&self) -> Self` implemented for
+        // `Int` returns `Int`, and that is the correct implementation,
+        // not a disagreement. Measured: without this exclusion the rule
+        // reported 10 such pairs in core/base/primitives.vr alone —
+        // `clone` returning Bool/Char/Float/Int/Unit and `from`
+        // returning Float — every one of them a correct impl.
+        let named_concrete = |t: &Type| match t {
+            Type::Named { path, .. } => {
+                match path.segments.last() {
+                    Some(verum_ast::ty::PathSegment::Name(ident)) => {
+                        ident.name.as_str() != "Self"
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        };
+        (Self::is_decidable_scalar(a) && named_concrete(b))
+            || (named_concrete(a) && Self::is_decidable_scalar(b))
+    }
+
     /// A disagreement between a protocol method and its implementation
     /// that admits NO benign reading.
     ///
@@ -8656,6 +8713,27 @@ impl TypeChecker {
                     a.to_text()
                 ));
             }
+        }
+        // T1078: a scalar on ONE side and a NAMED type on the other is
+        // just as undeniable as two different scalars, and it is the
+        // case that costs a user silence: `implement Display for Shown`
+        // with `fn fmt(&self, f: &mut Formatter) -> Text` — the
+        // protocol declares `-> Result<(), FormatError>` — compiled
+        // with zero diagnostics, and `to_string()` then printed an
+        // empty string because the blanket writes through a formatter
+        // the impl never touches.
+        //
+        // Only NAMED vs SCALAR is admitted, not named vs named: two
+        // named types can be an alias pair, a re-export, or the same
+        // type spelled differently, and T1029's sweep found every such
+        // class to be a comparison artefact. A scalar is never an alias
+        // for a named type, so this pair admits no benign reading.
+        if Self::scalar_vs_named_disagreement(pr, ir) {
+            return Some(format!(
+                "returns `{}`, but the protocol declares `{}`",
+                ir.to_text(),
+                pr.to_text()
+            ));
         }
         if Self::is_decidable_scalar(pr) && Self::is_decidable_scalar(ir) && pr != ir {
             return Some(format!(
