@@ -3455,8 +3455,16 @@ impl TypeChecker {
                         let ret = if let crate::ty::Type::Function { return_type, .. } = &fn_ty {
                             format!("{}", return_type.to_text())
                         } else { String::new() };
+                        // `type=` is here because its absence stalled a
+                        // diagnosis: comparing traces of two runs that
+                        // disagreed showed a `hash` registration moving
+                        // relative to a neighbour's `fmt`/`fmt_debug`,
+                        // which says the order of TYPES varies — but not
+                        // WHICH types, because the line named only the
+                        // method (T1065).
                         eprintln!(
-                            "[implvc-set] site=core.rs:metadata method={} impl_count={} k={} ret={} p0={}",
+                            "[implvc-set] site=core.rs:metadata type={} method={} impl_count={} k={} ret={} p0={}",
+                            type_name.as_str(),
                             method_name.as_str(),
                             impl_count,
                             impl_k,
