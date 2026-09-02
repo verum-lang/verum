@@ -1223,6 +1223,29 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     if is_tracked {
                         tracing::debug!("[LOWER] {} FAILED: {:?}", func_name, e);
                     }
+                    // UNDER STRICT CODEGEN A DROPPED FUNCTION IS AN ERROR
+                    // (T0693). This arm is the widest lenient default in the
+                    // backend: EVERY lowering failure becomes a skip, so the
+                    // binary ships without the function and the interpreter —
+                    // which needs no lowering — still runs it. That is one
+                    // program with two answers, announced by a WARN nothing
+                    // reads.
+                    //
+                    // `Channel.new` was dropped from every binary this way
+                    // for an intrinsic-arity defect, and the strict
+                    // unimplemented-sub-op error added a layer down was
+                    // itself swallowed here: the error was raised, the skip
+                    // caught it, and `verum build` still exited 0.
+                    //
+                    // Default behaviour is unchanged; `--strict-codegen`
+                    // (manifest `build.strict_codegen`, or
+                    // VERUM_STRICT_CODEGEN=1) now means what its name says.
+                    if std::env::var("VERUM_STRICT_CODEGEN").as_deref() == Ok("1") {
+                        return Err(super::error::LlvmLoweringError::internal(format!(
+                            "function `{}` failed to lower and would have been                              dropped from the binary: {:?}. The interpreter runs                              it, so shipping without it makes the two tiers                              disagree.",
+                            func_name, e
+                        )));
+                    }
                     tracing::warn!("Skipping function '{}': {:?}", func_name, e);
 
                     // **Extern-function preservation gate** (#15 Failure 2
@@ -4730,6 +4753,44 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             tracing::warn!("{}", diag.display());
         }
         self.stats.warnings += diagnostics.len();
+
+        // THE PINNED RULE, MADE ASKABLE (T0693). `instruction.rs` states:
+        //
+        //     **Architectural rule pinned**: every VBC opcode reachable
+        //     from stdlib codegen MUST have a matching AOT lowering arm;
+        //     the `emit_unimplemented_sub_op` fallback is a diagnostic of
+        //     choice, not a silent stub.
+        //
+        // It was pinned by the word "pinned" and by nothing else: no test
+        // in the tree mentioned `emit_unimplemented_sub_op`, there are 34
+        // fallback sites, and the rule is violated on every build that
+        // lowers `core.math.tensor.slice` — TensorExtended 0x19
+        // (`SliceFromArgs`) has no arm, so the function becomes a bodyless
+        // stub and the two tiers answer differently.
+        //
+        // Under the EXISTING strictness lever (`--strict-codegen`, the
+        // manifest's `build.strict_codegen`, or VERUM_STRICT_CODEGEN=1) an
+        // unimplemented sub-op is now an error naming the opcode and the
+        // function. Default behaviour is unchanged — this is the rule
+        // becoming answerable, not a new default.
+        //
+        // A new lever was deliberately NOT invented: the census for this
+        // task found nine strictness levers already, six of them enabled
+        // by nothing at all. Another one would have been a tenth.
+        if std::env::var("VERUM_STRICT_CODEGEN").as_deref() == Ok("1") {
+            let unimplemented: Vec<&super::error::LoweringDiagnostic> = diagnostics
+                .iter()
+                .filter(|d| d.sub_opcode.is_some())
+                .collect();
+            if let Some(first) = unimplemented.first() {
+                return Err(super::error::LlvmLoweringError::internal(format!(
+                    "{} unimplemented sub-opcode(s) reached AOT lowering;                      first: {} in `{}`. Every VBC opcode reachable from                      stdlib codegen must have a lowering arm — without one                      the function becomes a bodyless stub and the                      interpreter and the compiled binary answer differently.",
+                    unimplemented.len(),
+                    first.message,
+                    first.function_name
+                )));
+            }
+        }
 
         // T0241 facet-2: fold this function's NewClosure capture records into
         // the cross-function map so each closure body prologue can re-mark its
