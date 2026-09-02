@@ -10790,6 +10790,22 @@ impl TypeChecker {
                             // the method through the bound.
                             self.register_type_var_bounds(tvar, protocol_bounds.clone());
 
+                            // HKT-BOUND-REACHES-THE-SCHEME (T1075).  The `Type`
+                            // arm of this same loop does THREE things with a
+                            // bound; this arm did two.  The missing one is the
+                            // insert below, and it is the load-bearing one: it
+                            // is `func_param_protocol_bounds` that becomes
+                            // `scheme.with_protocol_bounds(...)`, and the scheme
+                            // is what a CALL SITE checks its argument against
+                            // (infer/expr.rs, `pending_protocol_bounds`).
+                            // Without it `fn f<F<_>: Mappable, A>(x: F<A>)`
+                            // accepted a type with no `implement Mappable`
+                            // at all, while the identical bound written as
+                            // `where type F: Mappable` was refused — because
+                            // `collect_where_clause_bounds` inserts here
+                            // regardless of the parameter's kind.
+                            func_param_protocol_bounds.insert(tvar, protocol_bounds.clone());
+
                             let type_param = crate::context::TypeParam::new(name_text, name.span)
                                 .with_bounds(protocol_bounds);
                             self.ctx.env.add_type_param(type_param);

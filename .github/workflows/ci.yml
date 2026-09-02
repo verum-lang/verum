@@ -754,6 +754,20 @@ jobs:
           scripts/ci/check_group_mount_item_is_not_a_module.sh --selftest ./target/release/verum
           scripts/ci/check_group_mount_item_is_not_a_module.sh ./target/release/verum
 
+      # A protocol bound on a higher-kinded parameter constrains the call
+      # exactly as a bound on an ordinary one. `<F<_>: Mappable>` accepted
+      # a type implementing nothing, while the SAME bound spelled
+      # `where type F: Mappable` refused everything including the valid
+      # argument (T1075) — two spellings, two code paths, neither right.
+      # The gate asserts the property rather than the case: the violation
+      # is refused, the satisfying type is ADMITTED, and both spellings
+      # agree. Without the admit arm a repair that refuses everything
+      # passes; that is exactly what the first attempt at this fix did.
+      - name: An HKT parameter's bound is checked
+        run: |
+          scripts/ci/check_hkt_bound_is_checked.sh --selftest ./target/release/verum
+          scripts/ci/check_hkt_bound_is_checked.sh ./target/release/verum
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:

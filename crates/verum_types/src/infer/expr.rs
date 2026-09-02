@@ -8177,6 +8177,59 @@ impl TypeChecker {
                             _ => break,
                         }
                     }
+                    // HKT-BOUND-ASKS-THE-CONSTRUCTOR (T1075).  A bound on
+                    // `F<_>` resolves to a TYPE CONSTRUCTOR (`Bad`, arity 1),
+                    // not to an inhabited type.  `check_bounds` keys impls by
+                    // the WHOLE type, and a constructor's key is `tycon:Bad`,
+                    // which never equals the key of
+                    // `implement<T> Mappable for Good<T>` — so it answered
+                    // "does not implement" for EVERY constructor, the
+                    // satisfying ones included.  Measured: once the bound was
+                    // merely recorded, BOTH the valid and the violating call
+                    // were refused, which is not a bound check.
+                    //
+                    // A `F<_>` bound can only ever be about the constructor's
+                    // NAME, and `type_constructor_implements_protocol` is the
+                    // authority that compares by name across `TypeConstructor`,
+                    // `Named` and `Generic` impl heads.  Load first, then ask:
+                    // a constructor reaching a bound has usually never been a
+                    // method receiver, so its impls are not registered yet
+                    // (the receiver-oriented lazy load, T0701).
+                    if let Type::TypeConstructor { name, .. } = unresolved_core {
+                        self.ensure_stdlib_type_loaded_transitive(name);
+                        for b in bounds.iter() {
+                            let Some(proto_ident) = b.protocol.as_ident() else {
+                                continue;
+                            };
+                            let proto: Text = proto_ident.as_str().into();
+                            self.ensure_stdlib_type_loaded_transitive(&proto);
+                            let holds = self
+                                .protocol_checker
+                                .read()
+                                .type_constructor_implements_protocol(name, &proto);
+                            if holds != b.is_negative {
+                                continue;
+                            }
+                            let msg = if b.is_negative {
+                                format!(
+                                    "type constructor `{}` must NOT implement `{}` here, but it does",
+                                    name, proto
+                                )
+                            } else {
+                                format!(
+                                    "type constructor `{}` does not implement `{}`, required by \
+                                     this call's bound",
+                                    name, proto
+                                )
+                            };
+                            self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
+                                code: Text::from("E405"),
+                                msg: Text::from(msg),
+                                span: expr.span,
+                            });
+                        }
+                        continue;
+                    }
                     if !matches!(unresolved_core, Type::Var(_)) {
                         // LAZY-LOAD FIRST, THEN JUDGE. The verdict used to be
                         // thrown away into `tracing::debug!` with the note
