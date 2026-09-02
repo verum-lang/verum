@@ -46,6 +46,7 @@ mount core.intrinsics.arithmetic.{ilog2};
 // bare variant `Equal` (e.g. the `cmp` chain), so the variants must
 // come in alongside the type.
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.intrinsics.memory.{ptr_read, ptr_write, slice_from_raw_parts};
 
 // =============================================================================
 // List<T>

@@ -29,6 +29,7 @@
 )
 module core.collections.heap;
 mount super.list.*;
+mount core.intrinsics.memory.{ptr_read, ptr_write};
 
 // =============================================================================
 // BinaryHeap<T>

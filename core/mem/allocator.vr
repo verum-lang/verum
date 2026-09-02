@@ -93,6 +93,7 @@ mount sys.windows.kernel32.{VirtualAlloc, VirtualFree};
 mount sys.windows.ntdll.{MEM_COMMIT, MEM_RESERVE, MEM_RELEASE, MEM_LARGE_PAGES, PAGE_READWRITE, PAGE_NOACCESS};
 
 mount sys.common.OSError;
+mount core.intrinsics.runtime.mem_raw.{memcpy_addr, memset_addr};
 
 // =============================================================================
 // Constants

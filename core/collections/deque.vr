@@ -45,6 +45,8 @@ mount core.base.ordering.{Ordering};
 // Allocator primitives for typed-OOM (#65, #68). See list.vr for
 // rationale on the explicit mount.
 mount core.base.memory.{try_alloc, try_realloc};
+mount core.intrinsics.memory.{ptr_read, ptr_write, slice_from_raw_parts};
+mount core.intrinsics.runtime.mem_raw.{memmove_addr};
 
 // =============================================================================
 // Deque<T>
