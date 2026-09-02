@@ -298,6 +298,14 @@ fn write_core_metadata_alongside_archive(
         // correctly refused.
         scan_protocol_associated_type_bounds(&mut metadata, root, verbose);
 
+        // T1071 — carry the blanket impls to the USER side.  The bake
+        // harvests them module-by-module into a Vec that dies with the
+        // bootstrap (`import_blanket_impls` has exactly one caller,
+        // stdlib_bootstrap.rs:2243), so a user compile began with an
+        // empty registry and no user type ever received a stdlib
+        // blanket.  Same source-walk remedy as its two neighbours.
+        scan_blanket_impls(&mut metadata, root, verbose);
+
         // Fully-qualified free-fn keys at FILE-module granularity
         // (2026-07-09).  `metadata.functions` keys free functions by
         // bare name (first-wins) plus a `<archive_module>.<name>`
@@ -1491,6 +1499,156 @@ fn scan_module_reexports(
 /// for the same reason: the fact exists only in source, so the
 /// source-walk is where it is recovered.  Keyed by protocol simple
 /// name, first-wins, matching that sibling's collision policy.
+/// T1071 — recover `core/`'s blanket impls for the user compile.
+///
+/// A blanket is `implement<T: Base> Derived for T` — the target IS the
+/// generic parameter.  `core/` declares eight: `PartialOrd for <T: Ord>`,
+/// `ToString for <T: Display>`, `IntoIterator for <I: Iterator>`,
+/// `IntoFuture` / `FutureExt` for `<F: Future>`, `IntoStream` /
+/// `StreamExt` for `<S: Stream>`, `IntoAsyncIterator for
+/// <A: AsyncIterator>`.  Every one of them was unreachable from user
+/// code; measured, `MyKey` with a hand-written `implement Ord`
+/// panicked on `.partial_cmp`, and `Shown` with `implement Display`
+/// panicked on `.to_string()`.
+///
+/// The criterion here MIRRORS `VbcCodegen::collect_blanket_impls`:
+/// target equals the parameter name, and the parameter carries a
+/// protocol bound.  Keeping the two definitions of "blanket" in step
+/// matters more than covering exotic shapes — a wider scan here would
+/// hand the codegen impls it does not recognise.
+fn scan_blanket_impls(
+    metadata: &mut verum_types::core_metadata::CoreMetadata,
+    root: &Path,
+    verbose: bool,
+) {
+    use std::collections::BTreeSet;
+    use verum_ast::ItemKind;
+    use verum_ast::decl::ImplKind;
+    use verum_common::Text;
+
+    let mut found: BTreeSet<(String, String, String)> = BTreeSet::new();
+    let mut files_parsed = 0usize;
+
+    fn protocol_simple(path: &verum_ast::ty::Path) -> Option<String> {
+        use verum_ast::ty::PathSegment;
+        path.segments.last().and_then(|s| match s {
+            PathSegment::Name(i) => Some(i.name.as_str().to_string()),
+            _ => None,
+        })
+    }
+
+    /// The impl target, when it is a BARE name (`for T`), which is what
+    /// makes an impl a blanket rather than a concrete one.
+    fn target_bare_name(ty: &verum_ast::ty::Type) -> Option<String> {
+        use verum_ast::ty::{PathSegment, TypeKind};
+        match &ty.kind {
+            TypeKind::Path(p) if p.segments.len() == 1 => match p.segments.first()? {
+                PathSegment::Name(i) => Some(i.name.as_str().to_string()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn visit_dir(
+        dir: &Path,
+        root: &Path,
+        found: &mut BTreeSet<(String, String, String)>,
+        files_parsed: &mut usize,
+    ) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_name().and_then(|n| n.to_str()) == Some("target") {
+                continue;
+            }
+            if path.is_dir() {
+                visit_dir(&path, root, found, files_parsed);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("vr") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            if !content.contains("implement<") && !content.contains("implement <") {
+                continue;
+            }
+            let mut parser = verum_fast_parser::Parser::new(&content);
+            let Ok(module) = parser.parse_module() else {
+                continue;
+            };
+            *files_parsed += 1;
+
+            for item in module.items.iter() {
+                let ItemKind::Impl(impl_decl) = &item.kind else {
+                    continue;
+                };
+                let ImplKind::Protocol {
+                    protocol, for_type, ..
+                } = &impl_decl.kind
+                else {
+                    continue;
+                };
+                let (Some(derived), Some(target)) =
+                    (protocol_simple(protocol), target_bare_name(for_type))
+                else {
+                    continue;
+                };
+                for g in impl_decl.generics.iter() {
+                    let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } = &g.kind else {
+                        continue;
+                    };
+                    // The target must BE this parameter — otherwise it is
+                    // an ordinary generic impl on a named type.
+                    if name.name.as_str() != target.as_str() {
+                        continue;
+                    }
+                    for b in bounds.iter() {
+                        let verum_ast::ty::TypeBoundKind::Protocol(bp) = &b.kind else {
+                            continue;
+                        };
+                        if let Some(base) = protocol_simple(bp) {
+                            // Path RELATIVE to the workspace root — the
+                            // user side looks it up in the embedded
+                            // stdlib archive, which is keyed that way.
+                            let rel = path
+                                .strip_prefix(root)
+                                .unwrap_or(&path)
+                                .to_string_lossy()
+                                .to_string();
+                            found.insert((base, derived.clone(), rel));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    visit_dir(root, root, &mut found, &mut files_parsed);
+
+    let mut list: verum_common::List<(Text, Text, Text)> = verum_common::List::new();
+    for (base, derived, file) in found.iter() {
+        list.push((
+            Text::from(base.as_str()),
+            Text::from(derived.as_str()),
+            Text::from(file.as_str()),
+        ));
+    }
+    let n = list.len();
+    metadata.blanket_impls = list;
+
+    if verbose || std::env::var("VERUM_TRACE_BLANKETS").is_ok() {
+        eprintln!(
+            "[precompile] blanket impls: {} file(s) parsed, {} (base, derived) pair(s) captured",
+            files_parsed, n
+        );
+    }
+}
+
 fn scan_protocol_associated_type_bounds(
     metadata: &mut verum_types::core_metadata::CoreMetadata,
     root: &Path,

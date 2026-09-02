@@ -93,6 +93,10 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
         // typechecker's re-export resolver degrades to a no-op when
         // the entry is absent, falling back to AST walks).
         module_reexports: OrderedMap::new(),
+        // T1071: filled by `precompile.rs::scan_blanket_impls`, which
+        // recovers the blankets from source — the archive itself carries
+        // no blanket descriptor to convert here.
+        blanket_impls: List::new(),
     };
 
     // METADATA-DETERMINISM-1 (the live #17-ph2 root): the archive index

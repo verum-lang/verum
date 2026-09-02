@@ -1678,7 +1678,14 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// invalidate independently of source.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
 const PRECOMPILE_SCHEMA_VERSION: &str =
-    "v44-2026-08-18-symbol_graph_sidecar";
+    // v45: the sidecar gained `blanket_impls` and `associated_types`
+    // bounds, both written by source walks in `precompile.rs`. The
+    // curated file list mixed into the key does NOT include
+    // precompile.rs, so editing a scanner there is invisible to the
+    // cache — measured: the scan was added, the build reported
+    // "precompile cache HIT", and the new field stayed empty while the
+    // reader had nothing to read. Bumping here is what invalidates it.
+    "v45-2026-09-02-blanket_impls_and_assoc_bounds";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].

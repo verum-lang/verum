@@ -227,6 +227,7 @@ impl<'s> CompilationPipeline<'s> {
         };
 
         let mut codegen = VbcCodegen::with_config(config);
+        seed_stdlib_blanket_impls(&mut codegen);
 
         // #122 — bridge stdlib-prep registry into the user-side codegen.
         //
@@ -1195,4 +1196,91 @@ pub(crate) fn trace_module_fingerprint(vbc_module: &VbcModule, site: &str) {
         vbc_module.constants.len(),
         vbc_module.global_ctors.len(),
     );
+}
+
+
+/// T1071 — give a USER compile the stdlib's blanket impls.
+///
+/// `implement<T: Base> Derived for T` is replayed onto every concrete
+/// implementor of `Base` by `generate_default_protocol_methods`, which
+/// reads `VbcCodegen::blanket_impls`.  That vector was seeded only by
+/// `import_blanket_impls`, whose single caller in the whole workspace
+/// is `pipeline/stdlib_bootstrap.rs` — so the bake got the blankets and
+/// a user compile got none.  Measured: a user type with
+/// `implement Ord for MyKey` panicked at run time on `.partial_cmp`
+/// and `implement Display for Shown` on `.to_string()`, while
+/// `Int.partial_cmp` worked.  All EIGHT blankets `core/` declares were
+/// affected — the same shape as the `#122` bridge directly below,
+/// which exists because "the user-side codegen started with an empty
+/// registry".
+///
+/// The metadata pair alone will not do: a blanket's BODY is what gets
+/// monomorphised (`partial_cmp` exists solely inside
+/// `implement<T: Ord> PartialOrd for T`) and an AST cannot travel in
+/// the sidecar.  So the sidecar carries `(base, derived, file)` and the
+/// body is recovered here by reparsing that file out of the EMBEDDED
+/// stdlib source, through `collect_blanket_impls` — the one definition
+/// of what a blanket is, so the two sides cannot drift.
+///
+/// Failure is silent by design: without the blankets a user compile
+/// behaves exactly as before, which is the safe direction.
+fn seed_stdlib_blanket_impls(codegen: &mut VbcCodegen) {
+    // UNCONDITIONAL entry line.  Instrument silence has at least five
+    // causes — never called, wrong site of several, behind an early
+    // exit, not rebuilt, or skipped by a cache — and only a line
+    // printed before any narrowing collapses them to one.  This
+    // function was first installed in `phases/vbc_codegen.rs`, a file
+    // of the same name whose `VbcCodegenPhase` has no caller at all.
+    let trace = std::env::var("VERUM_TRACE_BLANKETS").is_ok();
+    if trace {
+        eprintln!("[blankets] seed: entered");
+    }
+    let Some(meta) = crate::embedded_stdlib_metadata::get_runtime_metadata() else {
+        if trace {
+            eprintln!("[blankets] seed: NO embedded metadata");
+        }
+        return;
+    };
+    if trace {
+        eprintln!(
+            "[blankets] seed: metadata carries {} entr(ies)",
+            meta.blanket_impls.len()
+        );
+    }
+    let Some(stdlib) = crate::embedded_stdlib::get_embedded_stdlib() else {
+        if trace {
+            eprintln!("[blankets] seed: NO embedded stdlib source");
+        }
+        return;
+    };
+
+    // One parse per DECLARING FILE, not per blanket: several live in one
+    // file and reparsing it once per entry costs the same result N times.
+    let mut files: std::collections::BTreeSet<String> = Default::default();
+    for (_, _, file) in meta.blanket_impls.iter() {
+        files.insert(file.as_str().to_string());
+    }
+
+    let before = codegen.blanket_impls().len();
+    let mut parsed = 0usize;
+    for file in files.iter() {
+        let Some(src) = stdlib.get_file(file) else {
+            continue;
+        };
+        let mut parser = verum_fast_parser::Parser::new(src);
+        let Ok(module) = parser.parse_module() else {
+            continue;
+        };
+        parsed += 1;
+        codegen.collect_blanket_impls(&module);
+    }
+
+    if trace {
+        eprintln!(
+            "[blankets] seed: {} file(s) reparsed, blanket_impls {} -> {}",
+            parsed,
+            before,
+            codegen.blanket_impls().len()
+        );
+    }
 }

@@ -147,6 +147,32 @@ pub struct CoreMetadata {
     #[serde(default)]
     pub module_reexports: OrderedMap<Text, List<(Text, Text, Text)>>,
 
+    /// Blanket protocol implementations declared in `core/`
+    /// (`implement<T: Base> Derived for T`), as
+    /// `(base_protocol, derived_protocol, declaring_file)`.
+    ///
+    /// The file path is load-bearing, not documentation: a blanket's
+    /// BODY METHODS are what actually get monomorphised onto each
+    /// implementor — `partial_cmp` exists SOLELY in the body of
+    /// `implement<T: Ord> PartialOrd for T` — and an AST cannot be
+    /// carried through this sidecar.  The user side re-reads the named
+    /// file out of the EMBEDDED stdlib source and reparses the block,
+    /// so the pair here is a pointer, not the payload.
+    ///
+    /// T1071: the bake harvests these into a `Vec<BlanketImpl>` that
+    /// lives only for the bootstrap — `import_blanket_impls` has one
+    /// caller in the whole workspace, in `stdlib_bootstrap.rs`.  A user
+    /// compile therefore started with an EMPTY blanket registry, so a
+    /// user type implementing `Ord` never received
+    /// `implement<T: Ord> PartialOrd for T`, and `MyKey.partial_cmp`
+    /// panicked at run time while `Int.partial_cmp` worked.  All EIGHT
+    /// blankets `core/` declares were affected, not one.
+    ///
+    /// `serde(default)` so an older sidecar without this field still
+    /// loads — it then behaves exactly as before the fix.
+    #[serde(default)]
+    pub blanket_impls: List<(Text, Text, Text)>,
+
 
 }
 

@@ -1,0 +1,49 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: protocols, blanket-impls, stdlib
+// @timeout: 30000
+// @expected-exit: 0
+// @expected-stdout: Some(<)
+// @description: A stdlib blanket impl applies to a USER type, and the
+//   stdlib type it always worked for keeps working.
+
+// `core/` declares `implement<T: Ord> PartialOrd for T`.  It reached
+// stdlib scalars and no user type:
+//
+//     Panic: method 'MyKey.partial_cmp' not found on receiver of
+//            runtime kind `MyKey` (Object)
+//
+// while `Int.partial_cmp` answered `Some(<)`.
+//
+// The blanket machinery was complete and wired; its INPUT was empty
+// outside the bake.  the codegen's blanket registry is seeded by
+// `import_blanket_impls`, whose only caller in the workspace is
+// `pipeline/stdlib_bootstrap.rs` — so a user compile started with none
+// of the EIGHT blankets `core/` declares.
+//
+// BOTH arms are here on purpose.  The stdlib arm is not decoration: a
+// repair that seeded the wrong impls, or that broke the receiver-driven
+// path, would still satisfy the user arm alone.  T1071.
+
+type MyKey is { v: Int };
+
+implement Ord for MyKey {
+    public fn cmp(&self, other: &MyKey) -> Ordering {
+        self.v.cmp(&other.v)
+    }
+}
+
+public fn main() -> Int {
+    // The SUBJECT: `partial_cmp` exists only in the blanket's body.
+    let a = MyKey { v: 1 };
+    let b = MyKey { v: 2 };
+    print(f"{a.partial_cmp(&b)}");
+
+    // The CONTROL: the same blanket on a stdlib type, which worked
+    // before the fix and must keep working after it.
+    let x: Int = 1;
+    let y: Int = 2;
+    print(f"{x.partial_cmp(&y)}");
+    0
+}
