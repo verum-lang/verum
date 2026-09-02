@@ -5743,11 +5743,11 @@ implement BitXorAssign<Int> for Int {
 }
 
 implement ShlAssign<Int> for Int {
-    public fn shl_assign(&mut self, rhs: Int) { *self = shl(*self, rhs); }
+    public fn shl_assign(&mut self, rhs: Int) { *self = shl(*self, rhs as UInt32); }
 }
 
 implement ShrAssign<Int> for Int {
-    public fn shr_assign(&mut self, rhs: Int) { *self = shr(*self, rhs); }
+    public fn shr_assign(&mut self, rhs: Int) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- Float ---
@@ -5917,11 +5917,11 @@ implement BitXorAssign<Int8> for Int8 {
 }
 
 implement ShlAssign<Int8> for Int8 {
-    public fn shl_assign(&mut self, rhs: Int8) { *self = shl(*self, rhs); }
+    public fn shl_assign(&mut self, rhs: Int8) { *self = shl(*self, rhs as UInt32); }
 }
 
 implement ShrAssign<Int8> for Int8 {
-    public fn shr_assign(&mut self, rhs: Int8) { *self = shr(*self, rhs); }
+    public fn shr_assign(&mut self, rhs: Int8) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- Int16 ---
@@ -5959,11 +5959,11 @@ implement BitXorAssign<Int16> for Int16 {
 }
 
 implement ShlAssign<Int16> for Int16 {
-    public fn shl_assign(&mut self, rhs: Int16) { *self = shl(*self, rhs); }
+    public fn shl_assign(&mut self, rhs: Int16) { *self = shl(*self, rhs as UInt32); }
 }
 
 implement ShrAssign<Int16> for Int16 {
-    public fn shr_assign(&mut self, rhs: Int16) { *self = shr(*self, rhs); }
+    public fn shr_assign(&mut self, rhs: Int16) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- Int32 (bitwise compound assignments) ---
@@ -5981,11 +5981,11 @@ implement BitXorAssign<Int32> for Int32 {
 }
 
 implement ShlAssign<Int32> for Int32 {
-    public fn shl_assign(&mut self, rhs: Int32) { *self = shl(*self, rhs); }
+    public fn shl_assign(&mut self, rhs: Int32) { *self = shl(*self, rhs as UInt32); }
 }
 
 implement ShrAssign<Int32> for Int32 {
-    public fn shr_assign(&mut self, rhs: Int32) { *self = shr(*self, rhs); }
+    public fn shr_assign(&mut self, rhs: Int32) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- Int64 (bitwise compound assignments) ---
@@ -6003,11 +6003,11 @@ implement BitXorAssign<Int64> for Int64 {
 }
 
 implement ShlAssign<Int64> for Int64 {
-    public fn shl_assign(&mut self, rhs: Int64) { *self = shl(*self, rhs); }
+    public fn shl_assign(&mut self, rhs: Int64) { *self = shl(*self, rhs as UInt32); }
 }
 
 implement ShrAssign<Int64> for Int64 {
-    public fn shr_assign(&mut self, rhs: Int64) { *self = shr(*self, rhs); }
+    public fn shr_assign(&mut self, rhs: Int64) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- Int128 ---
@@ -6045,11 +6045,11 @@ implement BitXorAssign<Int128> for Int128 {
 }
 
 implement ShlAssign<Int128> for Int128 {
-    public fn shl_assign(&mut self, rhs: Int128) { *self = shl(*self, rhs); }
+    public fn shl_assign(&mut self, rhs: Int128) { *self = shl(*self, rhs as UInt32); }
 }
 
 implement ShrAssign<Int128> for Int128 {
-    public fn shr_assign(&mut self, rhs: Int128) { *self = shr(*self, rhs); }
+    public fn shr_assign(&mut self, rhs: Int128) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- ISize ---
@@ -6087,11 +6087,11 @@ implement BitXorAssign<ISize> for ISize {
 }
 
 implement ShlAssign<ISize> for ISize {
-    public fn shl_assign(&mut self, rhs: ISize) { *self = shl(*self, rhs); }
+    public fn shl_assign(&mut self, rhs: ISize) { *self = shl(*self, rhs as UInt32); }
 }
 
 implement ShrAssign<ISize> for ISize {
-    public fn shr_assign(&mut self, rhs: ISize) { *self = shr(*self, rhs); }
+    public fn shr_assign(&mut self, rhs: ISize) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- UInt8 ---
@@ -6129,11 +6129,11 @@ implement BitXorAssign<UInt8> for UInt8 {
 }
 
 implement ShlAssign<UInt8> for UInt8 {
-    public fn shl_assign(&mut self, rhs: UInt8) { *self = shl(*self, rhs); }
+    public fn shl_assign(&mut self, rhs: UInt8) { *self = shl(*self, rhs as UInt32); }
 }
 
 implement ShrAssign<UInt8> for UInt8 {
-    public fn shr_assign(&mut self, rhs: UInt8) { *self = shr(*self, rhs); }
+    public fn shr_assign(&mut self, rhs: UInt8) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- UInt16 ---
@@ -6171,11 +6171,11 @@ implement BitXorAssign<UInt16> for UInt16 {
 }
 
 implement ShlAssign<UInt16> for UInt16 {
-    public fn shl_assign(&mut self, rhs: UInt16) { *self = shl(*self, rhs); }
+    public fn shl_assign(&mut self, rhs: UInt16) { *self = shl(*self, rhs as UInt32); }
 }
 
 implement ShrAssign<UInt16> for UInt16 {
-    public fn shr_assign(&mut self, rhs: UInt16) { *self = shr(*self, rhs); }
+    public fn shr_assign(&mut self, rhs: UInt16) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- UInt32 (bitwise compound assignments) ---
@@ -6193,11 +6193,11 @@ implement BitXorAssign<UInt32> for UInt32 {
 }
 
 implement ShlAssign<UInt32> for UInt32 {
-    public fn shl_assign(&mut self, rhs: UInt32) { *self = shl(*self, rhs); }
+    public fn shl_assign(&mut self, rhs: UInt32) { *self = shl(*self, rhs as UInt32); }
 }
 
 implement ShrAssign<UInt32> for UInt32 {
-    public fn shr_assign(&mut self, rhs: UInt32) { *self = shr(*self, rhs); }
+    public fn shr_assign(&mut self, rhs: UInt32) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- UInt64 (bitwise compound assignments) ---
@@ -6215,11 +6215,11 @@ implement BitXorAssign<UInt64> for UInt64 {
 }
 
 implement ShlAssign<UInt64> for UInt64 {
-    public fn shl_assign(&mut self, rhs: UInt64) { *self = shl(*self, rhs); }
+    public fn shl_assign(&mut self, rhs: UInt64) { *self = shl(*self, rhs as UInt32); }
 }
 
 implement ShrAssign<UInt64> for UInt64 {
-    public fn shr_assign(&mut self, rhs: UInt64) { *self = shr(*self, rhs); }
+    public fn shr_assign(&mut self, rhs: UInt64) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- UInt128 ---
@@ -6257,11 +6257,11 @@ implement BitXorAssign<UInt128> for UInt128 {
 }
 
 implement ShlAssign<UInt128> for UInt128 {
-    public fn shl_assign(&mut self, rhs: UInt128) { *self = shl(*self, rhs); }
+    public fn shl_assign(&mut self, rhs: UInt128) { *self = shl(*self, rhs as UInt32); }
 }
 
 implement ShrAssign<UInt128> for UInt128 {
-    public fn shr_assign(&mut self, rhs: UInt128) { *self = shr(*self, rhs); }
+    public fn shr_assign(&mut self, rhs: UInt128) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- USize ---
@@ -6299,11 +6299,11 @@ implement BitXorAssign<USize> for USize {
 }
 
 implement ShlAssign<USize> for USize {
-    public fn shl_assign(&mut self, rhs: USize) { *self = shl(*self, rhs); }
+    public fn shl_assign(&mut self, rhs: USize) { *self = shl(*self, rhs as UInt32); }
 }
 
 implement ShrAssign<USize> for USize {
-    public fn shr_assign(&mut self, rhs: USize) { *self = shr(*self, rhs); }
+    public fn shr_assign(&mut self, rhs: USize) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- Float64 ---
