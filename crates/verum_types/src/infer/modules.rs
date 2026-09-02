@@ -21442,6 +21442,94 @@ impl TypeChecker {
             .iter()
             .filter_map(|arg| self.infer_expr(arg, InferMode::Synth).ok().map(|r| r.ty))
             .collect();
+        // T1069 measurement, BEFORE any repair: how often is the
+        // receiver a variant whose signature has SEVERAL claimants, and
+        // when it is, does exactly one of them declare the method?
+        //
+        // "Which type owns this signature" has no well-defined answer
+        // for a shared signature — the protocol checker's own docs say
+        // so, and `variant_signature_admits` exists to ask the
+        // membership question instead.  It has three callers, all in
+        // one unification arm; method lookup still reads the first-wins
+        // winner.  Adding the method name makes the question
+        // well-defined again — but only if the branch is ever REACHED,
+        // and a previous attempt at this repair was inert because it
+        // consulted a registry that does not hold inherent methods.
+        //
+        // So: measure first.  `owners=` counts claimants that declare
+        // this method, in BOTH registries this side can see.
+        // `VERUM_TRACE_CLAIMANT=entry` also prints one line per CALL,
+        // before any narrowing.  It answers "did this site run at all",
+        // which the narrowed print below cannot: silence from a
+        // filtered print means either "the condition never held" or
+        // "the site is not on this path", and those lead to opposite
+        // decisions.  Measured 2026-09-02 over 150 `core/` files —
+        // 336 entries, 0 with any claimant — which is an ANSWER,
+        // whereas the first version's bare silence was not.
+        //
+        // Separate spelling because it fires on every method call in
+        // the program; the narrowed line does not.
+        if std::env::var("VERUM_TRACE_CLAIMANT").as_deref() == Ok("entry") {
+            eprintln!(
+                "[claimant-entry] method={} recv={}",
+                method.name.as_str(),
+                match &recv_ty {
+                    Type::Variant(v) => format!("Variant({} cases)", v.len()),
+                    other => other.to_text().to_string(),
+                }
+            );
+        }
+        if std::env::var("VERUM_TRACE_CLAIMANT").is_ok()
+            && let Type::Variant(variants) = &recv_ty
+        {
+            let pc = self.protocol_checker.read();
+            let sig = Self::variant_type_signature(&recv_ty);
+            let relaxed = Self::variant_type_signature_relaxed(&recv_ty);
+            let claimants = sig
+                .as_ref()
+                .and_then(|s| pc.variant_type_name_candidates_for(s))
+                .or_else(|| {
+                    relaxed
+                        .as_ref()
+                        .and_then(|s| pc.variant_type_name_candidates_for(s))
+                })
+                .unwrap_or_default();
+            // The single-claimant case is printed TOO, as a count.
+            // "No output" would otherwise mean either "multi-claimant
+            // receivers do not occur" or "this print never runs" —
+            // opposite conclusions from the same silence.
+            let inherent = self.inherent_methods.read();
+            // The two registries are reported SEPARATELY, not OR-ed.
+            // A previous attempt at this repair consulted only the
+            // protocol side and came back inert because inherent
+            // `implement T { … }` bodies are invisible there; with a
+            // disjunction, `owners=0` alongside `inherent=1` would read
+            // as a fact about the corpus instead of a defect in the
+            // probe (T1069).
+            let owners_proto: Vec<&str> = claimants
+                .iter()
+                .filter(|c| pc.protocol_side_has_method(c.as_str(), method.name.as_str()))
+                .map(|c| c.as_str())
+                .collect();
+            let owners_inherent: Vec<&str> = claimants
+                .iter()
+                .filter(|c| {
+                    inherent
+                        .get(*c)
+                        .is_some_and(|m| m.contains_key(&method_name))
+                })
+                .map(|c| c.as_str())
+                .collect();
+            eprintln!(
+                "[claimant] n={} method={} variants={} claimants={:?} proto={:?} inherent={:?}",
+                claimants.len(),
+                method.name.as_str(),
+                variants.len(),
+                claimants.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
+                owners_proto,
+                owners_inherent
+            );
+        }
         let lookup_result_opt = self.protocol_checker.read().lookup_method_with_args(
             &recv_ty_raw,
             method.name.as_str(),

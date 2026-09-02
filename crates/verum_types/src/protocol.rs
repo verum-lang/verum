@@ -2012,6 +2012,31 @@ impl ProtocolChecker {
             || self.variant_type_names.contains_key(signature)
     }
 
+    /// Every type that claimed this variant signature, in registration
+    /// order.
+    ///
+    /// `variant_signature_admits` answers the membership question for
+    /// ONE candidate name; a caller that wants to pick among them —
+    /// method lookup, which knows the method and can ask who declares
+    /// it — needs the list itself (T1069).
+    pub fn variant_type_name_candidates_for(&self, signature: &Text) -> Option<List<Text>> {
+        self.variant_type_name_candidates.get(signature).cloned()
+    }
+
+    /// Does `type_name` have a method of this name in the PROTOCOL-side
+    /// registry?
+    ///
+    /// Deliberately narrow: this side holds primitive and
+    /// protocol-derived methods.  Inherent `implement T { … }` bodies
+    /// live in `TypeChecker::inherent_methods`, which this struct
+    /// cannot see — a repair that consulted only this registry came
+    /// back inert for exactly that reason (T1069).  Callers that need
+    /// both must ask from the TypeChecker side.
+    pub fn protocol_side_has_method(&self, type_name: &str, method_name: &str) -> bool {
+        self.method_registry
+            .contains_key(&(Text::from(type_name), Text::from(method_name)))
+    }
+
     pub fn variant_signature_admits(&self, signature: &Text, type_name: &str) -> bool {
         match self.variant_type_name_candidates.get(signature) {
             Some(claimants) => claimants.iter().any(|c| c.as_str() == type_name),
