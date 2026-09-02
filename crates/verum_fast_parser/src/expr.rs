@@ -6826,7 +6826,20 @@ impl<'a> RecursiveParser<'a> {
         // Check for 'else' arm (preferred)
         if self.stream.consume(&TokenKind::Else).is_some() {
             self.stream.expect(TokenKind::FatArrow)?;
-            let body = self.parse_expr()?;
+            // Select arm body: treat `{ }` as a BLOCK, not an empty map
+            // — the same treatment `parse_match_arms` gives its own arm
+            // bodies, and for the same reason. Without it `=> {}`
+            // synthesised as `Map<_, _>` while `=> { stmt; }` gave
+            // `Unit`, so a select MIXING the two failed to unify its
+            // arms: `core/shell/exec.vr:267` reported
+            // `expected 'Map<_, _>', found 'Unit'` on correct code.
+            // Measured: all-`{}` was clean and all-non-empty was clean;
+            // only the mix failed, in either order (T1084).
+            let body = if self.stream.check(&TokenKind::LBrace) {
+                self.parse_block_expr()?
+            } else {
+                self.parse_expr()?
+            };
             let span = self.stream.make_span(start_pos);
             return Ok(SelectArm::else_arm_with_attrs(
                 attributes,
@@ -6839,7 +6852,20 @@ impl<'a> RecursiveParser<'a> {
         if self.check_ident("default") {
             self.stream.advance();
             self.stream.expect(TokenKind::FatArrow)?;
-            let body = self.parse_expr()?;
+            // Select arm body: treat `{ }` as a BLOCK, not an empty map
+            // — the same treatment `parse_match_arms` gives its own arm
+            // bodies, and for the same reason. Without it `=> {}`
+            // synthesised as `Map<_, _>` while `=> { stmt; }` gave
+            // `Unit`, so a select MIXING the two failed to unify its
+            // arms: `core/shell/exec.vr:267` reported
+            // `expected 'Map<_, _>', found 'Unit'` on correct code.
+            // Measured: all-`{}` was clean and all-non-empty was clean;
+            // only the mix failed, in either order (T1084).
+            let body = if self.stream.check(&TokenKind::LBrace) {
+                self.parse_block_expr()?
+            } else {
+                self.parse_expr()?
+            };
             let span = self.stream.make_span(start_pos);
             return Ok(SelectArm::else_arm_with_attrs(
                 attributes,
@@ -6874,7 +6900,12 @@ impl<'a> RecursiveParser<'a> {
         };
 
         self.stream.expect(TokenKind::FatArrow)?;
-        let body = self.parse_expr()?;
+        // Same as the else/default arms above: `{ }` is a block here.
+        let body = if self.stream.check(&TokenKind::LBrace) {
+            self.parse_block_expr()?
+        } else {
+            self.parse_expr()?
+        };
 
         let span = self.stream.make_span(start_pos);
         Ok(SelectArm::new(

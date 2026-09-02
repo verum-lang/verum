@@ -1,0 +1,82 @@
+// @test: check
+// @level: L0
+// @tier: 0
+// @tags: parser, select, async, blocks
+// @timeout: 20000
+// @expected-exit: 0
+// @description: A select whose arms MIX an empty block with a non-empty
+//   one type-checks — `{}` in an arm is a block, not an empty map.
+
+// `core/shell/exec.vr:267` failed on correct code:
+//
+//     select {
+//         _ = wait_with_output_async(&child).await => {},
+//         _ = kill_ct.cancelled().await => { let _ = child.kill(); },
+//     };
+//
+//     error<E400>: Type mismatch: expected 'Map<_, _>', found 'Unit'
+//
+// Arms are synthesised independently and then unified against the
+// first. `=> {}` synthesised as `Map<_, _>`, `=> { stmt; }` as `Unit`,
+// so a select mixing the two could not unify. All-`{}` was clean and
+// all-non-empty was clean; only the MIX failed, in either order — which
+// is why nesting looked decisive at first and was not.
+//
+// `parse_match_arms` had solved this already, in as many words:
+//
+//     // Match arm body: treat `{ }` as block, not empty map.
+//
+// The repair is that same treatment in the three select-arm sites.
+// Measured, `{}` in a match arm is a `Unit` and in a select arm was a
+// `Map` — one token, two readings, one of them already fixed for the
+// sibling construct.
+//
+// T1084.
+
+async fn one() -> Int { 1 }
+async fn two() -> Int { 2 }
+
+// SUBJECT: mixed arms, empty first.
+public async fn mixed_empty_first() -> Int {
+    select {
+        _ = one().await => {},
+        _ = two().await => { let _ = 1; },
+    };
+    5
+}
+
+// SUBJECT: mixed arms, non-empty first — the failure was order-blind.
+public async fn mixed_empty_second() -> Int {
+    select {
+        _ = one().await => { let _ = 1; },
+        _ = two().await => {},
+    };
+    5
+}
+
+// CONTROL: all arms empty. Clean BEFORE the fix too, so a repair that
+// broke the uniform case would be caught here rather than by exec.vr.
+public async fn all_empty() -> Int {
+    select {
+        _ = one().await => {},
+        _ = two().await => {},
+    };
+    5
+}
+
+// CONTROL: a select nested in a select arm, all bodies non-empty. This
+// is what made nesting look like the discriminator; it was clean all
+// along and must stay so.
+public async fn nested_non_empty() -> Int {
+    select {
+        _ = one().await => { 0 },
+        _ = two().await => {
+            select {
+                _ = one().await => { let _ = 1; },
+            };
+            5
+        },
+    }
+}
+
+public fn main() -> Int { 0 }
