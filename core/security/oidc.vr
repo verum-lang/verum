@@ -163,7 +163,7 @@ implement Display for DiscoveryError {
 }
 
 implement Debug for DiscoveryError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 /// Fetch + parse + validate the OIDC discovery document.
@@ -333,7 +333,7 @@ implement Display for JwksError {
 }
 
 implement Debug for JwksError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 /// Fetch the JWKS at a URL.
@@ -569,7 +569,7 @@ implement Display for OidcVerifyError {
 }
 
 implement Debug for OidcVerifyError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 /// Verify an OIDC ID token against a JWKS cache + a set of

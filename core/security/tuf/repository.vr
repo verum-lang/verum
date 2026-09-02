@@ -114,7 +114,7 @@ implement Display for RepoError {
 }
 
 implement Debug for RepoError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 // =============================================================================

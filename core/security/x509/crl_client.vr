@@ -376,7 +376,7 @@ implement Display for CrlOperationError {
 }
 
 implement Debug for CrlOperationError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 /// Check the revocation status of `cert` (issued by `issuer`) via

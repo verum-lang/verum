@@ -148,13 +148,13 @@ implement Display for LogError {
             SignatureFailed(_) => f.write_str("transparency-log: signature failed"),
             InconsistentTreeHeads => f.write_str("transparency-log: tree-head consistency violated"),
             InvalidTile(c) => f.write_str(f"transparency-log: invalid tile (level={c.level}, index={c.index})".as_str()),
-            Merkle(e) => Display.fmt(e, f),
+            Merkle(e) => e.fmt(f),
         }
     }
 }
 
 implement Debug for LogError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 // =============================================================================

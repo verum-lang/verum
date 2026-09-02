@@ -105,7 +105,7 @@ implement Display for CogSignatureError {
             InvalidSourceHash(reason)   => f.write_str(f"cog-signature: invalid source_sha256 ({reason})".as_str()),
             HashMismatch { expected, computed }
                 => f.write_str(f"cog-signature: hash mismatch (expected {expected}, computed {computed})".as_str()),
-            SignatureFailed(e)          => Display.fmt(e, f),
+            SignatureFailed(e)          => e.fmt(f),
             VerificationFailed          => f.write_str("cog-signature: verification failed"),
             EncodingError(reason)       => f.write_str(f"cog-signature: encoding error ({reason})".as_str()),
         }
@@ -113,7 +113,7 @@ implement Display for CogSignatureError {
 }
 
 implement Debug for CogSignatureError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 // =============================================================================

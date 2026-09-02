@@ -185,7 +185,7 @@ implement Display for TomlError {
 
 implement Debug for TomlError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        Display.fmt(self, f)
+        self.fmt(f)
     }
 }
 

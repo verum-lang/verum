@@ -193,7 +193,7 @@ implement Display for ManifestError {
 }
 
 implement Debug for ManifestError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 // =============================================================================

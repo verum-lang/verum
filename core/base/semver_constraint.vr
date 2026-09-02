@@ -101,13 +101,13 @@ implement Display for SemVerConstraintError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             InvalidConstraint(reason) => f.write_str(f"semver-constraint: invalid ({reason})".as_str()),
-            InvalidVersion(e)         => Display.fmt(e, f),
+            InvalidVersion(e)         => e.fmt(f),
         }
     }
 }
 
 implement Debug for SemVerConstraintError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 implement Eq for SemVerConstraintError {

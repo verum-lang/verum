@@ -318,7 +318,7 @@ implement Display for ConfigError {
 
 implement Debug for ConfigError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        Display.fmt(self, f)
+        self.fmt(f)
     }
 }
 

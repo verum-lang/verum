@@ -65,7 +65,7 @@ implement Display for MigrationPlanError {
 }
 
 implement Debug for MigrationPlanError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 implement Eq for MigrationPlanError {

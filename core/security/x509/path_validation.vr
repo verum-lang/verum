@@ -202,7 +202,7 @@ implement Display for PathError {
 }
 
 implement Debug for PathError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 // =============================================================================

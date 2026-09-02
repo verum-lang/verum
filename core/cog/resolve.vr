@@ -795,7 +795,7 @@ implement Display for ProviderError {
 }
 
 implement Debug for ProviderError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 public type DependencyProvider is protocol {
@@ -848,13 +848,13 @@ implement Display for ResolveError {
                 }
                 Result.Ok(())
             }
-            Provider(e) => Display.fmt(e, f),
+            Provider(e) => e.fmt(f),
         }
     }
 }
 
 implement Debug for ResolveError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 /// The pubgrub solver state.

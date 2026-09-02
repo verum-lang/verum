@@ -528,7 +528,7 @@ implement Display for DsseVerifyError {
 }
 
 implement Debug for DsseVerifyError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
 /// Verify a DSSE envelope. Returns the decoded Statement on success.

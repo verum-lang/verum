@@ -102,7 +102,7 @@ implement Display for MoneyError {
 
 implement Debug for MoneyError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        Display.fmt(self, f)
+        self.fmt(f)
     }
 }
 
