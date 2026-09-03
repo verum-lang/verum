@@ -127,7 +127,13 @@ def main() -> int:
         print("  A diagnostic without a code prints no `error<CODE>` bracket and")
         print("  no source location, and every `^error<`-keyed counter misses it.")
         print("  Use `TypeError::OtherWithCodeSpanned { code, msg, span }`.")
-        print("  Worst files:")
+        # A CENSUS, not a delta: these are the largest holders, not the
+        # files that caused the increase. A peer misread exactly this
+        # shape in a sibling ratchet — the first line after the verdict
+        # was the alphabetically smallest name, and it read as the new
+        # entry. Say which it is.
+        print("  Largest holders (a CENSUS, not the increase — the new site")
+        print("  may be in any file):")
         for rel, hits in sorted(per_file.items(), key=lambda kv: -kv[1])[:10]:
             print(f"    {hits:4d}  {rel}")
         return 1
