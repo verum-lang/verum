@@ -496,8 +496,16 @@ attribute       = std_attribute
                 | identifier , [ '(' , attribute_args , ')' ] ;
 attribute_args  = expression_list | named_arg_list ;
 expression_list = expression , { ',' , expression } ;
-named_arg_list  = named_arg , { ',' , named_arg } ;
-named_arg       = identifier , '=' , expression ;
+named_arg_list  = named_arg , { ',' , named_arg } , [ ',' ] ;
+(* SEPARATOR: both spellings are accepted by the parser and both are in
+   use.  `=` is the norm (1174 occurrences in core/) and `:` the
+   exception (7, all of them `@arch_module` / `@mtac`), so `=` is what
+   new code should be written with — but a grammar that admitted only
+   `=` would have declared `core/signal.vr` ungrammatical, and this file
+   is the ONLY source of truth for what the language ACCEPTS.
+   Measured 2026-09-03: `@cfg(feature = "x")` and `@cfg(feature: "x")`
+   both compile clean.  A trailing comma is likewise accepted. *)
+named_arg       = identifier , ( '=' | ':' ) , expression ;
 
 (* Special attribute forms *)
 (* Spec: docs/detailed/18-advanced-protocols.md Section 3.1 - Specialization *)
