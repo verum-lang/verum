@@ -8149,7 +8149,7 @@ impl TypeChecker {
         // Measured before writing this: a protocol declaring
         // `type Out<T>` and an impl binding `type Out = Int` compiled
         // with ZERO diagnostics.
-        {
+        if std::env::var_os("VERUM_NO_GAT_ARITY_CHECK").is_none() {
             let arity_errors: Vec<(Text, usize, usize, verum_ast::span::Span)> = {
                 let guard = self.protocol_checker.read();
                 match guard.get_protocol(&proto_ident) {
@@ -10914,7 +10914,10 @@ pub(crate) fn associated_type_from_ast(
     use crate::advanced_protocols::{AssociatedTypeKind, GATTypeParam, Variance};
     use verum_ast::ty::{GenericParamKind, TypeBoundKind};
 
-    if ast_type_params.is_empty() {
+    // `VERUM_NO_GAT_CARRIER=1` restores the pre-carrier behaviour (always
+    // `simple`, i.e. an empty type-param list) so the carrier's effect on a
+    // corpus is an A/B inside ONE binary rather than two builds.
+    if ast_type_params.is_empty() || std::env::var_os("VERUM_NO_GAT_CARRIER").is_some() {
         return crate::protocol::AssociatedType::simple(name, bounds);
     }
 
