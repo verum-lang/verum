@@ -13101,11 +13101,20 @@ with .to_float() or .to_int() (at {:?})",
                     {
                         Ok(InferResult::new(Type::int()))
                     } else {
-                        Err(TypeError::Other(verum_common::Text::from(format!(
-                            "Type property 'bits' is only valid for sized numeric types, but got '{}'.\n  \
-                             Hint: Use '.bits' with types like Int, Float, Bool, Char, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64",
-                            resolved_ty
-                        ))))
+                        // `span` is a parameter of this function and both
+                        // property errors used to drop it, so the diagnostic
+                        // printed `<no source location attached>` — while the
+                        // public docs promise "a diagnostic pointing at the
+                        // offending property". Carrying it costs nothing.
+                        Err(TypeError::OtherWithCodeSpanned {
+                            code: verum_common::Text::from("E428"),
+                            msg: verum_common::Text::from(format!(
+                                "type property `bits` is only valid for sized numeric types, but `{}` is not one\n  \
+                                 help: `.bits` is defined on Int, Float, Bool, Char and the sized integer/float types",
+                                resolved_ty
+                            )),
+                            span,
+                        })
                     }
                 }
 
@@ -13121,11 +13130,16 @@ with .to_float() or .to_int() (at {:?})",
                     {
                         Ok(InferResult::new(resolved_ty))
                     } else {
-                        Err(TypeError::Other(verum_common::Text::from(format!(
-                            "Type property '{}' is only valid for numeric types, but got '{}'.\n  \
-                             Hint: Use '.{}' with types like Int, Float, or sized integer/float types",
-                            property, resolved_ty, property
-                        ))))
+                        Err(TypeError::OtherWithCodeSpanned {
+                            code: verum_common::Text::from("E428"),
+                            msg: verum_common::Text::from(format!(
+                                "type property `{}` is only valid for numeric types, but `{}` is not one\n  \
+                                 help: `.{}` is defined on Int, Float and the sized integer/float types, \
+                                 and on any type implementing `Numeric`",
+                                property, resolved_ty, property
+                            )),
+                            span,
+                        })
                     }
                 }
 
