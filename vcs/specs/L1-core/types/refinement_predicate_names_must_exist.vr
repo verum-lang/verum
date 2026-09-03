@@ -25,9 +25,34 @@
 // The same name in ordinary code was already `E100: unbound variable`,
 // so the checker knew it was unknown; the refinement path never asked.
 
+// ALL FOUR POLES, because the negative one alone cannot tell "catches a
+// typo" from "catches everything except `self`". The first version of
+// this file carried only the typo, and the check it guards shipped
+// rejecting `it` — the IMPLICIT binder, used by 166 files in core/ and
+// documented in the root CLAUDE.md's own example. Six core/ files went
+// from clean to red, found within the hour by another session's corpus
+// ratchet rather than by this spec.
+
+// POLE 1 — the implicit binder. MUST be clean.
+type WithIt is Int { it > 0 };
+
+// POLE 2 — the explicit binder. MUST be clean.
+type WithSelf is Int { self > 0 };
+
+// POLE 3 — a name that IS in scope. MUST be clean.
+const LIMIT: Int = 100;
+type WithConst is Int { it < LIMIT };
+
+// POLE 4 — the typo. THIS is what the file asserts.
 type P is Int { slef > 0 };
 
 fn main() {
+    let a: WithIt = 5;
+    let b: WithSelf = 5;
+    let c: WithConst = 5;
     let x: P = -5;
+    print(a);
+    print(b);
+    print(c);
     print(x);
 }
