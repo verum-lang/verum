@@ -27,7 +27,7 @@
 //
 // The premise had expired. Ctors are also `@thread_local` static
 // initialisers and the CBGR allocator's LOCAL_HEAP/CURRENT_HEAP
-// bootstrap; without them a static reads `Value::default()` out of a
+// bootstrap; without them a static reads `Value`'s `default()` out of a
 // slot nothing wrote. Measured 2026-09-03 on one file, one binary:
 //
 //     verum run   ->  9

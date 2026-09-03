@@ -14,7 +14,7 @@
 // function, and everything it calls, may not reach that context.
 //
 // Until 2026-09-03 nothing enforced it. The one place that built the
-// checker's model wrote every requirement through `ContextRequirement::new`,
+// checker's model wrote every requirement through `ContextRequirement`'s `new`,
 // which hardcodes `is_negative: false`, so `excluded_contexts` was
 // permanently empty and the transitive verifier walked a registry in which
 // no function forbade anything. The suite did not notice because the section

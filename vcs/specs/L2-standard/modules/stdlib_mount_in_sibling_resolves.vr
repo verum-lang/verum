@@ -1,0 +1,44 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: modules, project, mount, stdlib, cross-file
+// @timeout: 60000
+// @project: stdlib_mount_in_sibling
+// @expected-stdout: 1
+// @description: A stdlib function mounted by a SIBLING module resolves.
+//
+//   The fixture's entry file mounts only `probe.reader`; the mount of
+//   `core.encoding.json` lives in `src/reader.vr` and nowhere else. That
+//   one placement was enough to break the program at run time (T1126):
+//
+//       main.vr does NOT mount core.encoding.json
+//           -> Panic: [lenient] stage-5 qualified cross-module fn stub
+//              never resolved (func_id=...)
+//       main.vr ALSO mounts core.encoding.json
+//           -> correct
+//
+//   and nothing else differed. `verum check` reported ZERO errors in both
+//   cases, so the suite's compile-only specs could not have caught it —
+//   this one has to RUN.
+//
+//   Why the failure hid for so long: builtin-type METHODS called from a
+//   sibling module (`List.push`, `Text.len`) resolve through a different
+//   path and always worked, and most module code is methods. A free
+//   function mounted from the stdlib is the case nobody had written.
+//
+//   The carrier was a name harvester whose output feeds `wanted` — the set
+//   that decides which archive functions are registered at all. It matched
+//   five `ItemKind` variants and ended in `_ => {}`, so the `Module` variant
+//   was swallowed silently, and with it every mount in every sibling file.
+//   A missing arm there does not produce an error; it produces a SMALLER
+//   SET, which no layer below can distinguish from a set that was never
+//   asked for.
+//
+//   `stringify(json_int(7))` is "7" — one character. The number is small on
+//   purpose: the spec is about whether the call ARRIVES, and a wide value
+//   would invite reading it as a test of JSON.
+
+fn main() {
+    // The body lives in the fixture; this file carries the directives.
+    // See stdlib_mount_in_sibling/src/{main,reader}.vr.
+}
