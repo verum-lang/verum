@@ -148,19 +148,38 @@ fn print_json(
 ///
 /// Loads and validates verum.toml without printing the full feature set.
 /// Exits 0 on success; exits non-zero with diagnostics on failure.
-/// Top-level tables `Manifest` knows about.
+/// Top-level tables the toolchain reads.
 ///
 /// Kept next to the check that uses it rather than derived, because
 /// `Manifest`'s fields are `#[serde(default)]` — serde will not tell us
 /// which names it recognised, and `deny_unknown_fields` on 35 structs
 /// would turn every forward-compatible extra key into a hard error on
 /// manifests that work today.
+///
+/// THREE authorities, not one. `Manifest` is the biggest but not the
+/// only reader of `Verum.toml`:
+///
+///   Manifest (crates/verum_cli/src/config.rs)   26 tables
+///   [lint]   commands/lint.rs::load_full_lint_config
+///   [linker] verum_compiler/src/linker_config.rs
+///
+/// Both of the latter open the manifest themselves and look for their
+/// own block, so neither appears as a `Manifest` field. Deriving this
+/// list from `Manifest` alone — which is what the first version of this
+/// check did — makes it warn on `[lint]` and `[linker]`, two tables
+/// that work: `linker_config`'s own test asserts that `output`, `lto`,
+/// `use_lld`, `pic` and `strip` all take effect.
+///
+/// A new independent reader must be added here, or `config validate`
+/// will call its table a typo.
 const KNOWN_TABLES: &[&str] = &[
     "cog", "language", "dependencies", "dev_dependencies",
     "build_dependencies", "build", "features", "profile", "workspace",
     "lsp", "registry", "llvm", "optimization", "lto", "pgo",
     "cross_compile", "verify", "types", "runtime", "codegen", "meta",
     "protocols", "context", "safety", "test", "debug",
+    // Read by their own loaders, not by `Manifest` — see above.
+    "lint", "linker",
 ];
 
 /// Levenshtein distance, capped — only used to suggest a near miss.
