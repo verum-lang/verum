@@ -1,0 +1,41 @@
+// @test: check
+// @level: L1
+// @tier: 0
+// @tags: patterns, parameters, refutable
+// @timeout: 20000
+// @expected-exit: 101
+// @expected-stderr: cannot be a parameter pattern
+// @description: A qualified variant pattern in parameter position is
+//   refused — a parameter is matched against whatever the caller passes.
+
+// Measured 2026-09-03, before the check existed:
+//
+//     verum check   clean
+//     interpreted   handle(Click(999)) = Variant(27149)
+//
+// A function declared to return `Int` returned a raw variant handle.
+// Not a panic and not the payload — a wrong value of the wrong type,
+// silently, because the pattern simply did not match and nothing said
+// so.
+//
+// `destructuring.md` already stated the rule ("a refutable pattern in a
+// parameter position is a compile error"); a grep for
+// `irrefutab|is_refutable` across the tree found COMMENTS ONLY. The
+// rule existed in prose and nowhere else.
+//
+// Its sibling `irrefutable_parameter_pattern_is_accepted.vr` is the
+// positive half.
+//
+// T1073.
+
+type Event is Keypress(Int) | Click(Int);
+
+// The protocol's variant is selected by a QUALIFIED pattern, so it can
+// fail: `Event.Click` reaches here too.
+fn handle(Event.Keypress(code): Event) -> Int {
+    code
+}
+
+public fn main() -> Int {
+    handle(Event.Keypress(27))
+}

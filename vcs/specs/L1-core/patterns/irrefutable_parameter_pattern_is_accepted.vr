@@ -1,0 +1,35 @@
+// @test: check
+// @level: L1
+// @tier: 0
+// @tags: patterns, parameters, refutable
+// @timeout: 20000
+// @expected-exit: 0
+// @description: An irrefutable parameter pattern — a tuple of bindings,
+//   and a newtype unwrap — stays accepted.
+
+// The positive half, and the half the spec corpus made necessary.
+//
+// The first version of the predicate reported EVERY variant pattern,
+// which produced three false positives in
+// `vcs/specs/L1-core/types/newtypes/newtype_unwrap.vr`:
+// `fn process_id(UserId(n): UserId)` where `type UserId is (Int)` is a
+// newtype, so the pattern always matches. The check now reports only
+// the QUALIFIED spelling, which a newtype unwrap never uses.
+//
+// T1073.
+
+type Wrapped is (Int);
+
+fn manhattan((x, y): (Int, Int)) -> Int {
+    x + y
+}
+
+fn unwrap_it(Wrapped(n): Wrapped) -> Int {
+    n
+}
+
+public fn main() -> Int {
+    let a = manhattan((1, 2));
+    let b = unwrap_it(Wrapped(3));
+    a + b
+}

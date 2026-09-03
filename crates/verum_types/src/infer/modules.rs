@@ -11468,6 +11468,57 @@ impl TypeChecker {
                 FunctionParamKind::Regular { pattern, ty, .. } => {
                     let param_ty = self.ast_to_type(ty)?;
 
+                    // A parameter pattern is matched against whatever the
+                    // caller passes, so it must ALWAYS match. Measured
+                    // 2026-09-03, before this check existed:
+                    //
+                    //     type Event is Keypress(Int) | Click(Int);
+                    //     fn handle(Event.Keypress(code): Event) -> Int { code }
+                    //     handle(Event.Click(999))
+                    //
+                    //   `verum check`  -> clean
+                    //   interpreted    -> prints `Variant(27149)`
+                    //
+                    // i.e. a function declared to return `Int` returned a raw
+                    // variant handle. Not a panic and not the payload — a
+                    // wrong value of the wrong type, silently. The control
+                    // (an irrefutable tuple pattern in the same position)
+                    // was accepted then and is accepted now.
+                    //
+                    // `VERUM_NO_PARAM_PATTERN_CHECK=1` switches this off, so
+                    // the radius is an A/B inside one binary.
+                    if std::env::var_os("VERUM_NO_PARAM_PATTERN_CHECK").is_none()
+                        && let Some(what) = refutable_pattern_kind(pattern)
+                    {
+                        self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
+                            code: verum_common::Text::from("E429"),
+                            msg: verum_common::Text::from(format!(
+                                "{} cannot be a parameter pattern — a parameter is \
+                                 matched against whatever the caller passes, so it \
+                                 must always match\n  \
+                                 help: bind the parameter to a name and `match` on it \
+                                 in the body",
+                                what
+                            )),
+                            span: param.span,
+                        });
+                    }
+                    if std::env::var_os("VERUM_TRACE_CAPS").is_some() {
+                        // T0918: what the binding ACTUALLY holds.
+                        // Structural, not Display — Display was one of
+                        // the two channels under suspicion, and printing
+                        // through a suspect channel measures nothing.
+                        //
+                        // It answered both questions at once and refuted
+                        // both hypotheses: the binding carries
+                        // `CapabilityRestricted { base: Named{Store},
+                        // capabilities: {ReadOnly} }`, and Display prints
+                        // it faithfully. The misleading `found 'Store'`
+                        // comes from inside the unifier's own deliberate
+                        // peel.
+                        eprintln!("[caps] param bound as: {:?}", param_ty);
+                    }
+
                     // Track parameter name for return lifetime validation
                     if let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind {
                         self.current_function_params
@@ -27844,3 +27895,61 @@ impl TypeChecker {
     }
 }
 
+/// Name the reason a pattern can FAIL to match, or `None` if it always
+/// matches.
+///
+/// Used for positions that bind unconditionally — today the parameter
+/// list, where a failure has nowhere to go. Deliberately conservative:
+/// it recurses through the composite forms and reports only the kinds
+/// that are refutable whatever their type. A record pattern is treated
+/// as irrefutable because distinguishing a struct pattern from a
+/// record-VARIANT pattern needs the resolved type, and a false positive
+/// here would refuse working code; that case is listed in the register
+/// rather than guessed at.
+fn refutable_pattern_kind(pattern: &verum_ast::pattern::Pattern) -> Option<&'static str> {
+    use verum_ast::pattern::PatternKind as P;
+    match &pattern.kind {
+        P::Wildcard | P::Rest => None,
+        P::Ident { subpattern, .. } => match subpattern {
+            verum_common::Maybe::Some(inner) => refutable_pattern_kind(inner),
+            verum_common::Maybe::None => None,
+        },
+        P::Paren(inner) => refutable_pattern_kind(inner),
+        P::Reference { inner, .. } => refutable_pattern_kind(inner),
+        P::Tuple(ps) | P::Array(ps) => ps.iter().find_map(refutable_pattern_kind),
+        P::Slice { before, after, .. } => before
+            .iter()
+            .chain(after.iter())
+            .find_map(refutable_pattern_kind),
+        P::Record { fields, .. } => fields.iter().find_map(|f| match &f.pattern {
+            // A shorthand field (`{ x }`) binds a name — always matches.
+            verum_common::Maybe::None => None,
+            verum_common::Maybe::Some(inner) => refutable_pattern_kind(inner),
+        }),
+        P::Literal(_) => Some("a literal pattern"),
+        P::Range { .. } => Some("a range pattern"),
+        P::Or(_) => Some("an or-pattern"),
+        P::View { .. } => Some("a view pattern"),
+        // A variant pattern is refutable only when the type it selects
+        // from has more than one variant, and that needs the RESOLVED
+        // type, which this predicate does not have. The spec corpus
+        // settled the trade-off rather than a judgement call:
+        //
+        //   vcs/specs/L1-core/types/newtypes/newtype_unwrap.vr
+        //     `fn process_id(UserId(n): UserId)` — `type UserId is (Int)`
+        //     is a NEWTYPE, the pattern always matches, and reporting it
+        //     is a FALSE POSITIVE. The first version of this predicate
+        //     produced three of them in that one file.
+        //
+        // So only the QUALIFIED spelling is reported: `Event.Keypress(x)`
+        // names one variant of a named sum type, and a newtype unwrap is
+        // never written that way. A bare `Some(x)` is therefore MISSED —
+        // deliberately, and in the direction the gradual-verification
+        // policy already takes elsewhere in this file: fail open rather
+        // than refuse working code.
+        P::Variant { path, .. } if path.segments.len() >= 2 => {
+            Some("a qualified variant pattern")
+        }
+        _ => None,
+    }
+}
