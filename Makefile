@@ -83,6 +83,10 @@ check-doc-error-codes: ## Gate: an error code cited in the documentation must ex
 	python3 scripts/ci/check_doc_error_codes_exist.py --self-test
 	python3 scripts/ci/check_doc_error_codes_exist.py --check
 
+check-verdict-phases: ## Gate: a verdict phase must be reachable from every entry point (RED while T1101 is open — NOT in gates-source)
+	python3 scripts/ci/check_verdict_phases_reach_every_entry_point.py --self-test
+	python3 scripts/ci/check_verdict_phases_reach_every_entry_point.py --check
+
 check-gate-tables: ## Gate: a table inside a gate must not have the same key twice
 	python3 scripts/ci/check_gate_tables_have_no_duplicate_keys.py --self-test
 	python3 scripts/ci/check_gate_tables_have_no_duplicate_keys.py --check
