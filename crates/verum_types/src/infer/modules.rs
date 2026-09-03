@@ -2569,6 +2569,47 @@ impl TypeChecker {
         // Always remove the key when done
         self.imports_in_progress.remove(&import_key);
 
+        // A MOUNTED STATIC IS BOUND HERE, at the one point measurement
+        // proved is reached (T1088).
+        //
+        // Three earlier placements were inert, each for its own reason,
+        // and the third is why this one is here rather than deeper:
+        //
+        //   1. `own_surface_functions` in the surface query — the wrong
+        //      surface entirely; `VERUM_TRACE_MODSURFACE` names the
+        //      deciding one (`probed_module_info.exports`).
+        //   2. the `!inline_has_export` arm of the inner import — NOT
+        //      TAKEN for a static, and not taken BECAUSE of the repair
+        //      that publishes statics into the registry surface: being
+        //      exported is exactly what routes the item past that arm.
+        //   3. the mounted-function binding block further down — never
+        //      reached either.
+        //
+        // The instrument settled it: `VERUM_TRACE_STATICBIND` printed 176
+        // lines for other items and NONE for `GLOBAL_EPOCH`, while
+        // `[trace-import] inner exit: ok=true in_env=false` printed for it
+        // every time. The inner import succeeds and defines nothing, and
+        // this wrapper is the first place after it that always runs.
+        //
+        // Guarded three ways, so nothing that already worked can change:
+        // the inner import must have SUCCEEDED, the name must still be
+        // UNBOUND, and it must be a name `metadata.statics` holds.
+        if result.is_ok() {
+            let bind = local_name.unwrap_or(item_name);
+            if self.ctx.env.lookup(&Text::from(bind)).is_none()
+                && let Maybe::Some(md) = &self.core_metadata.clone()
+            {
+                let skey: Text = format!("{}.{}", module_path.as_str(), item_name).into();
+                if let Some(sd) = md.statics.get(&skey) {
+                    let ty =
+                        crate::infer::helpers::parse_descriptor_type_string(sd.ty.as_str());
+                    self.ctx
+                        .env
+                        .insert(bind, crate::context::TypeScheme::mono(ty));
+                }
+            }
+        }
+
         if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
             let in_env = self
                 .ctx
@@ -2825,6 +2866,44 @@ impl TypeChecker {
                             span,
                         });
                     }
+                    // BEING IN THE SURFACE IS NOT BEING BOUND (T1088).
+                    //
+                    // This `return Ok(())` means "the module does export
+                    // that name, so the mount is valid" — and validity is
+                    // not a binding. A `const` never reaches it: it is
+                    // absent from the VBC ExportTable, so it goes through
+                    // the metadata-binding block above and comes out
+                    // BOUND. Publishing statics into the module surface
+                    // moved them onto THIS path, where the mount is
+                    // accepted and nothing is defined.
+                    //
+                    // Measured with the instrument that was already here,
+                    // one probe each, same module, same binary:
+                    //
+                    //   [task21] gate: item='GLOBAL_EPOCH' exports_len=22
+                    //            export_hit=true  raw_kind=Some(Function)
+                    //   [task21] gate: item='EPOCH_MAX'    exports_len=22
+                    //            export_hit=false raw_kind=None
+                    //   [task21] gate early-return: item='EPOCH_MAX'
+                    //            bound_after=true
+                    //
+                    // The const works BECAUSE it is not in this surface.
+                    // `[trace-import] inner exit: ok=true in_env=false`
+                    // said the same thing from the other end: the import
+                    // succeeded and defined nothing.
+                    //
+                    // Guarded on the name being a known static, so nothing
+                    // that reached this line before can take a different
+                    // path than it did.
+                    // The static's VALUE binding is NOT here. This arm runs
+                    // only when the item is ABSENT from the module's export
+                    // table, and publishing statics into that table (the
+                    // repair one layer up) is exactly what routes them past
+                    // it — measured: VERUM_TRACE_STATICBIND printed 176 lines
+                    // and none for the static under test. It lives in
+                    // `import_item_from_module`'s wrapper instead, after the
+                    // inner import returns, which is the first point that
+                    // always runs. See T1088.
                     return Ok(());
                 }
             }
@@ -3729,37 +3808,13 @@ impl TypeChecker {
                     self.record_mount_binding(bind_name, &resolved_key);
                     return Ok(());
                 }
-                // A module-level `static` is a VALUE, and the lookup above
-                // only knows functions (T1088).
-                //
-                // Publishing statics into the module surface made
-                // `mount core.mem.epoch.{GLOBAL_EPOCH}` stop reporting E401
-                // — and left `let e = GLOBAL_EPOCH;` at `error<E100>:
-                // unbound variable`, which is the same "does not cross the
-                // boundary" defect one layer down. Measured: the braced
-                // mount went from 2 diagnostics to 1, the survivor being
-                // the use site.
-                //
-                // A `const` reaches this binding through
-                // `resolve_function_via_metadata_reexports` because codegen
-                // LOWERS it to a zero-argument function. A `static` cannot
-                // take that route — the constant-function path re-executes
-                // the initialiser on every read — so it needs its own
-                // lookup against its own channel.
-                if let Maybe::Some(md) = &self.core_metadata.clone() {
-                    let key: Text =
-                        format!("{}.{}", module_path.as_str(), item_name).into();
-                    if let Some(sd) = md.statics.get(&key) {
-                        let ty = crate::infer::helpers::parse_descriptor_type_string(
-                            sd.ty.as_str(),
-                        );
-                        self.ctx
-                            .env
-                            .insert(bind_name, crate::context::TypeScheme::mono(ty));
-                        self.record_mount_binding(bind_name, &key);
-                        return Ok(());
-                    }
-                }
+                // The static's VALUE binding is NOT here either. This block
+                // is reached only for names the function lookup missed, and
+                // measurement showed a mounted static never arrives: the
+                // instrument printed 176 lines for other items and none for
+                // it. It lives in this function's WRAPPER, after the inner
+                // import returns — the first point proved to always run.
+                // See T1088.
                 if let Some((true_name, src)) = self
                     .reexport_source_module_for(module_path.as_str(), item_name)
                     // T0244: see the function-branch filter in
@@ -25829,24 +25884,21 @@ impl TypeChecker {
                         ..
                     } = &constructor_ty
                     {
-                        // SPECIAL CASE: Handle variadic builtins like List.of, Set.of
-                        if (qualified_name == "List.of" || qualified_name == "Set.of")
-                            && !args.is_empty()
-                        {
-                            let elem_ty = if params.len() == 1 {
-                                params[0].clone()
-                            } else {
-                                Type::Var(TypeVar::fresh())
-                            };
-
-                            for arg in args.iter() {
-                                let resolved_elem = self.unifier.apply(&elem_ty);
-                                self.check_expr(arg, &resolved_elem)?;
-                            }
-
-                            let resolved_return = self.unifier.apply(return_type);
-                            return Ok(Some(InferResult::new(resolved_return)));
-                        }
+                        // The `List.of` / `Set.of` special case stood here and
+                        // is gone (T1093). It type-checked a call to a
+                        // function that exists nowhere: `core/` declares no
+                        // `fn of` for either type, and codegen answered
+                        // `undefined function: List.of`. The special case was
+                        // not describing a builtin, it was manufacturing one —
+                        // and the compiler holding stdlib knowledge the
+                        // library does not have is the circular dependency
+                        // crates/verum_types/src/CLAUDE.md forbids by name.
+                        //
+                        // The 13 call sites in core/ now use the list literal
+                        // `[x]`, measured working; the sibling entry in the
+                        // variadic-name list in infer/expr.rs is removed with
+                        // this one, since either alone leaves the other half
+                        // of the fiction standing.
 
                         // Commit to this qualified-name resolution. The
                         // earlier `args_pre_compatible` heuristic (raw-string

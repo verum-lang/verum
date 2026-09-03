@@ -7701,7 +7701,22 @@ impl TypeChecker {
                             "format" | "print" | "println" | "panic" |
                             "unreachable" | "todo" |
                             "assert" | "assert_eq" | "assert_ne" |
-                            "List.of" | "Set.of" | "min" | "max" |
+                            // `List.of` and `Set.of` were here and are gone
+                            // (T1093). Neither is implemented anywhere: the
+                            // checker skipped arity for them and codegen then
+                            // died with `undefined function: List.of`. Being
+                            // in this list is what let the call reach codegen
+                            // at all, so the entry did not describe a builtin
+                            // — it manufactured one. 13 call sites in core/
+                            // are rewritten to the list literal `[x]`, which
+                            // is what the language actually provides.
+                            //
+                            // The rule this restores is stated in
+                            // crates/verum_types/src/CLAUDE.md: the compiler
+                            // must hold ZERO hardcoded stdlib knowledge. A
+                            // name the checker knows and the library does not
+                            // is exactly the circular dependency it forbids.
+                            "min" | "max" |
                             "join" | "concat" |
                             // Meta reflection builtins accept variable args
                             // (e.g. type_name(Int, Text) for tuple type)

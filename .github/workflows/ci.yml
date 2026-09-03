@@ -839,21 +839,27 @@ jobs:
           scripts/ci/check_call_through_fn_bound_has_the_declared_result.sh --selftest ./target/release/verum
           scripts/ci/check_call_through_fn_bound_has_the_declared_result.sh ./target/release/verum
 
-      # NOT WIRED YET, and deliberately so — two gates in scripts/ci/ are
-      # RED against HEAD because the defects they pin are still open, and
-      # a red gate in CI teaches people to ignore CI:
-      #
-      #   check_a_module_level_static_crosses_the_module_boundary.sh
-      #       T1088. The braced mount now resolves; `let e = GLOBAL_EPOCH;`
-      #       still reports `unbound variable`, so the gate's use arm is
-      #       red. Wire it when the value binding lands.
-      #   check_a_mounted_call_never_compiles_to_unit.sh
-      #       T0907. An explicitly mounted call still compiles to `()`
-      #       when the bare slot is contested. Wire it with the fix.
-      #
-      # Both are runnable by hand against any binary and both fail with a
-      # named reason; they are the acceptance for their tasks, not dead
-      # files.
+      # A `public static` must be importable AND usable from another
+      # module. Measured (T1088): none of the stdlib's five were, while a
+      # `public const` seventy lines away in the same file imported
+      # cleanly — a `const` is LOWERED to a zero-argument function and so
+      # reaches `metadata.functions`, a `static` gets a TLS slot and had
+      # no channel at all. The three mount forms disagreed, which is how
+      # it stayed hidden: the braced form said E401, the glob form said
+      # nothing and deferred E100 to the use site. The gate checks both
+      # forms AND a use, so neither silence counts as success.
+      - name: A module-level static crosses the module boundary
+        run: |
+          scripts/ci/check_a_module_level_static_crosses_the_module_boundary.sh --selftest ./target/release/verum
+          scripts/ci/check_a_module_level_static_crosses_the_module_boundary.sh ./target/release/verum
+
+      # NOT WIRED YET, deliberately: check_a_mounted_call_never_compiles_to_unit.sh
+      # is RED against HEAD because T0907 is open — an explicitly mounted
+      # call still compiles to `()` when the bare slot is contested, and
+      # `check`, `build` and `run` all report zero diagnostics for it. A
+      # red gate in CI teaches people to ignore CI. It is runnable by hand
+      # against any binary and fails with a named reason; it is that
+      # task's acceptance, not a dead file. Wire it with the fix.
 
       # An associated type written as a generic APPLICATION must satisfy a
       # bound its generic impl provides. Measured (T1098): 40 false E405

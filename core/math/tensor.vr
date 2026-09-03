@@ -523,6 +523,73 @@ implement<T: RealField> DynTensor<T> {
     public fn cast<U: RealField>(&self) -> DynTensor<U> {
         @vbc(TENSOR_CAST, self.data, dtype_of<U>())
     }
+
+    // ---------------------------------------------------------------
+    // Method spellings for the shape operations that exist as free
+    // functions (T1061).
+    //
+    // A FREE FUNCTION IS NOT REACHABLE THROUGH METHOD-CALL SYNTAX.
+    // Measured 2026-09-03, five lines, two binaries differing only in
+    // whether this block is present:
+    //
+    //     let t: DynTensor<Float> = zeros([2, 3]);
+    //     let a = t.unsqueeze(0);
+    //         without   error<E400>: no method named `unsqueeze`
+    //         with      clean
+    //
+    // Callers across core/math write both forms — `mul(&a, &b)` free,
+    // `dt.unsqueeze(-1)` as a method — and only the free half resolved.
+    //
+    // EACH BODY DELEGATES, and that this is even possible was measured
+    // rather than assumed. A bare call resolves to the FREE function
+    // even when a method of the same name is in scope; the dotted call
+    // resolves to the method:
+    //
+    //     public fn twice(x: &Box4) -> Int { x.n * 2 }
+    //     implement Box4 {
+    //         public fn twice(&self) -> Int { self.n * 2 }
+    //         public fn viaFree(&self) -> Int { twice(self) }
+    //     }
+    //     -> b.viaFree() prints 10, b.twice() prints 10
+    //
+    // So there is no ambiguity and no self-recursion, and the shape
+    // rules stay in ONE body. Copying them instead cost a real error the
+    // first time this block was written: the duplicated `squeeze` body
+    // raised `E409: Cannot dereference non-reference type: USize` and
+    // two `E613: context ComputeDevice used but not declared`, because
+    // the free function's callees carry requirements a hand-copied body
+    // does not inherit.
+    // ---------------------------------------------------------------
+
+    /// Insert a length-1 axis at `dim` (negative counts from the end).
+    public fn unsqueeze(&self, dim: ISize) -> DynTensor<T> {
+        unsqueeze(self, dim)
+    }
+
+    /// Rectangular slice: one `(start, end)` pair per dimension.
+    public fn slice(&self, ranges: &[(Maybe<USize>, Maybe<USize>)]) -> DynTensor<T> {
+        slice(self, ranges)
+    }
+
+    /// Same elements, new shape. The element count must match.
+    public fn reshape(&self, new_shape: &[USize]) -> DynTensor<T> {
+        reshape(self, new_shape)
+    }
+
+    /// Drop every length-1 axis.
+    public fn squeeze(&self) -> DynTensor<T> {
+        squeeze(self)
+    }
+
+    /// Reorder the axes. `dims` must name every axis exactly once.
+    public fn permute(&self, dims: &[USize]) -> DynTensor<T> {
+        permute(self, dims)
+    }
+
+    /// Multiply every element by one scalar.
+    public fn mul_scalar(&self, scalar: T) -> DynTensor<T> {
+        mul_scalar(self, scalar)
+    }
 }
 
 // =============================================================================

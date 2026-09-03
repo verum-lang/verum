@@ -11737,6 +11737,46 @@ impl VbcCodegen {
             let qualified_verum = full_path.join(".");
             let qualified_rust = full_path.join("::");
 
+            // T0907 instrument. There was none in this loop, and reading it
+            // produced two plausible-and-wrong explanations in one session:
+            // "the stdlib `verify` wins the name" (refuted — calling the
+            // stdlib one explicitly gives E102, so it was never reached) and
+            // "the bare slot is contested" (refuted — the same contested
+            // name works when the MODULE is renamed).
+            //
+            // What the loop cannot currently be asked is which key it tried
+            // and what each one answered. `[mount-fallback]` fires only
+            // inside the bare-name arm, so a name that misses ALL FIVE keys
+            // leaves no trace at all — which is exactly the failing case:
+            //
+            //     module verifier + fn verify    -> silent Unit
+            //     module verifier + fn zz_check  -> works
+            //     module vf6      + fn verify    -> works
+            //
+            // Neither name alone breaks it, so the answer is in which key
+            // the project module's function is registered under.
+            if std::env::var("VERUM_TRACE_MOUNTBIND").is_ok() {
+                let probe = |k: &str| -> &'static str {
+                    if self.ctx.lookup_function(k).is_some() {
+                        "HIT"
+                    } else {
+                        "miss"
+                    }
+                };
+                eprintln!(
+                    "[mountbind] alias={} owner={:?} path={:?} | verum({})={} rust({})={} bare({})={}",
+                    alias_name,
+                    owning_module,
+                    full_path,
+                    qualified_verum,
+                    probe(&qualified_verum),
+                    qualified_rust,
+                    probe(&qualified_rust),
+                    func_name,
+                    probe(&func_name),
+                );
+            }
+
             // First try Verum-style qualified name (e.g., sys.intrinsics.ORDERING_ACQUIRE)
             if let Some(func_info) = self.ctx.lookup_function(&qualified_verum).cloned() {
                 if should_register(&self.ctx, &alias_name, &func_info) {
