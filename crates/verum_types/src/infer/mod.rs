@@ -615,6 +615,12 @@ pub struct TypeChecker {
     /// success so a Berardi-shaped declaration tucked inside an
     /// imported module still aborts the build.
     pub(crate) deferred_soundness_errors: Vec<TypeError>,
+    /// Names a refinement predicate mentioned that were not resolvable
+    /// AT THE TIME THE TYPE WAS CONVERTED. Re-checked when the module
+    /// is finished, because a `const` the predicate names is registered
+    /// later than the type declaration that uses it — checking eagerly
+    /// rejects `type P is Int { self < LIMIT }`, which is correct code.
+    pub(crate) deferred_refinement_names: Vec<(verum_common::Text, verum_ast::span::Span)>,
     /// AMBIGUITY-E404-1 (T0585): candidate un-annotated `let`
     /// bindings whose value type carried free inference variables AT
     /// BINDING time — `(name, span, pre-generalize type)`. Recorded

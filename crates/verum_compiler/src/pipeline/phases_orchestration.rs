@@ -1170,6 +1170,27 @@ impl<'s> CompilationPipeline<'s> {
         // This enables closure parameter type inference without explicit annotations
         self.type_registry = Some(checker.take_type_registry());
 
+        // Deferred errors the checker stashed rather than propagated.
+        //
+        // Two kinds, both of which were unreachable until 2026-09-03:
+        //
+        //   * soundness-critical failures registering a cross-module
+        //     type. The field carried a comment promising that
+        //     "`phase_type_check` drains stashed errors before
+        //     declaring success" — it did not. The only drain sat
+        //     inside a function with zero callers, and the field is
+        //     `pub(crate)`, so this crate could not have reached it.
+        //     Written, never read (T1095 residual).
+        //
+        //   * a refinement predicate naming something in no scope.
+        //     Deferred rather than reported at conversion time because
+        //     a `const` the predicate names is registered later than
+        //     the type declaration using it (T1112).
+        for e in checker.take_deferred_errors() {
+            let diag = type_error_to_diagnostic(&e, Some(self.session));
+            self.session.emit_diagnostic(diag);
+        }
+
         // Abort if errors
         self.session.abort_if_errors()?;
 

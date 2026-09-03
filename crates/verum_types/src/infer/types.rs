@@ -482,6 +482,58 @@ impl TypeChecker {
     ///
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     /// Tracks recursion depth to detect infinite recursion early.
+    /// Names a refinement predicate mentions that are in no scope.
+    ///
+    /// Returns the FIRST such name, or `None`. Walks single-segment
+    /// paths only: a qualified path names something the resolver owns,
+    /// and guessing about it here would trade one silent wrong answer
+    /// for another.
+    ///
+    /// `self` is always in scope — it is the value under refinement —
+    /// as is the sigma binder when the surface syntax provided one.
+    fn unbound_names_in_predicate(
+        &self,
+        expr: &verum_ast::expr::Expr,
+        binder: Option<verum_common::Text>,
+    ) -> Option<verum_common::Text> {
+        use verum_ast::expr::ExprKind;
+        let mut found: Option<verum_common::Text> = None;
+        let mut stack: Vec<&verum_ast::expr::Expr> = vec![expr];
+        // Locally bound names introduced inside the predicate itself
+        // (a closure parameter, a `let`) are not resolved here; a
+        // predicate that binds its own names is left alone entirely.
+        while let Some(e) = stack.pop() {
+            if found.is_some() {
+                break;
+            }
+            match &e.kind {
+                ExprKind::Closure { .. } => return None,
+                ExprKind::Path(path) if path.segments.len() == 1 => {
+                    if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
+                        let n = &ident.name;
+                        let is_self = n.as_str() == "self";
+                        let is_binder = binder.as_ref().is_some_and(|b| b == n);
+                        if !is_self
+                            && !is_binder
+                            && self.ctx.env.lookup(n.as_str()).is_none()
+                            && self.ctx.lookup_type(n.as_str()).is_none()
+                        {
+                            found = Some(n.clone());
+                        }
+                    }
+                }
+                ExprKind::Binary { left, right, .. } => {
+                    stack.push(left);
+                    stack.push(right);
+                }
+                ExprKind::Unary { expr: inner, .. } => stack.push(inner),
+                ExprKind::Paren(inner) => stack.push(inner),
+                _ => {}
+            }
+        }
+        found
+    }
+
     pub fn ast_to_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
         // SPECIAL CASE: stdlib core/math/hott.vr uses `type I is @builtin_interval;`
         // — a top-level alias whose *body* is the meta-type marker. Intercept it
@@ -779,6 +831,41 @@ impl TypeChecker {
                     Some(ident) => RefinementBinding::Sigma(ident.name.clone()),
                     None => RefinementBinding::Inline,
                 };
+                // A NAME IN A PREDICATE MUST EXIST (T1112).
+                //
+                // Every identifier here becomes a free variable of the
+                // solver obligation. An unknown one is therefore not
+                // "no constraint" — it is an ARBITRARY constraint, and
+                // the type it produces is not the author's. Measured
+                // 2026-09-03, one binary:
+                //
+                //     { self > 0 }   value  5 -> ok    value -5 -> E500
+                //     { slef > 0 }   value  5 -> E500  value -5 -> ok
+                //
+                // A single typo INVERTS the type: it accepts exactly
+                // the values the author wrote the refinement to reject,
+                // silently, in a feature whose purpose is rejecting
+                // them. The same name in ordinary code is `E100:
+                // unbound variable`, so the checker knows it is
+                // unknown; this path simply never asked.
+                //
+                // Deliberately narrow: single-segment paths only, and
+                // only names absent from BOTH the value environment and
+                // the type environment. A qualified path, a constant, a
+                // function and the binder itself all pass.
+                // DEFERRED, not reported here. A `const` the predicate
+                // names is registered LATER than the type declaration
+                // that uses it, so an eager check rejects
+                // `type P is Int { self < LIMIT }` — correct code, and
+                // exactly the false positive the first version of this
+                // produced. `take_deferred_errors` re-asks once the
+                // module is fully registered.
+                if let Some(bad) = self.unbound_names_in_predicate(
+                    &predicate.expr,
+                    predicate.binding.as_ref().map(|i| i.name.clone()),
+                ) {
+                    self.deferred_refinement_names.push((bad, predicate.span));
+                }
                 let pred = TyRefinementPredicate {
                     predicate: predicate.expr.clone(),
                     binding: binding.clone(),

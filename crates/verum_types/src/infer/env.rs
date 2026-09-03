@@ -818,6 +818,7 @@ impl TypeChecker {
             diagnostics: List::new(),
             diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
+            deferred_refinement_names: Vec::new(),
             pending_ambiguity: Vec::new(),
             protocols_with_known_defaults: Map::new(),
             pending_protocol_static_calls: Vec::new(),
@@ -960,6 +961,7 @@ impl TypeChecker {
             diagnostics: List::new(),
             diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
+            deferred_refinement_names: Vec::new(),
             pending_ambiguity: Vec::new(),
             protocols_with_known_defaults: Map::new(),
             pending_protocol_static_calls: Vec::new(),
@@ -1103,6 +1105,7 @@ impl TypeChecker {
             diagnostics: List::new(),
             diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
+            deferred_refinement_names: Vec::new(),
             pending_ambiguity: Vec::new(),
             protocols_with_known_defaults: Map::new(),
             pending_protocol_static_calls: Vec::new(),
@@ -2830,6 +2833,40 @@ impl TypeChecker {
     pub fn verify_all_negative_contexts(&self) -> Result<()> {
         self.context_checker.verify_all_negative_contexts()
     }
+    /// Drain the soundness-critical errors stashed during declaration
+    /// registration, plus any refinement-predicate name that is STILL
+    /// unresolved now that the whole module is registered.
+    ///
+    /// `deferred_soundness_errors` existed with a comment promising
+    /// that "`phase_type_check` drains stashed errors before declaring
+    /// success". It did not: the only drain was inside
+    /// `check_items_with_negative_context_verification`, which had zero
+    /// callers, and the field is `pub(crate)`, so `phase_type_check` —
+    /// in another crate — could not have reached it. A cross-module
+    /// type-registration failure was written to a buffer nothing ever
+    /// read, exactly the outcome the comment said it prevented.
+    pub fn take_deferred_errors(&mut self) -> Vec<TypeError> {
+        let mut out = std::mem::take(&mut self.deferred_soundness_errors);
+        for (name, span) in std::mem::take(&mut self.deferred_refinement_names) {
+            if self.ctx.env.lookup(name.as_str()).is_none()
+                && self.ctx.lookup_type(name.as_str()).is_none()
+            {
+                out.push(TypeError::OtherWithCodeSpanned {
+                    code: verum_common::Text::from("E100"),
+                    msg: verum_common::Text::from(format!(
+                        "unbound variable in refinement predicate: `{name}`\n         \
+                         help: the value under refinement is `self`; every other name must \
+                         be in scope\n         note: an unknown name here does not weaken \
+                         the refinement, it REPLACES it — the type then accepts and rejects \
+                         values unrelated to what was written"
+                    )),
+                    span,
+                });
+            }
+        }
+        out
+    }
+
     // REMOVED 2026-09-03 (T1095):
     // `check_items_with_negative_context_verification`, 208 lines.
     //
