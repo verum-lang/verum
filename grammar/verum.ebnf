@@ -78,8 +78,36 @@ type_param_name = uppercase_letter , { ident_continue } ;
 
 (* 1.4 Keywords *)
 
-(* Core reserved keywords - ONLY 3 per specification *)
-(* Spec: docs/detailed/05-syntax-grammar.md Section 2.1 - Keywords *)
+(* Core reserved keywords.
+ *
+ * "ONLY 3 per specification" is what this line used to say, and the
+ * parser disagrees.  Measured 2026-09-03 by binding each of the 75
+ * keyword tokens below as an ordinary identifier
+ * (`let <kw> = 1;`), with `zzq_control` as the control that must come
+ * back usable:
+ *
+ *   47 are REFUSED — they cannot be an identifier
+ *   28 are USABLE  — they are contextual, like the `default` note below
+ *
+ * The three named here are reserved, but so are `type`, `match`,
+ * `while`, `for`, `return`, `implement`, `mount`, `module`, `async`,
+ * `await`, `spawn`, `pub`, `public`, `mut`, `const`, `unsafe`, `pure`,
+ * `static`, `self`, `where`, `using`, `context`, `affine`, `linear`,
+ * `tensor`, `theorem`, `lemma`, `axiom`, `corollary`, `invariant`,
+ * `decreases`, `defer`, `errdefer`, `try`, `throws`, `yield`, `ffi`,
+ * `provide`, `finally`, `loop`, `break`, `continue`, `if`, `else`.
+ *
+ * The 28 that ARE usable as identifiers: by, calc, cases, cog,
+ * contradiction, ensures, exists, extends, forall, have, induction,
+ * internal, meta, nursery, obtain, proof, protected, protocol, qed,
+ * recover, requires, result, select, show, some, stream, suffices,
+ * super.  Several of those are surprising — `protocol`, `select`,
+ * `nursery`, `meta` and `result` read as core vocabulary — so the
+ * measurement is recorded rather than the intention.
+ *
+ * This production is left naming the three the specification calls
+ * CORE; it is not the list of what the lexer refuses.
+ *)
 reserved_keyword = 'let' | 'fn' | 'is' ;
 
 (* Primary keywords *)
