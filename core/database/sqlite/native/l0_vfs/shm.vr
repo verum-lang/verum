@@ -123,8 +123,8 @@ implement ShmSegment for InMemoryShm {
         if self.deleted {
             return Result.Err(VfsError { kind: Closed, message: "shm deleted" });
         }
-        if self.regions.contains_key(region_index) {
-            return Result.Ok(self.regions.get(region_index));
+        if let Some(region) = self.regions.get(region_index) {
+            return Result.Ok(region);
         }
         if !extend {
             return Result.Err(VfsError {
@@ -286,8 +286,8 @@ implement ShmSegment for MappedFileShm {
         if self.deleted {
             return Result.Err(VfsError { kind: Closed, message: "shm deleted" });
         }
-        if self.regions.contains_key(region_index) {
-            return Result.Ok(self.regions.get(region_index));
+        if let Some(region) = self.regions.get(region_index) {
+            return Result.Ok(region);
         }
         if !extend {
             return Result.Err(VfsError {
