@@ -16,7 +16,7 @@
 module core.term.layout.shortcuts;
 
 mount super.rect.Rect;
-mount super.constraint.{Constraint, TermLayout};
+mount super.constraint.{LayoutConstraint as Constraint, TermLayout};
 
 /// Split into header, body, footer areas.
 public fn header_body_footer(area: Rect, header_h: Int, footer_h: Int) -> (Rect, Rect, Rect) {
