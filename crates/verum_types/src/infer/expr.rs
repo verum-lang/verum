@@ -7429,6 +7429,38 @@ impl TypeChecker {
             List<crate::protocol::ProtocolBound>,
         > = Map::new();
 
+        // CALLEE-SOURCE (T1120): a unit's own `fn min` never runs — the
+        // ambient builtin answers instead, in BOTH layers, and
+        // `fn min(…) -> Text` used where `Int` is required checks clean.
+        // Four existing traces (FNSCHEME, CALLS, ARITY, WK_FALLBACK) say
+        // nothing about it, so the question "which SOURCE gave this call
+        // its signature" has no instrument. Printing the resolved type
+        // alone would not answer it either — the point is WHERE it came
+        // from, so the two arms are labelled apart.
+        //
+        // PLACEMENT MATTERS, and getting it wrong cost a build: the
+        // first version of this trace sat INSIDE the redirect arm
+        // below, so a bare `min(1, 2)` — the very call it was built to
+        // explain — took the other arm and the instrument printed
+        // nothing. Silence read as "the site is dead" when the site was
+        // simply not on that path. An instrument must print on EVERY
+        // input it claims to cover, which means it goes BEFORE the
+        // branch and names which arm was taken.
+        let trace_callee = std::env::var("VERUM_TRACE_CALLEE").is_ok();
+        if trace_callee {
+            let (arm, shown) = match (&effective_func_name, &callee_name) {
+                (Some(r), _) => ("redirect", r.as_str().to_string()),
+                (None, Some(c)) => ("callee", c.as_str().to_string()),
+                (None, None) => ("indirect", String::from("<expr>")),
+            };
+            eprintln!(
+                "[callee] arm={} name={} env_has={} type_args={}",
+                arm,
+                shown,
+                self.ctx.env.lookup(shown.as_str()).is_some(),
+                type_args.len()
+            );
+        }
         let func_result = if let Some(ref redirected_name) = effective_func_name {
             // Look up the redirected function name
             if let Some(scheme) = self.ctx.env.lookup(redirected_name.as_str()).cloned()

@@ -7215,7 +7215,9 @@ impl TypeChecker {
         // prelude import replay (`import_item_from_module_body`)
         // bypassed the inline copy of the rule and clobbered the
         // polymorphic print/println intrinsics.
-        let should_skip_registration = !self.insert_fn_scheme_guarded(func_name, scheme);
+        // T1120: DECLARATION channel — the unit's own `fn` outranks an
+        // ambient builtin (see `insert_fn_scheme_declared`).
+        let should_skip_registration = !self.insert_fn_scheme_declared(func_name, scheme);
 
         // Calculate required params (those without default values)
         // Default params must come after required params, so find first default

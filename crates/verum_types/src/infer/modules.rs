@@ -11194,7 +11194,8 @@ impl TypeChecker {
         // pass skipped the concrete `print(&Text)` but this insert put
         // it right back). Same ONE authority as every other channel.
         if !self.in_impl_block {
-            self.insert_fn_scheme_guarded(func.name.name.as_str(), scheme);
+            // T1120: DECLARATION channel.
+            self.insert_fn_scheme_declared(func.name.name.as_str(), scheme);
         }
 
         // Type check body
@@ -13131,8 +13132,9 @@ impl TypeChecker {
             final_scheme.with_protocol_bounds(func_param_protocol_bounds.clone())
         };
         if !self.in_impl_block {
-            // T0231: guarded — see the initial-scheme twin above.
-            self.insert_fn_scheme_guarded(func.name.name.as_str(), final_scheme);
+            // T0231 guarded / T1120 declaration channel — see the
+            // initial-scheme twin above.
+            self.insert_fn_scheme_declared(func.name.name.as_str(), final_scheme);
         }
 
         // Validate postconditions (ensures clauses) via SMT

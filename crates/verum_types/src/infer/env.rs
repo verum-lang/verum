@@ -6648,6 +6648,56 @@ impl TypeChecker {
         !should_skip
     }
 
+    /// **T1120 — a DECLARATION outranks an ambient builtin.**
+    ///
+    /// `insert_fn_scheme_guarded` above says in its own words what it
+    /// is for: *"Protect builtin generic/meta functions from being
+    /// DOWNGRADED by stdlib."* It was applied to every channel that
+    /// binds a scheme by name, so it also refused the one thing it was
+    /// never aimed at — a unit declaring a function of its own:
+    ///
+    /// ```text
+    /// fn min(a: Int, b: Int) -> Text { "MINE" }
+    /// fn main() { print(min(1, 2)); }        // printed 1, not MINE
+    /// ```
+    ///
+    /// The ambient `min` is `TypeScheme::poly([tv])` (one var); the
+    /// declaration is monomorphic (zero vars); `0 < 1` made it
+    /// "strictly less generic", so the insert was skipped and the body
+    /// never ran. Worse than a wrong answer, the declaration's own
+    /// return type stopped being checked: `fn min(…) -> Text` used
+    /// where `Int` is required type-checked clean, because the type in
+    /// the env belonged to the builtin.
+    ///
+    /// `docs/architecture/name-resolution.md` §3.2 ranks a
+    /// module-local declaration 4 and an ambient builtin 6 — this
+    /// restores that order for the declaration channels, and ONLY for
+    /// them. The prelude/import replay keeps the guard verbatim, which
+    /// is where the case it was written for actually lives
+    /// (`core/io/stdio.vr`'s concrete `print(&Text)` must not displace
+    /// the polymorphic `print<T>`).
+    ///
+    /// The stdlib is identified by asking the existing authority
+    /// (`ImportOrigin::classify`) rather than re-deriving a prefix
+    /// rule here, so the two stay in step.
+    pub(crate) fn insert_fn_scheme_declared(
+        &mut self,
+        name: &str,
+        scheme: crate::context::TypeScheme,
+    ) -> bool {
+        let declaring_module_is_stdlib = crate::import_origin::ImportOrigin::classify(
+            self.current_module_path().as_str(),
+            self.current_cog_name.as_str(),
+        ) == crate::import_origin::ImportOrigin::Stdlib;
+        if declaring_module_is_stdlib {
+            return self.insert_fn_scheme_guarded(name, scheme);
+        }
+        self.ctx.env.insert(verum_common::Text::from(name), scheme);
+        self.meta_builtin_names
+            .remove(&verum_common::Text::from(name));
+        true
+    }
+
     /// T0660 — value-typed contexts: `using [X]` accepts any KNOWN
     /// TYPE as a context, not only `context`/`context protocol`
     /// declarations. The DI model is `provide X = value` — a plain
