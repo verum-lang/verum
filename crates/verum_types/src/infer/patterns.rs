@@ -2370,6 +2370,32 @@ impl TypeChecker {
                 );
                 // Auto-deref: if matching &[T] or &&[T] with slice pattern, use inner type
                 let effective_ty = self.unwrap_references(&scheme.ty);
+
+                // A SLICE PATTERN IS A LOWER BOUND, and it can still be
+                // too long. `[a, b, c, d, ..]` against `[Int; 3]` binds
+                // four whatever the rest absorbs — measured before this
+                // check, it compiled and died at run time with "Index
+                // out of bounds".
+                //
+                // The sibling check on `PatternKind::Array` (T1125) did
+                // not see this case at all: `..` makes the parser emit
+                // `Slice`, not `Array`, so the two forms take two arms.
+                // Recorded as unreached in that commit rather than
+                // guessed at; this is where it lives.
+                if let Type::Array { size: Some(n), .. } = &effective_ty {
+                    let bound = before.len() + after.len();
+                    if bound > *n {
+                        return Err(TypeError::OtherWithCodeSpanned {
+                            code: verum_common::Text::from("E400"),
+                            msg: verum_common::Text::from(format!(
+                                "this pattern binds at least {bound} element(s), but the \
+                                 type is `[_; {n}]`\n         help: a `..` matches the \
+                                 rest, so it cannot make room for more than {n}"
+                            )),
+                            span: pattern.span,
+                        });
+                    }
+                }
                 // Handle Array, Slice, and collection types ([...] syntax works on all)
                 let is_array_or_slice =
                     matches!(&effective_ty, Type::Array { .. } | Type::Slice { .. });
