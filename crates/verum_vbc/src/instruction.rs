@@ -17085,6 +17085,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn cbgr_meta_count_pinned_at_sixty() {
         // 46 pre-T0846; +7 (EpochBegin/CheckFat/CheckWrite/Revoke/
         // RegisterRoot/RefRelease/ValidateRef, T0846); +7 (the
