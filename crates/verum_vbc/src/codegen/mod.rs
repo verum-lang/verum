@@ -2614,6 +2614,15 @@ impl VbcCodegen {
             // remains the canonical source.
             if !self.type_name_to_id.contains_key(name) {
                 let type_id = self.alloc_user_type_id();
+                // TYPEBIND (T1108): `type_name_to_id` is written from nine
+                // places and the LOCAL-TYPE-SHADOW rule reads provenance
+                // recorded by only two of them, so a name bound by any of
+                // the other seven is indistinguishable from a local one.
+                // Naming the site is the whole diagnosis; guessing it cost
+                // a build already.
+                if std::env::var("VERUM_TRACE_TYPEBIND").is_ok() {
+                    eprintln!("[typebind] site=protocol_stub name={name} id={}", type_id.0);
+                }
                 self.type_name_to_id.insert(name.clone(), type_id);
                 let name_sid = StringId(self.ctx.intern_string_raw(name));
                 let stub = crate::types::TypeDescriptor {
@@ -2739,6 +2748,12 @@ impl VbcCodegen {
                 self.ctx.declared_context_types.insert(ctx_name.clone());
                 if !self.type_name_to_id.contains_key(&ctx_name) {
                     let type_id = self.alloc_user_type_id();
+                    if std::env::var("VERUM_TRACE_TYPEBIND").is_ok() {
+                        eprintln!(
+                            "[typebind] site=context_type name={ctx_name} id={}",
+                            type_id.0
+                        );
+                    }
                     self.type_name_to_id.insert(ctx_name.clone(), type_id);
 
                     // Create TypeDescriptor with method names as variants
@@ -8966,6 +8981,9 @@ impl VbcCodegen {
                                 kind: crate::types::TypeKind::Protocol,
                                 ..Default::default()
                             });
+                            if std::env::var("VERUM_TRACE_TYPEBIND").is_ok() {
+                                eprintln!("[typebind] site=proto_impl name={} id={}", pn, proto_id.0);
+                            }
                             self.type_name_to_id.insert(pn.clone(), proto_id);
                         }
                         if let Some(&proto_type_id) = self.type_name_to_id.get(&pn) {
@@ -12288,6 +12306,9 @@ impl VbcCodegen {
                 });
             }
         }
+        if std::env::var("VERUM_TRACE_TYPEBIND").is_ok() {
+            eprintln!("[typebind] site=register_type name={} id={}", type_name, type_id.0);
+        }
         self.type_name_to_id.insert(type_name.to_string(), type_id);
         self.push_type_dedupe(td);
     }
@@ -14029,6 +14050,9 @@ impl VbcCodegen {
                             existing
                         } else {
                             let tid = self.alloc_user_type_id();
+                            if std::env::var("VERUM_TRACE_TYPEBIND").is_ok() {
+                                eprintln!("[typebind] site=decl_walk name={} id={}", type_name, tid.0);
+                            }
                             self.type_name_to_id.insert(type_name.clone(), tid);
                             tid
                         };
@@ -24352,6 +24376,9 @@ impl VbcCodegen {
                 }
                 None => {
                     let id = self.alloc_user_type_id();
+                    if std::env::var("VERUM_TRACE_TYPEBIND").is_ok() {
+                        eprintln!("[typebind] site=lazy_import name={} id={}", name_str, id.0);
+                    }
                     self.type_name_to_id.insert(name_str.clone(), id);
                     (id, true)
                 }
@@ -24803,6 +24830,9 @@ impl VbcCodegen {
                 Some(existing) => existing,
                 None => {
                     let id = self.alloc_user_type_id();
+                    if std::env::var("VERUM_TRACE_TYPEBIND").is_ok() {
+                        eprintln!("[typebind] site=proto_import name={} id={}", proto_name, id.0);
+                    }
                     self.type_name_to_id.insert(proto_name.clone(), id);
                     id
                 }

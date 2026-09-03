@@ -1846,17 +1846,103 @@ fn find_callees_in_module(module: &Module, func_name: &str) -> Vec<String> {
 /// AST visitor that collects computational properties from expressions.
 struct PropertyCollector {
     properties: Vec<ComputationalProperty>,
+    /// Names bound by a `let` in the function under analysis (T1117).
+    ///
+    /// `Mutates` is supposed to mean "this call mutates state the CALLER
+    /// can observe". A value the function created itself and returns by
+    /// value is observable only as the result, so building it cannot be
+    /// what makes the function impure — otherwise `pure` is unusable for
+    /// every function that assembles a collection, which is the ordinary
+    /// functional shape.
+    ///
+    /// Measured 2026-09-03 on `internal/registry-next`: five functions in
+    /// its protocol layer were rejected, every one of them for exactly
+    /// this, including one named `order_does_not_change_the_answer` —
+    /// an assertion about determinism that could not be declared pure.
+    locals: std::collections::HashSet<String>,
 }
 
 impl PropertyCollector {
     fn new() -> Self {
         Self {
             properties: Vec::new(),
+            locals: std::collections::HashSet::new(),
+        }
+    }
+
+    /// Does this initialiser CREATE a value, rather than name one the
+    /// function was handed?
+    ///
+    /// The distinction is load-bearing and I got it wrong first: with
+    /// every `let` counted as local,
+    ///
+    ///     pure fn sneaky(out: &mut List<Int>) -> Int {
+    ///         let alias = out;
+    ///         alias.push(1);
+    ///         0
+    ///     }
+    ///
+    /// checked CLEAN — a function that mutates the caller's list,
+    /// declared pure and accepted. Binding a parameter to a new name is
+    /// not creating a value, and the exemption must not follow the name.
+    ///
+    /// So the test is on the INITIALISER, not on the binding: a call, a
+    /// literal, a struct/array literal produce something new; a path, a
+    /// reference, a field or index projection all reach a value that
+    /// already existed. Anything unrecognised counts as NOT constructing
+    /// — a missed exemption costs a false `Mutates`, a missed report is
+    /// a lie about purity, and only one of those is a soundness hole.
+    fn initialiser_constructs(init: &Expr) -> bool {
+        matches!(
+            init.kind,
+            ExprKind::Call { .. }
+                | ExprKind::MethodCall { .. }
+                | ExprKind::Literal(_)
+                | ExprKind::Array(_)
+                | ExprKind::Tuple(_)
+                | ExprKind::Record { .. }
+        )
+    }
+
+    /// Is this receiver a value the function itself created?
+    fn receiver_is_local(&self, recv: &Expr) -> bool {
+        match &recv.kind {
+            ExprKind::Path(path) => path
+                .as_ident()
+                .map(|i| self.locals.contains(i.as_str()))
+                .unwrap_or(false),
+            // `out[i].push(..)`, `out.field.push(..)` — still the local's
+            // own storage. Walk down to the base of the projection.
+            ExprKind::Index { expr, .. } => self.receiver_is_local(expr),
+            ExprKind::Field { expr, .. } => self.receiver_is_local(expr),
+            ExprKind::TupleIndex { expr, .. } => self.receiver_is_local(expr),
+            _ => false,
         }
     }
 }
 
 impl Visitor for PropertyCollector {
+    /// Record `let` bindings so `receiver_is_local` can tell a value the
+    /// function CREATED from one it was HANDED (T1117). Only the simple
+    /// identifier pattern is recorded: a destructured binding gives the
+    /// caller's value new names, and treating those as locally owned
+    /// would exempt real mutation. Erring toward reporting keeps the
+    /// property meaningful — a missed exemption is a false `Mutates`, a
+    /// missed report is a lie about purity.
+    fn visit_stmt(&mut self, stmt: &Stmt) {
+        if let StmtKind::Let {
+            pattern,
+            value: verum_common::Maybe::Some(init),
+            ..
+        } = &stmt.kind
+            && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+            && Self::initialiser_constructs(init)
+        {
+            self.locals.insert(name.to_string());
+        }
+        walk_stmt(self, stmt);
+    }
+
     fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             // IO detection: print, read, write, File operations
@@ -1881,7 +1967,9 @@ impl Visitor for PropertyCollector {
                 walk_expr(self, expr);
             }
             // Mutation detection: &mut self method calls
-            ExprKind::MethodCall { method, .. } => {
+            ExprKind::MethodCall {
+                method, receiver, ..
+            } => {
                 // Methods ending with ! or known mutating patterns
                 let name = method.as_str();
                 if name == "push"
@@ -1892,7 +1980,13 @@ impl Visitor for PropertyCollector {
                     || name == "clear"
                     || name == "sort"
                 {
-                    self.properties.push(ComputationalProperty::Mutates);
+                    // …but only when the receiver is NOT the function's own
+                    // local (T1117). Mutating a value you created is not
+                    // observable to the caller; mutating a parameter or a
+                    // global is.
+                    if !self.receiver_is_local(receiver) {
+                        self.properties.push(ComputationalProperty::Mutates);
+                    }
                 }
                 walk_expr(self, expr);
             }
