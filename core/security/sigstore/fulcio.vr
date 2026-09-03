@@ -163,7 +163,7 @@ pub fn fulcio_proof_of_possession(k: &FulcioKey, oidc_sub: &Text) -> List<Byte> 
         FulcioKey.EcdsaP256(seed) => {
             let digest = Sha256.digest(msg);
             let sig = P256.sign_prehashed(seed, &digest);
-            P256Signature.to_der(&sig)
+            P256.signature_to_der(&sig)
         }
     }
 }

@@ -235,7 +235,7 @@ fn verify_ecdsa_p256_sig(
         .map_err(|e| MalformedKey(f"p256 public hex: {e}"))?;
     let pk = P256PublicKey.from_uncompressed(pk_bytes.as_slice())
         .map_err(|_| MalformedKey("p256: invalid uncompressed point".to_text()))?;
-    let sig = P256Signature.from_der(sig_bytes.as_slice())
+    let sig = P256.signature_from_der(sig_bytes.as_slice())
         .map_err(|_| MalformedSignature("p256: invalid DER signature".to_text()))?;
     let digest = Sha256.digest(payload.as_slice());
     match P256.verify_prehashed(&pk, &digest, &sig) {

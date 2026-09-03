@@ -421,7 +421,7 @@ fn verify_envelope_against_cert(
                     Result.Ok(p)  => p,
                     Result.Err(_) => { i = i + 1; continue; }
                 };
-                let p_sig = match P256Signature.from_der(sig_bytes.as_slice()) {
+                let p_sig = match P256.signature_from_der(sig_bytes.as_slice()) {
                     Result.Ok(s)  => s,
                     Result.Err(_) => { i = i + 1; continue; }
                 };

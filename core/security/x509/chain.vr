@@ -494,7 +494,7 @@ fn verify_ecdsa_p256(
             let pk = P256PublicKey.from_uncompressed(ec.bytes.as_slice())
                 .map_err(|_| ChainError.BadSignature(-1))?;
             // ECDSA signature is a SEQUENCE of two INTEGERs; feed as DER bytes.
-            let sig = P256Signature.from_der(signature.as_slice())
+            let sig = P256.signature_from_der(signature.as_slice())
                 .map_err(|_| ChainError.BadSignature(-1))?;
             let digest = Sha256.digest(message.as_slice());
             match P256.verify_prehashed(&pk, &digest, &sig) {

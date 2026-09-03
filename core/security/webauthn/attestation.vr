@@ -391,7 +391,7 @@ fn verify_signature_against_spki(
         (security.x509.spki.SubjectPublicKey.EcP256(ec), COSE_ALG_ES256) => {
             let pk = P256PublicKey.from_uncompressed(ec.bytes.as_slice())
                 .map_err(|_| WebAuthnError.InvalidSignature)?;
-            let p_sig = P256Signature.from_der(sig.as_slice())
+            let p_sig = P256.signature_from_der(sig.as_slice())
                 .map_err(|_| WebAuthnError.InvalidSignature)?;
             let digest = Sha256.digest(signed_input.as_slice());
             P256.verify_prehashed(&pk, &digest, &p_sig)
@@ -429,7 +429,7 @@ fn verify_ecdsa_p256(
     while j < 32 { uncompressed.push(y[j]); j = j + 1; }
     let pk = P256PublicKey.from_uncompressed(uncompressed.as_slice())
         .map_err(|_| WebAuthnError.InvalidSignature)?;
-    let p_sig = P256Signature.from_der(sig.as_slice())
+    let p_sig = P256.signature_from_der(sig.as_slice())
         .map_err(|_| WebAuthnError.InvalidSignature)?;
     let digest = Sha256.digest(signed_input.as_slice());
     P256.verify_prehashed(&pk, &digest, &p_sig)

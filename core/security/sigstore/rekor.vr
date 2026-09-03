@@ -283,7 +283,7 @@ public fn verify_entry_set(
     let digest = Sha256.digest(payload_bytes.as_slice());
     let sig_bytes = core.encoding.base64.decode(&entry.set.signature_b64)
         .map_err(|e| InvalidBase64(f"set sig: {e}"))?;
-    let sig = P256Signature.from_der(sig_bytes.as_slice())
+    let sig = P256.signature_from_der(sig_bytes.as_slice())
         .map_err(|_| InvalidEntry("malformed SET ECDSA signature".to_text()))?;
     match P256.verify_prehashed(&config.log_public_key, &digest, &sig) {
         Result.Ok(())  => Result.Ok(()),

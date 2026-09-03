@@ -827,7 +827,7 @@ fn verify_certificate_signature(
             SubjectPublicKey.EcP256(ec) => {
                 let pk_ec = P256PublicKey.from_uncompressed(ec.bytes.as_slice())
                     .map_err(|_| TlsError.BadCertificate)?;
-                let sig = P256Signature.from_der(cv.signature.as_slice())
+                let sig = P256.signature_from_der(cv.signature.as_slice())
                     .map_err(|_| TlsError.DecryptError)?;
                 let digest = Sha256.digest(signed);
                 match P256.verify_prehashed(&pk_ec, &digest, &sig) {
