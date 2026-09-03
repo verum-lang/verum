@@ -156,7 +156,7 @@ fn test_abs_function_postcondition_validation() {
     let mut validator = PostconditionValidator::new();
 
     // This should validate successfully (abs always returns non-negative)
-    let result = validator.validate_postconditions(&func, &return_type, &ctx);
+    let result = validator.count_postconditions(&func, &return_type, &ctx);
 
     // The current implementation is a stub that tracks stats but doesn't fail
     // This test ensures the API works correctly
@@ -184,7 +184,7 @@ fn test_validator_stats_tracking() {
     assert_eq!(validator.stats().postconditions_checked, 0);
 
     // Validate postconditions
-    let _ = validator.validate_postconditions(&func, &return_type, &ctx);
+    let _ = validator.count_postconditions(&func, &return_type, &ctx);
 
     // Stats should be updated
     assert_eq!(

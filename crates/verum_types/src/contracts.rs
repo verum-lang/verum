@@ -2,9 +2,26 @@
 //!
 //! Function contracts: "requires" for preconditions, "ensures" for postconditions, verified at compile-time (proof) or runtime
 //!
-//! This module implements compile-time validation of function contracts:
-//! - **Preconditions** (`requires`): Checked at call sites
-//! - **Postconditions** (`ensures`): Checked at function return
+//! WHAT THIS MODULE ACTUALLY DOES: it COUNTS contract clauses. It does
+//! not decide anything about them.
+//!
+//! The header used to say it "implements compile-time validation of
+//! function contracts — preconditions checked at call sites,
+//! postconditions checked at function return". Measured 2026-09-03:
+//! both `count_*` methods (named `validate_*` until that date) return
+//! `Ok(())` after incrementing a counter, and neither had a caller
+//! anywhere in the tree.
+//!
+//! The contracts ARE enforced, by the SMT path, and the mode decides:
+//!
+//!     verum check f.vr             0 errors  (SMT skipped by design)
+//!     verum check --verify f.vr    1 error
+//!     verum verify f.vr            "1 proved, 1 failed"
+//!
+//! on `pure fn f(n: Int) -> Int requires n >= 0 { n }` called as
+//! `f(-1)`. So there is no gap in enforcement — there was a gap between
+//! a name and its behaviour, which for a `pub` item is the same defect
+//! as `@cap`: a reader takes the name for the guarantee.
 //!
 //! # Architecture
 //!
@@ -136,7 +153,7 @@ impl PostconditionValidator {
     ///
     /// * `Ok(())` if all postconditions are satisfied
     /// * `Err(TypeError)` with detailed diagnostic if validation fails
-    pub fn validate_postconditions(
+    pub fn count_postconditions(
         &mut self,
         func: &FunctionDecl,
         _return_type: &Type,
@@ -203,7 +220,7 @@ impl PreconditionValidator {
     ///
     /// * `Ok(())` if all preconditions are satisfied
     /// * `Err(TypeError)` if any precondition fails
-    pub fn validate_preconditions(
+    pub fn count_preconditions(
         &mut self,
         func: &FunctionDecl,
         _args: &[Expr],
