@@ -5522,23 +5522,11 @@ impl ProtocolChecker {
         result
     }
 
-    /// Batch check multiple protocol implementations with caching
-    ///
-    /// Efficiently checks if a type implements multiple protocols,
-    /// using the cache to avoid redundant lookups.
-    ///
-    /// # Returns
-    /// A list of protocols that are NOT implemented (violations)
-    pub fn check_protocols_cached(&mut self, ty: &Type, protocols: &[&Text]) -> List<Text> {
-        let mut missing = List::new();
-        for protocol in protocols {
-            let protocol_path = Path::single(Ident::new(protocol.as_str(), Span::default()));
-            if !self.implements_cached(ty, &protocol_path) {
-                missing.push((*protocol).clone());
-            }
-        }
-        missing
-    }
+    // `check_protocols_cached` REMOVED (T1073): superseded, not
+    // unfinished. It had no caller, and neither did the
+    // `check_protocols` it cached for — measured, zero calls to
+    // either in the workspace. A cache in front of a function nobody
+    // calls answers a question nobody asks.
 
     /// Find implementation for type and protocol
     ///
@@ -10438,61 +10426,10 @@ impl ProtocolChecker {
         }
     }
 
-    /// Get protocol implementation with detailed error on failure
-    ///
-    /// This is a convenience method that combines `find_impl` with
-    /// `check_protocol_implementation` to provide a complete error
-    /// when a type doesn't implement a protocol.
-    pub fn get_impl_or_violations(
-        &self,
-        ty: &Type,
-        protocol_name: &Text,
-    ) -> Result<&ProtocolImpl, ProtocolViolations> {
-        let protocol_path = Path::single(Ident::new(protocol_name.as_str(), Span::default()));
-
-        // Try to find existing implementation
-        if let Maybe::Some(impl_) = self.find_impl(ty, &protocol_path) {
-            return Ok(impl_);
-        }
-
-        // Get the protocol definition for detailed checking
-        let protocol_def = match self.protocols.get(protocol_name) {
-            Some(p) => p,
-            None => {
-                return Err(ProtocolViolations {
-                    ty: ty.clone(),
-                    protocol: protocol_name.clone(),
-                    violations: List::from(vec![ProtocolViolation::MissingImplBlock {
-                        for_type: ty.clone(),
-                        protocol: protocol_name.clone(),
-                        help: format!("Protocol `{}` is not defined", protocol_name).into(),
-                    }]),
-                });
-            }
-        };
-
-        // Perform detailed check
-        match self.check_protocol_implementation(ty, protocol_def) {
-            Ok(()) => {
-                // This shouldn't happen if find_impl returned None,
-                // but handle gracefully
-                Err(ProtocolViolations {
-                    ty: ty.clone(),
-                    protocol: protocol_name.clone(),
-                    violations: List::from(vec![ProtocolViolation::MissingImplBlock {
-                        for_type: ty.clone(),
-                        protocol: protocol_name.clone(),
-                        help: "Implementation may exist but was not found".into(),
-                    }]),
-                })
-            }
-            Err(violations) => Err(ProtocolViolations {
-                ty: ty.clone(),
-                protocol: protocol_name.clone(),
-                violations,
-            }),
-        }
-    }
+    // `get_impl_or_violations` REMOVED (T1073): superseded by
+    // `check_protocol_implementation`, which its own doc comment named
+    // as the intended partner and which HAS callers (2). Keeping both
+    // meant two answers to one question, free to drift.
 
     /// Check if a type has a method with a given name and signature
     ///

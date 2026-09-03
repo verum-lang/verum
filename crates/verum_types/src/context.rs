@@ -1553,35 +1553,11 @@ impl TypeEnv {
         Maybe::None
     }
 
-    /// Check if type satisfies parameter bounds
-    /// Generic bounds checking: verifying type arguments satisfy protocol constraints at instantiation sites
-    ///
-    /// Performs actual bounds checking using the provided ProtocolChecker.
-    /// Returns the bounds that need to be satisfied if a protocol checker is not provided.
-    pub fn check_param_bounds(
-        &self,
-        ty: &Type,
-        param_name: &str,
-        protocol_checker: Option<&crate::protocol::ProtocolChecker>,
-    ) -> Result<(), Text> {
-        if let Maybe::Some(param) = self.get_type_param(param_name)
-            && !param.bounds.is_empty()
-        {
-            // If a protocol checker is provided, verify bounds
-            if let Some(checker) = protocol_checker {
-                // Convert bounds to slice for check_bounds
-                let bounds_vec: std::vec::Vec<_> = param.bounds.iter().cloned().collect();
-                if let Err(protocol_err) = checker.check_bounds(ty, &bounds_vec) {
-                    return Err(Text::from(format!(
-                        "Type '{}' does not satisfy bounds for parameter '{}': {}",
-                        ty, param_name, protocol_err
-                    )));
-                }
-            }
-            // Without protocol checker, we rely on caller to perform checking
-        }
-        Ok(())
-    }
+    // `check_param_bounds` REMOVED (T1073): superseded by the
+    // `func_param_protocol_bounds` path in infer/modules.rs (9 sites),
+    // which is what `scheme.with_protocol_bounds` consults and what
+    // T1074/T1075 repaired. This one had no caller and would have been
+    // a second, divergent authority on the same question.
 
     /// Get the bounds for a type parameter (for external checking)
     /// Generic bounds checking: verifying type arguments satisfy protocol constraints at instantiation sites
