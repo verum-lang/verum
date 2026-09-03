@@ -392,6 +392,125 @@ impl AttributeValidator {
 
             // Type-only attributes (per grammar/verum.ebnf)
             // @derive(...) - derive_attribute in grammar
+            // Registered in `verum_types::attr::standard` and MISSING from
+            // this list until 2026-09-03. The list's own comment says it
+            // "is not exhaustive - full validation is done by verum_types
+            // registry", but the diagnostic it produces is not tentative:
+            // it says `unknown attribute`, and it is a warning, so the
+            // attribute is a silent no-op AND the author is told the name
+            // does not exist. Measured: thirteen registered names —
+            // `@trusted`, `@linkage`, `@section` among them — were
+            // reported exactly as `@zzq_nonsense` was.
+            //
+            // A quick check may be incomplete about TARGETS. It may not be
+            // incomplete about EXISTENCE while wording its answer as if it
+            // were complete. `check_parser_attrs_cover_the_registry`
+            // pins this list against `standard.rs`.
+            "kernel"
+            | "link_name"
+            | "link_section"
+            | "linkage"
+            | "ownership"
+            | "property"
+            | "section"
+            | "test_case"
+            | "trusted"
+            | "unsafe_fn"
+            | "visibility"
+            | "weak" => target.contains(AttributeTarget::Function),
+
+            "register_block" => target.contains(AttributeTarget::Type),
+
+            // ---- Registered in `verum_types::attr::standard`, absent here
+            // until 2026-09-03 ----
+            //
+            // 85 names were in the registry and not in this match, so the
+            // parser reported each as `warning<W0400>: unknown attribute`
+            // — the same text, character for character, that a name like
+            // `@zzq_nonsense` gets. A warning, so the attribute is also a
+            // silent no-op: the author is told the name does not exist AND
+            // nothing acts on it.
+            //
+            // The list's comment above says it "is not exhaustive". That is
+            // fine for TARGETS; it is not fine for EXISTENCE, because the
+            // sentence this arm produces is not hedged.
+            //
+            // Targets below are the ones `standard.rs` registers, read
+            // mechanically. `make check-parser-attrs` pins the containment.
+            "alias"
+            | "api"
+            | "axiom"
+            | "benchmark"
+            | "cached"
+            | "checkpoint"
+            | "console"
+            | "constant"
+            | "cooperative"
+            | "custom_attribute"
+            | "decreases"
+            | "errors_via"
+            | "gen_closure_factory"
+            | "gen_helpers"
+            | "gen_incrementer"
+            | "gui"
+            | "import"
+            | "inject"
+            | "interrupt"
+            | "invalid_attribute_that_does_not_exist"
+            | "json"
+            | "logic"
+            | "main"
+            | "memory_effects"
+            | "modifies"
+            | "multi_grid"
+            | "noinline"
+            | "noreturn"
+            | "owl2_characteristic"
+            | "owl2_property"
+            | "private"
+            | "pub"
+            | "public"
+            | "pure"
+            | "purity_hint"
+            | "rate_limited"
+            | "recursive"
+            | "regex"
+            | "requires"
+            | "sql_query"
+            | "stack_align"
+            | "tailrec"
+            | "thread_safe"
+            | "timeout"
+            | "total"
+            | "track_caller"
+            | "uninterpreted"
+            | "unstable"
+            | "variadic"
+            | "wasm_export" => target.contains(AttributeTarget::Function),
+            "async_trait"
+            | "builder"
+            | "cfg_attr"
+            | "custom_attr"
+            | "derive_debug"
+            | "injectable"
+            | "invariant"
+            | "json_schema"
+            | "lock_level"
+            | "lock_order"
+            | "object_safe"
+            | "owl2_class"
+            | "owl2_disjoint_with"
+            | "owl2_equivalent_class"
+            | "owl2_has_key"
+            | "owl2_subclass_of"
+            | "table" => target.contains(AttributeTarget::Type),
+            "provide"
+            | "using" => target.contains(AttributeTarget::Module),
+            "prototype" => (target.contains(AttributeTarget::Function)
+                || target.contains(AttributeTarget::Module)),
+            "impl_trait_for_tuples" => target.contains(AttributeTarget::Impl),
+            "wasm_import" => target.contains(AttributeTarget::Static),
+
             // @repr(...) - common attribute for type layout
             // @sealed - prevents external implementations
             // @must_consume - alias for `type linear` (must use exactly once)
