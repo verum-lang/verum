@@ -2830,238 +2830,30 @@ impl TypeChecker {
     pub fn verify_all_negative_contexts(&self) -> Result<()> {
         self.context_checker.verify_all_negative_contexts()
     }
+    // REMOVED 2026-09-03 (T1095):
+    // `check_items_with_negative_context_verification`, 208 lines.
+    //
+    // A second, complete type-checking driver — pre_register_module,
+    // register_type_declaration, register_function_signature,
+    // check_item — that existed to end with
+    // `verify_all_negative_contexts`. It had ZERO callers anywhere,
+    // production or test, from its introduction.
+    //
+    // Meanwhile the negative-context check that RUNS is
+    // `verum_compiler::phases::context_validation::ContextValidationPhase`,
+    // reached from `check_project`, `run_check_only`, `run_interpreter`
+    // and `run_for_test`. Two implementations of one rule, one of them
+    // never invoked: the duplicate could only drift, and a reader
+    // finding it would reasonably wire the wrong one.
+    //
+    // The chain it called — `verify_all_negative_contexts` ->
+    // `verify_transitive_negative_contexts` -> `check_callees_for_excluded`
+    // in `context_check.rs` — is LEFT IN PLACE and still exercised by
+    // its own tests. It is correct as of T1095 (before that its input,
+    // `excluded_contexts`, was permanently empty). Anyone wiring it
+    // should first ask whether `ContextValidationPhase` already answers
+    // the question, because it does.
 
-    /// Type check a list of items and then verify negative context constraints.
-    ///
-    /// This is the recommended entry point for checking a module's items.
-    /// It performs:
-    /// 1. Type checking of all items (functions, types, impls, etc.)
-    /// 2. Transitive negative context verification
-    ///
-    /// # Arguments
-    ///
-    /// * `items` - The top-level items to check
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` if all items type-check correctly and negative context constraints
-    /// are satisfied, or the first error encountered.
-    ///
-    /// # Example
-    ///
-    /// ```verum
-    /// // This will be caught by transitive verification:
-    /// fn uses_db() using [Database] { ... }
-    /// fn no_db() using [!Database] { uses_db(); } // Error!
-    /// ```
-    pub fn check_items_with_negative_context_verification(
-        &mut self,
-        items: &[verum_ast::Item],
-    ) -> Result<()> {
-        // Phase -1: Pre-register all modules BEFORE any content processing
-        // This enables cross-module imports to work even when modules are declared after
-        // the modules that import from them.
-        // Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Module registration order
-        for item in items {
-            if let verum_ast::ItemKind::Module(module_decl) = &item.kind {
-                self.pre_register_module(module_decl, "cog");
-            }
-        }
-
-        // Phase -0.5: Collect every explicitly-imported name across the
-        // file's `mount` declarations BEFORE any of those mounts run.
-        //
-
-        // Why: an explicit `mount X.{Bar}` is supposed to be authoritative
-        // for the name `Bar` for the rest of the file. The existing guard
-        // at `import_item_from_module_impl` (search "explicit_imports")
-        // prevents glob re-imports from clobbering an explicit one — but
-        // only when the explicit was processed first. When `mount foo.*`
-        // appears before the explicit mount in source order, the glob runs
-        // first, registers `foo::Bar`, and the later explicit `{Bar}`
-        // import races against an existing flat-name binding, producing
-        // confusing variant-set diagnostics for users.
-        //
-
-        // The fix is order-independent: pre-scan every `Mount` item, walk
-        // its tree, and seed `explicit_imports` with every leaf-name that
-        // *would* be imported explicitly. Then when a glob runs in Phase 2,
-        // the existing guard skips those names — explicit always wins
-        // regardless of source order.
-        //
-
-        // Spec note: this matches the user-intuitive semantics — explicit
-        // imports are authoritative, gloss are background.
-        for item in items {
-            if let verum_ast::ItemKind::Mount(mount_decl) = &item.kind {
-                self.collect_explicit_import_names(&mount_decl.tree);
-            }
-        }
-
-        // Phase 0: Register all type declarations FIRST
-        // This is critical for user-defined types like Maybe<T>, Result<T, E> to be available
-        // before type-checking functions that use them.
-        // Types must be registered before function signatures because function signatures
-        // reference types in their parameters and return types.
-        for item in items {
-            // Skip @cfg-gated items that don't match the current platform
-            if !self.cfg_evaluator.should_include(&item.attributes) {
-                continue;
-            }
-            if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
-                if let Err(e) = self.register_type_declaration(type_decl) {
-                    // Soundness-critical errors (positivity, etc.) MUST
-                    // abort the build — masking them with `tracing::debug!`
-                    // is precisely the gap that lets `verum build` ship
-                    // a Berardi-shaped type as a working binary.
-                    // Recoverable errors (forward-ref / cross-module
-                    // resolution) keep their original log-and-continue
-                    // semantics so genuine forward declarations resolve
-                    // on the second pass.
-                    if e.is_soundness_critical() {
-                        return Err(e);
-                    }
-                    tracing::debug!(
-                        "Initial type registration for '{}' failed (may be resolved later): {}",
-                        type_decl.name.name.as_str(),
-                        e
-                    );
-                }
-            }
-        }
-
-        // Phase 1: Register all function signatures (for forward references)
-        for item in items {
-            // Skip @cfg-gated items that don't match the current platform
-            if !self.cfg_evaluator.should_include(&item.attributes) {
-                continue;
-            }
-            if let verum_ast::ItemKind::Function(func) = &item.kind {
-                self.register_function_signature(func)?;
-            }
-            // Register extern block function signatures (FFI declarations)
-            if let verum_ast::ItemKind::ExternBlock(extern_block) = &item.kind {
-                for func in &extern_block.functions {
-                    // Extern functions have no body - just register their signatures
-                    let _ = self.register_function_signature(func);
-                }
-            }
-            // Register FFI boundary function signatures
-            if let verum_ast::ItemKind::FFIBoundary(ffi_boundary) = &item.kind {
-                let mut boundary_fields = indexmap::IndexMap::new();
-                for ffi_func in &ffi_boundary.functions {
-                    let mut param_types = verum_common::List::new();
-                    for (_name, param_ty) in &ffi_func.signature.params {
-                        if let Ok(t) = self.ast_to_type(param_ty) {
-                            param_types.push(t);
-                        }
-                    }
-                    let ret_type = self
-                        .ast_to_type(&ffi_func.signature.return_type)
-                        .unwrap_or(Type::Unit);
-                    let fn_type = Type::Function {
-                        params: param_types,
-                        return_type: Box::new(ret_type),
-                        contexts: None,
-                        type_params: verum_common::List::new(),
-                        properties: None,
-                    };
-                    self.ctx.env.insert(
-                        ffi_func.name.name.as_str(),
-                        TypeScheme::mono(fn_type.clone()),
-                    );
-                    let qualified_name =
-                        format!("{}.{}", ffi_boundary.name.name, ffi_func.name.name);
-                    self.ctx
-                        .env
-                        .insert(qualified_name.as_str(), TypeScheme::mono(fn_type.clone()));
-                    boundary_fields.insert(ffi_func.name.name.clone(), fn_type);
-                }
-                // Register the boundary name itself as a record namespace
-                let boundary_type = Type::Record(boundary_fields);
-                self.ctx.env.insert(
-                    ffi_boundary.name.name.as_str(),
-                    TypeScheme::mono(boundary_type),
-                );
-            }
-        }
-
-        // Phase 1b: Register active pattern declarations
-        // Pattern declarations are compiled as functions, but we also need their
-        // return types available for type checking active pattern invocations in match arms.
-        // Spec: grammar/verum.ebnf line 1817 - pattern_def
-        for item in items {
-            if let verum_ast::ItemKind::Pattern(pattern_decl) = &item.kind {
-                self.register_pattern_declaration(pattern_decl)?;
-            }
-        }
-
-        // Phase 1c: Pre-register all const declarations (for forward references)
-        // Constants defined after functions in source order should still be visible
-        // within function bodies. We register their types here so that name resolution
-        // succeeds during Phase 2.
-        for item in items {
-            if let verum_ast::ItemKind::Const(const_decl) = &item.kind {
-                if let Ok(const_ty) = self.ast_to_type(&const_decl.ty) {
-                    self.ctx
-                        .env
-                        .insert(const_decl.name.name.as_str(), TypeScheme::mono(const_ty));
-                }
-            }
-        }
-
-        // Phase 2: Type check all items
-        for item in items {
-            self.check_item(item)?;
-        }
-
-        // Phase 2.5: Solve universe constraints accumulated during
-        // type checking (Phase A.2). Any `Type(N)` usage or explicit
-        // universe polymorphism constraints are resolved here. Errors
-        // are logged and deferred to the DependentVerifier orchestrator
-        // which may resolve them with a wider cross-module constraint set.
-        // Snapshot the constraints before solving — if the solver
-        // fails, the orchestrator gets the actual undecided set.
-        let pre_solve_constraints: List<crate::universe_solver::UniverseConstraint> = self
-            .ctx
-            .universe_ctx()
-            .constraints()
-            .iter()
-            .cloned()
-            .collect();
-
-        if let Err(e) = self.ctx.solve_universe_constraints() {
-            tracing::debug!("Universe constraint solve produced diagnostics: {}", e);
-            self.deferred_verification_goals
-                .push(DeferredVerificationGoal::UniverseConstraints {
-                    constraints: pre_solve_constraints,
-                });
-        }
-
-        // Phase 3: Verify transitive negative context constraints
-        // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
-        self.verify_all_negative_contexts()?;
-
-        // Phase 4: Drain deferred soundness-critical errors. These were
-        // stashed by helpers whose Rust signature is `()` — typically
-        // cross-module pre-passes that import stdlib types. A
-        // positivity violation in any of those declarations would
-        // otherwise be silently lost; surface them here so the build
-        // aborts before reaching codegen.
-        if let Some(e) = self.deferred_soundness_errors.pop() {
-            // Surface remaining deferred errors as additional
-            // diagnostics so the user sees ALL violations, not only
-            // the first.
-            let mut tail: Vec<TypeError> = std::mem::take(&mut self.deferred_soundness_errors);
-            for extra in tail.drain(..) {
-                let diag = extra.to_diagnostic();
-                self.diagnostics.push(diag);
-            }
-            return Err(e);
-        }
-
-        Ok(())
-    }
 
     /// Pre-register a module and all nested modules (public interface).
     ///
