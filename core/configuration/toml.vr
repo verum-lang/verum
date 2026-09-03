@@ -695,7 +695,7 @@ fn parse_unicode_escape(p: &mut Parser, out: &mut Text, hex_digits: Int) -> Resu
     if code > 0x10FFFF || (code >= 0xD800 && code < 0xE000) {
         return Result.Err(mk_err(p, InvalidUnicode, &"invalid scalar value"));
     }
-    out.push_codepoint(code);
+    out.push(code as Char);
     Result.Ok(())
 }
 

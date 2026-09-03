@@ -1620,6 +1620,38 @@ implement<T> List<T> {
     // Split and Rotate
     // =========================================================================
 
+    /// The elements in `[start, end)`, copied.
+    ///
+    /// `Text` has carried `slice(start, end)` since forever
+    /// (core/text/text.vr:759) and callers reach for the same spelling
+    /// on lists — TOML path handling, the async IO buffer protocol and
+    /// the agent's token windows all write `xs.slice(a, b)` (T1061).
+    /// `split_at` answers a different question (both halves, one cut)
+    /// and `as_slice` gives the whole thing, so neither served them.
+    ///
+    /// Out-of-range bounds are clamped rather than fatal: a slice is a
+    /// READ, and the callers here compute their ends arithmetically
+    /// (`path.len() - 1`), where an off-by-one should yield an empty
+    /// list rather than kill the process.  `split_at` asserts because
+    /// it partitions and cannot mean anything at a bad index.
+    public fn slice(&self, start: Int, end: Int) -> List<T>
+    where T: Clone
+    {
+        let n = self.len();
+        let lo = if start < 0 { 0 } else if start > n { n } else { start };
+        let hi = if end < lo { lo } else if end > n { n } else { end };
+        let mut out: List<T> = List.with_capacity(hi - lo);
+        let mut i: Int = lo;
+        while i < hi {
+            match self.get(i) {
+                Maybe.Some(item) => out.push(item.clone()),
+                Maybe.None => break,
+            }
+            i = i + 1;
+        }
+        out
+    }
+
     // Split the list into two at the given index.
     public fn split_at(&self, mid: Int) -> (List<T>, List<T>)
     where T: Clone
