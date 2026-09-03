@@ -8354,8 +8354,29 @@ impl TypeChecker {
                             verum_common::Maybe::None => return None,
                         };
                         let impl_ty = crate::method_resolution::function_decl_to_type(func);
-                        Self::unambiguous_signature_disagreement(&proto_method.ty, &impl_ty)
-                            .map(|why| (func.name.name.clone(), why, func.span))
+                        // The protocol's OWN parameters, plus the
+                        // method's: both are bound elsewhere than in
+                        // this comparison, so neither can disagree.
+                        let mut bound: Vec<Text> = protocol
+                            .type_params
+                            .iter()
+                            .map(|tp| tp.name.clone())
+                            .collect();
+                        bound.extend(func.generics.iter().filter_map(|g| {
+                            match &g.kind {
+                                verum_ast::ty::GenericParamKind::Type { name, .. }
+                                | verum_ast::ty::GenericParamKind::HigherKinded {
+                                    name, ..
+                                } => Some(name.name.clone()),
+                                _ => None,
+                            }
+                        }));
+                        Self::unambiguous_signature_disagreement(
+                            &proto_method.ty,
+                            &impl_ty,
+                            &bound,
+                        )
+                        .map(|why| (func.name.name.clone(), why, func.span))
                     })
                     .collect(),
                 verum_common::Maybe::None => Vec::new(),
@@ -8709,7 +8730,7 @@ impl TypeChecker {
     /// two spellings of one type — T1029 measured 267 such messages and
     /// every class examined was an artefact), generics, references and
     /// `Unknown`, which is the ABSENCE of an answer rather than one.
-    fn scalar_vs_named_disagreement(a: &Type, b: &Type) -> bool {
+    fn scalar_vs_named_disagreement(a: &Type, b: &Type, bound_names: &[Text]) -> bool {
         // `Self` is the one named type that MUST differ from the
         // implementation's: `fn clone(&self) -> Self` implemented for
         // `Int` returns `Int`, and that is the correct implementation,
@@ -8717,15 +8738,33 @@ impl TypeChecker {
         // reported 10 such pairs in core/base/primitives.vr alone —
         // `clone` returning Bool/Char/Float/Int/Unit and `from`
         // returning Float — every one of them a correct impl.
+        //
+        // A PROTOCOL PARAMETER is the same case, and it cost a corpus
+        // regression to learn (2026-09-03, found by verum-2b's sweep,
+        // not by this session's probes):
+        //
+        //     type Normed<R> is protocol { fn abs(self) -> R; };
+        //     implement Normed<Int> for Int { fn abs(self) -> Int {…} }
+        //
+        // `R` is bound by the implement's argument — `Normed<Int>` means
+        // `R = Int` — so `-> Int` is exactly right, and the comparison
+        // saw a scalar against the UNSUBSTITUTED `R`. Four files, 19
+        // firings, all of them correct code refused.
+        //
+        // The doc comment on `unambiguous_signature_disagreement` had
+        // already listed "a protocol parameter instantiated by the
+        // implementation" as one of the benign readings that make
+        // `signature_disagreement` unusable as a judge. The exclusion
+        // for `Self` was written; the one for the parameters was not —
+        // the same rule, one of its two cases spelled.
         let named_concrete = |t: &Type| match t {
-            Type::Named { path, .. } => {
-                match path.segments.last() {
-                    Some(verum_ast::ty::PathSegment::Name(ident)) => {
-                        ident.name.as_str() != "Self"
-                    }
-                    _ => false,
+            Type::Named { path, .. } => match path.segments.last() {
+                Some(verum_ast::ty::PathSegment::Name(ident)) => {
+                    let n = ident.name.as_str();
+                    n != "Self" && !bound_names.iter().any(|p| p.as_str() == n)
                 }
-            }
+                _ => false,
+            },
             _ => false,
         };
         (Self::is_decidable_scalar(a) && named_concrete(b))
@@ -8750,7 +8789,11 @@ impl TypeChecker {
     /// ARITY IS DELIBERATELY NOT CHECKED here. The two sides may or may
     /// not count the receiver the same way, and that is not established —
     /// reporting on it would be a guess wearing a diagnostic's clothes.
-    pub fn unambiguous_signature_disagreement(proto: &Type, imp: &Type) -> Option<String> {
+    pub fn unambiguous_signature_disagreement(
+        proto: &Type,
+        imp: &Type,
+        bound_names: &[Text],
+    ) -> Option<String> {
         let (
             Type::Function {
                 params: pp,
@@ -8793,7 +8836,7 @@ impl TypeChecker {
         // type spelled differently, and T1029's sweep found every such
         // class to be a comparison artefact. A scalar is never an alias
         // for a named type, so this pair admits no benign reading.
-        if Self::scalar_vs_named_disagreement(pr, ir) {
+        if Self::scalar_vs_named_disagreement(pr, ir, bound_names) {
             return Some(format!(
                 "returns `{}`, but the protocol declares `{}`",
                 ir.to_text(),
@@ -8801,6 +8844,34 @@ impl TypeChecker {
             ));
         }
         if Self::is_decidable_scalar(pr) && Self::is_decidable_scalar(ir) && pr != ir {
+            // `Unit` ON THE PROTOCOL SIDE is not an answer, it is the
+            // absence of one — the same status the doc comment above
+            // already grants `Unknown`. A declared type the checker
+            // cannot resolve degrades to `Unit`, and then the
+            // diagnostic tells the author the protocol declares
+            // something it does not.
+            //
+            // Measured 2026-09-03, core/math/examples.vr:
+            //
+            //     protocol: fn omega(&self) -> X.cells(0)
+            //     reported: "returns `Int`, but the protocol declares `Unit`"
+            //
+            // The implementation IS wrong there — but the message
+            // names a declaration that does not exist, and the real
+            // defect is upstream: `implement InfSubobjectClassifier
+            // for T` supplies no argument for the protocol's
+            // `<X: InfinityTopos>` parameter, so the projection has
+            // nothing to resolve against. Reporting the checker's own
+            // unresolved projection as the author's mistake is exactly
+            // what `unambiguous_signature_disagreement` exists to
+            // avoid.
+            //
+            // The cost is a genuine `-> Unit` vs `-> Int` mismatch going
+            // unreported. That is the direction this file fails in
+            // deliberately.
+            if matches!(**pr, Type::Unit) {
+                return None;
+            }
             return Some(format!(
                 "returns `{}`, but the protocol declares `{}`",
                 ir.to_text(),
