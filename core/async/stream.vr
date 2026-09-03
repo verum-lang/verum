@@ -1541,7 +1541,7 @@ implement<S: Stream, C: FromIterator<S.Item>> Future for StreamCollect<S, C> {
                     self.items.push(item);
                 }
                 Poll.Ready(Maybe.None) => {
-                    let items = core.memory.take(&mut self.items);
+                    let items = core.base.memory.take(&mut self.items);
                     return Poll.Ready(C.from_iter(items.into_iter()));
                 }
                 Poll.Pending => return Poll.Pending,
@@ -1950,11 +1950,11 @@ implement<S: Stream, Su: StreamSum<S.Item>> Future for SumStream<S, Su> {
         loop {
             match self.stream.poll_next(cx) {
                 Poll.Ready(Maybe.Some(item)) => {
-                    let sum = core.memory.take(&mut self.sum);
+                    let sum = core.base.memory.take(&mut self.sum);
                     self.sum = sum.add(item);
                 }
                 Poll.Ready(Maybe.None) => {
-                    return Poll.Ready(core.memory.take(&mut self.sum));
+                    return Poll.Ready(core.base.memory.take(&mut self.sum));
                 }
                 Poll.Pending => return Poll.Pending,
             }
@@ -1975,11 +1975,11 @@ implement<S: Stream, P: StreamProduct<S.Item>> Future for ProductStream<S, P> {
         loop {
             match self.stream.poll_next(cx) {
                 Poll.Ready(Maybe.Some(item)) => {
-                    let product = core.memory.take(&mut self.product);
+                    let product = core.base.memory.take(&mut self.product);
                     self.product = product.mul(item);
                 }
                 Poll.Ready(Maybe.None) => {
-                    return Poll.Ready(core.memory.take(&mut self.product));
+                    return Poll.Ready(core.base.memory.take(&mut self.product));
                 }
                 Poll.Pending => return Poll.Pending,
             }
@@ -2159,12 +2159,12 @@ implement<S: Stream> Stream for ChunkedStream<S> {
 
         // Yield chunk if we have items
         if self.buffer.len() == self.size {
-            let chunk = core.memory.take(&mut self.buffer);
+            let chunk = core.base.memory.take(&mut self.buffer);
             self.buffer = List.with_capacity(self.size);
             Poll.Ready(Maybe.Some(chunk))
         } else if self.done && !self.buffer.is_empty() {
             // Final partial chunk
-            let chunk = core.memory.take(&mut self.buffer);
+            let chunk = core.base.memory.take(&mut self.buffer);
             Poll.Ready(Maybe.Some(chunk))
         } else if self.done {
             Poll.Ready(Maybe.None)
@@ -2287,7 +2287,7 @@ implement<S: Stream> Stream for WindowedStream<S> {
                         Poll.Pending => return Poll.Pending,
                     }
                 } else {
-                    let batch = core.memory.take(&mut self.buffer);
+                    let batch = core.base.memory.take(&mut self.buffer);
                     return Poll.Ready(Maybe.Some(batch));
                 }
             }
@@ -2302,7 +2302,7 @@ implement<S: Stream> Stream for WindowedStream<S> {
                     if self.buffer.is_empty() {
                         return Poll.Ready(Maybe.None);
                     } else {
-                        let batch = core.memory.take(&mut self.buffer);
+                        let batch = core.base.memory.take(&mut self.buffer);
                         return Poll.Ready(Maybe.Some(batch));
                     }
                 }
