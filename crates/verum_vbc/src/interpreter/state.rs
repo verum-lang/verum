@@ -2431,22 +2431,10 @@ pub struct CbgrStats {
     pub tier2_derefs: u64,
 
     // ========== Adaptive Validation Fields ==========
-    /// Consecutive validations without violation (used for adaptive checking).
-    pub consecutive_clean_validations: u64,
 
-    /// Adaptive validation skip counter (skip N validations when pattern is clean).
-    pub adaptive_skip_remaining: u64,
 
-    /// Whether adaptive validation is enabled.
-    pub adaptive_enabled: bool,
 
-    /// Threshold for consecutive clean validations before reducing check frequency.
-    /// Default: 1000 clean validations trigger adaptation.
-    pub adaptive_threshold: u64,
 
-    /// Skip count when adaptive mode is active.
-    /// Default: Skip 9 out of 10 validations (10% validation rate).
-    pub adaptive_skip_count: u64,
 }
 
 impl Default for CbgrStats {
@@ -2459,12 +2447,7 @@ impl Default for CbgrStats {
             cbgr_violations: 0,
             tier0_derefs: 0,
             tier1_derefs: 0,
-            tier2_derefs: 0,
-            consecutive_clean_validations: 0,
-            adaptive_skip_remaining: 0,
-            adaptive_enabled: false, // Disabled by default for safety
-            adaptive_threshold: 1000,
-            adaptive_skip_count: 9,
+            tier2_derefs: 0, // Disabled by default for safety
         }
     }
 }
@@ -2497,105 +2480,23 @@ impl CbgrStats {
 
     // ========== Adaptive Validation Methods ==========
 
-    /// Enable adaptive validation with custom thresholds.
-    ///
-    /// When enabled, the system will reduce validation frequency after
-    /// observing `threshold` consecutive clean validations, skipping
-    /// `skip_count` validations for every validation performed.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// stats.enable_adaptive(1000, 9); // After 1000 clean, skip 9 of 10
-    /// ```
-    pub fn enable_adaptive(&mut self, threshold: u64, skip_count: u64) {
-        self.adaptive_enabled = true;
-        self.adaptive_threshold = threshold;
-        self.adaptive_skip_count = skip_count;
-    }
-
-    /// Disable adaptive validation (always validate).
-    pub fn disable_adaptive(&mut self) {
-        self.adaptive_enabled = false;
-        self.adaptive_skip_remaining = 0;
-        self.consecutive_clean_validations = 0;
-    }
-
-    /// Check if validation should be performed based on adaptive state.
-    ///
-    /// Returns `true` if validation should be performed, `false` if it can be skipped.
-    /// This method should be called before each CBGR validation.
-    ///
-    /// When adaptive mode is disabled, always returns `true`.
-    /// When adaptive mode is enabled and pattern is clean, may return `false`
-    /// to skip validation and reduce overhead.
-    #[inline(always)]
-    pub fn should_validate(&mut self) -> bool {
-        if !self.adaptive_enabled {
-            return true;
-        }
-
-        // If we're in adaptive skip mode, check if we should skip
-        if self.adaptive_skip_remaining > 0 {
-            self.adaptive_skip_remaining -= 1;
-            return false;
-        }
-
-        // Check if we've reached the threshold for adaptive mode
-        if self.consecutive_clean_validations >= self.adaptive_threshold {
-            // Enter adaptive skip mode
-            self.adaptive_skip_remaining = self.adaptive_skip_count;
-        }
-
-        true
-    }
-
-    /// Record a successful (clean) validation.
-    ///
-    /// Call this after each validation that passes without violation.
-    #[inline(always)]
-    pub fn record_clean_validation(&mut self) {
-        self.cbgr_checks += 1;
-        self.consecutive_clean_validations += 1;
-    }
-
-    /// Record a validation that detected a violation.
-    ///
-    /// This resets the adaptive state to ensure full validation resumes.
-    #[inline(always)]
-    pub fn record_violation(&mut self) {
-        self.cbgr_violations += 1;
-        self.consecutive_clean_validations = 0;
-        self.adaptive_skip_remaining = 0;
-    }
-
-    /// Get the current violation rate (violations / checks).
-    pub fn violation_rate(&self) -> f64 {
-        if self.cbgr_checks == 0 {
-            0.0
-        } else {
-            self.cbgr_violations as f64 / self.cbgr_checks as f64
-        }
-    }
-
-    /// Get the estimated overhead reduction from adaptive validation.
-    ///
-    /// Returns a value between 0.0 (no reduction) and 1.0 (maximum reduction).
-    pub fn adaptive_overhead_reduction(&self) -> f64 {
-        if !self.adaptive_enabled || self.cbgr_checks == 0 {
-            0.0
-        } else {
-            // Calculate the fraction of skipped validations
-            let skip_ratio =
-                self.adaptive_skip_count as f64 / (self.adaptive_skip_count as f64 + 1.0);
-            // Only applies if we've been in adaptive mode
-            if self.consecutive_clean_validations >= self.adaptive_threshold {
-                skip_ratio
-            } else {
-                0.0
-            }
-        }
-    }
+    // ADAPTIVE CBGR VALIDATION REMOVED (T1073).
+    //
+    // Seven methods lived here — enable_adaptive / disable_adaptive /
+    // should_validate / record_clean_validation / record_violation /
+    // violation_rate / adaptive_overhead_reduction — and the whole
+    // subsystem was closed over itself: measured, every name had
+    // exactly ONE mention in the workspace, its own definition, and
+    // no test referenced any of them.
+    //
+    // So the counters `should_validate` reads were permanently zero,
+    // `adaptive_enabled` could never leave its `false` default, and
+    // nothing was ever skipped. Not a soundness defect — the code
+    // read as a live overhead-reduction feature and did nothing.
+    //
+    // Deleted rather than wired: its input was never populated, which
+    // is the difference between "not finished" and "superseded". The
+    // hot path validates unconditionally and always has.
 }
 
 impl InterpreterState {
