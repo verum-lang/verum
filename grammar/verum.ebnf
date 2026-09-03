@@ -821,23 +821,41 @@ variant_data    = '{' , field_list , '}'
 tuple_payload   = [ tuple_slot , { ',' , tuple_slot } ] ;
 tuple_slot      = [ identifier , ':' ] , type_expr ;
 
-(* A LABEL HERE MUST BE A PLAIN IDENTIFIER, and that is stricter than
-   every other name position in the language.  A lexer keyword usable
-   as a `let` binding, a record field and a function parameter is
-   REFUSED as a tuple-payload label:
+(* A LABEL HERE MUST BE A PLAIN IDENTIFIER, and this is the STRICTEST
+   name position in the language.  Measured 2026-09-03 across four
+   positions, with `other` as the control that passes all four:
 
-     A(stage: Int)   Parse error: expected type      <- refused
-     { stage: Int }  accepted
-     fn f(stage: Int) accepted
-     let stage = 1;   accepted
+     word      { w: Int }   fn f(w:)   let w =   A(w: Int)
+     ------------------------------------------------------
+     stage         ok          ok         ok      REFUSED
+     gen           ok          ok         ok      REFUSED
+     set           ok          ok         ok      REFUSED
+     field         ok          ok         ok      REFUSED
+     layer         ok          ok         ok      REFUSED
+     ref           ok        REFUSED    REFUSED   REFUSED
+     with          ok        REFUSED    REFUSED   REFUSED
+     in          REFUSED     REFUSED    REFUSED   REFUSED
+     private     REFUSED     REFUSED    REFUSED   REFUSED
+     move        REFUSED     REFUSED    REFUSED   REFUSED
+     other         ok          ok         ok        ok
 
-   Measured over `stage`, `gen`, `set`, `field`, `pattern`, `layer`,
-   with `other` as the control that passes all four positions.  The
-   mechanism is that these are lexer TOKENS rather than identifiers, and
-   only this position insists on an `Ident`.  Recorded because the
-   asymmetry is invisible from the productions and costs a confusing
-   "expected type" at a name the author has already used elsewhere in
-   the same file.
+   THREE classes, and conflating them misleads in a way worth avoiding:
+
+     * `stage` `gen` `set` `field` `layer` — free everywhere EXCEPT
+       this position.  This is the asymmetry the production above
+       exists to record.
+     * `ref` `with` — a RECORD field only.
+     * `in` `private` `move` — reserved in every position; their
+       refusal here is about the word, not about the position, and they
+       are listed at `lexer_only_reserved` below.
+
+   A reader told only "these words fail as a payload label" would
+   reasonably try `{ private: Int }` and be refused again.
+
+   The mechanism is that all of them are lexer TOKENS rather than
+   identifiers; what differs is how many positions insist on an `Ident`.
+   The diagnostic is "expected type" pointing at the LABEL, so an author
+   looks at the type and finds nothing wrong with it.
                                                                         *)
 (* `expression` here covers paren-wrapped range expressions for n-cells:  *)
 (*   `(a..b)` parses as `Paren(Range(a, b))` — picked up by the parser    *)
