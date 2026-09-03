@@ -1,0 +1,56 @@
+// @test: check
+// @level: L1
+// @tier: 0
+// @tags: capabilities, attenuation
+// @timeout: 20000
+// @expected-exit: 0
+// @description: A value carrying more capabilities than required is
+//   accepted — giving a capability away is the whole point.
+
+// `grammar/verum.ebnf:1416` gives `Type with [Cap, ...]`, and the
+// comment above it says the form "enables automatic capability
+// attenuation at call sites".
+//
+// It did not. Measured 2026-09-03, BOTH directions were refused with
+// the same diagnostic:
+//
+//     value carries [ReadWrite], required [ReadOnly]  -> E411
+//     value carries [ReadOnly], required [ReadWrite]  -> E411
+//
+// and the message read "capability cannot be widened" for the first,
+// which is a NARROWING. The rule that `ReadWrite` grants `ReadOnly`
+// existed — hand-written inside the method-call check — while the
+// attenuation check used plain set membership. One rule, two copies,
+// only one complete.
+//
+// This file is the positive half. Its sibling
+// `widening_is_refused.vr` carries the negative half; a check that
+// refuses everything passes that one alone.
+//
+// T1073.
+
+type Database is { id: Int };
+
+implement Database {
+    public fn query(&self) -> Int {
+        self.id
+    }
+
+    public fn write(&mut self, v: Int) -> Int {
+        v
+    }
+}
+
+// Requires only Read.
+fn count_rows(db: &Database with [Read]) -> Int {
+    db.query()
+}
+
+// Holds ReadWrite and gives Write away at the call.
+fn use_it(db: &Database with [ReadWrite]) -> Int {
+    count_rows(db)
+}
+
+public fn main() -> Int {
+    0
+}

@@ -191,6 +191,47 @@ impl TypeCapabilitySet {
             .all(|cap| other.capabilities.contains(cap))
     }
 
+    /// Does `holder` grant everything this set requires?
+    ///
+    /// THE canonical question for "may this value be used where those
+    /// capabilities are required". Plain set membership
+    /// ([`is_subset_of`]) is the wrong one: the capability vocabulary is
+    /// a lattice, not an alphabet — `ReadWrite` grants `ReadOnly` and
+    /// `WriteOnly`, and `Admin` grants everything.
+    ///
+    /// That rule already existed, hand-written inside the METHOD-call
+    /// check in `infer/modules.rs`, while the ATTENUATION check used
+    /// plain membership. One rule, two copies, and only one complete —
+    /// so passing a `[ReadWrite]` value where `[Read]` was required, the
+    /// give-away direction the whole feature exists for, was refused
+    /// with "capability cannot be widened" (measured 2026-09-03, both
+    /// directions of the probe rejected identically). Both sites now
+    /// ask here.
+    pub fn is_satisfied_by(&self, holder: &TypeCapabilitySet) -> bool {
+        self.capabilities.iter().all(|req| holder.grants(req))
+    }
+
+    /// Does this set grant `required`, following the lattice?
+    pub fn grants(&self, required: &TypeCapability) -> bool {
+        if self.capabilities.contains(required) {
+            return true;
+        }
+        // Admin is the top of the lattice.
+        if self.capabilities.contains(&TypeCapability::Admin) {
+            return true;
+        }
+        // ReadWrite is the join of ReadOnly and WriteOnly.
+        if self.capabilities.contains(&TypeCapability::ReadWrite)
+            && matches!(
+                required,
+                TypeCapability::ReadOnly | TypeCapability::WriteOnly
+            )
+        {
+            return true;
+        }
+        false
+    }
+
     /// Get capabilities in this set but not in another (difference)
     pub fn difference(&self, other: &TypeCapabilitySet) -> List<TypeCapability> {
         self.capabilities

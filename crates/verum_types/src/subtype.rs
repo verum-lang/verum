@@ -1081,8 +1081,11 @@ impl Subtyping {
 
                 // t1's capabilities must be a superset of t2's capabilities
                 // (more capabilities = subtype, contravariant in capability sets)
-                // Uses TypeCapabilitySet::is_subset_of for proper set comparison
-                c2.is_subset_of(c1)
+                // The lattice, not plain membership: a `ReadWrite` value is
+                // a subtype of the `Read` one, which is what attenuation
+                // means. Same authority as the attenuation and method-call
+                // checks.
+                c2.is_satisfied_by(c1)
             }
 
             // Capability-restricted to base type coercion

@@ -11467,21 +11467,6 @@ impl TypeChecker {
             match &param.kind {
                 FunctionParamKind::Regular { pattern, ty, .. } => {
                     let param_ty = self.ast_to_type(ty)?;
-                    if std::env::var_os("VERUM_TRACE_CAPS").is_some() {
-                        // T0918: what the binding ACTUALLY holds.
-                        // Structural, not Display — Display was one of
-                        // the two channels under suspicion, and printing
-                        // through a suspect channel measures nothing.
-                        //
-                        // It answered both questions at once and refuted
-                        // both hypotheses: the binding carries
-                        // `CapabilityRestricted { base: Named{Store},
-                        // capabilities: {ReadOnly} }`, and Display prints
-                        // it faithfully. The misleading `found 'Store'`
-                        // comes from inside the unifier's own deliberate
-                        // peel.
-                        eprintln!("[caps] param bound as: {:?}", param_ty);
-                    }
 
                     // Track parameter name for return lifetime validation
                     if let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind {
@@ -26180,12 +26165,12 @@ impl TypeChecker {
         // - ReadWrite satisfies both ReadOnly and WriteOnly
         // - Admin satisfies all capabilities
         for required in required_caps.to_list() {
-            let has_cap = available_capabilities.contains(&required)
-                // ReadWrite satisfies ReadOnly and WriteOnly
-                || (available_capabilities.contains(&TypeCapability::ReadWrite)
-                    && matches!(required, TypeCapability::ReadOnly | TypeCapability::WriteOnly))
-                // Admin satisfies everything
-                || available_capabilities.contains(&TypeCapability::Admin);
+            // The lattice lives in ONE place now
+            // (`TypeCapabilitySet::grants`). This site used to carry its
+            // own copy of it while the ATTENUATION check used plain set
+            // membership — one rule, two spellings, and the incomplete
+            // one refused the give-away direction.
+            let has_cap = available_capabilities.grants(&required);
 
             if !has_cap {
                 // Convert to Text for error reporting compatibility
@@ -27858,3 +27843,4 @@ impl TypeChecker {
         false
     }
 }
+

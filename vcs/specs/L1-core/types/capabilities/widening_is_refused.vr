@@ -1,0 +1,42 @@
+// @test: check
+// @level: L1
+// @tier: 0
+// @tags: capabilities, attenuation
+// @timeout: 20000
+// @expected-exit: 101
+// @expected-stderr: capability cannot be widened
+// @description: A value carrying fewer capabilities than required is
+//   refused — a capability may be given away, never acquired.
+
+// The negative half of the pair. See `attenuation_is_allowed.vr` for
+// the positive half and for why both are needed: before the fix BOTH
+// directions were refused, so a negative test alone would have been
+// green while the feature was unusable.
+//
+// T1073.
+
+type Database is { id: Int };
+
+implement Database {
+    public fn query(&self) -> Int {
+        self.id
+    }
+
+    public fn write(&mut self, v: Int) -> Int {
+        v
+    }
+}
+
+// Requires ReadWrite.
+fn store(db: &Database with [ReadWrite]) -> Int {
+    db.query()
+}
+
+// Holds only Read, and asks for more.
+fn use_it(db: &Database with [Read]) -> Int {
+    store(db)
+}
+
+public fn main() -> Int {
+    0
+}

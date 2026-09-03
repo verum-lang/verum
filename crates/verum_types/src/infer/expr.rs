@@ -2199,7 +2199,8 @@ impl TypeChecker {
             // Unrestricted: full rights, so any restriction is a give-away.
             None => return Ok(()),
         };
-        if required.is_subset_of(held) {
+        // The lattice, not plain membership: `ReadWrite` grants `Read`.
+        if required.is_satisfied_by(held) {
             return Ok(());
         }
         let want: Vec<String> = required.names().iter().map(|n| n.to_string()).collect();
