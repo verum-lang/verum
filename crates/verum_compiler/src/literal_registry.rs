@@ -137,7 +137,7 @@ pub enum ParsedLiteral {
     /// `parts` is a list of segments: literal text segments and
     /// interpolation placeholders. The lowering phase walks `parts` and
     /// builds a call to `core.shell.exec.sh()` with each `${expr}`
-    /// auto-escaped via `core.shell.escape.ShellEscape::shell_quote`.
+    /// auto-escaped via `core.shell.escape.Escaper.posix`.
     ShellCmd {
         /// Sequence of (kind, payload) pairs where:
         ///  * kind = 0 → literal text (payload is the bytes)
@@ -332,7 +332,14 @@ impl LiteralRegistry {
     ///  * literal text segments
     ///  * `${expr}` interpolations — each becomes a "kind=1" part holding
     ///  the raw expression text. Lowering re-parses the expression and
-    ///  wraps it with `ShellEscape::shell_quote(...)`.
+    ///  wraps it with `Escaper.posix(&expr)` —
+    ///  `macro_expansion::lower_shell_cmd`, which is the code that runs.
+    ///  (These comments said `ShellEscape::shell_quote(...)`, which is the
+    ///  protocol METHOD the escaper is declared behind, not the call the
+    ///  lowering emits; a reader grepping for `shell_quote` in Rust finds
+    ///  only comments and concludes the escaping is unwired. It is wired,
+    ///  and verified: `Escaper.posix("'; rm -rf /")` returns
+    ///  `''\''; rm -rf /'` — one properly quoted POSIX token.)
     ///  * `$unsafe{expr}` interpolations — kind=2 parts, bypass auto-escape
     ///  (caller must wrap call site in `unsafe { ... }`).
     ///

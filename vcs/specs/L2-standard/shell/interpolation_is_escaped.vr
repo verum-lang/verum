@@ -1,0 +1,45 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: shell, escaping, security
+// @timeout: 30000
+// @expected-exit: 0
+// @expected-stdout: plain=hello
+// @expected-stdout: quoted=''\''; rm -rf /'
+// @expected-stdout: space='a b'
+// @expected-stdout: empty=''
+// @description: The escaper behind `sh#"...${x}..."` renders any value as
+//   exactly one POSIX token.
+
+// `docs/cookbook/shell-scripting.md` promises that data interpolated into
+// a `sh#"..."` literal "cannot break out of its quoted form". That is a
+// SECURITY claim, and it was verified rather than assumed on 2026-09-03:
+// the lowering (`lower_shell_cmd`, in the macro-expansion phase) wraps
+// every `${expr}`
+// in `Escaper.posix(&expr)`, and the escaper closes the quote, emits an
+// escaped quote, and reopens — the standard POSIX single-quote idiom.
+//
+// The check that mattered is the third line: a value containing a single
+// quote is the only way out of single-quoted context, so `'; rm -rf /`
+// must come back as ONE token, not three.
+//
+// Pinned here because the claim is load-bearing and the code path is not
+// obvious: a reader grepping for the protocol method `shell_quote` finds
+// only comments, since the emitted call names the escaper directly.
+//
+// T1073.
+
+mount core.shell.escape.{Escaper};
+
+public fn main() -> Int {
+    let plain: Text = "hello";
+    let quoted: Text = "'; rm -rf /";
+    let sp: Text = "a b";
+    let empty: Text = "";
+
+    print(f"plain={Escaper.posix(&plain)}");
+    print(f"quoted={Escaper.posix(&quoted)}");
+    print(f"space={Escaper.posix(&sp)}");
+    print(f"empty={Escaper.posix(&empty)}");
+    0
+}
