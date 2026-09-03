@@ -1,0 +1,33 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, name-resolution, inversion
+// @expect: error(E100)
+// @expected-error: E100 "unbound variable in refinement predicate"
+// @description: A misspelled name in a refinement predicate is an error, not a silently inverted type.
+// @spec: 03-type-system.md — refinement types
+
+// =============================================================================
+// Why this file exists
+// =============================================================================
+//
+// `slef` is a typo of `self`. Measured 2026-09-03, before the fix:
+//
+//     type P is Int { slef > 0 };
+//     let x: P = -5;    ACCEPTED, 0 errors
+//     let x: P =  5;    REJECTED, E500
+//
+// Exactly inverted. Every identifier in a predicate becomes a free
+// variable of the solver obligation, so an unknown name is not "no
+// constraint" — it is an arbitrary one, and the type accepts precisely
+// the values the author wrote the refinement to reject.
+//
+// The same name in ordinary code was already `E100: unbound variable`,
+// so the checker knew it was unknown; the refinement path never asked.
+
+type P is Int { slef > 0 };
+
+fn main() {
+    let x: P = -5;
+    print(x);
+}
