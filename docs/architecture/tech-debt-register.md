@@ -294,6 +294,26 @@ release claim unsupportable are measured shut:
   before landing, not argued: 25 output-asserting specs went 16 → 18 passed
   across clean runs. `scripts/ci/check_shipped_path_parity.py` ratchets the
   residue (1 divergence, the async gap T0734).
+  **Closed out 2026-09-03 (b7578130a).** One divergence outlived that
+  landing, and the subject that finds it is not a reference — spec 627 is
+  green on the base binary, so the entry above's own repro no longer
+  reproduces. `phase_interpret_for_test` did not call `run_global_ctors`,
+  which `phase_interpret` and `run_compiled_vbc` both do, on a comment
+  claiming ctors are "primarily FFI library initializers … that fail on
+  macOS". They are also `@thread_local` static initialisers and the CBGR
+  allocator's heap bootstrap. Four lines:
+  `@thread_local static COUNTER: Int = 9; fn main() { print(COUNTER); }`
+  — `verum run` 9, the harness `()`, which is `Value::default()` read from
+  a slot nothing wrote. Six further probes in the same class (plain static,
+  static read through a call, static write, `Heap.new`, `List` push) now
+  agree on both paths. Gate:
+  `scripts/ci/check_test_harness_runs_the_users_program.sh`.
+  Structural residue, no behavioural symptom today and therefore NOT
+  changed: `validate_module` documents itself as the single authority every
+  entry point should call; `run_interpreter` open-codes a subset, and
+  `run_for_test` calls it AND then repeats six of its phases — with the
+  call placed before `clear_non_compilable_stdlib_modules`, so its first
+  type-check runs against a different set of stdlib modules than its second.
 * **The compiler no longer guesses a field position** (T0723, e108aebb0).
   FIELD-GUESS-HARD-1 is 0, down from 167; refusal is the default and
   `VERUM_FIELD_GUESS_PERMISSIVE=1` is the escape. Verified by re-baking under
