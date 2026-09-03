@@ -50,6 +50,35 @@ pub struct CoreMetadata {
     /// Protocol implementations (impl Eq for Int, etc.)
     pub implementations: List<ImplementationDescriptor>,
 
+    /// Module-level `static` declarations, keyed by qualified name
+    /// (`core.mem.epoch.GLOBAL_EPOCH`) exactly as `functions` is.
+    ///
+    /// A `static` needed its own channel because it is the one public
+    /// declaration form with no proxy here. A `const` survives by being
+    /// LOWERED to a zero-argument function — `register_constant_with_value`
+    /// in verum_vbc's codegen — and so arrives in `functions`. A `static`
+    /// cannot take that route: the constant-function path re-executes the
+    /// initialiser on every read, so a write made in one frame is invisible
+    /// to the next. Codegen therefore routes it to a TLS slot instead, and
+    /// the slot is a codegen-time structure that no wire format carries.
+    ///
+    /// The consequence, measured 2026-09-03 (T1088), was that NONE of the
+    /// stdlib's five `public static` declarations crossed a module
+    /// boundary, and the three mount forms disagreed about it:
+    ///
+    ///     mount core.mem.epoch.{GLOBAL_EPOCH};   error<E401> cannot find
+    ///     mount core.mem.epoch.*;                accepted…
+    ///     let e = GLOBAL_EPOCH;                  …then error<E100> unbound
+    ///
+    /// — the braced form validates each named item against the module
+    /// surface and told the truth; the glob form does not validate and
+    /// deferred the same truth to the use site.
+    ///
+    /// `serde(default)` so older sidecars keep deserialising; an empty map
+    /// degrades to exactly the previous behaviour.
+    #[serde(default)]
+    pub statics: OrderedMap<Text, StaticDescriptor>,
+
     /// Pre-computed monomorphizations (List<Int>, Map<Text, Int>, etc.)
     pub monomorphizations: OrderedMap<Text, MonomorphizedType>,
 
@@ -563,6 +592,35 @@ pub struct ProtocolDescriptor {
     /// #101 — declaration span; see [`TypeDescriptor::decl_span`].
     #[serde(default)]
     pub decl_span: Maybe<DeclSpan>,
+}
+
+/// A module-level `static` declaration, as the module surface sees it.
+///
+/// Deliberately thin: what an importer needs is the NAME (to answer
+/// "does this module declare it") and the declared TYPE (to type the
+/// use site). The storage is elsewhere — codegen gives every module-level
+/// static a TLS slot, and the archive loader already re-registers that
+/// slot on the user side, keyed on the name it reads out of the
+/// `__tls_init_<NAME>` constructor. So this descriptor deliberately does
+/// NOT carry a slot: two places naming the same slot is how they drift.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaticDescriptor {
+    /// Simple name as written (`GLOBAL_EPOCH`).
+    pub name: Text,
+
+    /// The module that declares it, in the `module …;` spelling.
+    pub module_path: Text,
+
+    /// The declared type, rendered the way `FunctionDescriptor`'s
+    /// parameter and return types are rendered.
+    pub ty: Text,
+
+    /// Whether it was written `static mut`.
+    ///
+    /// Carried because it is the difference between a cross-module READ,
+    /// which this channel enables, and a cross-module WRITE, which it does
+    /// not: the importer needs to be able to say which one it is refusing.
+    pub is_mut: bool,
 }
 
 /// Function definition descriptor

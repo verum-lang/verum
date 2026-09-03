@@ -3033,8 +3033,22 @@ fn inject_declared_module_free_fn_keys(
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            // Quick filter: no public fn, nothing to do.
-            if !content.contains("public fn ") {
+            // Quick filter: no public fn and no public static, nothing to do.
+            //
+            // `public static` was added to the filter, not just to the item
+            // loop below, because the filter is what decides whether the
+            // file is PARSED at all — a file exporting only statics would
+            // never reach the walk (T1088). No such file exists in core/
+            // today (measured: every carrier of a `public static` also has
+            // between 10 and 29 `public fn`), so this half is currently
+            // inert; it is here so the pass does not depend on that
+            // remaining true.
+            //
+            // The filter's other failure — matching `public fn` inside a
+            // string or a comment, and so parsing a file with no public
+            // functions at all — is a defect in the opposite direction and
+            // belongs to the bake-gap audit (T0640), not here.
+            if !content.contains("public fn ") && !content.contains("public static ") {
                 continue;
             }
             let mut parser = verum_fast_parser::Parser::new(&content);
@@ -3050,6 +3064,35 @@ fn inject_declared_module_free_fn_keys(
             let source_module = crate::stdlib_index::file_path_to_module_path(&rel_str);
 
             for item in &module.items {
+                // A module-level `public static` is recorded in its own
+                // channel (T1088).  It has no proxy among the descriptors
+                // below: a `const` reaches `metadata.functions` because
+                // codegen LOWERS it to a zero-argument function, and a
+                // `static` cannot take that route — the constant-function
+                // path re-executes the initialiser on every read, so a
+                // write from one frame is invisible to the next, and
+                // codegen gives it a TLS slot instead.  The slot is a
+                // codegen-time structure no wire format carries, so before
+                // this the declaration reached the archive as nothing but
+                // an interned string and the module surface did not have
+                // it.  Measured: all five `public static` in core/ were
+                // unmountable, while `EPOCH_MAX` seventy lines from one of
+                // them imported cleanly.
+                if let ItemKind::Static(sd) = &item.kind {
+                    if matches!(sd.visibility, verum_ast::decl::Visibility::Public) {
+                        let qualified: Text =
+                            format!("{}.{}", source_module, sd.name.name.as_str()).into();
+                        metadata.statics.entry(qualified).or_insert_with(|| {
+                            verum_types::core_metadata::StaticDescriptor {
+                                name: sd.name.name.clone(),
+                                module_path: Text::from(source_module.as_str()),
+                                ty: Text::from(render_type(&sd.ty).as_str()),
+                                is_mut: sd.is_mut,
+                            }
+                        });
+                    }
+                    continue;
+                }
                 let ItemKind::Function(fd) = &item.kind else {
                     continue;
                 };

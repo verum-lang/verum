@@ -93,6 +93,13 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
         // typechecker's re-export resolver degrades to a no-op when
         // the entry is absent, falling back to AST walks).
         module_reexports: OrderedMap::new(),
+        // Module-level statics are captured at archive precompile time
+        // (T1088), from a source walk in `precompile.rs`. This
+        // archive→metadata convert path has no source to walk, so it
+        // leaves the map empty — the module-surface query degrades to
+        // exactly its pre-T1088 behaviour, which is what every other
+        // source-walk field here does.
+        statics: OrderedMap::new(),
         // T1071: filled by `precompile.rs::scan_blanket_impls`, which
         // recovers the blankets from source — the archive itself carries
         // no blanket descriptor to convert here.

@@ -826,6 +826,38 @@ jobs:
           scripts/ci/check_call_through_fn_bound_has_the_declared_result.sh --selftest ./target/release/verum
           scripts/ci/check_call_through_fn_bound_has_the_declared_result.sh ./target/release/verum
 
+      # NOT WIRED YET, and deliberately so — two gates in scripts/ci/ are
+      # RED against HEAD because the defects they pin are still open, and
+      # a red gate in CI teaches people to ignore CI:
+      #
+      #   check_a_module_level_static_crosses_the_module_boundary.sh
+      #       T1088. The braced mount now resolves; `let e = GLOBAL_EPOCH;`
+      #       still reports `unbound variable`, so the gate's use arm is
+      #       red. Wire it when the value binding lands.
+      #   check_a_mounted_call_never_compiles_to_unit.sh
+      #       T0907. An explicitly mounted call still compiles to `()`
+      #       when the bare slot is contested. Wire it with the fix.
+      #
+      # Both are runnable by hand against any binary and both fail with a
+      # named reason; they are the acceptance for their tasks, not dead
+      # files.
+
+      # An associated type written as a generic APPLICATION must satisfy a
+      # bound its generic impl provides. Measured (T1098): 40 false E405
+      # across a 14-file core/ sample, including two in a file that had
+      # been clean, all naming types whose `implement<T> … for X<T>` sits
+      # in the same file. `implements_protocol_any` compared whole type
+      # keys while `make_type_key` renders arguments into them, so the
+      # ANY-instantiation question its name and doc promise was never
+      # asked. The gate keeps the concrete spelling working AND keeps a
+      # genuinely unmet bound refused — a false-positive repair turns into
+      # a false-negative one without that second half.
+      - name: A generic type satisfies a bound its impl provides
+        run: |
+          scripts/ci/check_a_generic_type_satisfies_a_bound_its_impl_provides.sh --selftest ./target/release/verum
+          scripts/ci/check_a_generic_type_satisfies_a_bound_its_impl_provides.sh ./target/release/verum
+
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:

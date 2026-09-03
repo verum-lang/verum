@@ -3729,6 +3729,37 @@ impl TypeChecker {
                     self.record_mount_binding(bind_name, &resolved_key);
                     return Ok(());
                 }
+                // A module-level `static` is a VALUE, and the lookup above
+                // only knows functions (T1088).
+                //
+                // Publishing statics into the module surface made
+                // `mount core.mem.epoch.{GLOBAL_EPOCH}` stop reporting E401
+                // — and left `let e = GLOBAL_EPOCH;` at `error<E100>:
+                // unbound variable`, which is the same "does not cross the
+                // boundary" defect one layer down. Measured: the braced
+                // mount went from 2 diagnostics to 1, the survivor being
+                // the use site.
+                //
+                // A `const` reaches this binding through
+                // `resolve_function_via_metadata_reexports` because codegen
+                // LOWERS it to a zero-argument function. A `static` cannot
+                // take that route — the constant-function path re-executes
+                // the initialiser on every read — so it needs its own
+                // lookup against its own channel.
+                if let Maybe::Some(md) = &self.core_metadata.clone() {
+                    let key: Text =
+                        format!("{}.{}", module_path.as_str(), item_name).into();
+                    if let Some(sd) = md.statics.get(&key) {
+                        let ty = crate::infer::helpers::parse_descriptor_type_string(
+                            sd.ty.as_str(),
+                        );
+                        self.ctx
+                            .env
+                            .insert(bind_name, crate::context::TypeScheme::mono(ty));
+                        self.record_mount_binding(bind_name, &key);
+                        return Ok(());
+                    }
+                }
                 if let Some((true_name, src)) = self
                     .reexport_source_module_for(module_path.as_str(), item_name)
                     // T0244: see the function-branch filter in
@@ -4160,6 +4191,36 @@ impl TypeChecker {
             if !matches!(fd.parent_type, Maybe::None) {
                 continue;
             }
+            let leaf = &key.as_str()[lo.len()..];
+            if leaf.is_empty() || leaf.contains('.') {
+                continue;
+            }
+            out.insert(Text::from(leaf));
+        }
+        // …and the module-level statics, by the same range query over the
+        // same key shape (T1088).
+        //
+        // THIS IS NOT THE SURFACE THE E401 GATE READS, and adding statics
+        // here alone was measured INERT: the braced-mount check consults
+        // `probed_module_info.exports`, built by the registry synthesis in
+        // `verum_compiler::pipeline::loading`, where the fix belongs and
+        // now is. `VERUM_TRACE_MODSURFACE=1` names the deciding surface in
+        // one line; reading the code had pointed at this one.
+        //
+        // It stays because the two surfaces answering "does M export X"
+        // differently is itself a defect this file has paid for before —
+        // see the T0693 note beside the registry synthesis, where exactly
+        // that divergence made `mount core.term.layout.{Constraint}` fail
+        // against a 263-entry surface that lacked only the re-export
+        // leaves. Keeping them in step is the point, not the repair.
+        //
+        // The `parent_type` filter above has no analogue: a static is
+        // always module-level. The dotted-leaf filter does — the range is
+        // one dot-level under `module`, so `a.b.c.X` must not answer for
+        // `mount a.b.*`.
+        let lo_key2 = Text::from(lo.as_str());
+        let hi_key2 = Text::from(hi.as_str());
+        for key in metadata.statics.range(lo_key2..hi_key2).map(|(k, _)| k) {
             let leaf = &key.as_str()[lo.len()..];
             if leaf.is_empty() || leaf.contains('.') {
                 continue;

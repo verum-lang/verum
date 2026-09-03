@@ -2077,10 +2077,44 @@ impl ProtocolChecker {
         // went unnoticed: asked about any user-defined or stdlib type,
         // the method answered "does not implement" no matter what was
         // registered.
+        // …and the TYPE side ignores its arguments for the same reason the
+        // protocol side does (T1098).
+        //
+        // `make_type_key` renders `MaybeIter<T>` as `named:MaybeIter.[…]`,
+        // arguments included, while `implement<T> Iterator for MaybeIter<T>`
+        // registers under the key its own parameter produced. The two are
+        // the same declaration and did not compare equal, so this method —
+        // whose name, doc and only caller (`implements_by_name`) all state
+        // the ANY-instantiation question — answered "does not implement"
+        // for every generic type.
+        //
+        // Measured 2026-09-03 over 14 core/ files: 40 E405 diagnostics,
+        // every one false. `core/base/maybe.vr` reported that
+        // `type IntoIter = MaybeIter<T>` fails the `Iterator` bound while
+        // line 511 of that same file declares
+        // `implement<T> Iterator for MaybeIter<T>`; `core/base/iterator.vr`
+        // said the same of `Rev<@builtin_interval>` against FIVE
+        // `implement … Iterator for Rev…`. The check had been unreachable
+        // until a neighbouring repair loaded the protocol definitions that
+        // open its `known` guard, so the wrongness is older than its
+        // visibility.
+        //
+        // Stripping the argument list is what "any variant" MEANS here; a
+        // caller that needs one instantiation asks
+        // `implements_protocol_instantiation`, which is the precise
+        // counterpart documented immediately below.
         let type_key = self.make_type_key(ty);
+        fn base_of(k: &str) -> &str {
+            match k.find('[') {
+                Some(i) => &k[..i],
+                None => k,
+            }
+        }
+        let type_base = base_of(type_key.as_str());
         let prefix = format!("{}<", protocol_base_name);
         self.impl_index.keys().any(|(tk, pk)| {
-            tk == &type_key && (pk.as_str() == protocol_base_name || pk.starts_with(&prefix))
+            (tk == &type_key || base_of(tk.as_str()) == type_base)
+                && (pk.as_str() == protocol_base_name || pk.starts_with(&prefix))
         })
     }
 

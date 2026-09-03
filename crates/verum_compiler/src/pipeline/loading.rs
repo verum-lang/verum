@@ -1562,6 +1562,49 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        // MODULE-LEVEL STATICS (T1088) — published here for the same reason
+        // the three families above are: THIS surface is the one the
+        // probed-exports E401 gate consults. Measured 2026-09-03, with the
+        // instrument that already existed:
+        //
+        //     [modsurface] site=probed-exports module=core.mem.epoch
+        //                  item=GLOBAL_EPOCH surface=probed_module_info.exports
+        //                  count=21
+        //
+        // 21 entries, no static among them — and a repair that added statics
+        // to `own_surface_functions` in verum_types was INERT, because that
+        // is a different surface. The trace named the deciding one; reading
+        // the code had pointed at the other.
+        //
+        // A `static` needed a channel of its own (`CoreMetadata::statics`)
+        // because it is the one public declaration form with no proxy: a
+        // `const` reaches `metadata.functions` by being LOWERED to a
+        // zero-argument function, and a `static` cannot take that route —
+        // the constant-function path re-executes the initialiser on every
+        // read, so a write from one frame would be invisible to the next.
+        // Codegen gives it a TLS slot instead, and the slot is a
+        // codegen-time structure no wire format carries.
+        //
+        // Published into the FUNCTION bucket, and that is not laziness: a
+        // `const` already arrives in that bucket by the lowering above, so
+        // a static landing anywhere else would make two spellings of one
+        // idea answer differently to the same question.
+        // The SIMPLE name, not the map key. The registration below extracts
+        // a leaf with `rsplit("::")` and its dot-based `or_else` arm is
+        // documented there as unreachable — `rsplit` on a string without the
+        // separator yields the whole string — so a dotted key would be
+        // published verbatim and `mount M.{X}` would still not find `X`.
+        // Measured: publishing the key took the surface from 21 entries to
+        // 22 and left the mount failing exactly as before; the entry was
+        // there under the wrong spelling. Function keys survive that path
+        // only because bare duplicates exist alongside the qualified ones.
+        for sd in metadata.statics.values() {
+            let mp = sd.module_path.as_str().to_string();
+            if !mp.is_empty() {
+                module_map.entry(mp).or_default().2.push(sd.name.as_str().to_string());
+            }
+        }
+
         // T0693 RE-EXPORT LEAVES — the synthesized surface must carry what
         // `public mount .sub.{X as Y};` publishes.
         //
