@@ -28,6 +28,78 @@ use crate::options::VerifyMode;
 use super::{CompilationPipeline, RunResult};
 
 impl<'s> CompilationPipeline<'s> {
+    /// Type-check every module of the cog before this entry point acts
+    /// on it (T1119).
+    ///
+    /// `phase_load_source` collapses a project to ONE module — `main.vr`
+    /// — so every driver that starts with it checks that file and lets
+    /// the rest of the cog through unchecked. Measured 2026-09-03: the
+    /// same `-> Int` returning `Text` was caught in `main.vr` and missed
+    /// in a sibling, and `verum run` EXECUTED the program and printed
+    /// the `Text`.
+    ///
+    /// Ten entry points begin that way, so the repair could not be a
+    /// guard copied ten times — that is the shape the defect is made of.
+    /// The DECISION (does this entry promise a checked program?) stays
+    /// with the entry, which is why this is a method it calls rather
+    /// than something buried in `phase_load_source`: `run_parse_only`
+    /// promises the opposite, and its measured 8 MB / 0.01 s exists
+    /// precisely because it materialises nothing.
+    ///
+    /// The condition is "the input belongs to a cog", NOT "the input is
+    /// a directory". `verum build` is handed the directory, but
+    /// `verum run` resolves `src/main.vr` itself (commands/run.rs) and
+    /// hands over a FILE — an `is_dir()` guard was inert there, on the
+    /// path that executes.
+    ///
+    /// ONLY the codegen path calls this today, and the reason is a
+    /// measured regression rather than a preference. Called at the top
+    /// of `run_interpreter` (or `run_for_test`) it leaves state the
+    /// interpreter cannot use: a CORRECT cog that printed 42 then died
+    /// with `[lenient] stage-5 qualified cross-module fn stub never
+    /// resolved`. The control that caught it — "a correct cog must
+    /// still build AND run" — was written into the verification before
+    /// the binary existed, precisely because a narrowing repair can
+    /// narrow to the empty set.
+    ///
+    /// So `run` and the harness still execute a cog whose siblings were
+    /// never type-checked. Closing that needs the pre-pass to run
+    /// against its OWN session rather than this one, which is the next
+    /// step of T1119, not a smaller version of this one.
+    pub(super) fn ensure_project_type_checked(&mut self) -> Result<()> {
+        if !self.input_belongs_to_a_cog() {
+            return Ok(());
+        }
+        self.check_project()?;
+        Ok(())
+    }
+
+    /// Is there a `verum.toml` at or above the input?
+    pub(super) fn input_belongs_to_a_cog(&self) -> bool {
+        let input = &self.session.options().input;
+        let mut dir = if input.is_dir() {
+            input.clone()
+        } else {
+            match input.parent() {
+                Some(p) => p.to_path_buf(),
+                None => return false,
+            }
+        };
+        // Bounded walk: a cog root within eight levels of its sources is
+        // every layout this toolchain produces, and an unbounded loop on
+        // a path that never terminates is worse than a missed check.
+        for _ in 0..8 {
+            if dir.join("verum.toml").exists() {
+                return true;
+            }
+            match dir.parent() {
+                Some(p) => dir = p.to_path_buf(),
+                None => return false,
+            }
+        }
+        false
+    }
+
     /// Unified dispatch entry-point: routes to the appropriate
     /// internal `run_*` method based on the session's
     /// `CompilerOptions`. Centralises tier selection in one place
@@ -41,6 +113,36 @@ impl<'s> CompilationPipeline<'s> {
             self.run_check_only()?;
             return Ok(RunResult::Checked);
         }
+        // T1119 — a cog's SIBLING modules were never type-checked.
+        //
+        // `run_native_compilation` runs its phases in full: load, parse,
+        // type_check, dependency_analysis. The gap is its INPUT.
+        // `phase_load_source` on a directory finds `main.vr` inside it and
+        // hands back ONE module, so the whole chain honestly checks that
+        // one file; the rest of the cog arrives later, when codegen
+        // resolves mounts, and never passes the type checker.
+        //
+        // Measured 2026-09-03 — one defect, only its LOCATION moved:
+        //
+        //     `-> Int` returning `Text` in src/mistyped.vr   check 3, build 0
+        //     the same in src/main.vr                        check 3, build 2
+        //
+        // and `verum run` on the first PRINTED `x` — a `Text` where the
+        // signature says `Int`, executed. That is not a missing
+        // diagnostic; it is a soundness hole reachable by the ordinary
+        // shape of any real program.
+        //
+        // Not the same defect as T1101 (a phase absent from a driver's
+        // list) or T1118 (a driver stopping at the first failing phase).
+        // A third form: the phase is called, is correct, and is handed
+        // less than the program.
+        //
+        // `check_project` already walks every discovered module and type
+        // checks it without generating code, so the repair is to ask it
+        // first rather than to write a second traversal — a second one
+        // would drift from this one exactly the way the drivers already
+        // have.
+        self.ensure_project_type_checked()?;
         let path = self.run_native_compilation()?;
         Ok(RunResult::Built(path))
     }
@@ -462,6 +564,23 @@ impl<'s> CompilationPipeline<'s> {
     pub fn run_interpreter(&mut self, args: List<Text>) -> Result<()> {
         let trace = std::env::var("VERUM_TRACE_PHASES").is_ok();
         let t_total = std::time::Instant::now();
+
+        // T1119, the interpreter half. `phase_load_source` below hands
+        // back ONE module for a directory — `main.vr` — so a sibling's
+        // body never reaches the type checker on this path either.
+        // Measured after the `run()` half was repaired:
+        //
+        //     defect in src/helper.vr   check 3   build 2   run 0
+        //
+        // `build` had been taught; `run` had not, and `run` is the path
+        // that EXECUTES. The same pre-pass, for the same reason: ask the
+        // traversal that already walks every module rather than write a
+        // third one.
+        // NOT here — see `ensure_project_type_checked`. Calling it before
+        // this path's own pipeline leaves state the interpreter cannot use:
+        // a correct cog then dies with `[lenient] stage-5 qualified
+        // cross-module fn stub never resolved`. Measured: v13 prints 42,
+        // v14 panics on the same source.
 
         // STDLIB-LOAD-COST-1 — source first, stdlib second.  See
         // `run_check_only` for the measurement; the ordering is what makes

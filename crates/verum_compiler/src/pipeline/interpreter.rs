@@ -412,6 +412,19 @@ impl<'s> CompilationPipeline<'s> {
     pub fn run_for_test(&mut self) -> Result<TestExecutionResult> {
         let start = Instant::now();
 
+        // T1119, the harness half — the THIRD entry point with the same
+        // shape. `phase_load_source` hands back one module for a
+        // directory, so a spec using `@project:` type-checks only
+        // `main.vr` and the rest of the cog reaches execution unchecked.
+        //
+        // Fixing `run()` and `run_interpreter()` and stopping there would
+        // repeat the mistake this defect is made of: in this tree one job
+        // has several drivers, and they drift independently, so a repair
+        // to one of them almost never closes the class. The harness is
+        // the entry whose verdict the SUITE reports, which makes it the
+        // worst one to leave behind.
+        // NOT here — same residual-state failure as `run_interpreter`.
+
         // Phase 1: Load source
         let file_id = self.phase_load_source()?;
 
