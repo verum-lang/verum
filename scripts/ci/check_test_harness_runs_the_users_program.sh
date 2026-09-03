@@ -159,11 +159,34 @@ macro_check=$( (cd "$REPO" && timeout 300 "$VERUM" check "$TMP/macro.vr" 2>&1) |
 # The harness leg, when a vtest binary exists. Its absence leaves the
 # arms above, which are checked either way — this is not a skip.
 VTEST="${2:-}"
+VTEST_SOURCE=argument
 if [ -z "$VTEST" ] || [ ! -x "$VTEST" ]; then
   VTEST=""
+  VTEST_SOURCE=fallback
   for cand in "$REPO/target/release/vtest" "$REPO/vcs/runner/vtest/target/release/vtest"; do
     [ -x "$cand" ] && VTEST="$cand" && break
   done
+fi
+# `vtest` LINKS THE COMPILER, so a vtest older than the `verum` under
+# test measures a different compiler and reports its verdict as this
+# one's. Measured 2026-09-03: this gate went red against a binary whose
+# fix was present and working, because argument 2 was omitted and the
+# fallback found `target/release/vtest` from three days earlier — the
+# shared target dir this repo's CLAUDE.md says never to trust. Passing
+# a matching vtest turned the same run green. A stale harness is not a
+# neutral default: it produces a CONFIDENT WRONG VERDICT, so say which
+# binary answered and how much older it is.
+if [ -n "$VTEST" ] && [ "$VTEST_SOURCE" = fallback ]; then
+  v_age=$(date -r "$VTEST" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')
+  c_age=$(date -r "$VERUM" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')
+  printf 'check_harness_parity: NOTE — no vtest given, using %s\n' "$VTEST" >&2
+  printf '  vtest built %s, verum built %s. vtest links the compiler: if the\n' "$v_age" "$c_age" >&2
+  printf '  vtest is older, the harness arm below reports the OLDER compiler.\n' >&2
+  printf '  Pass a matching vtest as argument 2 to measure this binary.\n' >&2
+  if [ "$VTEST" -ot "$VERUM" ]; then
+    printf '  THE VTEST IS OLDER THAN THE VERUM UNDER TEST — the harness arm is\n' >&2
+    printf '  not measuring this build.\n' >&2
+  fi
 fi
 harness_verdict="(no vtest binary)"
 harness_plain="(no vtest binary)"

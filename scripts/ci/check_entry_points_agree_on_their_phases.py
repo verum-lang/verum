@@ -190,9 +190,58 @@ def main(argv):
         return 1
 
     n = len(actual)
+    # A green here means "nothing MOVED", never "the entry points agree",
+    # and the two read alike unless the difference is printed. The gate's
+    # own name says `agree`, so a summary that stops at "unchanged" hands
+    # the reader the stronger claim for free — the shape catalogued as a
+    # gate legitimising the drift it does not check. Name the gaps in the
+    # success line so the reader can never mistake a ratchet for parity.
+    total = len(ENTRY_POINTS)
+    partial = sorted(k for k, v in actual.items() if len(v) < total)
     print(f"check_phase_parity: ok — {n} phases, mapping unchanged across "
-          f"{len(ENTRY_POINTS)} entry points")
+          f"{total} entry points")
+    if partial:
+        verdicts = _row_verdicts()
+        defects = [k for k in partial if verdicts.get(k, "").startswith("DEFECT")]
+        print(f"  NOT parity: {len(partial)} of {n} phases run by some entry "
+              f"points and not others.")
+        for k in partial:
+            missing = [e for e, _ in ENTRY_POINTS if e not in actual[k]]
+            print(f"    [{verdicts.get(k, 'UNANNOTATED')}] {k}: "
+                  f"missing from {', '.join(missing)}")
+        if defects:
+            print(f"  {len(defects)} of those are marked DEFECT and are OPEN "
+                  f"work, not design.")
     return 0
+
+
+def _row_verdicts():
+    """Read this file's own EXPECTED annotations: phase -> INTENDED / DEFECT <T>.
+
+    A bare list of asymmetries cries wolf — most of them are by design, and a
+    reader who cannot tell design from debt learns to skip the whole block.
+    The verdicts are already written beside the rows; parse them rather than
+    make the reader open the file to find out which lines matter.
+    """
+    import re
+    src = Path(__file__).read_text(encoding="utf-8").splitlines()
+    verdicts, current = {}, None
+    for line in src:
+        m = re.match(r'\s*"(phase_[a-z_]+)":', line)
+        if m:
+            current = m.group(1)
+            continue
+        if current is None:
+            continue
+        s = line.strip()
+        if not s.startswith("#"):
+            if s.startswith("}"):
+                break
+            continue
+        m = re.match(r'#\s*(INTENDED|DEFECT\s+\S+?)[:,]', s)
+        if m and current not in verdicts:
+            verdicts[current] = m.group(1).replace("  ", " ")
+    return verdicts
 
 
 if __name__ == "__main__":
