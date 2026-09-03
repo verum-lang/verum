@@ -506,8 +506,10 @@ impl AttributeValidator {
             | "table" => target.contains(AttributeTarget::Type),
             "provide"
             | "using" => target.contains(AttributeTarget::Module),
-            "prototype" => (target.contains(AttributeTarget::Function)
-                || target.contains(AttributeTarget::Module)),
+            "prototype" => {
+                target.contains(AttributeTarget::Function)
+                    || target.contains(AttributeTarget::Module)
+            }
             "impl_trait_for_tuples" => target.contains(AttributeTarget::Impl),
             "wasm_import" => target.contains(AttributeTarget::Static),
 
