@@ -41,3 +41,26 @@ modifying the compiler.
   - `infer/helpers.rs:988` `make_maybe_type` builds `Maybe<T>` from the literal `"Maybe"`; 4 callers, e.g. the `to_digit` / `from_digit` primitive-method return types at `helpers.rs:1141`.
   - `infer/modules.rs:22153` defaults `try_fold`'s result to `Generic { name: "Result", … }` when the closure's return type is not a function.
   Both would keep working if a user renamed or replaced those stdlib types, and both would then be silently wrong rather than loudly broken — which is why this rule is written as ZERO and not "few".
+- **TWO WELL-KNOWN-NAME LISTS, measured 2026-09-03.** The rule's most expensive
+  form is not an assumption about one type — it is a LIST of names the compiler
+  knows and the library does not declare.
+  - **Types**: `is_wellknown_type_name` (`infer/path_resolution.rs`, trace
+    `VERUM_TRACE_WK_FALLBACK`) carries seventy-four names. Measured with one
+    value of difference: `fn f(x: Blorbulator<Int>)` is refused `E101`, while
+    `Box<Int>`, `HashMap<Text,Int>` and `Arc<Int>` are ACCEPTED — three names
+    `core/` declares nowhere, and precisely the three the language renamed on
+    purpose to `Heap`, `Map`, `Shared`. The suppression turns the Rust habit
+    the rename exists to correct into silence.
+  - **Functions**: `min`, `max` and `abs` resolve with no mount and no
+    declaration (`print(min(1,2))` prints 1 in an otherwise empty file, while
+    an undeclared name gives `E100`), and a unit's OWN `fn min` loses to them —
+    the body never runs, and `fn min(…) -> Text` used where `Int` is required
+    type-checks clean. Three sites compose it: `infer/env.rs:497` registers a
+    baked descriptor's arity under its trailing SIMPLE name, `infer/expr.rs`
+    lists `"min" | "max"` as variadic so their arity mismatch never surfaces,
+    and the callee type comes from the same bare-name lookup. That is T1120,
+    and it violates `docs/architecture/name-resolution.md` §3.2 directly: a
+    module-local declaration is rank 4, ambient is rank 6.
+  The shape to recognise in both: **a name the compiler knows at an arity or
+  spelling the library never provided**. `List.of` / `Set.of` (removed
+  2026-09-03) were the same list one entry over.
