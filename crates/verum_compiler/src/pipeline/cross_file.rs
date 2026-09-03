@@ -1427,6 +1427,15 @@ impl<'s> CompilationPipeline<'s> {
         // and the subtree below it produces a DESCRIPTION of a body that
         // nothing turns into code.
         for u in crate::pipeline::derive_inject::inject_derived_impls(&mut module) {
+            // T1072 — a derive whose protocol a stdlib BLANKET supplies
+            // produced no impl on purpose, and the behaviour is there:
+            // `@derive(Ord, PartialOrd)` gives a working `partial_cmp`
+            // through `implement<T: Ord> PartialOrd for T` since T1071.
+            // Warning about it tells the author to expect the opposite
+            // of what happens.
+            if u.benign {
+                continue;
+            }
             self.session.emit_diagnostic(
                 DiagnosticBuilder::warning()
                     .code("W0507")

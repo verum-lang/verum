@@ -1,0 +1,21 @@
+// @test: check
+// @level: L0
+// @tier: 0
+// @tags: derive, meta, diagnostics
+// @timeout: 20000
+// @expected-exit: 0
+// @expected-stderr: was not applied
+// @description: A derive with neither a generator nor a blanket still
+//   warns.
+
+// The control for `derive_covered_by_a_blanket_is_silent.vr`. Without
+// it, a repair that simply stopped emitting W0507 would satisfy that
+// spec completely — and the twelve derives that genuinely generate
+// nothing would go quiet, which is the state W0507 exists to prevent.
+//
+// `Serialize` has no generator and no blanket in `core/`.
+
+@derive(Serialize)
+type S is { v: Int };
+
+public fn main() -> Int { 0 }

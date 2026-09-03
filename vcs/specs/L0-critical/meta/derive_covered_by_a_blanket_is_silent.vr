@@ -1,0 +1,41 @@
+// @test: check
+// @level: L0
+// @tier: 0
+// @tags: derive, meta, diagnostics, blanket-impls
+// @timeout: 20000
+// @expected-exit: 0
+// @description: A derive whose protocol a stdlib blanket already supplies
+//   produces no warning — the behaviour is there.
+
+// `@derive(PartialOrd)` had no generator and said so:
+//
+//     warning<W0507>: `@derive(PartialOrd)` on `K` was not applied
+//                     — no generator for this protocol yet
+//
+// The warning was TRUE when written and became FALSE when the gap it
+// described was closed elsewhere: T1071 made
+// `implement<T: Ord> PartialOrd for T` reach user types, so on this
+// very program `a.partial_cmp(&b)` answers `Some(<)` and `a < b` is
+// `true`. Nothing was missing, and the author was told otherwise.
+//
+// The suppression asks the sidecar's `blanket_impls` — the same list
+// the user-side seeder reads — rather than carrying a hardcoded set of
+// protocol names here, so a blanket added to `core/` is honoured
+// without editing the compiler.
+//
+// Its sibling `derive_without_a_generator_still_warns.vr` pins the
+// other side: a protocol with neither generator nor blanket must still
+// warn, so this is a narrowing and not a silencing.
+//
+// T1072.
+
+@derive(Ord, PartialOrd)
+type K is { v: Int };
+
+public fn main() -> Int {
+    let a = K { v: 1 };
+    let b = K { v: 2 };
+    let _ = a.partial_cmp(&b);
+    let _ = a < b;
+    0
+}
