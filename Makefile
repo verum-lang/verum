@@ -139,6 +139,7 @@ check-panic-surface: ## Gate (T0424): no net increase of unwrap/expect in verum_
 	python3 scripts/ci/check_uncoded_diagnostic_ratchet.py
 	python3 scripts/ci/check_mount_group_integrity.py
 	bash scripts/ci/check_summary_line_is_one_spelling.sh
+	python3 scripts/ci/check_gate_verdict_carries_a_quantity.py
 
 check-early-return-tenants: ## Gate (T1078): the count of diagnostics behind the source-seen early return does not drift
 	python3 scripts/ci/check_early_return_tenants.py

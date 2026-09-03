@@ -56,4 +56,10 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "[ok] summary-line: one producer (verum_diagnostics::compilation_failure_summary)"
+# The verdict carries its MEASURED QUANTITY, not just the word. `[ok]`
+# alone is indistinguishable from an `[ok]` printed before any check ran
+# — which is exactly what this gate did on its first run, when mapfile
+# failed on every line and it still said [ok]. A number that moves is
+# the cheapest evidence that the check executed.
+scanned=$(grep -rl 'compilation failed with\|type error' crates/ --include='*.rs' 2>/dev/null | wc -l | tr -d ' ')
+echo "[ok] summary-line: 1 producer (verum_diagnostics::compilation_failure_summary), ${scanned} file(s) mention the wording"

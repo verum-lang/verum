@@ -72,28 +72,40 @@ BARE_PROTOCOL = re.compile(
 DEFAULT_ROOTS = ("core",)
 
 
-def offenders(roots: list[str]) -> list[tuple[str, int, str]]:
+def offenders(roots: list[str]) -> tuple[list[tuple[str, int, str]], int]:
+    """Return the offending declarations AND the number of files scanned.
+
+    The count is not decoration: an `OK` with no quantity cannot be told
+    apart from an `OK` printed before the scan ran, which is a thing that
+    has happened in this directory (a gate whose every `mapfile` failed
+    still said `[ok]`).
+    """
     found: list[tuple[str, int, str]] = []
+    scanned = 0
     for root in roots:
         base = pathlib.Path(root)
         if not base.is_dir():
             continue
         for path in sorted(base.rglob("*.vr")):
+            scanned += 1
             for lineno, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
                 # A doc comment quoting the wrong form is not a declaration.
                 if line.lstrip().startswith("//"):
                     continue
                 if BARE_PROTOCOL.match(line):
                     found.append((str(path), lineno, line.strip()))
-    return found
+    return found, scanned
 
 
 def main() -> int:
     roots = sys.argv[1:] or list(DEFAULT_ROOTS)
-    found = offenders(roots)
+    found, scanned = offenders(roots)
 
     if not found:
-        print("check_protocol_form: OK — every protocol uses `type X is protocol`")
+        print(
+            f"check_protocol_form: OK — {scanned} file(s) scanned, every protocol "
+            f"uses `type X is protocol`"
+        )
         return 0
 
     for path, lineno, text in found:

@@ -1,0 +1,5 @@
+# Gates whose subject genuinely has no cardinality to report.
+# One filename per line; the reason after `#` is not optional.
+check_no_internal_refs.sh    # a boolean property of the tree: refs exist or they do not
+degrade_ratchet.sh           # reports a budget verdict; the budget itself is the number
+proof_gate.py                # ratchet verdict; the baseline file carries the count

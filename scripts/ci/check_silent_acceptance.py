@@ -408,7 +408,13 @@ def main() -> int:
         )
         return 1
 
-    print("check-silent-acceptance: OK (no regression against the baseline)")
+    # The verdict carries the quantities it decided on. `OK` alone reads
+    # the same whether the probes ran or the loop never entered — and this
+    # gate's whole subject is verdicts that are true for the wrong reason.
+    print(
+        f"check-silent-acceptance: OK — {len(silent)}/{len(CASES)} silent, "
+        f"baseline {len(BASELINE)}, 0 regressed, 0 unlisted-fixed"
+    )
     return 0
 
 
