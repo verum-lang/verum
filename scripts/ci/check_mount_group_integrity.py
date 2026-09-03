@@ -28,19 +28,36 @@ This gate is the missing second measurement, in its cheapest form: a
 purely syntactic scan, no compiler, no bake, whole tree in well under a
 second.
 
-Two rules, both violated by the defect above:
-  1. no `mount` statement may begin while a mount group is open;
-  2. every mount group must be closed by the end of the file.
+The rule generalises past mounts, and the table below is the point:
+a construct is at risk exactly when it has a MULTI-LINE form whose FIRST
+line matches the anchor an insertion sweep would use.  For each such
+construct, two rules:
 
-Strings and comments are skipped so a `{` inside either cannot open a
-phantom group.
+  1. no top-level statement may begin while the construct is open;
+  2. the construct must be closed by the end of the file.
+
+    construct        opens with             closed by
+    mount group      `mount ...{` (EOL)     brace depth back to 0
+    attribute        `@name(` unbalanced    paren depth back to 0
+
+The attribute row is verum-2b's, contributed with its anchor spelling
+after they measured zero instances of it in `core/` — a rule added for
+the shape rather than for a live defect, which is the cheap moment to
+add one.  A third construct joins as a table row, not as new code.
+
+Strings and comments are skipped so a delimiter inside either cannot
+open a phantom construct.
 """
 
 import pathlib
+import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCAN_DIRS = ["core", "core-tests", "vcs/specs"]
+
+# Anchor spelling for a multi-line attribute (verum-2b, T1061).
+ATTR_OPEN_RE = re.compile(r"^@[a-zA-Z_][a-zA-Z0-9_]*\(")
 
 
 def strip_line(line: str) -> str:
@@ -69,26 +86,61 @@ def strip_line(line: str) -> str:
 
 
 def check_file(path: pathlib.Path) -> list[str]:
+    """Track every at-risk construct in one pass.
+
+    `depth`/`open_line` per construct; a top-level statement seen while
+    any of them is open is the defect.
+    """
     problems: list[str] = []
-    depth = 0
-    open_line = 0
+    brace_depth = 0          # mount group
+    brace_line = 0
+    paren_depth = 0          # multi-line attribute
+    paren_line = 0
+
     for lineno, raw in enumerate(path.read_text(errors="replace").split("\n"), 1):
         line = strip_line(raw).strip()
         if not line:
             continue
-        if depth > 0 and line.startswith("mount "):
+
+        starts_item = line.startswith("mount ") or line.startswith("module ")
+
+        if brace_depth > 0 and starts_item:
             problems.append(
-                f"{path.relative_to(ROOT)}:{lineno}: a `mount` statement inside the "
-                f"group opened at line {open_line}"
+                f"{path.relative_to(ROOT)}:{lineno}: a top-level statement inside "
+                f"the mount group opened at line {brace_line}"
             )
+        if paren_depth > 0 and starts_item:
+            problems.append(
+                f"{path.relative_to(ROOT)}:{lineno}: a top-level statement inside "
+                f"the attribute opened at line {paren_line}"
+            )
+
+        # mount group: `mount ...{` at end of line opens it.
         if line.startswith("mount ") and line.endswith("{"):
-            depth += 1
-            open_line = lineno
-        elif depth > 0 and (line.startswith("}") or line.endswith("};")):
-            depth -= 1
-    if depth > 0:
+            brace_depth += 1
+            brace_line = lineno
+        elif brace_depth > 0 and (line.startswith("}") or line.endswith("};")):
+            brace_depth -= 1
+
+        # multi-line attribute: `@name(` with more `(` than `)` opens it,
+        # and the running paren balance closes it.
+        if paren_depth == 0:
+            if ATTR_OPEN_RE.match(line) and line.count("(") > line.count(")"):
+                paren_depth = line.count("(") - line.count(")")
+                paren_line = lineno
+        else:
+            paren_depth += line.count("(") - line.count(")")
+            if paren_depth < 0:
+                paren_depth = 0
+
+    if brace_depth > 0:
         problems.append(
-            f"{path.relative_to(ROOT)}: mount group opened at line {open_line} is "
+            f"{path.relative_to(ROOT)}: mount group opened at line {brace_line} is "
+            f"never closed"
+        )
+    if paren_depth > 0:
+        problems.append(
+            f"{path.relative_to(ROOT)}: attribute opened at line {paren_line} is "
             f"never closed"
         )
     return problems
@@ -102,6 +154,12 @@ def main() -> int:
         if not base.exists():
             continue
         for path in base.rglob("*.vr"):
+            # `vcs/specs/parser/fail/` is a corpus of DELIBERATELY malformed
+            # files — the parser's negative tests. Two of them are unclosed
+            # attributes, and they served as this gate's positive control for
+            # the attribute rule before being excluded here.
+            if "/fail/" in str(path):
+                continue
             scanned += 1
             problems.extend(check_file(path))
 
@@ -110,9 +168,10 @@ def main() -> int:
               f"in {scanned} file(s)")
         for p in problems[:20]:
             print(f"  {p}")
-        print("  A `mount` group must be closed before the next item begins;")
-        print("  a statement spliced inside one makes the whole file unparseable,")
-        print("  and an unparseable module ships as a SILENT ZERO in the bake.")
+        print("  A construct with a multi-line form must be closed before the next")
+        print("  item begins. A statement spliced inside one makes the whole file")
+        print("  unparseable, and an unparseable module ships as a SILENT ZERO in")
+        print("  the bake — where an error COUNT reads the break as an improvement.")
         return 1
 
     print(f"[ok] mount-group integrity: {scanned} file(s), no group left open "
