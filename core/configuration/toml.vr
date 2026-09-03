@@ -852,14 +852,14 @@ fn parse_number(p: &mut Parser) -> Result<TomlValue, TomlError> {
         }
         let raw = slice_text(p.bytes, start, p.pos);
         let cleaned = strip_underscores(&raw);
-        match Float.parse(&cleaned) {
+        match cleaned.parse_float() {
             Maybe.Some(f) => Result.Ok(TomlValue.TomlFloat(f)),
             Maybe.None    => Result.Err(mk_err(p, InvalidNumber, &"float parse failed")),
         }
     } else {
         let raw = slice_text(p.bytes, start, p.pos);
         let cleaned = strip_underscores(&raw);
-        match Int.parse(&cleaned) {
+        match cleaned.parse_int() {
             Maybe.Some(i) => Result.Ok(TomlValue.TomlInt(i)),
             Maybe.None    => Result.Err(mk_err(p, InvalidNumber, &"integer parse failed")),
         }

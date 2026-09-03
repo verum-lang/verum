@@ -328,7 +328,7 @@ fn decode_at(cur: &Cursor, depth: Int) -> Result<(RespValue, Cursor), RespError>
         }
         b',' => {
             let (line, c) = read_line(&after_prefix)?;
-            let d: Float = match Float.parse(&line) {
+            let d: Float = match line.parse_float() {
                 Result.Ok(x) => x,
                 Result.Err(_) => return Result.Err(RespError.InvalidInteger(line)),
             };

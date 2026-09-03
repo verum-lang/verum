@@ -532,7 +532,7 @@ fn parse_redis_url(url: &Text) -> Result<RedisConfig, RedisError> {
         ),
         Maybe.None => (stripped.clone(), "0".to_text()),
     };
-    let db = Int.parse(&db_text).unwrap_or(0);
+    let db = db_text.parse_int().unwrap_or(0);
     let (user, password, host) = match auth_host.find_byte(b'@') {
         Maybe.Some(i) => {
             let auth = auth_host.substring(0, i);

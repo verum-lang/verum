@@ -506,7 +506,7 @@ pub async fn zscore(
         RespValue.BulkString(b) => {
             let s = Text.from_utf8(b.as_slice())
                 .map_err(|e| RedisError.InvalidReply(f"utf8: {e}"))?;
-            Float.parse(&s).map(Some).map_err(|e| RedisError.InvalidReply(f"parse: {e}"))
+            s.parse_float().map(Some).map_err(|e| RedisError.InvalidReply(f"parse: {e}"))
         }
         RespValue.Double(d) => Result.Ok(Maybe.Some(d)),
         RespValue.Error_(m) => Result.Err(RedisError.Backend(m)),
@@ -582,7 +582,7 @@ fn expect_text_int(v: &RespValue) -> Result<Int, RedisError> {
         RespValue.BulkString(b) => {
             let str_val = Text.from_utf8(b.as_slice())
                 .map_err(|e| RedisError.InvalidReply(f"utf8: {e}"))?;
-            match Int.parse(&str_val) {
+            match str_val.parse_int() {
                 Result.Ok(n)  => Result.Ok(n),
                 Result.Err(_) => Result.Err(RedisError.InvalidReply(f"int parse: {str_val}")),
             }
