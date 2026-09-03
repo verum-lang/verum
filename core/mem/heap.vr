@@ -77,6 +77,7 @@ mount super.capability.{CAP_READ, CAP_WRITE, CAP_OWNED};
 
 // Platform-specific operations
 @cfg(target_os = "linux")
+mount sys.common.{random_bytes};
 mount sys.linux.tls.{get_tid_fast};
 
 @cfg(target_os = "macos")
@@ -1260,27 +1261,41 @@ fn decode_ptr(encoded: UInt64) -> UInt64 {
 
 /// Initialize encoding keys with random values
 public fn init_encoding_keys() {
-    @cfg(target_os = "linux") {
-        // Use getrandom syscall
-        unsafe {
-            sys.linux.random.getrandom(&ENCODE_KEY1 as &mut Byte, 8, 0);
-            sys.linux.random.getrandom(&ENCODE_KEY2 as &mut Byte, 8, 0);
+    // ONE seeding path, not three (T0807).  Each `@cfg` arm called a
+    // different platform primitive directly — `getrandom` on Linux,
+    // `arc4random_buf` on macOS, `RtlGenRandom` on Windows — so the
+    // free-list pointer encoding was seeded by three implementations
+    // that had to agree and never were checked against each other.
+    // The macOS arm did not even resolve: `arc4random_buf` lives in an
+    // `@ffi extern` block, which the stdlib bake does not carry into
+    // the module surface (T1085), so `verum check core/mem/heap.vr`
+    // reported `unbound variable: sys.darwin.libsystem.arc4random_buf`
+    // and the keys kept their compile-time constants on this platform.
+    //
+    // `core.sys.common.random_bytes` already owns the per-platform
+    // split, one arm each, behind a `Result`.  Asking it means the
+    // encoding is seeded the same way everywhere and a failure is
+    // visible rather than silent.
+    let mut buf: [Byte; 16] = [0_u8; 16];
+    match random_bytes(&mut buf[..]) {
+        Result.Ok(()) => {
+            let mut k1: UInt64 = 0;
+            let mut k2: UInt64 = 0;
+            let mut i: Int = 0;
+            while i < 8 {
+                k1 = (k1 << 8) | (buf[i] as UInt64);
+                k2 = (k2 << 8) | (buf[i + 8] as UInt64);
+                i = i + 1;
+            }
+            unsafe {
+                ENCODE_KEY1 = k1;
+                ENCODE_KEY2 = k2;
+            }
         }
-    }
-
-    @cfg(target_os = "macos") {
-        // Use arc4random
-        unsafe {
-            ENCODE_KEY1 = sys.darwin.libsystem.arc4random_buf(8);
-            ENCODE_KEY2 = sys.darwin.libsystem.arc4random_buf(8);
-        }
-    }
-
-    @cfg(target_os = "windows") {
-        // Use RtlGenRandom
-        unsafe {
-            sys.windows.bcrypt.RtlGenRandom(&ENCODE_KEY1 as &mut Byte, 8);
-            sys.windows.bcrypt.RtlGenRandom(&ENCODE_KEY2 as &mut Byte, 8);
+        Result.Err(_) => {
+            // Leave the compile-time constants in place.  This is the
+            // pre-existing behaviour on every platform where the arm
+            // failed; making it explicit rather than implicit.
         }
     }
 }
