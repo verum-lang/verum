@@ -62,16 +62,6 @@ EXPECTED = {
     "phase_parse": ("run_check_only", "run_for_test", "run_interpreter"),
     "phase_type_check": ("run_check_only", "run_for_test", "run_interpreter"),
     "phase_dependency_analysis": ("run_check_only", "run_for_test", "run_interpreter"),
-    # DEFECT T1095, closed 2026-09-03: `verum check <file>` ran no
-    # context validation, so `using [!Ctx]` — a documented compile-time
-    # guarantee — was reported by `build` and not by `check`. The single
-    # -file path is a THIRD entry point; `check_project` had been fixed
-    # first and that was not enough. Recorded as the one-caller shape it
-    # has TODAY: `run_interpreter` and `run_for_test` reach the phase
-    # through `phase_context_validation`'s other call sites in
-    # pipeline.rs, not from their own bodies, so this row is not yet the
-    # three-way it should read as.
-    "phase_context_validation": ("run_check_only",),
     "phase_verify": ("run_check_only", "run_interpreter"),
     # INTENDED: `run_for_test` reaches phase_verify through validate_module.
     "phase_safety_gate": ("run_for_test", "run_interpreter"),
@@ -86,23 +76,32 @@ EXPECTED = {
     "phase_meta_evaluation": ("run_check_only",),
     # INTENDED: meta evaluation is a check-time service.
     "phase_context_validation": ("run_check_only",),
-    # INTENDED that only ONE name appears, and it is worth reading twice:
-    # the other two entry points reach context validation INDIRECTLY —
-    # `run_interpreter` through `phase_interpret`, `run_for_test` through
-    # `validate_module` — and this gate sees direct `self.phase_*(` calls
-    # only. The row therefore records "who calls it in its own body", not
-    # "who runs it".
+    # DEFECT T1095, closed 2026-09-03 by 9c0d94e12 — and the row still
+    # reads as one caller, which needs both halves said or the next
+    # reader draws the wrong conclusion from it.
     #
-    # The direct call here is T1095's fix (9c0d94e12): single-file
-    # `verum check <file>` ran neither, so a forbidden context was
-    # enforced by `verum build` and ignored by `verum check`. The measure
-    # that made it visible is worth copying: a 120-file corpus scored
-    # "0 violations" BEFORE the fix, and the known-bad control inside the
-    # same run also scored 0 — the clean result came from not checking.
-    # After: 120 files 0, control 1. Same number, opposite meaning.
+    # WHY ONE NAME IS CORRECT HERE: the other two entry points reach
+    # context validation INDIRECTLY — `run_interpreter` through
+    # `phase_interpret`, `run_for_test` through `validate_module` — and
+    # this gate reads direct `self.phase_*(` calls out of a body. Every
+    # row means "who calls it here", never "who runs it". Read the other
+    # way, this row looks like a two-thirds gap that does not exist.
     #
-    # This row is also the first live demonstration that the gate works:
-    # it went red on main the moment that one line landed.
+    # WHY THE ROW IS STILL MARKED DEFECT: single-file `verum check
+    # <file>` ran no context validation at all, so `using [!Ctx]` — a
+    # documented compile-time guarantee — was enforced by `verum build`
+    # and ignored by `verum check`. `check_project` had been fixed first
+    # and that was not enough: the single-file path is a THIRD entry
+    # point, and "fixed the project path" read as "fixed check".
+    #
+    # The measurement that made it visible is the one to copy: a
+    # 120-file corpus scored "0 violations" BEFORE the fix, and the
+    # known-bad control INSIDE the same run also scored 0 — the clean
+    # result came from not checking. After: 120 files 0, control 1.
+    # Same number, opposite meaning.
+    #
+    # This row is also the first live demonstration that this gate
+    # works: it went red on main the moment that one line landed.
     "phase_ats_v": (),
     # INTENDED: reached through validate_module, never called directly here.
 }
