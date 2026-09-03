@@ -9762,7 +9762,16 @@ impl VbcCodegen {
             | "neg"
             | "bitand" | "bitor" | "bitxor" | "bitnot"
             | "shl" | "shr" | "lshr" | "ashr"
-            | "clamp" | "signum" | "abs_signed" => {
+            // T1123: `"abs"` is the SOURCE spelling; `"abs_signed"` is
+            // the registry's. Only the latter was listed, so a bare
+            // `abs(x)` fell out of this arm as "not a builtin" and
+            // lowered to a value that printed as `MemoryOrdering.Relaxed`
+            // — tag 0 of an unrelated enum — for every input. The type
+            // checker accepts the name (`reg_num_poly!("abs", 1)` in
+            // verum_types/src/infer/env.rs), so nothing reported it.
+            // `lookup_intrinsic` already resolves abs -> abs_signed
+            // (intrinsics/mod.rs), hence the name alone was missing.
+            | "clamp" | "signum" | "abs" | "abs_signed" => {
                 if let Some(intrinsic_info) = lookup_intrinsic(name)
                     && args.len() == intrinsic_info.intrinsic.param_count as usize
                 {
