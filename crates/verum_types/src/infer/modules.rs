@@ -12079,6 +12079,45 @@ impl TypeChecker {
                 } else {
                     self.termination_checker.check_function(func)
                 };
+                // MEASUREMENT, not a diagnostic (VERUM_TRACE_MUTUAL_REC).
+                //
+                // The walk above finds recursion by looking for calls to
+                // `func_name` INSIDE `func_name`, so it sees only the
+                // DIRECT case. Measured: `spin(n) { spin(n) }` is refused
+                // with E321, while `ping(n) { pong(n) }` beside
+                // `pong(n) { ping(n) }` checks clean and `verum verify`
+                // even reports "Proved".
+                //
+                // `check_mutual_recursion` walks the call graph this same
+                // pass populates (termination.rs:503) and has no caller.
+                // MEASURED 2026-09-04, and the answer is not "narrow it":
+                //
+                //   ping/pong with NO base case              2 reports
+                //   the same WITH a base case + decreasing   2 reports
+                //   163 core/ carriers                     248 reports
+                //   genuine mutual cycles among them          ZERO
+                //
+                // The two controls are identical, so the detector cannot
+                // tell a terminating mutual recursion from a
+                // non-terminating one: it finds CYCLES and has no notion
+                // of a measure. Every corpus report is a self-loop, and
+                // two of those files compile with no error at all while
+                // being flagged 42 and 70 times.
+                //
+                // So this must not be wired. The live walk above already
+                // understands measures — "recursive call to `X` has no
+                // decreasing argument", "invalid decreasing clause" — and
+                // lacks only a path across the call graph. The trace is
+                // kept so the number can be reproduced in one command.
+                //
+                // The graph grows as functions are walked, so a cycle
+                // shows up on the call that closes it; duplicates are
+                // expected and deduped by the reader.
+                if std::env::var("VERUM_TRACE_MUTUAL_REC").is_ok() {
+                    if let Err(cycle_err) = self.termination_checker.check_mutual_recursion() {
+                        eprintln!("[mutual-rec] {:?}", cycle_err);
+                    }
+                }
                 if let Err(term_err) = term_result {
                     match term_err {
                         crate::termination::TerminationError::NonTerminating {
