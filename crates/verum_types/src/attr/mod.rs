@@ -73,19 +73,13 @@ pub use verum_ast::attr::{
     FromAttribute, NamedArgSpec, Stability,
 };
 
-/// Validate attributes on an AST item.
-///
-/// Convenience function that uses the global registry.
-///
-/// # Errors
-///
-/// Returns a list of errors if validation fails.
-pub fn validate_attributes(
-    attrs: &[Attribute],
-    target: AttributeTarget,
-) -> Result<ValidationResult, verum_common::List<AttributeError>> {
-    registry().validate_collection(attrs, target)
-}
+// `validate_attributes` REMOVED (T1073): superseded by
+// `verum_fast_parser::attr_validation`, which is what actually runs —
+// measured, an unknown attribute is caught there as W0400 while this
+// path had no caller at all.  It fronted
+// `AttributeRegistry::validate_collection`, whose only other mention
+// in the workspace is a string literal in an LSP quick-fix template,
+// so the whole chain was unreachable.
 
 /// Check if an attribute name is known.
 ///
