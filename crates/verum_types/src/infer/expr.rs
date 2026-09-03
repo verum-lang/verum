@@ -2925,14 +2925,37 @@ impl TypeChecker {
         //
         // Asked of `IntegerKind::from_name`, the authority that already
         // decides what an integer alias is, rather than a second list.
+        // The authority answers about a BARE name, and the type does not
+        // always arrive with one. Measured 2026-09-03 (T1107): this arm
+        // let 41 warnings through on `core/base/primitives.vr` alone,
+        // every one of them naming `core.base.primitives.UInt64` or
+        // `core.base.primitives.Int32` — the file that DECLARES those
+        // types renders them fully qualified, `IntegerKind::from_name`
+        // matches `"UInt64"` and not `"core.base.primitives.UInt64"`, and
+        // the exemption above therefore missed exactly where it was most
+        // obviously right. A ten-value probe (`Int32` and `UInt64` under
+        // `<`) prints the correct answers, so the warning was making a
+        // false BEHAVIOURAL claim — `compares ADDRESSES` — about code
+        // that compares values.
+        //
+        // Ask about the leaf as well as the whole. Asking about the leaf
+        // means a user type named `Int32` in their own module is exempt
+        // too; that is the same latitude the bare-name spelling already
+        // had, and it errs toward silence on a warning whose false
+        // positives cost more than its misses — 41 of them in the
+        // library's most fundamental file teach the reader to skip the
+        // very class T0833 introduced to tell the truth about `Float`.
         if let Type::Named { path, .. } = ty {
             let name = self.path_to_string(path);
-            if crate::integer_hierarchy::IntegerKind::from_name(name.as_str()).is_some()
-                || matches!(
-                    name.as_str(),
-                    "Float32" | "Float64" | "Byte" | "Int" | "Float" | "Char" | "Text"
-                )
-            {
+            let leaf = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
+            let known = |n: &str| {
+                crate::integer_hierarchy::IntegerKind::from_name(n).is_some()
+                    || matches!(
+                        n,
+                        "Float32" | "Float64" | "Byte" | "Int" | "Float" | "Char" | "Text"
+                    )
+            };
+            if known(name.as_str()) || known(leaf) {
                 return;
             }
         }

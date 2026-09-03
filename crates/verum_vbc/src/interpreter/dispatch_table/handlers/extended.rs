@@ -52,6 +52,37 @@ fn expected_field_count(variant: &VariantDescriptor) -> u32 {
 /// the unknown-type-id branch on the synthetic ids the legacy
 /// `MakeVariant` path uses (`0x8000 + tag`, well above the
 /// builtin range).
+///
+/// WELL-KNOWN SEMANTIC TYPES bypass it too (T1111), and the rule is
+/// not new here — the module validator already states it, in
+/// `validate.rs`:
+///
+///     Built-in primitives (<16) and well-known semantic types
+///     (LIST/MAP/MAYBE/RESULT/etc., 512-1023) have implicit
+///     interpreter-known layouts and are not required to live in the
+///     per-module TypeDescriptor table — only user-defined types must
+///     be in the table.
+///
+/// This function asked only `is_builtin()`, so it applied a STRICTER
+/// rule than the validator that decides what a well-formed module
+/// contains, and rejected exactly the modules the validator accepts.
+/// Measured 2026-09-03: every program that mounted anything real from
+/// `core.mem` died at startup with
+///
+///     LayoutMismatch { type_id: TypeId(515), tag: 0,
+///                      got_field_count: 0, reason: "unknown type_id" }
+///
+/// 515 is `MAYBE`, and `tag 0 / 0 fields` is `Maybe.None` — built by
+/// `core/mem/heap.vr:1380`, `static mut CURRENT_HEAP: Maybe<LocalHeap>
+/// = Maybe.None;`. The whole memory subsystem — heap, capability,
+/// segment, epoch — was unreachable from user code, while the same
+/// `static mut SLOT: Maybe<Int> = Maybe.None;` in a user file worked,
+/// because a fresh compile puts the descriptor in the table and an
+/// archive-loaded module relies on the exemption this line withheld.
+///
+/// Two validators, one rule, and only one of them had it: the pair is
+/// the oracle. Asking the same predicate the other one asks
+/// (`is_semantic_type`) is the fix, not a new exemption.
 #[inline]
 pub(in super::super) fn validate_make_variant_typed(
     module: &crate::module::VbcModule,
@@ -59,7 +90,7 @@ pub(in super::super) fn validate_make_variant_typed(
     tag: u32,
     field_count: u32,
 ) -> Result<(), InterpreterError> {
-    if type_id.is_builtin() {
+    if type_id.is_builtin() || type_id.is_semantic_type() {
         return Ok(());
     }
     let desc = match module.get_type(type_id) {
