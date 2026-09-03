@@ -5,22 +5,25 @@
 // @timeout: 60000
 // @project: module_leaf_collision
 // @expected-stdout: 103
-// @skip: T1110 — the DEFECT THIS SPEC NAMES IS FIXED, and a second one
-//        underneath it is not. `@project:` needs a cog (verum.toml +
-//        src/), and a cog collects the module TWICE with two different
-//        function ids, so the qualified key lands on the body-less
-//        first pass and the call still returns `()`. Measured on the
-//        fixed binary, the trace tells the whole story in three lines:
-//            bind_mounted_function   key='verifier.verify'
-//            decl-takeback-foreign   mine=33895 holder=Some(33349)
-//            decl-yield              mine=33896 holder=Some(33895)
-//        Line two IS this spec's defect being repaired — the stranger
-//        33349 loses the key. Line three is T1110: the same declaration
-//        registering a second time under a different id and yielding to
-//        its own first pass. The loose-file form of exactly this source
-//        prints 103 on the same binary, which is how the two are told
-//        apart. The skip comes off with T1110, not by weakening the
-//        expectation.
+//
+//   THIS SPEC LANDED SKIPPED AND THE SKIP CAME OFF, which is the record
+//   of what happened between. When it was written it named ONE defect
+//   and uncovered a second underneath: `@project:` needs a cog, and a
+//   cog collected the module TWICE with two different function ids, so
+//   the qualified key landed on the body-less first pass and the call
+//   still returned `()`. The trace told both stories in three lines:
+//
+//       bind_mounted_function   key='verifier.verify'
+//       decl-takeback-foreign   mine=33895 holder=Some(33349)
+//       decl-yield              mine=33896 holder=Some(33895)
+//
+//   Line two is T0907 repaired — the stranger 33349 loses the key.
+//   Line three was T1110: the same declaration registering a second
+//   time under a NEW id and yielding to its own first pass. The
+//   loose-file form of this exact source printed 103 on the same
+//   binary, which is how the two were told apart. With T1110 fixed the
+//   third line reads `mine=33895 holder=Some(33895)` — holder IS mine,
+//   the yield is a no-op, and the collection is idempotent.
 // @description: A module keeps its own function when its name is also the
 //               last segment of a stdlib module's path.
 //

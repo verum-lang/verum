@@ -354,7 +354,6 @@ core/security/ecc/p256.vr
 core/security/ecc/vrf.vr
 core/security/ecc/x25519.vr
 core/security/hpke/mod.vr
-core/security/kdf/argon2.vr
 core/security/oidc.vr
 core/security/permission.vr
 core/security/provenance.vr

@@ -250,6 +250,32 @@ impl<'s> CompilationPipeline<'s> {
             }
         });
 
+        // CHECK-SUBSET-BUILD, third and fourth entries (T1101). The
+        // invariant stated below for `phase_verify` — "check ⊆ build must
+        // hold for verdicts" — was violated twice more by this same
+        // function, and by phases nobody had listed:
+        //
+        //   `clear_non_compilable_stdlib_modules` — `run_interpreter`
+        //     drops the stdlib modules that cannot compile before it
+        //     judges anything. Without it `check` walks into modules the
+        //     shipped path never sees, so the two commands do not even
+        //     read the same library.
+        //   `phase_safety_gate` — the user's `[safety]` configuration
+        //     (unsafe, @ffi, …) was enforced by `build` and `run` and
+        //     ignored by `check`. Inert on the default permissive
+        //     configuration, which is why it stayed invisible, and a
+        //     silent hole under a restrictive one.
+        //
+        // Both are taken in the order `run_interpreter` takes them, and
+        // both run BEFORE type checking there, so the same diagnostic
+        // arrives at the same point in both commands rather than at two
+        // different ones. `scripts/ci/check_entry_points_agree_on_their_phases.py`
+        // holds the mapping and names these two rows.
+        if std::env::var("VERUM_FULL_STDLIB").is_err() {
+            self.clear_non_compilable_stdlib_modules(Some(&module));
+        }
+        self.phase_safety_gate(&module)?;
+
         if has_meta_functions {
             // For files with meta functions, run BOTH meta evaluation and type checking.
             // Meta evaluation runs first to produce M-code errors (needed for meta-fail tests).
@@ -306,6 +332,13 @@ impl<'s> CompilationPipeline<'s> {
 
         // Dependency analysis (validates against target constraints)
         self.phase_dependency_analysis(&module)?;
+
+        // CBGR analysis — the fourth entry of the same invariant (T1101).
+        // `run_interpreter` and `run_for_test` both run it; `verum check`
+        // skipped it outright, so a borrow the shipped path refuses passed
+        // `check` clean. It goes last here for the same reason it goes
+        // last there: it reads the types the checker has just settled.
+        self.phase_cbgr_analysis(&module)?;
 
         let elapsed = start.elapsed();
         info!("Type checking completed in {:.2}s", elapsed.as_secs_f64());

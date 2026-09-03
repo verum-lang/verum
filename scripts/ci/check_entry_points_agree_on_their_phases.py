@@ -64,11 +64,19 @@ EXPECTED = {
     "phase_dependency_analysis": ("run_check_only", "run_for_test", "run_interpreter"),
     "phase_verify": ("run_check_only", "run_interpreter"),
     # INTENDED: `run_for_test` reaches phase_verify through validate_module.
-    "phase_safety_gate": ("run_for_test", "run_interpreter"),
-    # DEFECT T1101: `verum check` skips the safety gate. Inert on the default
-    # permissive [safety] configuration, observable under a restrictive one.
-    "phase_cbgr_analysis": ("run_for_test", "run_interpreter"),
-    # DEFECT T1101: `verum check` skips CBGR analysis outright.
+    "phase_safety_gate": ("run_check_only", "run_for_test", "run_interpreter"),
+    # INTENDED: all three now run it. Was DEFECT T1101 — `verum check`
+    # skipped the safety gate, inert on the default permissive [safety]
+    # configuration and a silent hole under a restrictive one. Closed
+    # 2026-09-03; `run_check_only` takes it in `run_interpreter`'s order,
+    # before type checking, so the diagnostic arrives at the same point in
+    # both commands.
+    "phase_cbgr_analysis": ("run_check_only", "run_for_test", "run_interpreter"),
+    # INTENDED: all three now run it. Was DEFECT T1101 — `verum check`
+    # skipped CBGR analysis outright, so a borrow the shipped path refuses
+    # passed `check` clean. Closed 2026-09-03; it runs last, after
+    # dependency analysis, for the same reason it runs last in
+    # `run_interpreter` — it reads the types the checker has just settled.
     "phase_interpret_with_args": ("run_interpreter",),
     # INTENDED: only the run path executes.
     "phase_interpret_for_test": ("run_for_test",),

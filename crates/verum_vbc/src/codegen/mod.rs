@@ -9888,8 +9888,66 @@ impl VbcCodegen {
             format!("{}${}", self.nested_function_scope.join("$"), base_name)
         };
 
-        let id = FunctionId(self.next_func_id);
-        self.next_func_id = self.next_func_id.saturating_add(1);
+        // COLLECT-TWICE-IDEMPOTENT-1 (T1110): the SAME declaration must
+        // keep the SAME id when it is collected a second time.
+        //
+        // A cog reaches a module by two routes — once as a project source
+        // file, once as the target of a `mount` walked by
+        // `resolve_mounts_recursive` — and each route ran the collector,
+        // so one `fn` was registered twice and MINTED A FRESH ID the
+        // second time. The qualified-key rule then did exactly what it is
+        // written to do: `<module>.<name>` was already held by a local
+        // declaration of this same module, so the second registration
+        // yielded to the first. The key stayed on the FIRST pass's id,
+        // the body was compiled under the SECOND, and the call reached an
+        // entry with no body and returned `()`.
+        //
+        // Measured 2026-09-03, one source in two layouts, one binary:
+        //
+        //   loose files  [qkey] decl-yield vf6.verify mine=33895 holder=Some(33895)
+        //   as a cog     [qkey] decl-takeback-foreign mine=33895 holder=Some(33349)
+        //                [qkey] decl-yield            mine=33896 holder=Some(33895)
+        //
+        // The loose form's `holder == mine` is the invariant this restores:
+        // collecting a declaration twice is idempotent, so the ids agree
+        // and the yield is a no-op instead of a hand-off to a body-less
+        // twin. Arity is part of the test because an overload legitimately
+        // registers under the same qualified key and must still get an id
+        // of its own.
+        let arity = func.params.len();
+        let reuse_id = {
+            let scope = self
+                .ctx
+                .current_source_module
+                .clone()
+                .unwrap_or_else(|| self.config.module_name.clone());
+            if self.nested_function_scope.is_empty()
+                && !scope.is_empty()
+                && scope != "main"
+                && !name.contains('.')
+                && !name.contains("::")
+            {
+                let key = format!("{}.{}", scope, name);
+                if self.decl_installed_qualified_keys.contains(&key) {
+                    self.ctx
+                        .lookup_function(&key)
+                        .filter(|f| f.param_count == arity)
+                        .map(|f| FunctionId(f.id.0))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+        let id = match reuse_id {
+            Some(existing) => existing,
+            None => {
+                let fresh = FunctionId(self.next_func_id);
+                self.next_func_id = self.next_func_id.saturating_add(1);
+                fresh
+            }
+        };
 
         // Extract parameter names and type names
         let param_names: Vec<String> = func
