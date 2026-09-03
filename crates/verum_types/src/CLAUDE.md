@@ -35,5 +35,9 @@ modifying the compiler.
 
 **History**: This rule has been violated multiple times:
 - `register_stdlib_affine_types()` hardcoded Heap, File, TcpStream, etc. as affine (DELETED)
-- `protected_stdlib_variants` hardcoded None, Some, Ok, Err names (NEEDS FIX: should use registration order / first-registered-wins semantics instead)
-- Various places assume `Result<T,E>` and `Maybe<T>` exist and have specific variants
+- `protected_stdlib_variants` hardcoded None, Some, Ok, Err names — **GONE** (measured 2026-09-03: zero occurrences of `protected_stdlib_variants` or a hardcoded `"Some" | "None"` pair anywhere in `crates/`). This line said NEEDS FIX for long enough to send readers hunting for code that no longer exists; an instruction file that loads into every session costs more when stale than when absent.
+- `List.of` / `Set.of` were literals in the checker's variadic-name list AND a `SPECIAL CASE` in `infer/modules.rs`, so a 3-argument call type-checked against `core/collections/list.vr`'s 1-argument `fn of` and died at VBC codegen with `undefined function: List.of` — **removed 2026-09-03**. The shape to recognise: the compiler knowing a name the library does not have at the arity the compiler assumed.
+- **STILL TRUE, and measured rather than asserted**: places assume `Result<T,E>` and `Maybe<T>` by name.
+  - `infer/helpers.rs:988` `make_maybe_type` builds `Maybe<T>` from the literal `"Maybe"`; 4 callers, e.g. the `to_digit` / `from_digit` primitive-method return types at `helpers.rs:1141`.
+  - `infer/modules.rs:22153` defaults `try_fold`'s result to `Generic { name: "Result", … }` when the closure's return type is not a function.
+  Both would keep working if a user renamed or replaced those stdlib types, and both would then be silently wrong rather than loudly broken — which is why this rule is written as ZERO and not "few".
