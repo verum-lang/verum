@@ -208,6 +208,5 @@ pub(super) mod log_extended;
 pub(super) mod math_extended;
 pub(super) mod ml_extended;
 pub(super) mod simd_extended;
-pub(super) mod tensor;
 pub(super) mod tensor_extended;
 pub(super) mod text_extended;
