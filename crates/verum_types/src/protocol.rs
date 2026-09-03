@@ -469,7 +469,6 @@ pub struct ProtocolMethod {
     /// Example: {"x" -> {> 0}, "return" -> {>= 0}}
     ///
     /// Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 5.4.1-5.4.3
-    pub refinement_constraints: Map<Text, crate::advanced_protocols::RefinementConstraint>,
     /// Whether this method is async (affects state machine generation)
     pub is_async: bool,
     /// Context requirements for this method (from `using [...]` clause)
@@ -498,7 +497,6 @@ impl ProtocolMethod {
             ty,
             has_default,
             doc: Maybe::None,
-            refinement_constraints: Map::new(),
             is_async: false,
             context_requirements: List::new(),
             type_param_names: List::new(),
@@ -522,7 +520,6 @@ impl ProtocolMethod {
             ty,
             has_default,
             doc: Maybe::None,
-            refinement_constraints: Map::new(),
             is_async: false,
             context_requirements: List::new(),
             type_param_names,
@@ -537,7 +534,6 @@ impl ProtocolMethod {
         ty: Type,
         has_default: bool,
         doc: Maybe<Text>,
-        refinement_constraints: Map<Text, crate::advanced_protocols::RefinementConstraint>,
         is_async: bool,
     ) -> Self {
         Self {
@@ -545,7 +541,6 @@ impl ProtocolMethod {
             ty,
             has_default,
             doc,
-            refinement_constraints,
             is_async,
             context_requirements: List::new(),
             type_param_names: List::new(),
@@ -563,85 +558,12 @@ impl ProtocolMethod {
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
             doc: Maybe::None,
-            refinement_constraints: Map::new(),
             is_async: true,
             context_requirements: List::new(),
             receiver_kind: Maybe::None,
         }
     }
 
-    /// Add a refinement constraint to a parameter
-    pub fn with_param_refinement(
-        mut self,
-        param_name: Text,
-        constraint: crate::advanced_protocols::RefinementConstraint,
-    ) -> Self {
-        self.refinement_constraints.insert(param_name, constraint);
-        self
-    }
-
-    /// Add a refinement constraint to the return type
-    pub fn with_return_refinement(
-        mut self,
-        constraint: crate::advanced_protocols::RefinementConstraint,
-    ) -> Self {
-        self.refinement_constraints
-            .insert("return".into(), constraint);
-        self
-    }
-
-    /// Check if this method has refinement constraints
-    pub fn has_refinement(&self) -> bool {
-        !self.refinement_constraints.is_empty()
-    }
-
-    /// Get refinement constraint for a parameter
-    pub fn get_param_refinement(
-        &self,
-        param_name: &str,
-    ) -> Option<&crate::advanced_protocols::RefinementConstraint> {
-        self.refinement_constraints.get(&param_name.into())
-    }
-
-    /// Get refinement constraint for return type
-    pub fn get_return_refinement(
-        &self,
-    ) -> Option<&crate::advanced_protocols::RefinementConstraint> {
-        self.refinement_constraints.get(&"return".into())
-    }
-
-    /// Validate refinement constraints
-    ///
-    /// Checks that:
-    /// 1. Parameter names in constraints match actual parameters
-    /// 2. Constraint predicates are well-formed
-    /// 3. No conflicting constraints exist
-    pub fn validate_refinements(&self) -> Result<(), Text> {
-        // Extract parameter names from function type
-        let param_names: Set<Text> = match &self.ty {
-            Type::Function { params, .. } => {
-                // For now, use indices as names since we don't have named parameters in Type
-                (0..params.len())
-                    .map(|i| format!("param_{}", i).into())
-                    .collect()
-            }
-            _ => Set::new(),
-        };
-
-        // Validate each constraint
-        for (name, _constraint) in self.refinement_constraints.iter() {
-            if name != "return" && !param_names.contains(name) {
-                // Check if it's a numbered parameter reference
-                if !name.starts_with("param_") {
-                    return Err(
-                        format!("Refinement constraint for unknown parameter: {}", name).into(),
-                    );
-                }
-            }
-        }
-
-        Ok(())
-    }
 }
 
 /// Associated type in a protocol (with GAT support)
@@ -2204,8 +2126,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Test for equality".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2225,8 +2146,7 @@ impl ProtocolChecker {
                         ),
                         has_default: true,
                         doc: Maybe::Some("Test for inequality (has default impl)".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2370,8 +2290,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Compare two values".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2415,8 +2334,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Convert to string representation".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2466,8 +2384,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Map a function over the functor".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2502,8 +2419,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Get next element".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2549,8 +2465,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Get next element asynchronously".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: true, // This is an async method
+                                    is_async: true, // This is an async method
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2570,8 +2485,7 @@ impl ProtocolChecker {
                         doc: Maybe::Some(
                             "Return size hint (lower bound, optional upper bound)".into(),
                         ),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2628,8 +2542,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Feed this value into a Hasher".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2669,8 +2582,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Create a deep copy of this value".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2707,8 +2619,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Create a default value".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2751,8 +2662,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Immutably dereferences the value".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2801,8 +2711,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Mutably dereferences the value".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2856,8 +2765,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Get next element as generation-aware reference".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2904,8 +2812,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Get current item without advancing".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2925,8 +2832,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Advance to next item".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2976,8 +2882,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Map a function over a functor (higher-kinded)".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3031,8 +2936,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Wrap a value in the monad".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3055,8 +2959,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Sequentially compose two monadic actions".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3110,8 +3013,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Construct from success value".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3134,8 +3036,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Decide whether to continue or break".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3186,8 +3087,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Convert residual to Self".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3229,8 +3129,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Bitwise AND operation".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3275,8 +3174,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Bitwise OR operation".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3321,8 +3219,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Bitwise XOR operation".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3367,8 +3264,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Bitwise left shift operation".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3413,8 +3309,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Bitwise right shift operation".into()),
-                        refinement_constraints: Map::new(),
-                        is_async: false,
+                                    is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -10830,31 +10725,6 @@ impl ProtocolChecker {
         result
     }
 
-    /// Check if a specific type implements a specific protocol
-    ///
-    /// This method performs a precise check to determine if the given type
-    /// has an implementation for the given protocol.
-    ///
-    /// # Arguments
-    /// * `ty` - The type to check
-    /// * `protocol_name` - The protocol name to check for
-    ///
-    /// # Returns
-    /// `true` if the type implements the protocol, `false` otherwise
-    ///
-    /// # Example
-    /// ```ignore
-    /// let implements_display = checker.check_type_implements_protocol(
-    ///  &Type::Int,
-    ///  &"Display".into()
-    /// );
-    /// ```
-    pub fn check_type_implements_protocol(&self, ty: &Type, protocol_name: &Text) -> bool {
-        let type_key = self.make_type_key(ty);
-        self.impl_index
-            .contains_key(&(type_key, protocol_name.clone()))
-    }
-
     /// Get all registered protocol implementations
     ///
     /// Returns a reference to all protocol implementations in the system.
@@ -12801,7 +12671,15 @@ impl ProtocolChecker {
     /// Validates:
     /// 1. All non-default methods are provided
     /// 2. Method signatures are compatible with protocol requirements
-    /// 3. Refinement constraints are respected (implementations can strengthen, not weaken)
+    ///
+    /// A third clause promised refinement compatibility. Its carrier was
+    /// `ProtocolMethod::refinement_constraints`, a map with no producer:
+    /// `with_param_refinement` and `with_return_refinement` had no caller
+    /// anywhere, tests included, so it was `Map::new()` at all thirty
+    /// construction sites and both consumers were vacuous. A refinement
+    /// reaches a protocol method through its parameter's TYPE — the
+    /// grammar attaches `type_refinement` to a type definition — so the
+    /// side map was superseded, not unfinished (T1073).
     ///
     /// Note: This only checks methods defined directly in the protocol being implemented.
     /// Superprotocol methods are checked when verifying superprotocol conformance.
@@ -12822,11 +12700,6 @@ impl ProtocolChecker {
                     impl_method_ty,
                     impl_.span,
                 )?;
-
-                // Check refinement constraints (impl can strengthen, not weaken)
-                if proto_method.has_refinement() {
-                    self.check_refinement_compatibility(proto_method, impl_method_ty, impl_.span)?;
-                }
             } else if !proto_method.has_default {
                 // Method not provided and has no default - error
                 return Err(ConformanceError::MissingMethod {
@@ -13059,41 +12932,6 @@ impl ProtocolChecker {
             // Different types
             _ => false,
         }
-    }
-
-    /// Check refinement constraint compatibility
-    ///
-    /// Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 7.3 - Refinement Types with Protocols
-    ///
-    /// Implementations can strengthen refinements but cannot weaken them:
-    /// - Parameters: can strengthen (accept more constrained types)
-    /// - Return types: can strengthen (return more constrained types)
-    fn check_refinement_compatibility(
-        &self,
-        proto_method: &ProtocolMethod,
-        _impl_sig: &Type,
-        span: Span,
-    ) -> Result<(), ConformanceError> {
-        // For each refinement in the protocol method, verify the implementation
-        // respects it (implementations can strengthen but not weaken refinements)
-        for (param_name, _proto_refinement) in proto_method.refinement_constraints.iter() {
-            // The implementation must have at least the same refinement
-            // or a stronger one. For now, we just verify the structure.
-            // A full implementation would use SMT solving to compare predicates.
-            if param_name == "return" {
-                // Return type refinement: impl must be at least as strong
-                // (covariant position - can strengthen)
-            } else {
-                // Parameter refinement: impl must be at least as strong
-                // (we accept same or stronger constraints)
-            }
-        }
-
-        // If the implementation has refinements, ensure they're compatible
-        // This is a structural check - full verification requires SMT
-        let _ = span; // Used for error reporting in full implementation
-
-        Ok(())
     }
 
     /// Check that all required associated types are defined

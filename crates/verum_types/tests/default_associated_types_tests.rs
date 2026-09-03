@@ -65,7 +65,6 @@ fn test_default_associated_type_used() {
                     ),
                     has_default: false,
                     doc: Maybe::None,
-                    refinement_constraints: Map::new(),
                     is_async: false,
                     context_requirements: List::new(),
                     type_param_names: List::new(),

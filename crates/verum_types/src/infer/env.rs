@@ -13205,10 +13205,13 @@ with .to_float() or .to_int() (at {:?})",
                     // message asked them to implement a context — advice
                     // that cannot be followed.
                     //
-                    // `ContextResolver::validate_as_type_bound` was written
-                    // for exactly this, with that diagnostic and its help
-                    // text, and had ONE mention in the tree: its own
-                    // definition.  A stub in `type_var_bounds` computes the
+                    // `ContextResolver` carried a `validate_as_type_bound`
+                    // written for exactly this, with this diagnostic and
+                    // its help text, and with ONE mention in the tree: its
+                    // own definition.  Deleted under T1073 — it asked
+                    // `ProtocolKind::Injectable`, which is READ in three
+                    // places and ASSIGNED IN NONE, so it could not have
+                    // answered even if something had called it.  A stub in `type_var_bounds` computes the
                     // same condition and its body is a comment — "emit
                     // warning but don't block … Full error would require
                     // span info not available here".  Here the span exists,

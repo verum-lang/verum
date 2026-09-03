@@ -449,7 +449,6 @@ fn test_default_method_ne_from_eq() {
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),
                     has_default: false,
                     doc: Maybe::None,
-                    refinement_constraints: Map::new(),
                     is_async: false,
                     context_requirements: List::new(),
                     type_param_names: List::new(),
@@ -464,7 +463,6 @@ fn test_default_method_ne_from_eq() {
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),
                     has_default: true, // Default implementation
                     doc: Maybe::None,
-                    refinement_constraints: Map::new(),
                     is_async: false,
                     context_requirements: List::new(),
                     type_param_names: List::new(),
@@ -540,7 +538,6 @@ fn test_explicit_method_overrides_default() {
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),
                     has_default: false,
                     doc: Maybe::None,
-                    refinement_constraints: Map::new(),
                     is_async: false,
                     context_requirements: List::new(),
                     type_param_names: List::new(),
@@ -555,7 +552,6 @@ fn test_explicit_method_overrides_default() {
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),
                     has_default: true, // Default implementation
                     doc: Maybe::None,
-                    refinement_constraints: Map::new(),
                     is_async: false,
                     context_requirements: List::new(),
                     type_param_names: List::new(),
@@ -635,7 +631,6 @@ fn test_missing_required_method_error() {
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),
                     has_default: false, // Required method
                     doc: Maybe::None,
-                    refinement_constraints: Map::new(),
                     is_async: false,
                     context_requirements: List::new(),
                     type_param_names: List::new(),
@@ -1309,7 +1304,6 @@ fn test_error_message_method_not_found() {
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),
                     has_default: false,
                     doc: Maybe::None,
-                    refinement_constraints: Map::new(),
                     is_async: false,
                     context_requirements: List::new(),
                     type_param_names: List::new(),

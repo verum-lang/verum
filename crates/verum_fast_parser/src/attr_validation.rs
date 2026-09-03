@@ -269,66 +269,6 @@ impl AttributeValidator {
         self.validate_attrs(attrs, AttributeTarget::MatchArm)
     }
 
-    /// Validate attributes for a function parameter.
-    #[must_use]
-    pub fn validate_param_attrs(&self, attrs: &[Attribute]) -> List<AttributeValidationWarning> {
-        self.validate_attrs(attrs, AttributeTarget::Param)
-    }
-
-    /// Validate attributes for an impl block.
-    #[must_use]
-    pub fn validate_impl_attrs(&self, attrs: &[Attribute]) -> List<AttributeValidationWarning> {
-        self.validate_attrs(attrs, AttributeTarget::Impl)
-    }
-
-    /// Validate attributes for a module.
-    #[must_use]
-    pub fn validate_module_attrs(&self, attrs: &[Attribute]) -> List<AttributeValidationWarning> {
-        self.validate_attrs(attrs, AttributeTarget::Module)
-    }
-
-    /// Validate attributes for a protocol (trait).
-    #[must_use]
-    pub fn validate_protocol_attrs(&self, attrs: &[Attribute]) -> List<AttributeValidationWarning> {
-        self.validate_attrs(attrs, AttributeTarget::Protocol)
-    }
-
-    /// Validate attributes for a variant.
-    #[must_use]
-    pub fn validate_variant_attrs(&self, attrs: &[Attribute]) -> List<AttributeValidationWarning> {
-        self.validate_attrs(attrs, AttributeTarget::Variant)
-    }
-
-    /// Validate attributes for a statement.
-    #[must_use]
-    pub fn validate_stmt_attrs(&self, attrs: &[Attribute]) -> List<AttributeValidationWarning> {
-        self.validate_attrs(attrs, AttributeTarget::Stmt)
-    }
-
-    /// Validate attributes for an expression.
-    #[must_use]
-    pub fn validate_expr_attrs(&self, attrs: &[Attribute]) -> List<AttributeValidationWarning> {
-        self.validate_attrs(attrs, AttributeTarget::Expr)
-    }
-
-    /// Validate attributes for a loop.
-    #[must_use]
-    pub fn validate_loop_attrs(&self, attrs: &[Attribute]) -> List<AttributeValidationWarning> {
-        self.validate_attrs(attrs, AttributeTarget::Loop)
-    }
-
-    /// Validate attributes for a static declaration.
-    #[must_use]
-    pub fn validate_static_attrs(&self, attrs: &[Attribute]) -> List<AttributeValidationWarning> {
-        self.validate_attrs(attrs, AttributeTarget::Static)
-    }
-
-    /// Validate attributes for a const declaration.
-    #[must_use]
-    pub fn validate_const_attrs(&self, attrs: &[Attribute]) -> List<AttributeValidationWarning> {
-        self.validate_attrs(attrs, AttributeTarget::Const)
-    }
-
     /// Core validation logic for any target.
     ///
     /// This method provides basic validation against known attribute targets.

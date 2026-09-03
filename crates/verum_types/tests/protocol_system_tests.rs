@@ -46,7 +46,6 @@ fn create_eq_protocol() -> Protocol {
             ty: Type::function(vec![Type::Int, Type::Int].into(), Type::Bool),
             has_default: false,
             doc: Maybe::Some("Test for equality".into()),
-            refinement_constraints: Map::new(),
             is_async: false,
             context_requirements: List::new(),
             type_param_names: List::new(),
@@ -61,7 +60,6 @@ fn create_eq_protocol() -> Protocol {
             ty: Type::function(vec![Type::Int, Type::Int].into(), Type::Bool),
             has_default: true, // Default implementation
             doc: Maybe::Some("Test for inequality (has default impl)".into()),
-            refinement_constraints: Map::new(),
             is_async: false,
             context_requirements: List::new(),
             type_param_names: List::new(),
@@ -93,7 +91,6 @@ fn create_ord_protocol() -> Protocol {
             ty: Type::function(vec![Type::Int, Type::Int].into(), Type::Int),
             has_default: false,
             doc: Maybe::Some("Compare two values".into()),
-            refinement_constraints: Map::new(),
             is_async: false,
             context_requirements: List::new(),
             type_param_names: List::new(),
@@ -108,7 +105,6 @@ fn create_ord_protocol() -> Protocol {
             ty: Type::function(vec![Type::Int, Type::Int].into(), Type::Bool),
             has_default: true, // Derived from cmp
             doc: Maybe::Some("Less than (has default impl)".into()),
-            refinement_constraints: Map::new(),
             is_async: false,
             context_requirements: List::new(),
             type_param_names: List::new(),
@@ -123,7 +119,6 @@ fn create_ord_protocol() -> Protocol {
             ty: Type::function(vec![Type::Int, Type::Int].into(), Type::Bool),
             has_default: true, // Derived from cmp
             doc: Maybe::Some("Less than or equal (has default impl)".into()),
-            refinement_constraints: Map::new(),
             is_async: false,
             context_requirements: List::new(),
             type_param_names: List::new(),
@@ -162,7 +157,6 @@ fn create_iterator_protocol() -> Protocol {
             ty: Type::function(vec![Type::Int].into(), Type::Int), // Simplified
             has_default: false,
             doc: Maybe::Some("Get next element".into()),
-            refinement_constraints: Map::new(),
             is_async: false,
             context_requirements: List::new(),
             type_param_names: List::new(),
@@ -177,7 +171,6 @@ fn create_iterator_protocol() -> Protocol {
             ty: Type::function(vec![Type::Int].into(), Type::Int),
             has_default: true, // Default impl using next()
             doc: Maybe::Some("Count elements (has default impl)".into()),
-            refinement_constraints: Map::new(),
             is_async: false,
             context_requirements: List::new(),
             type_param_names: List::new(),
@@ -499,7 +492,6 @@ fn test_method_override_in_subprotocol() {
             ty: Type::function(vec![Type::Int].into(), Type::Int),
             has_default: true,
             doc: Maybe::None,
-            refinement_constraints: Map::new(),
             is_async: false,
             context_requirements: List::new(),
             type_param_names: List::new(),
@@ -530,7 +522,6 @@ fn test_method_override_in_subprotocol() {
             ty: Type::function(vec![Type::Int].into(), Type::Int),
             has_default: true, // Different implementation
             doc: Maybe::Some("Overridden in Derived".into()),
-            refinement_constraints: Map::new(),
             is_async: false,
             context_requirements: List::new(),
             type_param_names: List::new(),

@@ -1009,17 +1009,6 @@ fn expand_col_ctor(col: &PatternColumn, ctor: &Constructor) -> List<PatternColum
     }
 }
 
-/// Internal exhaustiveness check for sub-patterns
-fn check_exhaustiveness_internal(
-    rows: &[PatternColumn],
-    ty: &Type,
-    env: &TypeEnv,
-) -> Result<ExhaustivenessResult, TypeError> {
-    // Convert columns to a simple matrix for recursive checking
-    let patterns: Vec<Pattern> = rows.iter().map(|c| c.to_pattern()).collect();
-    check_exhaustiveness(&patterns, ty, env)
-}
-
 /// Configuration for exhaustiveness checking
 #[derive(Clone)]
 pub struct ExhaustivenessConfig<'a> {

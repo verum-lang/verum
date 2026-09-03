@@ -325,7 +325,6 @@ pub fn create_from_tensor_literal_protocol() -> Protocol {
             doc: Maybe::Some(
                 "Construct tensor from compile-time literal with shape validation".into(),
             ),
-            refinement_constraints: Map::new(),
             is_async: false,
             context_requirements: List::new(),
             type_param_names: List::new(),

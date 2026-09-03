@@ -154,24 +154,6 @@ impl ContextResolver {
         self.lenient_contexts
     }
 
-    /// Check if a protocol name can be used as a type bound.
-    /// Returns Err if the protocol is Injectable-only (context without protocol keyword).
-    pub fn validate_as_type_bound(&self, name: &str, span: verum_ast::Span) -> Result<()> {
-        let name_text = verum_common::Text::from(name);
-        if let verum_common::Maybe::Some(kind) = self.protocol_kinds.get(&name_text) {
-            if *kind == crate::protocol::ProtocolKind::Injectable {
-                return Err(TypeError::Other(verum_common::Text::from(format!(
-                    "context '{}' cannot be used as a type bound; \
-                     contexts declared with `context {}` are injectable only.\n  \
-                     help: use `using [{}]` for dependency injection, \
-                     or declare as `context protocol {}` to enable both uses",
-                    name, name, name, name
-                ))));
-            }
-        }
-        Ok(())
-    }
-
     /// Get a reference to the configuration environment
     pub fn config(&self) -> &condition_eval::ConfigEnv {
         &self.config

@@ -75,7 +75,6 @@ fn test_simple_method_call_eq() {
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),
                     has_default: false,
                     doc: Maybe::None,
-                    refinement_constraints: Map::new(),
                     is_async: false,
                     context_requirements: List::new(),
                     type_param_names: List::new(),
