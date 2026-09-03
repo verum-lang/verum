@@ -137,6 +137,7 @@ check-internal-refs: ## Gate: no references to the internal/ directory in tracke
 check-panic-surface: ## Gate (T0424): no net increase of unwrap/expect in verum_codegen/src/llvm production code
 	python3 scripts/ci/check_panic_surface_ratchet.py
 	python3 scripts/ci/check_uncoded_diagnostic_ratchet.py
+	python3 scripts/ci/check_mount_group_integrity.py
 
 check-early-return-tenants: ## Gate (T1078): the count of diagnostics behind the source-seen early return does not drift
 	python3 scripts/ci/check_early_return_tenants.py
