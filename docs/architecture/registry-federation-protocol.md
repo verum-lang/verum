@@ -236,3 +236,83 @@ Named so that their absence is a decision:
 * **Content-addressed transports.** The `Source` protocol has two
   implementations, registry and git. Others are an extension point, not
   an axis of the design.
+
+## 8. The wire
+
+A client that publishes to a node, or asks one a question, does so over
+HTTP. This section fixes the three routes and the one body format, so
+that "a node" means the same thing to a publisher and to a mirror.
+
+### 8.1 Routes
+
+| Route | Contexts it needs | Answers |
+|---|---|---|
+| `GET /search[?name=&from=]` | none | what the node holds |
+| `GET /resolve?name=<pkg>` | none | which configured source has it |
+| `POST /publish` | Clock, NodeIdentity, Uplink | acceptance or a refusal |
+
+The clause set of `/search` is a CONJUNCTION and nothing else, matching
+§1: `?name=X&from=Y` means both. There is no disjunction on the wire
+because there is none in the query model — "A or B" over a registry is
+two questions, and a node that answers one of them silently has
+answered neither.
+
+An empty query admits everything the node holds. A query language where
+"ask nothing" means "get nothing" surprises people at exactly the wrong
+moment.
+
+### 8.2 The publish body
+
+One JSON object, four members, all required:
+
+```json
+{
+  "manifest":  { "name": …, "version": …, "artefact": …, "published_at": … },
+  "signature": { "manifest_digest": …, "signer": … },
+  "proof":     { "manifest_digest": …, "log_id": …, "tree_size": … },
+  "as_authority": "…"
+}
+```
+
+`as_authority` carries the authority's IDENTIFIER, not a name pattern it
+owns. An id says WHO is publishing; a pattern says WHAT they may
+publish (§1). Conflating them is how a registry ends up letting anyone
+who can spell a scope publish into it.
+
+**A missing or ill-typed member is a refusal that NAMES the member** —
+`missing field: signature.signer` — never a default. The alternative is
+worse than it looks: a body with no `signer` that decoded to the empty
+string would be checked against the authority list and refused *with the
+wrong reason*, sending an operator to their configuration when their
+client sent a malformed request. A default converts a transport fault
+into a policy fault, and policy faults are the ones people argue about
+for hours.
+
+### 8.3 Status codes
+
+The node refuses in kinds, and the wire keeps them apart:
+
+| Situation | Code | Why not another |
+|---|---|---|
+| accepted | 201 | |
+| already held, byte-identical | 200 | success, not conflict — this is how a retry after a dropped response behaves |
+| malformed body | 400 | the request never reached policy |
+| not that authority's name | 403 | authenticated, not permitted |
+| no such name here | 404 | |
+| contested name (§1) | 409 | a conflict, not a permission problem: the node REFUSES rather than ranking |
+| version exists with other content | 409 | resubmitting the same body will never help |
+| evidence does not hold (§2) | 422 | the body is well-formed and the name is theirs; 400 would send them to check their JSON |
+
+Flattening these into one status is the cheapest way to build a registry
+nobody can operate: every failure would read as "typo, try again".
+
+`/resolve` maps the same way — 404 for a name no source has, 403 when a
+source has it but below the audit policy (the operator has a
+configuration line to change, and 404 would send them hunting for a
+missing package), 502 when a configured source failed.
+
+### 8.4 What a resolve answers with
+
+The source's own description, not a bare yes. An operator needs to know
+not *whether* a coordinate resolved but *from where* — a resolution that
+cannot say which source answered is the failure §2 exists to prevent.
