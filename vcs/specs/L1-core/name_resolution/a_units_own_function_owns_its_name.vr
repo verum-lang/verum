@@ -1,0 +1,36 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: name-resolution, shadowing, silent-wrong-value
+// @expect: pass
+// @expected-stdout: 999
+// @description: A function declared in the compilation unit is the one that runs, even when a builtin shares its name.
+// @skip: T1120 is open — a unit's own `fn min` is not bound; the call
+//        reaches a builtin and prints 1. Remove this line when T1120
+//        closes; the file needs no other change, which is the point of
+//        writing it now.
+
+// =============================================================================
+// Measured 2026-09-03 — this file FAILS today, printing 1
+// =============================================================================
+//
+//     CONTROL zzq_unique   999   a local free fn IS callable
+//     min                    1   the user's body never runs
+//     max                    2   likewise
+//     abs, gcd, lcm, pow, sum, count, first, last, len -> 999
+//
+// So it is two NAMES, not free functions in general. And the type
+// checker is complicit: declaring `fn min(a: Int, b: Int) -> Text` and
+// calling `print(min(1, 2))` type-checks with ZERO errors and prints an
+// Int at run time — the binding misses the unit's own declaration
+// before codegen is reached.
+//
+// A silent wrong VALUE, with no diagnostic anywhere. Tracked as T1120.
+
+fn min(a: Int, b: Int) -> Int {
+    999
+}
+
+fn main() {
+    print(min(1, 2));
+}
