@@ -647,7 +647,6 @@ pub struct InterpreterState {
     /// lookup via task-local storage. Must be initialized once per thread before
     /// use. The context environment (theta) is stored in task-local storage and
     /// inherited on spawn. Context methods can be sync or async.
-    pub runtime_ctx_initialized: bool,
 
     /// Thread-local storage slots for V-LLSI TLS operations.
     ///
@@ -2614,7 +2613,6 @@ impl InterpreterState {
             capture_output: false,
             arg_stack: Vec::new(),
             awaiting_task: None,
-            runtime_ctx_initialized: false,
             tls_slots: HashMap::new(),
             static_mut_cells: HashMap::new(),
             static_mut_wide_cells: HashMap::new(),
@@ -2640,18 +2638,6 @@ impl InterpreterState {
             permission_router: Box::new(
                 crate::interpreter::permission::PermissionRouter::allow_all(),
             ),
-        }
-    }
-
-    /// Initializes the runtime context system if not already initialized.
-    ///
-    /// This sets up thread-local storage for the V-LLSI context system.
-    /// The interpreter calls this automatically when needed.
-    pub fn ensure_runtime_ctx_initialized(&mut self) {
-        if !self.runtime_ctx_initialized {
-            // V-LLSI context system is initialized via TLS slots
-            // No external runtime dependency required
-            self.runtime_ctx_initialized = true;
         }
     }
 
