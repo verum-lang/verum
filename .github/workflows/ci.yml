@@ -59,6 +59,19 @@ jobs:
       - name: core/ ring law (no upward edges, no cycles)
         run: python3 scripts/ci/check_core_rings.py
 
+      # Three defects in one day, all the same shape: a phase one entry
+      # point runs and another does not. T0732 (the harness skipped the
+      # global constructors, so every spec was green on a pipeline no user
+      # executes), T1095 (`check_project` is hand-assembled, so the context
+      # phase added to `build` was never inherited) and T1101 (`verum check`
+      # does not run CBGR analysis, and calls a use-after-free clean).
+      # None was found by a test; all three by grepping `self.phase_*(` out
+      # of two entry-point bodies and comparing the lists. This gate is that
+      # comparison, recorded — it fails when the mapping changes, so the
+      # next divergence is written down instead of shipped.
+      - name: Pipeline entry points agree on their phases
+        run: python3 scripts/ci/check_entry_points_agree_on_their_phases.py
+
       # INVENTORY.md is the per-module conformance truth table, and its
       # structural integrity is what makes the liveness layer possible:
       # rows unique, row <-> test-directory bijection, valid status
