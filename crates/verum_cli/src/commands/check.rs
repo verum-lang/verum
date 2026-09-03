@@ -77,18 +77,22 @@ pub fn execute(_workspace: bool, strict: bool, verbose: bool) -> Result<()> {
                 })?;
 
                 ui::output("");
-                ui::error(&format!(
-                    "{} type error{} found",
-                    error_count,
-                    if error_count == 1 { "" } else { "s" }
-                ));
+                // ONE spelling of the summary line, shared with the
+                // single-file path's emitter
+                // (`verum_diagnostics::emitter`). This path used to
+                // print "{n} type errors found", and the CliError
+                // carried a third spelling — so a corpus counter keyed
+                // on the canonical line read ZERO on a project-mode
+                // failure. "0" that means "the instrument did not
+                // answer" is the failure mode this repo has paid for
+                // repeatedly; a summary line is only useful if there is
+                // exactly one of it.
+                ui::error(&verum_diagnostics::compilation_failure_summary(error_count));
                 ui::output("");
 
-                return Err(CliError::CompilationFailed(format!(
-                    "{} type error{}",
-                    error_count,
-                    if error_count == 1 { "" } else { "s" }
-                )));
+                return Err(CliError::CompilationFailed(
+                    verum_diagnostics::compilation_failure_summary(error_count),
+                ));
             }
 
             // Show warnings if any (T6.0.1 — diagnostics surface

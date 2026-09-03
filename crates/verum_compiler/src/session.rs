@@ -1375,7 +1375,10 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
     pub fn abort_if_errors(&self) -> Result<()> {
         if self.has_errors() {
             self.display_diagnostics()?;
-            anyhow::bail!("compilation failed with {} error(s)", self.error_count());
+            anyhow::bail!(
+                "{}",
+                verum_diagnostics::compilation_failure_summary(self.error_count())
+            );
         }
         Ok(())
     }

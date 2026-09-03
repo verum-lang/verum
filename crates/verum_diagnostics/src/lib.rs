@@ -101,6 +101,7 @@ pub use diagnostic::{
     SourceLocation, Span, SpanLabel, SuggestedFix,
 };
 pub use emitter::{
+    compilation_failure_summary,
     Emitter, EmitterConfig, LspCodeAction, LspDiagnostic, LspLocation, LspPosition, LspRange,
     LspRelatedInformation, LspTextEdit, LspWorkspaceEdit, OutputFormat,
 };

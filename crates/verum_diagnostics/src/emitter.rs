@@ -202,9 +202,8 @@ impl Emitter {
         if errors > 0 {
             writeln!(
                 writer,
-                "error: compilation failed with {} error{}",
-                errors,
-                if errors == 1 { "" } else { "s" }
+                "error: {}",
+                compilation_failure_summary(errors)
             )?;
         }
 
@@ -559,4 +558,23 @@ struct JsonSummary {
     warning_count: usize,
     note_count: usize,
     fixable_count: usize,
+}
+
+/// The ONE wording of the compilation-failure summary line.
+///
+/// Four sites used to spell this fact four ways — `session.rs` printed
+/// "compilation failed with N error(s)", this emitter printed
+/// "... N error"/"errors", and `verum_cli`'s project path printed
+/// "N type errors found" plus a third variant in its error value. A
+/// corpus counter keyed on any one of them therefore read ZERO on the
+/// modes that used another, and a zero that means "the instrument did
+/// not answer" is indistinguishable from a zero that means "no errors".
+///
+/// Every caller goes through here so the line can be counted.
+pub fn compilation_failure_summary(errors: usize) -> String {
+    format!(
+        "compilation failed with {} error{}",
+        errors,
+        if errors == 1 { "" } else { "s" }
+    )
 }
