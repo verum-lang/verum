@@ -491,7 +491,7 @@ fn verify_ecdsa_p256(
     match issuer_key {
         SubjectPublicKey.EcP256(ec) => {
             // Convert raw 0x04||X||Y into P256PublicKey.
-            let pk = P256PublicKey.from_uncompressed(ec.bytes.as_slice())
+            let pk = P256.public_key_from_bytes(ec.bytes.as_slice())
                 .map_err(|_| ChainError.BadSignature(-1))?;
             // ECDSA signature is a SEQUENCE of two INTEGERs; feed as DER bytes.
             let sig = P256.signature_from_der(signature.as_slice())

@@ -417,7 +417,7 @@ fn verify_envelope_against_cert(
                 }
             }
             security.x509.spki.SubjectPublicKey.EcP256(ec) => {
-                let pk = match P256PublicKey.from_uncompressed(ec.bytes.as_slice()) {
+                let pk = match P256.public_key_from_bytes(ec.bytes.as_slice()) {
                     Result.Ok(p)  => p,
                     Result.Err(_) => { i = i + 1; continue; }
                 };

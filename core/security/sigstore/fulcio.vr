@@ -143,7 +143,7 @@ public fn fulcio_key_public_bytes(k: &FulcioKey) -> List<Byte> {
         FulcioKey.EcdsaP256(seed) => {
             // Uncompressed: 0x04 || X || Y, 65 bytes.
             let pk = P256.public_key(seed);
-            P256PublicKey.to_uncompressed(&pk)
+            pk.bytes.clone()
         }
     }
 }

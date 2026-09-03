@@ -233,7 +233,7 @@ fn verify_ecdsa_p256_sig(
     // uncompressed point; we support raw uncompressed (0x04 || X || Y).
     let pk_bytes = hex_decode(&pk_pem_or_hex)
         .map_err(|e| MalformedKey(f"p256 public hex: {e}"))?;
-    let pk = P256PublicKey.from_uncompressed(pk_bytes.as_slice())
+    let pk = P256.public_key_from_bytes(pk_bytes.as_slice())
         .map_err(|_| MalformedKey("p256: invalid uncompressed point".to_text()))?;
     let sig = P256.signature_from_der(sig_bytes.as_slice())
         .map_err(|_| MalformedSignature("p256: invalid DER signature".to_text()))?;

@@ -283,7 +283,7 @@ fn verify_signature(
             while i < 32 { uncompressed.push(x[i]); i = i + 1; }
             let mut j: Int = 0;
             while j < 32 { uncompressed.push(y[j]); j = j + 1; }
-            let p_pk = P256PublicKey.from_uncompressed(uncompressed.as_slice())
+            let p_pk = P256.public_key_from_bytes(uncompressed.as_slice())
                 .map_err(|_| WebAuthnError.InvalidSignature)?;
             let p_sig = P256.signature_from_der(sig.as_slice())
                 .map_err(|_| WebAuthnError.InvalidSignature)?;
