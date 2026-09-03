@@ -781,6 +781,21 @@ jobs:
           scripts/ci/check_let_folding_is_bounded_by_term_size.sh --selftest ./target/release/verum
           scripts/ci/check_let_folding_is_bounded_by_term_size.sh ./target/release/verum
 
+      # `Self.method()` inside `implement T { … }` is `T.method()`. The
+      # lookup key is built from the receiver path, whose arm for the
+      # VALUE keyword `self` resolved it while capital `Self` arrived as
+      # a plain Name and fell through — so the key became the literal
+      # `Self.new`, which no registry holds (T1087). The same
+      # substitution already existed twice (type position, newtype
+      # constructor); this was the third spelling and the one nobody
+      # wrote. The gate keeps the named form working and an absent
+      # method refused, so neither "break Opt2.new" nor "resolve
+      # anything on Self" can pass it.
+      - name: Self in static position is the impl type
+        run: |
+          scripts/ci/check_self_is_the_impl_type_in_static_position.sh --selftest ./target/release/verum
+          scripts/ci/check_self_is_the_impl_type_in_static_position.sh ./target/release/verum
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:
