@@ -126,43 +126,25 @@ def body(path: Path, name: str):
     return lines[start:]
 
 
-def duplicate_expected_keys():
-    """Keys written twice in the EXPECTED literal.
-
-    Python keeps the LAST one silently, so a second row for a phase makes
-    the first row's annotation dead text that still reads as authoritative.
-    It happened here on 2026-09-03: two sessions each recorded
-    `phase_context_validation` within one commit window, and the earlier
-    (better) explanation was lost without any diagnostic — not from the
-    compiler, not from this gate, not from review, because the two rows sat
-    twenty lines apart.
-
-    Cheap and exact: count the `"name":` lines in the source and compare
-    with the dict's own length. A file, not the dict, is the only place the
-    duplicate still exists.
-    """
-    src = Path(__file__).read_text()
-    written = re.findall(r'^    "(phase_[a-z_0-9]+)":', src, re.M)
-    seen, dupes = set(), []
-    for k in written:
-        if k in seen:
-            dupes.append(k)
-        seen.add(k)
-    return dupes
-
-
 def main(argv):
-    dupes = duplicate_expected_keys()
-    if dupes:
-        print("check_phase_parity: FAILED — EXPECTED lists a phase more than once:")
-        for k in sorted(set(dupes)):
-            print(f"  `{k}` appears twice; Python keeps the LAST row and drops the first.")
-        print()
-        print("  Merge them into one row keeping BOTH annotations. Two sessions")
-        print("  recording the same phase in one commit window is how this arises,")
-        print("  and the lost half goes on reading as authoritative.")
-        return 1
-
+    # A DUPLICATE KEY IN `EXPECTED` IS CHECKED ELSEWHERE, ON PURPOSE.
+    #
+    # This file briefly carried its own duplicate-key check, written after
+    # the table lost half a commit to one: two sessions each recorded
+    # `phase_context_validation` within one window, and Python keeps the
+    # LAST key silently, so the earlier (better) annotation became dead
+    # text that still read as authoritative.
+    #
+    # `scripts/ci/check_gate_tables_have_no_duplicate_keys.py` now does it
+    # for EVERY dict and set in EVERY gate script — by parsing them with
+    # `ast`, not by grepping, because what makes something a duplicate is
+    # the parser. It runs in CI through `make gates-source`. The local
+    # version matched only `"phase_*":` rows, so it was both redundant and
+    # strictly weaker: a duplicate of any other key here would have passed
+    # it and been caught by the general one anyway.
+    #
+    # Two checks for one property is how the weaker of them ends up giving
+    # false comfort. Kept here as the reason the general gate exists.
     update = "--update" in argv
     actual = {}
     for name, path in ENTRY_POINTS:
