@@ -155,6 +155,57 @@ public const MAX_CBOR_MAP_ENTRIES: Int = 1_000_000;
 /// are curve, x and y in a COSE_Key), so the offset belongs here rather
 /// than at every call site, where getting it wrong yields a structure
 /// that encodes and decodes cleanly and MEANS something else.
+/// Read-side accessors: `Maybe::Some` when the value carries the asked-for
+/// shape, `Maybe::None` otherwise.
+///
+/// Callers already spell them — `att_stmt.as_map()`, `label.as_text()` —
+/// in WebAuthn attestation and registration, HTTP/3 request decoding and
+/// the SQLite pragma API.  `CborValue` had no inherent impl block at
+/// all, so all of them failed to type-check (T1061).  Returning `Maybe`
+/// rather than `Result` matches the call sites, which chain
+/// `.ok_or_else(...)` with their own domain error.
+implement CborValue {
+    /// The text of a `CborText`, if this is one.
+    public fn as_text(&self) -> Maybe<Text> {
+        match self {
+            CborValue.CborText(t) => Maybe.Some(t.clone()),
+            _ => Maybe.None,
+        }
+    }
+
+    /// The entries of a `CborMap`, if this is one.
+    public fn as_map(&self) -> Maybe<List<(CborValue, CborValue)>> {
+        match self {
+            CborValue.CborMap(entries) => Maybe.Some(entries.clone()),
+            _ => Maybe.None,
+        }
+    }
+
+    /// The items of a `CborArray`, if this is one.
+    public fn as_array(&self) -> Maybe<List<CborValue>> {
+        match self {
+            CborValue.CborArray(items) => Maybe.Some(items.clone()),
+            _ => Maybe.None,
+        }
+    }
+
+    /// The bytes of a `CborBytes`, if this is one.
+    public fn as_bytes(&self) -> Maybe<List<Byte>> {
+        match self {
+            CborValue.CborBytes(b) => Maybe.Some(b.clone()),
+            _ => Maybe.None,
+        }
+    }
+
+    /// The boolean of a `CborBool`, if this is one.
+    public fn as_bool(&self) -> Maybe<Bool> {
+        match self {
+            CborValue.CborBool(b) => Maybe.Some(*b),
+            _ => Maybe.None,
+        }
+    }
+}
+
 public fn from_signed(v: Int) -> CborValue {
     if v >= 0 {
         CborValue.CborUint(v as UInt64)

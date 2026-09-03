@@ -116,6 +116,22 @@ implement TextBuilder {
         }
     }
 
+    /// Append one raw byte.
+    ///
+    /// Four callers spell it — the JSON-schema emitter and Weft's
+    /// handler, rpc and tracing paths, all of which build output byte
+    /// by byte while escaping (T1061).  `push` takes a `&Text` and
+    /// `push_char` a `Char`, so neither serves a caller that already
+    /// holds the byte; `push_char` itself ends by pushing bytes onto
+    /// the same buffer, which is what this exposes.
+    ///
+    /// No UTF-8 validation: the callers are mid-escape and know the
+    /// byte is ASCII.  Feeding it an arbitrary byte can leave the
+    /// buffer holding invalid UTF-8, exactly as `Text.push_byte` does.
+    public fn push_byte(&mut self, b: Byte) {
+        self.buf.push_byte(b);
+    }
+
     /// Append a text string followed by a newline.
     public fn push_line(&mut self, text: &Text) {
         self.buf.push_str(text);
