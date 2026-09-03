@@ -1023,7 +1023,7 @@ fn parse_tool_call(action: &Text) -> Result<(Text, Map<Text, Value>), Error> {
 // Extract action from response
 fn extract_action(response: &Text) -> Maybe<Text> {
     if let Maybe.Some(start) = response.find("Action:") {
-        let after_action = response.slice_from(start + 7);
+        let after_action = response.slice(start + 7, response.len());
         if let Maybe.Some(end) = after_action.find("\n") {
             Maybe.Some(after_action.slice_to(end).trim().to_text())
         } else {
@@ -1354,7 +1354,7 @@ implement ChainOfThoughtPrompt {
     // Extract answer from CoT response
     public fn extract_answer(&self, response: Text) -> Maybe<Text> {
         if let Maybe.Some(start) = response.find(&self.answer_prefix) {
-            let after_prefix = response.slice_from(start + self.answer_prefix.len());
+            let after_prefix = response.slice(start + self.answer_prefix.len(), response.len());
             let trimmed = after_prefix.trim();
             if !trimmed.is_empty() {
                 return Maybe.Some(trimmed.to_text());
@@ -1421,7 +1421,7 @@ implement<Schema: JsonSchema + Default> StructuredOutputPrompt<Schema> {
 fn extract_json(text: &Text) -> Result<Text, AgentParseError> {
     // Try to find JSON in code block first
     if let Maybe.Some(start) = text.find("```json") {
-        let after_marker = text.slice_from(start + 7);
+        let after_marker = text.slice(start + 7, text.len());
         if let Maybe.Some(end) = after_marker.find("```") {
             return Ok(after_marker.slice_to(end).trim().to_text());
         }
@@ -1429,10 +1429,10 @@ fn extract_json(text: &Text) -> Result<Text, AgentParseError> {
 
     // Try generic code block
     if let Maybe.Some(start) = text.find("```") {
-        let after_marker = text.slice_from(start + 3);
+        let after_marker = text.slice(start + 3, text.len());
         // Skip optional language identifier
         let content_start = if let Maybe.Some(nl) = after_marker.find("\n") {
-            after_marker.slice_from(nl + 1)
+            after_marker.slice(nl + 1, after_marker.len())
         } else {
             after_marker
         };

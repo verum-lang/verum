@@ -175,7 +175,7 @@ fn extract_string_field(json: &Text, key: &Text) -> Maybe<Text> {
             match json.find(&needle2) {
                 Maybe.None        => Maybe.None,
                 Maybe.Some(start) => {
-                    let after = json.slice_from(start + needle2.len());
+                    let after = json.slice(start + needle2.len(), json.len());
                     match after.find("\"") {
                         Maybe.None     => Maybe.None,
                         Maybe.Some(end) => Maybe.Some(after.slice_to(end)),
@@ -184,7 +184,7 @@ fn extract_string_field(json: &Text, key: &Text) -> Maybe<Text> {
             }
         },
         Maybe.Some(start) => {
-            let after = json.slice_from(start + needle.len());
+            let after = json.slice(start + needle.len(), json.len());
             match after.find("\"") {
                 Maybe.None      => Maybe.None,
                 Maybe.Some(end) => Maybe.Some(after.slice_to(end)),
@@ -202,13 +202,13 @@ fn extract_int_field(json: &Text, key: &Text) -> Maybe<Int> {
             match json.find(&needle2) {
                 Maybe.None        => Maybe.None,
                 Maybe.Some(start) => {
-                    let after = json.slice_from(start + needle2.len());
+                    let after = json.slice(start + needle2.len(), json.len());
                     after.parse_int_prefix()
                 },
             }
         },
         Maybe.Some(start) => {
-            let after = json.slice_from(start + needle.len());
+            let after = json.slice(start + needle.len(), json.len());
             after.parse_int_prefix()
         },
     }
@@ -502,23 +502,23 @@ fn parse_name_pairs(json: &Text) -> List<(Text, Text)> {
         match rest.find("\"") {
             Maybe.None => break,
             Maybe.Some(i) => {
-                let after_open = rest.slice_from(i + 1);
+                let after_open = rest.slice(i + 1, rest.len());
                 match after_open.find("\"") {
                     Maybe.None => break,
                     Maybe.Some(j) => {
                         let first = after_open.slice_to(j);
-                        let remaining = after_open.slice_from(j + 1);
+                        let remaining = after_open.slice(j + 1, after_open.len());
                         // Find second quoted string
                         match remaining.find("\"") {
                             Maybe.None => break,
                             Maybe.Some(k) => {
-                                let after_second_open = remaining.slice_from(k + 1);
+                                let after_second_open = remaining.slice(k + 1, remaining.len());
                                 match after_second_open.find("\"") {
                                     Maybe.None => break,
                                     Maybe.Some(l) => {
                                         let second = after_second_open.slice_to(l);
                                         pairs.push((first, second));
-                                        rest = after_second_open.slice_from(l + 1);
+                                        rest = after_second_open.slice(l + 1, after_second_open.len());
                                     },
                                 }
                             },
