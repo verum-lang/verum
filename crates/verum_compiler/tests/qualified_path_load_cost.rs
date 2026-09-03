@@ -35,7 +35,15 @@ fn modules_loaded(code: &str) -> usize {
         .expect("the embedded runtime archive must be available for this gate");
 
     let cache = verum_compiler::archive_ctx_loader::ArchiveCtxCache::new();
-    let (fn_modules, _type_modules) = cache.apply_lazy_with_types(archive, &mut codegen, &module);
+    let (fn_modules, _type_modules) = cache.apply_lazy_with_types(
+        archive,
+        &mut codegen,
+        &module,
+        // No sibling modules: this gate measures the cost of loading ONE
+        // module's qualified paths, and an empty slice is what the call
+        // did before 658e30c9c gave the method a fourth parameter.
+        &[],
+    );
     fn_modules
 }
 
