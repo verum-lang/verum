@@ -303,6 +303,17 @@ impl<'a> BytecodeSpecializer<'a> {
     }
 
     /// Returns new type descriptors generated during specialization.
+    /// T1073 kept this deliberately.  The unconsumed-mechanism census
+    /// flagged it as having no caller, and my first reading of the
+    /// field said "declared and zero-initialised, nothing pushes to
+    /// it" — WRONG: `:1033` pushes on every specialised descriptor.
+    /// The grep behind that reading searched `new_type_descriptors(`
+    /// with a paren, so it saw the getter and never the field.
+    ///
+    /// This is therefore a PRODUCER WITH NO CONSUMER, not an empty
+    /// mechanism: specialisation really does generate these and nobody
+    /// drains them.  Deleting the drain would strand the data; the open
+    /// question is who should read it.
     pub fn take_new_type_descriptors(&mut self) -> Vec<TypeDescriptor> {
         std::mem::take(&mut self.new_type_descriptors)
     }

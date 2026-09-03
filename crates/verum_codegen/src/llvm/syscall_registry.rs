@@ -720,24 +720,9 @@ pub fn predeclare_all<'ctx>(module: &Module<'ctx>, ctx: &'ctx Context) {
     }
 }
 
-/// Pre-declare a curated set of POSIX syscalls into `module`. Used by
-/// emit paths that want to ensure the Verum-ABI signatures are present
-/// before any later inline declaration drifts. Idempotent — no-ops on
-/// names already present.
-///
-/// The current set is the I/O subset (`close`, `read`, `write`,
-/// `access`, `unlink`) — the historical contents of
-/// `ensure_io_syscalls_declared`. Time syscalls (`clock_gettime`,
-/// `nanosleep`, `sched_yield`) are declared lazily by call sites
-/// through [`get_or_declare`].
-pub fn ensure_io_declared<'ctx>(
-    module: &Module<'ctx>,
-    ctx: &'ctx Context,
-) {
-    for name in ["close", "read", "write", "access", "unlink"] {
-        let _ = get_or_declare(module, ctx, name);
-    }
-}
+// `ensure_io_declared` REMOVED (T1073): superseded by
+// `ensure_io_syscalls_declared` (9 callers against its own 0), which
+// its own doc comment already named as the fuller list.
 
 // =============================================================================
 // Verum-ABI syscall wrappers — no-libc enforcement layer.
