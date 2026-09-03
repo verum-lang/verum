@@ -1,9 +1,9 @@
-// @test: typecheck-pass
+// @test: typecheck-fail
 // @tier: 0
 // @level: L1
 // @tags: context, DI, negative-contexts, violation
-// @expect: pass
-// @description: A function that forbids a context, calling one that requires it. Reported, but as a WARNING — see the note below.
+// @expect: errors
+// @description: A function that forbids a context must not be able to call one that requires it.
 // @spec: 16-context-system.md Section 1.4 - Negative Contexts
 
 // =============================================================================
@@ -22,19 +22,23 @@
 // L2-standard/context/advanced/context_patterns_complete.vr was commented
 // out in full — the guarantee had a heading and no test.
 //
-// WHY `@expect: pass` FOR A VIOLATION. Measured 2026-09-03 on a built
-// compiler: the violation IS detected and reported —
+// THIS FILE CHANGED DIRECTIVE ON THE DAY IT WAS WRITTEN, and the change
+// is the record. It landed as `@test: typecheck-pass`, because the
+// violation was detected and reported as a TRACING WARNING that the
+// check's exit status did not reflect: `[context] unresolved_policy`
+// defaulted to "error" and its "error" arm called `warn!` exactly like
+// its "warn" arm, so all three settings behaved alike.
+//
+// With that arm emitting a real diagnostic, the file asserts what its
+// heading always claimed:
 //
 //   Function 'must_not_touch_the_database' calls 'reads_the_database'
 //   which requires context 'Database', but 'Database' is excluded via
 //   `using [!Database]`
 //
-// — but as a tracing warning, not a diagnostic, so the check exits 0.
-// `[context] unresolved_policy` defaults to "error", and its "error"
-// arm emits `warn!` exactly like its "warn" arm; the knob has no
-// effect today. When that is fixed this file becomes
-// `@test: typecheck-fail` with the real code, and the change of
-// directive is the record that it happened.
+// Cost of the promotion, measured with the control inside the sweep:
+// 300 core/ files and 150 specs, 0 violations; the known-bad control,
+// 1. Nothing went from green to red.
 
 context Database {
     fn query(&self, sql: Text) -> Text;
