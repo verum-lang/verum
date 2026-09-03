@@ -63,13 +63,13 @@ public fn advice_name(v: &VacuumAdvice) -> Text {
 // Snapshot rendering "freelist=X / total=Y (Z%)".
 public fn snapshot_text(r: &FreelistCountReading) -> Text {
     let mut s = Text.new();
-    s = s.append("freelist=".clone());
-    s = s.append(int64_decimal(r.free_pages));
-    s = s.append(" total=".clone());
-    s = s.append(int64_decimal(r.total_pages));
-    s = s.append(" (".clone());
-    s = s.append(int_decimal(fragmentation_percent(r)));
-    s = s.append("%)".clone());
+    s = s.concat(&"freelist=".clone());
+    s = s.concat(&int64_decimal(r.free_pages));
+    s = s.concat(&" total=".clone());
+    s = s.concat(&int64_decimal(r.total_pages));
+    s = s.concat(&" (".clone());
+    s = s.concat(&int_decimal(fragmentation_percent(r)));
+    s = s.concat(&"%)".clone());
     s
 }
 

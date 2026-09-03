@@ -57,13 +57,13 @@ public fn is_empty(r: &OffsetsResult) -> Bool {
 // Render one hit in the "col term off size" form, space-separated.
 public fn render_hit(h: &MatchHit) -> Text {
     let mut s = Text.new();
-    s = s.append(int_to_text(h.column));
-    s = s.append(" ".clone());
-    s = s.append(int_to_text(h.term));
-    s = s.append(" ".clone());
-    s = s.append(i64_to_text(h.byte_offset));
-    s = s.append(" ".clone());
-    s = s.append(i64_to_text(h.byte_size));
+    s = s.concat(&int_to_text(h.column));
+    s = s.concat(&" ".clone());
+    s = s.concat(&int_to_text(h.term));
+    s = s.concat(&" ".clone());
+    s = s.concat(&i64_to_text(h.byte_offset));
+    s = s.concat(&" ".clone());
+    s = s.concat(&i64_to_text(h.byte_size));
     s
 }
 
