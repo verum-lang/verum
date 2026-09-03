@@ -250,6 +250,42 @@ impl ContextValidationPhase {
             }
         }
 
+        // MODULE-LEVEL ALIAS CONSISTENCY (T1073).
+        //
+        // `verum_types::validate_module_aliases` — its own doc calls
+        // itself "the entry point for module-level alias validation" —
+        // had exactly one reference in the tree: the `pub use` that
+        // re-exports it. Nothing entered it, so the rule it carries was
+        // written, tested, and never asked.
+        //
+        // The rule is deliberate, not abandoned: its error type carries
+        // `first_function` and `second_function`, fields that mean
+        // nothing except across functions, and
+        // `context_check_tests.rs` asserts exactly that shape — alias
+        // `primary` bound to `Database` in `migrate` and to `Cache` in
+        // `verify`, one error naming both.
+        //
+        // Measured before wiring: within ONE function a duplicate alias
+        // is caught ("Duplicate context alias 'x'"); ACROSS functions it
+        // was not, and the same alias for the SAME context stayed legal,
+        // which is the distinction the rule draws.
+        let module_fns: Vec<verum_ast::decl::FunctionDecl> = module
+            .items
+            .iter()
+            .filter_map(|item| match &item.kind {
+                verum_ast::ItemKind::Function(f) => Some((*f).clone()),
+                _ => None,
+            })
+            .collect();
+        if let Err(e) = verum_types::validate_module_aliases(&module_fns) {
+            errors.push(
+                DiagnosticBuilder::error()
+                    .code("E612")
+                    .message(e.to_string())
+                    .build(),
+            );
+        }
+
         // Computational property inference — infer Pure/IO/Mutates/Async/etc.
         // bottom-up through call graph. Used for pure fn validation.
         let inferred = InferredProperties::infer(module);
