@@ -748,7 +748,7 @@ fn email_within_subtree(email: &Text, subtree: &Text) -> Bool {
 
 fn extract_uri_host(uri: &Text) -> Text {
     // Naive URI parse: scheme://host[:port]/...
-    let after_scheme = match uri.find_str("://") {
+    let after_scheme = match uri.find("://") {
         Maybe.Some(p) => uri.substring(p + 3, uri.len()),
         Maybe.None    => uri.clone(),
     };

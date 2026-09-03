@@ -986,6 +986,42 @@ implement Text {
     }
 
     /// Find character.
+    /// Byte offset of the first occurrence of `needle` at or after
+    /// `from`, or `None`.
+    ///
+    /// `find` searches from the start, and callers that walk a document
+    /// need to resume — the S3 XML list parser and the URL splitter both
+    /// spell `find_str_after(needle, pos)` and had nothing to call
+    /// (T1061).  Written on top of `find` over the tail rather than as a
+    /// second search: one matcher, one set of bounds bugs.
+    public fn find_str_after(&self, needle: &Text, from: Int) -> Maybe<Int> {
+        let n = self.len();
+        let start = if from < 0 { 0 } else if from > n { n } else { from };
+        match self.slice(start, n).find(needle) {
+            Maybe.Some(rel) => Maybe.Some(start + rel),
+            Maybe.None => Maybe.None,
+        }
+    }
+
+    /// Byte offset of the first occurrence of `byte`, or `None`.
+    ///
+    /// `find_char` walks CHARACTER indices and decodes as it goes;
+    /// callers looking for an ASCII delimiter (`b'@'` in a URL's
+    /// authority) hold a byte and want a byte offset.  On multi-byte
+    /// input the two answer different questions, so this is not an
+    /// alias for `find_char`.
+    public fn find_byte(&self, byte: Byte) -> Maybe<Int> {
+        let bytes = self.as_bytes();
+        let mut i: Int = 0;
+        while i < bytes.len() {
+            if bytes[i] == byte {
+                return Maybe.Some(i);
+            }
+            i = i + 1;
+        }
+        Maybe.None
+    }
+
     public fn find_char(&self, ch: Char) -> Maybe<Int> {
         for (idx, c) in self.char_indices() {
             if c == ch {

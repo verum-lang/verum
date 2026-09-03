@@ -435,7 +435,7 @@ fn compose_object_url(cfg: &S3Config, key: &Text) -> Text {
     } else {
         let mut endpoint = cfg.endpoint.clone();
         // Insert bucket as a hostname prefix.
-        let after_scheme = match endpoint.find_str("://") {
+        let after_scheme = match endpoint.find("://") {
             Maybe.Some(i) => i + 3,
             Maybe.None    => 0,
         };
@@ -450,7 +450,7 @@ fn compose_bucket_url(cfg: &S3Config) -> Text {
         f"{trim_trailing_slash(&cfg.endpoint)}/{cfg.bucket}"
     } else {
         let endpoint = &cfg.endpoint;
-        let after_scheme = match endpoint.find_str("://") {
+        let after_scheme = match endpoint.find("://") {
             Maybe.Some(i) => i + 3,
             Maybe.None    => 0,
         };
@@ -474,7 +474,7 @@ fn compose_bucket_path(cfg: &S3Config) -> Text {
 }
 
 fn extract_host(endpoint: &Text) -> Text {
-    let after_scheme = match endpoint.find_str("://") {
+    let after_scheme = match endpoint.find("://") {
         Maybe.Some(i) => i + 3,
         Maybe.None    => 0,
     };
@@ -633,7 +633,7 @@ fn parse_list_v2_response(body: &List<Byte>) -> Result<ListPage, StorageError> {
 fn extract_xml_text(xml: &Text, tag: &Text) -> Maybe<Text> {
     let open = f"<{tag}>";
     let close = f"</{tag}>";
-    let s = xml.find_str(&open)?;
+    let s = xml.find(&open)?;
     let e = xml.find_str_after(&close, s + open.len())?;
     Maybe.Some(xml.substring(s + open.len(), e))
 }
