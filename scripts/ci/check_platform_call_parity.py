@@ -100,7 +100,7 @@ DECL = re.compile(
 GLOB_REEXPORT = re.compile(r"^\s*public\s+mount\s+\.?([a-z_]\w*)\s*\.\s*\*\s*;", re.M)
 LIST_REEXPORT = re.compile(r"public\s+mount\s+\.?([a-z_]\w*)\.\{(.*?)\}\s*;", re.S)
 
-BASELINE = 15
+BASELINE = 11
 
 _declared: dict[Path, set[str]] = {}
 
