@@ -15,6 +15,7 @@ use serde_json::json;
 
 use crate::config::Manifest;
 use crate::error::CliError;
+use crate::ui;
 
 /// Execute `verum config show`.
 ///
@@ -147,6 +148,92 @@ fn print_json(
 ///
 /// Loads and validates verum.toml without printing the full feature set.
 /// Exits 0 on success; exits non-zero with diagnostics on failure.
+/// Top-level tables `Manifest` knows about.
+///
+/// Kept next to the check that uses it rather than derived, because
+/// `Manifest`'s fields are `#[serde(default)]` — serde will not tell us
+/// which names it recognised, and `deny_unknown_fields` on 35 structs
+/// would turn every forward-compatible extra key into a hard error on
+/// manifests that work today.
+const KNOWN_TABLES: &[&str] = &[
+    "cog", "language", "dependencies", "dev_dependencies",
+    "build_dependencies", "build", "features", "profile", "workspace",
+    "lsp", "registry", "llvm", "optimization", "lto", "pgo",
+    "cross_compile", "verify", "types", "runtime", "codegen", "meta",
+    "protocols", "context", "safety", "test", "debug",
+];
+
+/// Levenshtein distance, capped — only used to suggest a near miss.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for i in 1..=a.len() {
+        cur[0] = i;
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+/// Report top-level tables the manifest does not know.
+///
+/// `verum config validate`'s own help promises to check "for invalid
+/// values, inconsistent combinations, and TYPOS". Measured 2026-09-03,
+/// it delivered the first and not the third:
+///
+///     profile = "zzq_not_a_profile"   REFUSED  (unknown variant)
+///     [zzq_nonsense]                  accepted
+///     [runtime] kindd = "full"        accepted
+///
+/// An unknown table is the shape a typo takes — `[runtim]`, `[verifiy]`
+/// — and it is silently ignored, so the setting the author wrote simply
+/// does not apply and nothing says so. That is the silent-acceptance
+/// class the debt register tracks, in the configuration surface.
+///
+/// A WARNING rather than an error: a manifest carrying a table for a
+/// future version, or for a tool that is not the compiler, is
+/// legitimate, and refusing it would break working projects for a
+/// spelling check.
+fn warn_unknown_tables(manifest_path: &std::path::Path) {
+    let Ok(text) = std::fs::read_to_string(manifest_path) else {
+        return;
+    };
+    // `toml::from_str::<Table>` — the same call `Manifest::from_file`
+    // makes, and the reason this check was inert for one build:
+    // `text.parse::<toml::Value>()` compiles under toml 0.9 and fails
+    // at run time on a document this very function had just been handed
+    // as valid. A silent early return on that `Err` made a working
+    // check indistinguishable from an absent one.
+    let Ok(table) = toml::from_str::<toml::Table>(&text) else {
+        return; // a parse failure is reported by the loader above
+    };
+
+    for key in table.keys() {
+        if KNOWN_TABLES.contains(&key.as_str()) {
+            continue;
+        }
+        let near = KNOWN_TABLES
+            .iter()
+            .map(|k| (edit_distance(key, k), *k))
+            .filter(|(d, _)| *d <= 2)
+            .min_by_key(|(d, _)| *d);
+        match near {
+            Some((_, suggestion)) => ui::warn(&format!(
+                "unknown table `[{key}]` — did you mean `[{suggestion}]`? \
+                 It is ignored, so anything under it has no effect."
+            )),
+            None => ui::warn(&format!(
+                "unknown table `[{key}]` — it is ignored, so anything \
+                 under it has no effect."
+            )),
+        }
+    }
+}
+
 pub fn validate() -> Result<(), CliError> {
     let manifest_dir = Manifest::find_manifest_dir()?;
     let manifest_path = Manifest::manifest_path(&manifest_dir);
@@ -154,6 +241,7 @@ pub fn validate() -> Result<(), CliError> {
     crate::feature_overrides::apply_global(&mut manifest)?;
     let _features = crate::feature_overrides::manifest_to_features(&manifest)?;
     manifest.validate()?;
+    warn_unknown_tables(&manifest_path);
 
     println!(
         "  {} {} is valid.",
