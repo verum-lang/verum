@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: gates-source check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-silent-acceptance check-name-census check-panic-surface check-early-return-tenants check-dup-emitters
+.PHONY: gates-source check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-silent-acceptance check-name-census check-panic-surface check-early-return-tenants check-dup-emitters
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -79,6 +79,10 @@ check-doc-anchors: ## Gate: a documentation link must point at a heading that ex
 	python3 scripts/ci/check_doc_anchors.py --self-test
 	python3 scripts/ci/check_doc_anchors.py --check
 
+check-doc-error-codes: ## Gate: an error code cited in the documentation must exist in the registry
+	python3 scripts/ci/check_doc_error_codes_exist.py --self-test
+	python3 scripts/ci/check_doc_error_codes_exist.py --check
+
 check-grammar-docs-match: ## Gate: EBNF shown in the documentation must match grammar/verum.ebnf
 	python3 scripts/ci/check_grammar_docs_match.py --self-test
 	python3 scripts/ci/check_grammar_docs_match.py --check
@@ -86,7 +90,7 @@ check-grammar-docs-match: ## Gate: EBNF shown in the documentation must match gr
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
 
-gates-source: check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+gates-source: check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication ## Every gate that needs only the SOURCE TREE — no build, no artefacts
 
 	@echo "gates-source: all source-only gates green"
 
