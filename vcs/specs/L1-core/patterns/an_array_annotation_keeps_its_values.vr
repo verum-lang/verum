@@ -4,8 +4,6 @@
 // @tags: fixed-size-array, annotation, silent-wrong-value
 // @expect: pass
 // @expected-stdout: 1
-// @skip: T1122 is open — the annotation zeroes the bindings; this file
-//        prints 0. Remove this line when T1122 closes.
 // @description: A fixed-size array annotation on a `let` must not change the values bound.
 
 // =============================================================================
