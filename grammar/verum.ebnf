@@ -784,7 +784,35 @@ variant_list    = [ '|' ] , variant , { '|' , variant } ;
 (*   type Torus is Base | loop_a() = Base..Base | loop_b() = Base..Base   *)
 (*               | Surf() = (loop_a..loop_b)..(loop_b..loop_a);           *)
 variant         = { attribute } , identifier , [ variant_data ] , [ path_endpoints ] ;
-variant_data    = '{' , field_list , '}' | '(' , type_list , ')' ;
+variant_data    = '{' , field_list , '}'
+                | '(' , tuple_payload , ')' ;
+
+(* A TUPLE PAYLOAD MAY LABEL ITS SLOTS.  `A(count: Int)` parses, binds,
+   and destructures positionally (`T.A(n)`); this file described only
+   `'(' , type_list , ')'`, which admits no label, while core/ uses the
+   labelled form 165 times.  Measured 2026-09-03.
+                                                                        *)
+tuple_payload   = [ tuple_slot , { ',' , tuple_slot } ] ;
+tuple_slot      = [ identifier , ':' ] , type_expr ;
+
+(* A LABEL HERE MUST BE A PLAIN IDENTIFIER, and that is stricter than
+   every other name position in the language.  A lexer keyword usable
+   as a `let` binding, a record field and a function parameter is
+   REFUSED as a tuple-payload label:
+
+     A(stage: Int)   Parse error: expected type      <- refused
+     { stage: Int }  accepted
+     fn f(stage: Int) accepted
+     let stage = 1;   accepted
+
+   Measured over `stage`, `gen`, `set`, `field`, `pattern`, `layer`,
+   with `other` as the control that passes all four positions.  The
+   mechanism is that these are lexer TOKENS rather than identifiers, and
+   only this position insists on an `Ident`.  Recorded because the
+   asymmetry is invisible from the productions and costs a confusing
+   "expected type" at a name the author has already used elsewhere in
+   the same file.
+                                                                        *)
 (* `expression` here covers paren-wrapped range expressions for n-cells:  *)
 (*   `(a..b)` parses as `Paren(Range(a, b))` — picked up by the parser    *)
 (*   to compute the variant's `path_dim` at AST-build time.               *)
