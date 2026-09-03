@@ -931,7 +931,32 @@ impl<'s> CompilationPipeline<'s> {
                 .unwrap_or(false);
             has_ast_attr || has_comment_annotation
         };
-        if has_test_annotation {
+        // OPT-OUT: `// @contexts: strict` in the header.
+        //
+        // The leniency above is blanket — it accepts EVERY undefined
+        // context in any file carrying a `@test:` header. That is right
+        // for the many specs that write `using [Database]` and expect a
+        // harness to provide it, and it makes one property untestable
+        // by the suite: that an undefined context IS rejected. Measured
+        // 2026-09-03, a spec asserting `error<E605>` on `using
+        // [!Databse]` checked cleanly for exactly this reason — the
+        // suite disabled the check the spec existed to test, and the
+        // failure read as "the defect is fixed".
+        //
+        // So a spec may say it wants the real rules. Nothing else
+        // changes: a file without the line keeps the mode it had.
+        let wants_strict_contexts = module
+            .items
+            .first()
+            .and_then(|item| self.session.get_source(item.span.file_id))
+            .map(|sf| {
+                sf.source.as_str().lines().take(15).any(|line| {
+                    let t = line.trim();
+                    t.starts_with("// @contexts:") && t.contains("strict")
+                })
+            })
+            .unwrap_or(false);
+        if has_test_annotation && !wants_strict_contexts {
             checker.context_resolver_mut().set_lenient_contexts(true);
         }
 

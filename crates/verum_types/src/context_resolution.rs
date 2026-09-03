@@ -492,11 +492,13 @@ impl ContextResolver {
 
                     // Validate all contexts in the group
                     // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
-                    // Skip validation for negative contexts - they're exclusions, not requirements
+                    // Both signs are validated. An exclusion names a
+                    // context just as a requirement does, and a
+                    // misspelled exclusion (`!Loggr`) forbids nothing
+                    // while reading as a guarantee — the failure mode
+                    // that only exists once exclusions are enforced.
                     for ctx_ref in requirement.iter() {
-                        if !ctx_ref.is_negative {
-                            self.validate_context(&ctx_ref.name, span)?;
-                        }
+                        self.validate_context(&ctx_ref.name, span)?;
                     }
 
                     return Ok(requirement);
@@ -524,12 +526,13 @@ impl ContextResolver {
                 });
             }
 
-            // For negative contexts, we don't validate existence (they're exclusions)
+            // Validate existence for BOTH signs. Skipping the
+            // negative side was free while exclusions were inert; now
+            // that they are enforced, an unchecked name turns a typo
+            // into a silent permission of exactly what the author
+            // wrote the exclusion to forbid.
             // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
-            if !ctx.is_negative {
-                // Validate the context exists (only for positive contexts)
-                self.validate_context(&name, span)?;
-            }
+            self.validate_context(&name, span)?;
 
             // Validate alias uniqueness
             // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.2 - Aliased Contexts

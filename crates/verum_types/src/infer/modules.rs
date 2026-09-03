@@ -12258,7 +12258,18 @@ impl TypeChecker {
             let func_context_set = if let Some(ref req) = context_requirement {
                 let mut context_set = ContextSet::new();
                 for context_ref in req.iter() {
-                    context_set.add(ContextRequirement::new(context_ref.name.clone(), func.span));
+                    // A forbidden context (`using [!Database]`) must enter the
+                    // model AS forbidden. Building every requirement with
+                    // `::new` — which hardcodes `is_negative: false` — left
+                    // `excluded_contexts` permanently empty, so
+                    // `verify_all_negative_contexts` walked a registry in
+                    // which no function ever forbade anything, and the
+                    // documented compile-time guarantee held for no program.
+                    context_set.add(if context_ref.is_negative {
+                        ContextRequirement::negative(context_ref.name.clone(), func.span)
+                    } else {
+                        ContextRequirement::new(context_ref.name.clone(), func.span)
+                    });
                 }
                 context_set
             } else {

@@ -820,6 +820,21 @@ impl<'s> CompilationPipeline<'s> {
                     // miss the architectural phase entirely (T0834).
                     self.on_module_parsed(&module)?;
 
+                    // Context validation — the same phase `build` runs.
+                    // `check_project` is a hand-rolled pipeline rather
+                    // than the orchestrated phase list, so it inherited
+                    // none of Phase 4c: measured 2026-09-03, a function
+                    // declaring `using [!Zlog]` and calling one that
+                    // requires `Zlog` produced a warning under `verum
+                    // build` and NOTHING under `verum check` — the
+                    // command whose entire job is to answer that
+                    // question. Guarded on Check so `build`, which runs
+                    // the phase from its own list, does not report
+                    // twice.
+                    if self.mode == CompilationMode::Check {
+                        self.phase_context_validation(&module);
+                    }
+
                     // Implicit prelude — user compiles only; stdlib
                     // bootstrap defines the prelude itself.
                     if matches!(self.build_mode, crate::pipeline::BuildMode::Normal) {

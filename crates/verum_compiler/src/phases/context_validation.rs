@@ -222,6 +222,22 @@ impl ContextValidationPhase {
         let function_contexts =
             std::sync::Arc::new(self.build_function_contexts_map(module, &context_registry));
 
+        // VERUM_TRACE_CTXVALID=1 — the phase's own account of itself.
+        // Written because every layer below it looked correct while the
+        // guarantee held for no program: knowing the phase RAN, and with
+        // what map, separates "not reached" from "reached and empty".
+        if std::env::var_os("VERUM_TRACE_CTXVALID").is_some() {
+            eprintln!(
+                "[ctxvalid] items={} fn_contexts={} decls={}",
+                module.items.len(),
+                function_contexts.len(),
+                context_decls.len()
+            );
+            for (name, ctxs) in function_contexts.iter() {
+                eprintln!("[ctxvalid]   fn {name} requires {ctxs:?}");
+            }
+        }
+
         for item in &module.items {
             match self.validate_item_with_context_info(
                 item,
