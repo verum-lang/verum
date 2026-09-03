@@ -259,7 +259,7 @@ fn list_eq_value(a: &List<ConfigValue>, b: &List<ConfigValue>) -> Bool {
 
 fn map_eq_value(a: &Map<Text, ConfigValue>, b: &Map<Text, ConfigValue>) -> Bool {
     if a.len() != b.len() { return false; }
-    let keys = a.keys();
+    let keys = a.keys_list();
     let mut i = 0;
     while i < keys.len() {
         let k = keys.get(i).unwrap();

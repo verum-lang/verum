@@ -1265,7 +1265,7 @@ fn stringify_array_inline(items: &List<TomlValue>) -> Text {
 fn stringify_table_inline(t: &Map<Text, TomlValue>) -> Text {
     let mut out = Text.new();
     out.push_byte(0x7B_u8);
-    let keys = t.keys();
+    let keys = t.keys_list();
     let mut i = 0;
     while i < keys.len() {
         if i > 0 { out.push_str(&", ".to_text()); }
@@ -1462,7 +1462,7 @@ public fn to_config_value(t: &TomlValue) -> ConfigValue {
         }
         TomlValue.TomlTable(t2) => {
             let mut out: Map<Text, ConfigValue> = Map.new();
-            let keys = t2.keys();
+            let keys = t2.keys_list();
             let mut i = 0;
             while i < keys.len() {
                 let k = keys.get(i).unwrap();
@@ -1501,7 +1501,7 @@ public fn from_config_value(v: &ConfigValue) -> Result<TomlValue, ConfigError> {
         }
         ConfigValue.ConfigTable(t) => {
             let mut out: Map<Text, TomlValue> = Map.new();
-            let keys = t.keys();
+            let keys = t.keys_list();
             let mut i = 0;
             while i < keys.len() {
                 let k = keys.get(i).unwrap();

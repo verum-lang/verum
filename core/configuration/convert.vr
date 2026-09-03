@@ -187,7 +187,7 @@ fn walk_for_loss(v: &ConfigValue, caps: &FormatCapabilities, path: &Text, report
             }
         }
         ConfigValue.ConfigTable(t) => {
-            let keys = t.keys();
+            let keys = t.keys_list();
             let mut i = 0;
             while i < keys.len() {
                 let k = keys.get(i).unwrap();
@@ -314,7 +314,7 @@ fn coerce_for_capabilities(
         }
         ConfigValue.ConfigTable(t) => {
             let mut out: Map<Text, ConfigValue> = Map.new();
-            let keys = t.keys();
+            let keys = t.keys_list();
             let mut i = 0;
             while i < keys.len() {
                 let k = keys.get(i).unwrap();

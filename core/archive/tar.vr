@@ -353,7 +353,7 @@ fn parse_pax(bytes: &[Byte], start: Int, end: Int) -> Result<Map<Text, Text>, Ta
 
 fn merge_pax(global: &Map<Text, Text>, local: &Map<Text, Text>) -> Map<Text, Text> {
     let mut out = global.clone();
-    let keys = local.keys();
+    let keys = local.keys_list();
     let mut i = 0;
     while i < keys.len() {
         let k = keys.get(i).unwrap();
@@ -481,7 +481,7 @@ fn write_pax_header(records: &Map<Text, Text>, out: &mut List<Byte>) -> Result<(
     // Build the body: each record is "<len> <key>=<value>\n", with len
     // including all of itself + the trailing newline.
     let mut body: List<Byte> = List.new();
-    let keys = records.keys();
+    let keys = records.keys_list();
     let mut i = 0;
     while i < keys.len() {
         let k = keys.get(i).unwrap();

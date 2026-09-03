@@ -273,7 +273,7 @@ public fn format_value(m: &CogManifest) -> ConfigValue {
     // [features]
     if !m.features.is_empty() {
         let mut feats: Map<Text, ConfigValue> = Map.new();
-        let keys = m.features.keys();
+        let keys = m.features.keys_list();
         let mut i = 0;
         while i < keys.len() {
             let k = keys.get(i).unwrap();
@@ -378,7 +378,7 @@ fn parse_dependencies(
         }),
     };
     let mut deps: Map<Text, DependencySpec> = Map.new();
-    let keys = t.keys();
+    let keys = t.keys_list();
     let mut i = 0;
     while i < keys.len() {
         let k = keys.get(i).unwrap();
@@ -475,7 +475,7 @@ fn parse_features(root: &Map<Text, ConfigValue>) -> (Map<Text, List<Text>>, List
     let mut feats: Map<Text, List<Text>> = Map.new();
     let mut defaults: List<Text> = List.new();
     if let Maybe.Some(ConfigValue.ConfigTable(t)) = root.get(&"features".to_text()) {
-        let keys = t.keys();
+        let keys = t.keys_list();
         let mut i = 0;
         while i < keys.len() {
             let k = keys.get(i).unwrap();
@@ -513,7 +513,7 @@ fn format_cog_identity(c: &CogIdentity) -> ConfigValue {
 
 fn format_dependencies(deps: &Map<Text, DependencySpec>) -> ConfigValue {
     let mut out: Map<Text, ConfigValue> = Map.new();
-    let keys = deps.keys();
+    let keys = deps.keys_list();
     let mut i = 0;
     while i < keys.len() {
         let k = keys.get(i).unwrap();
