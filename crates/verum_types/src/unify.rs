@@ -18,7 +18,7 @@ use verum_ast::span::Span;
 #[allow(unused_imports)]
 use verum_common::Text;
 use verum_common::ToText;
-use verum_common::{List, Map};
+use verum_common::{List, Map, Maybe};
 
 /// Unifier performs type unification.
 ///
@@ -169,7 +169,44 @@ pub struct Unifier {
     /// half the fix. A rigid var renders through the ordinary var path as
     /// `_`, and "expected `_`, found `Int`" tells the author nothing about
     /// which promise they broke; "expected `T`, found `Int`" names it.
-    rigid_vars: Map<TypeVar, (Text, bool)>,
+    rigid_vars: Map<TypeVar, RigidVar>,
+}
+
+/// What is known about one rigid type parameter for the duration of a body.
+///
+/// `bounded` used to be the whole story, and it is the reason a call
+/// through a bounded parameter had no result type. Measured 2026-09-03,
+/// two files differing in one thing:
+///
+///     fn via_bound<U, F: fn(Int) -> List<U>>(f: F) -> Int {
+///         let inner = f(1);           // error<E404>: `inner` is `_`
+///         inner.len()
+///     }
+///     fn via_direct<U>(f: fn(Int) -> List<U>) -> Int {
+///         let inner = f(1);           // clean
+///         inner.len()
+///     }
+///
+/// `bind_var` permits the call — a bounded parameter may take a function
+/// shape, because the bound promised one — but the table recorded only
+/// THAT a bound exists, never BY WHAT. So the caller of `bind_var` had
+/// invented a shape out of fresh variables and unification had nothing to
+/// narrow it with, and the return type stayed unsolved.
+///
+/// `fn_bound` restores the discarded half. It is the parameter's declared
+/// function type, already resolved in the scope that declared it, so a
+/// call site can ask for the signature instead of guessing at it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RigidVar {
+    /// The name the parameter was written under — the diagnostic is half
+    /// the fix, see the field comment above.
+    pub name: Text,
+    /// Whether the parameter carries any bound at all.
+    pub bounded: bool,
+    /// The parameter's bound when that bound is a function type
+    /// (`F: fn(A) -> B`), which is the only bound shape that answers
+    /// "what does calling this parameter produce".
+    pub fn_bound: Maybe<Type>,
 }
 
 /// Default `unify_inner` recursion budget (#304). 50 frames ×
@@ -264,9 +301,19 @@ impl Unifier {
     /// Adds rather than replaces: a generic function declared inside a
     /// generic function must keep the OUTER parameters rigid too, or the
     /// inner body could discover the outer `T`.
-    pub fn enter_rigid_scope(&mut self, vars: impl IntoIterator<Item = (TypeVar, Text, bool)>) {
-        for (var, name, bounded) in vars {
-            self.rigid_vars.insert(var, (name, bounded));
+    pub fn enter_rigid_scope(
+        &mut self,
+        vars: impl IntoIterator<Item = (TypeVar, Text, bool, Maybe<Type>)>,
+    ) {
+        for (var, name, bounded, fn_bound) in vars {
+            self.rigid_vars.insert(
+                var,
+                RigidVar {
+                    name,
+                    bounded,
+                    fn_bound,
+                },
+            );
         }
     }
 
@@ -277,12 +324,21 @@ impl Unifier {
     /// scope looking unbounded and has to be corrected here.
     pub fn mark_rigid_bounded(&mut self, var: TypeVar) {
         if let Some(entry) = self.rigid_vars.get_mut(&var) {
-            entry.1 = true;
+            entry.bounded = true;
+        }
+    }
+
+    /// Record the function type a parameter is bounded by, for a bound that
+    /// arrives after the rigid scope was installed (a `where` clause).
+    pub fn set_rigid_fn_bound(&mut self, var: TypeVar, fn_bound: Type) {
+        if let Some(entry) = self.rigid_vars.get_mut(&var) {
+            entry.bounded = true;
+            entry.fn_bound = Maybe::Some(fn_bound);
         }
     }
 
     /// Restore the rigid set saved by [`Unifier::rigid_snapshot`].
-    pub fn exit_rigid_scope(&mut self, previous: Map<TypeVar, (Text, bool)>) {
+    pub fn exit_rigid_scope(&mut self, previous: Map<TypeVar, RigidVar>) {
         self.rigid_vars = previous;
     }
 
@@ -293,7 +349,7 @@ impl Unifier {
     /// cannot sit at the bottom of the function that installs the scope: an
     /// error would leak the parameters of a half-checked body into the next
     /// function, where they belong to nothing and would refuse to bind.
-    pub fn rigid_snapshot(&self) -> Map<TypeVar, (Text, bool)> {
+    pub fn rigid_snapshot(&self) -> Map<TypeVar, RigidVar> {
         self.rigid_vars.clone()
     }
 
@@ -302,15 +358,17 @@ impl Unifier {
         self.rigid_vars.contains_key(&var)
     }
 
-    /// Drop one parameter back to flexible.
+    /// The function type a rigid parameter is bounded by, if it has one.
     ///
-    /// Needed because a parameter's bounds arrive from two places: written
-    /// inline (`fn f<F: fn(T) -> U>`) they are known before the body is
-    /// entered, but written in a `where` clause they are processed after.
-    /// A bound naming a structural type says the parameter IS that type,
-    /// which is the one thing a rigid var may not be.
-    pub fn release_rigid(&mut self, var: TypeVar) {
-        self.rigid_vars.remove(&var);
+    /// A call site asks this instead of inventing a shape out of fresh
+    /// variables: the parameter's own declaration already says what calling
+    /// it produces, and inventing the shape is what left the result type
+    /// unsolved. See [`RigidVar`] for the measurement.
+    pub fn rigid_fn_bound(&self, var: TypeVar) -> Maybe<Type> {
+        self.rigid_vars
+            .get(&var)
+            .map(|entry| entry.fn_bound.clone())
+            .unwrap_or(Maybe::None)
     }
 
     /// How a rigid var should read in a diagnostic: the name the author
@@ -318,7 +376,7 @@ impl Unifier {
     fn rigid_name(&self, var: TypeVar) -> Text {
         self.rigid_vars
             .get(&var)
-            .map(|(name, _)| name.clone())
+            .map(|entry| entry.name.clone())
             .unwrap_or_else(|| Type::Var(var).to_text())
     }
 
@@ -326,7 +384,7 @@ impl Unifier {
     fn rigid_is_bounded(&self, var: TypeVar) -> bool {
         self.rigid_vars
             .get(&var)
-            .map(|(_, bounded)| *bounded)
+            .map(|entry| entry.bounded)
             .unwrap_or(false)
     }
 

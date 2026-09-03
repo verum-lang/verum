@@ -7599,6 +7599,32 @@ impl TypeChecker {
             {
                 *inner.clone()
             }
+            // ASK THE DECLARATION INSTEAD OF INVENTING A SHAPE.
+            //
+            // A type parameter bounded by a function type — `fn f<F: fn(Int)
+            // -> List<U>>(f: F)` — already says what calling it produces.
+            // Without this arm the call reached `Type::Var` below, which
+            // built a signature out of fresh variables and unified the
+            // parameter with it. `bind_var` PERMITS that for a bounded
+            // parameter (the bound promised a function shape), so the call
+            // was accepted and nothing ever narrowed the result type.
+            //
+            // Measured 2026-09-03, two files differing in one thing:
+            //
+            //     fn via_bound<U, F: fn(Int) -> List<U>>(f: F) -> Int {
+            //         let inner = f(1);      error<E404>: `inner` is `_`
+            //     fn via_direct<U>(f: fn(Int) -> List<U>) -> Int {
+            //         let inner = f(1);      clean
+            //
+            // Normalising here rather than in the `Type::Var` arm is what
+            // makes arity, defaults, argument checking and the result type
+            // all come from the one place that already implements them.
+            // The stdlib pays for this directly: `Deque.flat_map<U, F:
+            // fn(&T) -> List<U>>` is one of the bodies it un-breaks.
+            Type::Var(v) => match self.unifier.rigid_fn_bound(*v) {
+                Maybe::Some(bound_fn) => bound_fn,
+                Maybe::None => func_ty_raw,
+            },
             _ => func_ty_raw,
         };
 
@@ -8349,6 +8375,11 @@ impl TypeChecker {
                 Ok(InferResult::new(resolved_return))
             }
             Type::Var(v) => {
+                // Reached only when the parameter has NO declared function
+                // bound — one with a bound was rewritten to that bound
+                // where `func_ty` is computed, so it arrives at the
+                // ordinary `Type::Function` arm instead.
+                //
                 // Type variable being called as a function - instantiate it as a function type
                 // Create fresh type variables for parameters based on argument count
                 let mut param_types = List::new();

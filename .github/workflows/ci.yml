@@ -796,6 +796,36 @@ jobs:
           scripts/ci/check_self_is_the_impl_type_in_static_position.sh --selftest ./target/release/verum
           scripts/ci/check_self_is_the_impl_type_in_static_position.sh ./target/release/verum
 
+      # The conformance harness drives `run_for_test`; users get
+      # `run_interpreter`. When the two sequences part, a spec is green
+      # on a pipeline nobody runs. Measured (T0732): the test path
+      # skipped `run_global_ctors`, so a `@thread_local static` read as
+      # `()` — Value::default() out of a slot no initialiser touched —
+      # while `verum run` printed 9. An ordinary reference agrees under
+      # both paths, which is why a suite that never takes one could not
+      # see it. The gate also holds the two paths to the SAME answer on
+      # a user macro, and checks the source property (three execution
+      # entry points, three `run_global_ctors` calls) so it still says
+      # something where no vtest binary was built.
+      - name: The test harness runs the user's program
+        run: |
+          scripts/ci/check_test_harness_runs_the_users_program.sh --selftest ./target/release/verum
+          scripts/ci/check_test_harness_runs_the_users_program.sh ./target/release/verum
+
+      # Calling a type parameter bounded by a function type must yield
+      # what the bound declares. `bind_var` PERMITS the call — the bound
+      # promised a function shape — but the rigid table recorded only
+      # THAT a bound exists, never by what, so the call site invented a
+      # signature from fresh variables and the result stayed unsolved
+      # (T0755). `fn f<U, F: fn(Int) -> List<U>>(f: F)` and
+      # `fn f<U>(f: fn(Int) -> List<U>)` mean the same thing and only
+      # the second worked; `Deque.flat_map` in core/ is one of the
+      # bodies that paid for it.
+      - name: A call through a fn bound has the declared result
+        run: |
+          scripts/ci/check_call_through_fn_bound_has_the_declared_result.sh --selftest ./target/release/verum
+          scripts/ci/check_call_through_fn_bound_has_the_declared_result.sh ./target/release/verum
+
       - name: AOT smoke under STRICT gates
         continue-on-error: true
         env:

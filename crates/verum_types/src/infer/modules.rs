@@ -10672,7 +10672,15 @@ impl TypeChecker {
         // written under. HKT and meta parameters go through their own arms
         // below and are deliberately not made rigid yet — one kind at a
         // time, each with its own measurement.
-        let mut func_rigid_type_params: List<(TypeVar, Text, bool)> = List::new();
+        let mut func_rigid_type_params: List<(TypeVar, Text, bool, Maybe<Type>)> = List::new();
+        // The AST of each parameter's FUNCTION-shaped bound, collected here
+        // and resolved after the loop.
+        //
+        // Not resolved inline, because a bound may name a parameter the loop
+        // has not reached yet — `<F: fn(Int) -> List<U>, U>` is legal and
+        // resolving `U` mid-loop would invent a second variable for it. See
+        // [[RigidVar]] in unify.rs for what the resolved bound is for.
+        let mut func_rigid_fn_bound_ast: List<(TypeVar, verum_ast::ty::Type)> = List::new();
         // …and the same thing keyed by NAME, because the loop below is not
         // the only one: `check_function_inner` walks `func.generics` twice.
         let mut func_type_param_by_name: Map<Text, TypeVar> = Map::new();
@@ -10712,7 +10720,32 @@ impl TypeChecker {
                     // That single allowance lives in `bind_var`; dropping
                     // rigidity for bounded parameters outright also lets it
                     // through and costs real detection.
-                    func_rigid_type_params.push((tvar, name_text.clone(), !bounds.is_empty()));
+                    func_rigid_type_params.push((
+                        tvar,
+                        name_text.clone(),
+                        !bounds.is_empty(),
+                        Maybe::None,
+                    ));
+                    // A bound written as a FUNCTION TYPE is the one bound
+                    // shape that answers "what does calling this parameter
+                    // produce". The parser files it under `Equality` (see
+                    // `parse_type_bounds_or_type`: a bound that is a complex
+                    // type rather than a protocol path becomes an equality
+                    // bound), and `convert_type_bounds_to_protocol_bounds`
+                    // below keeps only the protocol ones — so without this
+                    // the declared signature is dropped on the floor and a
+                    // call through the parameter has to invent one.
+                    for bound in bounds.iter() {
+                        let bound_ty = match &bound.kind {
+                            verum_ast::ty::TypeBoundKind::Equality(t)
+                            | verum_ast::ty::TypeBoundKind::GenericProtocol(t) => t,
+                            _ => continue,
+                        };
+                        if matches!(bound_ty.kind, verum_ast::ty::TypeKind::Function { .. }) {
+                            func_rigid_fn_bound_ast.push((tvar, bound_ty.clone()));
+                            break;
+                        }
+                    }
                     func_type_param_by_name.insert(name_text.clone(), tvar);
 
                     // Track implicit parameters
@@ -11039,13 +11072,39 @@ impl TypeChecker {
         // anywhere, because T was one shared inference variable rather than
         // a universally quantified one.
         // (Restored by `check_function`, which wraps every exit path.)
+        // Resolve the function-shaped bounds now that EVERY parameter of
+        // this signature is defined, and attach each to its parameter.
+        // Resolution failure is not an error here: a bound naming a type
+        // this pass cannot see is the ordinary cross-module case, and the
+        // parameter simply keeps the behaviour it had before this channel
+        // existed.
+        for (bound_var, bound_ast) in func_rigid_fn_bound_ast.iter() {
+            let Ok(resolved) = self.ast_to_type(bound_ast) else {
+                continue;
+            };
+            for entry in func_rigid_type_params.iter_mut() {
+                if entry.0 == *bound_var {
+                    entry.3 = Maybe::Some(resolved.clone());
+                    break;
+                }
+            }
+        }
         if std::env::var_os("VERUM_TRACE_RIGID").is_some() {
             eprintln!(
                 "[rigid] scope for `{}`: {:?}",
                 func.name.name.as_str(),
                 func_rigid_type_params
                     .iter()
-                    .map(|(v, n, b)| format!("{}=v{}{}", n.as_str(), v.id(), if *b { "+bound" } else { "" }))
+                    .map(|(v, n, b, fb)| format!(
+                        "{}=v{}{}{}",
+                        n.as_str(),
+                        v.id(),
+                        if *b { "+bound" } else { "" },
+                        match fb {
+                            Maybe::Some(t) => format!("+fn({})", t.to_text()),
+                            Maybe::None => String::new(),
+                        }
+                    ))
                     .collect::<Vec<_>>()
             );
         }
