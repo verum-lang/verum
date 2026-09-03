@@ -126,7 +126,43 @@ def body(path: Path, name: str):
     return lines[start:]
 
 
+def duplicate_expected_keys():
+    """Keys written twice in the EXPECTED literal.
+
+    Python keeps the LAST one silently, so a second row for a phase makes
+    the first row's annotation dead text that still reads as authoritative.
+    It happened here on 2026-09-03: two sessions each recorded
+    `phase_context_validation` within one commit window, and the earlier
+    (better) explanation was lost without any diagnostic — not from the
+    compiler, not from this gate, not from review, because the two rows sat
+    twenty lines apart.
+
+    Cheap and exact: count the `"name":` lines in the source and compare
+    with the dict's own length. A file, not the dict, is the only place the
+    duplicate still exists.
+    """
+    src = Path(__file__).read_text()
+    written = re.findall(r'^    "(phase_[a-z_0-9]+)":', src, re.M)
+    seen, dupes = set(), []
+    for k in written:
+        if k in seen:
+            dupes.append(k)
+        seen.add(k)
+    return dupes
+
+
 def main(argv):
+    dupes = duplicate_expected_keys()
+    if dupes:
+        print("check_phase_parity: FAILED — EXPECTED lists a phase more than once:")
+        for k in sorted(set(dupes)):
+            print(f"  `{k}` appears twice; Python keeps the LAST row and drops the first.")
+        print()
+        print("  Merge them into one row keeping BOTH annotations. Two sessions")
+        print("  recording the same phase in one commit window is how this arises,")
+        print("  and the lost half goes on reading as authoritative.")
+        return 1
+
     update = "--update" in argv
     actual = {}
     for name, path in ENTRY_POINTS:
