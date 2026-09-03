@@ -69,6 +69,7 @@ module core.configuration.toml;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount time.rfc3339.{Rfc3339Time};
+mount time.rfc3339.{parse as rfc3339_parse, format_with_offset as rfc3339_format_with_offset};
 mount configuration.value.{ConfigValue};
 mount configuration.error.{ConfigError, ConfigErrorKind, format_id_toml};
 mount configuration.format.{
@@ -945,7 +946,7 @@ fn parse_date_or_datetime(p: &mut Parser) -> Result<TomlValue, TomlError> {
         let raw = slice_text(p.bytes, start, p.pos);
         // Pad to a full RFC 3339 by appending T00:00:00Z and parse — date-only.
         let padded = raw.concat(&"T00:00:00Z".to_text());
-        match rfc3339.parse(&padded) {
+        match rfc3339_parse(&padded) {
             Result.Ok(t)  => Result.Ok(TomlValue.TomlLocalDate(t)),
             Result.Err(_) => Result.Err(mk_err(p, InvalidDateTime, &"invalid local-date")),
         }
@@ -971,12 +972,12 @@ fn parse_date_or_datetime(p: &mut Parser) -> Result<TomlValue, TomlError> {
         if !has_offset {
             // Append Z to satisfy RFC 3339 parser, but tag as LocalDateTime.
             let padded = norm.concat(&"Z".to_text());
-            match rfc3339.parse(&padded) {
+            match rfc3339_parse(&padded) {
                 Result.Ok(t)  => Result.Ok(TomlValue.TomlLocalDateTime(t)),
                 Result.Err(_) => Result.Err(mk_err(p, InvalidDateTime, &"invalid local-datetime")),
             }
         } else {
-            match rfc3339.parse(&norm) {
+            match rfc3339_parse(&norm) {
                 Result.Ok(t)  => Result.Ok(TomlValue.TomlOffsetDateTime(t)),
                 Result.Err(_) => Result.Err(mk_err(p, InvalidDateTime, &"invalid offset-datetime")),
             }
@@ -990,7 +991,7 @@ fn parse_local_time_value(p: &mut Parser) -> Result<TomlValue, TomlError> {
     let raw = slice_text(p.bytes, start, p.pos);
     // Pad with 1970-01-01T prefix and Z to use RFC 3339 parser.
     let padded = "1970-01-01T".to_text().concat(&raw).concat(&"Z".to_text());
-    match rfc3339.parse(&padded) {
+    match rfc3339_parse(&padded) {
         Result.Ok(t)  => Result.Ok(TomlValue.TomlLocalTime(t)),
         Result.Err(_) => Result.Err(mk_err(p, InvalidDateTime, &"invalid local-time")),
     }
@@ -1205,7 +1206,7 @@ fn stringify_inline_value(v: &TomlValue) -> Text {
         TomlValue.TomlInt(i)               => i.to_text(),
         TomlValue.TomlFloat(f)             => f.to_text(),
         TomlValue.TomlBool(b)              => if *b { "true".to_text() } else { "false".to_text() },
-        TomlValue.TomlOffsetDateTime(t)    => rfc3339.format_with_offset(t.unix_seconds, t.nanos, t.offset_minutes),
+        TomlValue.TomlOffsetDateTime(t)    => rfc3339_format_with_offset(t.unix_seconds, t.nanos, t.offset_minutes),
         TomlValue.TomlLocalDateTime(t)     => format_local_datetime(t),
         TomlValue.TomlLocalDate(t)         => format_local_date(t),
         TomlValue.TomlLocalTime(t)         => format_local_time(t),
@@ -1393,7 +1394,7 @@ fn all_tables(items: &List<TomlValue>) -> Bool {
 
 fn format_local_datetime(t: &Rfc3339Time) -> Text {
     // Reuse RFC 3339 formatting and strip the trailing offset.
-    let raw = rfc3339.format_with_offset(t.unix_seconds, t.nanos, 0);
+    let raw = rfc3339_format_with_offset(t.unix_seconds, t.nanos, 0);
     // Strip trailing 'Z' or offset.
     let bytes = raw.as_bytes();
     let mut i = bytes.len() - 1;
@@ -1408,13 +1409,13 @@ fn format_local_datetime(t: &Rfc3339Time) -> Text {
 
 fn format_local_date(t: &Rfc3339Time) -> Text {
     // Take first 10 bytes (YYYY-MM-DD).
-    let raw = rfc3339.format_with_offset(t.unix_seconds, t.nanos, 0);
+    let raw = rfc3339_format_with_offset(t.unix_seconds, t.nanos, 0);
     slice_text(raw.as_bytes(), 0, 10)
 }
 
 fn format_local_time(t: &Rfc3339Time) -> Text {
     // Take bytes [11..], strip trailing 'Z'/offset.
-    let raw = rfc3339.format_with_offset(t.unix_seconds, t.nanos, 0);
+    let raw = rfc3339_format_with_offset(t.unix_seconds, t.nanos, 0);
     let bs = raw.as_bytes();
     let mut end = bs.len();
     while end > 11 {
