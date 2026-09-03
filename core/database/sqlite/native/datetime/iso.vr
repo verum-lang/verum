@@ -26,7 +26,7 @@ module core.database.sqlite.native.datetime.iso;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.datetime.instant.{
-    Instant, from_ymd, from_ymd_hms,
+    DatetimeInstant as Instant, from_ymd, from_ymd_hms,
 };
 
 // -----------------------------------------------------------------------------

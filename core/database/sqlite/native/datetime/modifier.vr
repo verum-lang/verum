@@ -34,7 +34,7 @@ module core.database.sqlite.native.datetime.modifier;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.datetime.instant.{
-    Instant, from_ymd_hms, from_unix_seconds,
+    DatetimeInstant as Instant, from_ymd_hms, from_unix_seconds,
 };
 mount core.database.sqlite.native.datetime.julian.{
     julian_day_int, julian_to_gregorian, day_fraction_to_time, weekday_for,
