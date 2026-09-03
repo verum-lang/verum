@@ -866,6 +866,28 @@ jobs:
       # uncontested one, a non-colliding control, and a genuinely wrong
       # call that must still be refused, so neither silence nor a blanket
       # "stop checking calls" can pass it.
+      # An ambient builtin either refuses a bare call or answers
+      # correctly. Measured (T1123/T1127): `print(abs(0 - 3))` printed
+      # `Relaxed` — MemoryOrdering.Relaxed, tag 0 of an atomics enum the
+      # program never mentions — and the SAME answer came back for every
+      # input: Int, Float, literal, variable, positive, negative. An
+      # answer identical across a varied sample is the signature of an
+      # argument that never reaches the operation. The neighbours were
+      # all healthy (`n.abs()` gave 3, `min`/`max`/`clamp` were right),
+      # so the shape is worth a gate rather than a one-line fix: the
+      # type checker registers a name the code generator has no route
+      # for, and the call lowers to a value nobody chose. The gate found
+      # a SECOND name, `pow`, that the original report did not mention.
+      # It asks the behavioural question rather than comparing the two
+      # lists textually — a text comparison goes green the moment
+      # somebody adds a name to a list that no longer feeds the arm.
+      # `--selftest` runs it with one expectation falsified and requires
+      # it to go red, because an assertion of absence passes for free.
+      - name: An ambient builtin computes what it names
+        run: |
+          scripts/ci/check_an_ambient_builtin_computes_what_it_names.sh --selftest ./target/release/verum
+          scripts/ci/check_an_ambient_builtin_computes_what_it_names.sh ./target/release/verum
+
       - name: A mounted call never compiles to unit
         run: |
           scripts/ci/check_a_mounted_call_never_compiles_to_unit.sh --selftest ./target/release/verum

@@ -67,12 +67,25 @@
 # it would pin a spelling that rests on that private list.
 # That is T1124, filed separately: an undeclared `@name(...)` compiles
 # to `nil` instead of being diagnosed.
-set -eu
+#
+# SELFTEST (`--selftest`): the gate is run with one expectation
+# deliberately falsified, and must go RED. An assertion of absence
+# passes for free — without this, "every builtin computes what it names"
+# is indistinguishable from "the runner did nothing".
+#
+# usage: check_an_ambient_builtin_computes_what_it_names.sh [--selftest] [verum]
+set -u
+
+SELFTEST=0
+if [ "${1:-}" = "--selftest" ]; then
+    SELFTEST=1
+    shift
+fi
 
 VERUM="${1:-target/release/verum}"
 if [ ! -x "$VERUM" ]; then
     echo "check_an_ambient_builtin_computes_what_it_names: no binary at $VERUM" >&2
-    echo "usage: $0 [path-to-verum]" >&2
+    echo "usage: $0 [--selftest] [path-to-verum]" >&2
     exit 2
 fi
 
@@ -81,10 +94,19 @@ trap 'rm -rf "$TMP"' EXIT
 fails=0
 checked=0
 
+# The VBC cache is content-keyed, so a fixed probe answers from cache on
+# a second CI run and would measure the cache rather than the compiler.
+NONCE="$$_$(date +%s 2>/dev/null || echo 0)"
+
 # name | expression | expected output
 # Only names that are REGISTERED as bare-callable appear here; the rest
 # of IO_AND_NUMERIC_BUILTIN_NAMES are print-family or unregistered, and
 # the "does not type-check" branch below covers them without a claim.
+if [ "$SELFTEST" -eq 1 ]; then
+    # One line, one WRONG expectation. If the gate reports OK on this,
+    # it is not comparing anything and its green means nothing.
+    cases='abs|abs(0 - 3)|999'
+else
 cases='abs|abs(0 - 3)|3
 abs|abs(3)|3
 abs|abs(0.0 - 2.5)|2.5
@@ -99,19 +121,25 @@ ceil|ceil(2.1)|3
 pow|pow(2, 3)|8
 method|(0 - 3).abs()|3
 method|(2).pow(3)|8'
+fi
 
 echo "$cases" | while IFS='|' read -r name expr want; do
     [ -n "$name" ] || continue
     f="$TMP/probe.vr"
-    printf 'fn main() { print(%s); }\n' "$expr" > "$f"
+    printf '// nonce %s\nfn main() { print(%s); }\n' "$NONCE" "$expr" > "$f"
 
-    if ! "$VERUM" check "$f" >"$TMP/chk" 2>&1; then
+    # ONE invocation per case, not two. `run` reports a refusal the same
+    # way `check` does, so a separate `check` only doubled the wall time
+    # (110s -> 55s for the same thirteen answers). The distinction the
+    # gate needs — refused versus answered-wrongly — survives, because a
+    # refusal is a non-zero exit and an answer is a line of output.
+    if ! "$VERUM" run "$f" >"$TMP/out" 2>&1; then
         # Refusing is always allowed: no claim, no lie.
         printf '  %-8s %-22s refused (no claim)\n' "$name" "$expr"
         continue
     fi
     checked=$((checked + 1))
-    got="$("$VERUM" run "$f" 2>/dev/null | tail -1)"
+    got="$(tail -1 "$TMP/out")"
     case "$got" in
         "$want"|"$want".0|"$want".00*)
             printf '  %-8s %-22s -> %s\n' "$name" "$expr" "$got"
@@ -123,6 +151,16 @@ echo "$cases" | while IFS='|' read -r name expr want; do
             ;;
     esac
 done
+
+if [ "$SELFTEST" -eq 1 ]; then
+    if [ -s "$TMP/failed" ]; then
+        echo "selftest: ok — a falsified expectation is reported"
+        exit 0
+    fi
+    echo "SELFTEST FAILED: the gate reported OK on a deliberately wrong"
+    echo "expectation, so it is not comparing anything." >&2
+    exit 1
+fi
 
 if [ -s "$TMP/failed" ]; then
     echo
