@@ -1,0 +1,54 @@
+// @test: check
+// @level: L0
+// @tier: 0
+// @tags: protocols, associated-types, gat
+// @timeout: 20000
+// @expected-exit: 101
+// @expected-stderr: type parameter(s) here, but
+// @description: An impl that binds a GAT with the wrong number of type
+//   parameters is refused.
+
+// `grammar/verum.ebnf:1193` lets a protocol give its associated type
+// its own parameters:
+//
+//     protocol_type = 'type' , identifier , [ type_params ] , ... ;
+//
+// and `verum.ebnf:1238` lets the impl bind it with parameters of its
+// own.  Nothing compared the two counts, so the program below — which
+// declares `type Out<T>` and binds `type Out = Int` — compiled clean.
+//
+// The arity lives on both sides of the AST and on both sides of the
+// registry, so the comparison is direct.  What it needed was the
+// PROTOCOL's count: every associated type was registered through the
+// registry's `simple` constructor, which hardcodes an empty type-param
+// list, while the `generic` constructor that carries them had no
+// production caller at all.  With the protocol side pinned at zero the
+// comparison did not merely miss the violation, it INVERTED: this file
+// compiled clean and its correct sibling was rejected.
+//
+// This is the negative half.  `generic_associated_type_arity_is_accepted.vr`
+// is the positive half, and the inversion is exactly why one without
+// the other proves nothing.
+//
+// T1073.
+
+type Mapper is protocol {
+    type Out<T>;
+    fn run<T>(&self, x: T) -> Self.Out<T>;
+};
+
+type Box is { v: Int };
+
+// VIOLATION: the protocol declares `Out` with ONE type parameter;
+// this binds it with none.
+implement Mapper for Box {
+    type Out = Int;
+
+    public fn run<T>(&self, x: T) -> Int {
+        0
+    }
+}
+
+public fn main() -> Int {
+    0
+}

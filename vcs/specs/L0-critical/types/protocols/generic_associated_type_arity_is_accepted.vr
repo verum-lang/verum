@@ -1,0 +1,43 @@
+// @test: check
+// @level: L0
+// @tier: 0
+// @tags: protocols, associated-types, gat
+// @timeout: 20000
+// @expected-exit: 0
+// @description: An impl that binds a GAT with the RIGHT number of type
+//   parameters is accepted.
+
+// The positive half of T1073, and the half that caught the defect.
+//
+// Measured on the binary that had the arity comparison but not the
+// carrier: this file — the CORRECT program — was rejected with
+// "`type Out` takes 1 type parameter(s) here, but `Mapper` declares it
+// with 0", while its violating sibling compiled clean.  The protocol
+// side was pinned at zero, so the comparison ran backwards.
+//
+// A first control that merely omitted the impl block reported 0 for
+// both trees and read as "the check is inert".  It differed from the
+// subject in more than one value and could not tell inertness from
+// inversion.  This file differs from
+// `generic_associated_type_arity_is_checked.vr` in exactly one: the
+// parameter list on `type Out`.
+
+type Mapper is protocol {
+    type Out<T>;
+    fn run<T>(&self, x: T) -> Self.Out<T>;
+};
+
+type Box is { v: Int };
+
+// CORRECT: one declared parameter, one bound parameter.
+implement Mapper for Box {
+    type Out<T> = T;
+
+    public fn run<T>(&self, x: T) -> T {
+        x
+    }
+}
+
+public fn main() -> Int {
+    0
+}
