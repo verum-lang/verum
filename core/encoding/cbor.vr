@@ -146,6 +146,23 @@ public const MAX_CBOR_MAP_ENTRIES: Int = 1_000_000;
 // Encoding
 // =============================================================================
 
+/// CBOR integer from a SIGNED value.
+///
+/// The wire format has no signed major type: non-negative values use
+/// major 0 (`CborUint`), negative ones major 1 (`CborNint`), and the
+/// payload of major 1 is `n` such that the value is `-1 - n`.  Callers
+/// that build COSE structures work in signed labels (`-1`, `-2`, `-3`
+/// are curve, x and y in a COSE_Key), so the offset belongs here rather
+/// than at every call site, where getting it wrong yields a structure
+/// that encodes and decodes cleanly and MEANS something else.
+public fn from_int(v: Int) -> CborValue {
+    if v >= 0 {
+        CborValue.CborUint(v as UInt64)
+    } else {
+        CborValue.CborNint((-1 - v) as UInt64)
+    }
+}
+
 public fn encode(v: &CborValue) -> List<Byte> {
     // Output size is content-dependent; 64 bytes is a typical
     // small-document threshold (CBOR is compact). Pre-allocating
