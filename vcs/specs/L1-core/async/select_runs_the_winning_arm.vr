@@ -1,0 +1,81 @@
+// @test: run-interpreter
+// @level: L1
+// @tier: 0
+// @tags: async, select, concurrency
+// @timeout: 30000
+// @expected-stdout-begin
+// 11
+// 11
+// 7
+// fast 11
+// @expected-stdout-end
+// @description: `select` yields the winning arm's value and runs its body.
+//
+//   All four lines below were wrong at once (T1131), and each was wrong
+//   in a DIFFERENT way, which is why the spec keeps all four rather than
+//   the shortest one that fails:
+//
+//     value position, nothing before it     -> ()
+//     value position, preceded by `let z`   -> <value 0x7ffd000000000000>
+//     arms with constant bodies             -> 1        (wanted 7)
+//     STATEMENT position, arms print        -> nothing printed at all
+//
+//   `0x7FFD` is the Type Ref tag in the NaN-box table, so line two was
+//   reading a register nobody had written; line one read the same
+//   register when it happened to hold Unit. A spec that checked only
+//   line one would have passed the day the leftover happened to be
+//   right.
+//
+//   ROOT: the emitter and the handler disagreed about what ONE register
+//   means. `compile_select` emits `Select { dst: index_reg, … }` and
+//   then compares that register against 0, 1, 2 … to pick an arm; the
+//   interpreter's `handle_select` wrote the winning task's RESULT there
+//   instead of its INDEX. A result equals its own arm index only by
+//   coincidence, so no arm was ever selected and no body ran.
+//
+//   The handler also failed to CONSUME the handler-offset table that
+//   the encoder writes after the future list, leaving the program
+//   counter inside its own instruction — a `select` racing
+//   `token.cancelled()` died before executing a line with
+//   `Invalid bytecode at pc 36: invalid TypeRef tag 64 in stream`.
+//
+//   Why it stayed invisible: `select` type-checks clean in every one of
+//   these forms. Nothing in the toolchain reports a register that was
+//   never written.
+
+mount core.async.timer.{sleep_ms};
+
+async fn fast() -> Int { sleep_ms(10).await; 11 }
+async fn slow() -> Int { sleep_ms(60).await; 22 }
+
+async fn main() {
+    // Value position, nothing bound before it.
+    let r1 = select {
+        x = fast().await => x,
+        y = slow().await => y,
+    };
+    print(r1);
+
+    // Value position with a live binding before it — the case that
+    // exposed the leftover as a raw tag rather than as Unit.
+    let z = 99;
+    let r2 = select {
+        x = fast().await => x,
+        y = slow().await => y,
+    };
+    print(r2);
+
+    // The arm body need not mention the bound value.
+    let r3 = select {
+        x = fast().await => 7,
+        y = slow().await => 8,
+    };
+    print(r3);
+
+    // Statement position: the winning arm must RUN, not merely be
+    // chosen. This line printed nothing before the fix.
+    select {
+        x = fast().await => print(f"fast {x}"),
+        y = slow().await => print(f"slow {y}"),
+    }
+}

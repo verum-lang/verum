@@ -166,40 +166,104 @@ pub(in super::super) fn handle_await(
 pub(in super::super) fn handle_select(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
+    // T1131 — THE CONTRACT: `dst` receives the INDEX of the arm that
+    // won, and the winner's RESULT is written back over its own future
+    // register. Both halves are what `compile_select`
+    // (verum_vbc/src/codegen/expressions.rs) already assumes:
+    //
+    //     self.ctx.emit(Instruction::Select { dst: index_reg, … });
+    //     … CmpI { op: Eq, a: index_reg, b: <literal i> }   // index
+    //     … compile_pattern_bind(pattern, future_regs[i])   // result
+    //
+    // Before this, the handler wrote the RESULT VALUE into `dst`. The
+    // emitted code then compared a result against 0, 1, 2 … , no arm
+    // ever matched, no body ran, and the select's destination register
+    // kept whatever it happened to hold — measured as `()`, as a raw
+    // `0x7ffd…` TypeRef tag, and as a select STATEMENT whose arms
+    // printed nothing at all. The two sides had different ideas of what
+    // one register meant, and nothing checked.
     let dst = read_reg(state)?;
-    let futures = read_reg_range(state)?;
+    // T1131, SECOND HALF — READ THE OPERAND THE SHAPE IT WAS WRITTEN.
+    //
+    // The encoder writes a register VECTOR (bytecode.rs,
+    // `Instruction::Select` -> `encode_reg_vec`):
+    //     varint(count), then `count` registers
+    // This handler called `read_reg_range`, which reads
+    //     one register, then ONE BYTE as a count
+    // — a different wire shape entirely, so the stream desynchronised
+    // at the operand's first byte and everything after it, including
+    // the next instruction, was decoded from the wrong offset.
+    // Measured: `Invalid bytecode at pc 36: invalid TypeRef tag 64 in
+    // stream` on a program that never executed a line.
+    //
+    // The registers are NOT necessarily consecutive — `compile_select`
+    // compiles each arm's future with `compile_expr`, which allocates
+    // from a free list — so a range could not have represented them
+    // even if the count had been read correctly.
+    let future_count = read_varint(state)? as usize;
+    let mut future_regs: Vec<Reg> = Vec::with_capacity(future_count.min(64));
+    for _ in 0..future_count {
+        future_regs.push(read_reg(state)?);
+    }
+    // CONSUME THE HANDLER TABLE.
+    //
+    // The encoder writes it (bytecode.rs, `Instruction::Select`):
+    //     encode_reg(dst); encode_reg_vec(futures);
+    //     encode_varint(handlers.len()); handlers.map(encode_signed_varint)
+    // and the decoder reads it back symmetrically. This HANDLER read
+    // only the first two, so the program counter was left standing in
+    // the middle of its own instruction and the next byte was decoded
+    // as an opcode. Measured: a `select` racing `token.cancelled()`
+    // died before running with
+    //     Invalid bytecode at pc 36: invalid TypeRef tag 64 in stream
+    // — a program that never executed a line, blamed on a type tag.
+    //
+    // The offsets are not used at dispatch (the emitter follows the
+    // Select with its own compare-and-jump ladder), but they are in the
+    // stream and must be walked past. Reading a field you will not use
+    // is not waste here; it is the definition of the instruction's
+    // length.
+    let handler_count = read_varint(state)? as usize;
+    for _ in 0..handler_count {
+        let _offset = read_signed_varint(state)?;
+    }
 
-    if futures.count == 0 {
-        state.set_reg(dst, Value::unit());
+    if future_regs.is_empty() {
+        // No arms: no index can be right. -1 matches no `CmpI` the
+        // codegen emits, so every arm is skipped and the select's value
+        // stays whatever the emitter initialised — which is the only
+        // honest answer to "which of nothing won".
+        state.set_reg(dst, Value::from_i64(-1));
         return Ok(DispatchResult::Continue);
     }
 
     // Collect task IDs from the future registers
     let mut task_entries: Vec<(Option<TaskId>, usize)> = Vec::new();
-    for i in 0..futures.count {
-        let reg = Reg(futures.start.0 + i as u16);
-        let val = state.get_reg(reg);
+    for (i, reg) in future_regs.iter().enumerate() {
+        let val = state.get_reg(*reg);
         let tid = if val.is_int() {
             decode_task_id(val.as_i64())
         } else {
             None
         };
-        task_entries.push((tid, i as usize));
+        task_entries.push((tid, i));
     }
 
     // Check if any task is already completed
-    for &(tid_opt, _) in &task_entries {
+    for &(tid_opt, idx) in &task_entries {
         if let Some(tid) = tid_opt
             && let Some(task) = state.tasks.get(tid)
             && let Some(result) = task.result
         {
-            state.set_reg(dst, result);
+            // Result over the winner's own future register, index in dst.
+            state.set_reg(future_regs[idx], result);
+            state.set_reg(dst, Value::from_i64(idx as i64));
             return Ok(DispatchResult::Continue);
         }
     }
 
     // Execute pending tasks until one of our targets completes
-    for &(tid_opt, _) in &task_entries {
+    for &(tid_opt, idx) in &task_entries {
         if let Some(tid) = tid_opt
             && state
                 .tasks
@@ -211,15 +275,19 @@ pub(in super::super) fn handle_select(
             if let Some(task) = state.tasks.get(tid)
                 && let Some(result) = task.result
             {
-                state.set_reg(dst, result);
+                state.set_reg(future_regs[idx], result);
+                state.set_reg(dst, Value::from_i64(idx as i64));
                 return Ok(DispatchResult::Continue);
             }
         }
     }
 
-    // Fallback -- return first register value directly
-    let first = state.get_reg(futures.start);
-    state.set_reg(dst, first);
+    // Nothing resolved to a task. The first arm is still the one the
+    // emitted code will take, and its register already holds whatever
+    // the arm expression produced — a non-task value selects itself
+    // rather than nothing. Index 0 makes that explicit instead of
+    // leaving the destination unwritten.
+    state.set_reg(dst, Value::from_i64(0));
 
     Ok(DispatchResult::Continue)
 }

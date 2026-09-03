@@ -9269,6 +9269,58 @@ impl VbcCodegen {
                 Ok(Some(None))
             }
 
+            // T1127 — `pow(a, b)` LOWERS TO `a.pow(b)`.
+            //
+            // The method form is already correct for both numeric types
+            // (`(2).pow(3)` -> 8, `(2.0).pow(3.0)` -> 8.0); only the
+            // bare free form was missing a route, and a name the type
+            // checker accepts with no route lowers to a value nobody
+            // chose — measured as `Relaxed`, tag 0 of an unrelated
+            // atomics enum, for every input.
+            //
+            // Routing it to the METHOD rather than to an opcode is the
+            // point. `abs` (T1123) could be fixed by naming the source
+            // spelling next to the registry one, because `abs_signed`
+            // is an ArithExtended opcode that dispatches int-vs-float on
+            // the NaN-box tag. `pow` has no integer-power opcode: the
+            // registry carries pow_f64 / powi_f64 / pow_f32 only, and
+            // `lookup_intrinsic("pow")` aliases to the FLOAT one — so an
+            // opcode route would answer 8.0 where the checker promised
+            // `Int`, trading a wrong value for a wrong TYPE, which
+            // propagates. The integer implementation exists exactly once,
+            // in the interpreter's method dispatch, and this makes the
+            // free form reach it instead of adding a second one.
+            "pow" => {
+                if args.len() < 2 {
+                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                        expected: 2,
+                        found: args.len(),
+                        function: "pow".to_string(),
+                    }));
+                }
+                let base_ty = self.extract_expr_type_name(&args[0]);
+                let base_reg = self
+                    .compile_expr(&args[0])?
+                    .or_internal("pow base has no value")?;
+                let exp_reg = self
+                    .compile_expr(&args[1])?
+                    .or_internal("pow exponent has no value")?;
+                let method_id = self.call_method_id(base_ty.as_deref(), "pow");
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CallM {
+                    dst: result,
+                    receiver: base_reg,
+                    method_id,
+                    args: crate::instruction::RegRange {
+                        start: exp_reg,
+                        count: 1,
+                    },
+                });
+                self.ctx.free_temp(base_reg);
+                self.ctx.free_temp(exp_reg);
+                Ok(Some(Some(result)))
+            }
+
             "min" => {
                 if args.len() < 2 {
                     return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
@@ -30985,6 +31037,14 @@ impl VbcCodegen {
         arms: &verum_common::List<verum_ast::expr::SelectArm>,
     ) -> CodegenResult<Option<Reg>> {
         let dest = self.ctx.alloc_temp();
+        // T1131: define the destination BEFORE the arms. A freshly
+        // allocated temp holds whatever the slot held, and when no arm
+        // matched the select's value was read out as that leftover —
+        // measured as `()` in one program and as a raw `0x7ffd…`
+        // TypeRef tag in the same program one statement later. The
+        // register is now Unit unless an arm writes it, so "no arm won"
+        // reads as a value nobody chose ONLY when that is true.
+        self.ctx.emit(Instruction::LoadNil { dst: dest });
         let end_label = self.ctx.new_label("select_end");
 
         // Collect all future registers and handler offsets
