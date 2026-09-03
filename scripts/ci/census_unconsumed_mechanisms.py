@@ -45,6 +45,13 @@ CORRECTNESS = re.compile(
     re.I,
 )
 CALL = re.compile(r"(?:[.:]|\b)([a-z_][a-z0-9_]*)\s*\(")
+# Mentions WITHOUT a paren — a field read, a doc reference, a match arm.
+# Counted separately because a name with zero calls but many bare
+# mentions is usually a getter over a live field, not dead code: keying
+# the census on `name(` alone reported `take_new_type_descriptors` as
+# draining an empty vector when `specializer.rs:1033` pushes to that
+# field on every specialised descriptor (T1073).
+BARE = re.compile(r"\b([a-z_][a-z0-9_]*)\b")
 DEFN = re.compile(r"^\s*pub(?:\([a-z:]+\))?\s+fn\s+([a-z_][a-z0-9_]*)\s*[(<]")
 
 
@@ -67,6 +74,26 @@ def collect_definitions():
                         j -= 1
                     defs.setdefault(m.group(1), (path, i + 1, " ".join(reversed(doc))))
     return defs
+
+
+def collect_bare_mentions(names: set[str]) -> collections.Counter:
+    """How often each name appears at all, parens or not.
+
+    The difference between this and the call count is the signal: a
+    mechanism nobody CALLS whose name still appears elsewhere is
+    usually reachable through a field or a re-export, and deleting it
+    on the call count alone strands whatever produces into it.
+    """
+    seen = collections.Counter()
+    for dirpath, _, files in os.walk("crates"):
+        for name in files:
+            if not name.endswith(".rs"):
+                continue
+            text = open(os.path.join(dirpath, name), encoding="utf-8", errors="replace").read()
+            for m in BARE.findall(text):
+                if m in names:
+                    seen[m] += 1
+    return seen
 
 
 def collect_calls():
@@ -95,8 +122,31 @@ def main():
     ]
     print(f"public fns scanned: {len(defs)}   with no in-tree caller: {len(uncalled)}")
     print(f"of those, correctness-shaped: {len(rows)}" if not show_all else "")
+    # Also look for the FIELD a getter drains: `take_x` / `get_x` /
+    # `x_mut` all front a field named `x`, and it is the field's
+    # mentions that say whether anything produces into it. Keying only
+    # on the function's own name is what let `take_new_type_descriptors`
+    # look empty while `new_type_descriptors` was pushed to on every
+    # specialised descriptor.
+    def backing(n: str) -> str:
+        for pre in ("take_", "get_", "drain_"):
+            if n.startswith(pre):
+                return n[len(pre):]
+        for suf in ("_mut", "_ref"):
+            if n.endswith(suf):
+                return n[: -len(suf)]
+        return n
+
+    bare = collect_bare_mentions({r[0] for r in rows} | {backing(r[0]) for r in rows})
     for name, path, line, _doc in sorted(rows):
-        print(f"  {name:44} {path}:{line}")
+        b = backing(name)
+        n = bare[name] + (bare[b] if b != name else 0)
+        # 1 == the definition itself. Anything above that is a mention
+        # the call-count did not see, and a reason to read before
+        # deleting.
+        # 1 == the definition itself; a backing field adds its own.
+        hint = "" if n <= 1 else f"   [{n} mentions incl. `{b}` — read before deleting]"
+        print(f"  {name:44} {path}:{line}{hint}")
     # A census that can only report findings measures nothing: say so when
     # the answer is none.
     if not rows:
