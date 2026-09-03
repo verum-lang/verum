@@ -69,6 +69,7 @@
 module core.net.h3.webtransport;
 
 mount core.collections.list.{List};
+mount core.sync.mutex.{Mutex};
 mount core.collections.map.{Map};
 mount core.async.cancellation.{CancellationToken};
 mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
@@ -225,8 +226,8 @@ implement WtSession {
         Result.Ok(WtBidirectional {
             session_id: self.id.clone(),
             cancel:     self.cancel.clone(),
-            send_buf:   Shared.new([]),
-            recv_buf:   Shared.new([]),
+            send_buf:   Shared.new(Mutex.new([])),
+            recv_buf:   Shared.new(Mutex.new([])),
             fin_sent:   Shared.new(AtomicBool.new(false)),
             fin_recv:   Shared.new(AtomicBool.new(false)),
         })
@@ -239,7 +240,7 @@ implement WtSession {
         Result.Ok(WtUnidirectional {
             session_id: self.id.clone(),
             cancel:     self.cancel.clone(),
-            send_buf:   Shared.new([]),
+            send_buf:   Shared.new(Mutex.new([])),
             fin_sent:   Shared.new(AtomicBool.new(false)),
         })
     }
@@ -282,10 +283,10 @@ public type WtBidirectional is {
     cancel:     CancellationToken,
     /// Outbound buffer — the integration layer drains this into
     /// QUIC STREAM frames respecting flow control.
-    send_buf:   Shared<List<Byte>>,
+    send_buf:   Shared<Mutex<List<Byte>>>,
     /// Inbound buffer — the integration layer pushes peer bytes here
     /// for the application to read.
-    recv_buf:   Shared<List<Byte>>,
+    recv_buf:   Shared<Mutex<List<Byte>>>,
     fin_sent:   Shared<AtomicBool>,
     fin_recv:   Shared<AtomicBool>,
 };
@@ -298,7 +299,7 @@ implement WtBidirectional {
         if self.fin_sent.load(MemoryOrdering.Acquire) {
             return Result.Err(H3Error.WriteAfterFinish);
         }
-        let mut b = self.send_buf.lock();
+        let mut b = self.send_buf.lock().unwrap_or_else(|p| p.into_inner());
         b.extend_from_slice(bytes);
         Result.Ok(())
     }
@@ -307,7 +308,7 @@ implement WtBidirectional {
         if self.cancel.is_cancelled() {
             return Result.Err(H3Error.StreamCancelled);
         }
-        let mut b = self.recv_buf.lock();
+        let mut b = self.recv_buf.lock().unwrap_or_else(|p| p.into_inner());
         let n = b.len();
         let mut i: Int = 0;
         while i < n { into.push(b[i]); i = i + 1; }
@@ -332,7 +333,7 @@ implement WtBidirectional {
 
     /// Used by the integration layer to push inbound bytes.
     public fn ingest(&self, bytes: &[Byte]) {
-        let mut b = self.recv_buf.lock();
+        let mut b = self.recv_buf.lock().unwrap_or_else(|p| p.into_inner());
         let mut i: Int = 0;
         while i < bytes.len() { b.push(bytes[i]); i = i + 1; }
     }
@@ -350,7 +351,7 @@ implement WtBidirectional {
 public type WtUnidirectional is {
     session_id: SessionId,
     cancel:     CancellationToken,
-    send_buf:   Shared<List<Byte>>,
+    send_buf:   Shared<Mutex<List<Byte>>>,
     fin_sent:   Shared<AtomicBool>,
 };
 
@@ -362,7 +363,7 @@ implement WtUnidirectional {
         if self.fin_sent.load(MemoryOrdering.Acquire) {
             return Result.Err(H3Error.WriteAfterFinish);
         }
-        let mut b = self.send_buf.lock();
+        let mut b = self.send_buf.lock().unwrap_or_else(|p| p.into_inner());
         b.extend_from_slice(bytes);
         Result.Ok(())
     }

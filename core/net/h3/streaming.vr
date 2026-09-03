@@ -61,6 +61,7 @@ module core.net.h3.streaming;
 mount core.collections.list.{List};
 mount core.async.cancellation.{CancellationToken};
 mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
+mount core.sync.mutex.{Mutex};
 mount core.net.h3.error.{H3Error};
 mount core.net.h3.qpack.decoder.{QpackHeaderField};
 
@@ -88,7 +89,7 @@ public type H3DataSink is {
     /// The underlying connection's send-buffer cursor for this
     /// stream — opaque to users; the integration layer constructs
     /// it during `send_streaming_response`.
-    pending:        Shared<List<Byte>>,
+    pending:        Shared<Mutex<List<Byte>>>,
     /// Per-stream remaining flow-control credit (bytes the peer has
     /// granted us via `MAX_STREAM_DATA`).
     credit:         Shared<AtomicInt>,
@@ -112,7 +113,7 @@ implement H3DataSink {
         cancel: CancellationToken,
     ) -> H3DataSink {
         H3DataSink {
-            pending:       Shared.new([]),
+            pending:       Shared.new(Mutex.new([])),
             credit:        Shared.new(AtomicInt.new(initial_credit)),
             cancelled:     Shared.new(AtomicBool.new(false)),
             finished:      Shared.new(AtomicBool.new(false)),
@@ -160,7 +161,7 @@ implement H3DataSink {
         }
         // Decrement credit + push to the per-stream send queue.
         let _ = self.credit.fetch_sub(need, MemoryOrdering.AcqRel);
-        let mut p = self.pending.lock();
+        let mut p = self.pending.lock().unwrap_or_else(|p| p.into_inner());
         let mut i: Int = 0;
         while i < bytes.len() { p.push(bytes[i]); i = i + 1; }
         let _ = self.bytes_written.fetch_add(need, MemoryOrdering.AcqRel);
@@ -205,7 +206,7 @@ implement H3DataSink {
     /// Drain pending bytes into a List<Byte> for a single DATA-frame
     /// emission. Called by the tx pump.
     public fn drain_pending(&self) -> List<Byte> {
-        let mut p = self.pending.lock();
+        let mut p = self.pending.lock().unwrap_or_else(|p| p.into_inner());
         // Output is exactly p.len() bytes.
         let mut out: List<Byte> = List.with_capacity(p.len());
         let mut i: Int = 0;

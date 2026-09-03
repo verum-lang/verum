@@ -68,6 +68,7 @@
 module core.net.quic.multipath;
 
 mount core.collections.list.{List};
+mount core.sync.mutex.{Mutex};
 mount core.collections.map.{Map};
 mount core.sync.atomic.{AtomicInt, AtomicBool, MemoryOrdering};
 mount core.time.{Duration};
@@ -186,25 +187,25 @@ implement PerPathState {
 // =============================================================================
 
 public type PathSet is {
-    paths: Shared<List<PerPathState>>,
+    paths: Shared<Mutex<List<PerPathState>>>,
 };
 
 implement PathSet {
     public fn new() -> PathSet {
-        PathSet { paths: Shared.new([]) }
+        PathSet { paths: Shared.new(Mutex.new([])) }
     }
 
     public fn add(&self, path: PerPathState) {
-        let mut p = self.paths.lock();
+        let mut p = self.paths.lock().unwrap_or_else(|p| p.into_inner());
         p.push(path);
     }
 
     public fn count(&self) -> Int {
-        self.paths.lock().len()
+        self.paths.lock().unwrap_or_else(|p| p.into_inner()).len()
     }
 
     public fn active_count(&self) -> Int {
-        let p = self.paths.lock();
+        let p = self.paths.lock().unwrap_or_else(|p| p.into_inner());
         let mut n: Int = 0;
         let mut i: Int = 0;
         while i < p.len() {
@@ -216,7 +217,7 @@ implement PathSet {
 
     /// Find a path by id — returns the index, or -1 when absent.
     public fn index_of(&self, id: PathId) -> Int {
-        let p = self.paths.lock();
+        let p = self.paths.lock().unwrap_or_else(|p| p.into_inner());
         let mut i: Int = 0;
         while i < p.len() {
             if p[i].id.eq(&id) { return i; }
@@ -227,7 +228,7 @@ implement PathSet {
 
     /// Retire a path by id. Idempotent.
     public fn retire(&self, id: PathId) {
-        let p = self.paths.lock();
+        let p = self.paths.lock().unwrap_or_else(|p| p.into_inner());
         let mut i: Int = 0;
         while i < p.len() {
             if p[i].id.eq(&id) {
@@ -240,7 +241,7 @@ implement PathSet {
 
     /// Validate (PATH_RESPONSE received) a path by id.
     public fn validate(&self, id: PathId) {
-        let p = self.paths.lock();
+        let p = self.paths.lock().unwrap_or_else(|p| p.into_inner());
         let mut i: Int = 0;
         while i < p.len() {
             if p[i].id.eq(&id) {
@@ -279,7 +280,7 @@ implement RoundRobinScheduler {
 
 implement MultipathScheduler for RoundRobinScheduler {
     fn next_path(&self, paths: &PathSet) -> Maybe<PathId> {
-        let p = paths.paths.lock();
+        let p = paths.paths.lock().unwrap_or_else(|p| p.into_inner());
         let n = p.len();
         if n == 0 { return Maybe.None; }
         // Scan up to n entries starting from cursor; first
@@ -319,10 +320,10 @@ implement WeightedScheduler {
 
 implement MultipathScheduler for WeightedScheduler {
     fn next_path(&self, paths: &PathSet) -> Maybe<PathId> {
-        let p = paths.paths.lock();
+        let p = paths.paths.lock().unwrap_or_else(|p| p.into_inner());
         let n = p.len();
         if n == 0 { return Maybe.None; }
-        let mut counts = self.pass_counts.lock();
+        let mut counts = self.pass_counts.lock().unwrap_or_else(|p| p.into_inner());
         let mut best: Int = -1;
         let mut best_score: Float = 1.0e30;
         let mut i: Int = 0;
@@ -369,7 +370,7 @@ implement LowestRttScheduler {
 
 implement MultipathScheduler for LowestRttScheduler {
     fn next_path(&self, paths: &PathSet) -> Maybe<PathId> {
-        let p = paths.paths.lock();
+        let p = paths.paths.lock().unwrap_or_else(|p| p.into_inner());
         let n = p.len();
         if n == 0 { return Maybe.None; }
         let mut best: Int = -1;

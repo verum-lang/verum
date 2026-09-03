@@ -39,6 +39,7 @@
 module core.net.quic.transport.abstraction;
 
 mount core.collections.list.{List};
+mount core.sync.mutex.{Mutex};
 mount core.net.addr.{SocketAddr};
 
 // =============================================================================
@@ -249,7 +250,7 @@ implement UdpTransport for RealUdpTransport {
 
 public type SimUdpTransport is {
     addr:     SocketAddr,
-    network:  Shared<SimNetwork>,
+    network:  Shared<Mutex<SimNetwork>>,
 };
 
 public type SimNetwork is {
@@ -336,7 +337,7 @@ implement SimNetwork {
 }
 
 implement SimUdpTransport {
-    public fn bind(addr: SocketAddr, network: Shared<SimNetwork>) -> SimUdpTransport {
+    public fn bind(addr: SocketAddr, network: Shared<Mutex<SimNetwork>>) -> SimUdpTransport {
         SimUdpTransport { addr: addr, network: network }
     }
 }
