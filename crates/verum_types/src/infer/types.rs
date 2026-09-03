@@ -511,7 +511,20 @@ impl TypeChecker {
                 ExprKind::Path(path) if path.segments.len() == 1 => {
                     if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
                         let n = &ident.name;
-                        let is_self = n.as_str() == "self";
+                        // THREE names bind the value under refinement,
+                        // not one. `it` is the IMPLICIT binder — the
+                        // form the root CLAUDE.md uses in its own
+                        // example (`Int{ it > 0 }`), and the one
+                        // `emit_refinement_assert_on_reg` aliases to
+                        // the value register alongside the explicit
+                        // `where` binding. The first version of this
+                        // check knew only `self`, so it rejected `it`
+                        // and reddened six core/ files that had been
+                        // clean — found by verum-2b within the hour,
+                        // and by them rather than by me because my
+                        // radius sample was drawn from arbitrary files
+                        // instead of files USING the construct.
+                        let is_self = matches!(n.as_str(), "self" | "it");
                         let is_binder = binder.as_ref().is_some_and(|b| b == n);
                         if !is_self
                             && !is_binder
@@ -860,10 +873,12 @@ impl TypeChecker {
                 // exactly the false positive the first version of this
                 // produced. `take_deferred_errors` re-asks once the
                 // module is fully registered.
-                if let Some(bad) = self.unbound_names_in_predicate(
-                    &predicate.expr,
-                    predicate.binding.as_ref().map(|i| i.name.clone()),
-                ) {
+                if self.in_type_declaration
+                    && let Some(bad) = self.unbound_names_in_predicate(
+                        &predicate.expr,
+                        predicate.binding.as_ref().map(|i| i.name.clone()),
+                    )
+                {
                     self.deferred_refinement_names.push((bad, predicate.span));
                 }
                 let pred = TyRefinementPredicate {

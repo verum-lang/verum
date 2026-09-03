@@ -819,6 +819,7 @@ impl TypeChecker {
             diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
             deferred_refinement_names: Vec::new(),
+            in_type_declaration: false,
             pending_ambiguity: Vec::new(),
             protocols_with_known_defaults: Map::new(),
             pending_protocol_static_calls: Vec::new(),
@@ -962,6 +963,7 @@ impl TypeChecker {
             diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
             deferred_refinement_names: Vec::new(),
+            in_type_declaration: false,
             pending_ambiguity: Vec::new(),
             protocols_with_known_defaults: Map::new(),
             pending_protocol_static_calls: Vec::new(),
@@ -1106,6 +1108,7 @@ impl TypeChecker {
             diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
             deferred_refinement_names: Vec::new(),
+            in_type_declaration: false,
             pending_ambiguity: Vec::new(),
             protocols_with_known_defaults: Map::new(),
             pending_protocol_static_calls: Vec::new(),
@@ -2855,8 +2858,9 @@ impl TypeChecker {
                     code: verum_common::Text::from("E100"),
                     msg: verum_common::Text::from(format!(
                         "unbound variable in refinement predicate: `{name}`\n         \
-                         help: the value under refinement is `self`; every other name must \
-                         be in scope\n         note: an unknown name here does not weaken \
+                         help: the value under refinement is `self` or `it`, or the \
+                         binding named by a `where` form; every other name must be in \
+                         scope\n         note: an unknown name here does not weaken \
                          the refinement, it REPLACES it — the type then accepts and rejects \
                          values unrelated to what was written"
                     )),

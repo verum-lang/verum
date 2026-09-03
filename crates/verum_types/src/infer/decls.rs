@@ -191,6 +191,15 @@ impl TypeChecker {
     ///
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deeply nested types.
     pub fn register_type_declaration(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
+        // Same scoping as `resolve_type_definition`: the refinement
+        // name check (T1112) speaks only about a TYPE DECLARATION's own
+        // predicate. Both entries set it because a module-level
+        // `type P is Int { … }` takes this one, and the spec that
+        // asserts the check went silent when only the other was wired
+        // (T1115).
+        let prev_in_type_decl = self.in_type_declaration;
+        self.in_type_declaration = true;
+        let out = (|| {
         // #124 — primitive type names are reserved.
         //
         // A user (or stdlib) `type Unit is | UDays | UHours | …;` must not
@@ -242,6 +251,10 @@ impl TypeChecker {
             return Ok(());
         }
         self.register_type_declaration_inner(type_decl)
+    
+        })();
+        self.in_type_declaration = prev_in_type_decl;
+        out
     }
 
     /// Push a declaration's generic-parameter scope frame. Innermost
@@ -2553,6 +2566,22 @@ impl TypeChecker {
     /// type B is { a: Box<A> };
     /// ```
     pub fn resolve_type_definition(
+        &mut self,
+        type_decl: &verum_ast::TypeDecl,
+        resolution_stack: &mut List<verum_common::Text>,
+    ) -> Result<()> {
+        use verum_ast::decl::TypeDeclBody;
+        use verum_common::Text;
+        // Scoped so an early return cannot leave the flag set; a
+        // refinement's name check applies here and nowhere else.
+        let prev_in_type_decl = self.in_type_declaration;
+        self.in_type_declaration = true;
+        let out = self.resolve_type_definition_inner(type_decl, resolution_stack);
+        self.in_type_declaration = prev_in_type_decl;
+        return out;
+    }
+
+    fn resolve_type_definition_inner(
         &mut self,
         type_decl: &verum_ast::TypeDecl,
         resolution_stack: &mut List<verum_common::Text>,

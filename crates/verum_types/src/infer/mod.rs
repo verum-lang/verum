@@ -621,6 +621,16 @@ pub struct TypeChecker {
     /// later than the type declaration that uses it — checking eagerly
     /// rejects `type P is Int { self < LIMIT }`, which is correct code.
     pub(crate) deferred_refinement_names: Vec<(verum_common::Text, verum_ast::span::Span)>,
+    /// True while a TYPE DECLARATION's body is being converted.
+    ///
+    /// The refinement-name check (T1112) only applies there. A
+    /// refinement on a PARAMETER may legitimately name a sibling
+    /// parameter — `fn combinations(n: Int{>= 0}, k: Int{>= 0, <= n})`
+    /// in `core/math/sdg.vr` is real, correct code — and those names
+    /// are function-local, so the deferred re-check (which runs at the
+    /// end of the module) cannot see them either. Rather than guess,
+    /// the check declines to speak about that position (T1115).
+    pub(crate) in_type_declaration: bool,
     /// AMBIGUITY-E404-1 (T0585): candidate un-annotated `let`
     /// bindings whose value type carried free inference variables AT
     /// BINDING time — `(name, span, pre-generalize type)`. Recorded
