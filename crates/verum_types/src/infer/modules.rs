@@ -15957,6 +15957,116 @@ impl TypeChecker {
         }
     }
 
+    /// `Labeled<Text>` -> the record it names, with `Text` substituted.
+    ///
+    /// The variant sibling below has existed since the archive gained
+    /// generic payloads; the record case had no counterpart, so a
+    /// parameter annotated with a GENERIC record FROM THE ARCHIVE stayed
+    /// `Type::Generic { name, args }` and field access on it reported
+    /// `E103: Cannot access field 'value' on non-record type:
+    /// Labeled<Text>` (T1105).
+    ///
+    /// Isolated to exactly three conditions holding together — archive,
+    /// generic, parameter position — by five controls, two of them
+    /// measured by another session:
+    ///
+    ///     param of an ARCHIVE generic record      E103
+    ///     param of a PROJECT generic record       works
+    ///     param of an archive NON-generic record  works
+    ///     LOCAL BINDING of the same archive value works
+    ///     all three mount forms                   identical, so the
+    ///                                             mount form is not it
+    ///
+    /// Substitution reuses `substitute_variant_args_positionally`'s
+    /// staging by construction: the record is wrapped as a one-case
+    /// variant, substituted, and unwrapped. One carrier for the four
+    /// stages (named params, template vars, free vars, bare-Named
+    /// placeholders) rather than a second copy that drifts.
+    pub(crate) fn expand_generic_to_record(&self, ty: &Type) -> Option<Type> {
+        if std::env::var_os("VERUM_TRACE_GENREC").is_some() {
+            // FIRST line on purpose. The first version of this trace sat
+            // after the `match ty { … _ => return None }`, so every shape
+            // that took the early return reported nothing — and "no trace
+            // at all" read as "the function is never called".
+            eprintln!(
+                "[genrec] ty={}",
+                format!("{:?}", ty).chars().take(110).collect::<String>()
+            );
+        }
+        // BOTH spellings of an applied named type. The first version
+        // handled only `Type::Generic` and was INERT: the annotation
+        // resolver produces `Type::Named { path, args }` for a mounted
+        // head, and the old arm's wording ("Cannot access field … on
+        // non-record type") in the failing output is what said the new
+        // branch had never run.
+        let (head, args) = match ty {
+            Type::Generic { name, args } => (name.clone(), args.clone()),
+            Type::Named { path, args } => match path.segments.last() {
+                Some(verum_ast::ty::PathSegment::Name(ident)) => {
+                    (ident.name.clone(), args.clone())
+                }
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let name = &head;
+        // WHERE THE FIELDS ACTUALLY LIVE. The bare name does NOT hold
+        // them: measured, `lookup_type("Labeled")` returns
+        // `Generic { name: "Labeled", args: [Var(_)] }` — a
+        // self-referential placeholder, not a body. That is by design;
+        // `core.rs` explains it beside the registration —
+        // `type_descriptor_to_type` returns the nominal form for
+        // records and "doesn't carry the field-type map", so the map is
+        // written separately under `__struct_fields_<name>`.
+        //
+        // `lookup_field_type` already consults that key — for a
+        // `Type::Named` receiver. A `Type::Generic` receiver, which is
+        // what an APPLIED archive record resolves to, reached no
+        // consumer of it at all. That is the whole of T1105: the fields
+        // were never lost, they were behind a key this shape never
+        // asked.
+        let fields_key: verum_common::Text =
+            format!("__struct_fields_{}", name).into();
+        let looked = match self.ctx.lookup_type(fields_key.as_str()) {
+            Option::Some(t) => Option::Some(t),
+            Option::None => self.ctx.lookup_type(name.as_str()),
+        };
+        if std::env::var_os("VERUM_TRACE_GENREC").is_some() {
+            eprintln!(
+                "[genrec] head={} via={} lookup={}",
+                name,
+                if self.ctx.lookup_type(fields_key.as_str()).is_some() {
+                    "__struct_fields_"
+                } else {
+                    "bare"
+                },
+                looked
+                    .as_ref()
+                    .map(|t| format!("{:?}", t).chars().take(110).collect::<String>())
+                    .unwrap_or_else(|| "<none>".to_string())
+            );
+        }
+        let Option::Some(Type::Record(fields)) = looked else {
+            return None;
+        };
+        if args.is_empty() {
+            return Some(Type::Record(fields.clone()));
+        }
+        let mut wrapper: indexmap::IndexMap<verum_common::Text, Type> =
+            indexmap::IndexMap::new();
+        wrapper.insert(
+            verum_common::Text::from("__record"),
+            Type::Record(fields.clone()),
+        );
+        match self.substitute_variant_args_positionally(&wrapper, &args, name.as_str()) {
+            Type::Variant(v) => match v.get(&verum_common::Text::from("__record")) {
+                Some(Type::Record(substituted)) => Some(Type::Record(substituted.clone())),
+                _ => Some(Type::Record(fields.clone())),
+            },
+            _ => Some(Type::Record(fields.clone())),
+        }
+    }
+
     pub(crate) fn expand_generic_to_variant(&self, ty: &Type) -> Type {
         self.expand_generic_to_variant_impl(ty, 0)
     }

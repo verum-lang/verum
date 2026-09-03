@@ -9750,6 +9750,28 @@ impl TypeChecker {
                     // question of `Deref`, as method calls and indexing
                     // already did.
                     Ok(InferResult::new(t))
+                } else if let Some(Type::Record(fields)) =
+                    self.expand_generic_to_record(&normalized_ty)
+                {
+                    // THIRD field-access path, and the one a generic
+                    // record from the ARCHIVE needs. `Labeled<Text>`
+                    // resolves to `Type::Generic { name, args }` — never
+                    // to a record — so neither the record arm above nor
+                    // the deref arm sees it, and a parameter typed with
+                    // one reported E103 on a field it plainly has
+                    // (T1105). The variant side has had this expansion
+                    // since the archive gained generic payloads; the
+                    // record side had no counterpart.
+                    match fields.get(field.name.as_str()) {
+                        Some(t) => Ok(InferResult::new(t.clone())),
+                        None => Err(TypeError::OtherWithCode {
+                            code: verum_common::Text::from("E103"),
+                            msg: verum_common::Text::from(format!(
+                                "field '{}' not found in type: {}",
+                                field.name, normalized_ty
+                            )),
+                        }),
+                    }
                 } else {
                     Err(TypeError::OtherWithCode {
                         code: verum_common::Text::from("E103"),
@@ -9876,6 +9898,24 @@ impl TypeChecker {
                             {
                                 self.record_deref_adjustment(obj.span, hops);
                                 return Ok(InferResult::new(t));
+                            }
+                            // SECOND E103 SITE, and the one an archive
+                            // generic record actually reaches. The
+                            // comment above says this file formats the
+                            // message twice and that wiring only the
+                            // first copy leaves `core/` untouched —
+                            // written by whoever wired deref. I repeated
+                            // it verbatim for T1105: the record
+                            // expansion went to the first site, changed
+                            // nothing, and the trace inside the helper
+                            // printed no line at all, because the helper
+                            // was never called from here.
+                            if let Some(Type::Record(rec)) =
+                                self.expand_generic_to_record(&normalized_ty)
+                            {
+                                if let Some(t) = rec.get(field.name.as_str()) {
+                                    return Ok(InferResult::new(t.clone()));
+                                }
                             }
                             Err(TypeError::OtherWithCode {
                                 code: verum_common::Text::from("E103"),
