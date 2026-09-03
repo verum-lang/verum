@@ -438,10 +438,18 @@ impl<'s> CompilationPipeline<'s> {
         // same module twice — measurable cold-start regression on
         // scripts with deep mount trees).  Function/id remap and
         // type-side first-wins discipline are layered inside.
+        // T1126: the cog's other files travel in `project_modules`, not
+        // as items of `module`, so they have to be handed over
+        // explicitly — the name harvest that decides what is registered
+        // from the archive is otherwise blind to every mount that lives
+        // in a sibling file.
+        let siblings: Vec<std::sync::Arc<Module>> =
+            self.project_modules.values().cloned().collect();
         let (fn_modules, type_modules) = CTX_CACHE.apply_lazy_with_types(
             archive,
             &mut codegen,
             module,
+            &siblings,
         );
         tracing::debug!(
             target: "compile_ast_to_vbc",

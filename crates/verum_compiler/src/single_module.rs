@@ -75,7 +75,14 @@ pub fn compile_module_with_stdlib(
         // 7000+.
         static CTX_CACHE: crate::archive_ctx_loader::ArchiveCtxCache =
             crate::archive_ctx_loader::ArchiveCtxCache::new();
-        CTX_CACHE.apply_lazy_with_types(archive, &mut codegen, module);
+        CTX_CACHE.apply_lazy_with_types(
+            archive,
+            &mut codegen,
+            module,
+            // T1126: a single-module compile has no siblings by
+            // definition — the whole point of this entry point.
+            &[],
+        );
     }
 
     // T0363 — CODEGEN-MOUNT-ALIAS-DISPATCH-1: seed cross-module TYPE

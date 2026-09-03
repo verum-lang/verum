@@ -1,0 +1,5 @@
+mount probe.reader.{width};
+
+fn main() {
+    print(width());
+}

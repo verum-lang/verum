@@ -26,13 +26,27 @@ audit pass:
 
 | 10 | A unit's OWN declaration loses to an ambient builtin, and both layers agree on the wrong answer. `fn min(a: Int, b: Int) -> Int { 999 }` + `min(1, 2)` prints **1**; the body never runs. Measured 2026-09-03 with a control: `zzq_unique` declared the same way prints 999, so free functions resolve — two NAMES do not. `min` and `max` are ambient with no mount and no declaration at all (`min(1,2)` alone prints 1, while an undeclared name gives E100), so the user's rank-4 declaration is losing to rank-6 ambient, which §3.2 forbids. Three sites compose it: `env.rs:497` registers a baked descriptor's arity under its **trailing simple name** ("call sites look up by the spelling they used"), so `fn abs(a: Int, b: Int)` draws `E102: accepts at most 1 argument` from the STDLIB's arity; `expr.rs:7742` lists `"min" \| "max"` as variadic, which is why THEIR arity mismatch never surfaces; and the callee type comes from the same bare-name env lookup, so `fn min(…) -> Text` used where `Int` is required type-checks CLEAN. Same shape as #9 one storey down: there a user MODULE lost its name to a stdlib leaf, here a DECLARATION loses its name in its own file. | T1120 |
 
+| 11 | ~~A stdlib free function called from a **non-entry module of a cog** never resolves.~~ **CLOSED 2026-09-04 (T1126)** — the harvest now takes the cog's sibling modules, which travel in the pipeline's `project_modules` map rather than as items of the entry module. Kept because the SHAPE is the lesson: `src/reader.vr` mounts `core.encoding.json` and calls `stringify`; if `src/main.vr` does not ALSO mount it, the call compiles to a stub and dies at run time with `[lenient] stage-5 … stub never resolved`, while `verum check` reports zero errors. Builtin-type METHODS from the same module work, so most cog code never meets it. The name harvester that computes `wanted` (which decides what is registered from the archive at all) walked five `ItemKind` variants and ended in `_ => {}`, so `ItemKind::Module` — and with it every mount in every sibling file — was swallowed. | T1126 |
+
 Aggravator: stdlib function *bodies* are typechecked on **no path** (the bake
 has no inference pass over `core/` bodies; `VERUM_STDLIB_PATH` overrides only
 the registry), so all of the above stayed invisible inside `core/` (T0124).
 
-The pattern across all ten: **resolution is attempted late, by name-shaped
+The pattern across all eleven: **resolution is attempted late, by name-shaped
 guessing, with a lenient fallback instead of an error**. The fix is one
-architecture, not ten patches.
+architecture, not eleven patches.
+
+Defect #11 adds a third pattern, and it is the cheapest to introduce and the
+hardest to notice: **a closed set handled as open, with a silent default**. A
+`match` over an enum that ends in `_ => {}` cannot fail when a variant is
+added — it simply produces a SMALLER answer, and a smaller set is not an error
+on any layer below it. Where the result of such a walk is a SET that something
+downstream filters on (`wanted`, `reachable`, the keep-sets in
+`archive_ctx_loader`), the missing element is indistinguishable from an element
+that was never asked for. The structural remedy is not a lint against `_ =>`
+— wildcards are legitimate nearly everywhere — but exhaustive arms in the
+walkers whose output is a set, so that adding a variant breaks the BUILD
+rather than the answer.
 
 Defect #9 adds a second pattern the other eight also show, and it is the one
 that makes them hard to see: **a judgement with two tests and three cases

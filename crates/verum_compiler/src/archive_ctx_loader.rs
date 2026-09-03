@@ -2615,11 +2615,20 @@ impl ArchiveCtxCache {
         merged_entries
     }
 
+    /// `sibling_modules` — T1126. The cog's OTHER files. They are not
+    /// items of `user_module`: the pipeline keeps them in its own
+    /// `project_modules` map, so a walk over the entry module's items
+    /// cannot reach them however deeply it recurses. Everything
+    /// harvested here feeds `wanted`, which decides what is registered
+    /// from the archive at all, so a mount that lives only in a sibling
+    /// file used to register nothing and its call died at run time as
+    /// an unresolved stub while `verum check` reported success.
     pub fn apply_lazy_with_types(
         &self,
         archive: &VbcArchive,
         codegen: &mut verum_vbc::codegen::VbcCodegen,
         user_module: &verum_ast::Module,
+        sibling_modules: &[std::sync::Arc<verum_ast::Module>],
     ) -> (usize, usize) {
         let t_load = std::time::Instant::now();
         self.begin_compilation_epoch();
@@ -2640,6 +2649,13 @@ impl ArchiveCtxCache {
         let mut harvest = Harvest::default();
         for item in user_module.items.iter() {
             collect_referenced_function_names(item, &mut harvest);
+        }
+        // T1126: the cog's sibling files, harvested into the SAME set.
+        // A mount is a mount whichever file it sits in.
+        for sib in sibling_modules {
+            for item in sib.items.iter() {
+                collect_referenced_function_names(item, &mut harvest);
+            }
         }
         let bare_method_seeds = std::mem::take(&mut harvest.bare_methods);
         let mut wanted: std::collections::HashSet<String> =
@@ -4850,7 +4866,75 @@ fn collect_referenced_function_names(
             harvest_names_in_type(&decl.ty, out);
             harvest_names_in_expr(&decl.value, out);
         }
-        _ => {}
+        // T1126 — DESCEND INTO NESTED MODULES.
+        //
+        // Everything this harvester produces feeds `wanted`, which
+        // decides which archive functions get registered at all. A
+        // module item was swallowed by the wildcard below, so a cog
+        // whose `src/helper.vr` mounts a stdlib module the ENTRY file
+        // never mentions harvested nothing from it: the call compiled
+        // to a stub, the alias install had no target, and the program
+        // died at run time with
+        //
+        //     [lenient] stage-5 qualified cross-module fn stub never
+        //     resolved (func_id=...)
+        //
+        // while `verum check` reported zero errors. Measured on a
+        // two-file cog: with the entry file mounting the same stdlib
+        // module it worked, without it the call panicked, and nothing
+        // else differed.
+        //
+        // Note what did NOT explain it, each refuted by one command,
+        // because the wrong repair here is expensive: `VERUM_FULL_STDLIB=1`
+        // (the whole stdlib loaded — still failed, so it is not the
+        // reachability closure), `VERUM_NO_MOUNT_PRUNE=1` (total
+        // function maps — still failed, so it is not the merge prune),
+        // and a nested `module inner { … }` inside ONE file (worked,
+        // so it is not nesting as such but the multi-file assembly).
+        ItemKind::Module(decl) => {
+            if let verum_common::Maybe::Some(items) = &decl.items {
+                for item in items.iter() {
+                    collect_referenced_function_names(item, out);
+                }
+            }
+        }
+        // NO WILDCARD, DELIBERATELY (T1126).
+        //
+        // Everything this function collects feeds `wanted`, and `wanted`
+        // decides which archive functions are registered at all. A
+        // variant that falls through a `_ => {}` here does not produce
+        // an error — it produces a SMALLER SET, and a smaller set is
+        // indistinguishable at every layer below from a set that was
+        // never asked for. That is how `ItemKind::Module` was swallowed
+        // for as long as it was.
+        //
+        // The arms below are exhaustive by construction: a new
+        // `ItemKind` breaks the BUILD, and someone has to decide here
+        // whether it can carry a name. The ones that carry none say so
+        // with their reason, so "not handled" and "nothing to handle"
+        // stay different facts.
+        ItemKind::Type(_) => {}          // names resolve via the type table
+        ItemKind::Protocol(_) => {}      // bodies arrive through Impl
+        ItemKind::Meta(_) => {}          // compile-time only
+        ItemKind::Predicate(_) => {}     // verification surface, not lowered
+        ItemKind::Context(_) => {}       // the context registry resolves these
+        ItemKind::ContextGroup(_) => {}
+        ItemKind::Layer(_) => {}         // architectural annotation
+        ItemKind::FFIBoundary(_) => {}   // extern surface, no archive callee
+        ItemKind::Theorem(_) => {}       // proof obligations, discharged elsewhere
+        ItemKind::Lemma(_) => {}
+        ItemKind::Corollary(_) => {}
+        ItemKind::Axiom(_) => {}
+        ItemKind::Tactic(_) => {}       // proof automation, never lowered
+        ItemKind::View(_) => {}         // presentation of an existing type
+        ItemKind::Pattern(_) => {}      // a named pattern, matched not called
+        // ExternBlock is the one of these four worth revisiting: it
+        // DECLARES names. They are FFI symbols resolved by the linker,
+        // not archive functions, so harvesting them into `wanted` would
+        // widen the set with names the archive cannot contain. Listed
+        // explicitly, with the reason, rather than left to a wildcard —
+        // the next reader gets a decision, not an omission.
+        ItemKind::ExternBlock(_) => {}
     }
 }
 

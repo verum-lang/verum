@@ -1,0 +1,10 @@
+module probe.reader;
+
+// The entry file deliberately does NOT mount this module. That is the
+// whole point of the fixture: the mount lives HERE and nowhere else.
+mount core.encoding.json.{json_int, stringify};
+
+public fn width() -> Int {
+    let v = json_int(7);
+    stringify(&v).len()
+}
