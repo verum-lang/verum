@@ -32,6 +32,34 @@ artifact), T0448/T0215-class residuals. Until S2 lands, every
 same-name collision class (barename ctor capture, qualified-key
 squats, first-wins registries) stays reachable.
 
+**R1a. What "stays reachable" costs, measured 2026-09-03 (T1108).** The
+cheapest program that reaches it is four lines, and the answer is not an
+error — it is a heap address:
+
+    type NtStatus is { magic: Int };
+    fn main() { let v = NtStatus { magic: 7 }; print(v.magic + 1); }
+
+    run   -> 40874348097, and a DIFFERENT number the next run
+    check -> no diagnostics
+
+`core/` declares `public type NtStatus is (Int32)` — a NEWTYPE — and
+`type_name_to_id` / `type_field_layouts` are keyed by SIMPLE name,
+first-wins. The user's record loses the slot, field access reads the
+newtype's layout and hands back the record's pointer, which then takes
+part in integer arithmetic. The value changing between runs is what
+proves it is an address rather than a wrong integer. Fifteen names
+measured broken (CFd ChildId CLong CPid CUid HostFlavor KernReturn
+MachMsgOption MachMsgReturn MachPortRight NtStatus TaskFlavor
+ThreadFlavor VmInherit VmProt); record-vs-record and protocol-vs-record
+collisions are harmless, so the damage needs a stdlib type that HAS a
+conflicting layout and is materialised in the program's closure.
+
+The shadow mechanism written for exactly this (`claim_local_type_id`,
+"locals shadow imports") does not fire: it reads
+`archive_claimed_type_ids`, which the route these types arrive by never
+writes. Gate `scripts/ci/check_a_user_type_keeps_its_own_fields.sh`,
+red and deliberately unwired until the fix.
+
 **R1b. DUPLICATED WALKS — measured 2026-08-08.** The identity problem
 has a structural twin: the *traversals themselves* are duplicated, so a
 correct mechanism wired into one copy stays silent in the others. Four
