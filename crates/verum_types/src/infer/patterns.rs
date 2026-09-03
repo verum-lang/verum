@@ -2307,6 +2307,41 @@ impl TypeChecker {
                         scheme.ty
                     ))));
                 };
+                // LENGTH IS PART OF THE TYPE, so a pattern of the wrong
+                // length is a type error and not a runtime surprise.
+                //
+                // Measured 2026-09-03 before this check existed:
+                //
+                //     let [x, y]:       [Int;3] = f();  compiled, printed 2,
+                //                                       dropping the third
+                //     let [w, x, y, z]: [Int;3] = f();  compiled, died at RUN
+                //                                       time, index out of bounds
+                //
+                // Both lengths are static: the annotation says 3, the
+                // pattern says 2 or 4. `docs/language/destructuring.md`
+                // promised exactly this diagnostic; the promise was
+                // right and the behaviour was not.
+                //
+                // A `..` rest pattern means "and the others", so a
+                // pattern containing one is checked as a LOWER bound.
+                if let Type::Array { size: Some(n), .. } = &effective_ty {
+                    let has_rest = patterns
+                        .iter()
+                        .any(|p| matches!(p.kind, verum_ast::PatternKind::Rest));
+                    let bound = patterns.len() - usize::from(has_rest);
+                    let wrong = if has_rest { bound > *n } else { bound != *n };
+                    if wrong {
+                        return Err(TypeError::OtherWithCodeSpanned {
+                            code: verum_common::Text::from("E400"),
+                            msg: verum_common::Text::from(format!(
+                                "this pattern binds {bound} element(s), but the type is \
+                                 `[_; {n}]`\n         help: write {n} binding(s), or use \
+                                 `..` to match the rest"
+                            )),
+                            span: pattern.span,
+                        });
+                    }
+                }
                 // If matching through reference, bind with reference to element type
                 let bind_ty = if is_reference {
                     Type::reference(false, element.clone())
