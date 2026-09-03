@@ -6,7 +6,7 @@
 /// intrinsics, these types provide:
 /// - Cross-platform portability (SSE, AVX, AVX-512, NEON)
 /// - Compile-time lane count verification
-/// - Automatic multi-versioning via @multiversion
+/// - `@multiversion` for multi-versioning (attribute only — see below)
 /// - Zero-cost abstractions (all operations inline to single instructions)
 ///
 
@@ -16,7 +16,7 @@
 /// SIMD types use the @repr(simd) attribute which:
 /// 1. Selects optimal vector width for target platform
 /// 2. Generates platform-specific intrinsics
-/// 3. Supports runtime CPU feature detection for multi-versioning
+/// 3. Leaves room for runtime CPU feature detection (not yet emitted)
 ///
 
 /// VBC (Verum Bytecode) opcodes 0xC0-0xCF are reserved for SIMD operations.
@@ -594,10 +594,12 @@ public const HAS_NEON: Bool = false;
 /// ```
 ///
 
-/// The @multiversion attribute is processed by the compiler and generates:
-/// 1. Function variants for each target feature
-/// 2. Runtime CPU feature detection
-/// 3. Function pointer dispatch table
+/// The @multiversion attribute is PARSED and carried on the declaration,
+/// and nothing consumes it yet: no variant is emitted, no CPU feature is
+/// detected at run time, and no dispatch table is built. A function
+/// carrying it compiles to its single written body. The intended shape,
+/// once a consumer exists, is variants per target feature behind runtime
+/// detection.
 
 // =============================================================================
 // VBC OPCODE REFERENCE

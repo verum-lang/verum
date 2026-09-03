@@ -69,7 +69,8 @@
 //
 
 // Header-separator scans use `core.simd.bytes.find_byte(b'\r')` which
-// @multiversion-dispatches to SSE2/AVX2/NEON per CPU. Scalar fallback
+// Marked `@multiversion` for SSE2/AVX2/NEON per CPU; the attribute has
+// no consumer yet, so the scalar fallback below is what runs
 // produces identical results at reduced throughput.
 //
 

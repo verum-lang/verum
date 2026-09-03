@@ -17,8 +17,9 @@
 
 // The intended design is SIMD-width chunks (SSE2 default = 16 bytes, AVX2
 // = 32, AVX-512 = 64) with a scalar tail-loop for the remainder past the
-// last aligned boundary, `@multiversion` selecting the width at startup
-// from runtime CPU-feature detection.
+// last aligned boundary. `@multiversion` is meant to select that width at
+// startup from runtime CPU-feature detection; until a consumer exists, the
+// single written body is what runs.
 //
 // NO PRIMITIVE IN THIS FILE DOES THAT TODAY — every one is a plain scalar
 // loop. See § Status.
@@ -215,7 +216,8 @@ public fn find_subslice(haystack: &[Byte], needle: &[Byte]) -> Maybe<Int> {
 /// tails and non-SIMD targets.
 @multiversion
 public fn is_valid_utf8(bytes: &[Byte]) -> Bool {
-    // Simplified scalar reference — backend @multiversion will replace with
+    // Scalar reference, and today the only version that runs: @multiversion
+    // is carried on the declaration and consumed by nothing. Meant to become
     // SIMD DFA (lookup-tables + vpshufb), ~5 GB/s on AVX2.
     let n = bytes.len();
     let mut i = 0;

@@ -34,7 +34,10 @@
 //! - Operations: splat, load (aligned/unaligned), arithmetic (+, *, fma),
 //!  horizontal reductions, shuffle/permute, gather/scatter, masked load/store
 //! - `Mask<N>` type for conditional SIMD operations (lane-wise comparisons)
-//! - `@multiversion` attribute generates multiple implementations for runtime dispatch
+//! - `@multiversion` is parsed and carried, and NOT consumed here: no
+//!  variant is emitted and no dispatch is generated (measured 2026-09-04 —
+//!  `MultiversionAttr` has no consumer in the tree, and the only CPUID in
+//!  the workspace reads a device vendor string in the interpreter)
 //! - `@target_feature(enable = "avx2")` for platform-specific intrinsic access
 //! - VBC opcodes 0xC0-0xCF handle SIMD at bytecode level
 //! - LLVM lowering maps to `<N x T>` vector types and vector intrinsics
