@@ -1,0 +1,64 @@
+// @test: compile-fail
+// @level: L2
+// @tier: 0
+// @tags: modules, aliases, protocols, project, T1073
+// @timeout: 60000
+// @project: aliased_protocol
+// @expected-exit: 101
+// @skip: the harness's `compile-fail` path does not honour `@project:`.
+//        Measured 2026-09-03 on one binary: `verum check`, `verum build`
+//        and `verum run` on this very directory all report
+//        `error<E427>: `show` does not match the signature `Shower`
+//        declares` and exit non-zero (101/101/1), while vtest reports
+//        "Compilation unexpectedly succeeded". The toolchain is right and
+//        the runner cannot see it. `typecheck-fail` is not an option:
+//        the runner refuses `@project` for it — "only supported for
+//        `run`, `run-panic` and `compile-fail`". So the NEGATIVE pole of
+//        a multi-file project is unobservable by the suite today; T1114.
+//        The skip comes off when the runner runs what the user runs, not
+//        by weakening the expectation.
+// @description: Mounting a protocol under an alias must not disable the
+//   conformance checks.
+//
+//   Measured 2026-09-03, before the fix (T1073):
+//
+//       mount probe.lib.{Shower};          E427 reported
+//       mount probe.lib.{Shower as S};     E427 SILENT
+//
+//   The impl in the fixture is wrong either way — the protocol declares
+//   `-> Int` and the impl returns `Bool`. The alias silently disabled
+//   THREE checks at once (GAT arity, the associated-type bound, and this
+//   signature check), because they all ask the registry by the name AS
+//   WRITTEN and a miss returns no diagnostics.
+//
+//   Not a wrong answer — a hole, and it opened on the spelling a user
+//   reaches for precisely when two modules collide, which is when the
+//   checks matter most. The resolver already existed:
+//   `canonical_alias_target` walks the alias chain, and it had one caller.
+//
+//   WHY THIS FILE EXISTS SEPARATELY FROM THE FIXTURE (T1113). The T1073
+//   commit added `aliased_protocol/` — verum.toml, src/lib.vr,
+//   src/main.vr — and no spec. The directives lived at the top of
+//   `src/main.vr` and named `@test: check`, which is not one of the
+//   suite's test types. Discovery therefore found a spec it could not
+//   read, and refused the WHOLE directory:
+//
+//       vtest run specs/L2-standard/modules
+//       Error: 1 spec(s) could not be read, so they were neither run nor
+//       counted
+//
+//   So the check this fixture was written to pin ran nowhere, and it took
+//   every other spec in the directory down with it. Its healthy siblings
+//   (`two_file_project/`, `module_leaf_collision/`) carry NO directives
+//   inside `src/`, which is why they are invisible to discovery — the
+//   directives belong in a spec file beside the project, never inside it.
+//
+//   `compile-fail` rather than `typecheck-fail`: the fixture is a cog, so
+//   the subject is a directory and the run is a full `verum build`, and
+//   the author's own expectation was a non-zero exit.
+
+fn main() {
+    // The program lives in the sibling directory named by `@project:`.
+    // This body is never compiled — vtest hands the compiler that
+    // directory, not this file.
+}
