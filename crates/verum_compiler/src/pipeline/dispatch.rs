@@ -294,6 +294,16 @@ impl<'s> CompilationPipeline<'s> {
             self.session.collect_phase_error("verify", r)?;
         }
 
+        // Context validation — Phase 4c, the same one `build` runs.
+        // The invariant stated above ("check ⊆ build must hold for
+        // verdicts") was violated here a second time, by a different
+        // phase: measured 2026-09-03, a function declaring
+        // `using [!Zlog]` and calling one that requires `Zlog` produced
+        // a diagnostic under `verum build` and NOTHING under
+        // `verum check <file>`. `check_project` got this in T1095; the
+        // single-file path is a third entry point and got it here.
+        self.phase_context_validation(&module);
+
         // Dependency analysis (validates against target constraints)
         self.phase_dependency_analysis(&module)?;
 
