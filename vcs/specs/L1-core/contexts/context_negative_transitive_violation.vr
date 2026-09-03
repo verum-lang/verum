@@ -1,0 +1,56 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: context, DI, negative-contexts, violation
+// @expect: pass
+// @description: A function that forbids a context, calling one that requires it. Reported, but as a WARNING — see the note below.
+// @spec: 16-context-system.md Section 1.4 - Negative Contexts
+
+// =============================================================================
+// The case this file exists for
+// =============================================================================
+//
+// `using [!Database]` is documented as a compile-time guarantee: the
+// function, and everything it calls, may not reach that context.
+//
+// Until 2026-09-03 nothing enforced it. The one place that built the
+// checker's model wrote every requirement through `ContextRequirement::new`,
+// which hardcodes `is_negative: false`, so `excluded_contexts` was
+// permanently empty and the transitive verifier walked a registry in which
+// no function forbade anything. The suite did not notice because the section
+// named "Testing Negative Context Violations" in
+// L2-standard/context/advanced/context_patterns_complete.vr was commented
+// out in full — the guarantee had a heading and no test.
+//
+// WHY `@expect: pass` FOR A VIOLATION. Measured 2026-09-03 on a built
+// compiler: the violation IS detected and reported —
+//
+//   Function 'must_not_touch_the_database' calls 'reads_the_database'
+//   which requires context 'Database', but 'Database' is excluded via
+//   `using [!Database]`
+//
+// — but as a tracing warning, not a diagnostic, so the check exits 0.
+// `[context] unresolved_policy` defaults to "error", and its "error"
+// arm emits `warn!` exactly like its "warn" arm; the knob has no
+// effect today. When that is fixed this file becomes
+// `@test: typecheck-fail` with the real code, and the change of
+// directive is the record that it happened.
+
+context Database {
+    fn query(&self, sql: Text) -> Text;
+}
+
+// Requires the context.
+fn reads_the_database() using [Database] {
+    let _ = Database.query("SELECT 1");
+}
+
+// Forbids it — and calls the function that requires it.
+// E609: transitive negative context violation.
+fn must_not_touch_the_database() using [!Database] {
+    reads_the_database();
+}
+
+fn main() {
+    must_not_touch_the_database();
+}

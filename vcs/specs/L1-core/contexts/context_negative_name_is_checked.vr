@@ -1,0 +1,52 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: context, DI, negative-contexts, typo
+// @contexts: strict
+// @expect: error(E605)
+// @expected-error: E605 "undefined context"
+// @description: A forbidden context names a context; a misspelled one is an error, not a silent no-op.
+// @spec: 16-context-system.md Section 1.4 - Negative Contexts
+
+// =============================================================================
+// Why the negative side is validated too
+// =============================================================================
+//
+// `@contexts: strict` is REQUIRED for this file to test anything. Every
+// file carrying a `@test:` header gets lenient context validation —
+// "undefined contexts are silently accepted" — which is right for the
+// many specs that write `using [Database]` and expect a harness to
+// provide it, and which disables exactly the check this file asserts.
+// Without the directive this spec checked cleanly, and the harness
+// reported "the expected errors never appeared": a spec defeated by its
+// own suite, reading as though the defect were fixed.
+//
+// Skipping existence-validation on `!X` was free while exclusions were
+// inert: an unchecked name forbade nothing, and so did a checked one.
+// Once exclusions are enforced the asymmetry acquires a cost — a typo
+// turns "forbidden" into "silently permitted", and reads to the author
+// as a guarantee. `!Databse` must be an error, exactly as `Databse` is.
+
+context Database {
+    fn query(&self, sql: Text) -> Text;
+}
+
+fn reads_the_database() using [Database] {
+    let _ = Database.query("SELECT 1");
+}
+
+// E605: `Databse` is not a context. Without this check the function
+// would compile and forbid nothing, while reading as a guarantee.
+//
+// The body is empty ON PURPOSE. An earlier draft called
+// `reads_the_database()` here, which made the file report E613 (the
+// caller does not declare `Database`) and stop before reaching the
+// typo — a test that would have passed for the wrong reason, on a
+// diagnostic about something else. Measured: with the call, E605 does
+// not appear at all.
+fn typo_in_the_exclusion() using [!Databse] {
+}
+
+fn main() {
+    typo_in_the_exclusion();
+}

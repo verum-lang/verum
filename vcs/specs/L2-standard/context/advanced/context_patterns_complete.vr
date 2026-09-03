@@ -55,6 +55,22 @@ context Analytics {
     fn track(event: Text, data: Map<Text, Value>);
 }
 
+// `IO` and `State` are excluded further down (`using [!IO, !State,
+// !Random]`). They are declared here because an exclusion names a
+// context: before the negative side was validated, that clause named
+// two things that did not exist and therefore excluded nothing.
+context IO {
+    fn write(&self, bytes: List<Byte>) -> Int;
+}
+
+context State {
+    fn get(&self, key: Text) -> Maybe<Text>;
+}
+
+context Random {
+    fn next_int(&self) -> Int;
+}
+
 context Cache {
     fn get<T>(key: Text) -> Maybe<T>;
     fn set<T>(key: Text, value: T);
@@ -396,10 +412,16 @@ async fn main() {
 // Part 9: Testing Negative Context Violations (Compile Error Expected)
 // ============================================================================
 
-// This should produce a compile error if uncommented:
-// fn violates_negative() using [!Database] {
-//     Database.query("SELECT 1");  // ERROR: Database is excluded
-// }
+// This file is `@expect: pass`, so the violation cannot live here — it
+// would make the whole file fail. It now has its own file, where the
+// failure is the assertion rather than an accident:
+//
+//   L1-core/contexts/context_negative_transitive_violation.vr   (E609)
+//   L1-core/contexts/context_negative_name_is_checked.vr        (E605)
+//
+// Leaving it commented out here is what let the guarantee go
+// unenforced from its introduction until 2026-09-03: the section had a
+// heading, a stated expectation, and nothing that ever ran.
 
 // ============================================================================
 // Part 10: Alias Uniqueness Validation
