@@ -22,15 +22,22 @@ audit pass:
 | 6 | Re-export chains resolve **one hop only** (`module_reexports` is followed once), so replacing a definition with a re-export breaks every parent-umbrella `public mount .Leaf.{T}` chain. | dedup trap, all consolidation tasks |
 | 7 | Free-function bare names resolve by registration order: last-registration-wins (T0114/T0144) or lowest-arity-first-wins (T0448). The class has already fired in live code: `l4_vdbe/cursor_btree_bridge.vr` carries a `cursor_new as btree_cursor_new` workaround alias because AOT picked a 0-arg `cursor_new` from an *unreachable* module. | T0114, T0144, T0448, T0538 |
 | 8 | The runtime's bare-suffix dispatch scan picks the alphabetically/iteration-order first `*.method` when the receiver type cannot be recovered — non-deterministic mis-dispatch (`Bool.hash` for an Int receiver, etc.). | T0106 family |
-| 9 | An **explicitly mounted** name loses the bare slot to the archive and the call compiles to `()`. `module verifier` + `mount verifier.{verify}` + `verify(3)` runs the `Err` arm of a function that returns `Ok` unconditionally; the user's body is never entered, and `check`, `build` and `run` all report zero diagnostics. The type checker resolves the same call CORRECTLY (`let w: Int = verify(3)` → `expected 'Int', found 'Ok(Verified) \| Err(Text)'`), so the layers disagree. Outcome tracks how many `core/` modules declare the name — 5 and 2 declarers are silent `()`, 1 declarer gives a loud arity error — which is defect #7's last-registration-wins seen from the call side. Violates §3.2 directly: an explicit `mount` is rank 3 and ambient is rank 6. | T0907 |
+| 9 | An **explicitly mounted** name loses the bare slot to the archive and the call compiles to `()`. `module verifier` + `mount verifier.{verify}` + `verify(3)` runs the `Err` arm of a function that returns `Ok` unconditionally; the user's body is never entered, and `check`, `build` and `run` all report zero diagnostics. The type checker resolves the same call CORRECTLY (`let w: Int = verify(3)` → `expected 'Int', found 'Ok(Verified) \| Err(Text)'`), so the layers disagree. Outcome tracks how many `core/` modules declare the name — 5 and 2 declarers are silent `()`, 1 declarer gives a loud arity error — which is defect #7's last-registration-wins seen from the call side. Violates §3.2 directly: an explicit `mount` is rank 3 and ambient is rank 6. **Root, measured 2026-09-03:** a user module owns `<its module>.<its name>`, and the ownership test in `verum_vbc/src/codegen/mod.rs` (trace label `decl-yield`) asked only "is the holder a mount?" and "is the holder a stub?", reading every OTHER holder as the one legitimate case — a second local declaration of the same module. A third case existed: a foreign module holding the key. `core/` ships three modules whose path ends in `.verifier`, one of whose `verify` is reachable under the LEAF spelling `verifier.verify`, so the user's own declaration yielded its own name and the mount's first ladder probe bound the bare alias to the stranger. Shown foreign rather than a second pass by perturbation: padding the user module walked `mine` 33895→33898 while `holder` stayed 33349. | T0907 |
 
 Aggravator: stdlib function *bodies* are typechecked on **no path** (the bake
 has no inference pass over `core/` bodies; `VERUM_STDLIB_PATH` overrides only
 the registry), so all of the above stayed invisible inside `core/` (T0124).
 
-The pattern across all eight: **resolution is attempted late, by name-shaped
+The pattern across all nine: **resolution is attempted late, by name-shaped
 guessing, with a lenient fallback instead of an error**. The fix is one
-architecture, not eight patches.
+architecture, not nine patches.
+
+Defect #9 adds a second pattern the other eight also show, and it is the one
+that makes them hard to see: **a judgement with two tests and three cases
+reads the third as one of the two**. Occupancy of a key was tested; provenance
+of the holder was not, so "somebody else has it" and "I already have it" were
+the same observation. Every table in §3 that answers a question by occupancy
+alone has this shape latent in it.
 
 ## 2. Prior art consulted
 

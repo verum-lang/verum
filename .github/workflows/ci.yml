@@ -853,13 +853,23 @@ jobs:
           scripts/ci/check_a_module_level_static_crosses_the_module_boundary.sh --selftest ./target/release/verum
           scripts/ci/check_a_module_level_static_crosses_the_module_boundary.sh ./target/release/verum
 
-      # NOT WIRED YET, deliberately: check_a_mounted_call_never_compiles_to_unit.sh
-      # is RED against HEAD because T0907 is open — an explicitly mounted
-      # call still compiles to `()` when the bare slot is contested, and
-      # `check`, `build` and `run` all report zero diagnostics for it. A
-      # red gate in CI teaches people to ignore CI. It is runnable by hand
-      # against any binary and fails with a named reason; it is that
-      # task's acceptance, not a dead file. Wire it with the fix.
+      # A module keeps its own function when its name is also the last
+      # segment of a stdlib module's path. Measured (T0907): `core/` ships
+      # three modules ending in `.verifier`, so a user `module verifier`
+      # declaring `fn verify` lost its own name — `mount verifier.{verify};
+      # verify(3)` ran the stdlib function and printed `()`, while `check`,
+      # `build` and `run` all reported zero diagnostics. The ownership test
+      # asked two questions of whoever held `<module>.<name>` (a mount? a
+      # stub?) and read every OTHER holder as the one legitimate case, a
+      # second local declaration; a third case — a foreign module — was
+      # read as that one. The gate's four arms are a contested name, an
+      # uncontested one, a non-colliding control, and a genuinely wrong
+      # call that must still be refused, so neither silence nor a blanket
+      # "stop checking calls" can pass it.
+      - name: A mounted call never compiles to unit
+        run: |
+          scripts/ci/check_a_mounted_call_never_compiles_to_unit.sh --selftest ./target/release/verum
+          scripts/ci/check_a_mounted_call_never_compiles_to_unit.sh ./target/release/verum
 
       # An associated type written as a generic APPLICATION must satisfy a
       # bound its generic impl provides. Measured (T1098): 40 false E405

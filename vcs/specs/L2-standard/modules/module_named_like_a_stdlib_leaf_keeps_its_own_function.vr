@@ -1,0 +1,71 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: modules, project, mount, cross-file, name-resolution, T0907
+// @timeout: 60000
+// @project: module_leaf_collision
+// @expected-stdout: 103
+// @skip: T1110 — the DEFECT THIS SPEC NAMES IS FIXED, and a second one
+//        underneath it is not. `@project:` needs a cog (verum.toml +
+//        src/), and a cog collects the module TWICE with two different
+//        function ids, so the qualified key lands on the body-less
+//        first pass and the call still returns `()`. Measured on the
+//        fixed binary, the trace tells the whole story in three lines:
+//            bind_mounted_function   key='verifier.verify'
+//            decl-takeback-foreign   mine=33895 holder=Some(33349)
+//            decl-yield              mine=33896 holder=Some(33895)
+//        Line two IS this spec's defect being repaired — the stranger
+//        33349 loses the key. Line three is T1110: the same declaration
+//        registering a second time under a different id and yielding to
+//        its own first pass. The loose-file form of exactly this source
+//        prints 103 on the same binary, which is how the two are told
+//        apart. The skip comes off with T1110, not by weakening the
+//        expectation.
+// @description: A module keeps its own function when its name is also the
+//               last segment of a stdlib module's path.
+//
+//   `core/` ships three modules whose path ends in `.verifier`
+//   (`core.security.x509.verifier`, `core.security.zk.halo2.verifier`,
+//   `core.security.zk.stark.verifier`), and each declares `verify`. A user
+//   module named `verifier` declaring its own `verify` therefore contests a
+//   name it has every right to. Measured 2026-09-03 (T0907), one binary:
+//
+//       module verifier;        print(verify(3))  ->  ()
+//       module probe.verifier;  print(verify(3))  ->  103
+//
+//   Only the module's SPELLING differs. The second is the cog-qualified
+//   form, which collides with nothing; the first is the plain one, and it
+//   lost. With a `Result` return the damage is quieter still — the `match`
+//   took the `Err` arm of a function that returns `Ok` unconditionally, so
+//   the program printed a wrong number rather than nothing, and `check`,
+//   `build` and `run` all reported zero diagnostics.
+//
+//   ROOT. A module's own declaration owns `<its module>.<its name>`. The
+//   ownership test asked two questions of whoever already held the key —
+//   is it a mount? is it an extern stub? — and read every OTHER holder as
+//   the one legitimate case: a second local declaration of the same module,
+//   which keeps source-order precedence. A third case existed, a foreign
+//   module holding the key, and it was read as the first. The declaration
+//   yielded its own name, and the explicit `mount` then found the stranger
+//   on the ladder's first probe and bound the bare alias to it.
+//
+//   The holder was shown to be foreign rather than a second pass over the
+//   same declaration by perturbation, not by inspection: padding the user's
+//   module with three extra declarations walked its own id 33895 -> 33898
+//   while the holder stayed 33349.
+//
+//   WHY 103 AND NOT A BOOLEAN. The expectation is deliberately a value the
+//   stdlib's `verify` cannot produce. Any of them returns a verdict, not
+//   `n + 100`, so this spec cannot pass by accidentally calling the right
+//   name on the wrong function.
+//
+//   CONTROL. `two_file_project_runs.vr` in this directory is the same shape
+//   with a non-colliding module name. If both fail, multi-file projects are
+//   broken in general and this spec says nothing about collisions; if only
+//   this one fails, the collision is the cause.
+
+fn main() {
+    // The program lives in the sibling directory named by `@project:`.
+    // This body is never compiled — vtest hands the compiler that
+    // directory, not this file.
+}

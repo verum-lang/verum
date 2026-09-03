@@ -1,0 +1,8 @@
+// The module name is the LAST SEGMENT of three core/ module paths, and
+// `verify` is declared by every one of them. Both halves are needed: the
+// same module with a uniquely-named function resolves correctly, and the
+// same function in a module named `vf6` resolves correctly. It is the PAIR
+// that was lost. See the spec file for the measurement.
+module verifier;
+
+public fn verify(n: Int) -> Int { n + 100 }

@@ -1,0 +1,3 @@
+mount verifier.{verify};
+
+fn main() { print(verify(3)); }

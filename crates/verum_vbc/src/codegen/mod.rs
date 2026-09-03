@@ -852,6 +852,16 @@ pub struct VbcCodegen {
     /// Written only by [`Self::register_mount_qualified_key`], read only
     /// by the local-declaration registrar.
     mount_installed_qualified_keys: std::collections::HashSet<String>,
+    /// Module-qualified keys (`<module>.<name>`) that a LOCAL DECLARATION
+    /// created — the other half of the same provenance question (T0907).
+    ///
+    /// The ownership rule reads "yield to another LOCAL declaration of
+    /// this module, but take the key back from a mount".  Occupancy alone
+    /// cannot tell those apart, and without this set a THIRD case —
+    /// a foreign module holding the key — was silently read as the first
+    /// and yielded to.  Written and read only by the local-declaration
+    /// registrar.
+    decl_installed_qualified_keys: std::collections::HashSet<String>,
     /// **FIELD-INTERN-FALLBACK visibility** — unique `(type, field)`
     /// pairs that resolved through the global field-name interner
     /// (the wrong-offset landmine class; defect-class-catalogue §40).
@@ -2178,6 +2188,7 @@ impl VbcCodegen {
             pending_imports: Vec::new(),
             mount_aliases_buffer: Vec::new(),
             mount_installed_qualified_keys: std::collections::HashSet::new(),
+            decl_installed_qualified_keys: std::collections::HashSet::new(),
             field_intern_fallbacks: std::collections::HashSet::new(),
             constant_type_refs: std::collections::HashMap::new(),
             // Track variant name collisions
@@ -10153,14 +10164,46 @@ impl VbcCodegen {
             const EXTERN_SENTINEL_THRESHOLD: u32 = u32::MAX / 4;
             let stub_held = holder.is_some_and(|h| h >= EXTERN_SENTINEL_THRESHOLD)
                 && info.id.0 < EXTERN_SENTINEL_THRESHOLD;
+            // A FOREIGN MODULE squatting this key does not own it either —
+            // MODULE-LEAF-COLLISION-1 (T0907).  The two takeback tests above
+            // ask "is the holder a mount?" and "is the holder a stub?", and
+            // read every other holder as the one legitimate case: a second
+            // local declaration of THIS module (an arity overload, which
+            // keeps source-order precedence).  A third case exists and was
+            // being read as that one.
+            //
+            // Measured 2026-09-03, two files, one binary.  `core/` ships
+            // three modules whose path ends in `.verifier`
+            // (`core.security.x509.verifier`, `…zk.halo2.verifier`,
+            // `…zk.stark.verifier`), and one of their `verify` functions is
+            // reachable in `ctx.functions` under the LEAF-qualified spelling
+            // `verifier.verify`.  A user module `verifier` declaring its own
+            // `fn verify` then found the key held by a stranger:
+            //
+            //     module verifier;  public fn verify(n: Int) -> Int { n+100 }
+            //     mount verifier.{verify};  print(verify(3))   ->  ()
+            //     module vf6;       public fn verify(n: Int) -> Int { n+100 }
+            //     mount vf6.{verify};       print(verify(3))   ->  103
+            //
+            // The holder id stayed fixed at 33349 while padding the user's
+            // module walked its own ids 33895 -> 33898, which is how the
+            // holder was shown to be foreign rather than a second pass over
+            // the same declaration.  The yield then let the explicit mount's
+            // first ladder probe find the stranger under the qualified key
+            // and bind the bare alias to it authoritatively, so the CALL ran
+            // the stdlib function.  A user module may not lose its own name
+            // to the leaf of somebody else's path.
+            let local_held = holder == Some(info.id.0)
+                || self.decl_installed_qualified_keys.contains(&dot_qualified);
             if std::env::var("VERUM_TRACE_QKEY").is_ok() {
                 eprintln!(
                     "[qkey] {} {} mine={} holder={:?}",
-                    match (holder.is_some(), mount_held, stub_held) {
-                        (false, _, _) => "decl-fresh",
-                        (true, true, _) => "decl-takeback",
-                        (true, false, true) => "decl-takeback-stub",
-                        (true, false, false) => "decl-yield",
+                    match (holder.is_some(), mount_held, stub_held, local_held) {
+                        (false, _, _, _) => "decl-fresh",
+                        (true, true, _, _) => "decl-takeback",
+                        (true, false, true, _) => "decl-takeback-stub",
+                        (true, false, false, false) => "decl-takeback-foreign",
+                        (true, false, false, true) => "decl-yield",
                     },
                     dot_qualified,
                     info.id.0,
@@ -10168,13 +10211,18 @@ impl VbcCodegen {
                 );
             }
             if holder.is_none() {
-                self.ctx.register_function(dot_qualified, info.clone());
-            } else if mount_held || stub_held {
+                self.ctx
+                    .register_function(dot_qualified.clone(), info.clone());
+                self.decl_installed_qualified_keys
+                    .insert(dot_qualified.clone());
+            } else if mount_held || stub_held || !local_held {
                 self.ctx
                     .register_function_authoritative(dot_qualified.clone(), info.clone());
                 // The definition owns it now; a later arity overload must
                 // see it as declaration-held, not mount-held.
                 self.mount_installed_qualified_keys.remove(&dot_qualified);
+                self.decl_installed_qualified_keys
+                    .insert(dot_qualified.clone());
             }
             if self.ctx.lookup_function(&colon_qualified).is_none() {
                 self.ctx.register_function(colon_qualified, info.clone());

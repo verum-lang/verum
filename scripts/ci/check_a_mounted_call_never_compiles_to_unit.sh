@@ -30,10 +30,43 @@
 # `expected 'Int', found 'Ok(Verified) | Err(Text)'` — so the two layers
 # disagree and codegen is the wrong one.
 #
-# MECHANISM, confirmed by a prediction that held.  The module name
-# `verifier` is the simple name of three core/ modules.  Vary ONLY the
-# function name and the outcome tracks how many core/ modules declare
-# it:
+# MECHANISM — measured, not inferred.  `VERUM_TRACE_QKEY` names the
+# whole chain in two lines:
+#
+#     [qkey] bind_mounted_function alias='verify' key='verifier.verify'
+#     [qkey] decl-yield verifier.verify mine=33895 holder=Some(33349)
+#
+# and the healthy spelling differs in exactly one value — the holder is
+# the declaration ITSELF:
+#
+#     [qkey] decl-yield vf6.verify mine=33895 holder=Some(33895)
+#
+# That the holder 33349 is FOREIGN was measured rather than assumed:
+# padding the user's module with three extra declarations walked `mine`
+# 33895 -> 33898 while `holder` stayed 33349, which rules out the
+# reading that it is a second pass over the same declaration.
+#
+# The ownership judgement (`verum_vbc/src/codegen/mod.rs`, search
+# `decl-yield`) asked two questions of a holder — is it a mount?  is it
+# an extern stub? — and read every other holder as the one legitimate
+# case: a second LOCAL declaration of this module, i.e. an arity
+# overload, which keeps source-order precedence.  A third case exists:
+# a foreign module holding the key.  It was read as the first, so the
+# user's own declaration yielded its own name.  The explicit mount then
+# found the stranger on the ladder's FIRST probe and bound the bare
+# alias to it authoritatively, and the call ran the stdlib function.
+#
+# The leaf-qualified key `verifier.verify` is not in the baked archive
+# (7 of its 8 `verifier.verify` strings are fully qualified, none are
+# leaf) — it is created in-process at load.  Which loader writes it is
+# still unnamed; the ownership rule is repaired independently of that,
+# because a user module may not lose its own name to the leaf of
+# somebody else's path however the leaf key arrives.
+#
+# EARLIER OBSERVATION, kept because it shows the two failure shapes.
+# The module name `verifier` is the simple name of three core/ modules.
+# Vary ONLY the function name and the outcome tracks how many core/
+# modules declare it:
 #
 #     verify                                5 modules   silent 999
 #     verify_batch                          2 modules   silent 999
@@ -159,7 +192,9 @@ if [ "$co" != "3" ]; then
   printf '  compiles to `()` — `match` then takes the Err arm and prints 999.\n'
   printf '  The type checker resolves the SAME call correctly, so this is a\n'
   printf '  disagreement between layers, not a missing type. See T0907 and\n'
-  printf '  verum_vbc/src/codegen/mod.rs:11871 (T0612/T0559 Stage D).\n'
+  printf '  the ownership judgement in verum_vbc/src/codegen/mod.rs — search\n'
+  printf '  `decl-yield`; run again with VERUM_TRACE_QKEY=1 to see which of\n'
+  printf '  decl-fresh / decl-takeback{,-stub,-foreign} / decl-yield fired.\n'
   exit 1
 fi
 
