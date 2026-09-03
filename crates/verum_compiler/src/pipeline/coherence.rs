@@ -14,8 +14,11 @@
 //! The cluster is gated on `[protocols].coherence` in `verum.toml`:
 //!
 //!  * `unchecked` → skip coherence checking entirely.
-//!  * `lenient` → emit violations as warnings (default).
-//!  * `strict` → emit violations as errors.
+//!  * `lenient` → emit violations as warnings.
+//!  * `strict` → emit violations as errors.  **This is the default**
+//!    (`ProtocolsFeatures::default` in `language_features.rs`); the
+//!    comment here said `lenient` until it was checked against that
+//!    impl.
 //!
 //! Pre-registered "trusted" crates (`core`, `sys`, `mem`, …) are
 //! allowed to define blanket implementations like
