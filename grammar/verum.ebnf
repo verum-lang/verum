@@ -156,10 +156,36 @@ proof_keywords = 'theorem' | 'lemma' | 'axiom' | 'corollary' | 'proof' | 'calc'
                | 'have' | 'show' | 'suffices' | 'obtain' | 'by' | 'qed'
                | 'induction' | 'cases' | 'contradiction' | 'forall' | 'exists' ;
 
+(* Tokens the LEXER declares that no production above names.
+ *
+ * Measured 2026-09-03: `crates/verum_lexer/src/token.rs` carries 112
+ * `#[token("…")]` declarations; the nine productions above name 76.
+ * Of the 36 missing, TWENTY are genuinely reserved — binding one as an
+ * identifier is refused — and sixteen are contextual.
+ *
+ * A grammar that omits them understates what the language takes: an
+ * author naming a variable `move`, `ref`, `view` or `with` gets a parse
+ * error with no production to point at.
+ *)
+lexer_only_reserved = 'as' | 'checked' | 'cofix' | 'coinductive' | 'extern'
+                    | 'false' | 'in' | 'inductive' | 'inject' | 'lift'
+                    | 'move' | 'private' | 'quote' | 'ref' | 'throw'
+                    | 'true' | 'typeof' | 'unknown' | 'view' | 'with' ;
+
+(* The sixteen contextual ones, usable as identifiers today and listed
+ * so the next measurement can tell a change from a discovery:
+ * assumption, auto, blast, crate, field, gen, implies, layer, link,
+ * omega, pattern, ring, set, simp, smt, stage, trivial, volatile.
+ * `field`, `gen`, `set`, `pattern`, `layer` and `stage` are the
+ * exception noted at `tuple_slot`: usable everywhere EXCEPT as a
+ * tuple-payload label.
+ *)
+
 (* Composite keyword definition *)
 keyword = reserved_keyword | primary_keyword | control_flow
         | async_keywords | modifiers | ffi_keywords
-        | module_keywords | additional_keywords | proof_keywords ;
+        | module_keywords | additional_keywords | proof_keywords
+        | lexer_only_reserved ;
 
 (* 1.5 Literals *)
 
