@@ -361,33 +361,23 @@ impl TypeChecker {
                     // Name not resolved - for well-known types, create forward references
                     // rather than erroring. This handles stdlib types that are used in
                     // test files but not explicitly imported.
-                    if is_wellknown_type_name(name) {
-                        Ok(Type::Named {
-                            path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
-                                name, span,
-                            )),
-                            args: List::new(),
-                        })
-                    } else {
-                        Err(TypeError::TypeNotFound {
+                    match wellknown_forward_reference(name, span) {
+                        Some(ty) => Ok(ty),
+                        None => Err(TypeError::TypeNotFound {
                             name: name.to_text(),
                             span,
-                        })
+                        }),
                     }
                 }
             }
         } else {
             // No module context - for well-known types, create forward references
-            if is_wellknown_type_name(name) {
-                Ok(Type::Named {
-                    path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(name, span)),
-                    args: List::new(),
-                })
-            } else {
-                Err(TypeError::TypeNotFound {
+            match wellknown_forward_reference(name, span) {
+                Some(ty) => Ok(ty),
+                None => Err(TypeError::TypeNotFound {
                     name: name.to_text(),
                     span,
-                })
+                }),
             }
         }
     }
@@ -1969,6 +1959,45 @@ impl TypeChecker {
 /// forward reference rather than generating a "type not found" error.
 /// This handles stdlib types commonly used in test files that may not be
 /// explicitly imported. The type checker creates an opaque Named type for these.
+/// The two bare-name sites where an unresolved type name either becomes an
+/// opaque forward reference or an `E101 type not found`.
+///
+/// Measured 2026-09-03, parameter position, one value of difference between
+/// subject and control:
+///
+///     fn f(x: Blorbulator<Int>)  ->  error<E101>: type not found   REFUSED
+///     fn f(x: Box<Int>)          ->  0 errors                      ACCEPTED
+///     fn f(x: HashMap<Text,Int>) ->  0 errors                      ACCEPTED
+///     fn f(x: Arc<Int>)          ->  0 errors                      ACCEPTED
+///
+/// `Box`, `HashMap` and `Arc` are three of the SEVENTY-FOUR names on
+/// `is_wellknown_type_name`'s list that `core/` declares nowhere — and three
+/// that the language renamed on purpose (`Heap`, `Map`, `Shared`). The
+/// suppression turns exactly the Rust habit the rename exists to correct into
+/// silence.
+///
+/// Two env vars, so the list can be measured rather than argued about:
+///
+///   * `VERUM_TRACE_WK_FALLBACK=1`  — print every name this fires for, with
+///     its span, so a corpus run yields the census of who depends on it.
+///   * `VERUM_NO_WELLKNOWN_FALLBACK=1` — return `None`, i.e. restore the
+///     error, so the radius is an A/B inside ONE binary.
+fn wellknown_forward_reference(name: &str, span: Span) -> Option<Type> {
+    if !is_wellknown_type_name(name) {
+        return None;
+    }
+    if std::env::var("VERUM_TRACE_WK_FALLBACK").is_ok() {
+        eprintln!("[wk-fallback] {} @ {:?}", name, span);
+    }
+    if std::env::var("VERUM_NO_WELLKNOWN_FALLBACK").is_ok() {
+        return None;
+    }
+    Some(Type::Named {
+        path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(name, span)),
+        args: List::new(),
+    })
+}
+
 pub(crate) fn is_wellknown_type_name(name: &str) -> bool {
     // Single uppercase letter = likely a generic type parameter (T, U, V, A, B, etc.)
     if name.len() == 1 && name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
