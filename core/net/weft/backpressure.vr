@@ -43,7 +43,7 @@ module core.net.weft.backpressure;
 
 mount core.sync.semaphore.{Semaphore};
 mount core.sync.atomic.{AtomicInt, MemoryOrdering};
-mount core.time.{Instant};
+mount core.time.{Instant, SystemTime};
 mount core.net.http.{Response};
 mount core.net.weft.service.{Layer};
 mount core.net.weft.handler.{WeftRequest, Handler};
@@ -564,5 +564,5 @@ implement<H: Handler> Handler for WfqHandler<H> {
 // =============================================================================
 
 fn monotonic_ms() -> Int {
-    Instant.now().duration_since_epoch().as_millis()
+    SystemTime.now().duration_since_epoch().as_millis()
 }

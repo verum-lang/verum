@@ -65,6 +65,7 @@ mount core.collections.map.{Map};
 mount core.net.addr.{SocketAddr};
 mount core.net.http.{Method, StatusCode, Headers, Response};
 mount core.time.instant.{Instant};
+mount core.time.system_time.{SystemTime};
 mount core.net.http2.hpack.{HeaderField};
 mount core.net.quic.{QuicConfig};
 mount core.net.http3.server.{Http3Server, Http3Request, Http3RequestHandle};
@@ -226,7 +227,7 @@ async fn dispatch_one_request<H: Handler>(
     // CoDelLayer (backpressure.vr) sees a consistent
     // `x-weft-submitted-at` regardless of which transport delivered
     // the request.
-    let submitted_at_ms = Instant.now().duration_since_epoch().as_millis();
+    let submitted_at_ms = SystemTime.now().duration_since_epoch().as_millis();
 
     // 1. Convert Http3Request → WeftRequest.
     let mut headers = Headers.with_capacity(req.headers.len());

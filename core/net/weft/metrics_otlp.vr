@@ -82,7 +82,7 @@ module core.net.weft.metrics_otlp;
 
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
-mount core.time.{Instant, Duration};
+mount core.time.{Instant, Duration, SystemTime};
 mount core.async.task;
 mount core.async.timer;
 mount core.async.cancellation.{CancellationToken};
@@ -235,7 +235,7 @@ implement OtlpExporter {
         if outcome.status >= 200 && outcome.status < 300 {
             self.pushes_ok.fetch_add(1, MemoryOrdering.AcqRel);
             self.last_ok_ms.store(
-                Instant.now().duration_since_epoch().as_millis(),
+                SystemTime.now().duration_since_epoch().as_millis(),
                 MemoryOrdering.Release,
             );
             Result.Ok(())
@@ -461,7 +461,7 @@ fn encode_number_data_point(value: Int) -> List<Byte> {
     // NumberDataPoint:
     //  3: time_unix_nano
     //  6: as_int (int64)
-    let now_ns = Instant.now().duration_since_epoch().as_nanos() as UInt64;
+    let now_ns = SystemTime.now().duration_since_epoch().as_nanos() as UInt64;
     // fixed64 wire-type = 1 (8 bytes little-endian).
     write_tag(&mut dp, 3, 1);
     let mut k: Int = 0;
@@ -497,7 +497,7 @@ fn encode_histogram_data_point(snap: &OtlpHistogramSnapshot) -> List<Byte> {
     //  5: sum (double — fixed64)
     //  6: bucket_counts (repeated uint64, packed)
     //  7: explicit_bounds (repeated double, packed)
-    let now_ns = Instant.now().duration_since_epoch().as_nanos() as UInt64;
+    let now_ns = SystemTime.now().duration_since_epoch().as_nanos() as UInt64;
     write_tag(&mut dp, 3, 1);
     let mut k: Int = 0;
     while k < 8 {

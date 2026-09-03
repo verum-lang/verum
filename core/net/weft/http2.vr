@@ -73,7 +73,7 @@ mount core.net.tcp.{TcpStream};
 mount core.net.http.{Method, StatusCode, Version, Headers, Response};
 mount core.async.cancellation.{CancellationToken};
 mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
-mount core.time.{Instant};
+mount core.time.{Instant, SystemTime};
 mount core.net.http2.{
     PREFACE, FrameHeader, FrameType, FrameFlags, Http2Frame as Frame,
     Settings, SettingId, ErrorCode, Http2Error,
@@ -335,7 +335,7 @@ implement RapidResetGuard {
 /// `core/net/weft/backpressure.vr`; duplicated here to avoid
 /// cross-file coupling on a one-line shim.
 fn monotonic_now_ms() -> Int {
-    Instant.now().duration_since_epoch().as_millis()
+    SystemTime.now().duration_since_epoch().as_millis()
 }
 
 // =============================================================================

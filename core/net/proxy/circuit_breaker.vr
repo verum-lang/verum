@@ -39,7 +39,7 @@
 module core.net.proxy.circuit_breaker;
 
 mount core.sync.atomic.{AtomicInt, MemoryOrdering};
-mount core.time.{Instant};
+mount core.time.{Instant, SystemTime};
 mount core.net.http.{Response};
 mount core.net.weft.service.{Layer};
 mount core.net.weft.handler.{WeftRequest, Handler};
@@ -131,7 +131,7 @@ public type CircuitBreakerHandler<H> is {
 implement<H: Handler> Handler for CircuitBreakerHandler<H> {
     async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
         let s = &*self.state;
-        let now = Instant.now().duration_since_epoch().as_millis();
+        let now = SystemTime.now().duration_since_epoch().as_millis();
 
         match s.state.load(MemoryOrdering.Acquire) {
             STATE_OPEN => {
@@ -161,7 +161,7 @@ implement<H: Handler> CircuitBreakerHandler<H> {
         if is_failure {
             let failures = s.consecutive_failures.fetch_add(1, MemoryOrdering.AcqRel) + 1;
             if failures >= s.failure_threshold {
-                let now = Instant.now().duration_since_epoch().as_millis();
+                let now = SystemTime.now().duration_since_epoch().as_millis();
                 s.opened_at_ms.store(now, MemoryOrdering.Release);
                 s.state.store(STATE_OPEN, MemoryOrdering.Release);
             }

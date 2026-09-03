@@ -15,6 +15,7 @@ module core.net.weft.connection;
 mount core.collections.list.{List};
 mount core.net.addr.{SocketAddr};
 mount core.time.instant.{Instant};
+mount core.time.system_time.{SystemTime};
 mount core.net.weft.transport.{WeftTransport};
 mount core.net.weft.bufpool.{BufferPool, BufferHandle};
 mount core.net.weft.arena_pool.{ArenaPool, ArenaLease};
@@ -314,7 +315,7 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     // (backpressure.vr) reads `x-weft-submitted-at` as a millisecond
     // monotonic to compute sojourn time; without this stamp it sees
     // 0 and CoDel admission becomes a no-op.
-    let submitted_at_ms = Instant.now().duration_since_epoch().as_millis();
+    let submitted_at_ms = SystemTime.now().duration_since_epoch().as_millis();
 
     let mut parser = HttpParser.request();
     // Red-team #316: keep the request buffer as `List<Byte>` directly,

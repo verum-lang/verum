@@ -47,7 +47,7 @@ module core.net.proxy.upstream_pool;
 
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
-mount core.time.{Instant};
+mount core.time.{Instant, SystemTime};
 mount core.sync.Mutex;
 mount core.net.tcp.{TcpStream};
 mount core.net.addr.{SocketAddr};
@@ -253,7 +253,7 @@ implement UpstreamPool {
             Maybe.Some(b) => b,
             Maybe.None => return Maybe.None,
         };
-        let now = Instant.now().duration_since_epoch().as_millis();
+        let now = SystemTime.now().duration_since_epoch().as_millis();
         let timeout = self.state.config.idle_timeout_ms;
         while !bucket.is_empty() {
             let c = bucket.pop().expect("upstream_pool: bucket non-empty by while-condition guard");
@@ -284,7 +284,7 @@ implement Drop for ConnectionLease {
             Maybe.Some(s) => s,
             Maybe.None    => return,
         };
-        let now = Instant.now().duration_since_epoch().as_millis();
+        let now = SystemTime.now().duration_since_epoch().as_millis();
         let mut idle = self.pool.idle.lock().unwrap_or_else(|p| p.into_inner());
         let bucket = match idle.get_mut(&self.upstream) {
             Maybe.Some(b) => b,
