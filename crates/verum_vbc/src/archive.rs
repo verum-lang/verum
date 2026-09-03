@@ -44,7 +44,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::deserialize::{deserialize_module, deserialize_module_validated};
+use crate::deserialize::deserialize_module;
 use crate::error::{VbcError, VbcResult};
 use crate::module::VbcModule;
 use crate::serialize::serialize_archive_member;
