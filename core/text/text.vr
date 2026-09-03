@@ -40,8 +40,8 @@ mount core.base.memory.{try_alloc, try_realloc};
 mount core.intrinsics.runtime.mem_raw.{memset_addr};
 
 // Import intrinsics as functions
-mount core.intrinsics.runtime.text.{
 mount core.intrinsics.memory.{ptr_offset};
+mount core.intrinsics.runtime.text.{
     text_from_static, utf8_decode_char as intrinsic_utf8_decode_char,
     text_parse_int, text_parse_float, int_to_text,
     char_to_uppercase, char_to_lowercase,

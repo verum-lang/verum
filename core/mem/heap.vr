@@ -90,8 +90,8 @@ mount core.intrinsics.memory.{
     ptr_offset, ptr_read, ptr_write,
     slice_from_raw_parts_mut, memset,
 };
-mount core.intrinsics.atomic.{
 mount core.intrinsics.runtime.mem_raw.{memset_addr};
+mount core.intrinsics.atomic.{
     atomic_load_u8, atomic_store_u8, atomic_fetch_add_u8,
     atomic_load_u64, atomic_exchange_u64, atomic_compare_exchange_u64,
     ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL,
