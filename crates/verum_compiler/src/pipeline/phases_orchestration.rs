@@ -1818,9 +1818,31 @@ impl<'s> CompilationPipeline<'s> {
                         }
                     }
                     _ => {
-                        // "error" (default) — report as-is.
+                        // "error" (DEFAULT) — a real diagnostic, so it
+                        // counts and the build fails.
+                        //
+                        // This arm used to call `warn!`, character for
+                        // character like the "warn" arm above it. The
+                        // knob documented as defaulting to "error" had
+                        // no effect: all three settings behaved as
+                        // "warn", except "allow" which was silent. A
+                        // violation of `using [!Ctx]` reached the user
+                        // as a tracing line that no diagnostic count
+                        // included, no exit status reflected and no
+                        // test could observe.
+                        //
+                        // Cost of making it real, measured 2026-09-03
+                        // with the control INSIDE the sweep:
+                        //
+                        //     known-bad control   1 violation
+                        //     core/, 300 files    0
+                        //     vcs/specs, 150      0
+                        //
+                        // Nothing in the corpus writes a negative
+                        // context it then violates, so this promotes
+                        // zero existing code from green to red.
                         for e in errors.iter() {
-                            warn!("Context: {}", e.message());
+                            self.session.emit_diagnostic(e.clone());
                         }
                     }
                 }
