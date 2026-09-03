@@ -8431,6 +8431,7 @@ impl TypeChecker {
                             &proto_method.ty,
                             &impl_ty,
                             &bound,
+                            &|t: &Type| self.scalar_behind(t),
                         )
                         .map(|why| (func.name.name.clone(), why, func.span))
                     })
@@ -8438,6 +8439,41 @@ impl TypeChecker {
                 verum_common::Maybe::None => Vec::new(),
             }
         };
+        // MEASUREMENT, not a diagnostic (VERUM_TRACE_PROTO_MISSING).
+        //
+        // A protocol method that the implementation never provides and
+        // that carries no default is accepted today with silence: the
+        // walk above is driven by the IMPL's items, so a method absent
+        // from them is never visited. `check_method_conformance` in
+        // `protocol.rs` has the arm for it — `ConformanceError::
+        // MissingMethod` — reached only from tests.
+        //
+        // Counted before it is judged, the way T1029 counted the lenient
+        // signature comparison: the readings that could make it noise
+        // (an implementation split across blocks, a superprotocol
+        // default, a blanket impl, a derived method) are cheaper to
+        // measure over core/ than to argue about.
+        if std::env::var("VERUM_TRACE_PROTO_MISSING").is_ok() {
+            let guard = self.protocol_checker.read();
+            if let verum_common::Maybe::Some(protocol) = guard.get_protocol(&proto_ident) {
+                let provided: Vec<Text> = impl_decl
+                    .items
+                    .iter()
+                    .filter_map(|item| match &item.kind {
+                        verum_ast::decl::ImplItemKind::Function(f) => Some(f.name.name.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                for m in protocol.methods.values() {
+                    if !m.has_default && !provided.iter().any(|n| n == &m.name) {
+                        eprintln!(
+                            "[proto-missing] {}::{} not provided by the impl (module {})",
+                            proto_ident, m.name, self.current_module_path
+                        );
+                    }
+                }
+            }
+        }
         for (method, why, span) in mismatches {
             self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
                 code: Text::from("E427"),
@@ -8767,6 +8803,91 @@ impl TypeChecker {
     /// `Unknown` is excluded on purpose — it is the ABSENCE of an answer,
     /// not an answer, and treating it as one is how a checker starts
     /// reporting its own gaps as the author's mistakes.
+    /// The built-in scalar a named type IS, under another name.
+    ///
+    /// Asked of two authorities rather than answered with a list:
+    /// `IntegerKind::from_name` decides what a sized integer alias is
+    /// (`UInt64`, `USize`, …) — the same authority
+    /// `warn_comparison_without_ordering` asks — and the ALIAS TABLE
+    /// decides what a declared name resolves to.
+    ///
+    /// The alias table, not `type_defs`: a declaration registers its
+    /// resolved type with `define_alias` and deliberately stores a
+    /// SELF-REFERENTIAL `Type::Named { NonNeg }` in `type_defs`, to keep
+    /// the indirection generic aliases need (`TypeDeclBody::Alias`).  A
+    /// walker that follows `lookup_type` stops on its own tail, which is
+    /// how the first version of this exclusion came out inert.
+    /// `resolve_alias` is the table `unify` itself consults.
+    ///
+    /// A refinement is unwrapped to its base for the same reason: `unify`
+    /// relates `Refined { base }` to `base` in BOTH directions, so for
+    /// `type NonNeg is Int { it >= 0 }` the two names are one type to
+    /// every other part of the checker.
+    ///
+    /// RESOLVING, not excluding.  The first repair pushed such names into
+    /// `bound_names` — "cannot disagree here" — and that silenced the
+    /// TRUE pole along with the false one: `Text` against `NonNeg` is a
+    /// disagreement precisely because `NonNeg` is `Int`.  Normalising
+    /// both sides and then comparing keeps both answers.
+    fn scalar_behind(&self, t: &Type) -> Option<Type> {
+        let Type::Named { path, .. } = t else {
+            return None;
+        };
+        let name = match path.segments.last() {
+            Some(verum_ast::ty::PathSegment::Name(i)) => i.name.clone(),
+            _ => return None,
+        };
+        if crate::integer_hierarchy::IntegerKind::from_name(name.as_str()).is_some() {
+            return Some(Type::Int);
+        }
+        if matches!(name.as_str(), "Float32" | "Float64") {
+            return Some(Type::Float);
+        }
+        if name.as_str() == "Byte" {
+            return Some(Type::Int);
+        }
+        let mut cur_name = name.clone();
+        let mut cur = self
+            .ctx
+            .resolve_alias(name.as_str())
+            .or_else(|| self.ctx.lookup_type(name.as_str()))?
+            .clone();
+        // A chain of refinements and aliases ends at a representation;
+        // the bound stops a cycle from spinning here.
+        for _ in 0..8 {
+            match cur {
+                Type::Refined { ref base, .. } => {
+                    let next = (**base).clone();
+                    cur = next;
+                }
+                Type::Named { ref path, .. } => {
+                    let n = match path.segments.last() {
+                        Some(verum_ast::ty::PathSegment::Name(i)) => i.name.clone(),
+                        _ => return None,
+                    };
+                    if n == cur_name {
+                        // The self-reference described above: this name
+                        // has no further definition to follow.
+                        return None;
+                    }
+                    let next = self
+                        .ctx
+                        .resolve_alias(n.as_str())
+                        .or_else(|| self.ctx.lookup_type(n.as_str()))?
+                        .clone();
+                    cur_name = n;
+                    cur = next;
+                }
+                _ => break,
+            }
+        }
+        if Self::is_decidable_scalar(&cur) {
+            Some(cur)
+        } else {
+            None
+        }
+    }
+
     fn is_decidable_scalar(t: &Type) -> bool {
         matches!(
             t,
@@ -8845,10 +8966,18 @@ impl TypeChecker {
     /// ARITY IS DELIBERATELY NOT CHECKED here. The two sides may or may
     /// not count the receiver the same way, and that is not established —
     /// reporting on it would be a guess wearing a diagnostic's clothes.
+    ///
+    /// `resolve` normalises a named type to the built-in scalar it IS
+    /// under another name, so that `NonNeg` and `Int` compare equal and
+    /// `Text` against `NonNeg` still compares different.  The MESSAGE
+    /// keeps the author's own spelling — they wrote `NonNeg`, and being
+    /// told about `Int` would send them looking for a type they never
+    /// named.
     pub fn unambiguous_signature_disagreement(
         proto: &Type,
         imp: &Type,
         bound_names: &[Text],
+        resolve: &dyn Fn(&Type) -> Option<Type>,
     ) -> Option<String> {
         let (
             Type::Function {
@@ -8869,7 +8998,27 @@ impl TypeChecker {
             return None;
         }
         for (i, (a, b)) in pp.iter().zip(ip.iter()).enumerate() {
-            if Self::is_decidable_scalar(a) && Self::is_decidable_scalar(b) && a != b {
+            // T1078 admitted scalar-vs-named for the RETURN and left the
+            // parameters on the older scalar-vs-scalar rule — the same
+            // defect in the sibling position, and the worse one of the
+            // two: a caller behind the bound passes what the PROTOCOL
+            // declares, so an implementation that reads the parameter as
+            // another type reads a value nobody ever wrote there.
+            // Measured before this repair, with zero diagnostics:
+            //
+            //     type NonNeg is Int { it >= 0 };
+            //     type Sink is protocol { fn take(n: NonNeg) -> Int; };
+            //     implement Sink for Box { fn take(n: Text) -> Int {…} }
+            //
+            // The predicate below is the same one the return uses, its
+            // exclusions included: `Self`, the protocol's own parameters
+            // and the method's generics are bound elsewhere than in this
+            // comparison, so none of them can disagree here.
+            let ra = resolve(a).unwrap_or_else(|| a.clone());
+            let rb = resolve(b).unwrap_or_else(|| b.clone());
+            let scalars_differ =
+                Self::is_decidable_scalar(&ra) && Self::is_decidable_scalar(&rb) && ra != rb;
+            if scalars_differ || Self::scalar_vs_named_disagreement(&ra, &rb, bound_names) {
                 return Some(format!(
                     "parameter {} is `{}`, but the protocol declares `{}`",
                     i + 1,
@@ -8892,14 +9041,17 @@ impl TypeChecker {
         // type spelled differently, and T1029's sweep found every such
         // class to be a comparison artefact. A scalar is never an alias
         // for a named type, so this pair admits no benign reading.
-        if Self::scalar_vs_named_disagreement(pr, ir, bound_names) {
+        // `return_type` is a `Box<Type>`; the resolver speaks `&Type`.
+        let rpr = resolve(&**pr).unwrap_or_else(|| (**pr).clone());
+        let rir = resolve(&**ir).unwrap_or_else(|| (**ir).clone());
+        if Self::scalar_vs_named_disagreement(&rpr, &rir, bound_names) {
             return Some(format!(
                 "returns `{}`, but the protocol declares `{}`",
                 ir.to_text(),
                 pr.to_text()
             ));
         }
-        if Self::is_decidable_scalar(pr) && Self::is_decidable_scalar(ir) && pr != ir {
+        if Self::is_decidable_scalar(&rpr) && Self::is_decidable_scalar(&rir) && rpr != rir {
             // `Unit` ON THE PROTOCOL SIDE is not an answer, it is the
             // absence of one — the same status the doc comment above
             // already grants `Unknown`. A declared type the checker

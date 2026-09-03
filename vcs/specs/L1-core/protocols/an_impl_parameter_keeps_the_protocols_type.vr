@@ -1,0 +1,46 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: protocols, conformance, signatures, E427, T1073
+// @expect: error(E427)
+// @expected-error: E427 "does not match the signature"
+// @description: An implementation's parameter type must not contradict the protocol's.
+// @spec: 09-protocols.md - Conformance
+
+// =============================================================================
+// Why the PARAMETER position needs the same rule as the return
+// =============================================================================
+//
+// A caller that holds a value behind the protocol bound writes the
+// arguments the PROTOCOL declares.  If the implementation reads a
+// parameter as a different type, the value it reads was never written
+// there — and nothing at the call site can show it, because the call
+// site only ever sees the protocol's signature.
+//
+// The return position was given this rule (T1078) and the parameter
+// position was left on the older, narrower one: only two DIFFERENT
+// BUILT-IN SCALARS were reported, so `Text` against a NAMED type passed.
+// Measured before the repair, with zero diagnostics on this very file.
+//
+// The rule speaks only where no benign reading exists.  It stays silent
+// on an implementation that accepts a BROADER type than the protocol
+// declares — parameters are contravariant, and a named type that is a
+// scalar under another name (`type Meters is Float`, `UInt64`) is that
+// scalar to `unify` and therefore to this check.  The companion file
+// `an_impl_parameter_may_widen.vr` holds that positive pole.
+
+type NonNeg is Int { it >= 0 };
+
+type Sink is protocol {
+    fn take(n: NonNeg) -> Int;
+};
+
+type Box is { v: Int };
+
+implement Sink for Box {
+    // `Text` is not `NonNeg` under any normalisation: a caller behind
+    // the `Sink` bound passes an integer, and this body reads it as text.
+    fn take(n: Text) -> Int { 0 }
+}
+
+fn main() -> Int { 0 }

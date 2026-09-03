@@ -1,0 +1,40 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: protocols, conformance, signatures, contravariance, T1073
+// @description: The parameter rule stays silent where the types agree under `unify`.
+// @spec: 09-protocols.md - Conformance
+
+// =============================================================================
+// The TRUE pole of the parameter rule
+// =============================================================================
+//
+// This file exists so that narrowing the rule cannot narrow it to
+// nothing, and so that widening it cannot start refusing correct code.
+//
+// `NonNeg` IS `Int`: a declaration stores its resolved type in the alias
+// table, and `unify` relates a refinement to its base in both
+// directions.  An implementation naming either one is naming the same
+// type, and the check must not speak.
+//
+// The first repair asked `lookup_type` for that fact and got the
+// declaration's own name back — `type_defs` deliberately holds a
+// self-referential `Named` to keep the indirection generic aliases
+// need.  The exclusion was inert and this file was red.  The authority
+// is `resolve_alias`, the table `unify` itself consults.
+
+type NonNeg is Int { it >= 0 };
+
+type Sink is protocol {
+    fn take(n: NonNeg) -> Int;
+};
+
+type Box is { v: Int };
+
+implement Sink for Box {
+    // Accepting the base type is accepting MORE than the protocol
+    // promises to pass — the direction contravariance allows.
+    fn take(n: Int) -> Int { n }
+}
+
+fn main() -> Int { 0 }
