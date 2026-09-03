@@ -205,16 +205,16 @@ fn walk_for_loss(v: &ConfigValue, caps: &FormatCapabilities, path: &Text, report
 
 fn path_with_kind(path: &Text, kind: &Text) -> Text {
     let mut out = path.clone();
-    if out.is_empty() { out.push_text(&"<root>".to_text()); }
-    out.push_text(&": ".to_text());
-    out.push_text(&kind.to_text());
+    if out.is_empty() { out.push_str(&"<root>".to_text()); }
+    out.push_str(&": ".to_text());
+    out.push_str(&kind.to_text());
     out
 }
 
 fn path_index(path: &Text, i: Int) -> Text {
     let mut out = path.clone();
     out.push_byte(0x5B_u8);
-    out.push_text(&i.to_text());
+    out.push_str(&i.to_text());
     out.push_byte(0x5D_u8);
     out
 }
@@ -222,7 +222,7 @@ fn path_index(path: &Text, i: Int) -> Text {
 fn path_field(path: &Text, key: &Text) -> Text {
     let mut out = path.clone();
     if !out.is_empty() { out.push_byte(0x2E_u8); }
-    out.push_text(key);
+    out.push_str(key);
     out
 }
 

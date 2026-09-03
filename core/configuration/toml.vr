@@ -1194,7 +1194,7 @@ public fn stringify_pretty(value: &TomlValue) -> Text {
     let mut out = Text.new();
     match value {
         TomlValue.TomlTable(t) => stringify_table_pretty(t, &List.new(), &mut out),
-        _                      => out.push_text(&stringify_inline_value(value)),
+        _                      => out.push_str(&stringify_inline_value(value)),
     }
     out
 }
@@ -1221,19 +1221,19 @@ fn stringify_string(s: &Text) -> Text {
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
-        if      b == 0x22_u8 { out.push_text(&"\\\"".to_text()); }
-        else if b == 0x5C_u8 { out.push_text(&"\\\\".to_text()); }
-        else if b == 0x08_u8 { out.push_text(&"\\b".to_text()); }
-        else if b == 0x09_u8 { out.push_text(&"\\t".to_text()); }
-        else if b == 0x0A_u8 { out.push_text(&"\\n".to_text()); }
-        else if b == 0x0C_u8 { out.push_text(&"\\f".to_text()); }
-        else if b == 0x0D_u8 { out.push_text(&"\\r".to_text()); }
+        if      b == 0x22_u8 { out.push_str(&"\\\"".to_text()); }
+        else if b == 0x5C_u8 { out.push_str(&"\\\\".to_text()); }
+        else if b == 0x08_u8 { out.push_str(&"\\b".to_text()); }
+        else if b == 0x09_u8 { out.push_str(&"\\t".to_text()); }
+        else if b == 0x0A_u8 { out.push_str(&"\\n".to_text()); }
+        else if b == 0x0C_u8 { out.push_str(&"\\f".to_text()); }
+        else if b == 0x0D_u8 { out.push_str(&"\\r".to_text()); }
         else if b < 0x20_u8 {
             // \uXXXX
             let mut hex = "\\u00".to_text();
             hex.push_byte(hex_nibble((b >> 4) as Int));
             hex.push_byte(hex_nibble((b & 0x0F_u8) as Int));
-            out.push_text(&hex);
+            out.push_str(&hex);
         } else {
             out.push_byte(b);
         }
@@ -1253,8 +1253,8 @@ fn stringify_array_inline(items: &List<TomlValue>) -> Text {
     out.push_byte(0x5B_u8);
     let mut i = 0;
     while i < items.len() {
-        if i > 0 { out.push_text(&", ".to_text()); }
-        out.push_text(&stringify_inline_value(items.get(i).unwrap()));
+        if i > 0 { out.push_str(&", ".to_text()); }
+        out.push_str(&stringify_inline_value(items.get(i).unwrap()));
         i = i + 1;
     }
     out.push_byte(0x5D_u8);
@@ -1267,11 +1267,11 @@ fn stringify_table_inline(t: &Map<Text, TomlValue>) -> Text {
     let keys = t.keys();
     let mut i = 0;
     while i < keys.len() {
-        if i > 0 { out.push_text(&", ".to_text()); }
+        if i > 0 { out.push_str(&", ".to_text()); }
         let k = keys.get(i).unwrap();
-        out.push_text(&render_key(k));
-        out.push_text(&" = ".to_text());
-        out.push_text(&stringify_inline_value(t.get(k).unwrap()));
+        out.push_str(&render_key(k));
+        out.push_str(&" = ".to_text());
+        out.push_str(&stringify_inline_value(t.get(k).unwrap()));
         i = i + 1;
     }
     out.push_byte(0x7D_u8);
@@ -1308,16 +1308,16 @@ fn stringify_table_pretty(
                 if !items.is_empty() && all_tables(items) {
                     sub_aots.push(k.clone());
                 } else {
-                    out.push_text(&render_key(k));
-                    out.push_text(&" = ".to_text());
-                    out.push_text(&stringify_inline_value(v));
+                    out.push_str(&render_key(k));
+                    out.push_str(&" = ".to_text());
+                    out.push_str(&stringify_inline_value(v));
                     out.push_byte(0x0A_u8);
                 }
             }
             _ => {
-                out.push_text(&render_key(k));
-                out.push_text(&" = ".to_text());
-                out.push_text(&stringify_inline_value(v));
+                out.push_str(&render_key(k));
+                out.push_str(&" = ".to_text());
+                out.push_str(&stringify_inline_value(v));
                 out.push_byte(0x0A_u8);
             }
         }
@@ -1331,7 +1331,7 @@ fn stringify_table_pretty(
         new_path.push(k.clone());
         out.push_byte(0x0A_u8);
         out.push_byte(0x5B_u8);
-        out.push_text(&render_path(&new_path));
+        out.push_str(&render_path(&new_path));
         out.push_byte(0x5D_u8);
         out.push_byte(0x0A_u8);
         match t.get(k).unwrap() {
@@ -1351,9 +1351,9 @@ fn stringify_table_pretty(
                 let mut x = 0;
                 while x < arr.len() {
                     out.push_byte(0x0A_u8);
-                    out.push_text(&"[[".to_text());
-                    out.push_text(&render_path(&new_path));
-                    out.push_text(&"]]".to_text());
+                    out.push_str(&"[[".to_text());
+                    out.push_str(&render_path(&new_path));
+                    out.push_str(&"]]".to_text());
                     out.push_byte(0x0A_u8);
                     match arr.get(x).unwrap() {
                         TomlValue.TomlTable(t2) => stringify_table_pretty(t2, &new_path, out),
@@ -1373,7 +1373,7 @@ fn render_path(path: &List<Text>) -> Text {
     let mut i = 0;
     while i < path.len() {
         if i > 0 { out.push_byte(0x2E_u8); }
-        out.push_text(&render_key(path.get(i).unwrap()));
+        out.push_str(&render_key(path.get(i).unwrap()));
         i = i + 1;
     }
     out
