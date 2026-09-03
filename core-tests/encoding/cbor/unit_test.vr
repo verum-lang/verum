@@ -16,7 +16,7 @@
 mount core.encoding.cbor.{
     CborValue, CborError,
     MAX_CBOR_NESTING, MAX_CBOR_ARRAY_ITEMS, MAX_CBOR_MAP_ENTRIES,
-    encode, decode, encode_canonical, from_int,
+    encode, decode, encode_canonical, from_signed,
 };
 
 // =============================================================================
@@ -316,7 +316,7 @@ fn test_cbor_encode_canonical_produces_bytes() {
 }
 
 // =============================================================================
-// from_int: the SIGN OFFSET, checked against RFC 8949 byte vectors.
+// from_signed: the SIGN OFFSET, checked against RFC 8949 byte vectors.
 //
 // A round-trip test cannot see this.  `encode(decode(x)) == x` holds for
 // ANY self-consistent offset, including an off-by-one, and the structure
@@ -329,28 +329,28 @@ fn test_cbor_encode_canonical_produces_bytes() {
 
 @test
 fn test_from_int_negative_one_is_0x20() {
-    let bytes = encode(&from_int(-1));
+    let bytes = encode(&from_signed(-1));
     assert_eq(bytes.len(), 1);
     assert_eq(bytes[0], 0x20_u8);
 }
 
 @test
 fn test_from_int_negative_three_is_0x22() {
-    let bytes = encode(&from_int(-3));
+    let bytes = encode(&from_signed(-3));
     assert_eq(bytes.len(), 1);
     assert_eq(bytes[0], 0x22_u8);
 }
 
 @test
 fn test_from_int_zero_is_0x00() {
-    let bytes = encode(&from_int(0));
+    let bytes = encode(&from_signed(0));
     assert_eq(bytes.len(), 1);
     assert_eq(bytes[0], 0x00_u8);
 }
 
 @test
 fn test_from_int_three_is_0x03() {
-    let bytes = encode(&from_int(3));
+    let bytes = encode(&from_signed(3));
     assert_eq(bytes.len(), 1);
     assert_eq(bytes[0], 0x03_u8);
 }

@@ -155,7 +155,7 @@ public const MAX_CBOR_MAP_ENTRIES: Int = 1_000_000;
 /// are curve, x and y in a COSE_Key), so the offset belongs here rather
 /// than at every call site, where getting it wrong yields a structure
 /// that encodes and decodes cleanly and MEANS something else.
-public fn from_int(v: Int) -> CborValue {
+public fn from_signed(v: Int) -> CborValue {
     if v >= 0 {
         CborValue.CborUint(v as UInt64)
     } else {

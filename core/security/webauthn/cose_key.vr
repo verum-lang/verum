@@ -54,7 +54,7 @@ module core.security.webauthn.cose_key;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount core.encoding.cbor.{
-    CborValue, decode, encode, from_int,
+    CborValue, decode, encode, from_signed,
     CborError,
 };
 mount core.security.webauthn.types.{
@@ -243,37 +243,37 @@ pub fn encode_cose_key(pk: &CredentialPublicKey) -> List<Byte> {
     let mut entries: List<(CborValue, CborValue)> = List.new();
     match pk {
         CredentialPublicKey.Ed25519 { x } => {
-            entries.push((from_int(1),  from_int(COSE_KTY_OKP)));
-            entries.push((from_int(3),  from_int(COSE_ALG_EDDSA)));
-            entries.push((from_int(-1), from_int(COSE_CRV_ED25519)));
-            entries.push((from_int(-2), CborValue.CborBytes(x.clone())));
+            entries.push((from_signed(1),  from_signed(COSE_KTY_OKP)));
+            entries.push((from_signed(3),  from_signed(COSE_ALG_EDDSA)));
+            entries.push((from_signed(-1), from_signed(COSE_CRV_ED25519)));
+            entries.push((from_signed(-2), CborValue.CborBytes(x.clone())));
         }
         CredentialPublicKey.EcdsaP256 { x, y } => {
-            entries.push((from_int(1),  from_int(COSE_KTY_EC2)));
-            entries.push((from_int(3),  from_int(COSE_ALG_ES256)));
-            entries.push((from_int(-1), from_int(COSE_CRV_P256)));
-            entries.push((from_int(-2), CborValue.CborBytes(x.clone())));
-            entries.push((from_int(-3), CborValue.CborBytes(y.clone())));
+            entries.push((from_signed(1),  from_signed(COSE_KTY_EC2)));
+            entries.push((from_signed(3),  from_signed(COSE_ALG_ES256)));
+            entries.push((from_signed(-1), from_signed(COSE_CRV_P256)));
+            entries.push((from_signed(-2), CborValue.CborBytes(x.clone())));
+            entries.push((from_signed(-3), CborValue.CborBytes(y.clone())));
         }
         CredentialPublicKey.EcdsaP384 { x, y } => {
-            entries.push((from_int(1),  from_int(COSE_KTY_EC2)));
-            entries.push((from_int(3),  from_int(COSE_ALG_ES384)));
-            entries.push((from_int(-1), from_int(COSE_CRV_P384)));
-            entries.push((from_int(-2), CborValue.CborBytes(x.clone())));
-            entries.push((from_int(-3), CborValue.CborBytes(y.clone())));
+            entries.push((from_signed(1),  from_signed(COSE_KTY_EC2)));
+            entries.push((from_signed(3),  from_signed(COSE_ALG_ES384)));
+            entries.push((from_signed(-1), from_signed(COSE_CRV_P384)));
+            entries.push((from_signed(-2), CborValue.CborBytes(x.clone())));
+            entries.push((from_signed(-3), CborValue.CborBytes(y.clone())));
         }
         CredentialPublicKey.EcdsaP521 { x, y } => {
-            entries.push((from_int(1),  from_int(COSE_KTY_EC2)));
-            entries.push((from_int(3),  from_int(COSE_ALG_ES512)));
-            entries.push((from_int(-1), from_int(COSE_CRV_P521)));
-            entries.push((from_int(-2), CborValue.CborBytes(x.clone())));
-            entries.push((from_int(-3), CborValue.CborBytes(y.clone())));
+            entries.push((from_signed(1),  from_signed(COSE_KTY_EC2)));
+            entries.push((from_signed(3),  from_signed(COSE_ALG_ES512)));
+            entries.push((from_signed(-1), from_signed(COSE_CRV_P521)));
+            entries.push((from_signed(-2), CborValue.CborBytes(x.clone())));
+            entries.push((from_signed(-3), CborValue.CborBytes(y.clone())));
         }
         CredentialPublicKey.Rsa { n, e, alg } => {
-            entries.push((from_int(1),  from_int(COSE_KTY_RSA)));
-            entries.push((from_int(3),  from_int(*alg)));
-            entries.push((from_int(-1), CborValue.CborBytes(n.clone())));
-            entries.push((from_int(-2), CborValue.CborBytes(e.clone())));
+            entries.push((from_signed(1),  from_signed(COSE_KTY_RSA)));
+            entries.push((from_signed(3),  from_signed(*alg)));
+            entries.push((from_signed(-1), CborValue.CborBytes(n.clone())));
+            entries.push((from_signed(-2), CborValue.CborBytes(e.clone())));
         }
     }
     encoding.cbor.encode_canonical(&CborValue.CborMap(entries))
