@@ -67,7 +67,7 @@ public fn append_char(mut b: Builder, n: Int, c: Int) -> Builder {
             b.err = toobig_code();
             return b;
         }
-        b.contents = b.contents.append_byte(c & 0xFF);
+        b.contents.push_byte(c & 0xFF);
         i = i + 1;
     }
     b

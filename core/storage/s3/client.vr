@@ -495,10 +495,10 @@ fn encode_query(pairs: &List<(Text, Text)>) -> Text {
     let mut out: Text = "".to_text();
     let mut i: Int = 0;
     while i < pairs.len() {
-        if i > 0 { out = out.append("&"); }
-        out = out.append(&core.storage.s3.signing.percent_encode_strict(&pairs[i].0));
-        out = out.append("=");
-        out = out.append(&core.storage.s3.signing.percent_encode_strict(&pairs[i].1));
+        if i > 0 { out = out.concat(&"&"); }
+        out = out.concat(&&core.storage.s3.signing.percent_encode_strict(&pairs[i].0));
+        out = out.concat(&"=");
+        out = out.concat(&&core.storage.s3.signing.percent_encode_strict(&pairs[i].1));
         i = i + 1;
     }
     out

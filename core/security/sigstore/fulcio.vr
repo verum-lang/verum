@@ -377,7 +377,7 @@ fn text_of_body_lossy(body: &List<Byte>) -> Text {
         let mut i: Int = 0;
         while i < body.len() && i < 256 {
             let b = body[i];
-            out = out.append(&f"{b:02x}");
+            out = out.concat(&&f"{b:02x}");
             i = i + 1;
         }
         out

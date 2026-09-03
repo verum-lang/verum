@@ -46,9 +46,9 @@ public fn step(mut s: StringAggState, value: &StringAggOperand, sep: &StringAggO
         s.has_sep = true;
     }
     if s.have_value {
-        s.out = s.out.append(s.sep.clone());
+        s.out = s.out.concat(&s.sep.clone());
     }
-    s.out = s.out.append(v);
+    s.out = s.out.concat(&v);
     s.have_value = true;
     s
 }

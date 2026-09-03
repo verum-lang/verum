@@ -43,10 +43,10 @@ public fn is_unset(v: Int) -> Bool { v == 0 }
 public fn ascii_magic_text(v: Int) -> Text {
     let bs = to_bytes_be(v);
     let mut s = Text.new();
-    s = s.append_byte(bs.b3);
-    s = s.append_byte(bs.b2);
-    s = s.append_byte(bs.b1);
-    s = s.append_byte(bs.b0);
+    s.push_byte(bs.b3);
+    s.push_byte(bs.b2);
+    s.push_byte(bs.b1);
+    s.push_byte(bs.b0);
     s
 }
 

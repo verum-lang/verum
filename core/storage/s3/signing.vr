@@ -241,11 +241,11 @@ fn percent_encode_path(path: &Text) -> Text {
     while i < bs.len() {
         let b = bs[i];
         if b == b'/' {
-            out = out.append("/");
+            out = out.concat(&"/");
         } else if is_unreserved(b) {
-            out = out.append(&Text.from_bytes(&[b]).unwrap_or("".clone()));
+            out = out.concat(&&Text.from_bytes(&[b]).unwrap_or("".clone()));
         } else {
-            out = out.append(&f"%{b:02X}");
+            out = out.concat(&&f"%{b:02X}");
         }
         i = i + 1;
     }
@@ -270,10 +270,10 @@ fn canonical_query_string(pairs: &List<(Text, Text)>) -> Text {
     let mut out: Text = "".to_text();
     let mut k: Int = 0;
     while k < sorted.len() {
-        if k > 0 { out = out.append("&"); }
-        out = out.append(&sorted[k].0);
-        out = out.append("=");
-        out = out.append(&sorted[k].1);
+        if k > 0 { out = out.concat(&"&"); }
+        out = out.concat(&&sorted[k].0);
+        out = out.concat(&"=");
+        out = out.concat(&&sorted[k].1);
         k = k + 1;
     }
     out
@@ -286,9 +286,9 @@ fn percent_encode_strict(s: &Text) -> Text {
     while i < bs.len() {
         let b = bs[i];
         if is_unreserved(b) {
-            out = out.append(&Text.from_bytes(&[b]).unwrap_or("".clone()));
+            out = out.concat(&&Text.from_bytes(&[b]).unwrap_or("".clone()));
         } else {
-            out = out.append(&f"%{b:02X}");
+            out = out.concat(&&f"%{b:02X}");
         }
         i = i + 1;
     }
@@ -332,12 +332,12 @@ fn canonical_headers_and_signed(headers: &Map<Text, Text>) -> (Text, Text) {
         let k = &keys[i];
         let v = headers.get(k).cloned().unwrap_or_else(|| "".to_text());
         let trimmed = collapse_whitespace(&v.trim().to_text());
-        canon = canon.append(k);
-        canon = canon.append(":");
-        canon = canon.append(&trimmed);
-        canon = canon.append("\n");
-        if i > 0 { signed = signed.append(";"); }
-        signed = signed.append(k);
+        canon = canon.concat(&k);
+        canon = canon.concat(&":");
+        canon = canon.concat(&&trimmed);
+        canon = canon.concat(&"\n");
+        if i > 0 { signed = signed.concat(&";"); }
+        signed = signed.concat(&k);
         i = i + 1;
     }
     (canon, signed)
@@ -365,11 +365,11 @@ fn collapse_whitespace(s: &Text) -> Text {
         let b = bs[i];
         if b == b' ' || b == b'\t' {
             if !prev_ws {
-                out = out.append(" ");
+                out = out.concat(&" ");
                 prev_ws = true;
             }
         } else {
-            out = out.append(&Text.from_bytes(&[b]).unwrap_or("".clone()));
+            out = out.concat(&&Text.from_bytes(&[b]).unwrap_or("".clone()));
             prev_ws = false;
         }
         i = i + 1;

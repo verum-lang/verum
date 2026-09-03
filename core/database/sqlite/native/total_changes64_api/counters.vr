@@ -69,10 +69,10 @@ public fn diff_total(prev: &Counters, now: &Counters) -> Int64 {
 
 public fn snapshot_text(c: &Counters) -> Text {
     let mut s = Text.new();
-    s = s.append("changes=".clone());
-    s = s.append(int64_decimal(c.last_stmt));
-    s = s.append(" total=".clone());
-    s = s.append(int64_decimal(c.total));
+    s = s.concat(&"changes=".clone());
+    s = s.concat(&int64_decimal(c.last_stmt));
+    s = s.concat(&" total=".clone());
+    s = s.concat(&int64_decimal(c.total));
     s
 }
 
@@ -92,7 +92,7 @@ fn int64_decimal(n: Int64) -> Text {
         x = x / ten;
     }
     let mut out = Text.new();
-    if sign { out = out.append("-".clone()); }
+    if sign { out = out.concat(&"-".clone()); }
     let mut i = (digits.len() as Int) - 1;
     while i >= 0 {
         let d = digits.get(i as Int);
