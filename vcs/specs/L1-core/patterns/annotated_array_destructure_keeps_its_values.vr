@@ -1,0 +1,36 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: destructuring, fixed-size-array, silent-wrong-value
+// @expect: pass
+// @expected-stdout: 1
+// @skip: T1122 is open — the annotation zeroes the bindings; this file
+//        prints 0. Remove this line when T1122 closes.
+// @description: A type annotation on a destructuring `let` must not change the values bound.
+
+// =============================================================================
+// Measured 2026-09-03 — separating pair, one difference
+// =============================================================================
+//
+//     let [x,y,z]: [Int;3] = three();   ->  0 0 0
+//     let [x,y,z]           = three();   ->  1 2 3
+//
+// The same file, one `sed` substitution apart. Four neighbours are all
+// correct, so it needs the annotation AND a call initialiser together:
+//
+//     literal WITH the annotation      1 2 3
+//     literal without                  1 2 3
+//     fn call without the annotation   1 2 3
+//     indexing a[0], a[1], a[2]        1 2 3
+//
+// A type annotation is a claim about a type. Here it silently replaces
+// the VALUES.
+
+fn three() -> [Int; 3] {
+    [1, 2, 3]
+}
+
+fn main() {
+    let [x, y, z]: [Int; 3] = three();
+    print(x);
+}
