@@ -70,7 +70,7 @@ Before writing or modifying ANY `.vr` file, you MUST verify syntax against `gram
 | `trait Name { ... }` | `type Name is protocol { ... };` | `protocol_def` |
 | `impl Name { ... }` | `implement Name { ... }` | `impl_block` |
 | `impl Trait for T` | `implement Trait for T` | `impl_type` |
-| `Box::new(x)` | `Heap(x)` | semantic types |
+| `Box::new(x)` | `Heap.new(x)` | semantic types |
 | `Vec<T>` | `List<T>` | semantic types |
 | `String` | `Text` | semantic types |
 | `#[derive(...)]` | `@derive(...)` | `attribute` |
