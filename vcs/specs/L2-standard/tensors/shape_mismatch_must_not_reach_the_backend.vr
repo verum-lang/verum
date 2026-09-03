@@ -1,0 +1,39 @@
+// @test: check
+// @level: L2
+// @tier: 0
+// @tags: tensors, shapes, silent-acceptance
+// @timeout: 30000
+// @expected-exit: 101
+// @expected-stderr: shape
+// @ignore: shapes are not carried by the type — this file documents the
+//   defect and will pass when they are. Measured 2026-09-03: `verum
+//   check` is clean and `verum run` dies with `internal compiler error
+//   (worker thread panicked): Expected int, got Some(0)`.
+// @description: Adding tensors whose shapes cannot broadcast must be
+//   refused at compile time, not crash the compiler at run time.
+
+// `docs/language/tensor-types.md` promises "a failing broadcast is a
+// compile error with the offending axis called out". It is not: the
+// program below passes `verum check` with zero diagnostics.
+//
+// Its control — the same file with both shapes `tensor<2, 3>` — compiles
+// AND runs, so this is a mismatch reaching the backend rather than a
+// broken example. See `shape_match_is_accepted.vr`.
+//
+// The cause is one level down and invalidates the notation the public
+// page uses throughout: `Tensor<Float32, [4, 3, 1]>` resolves to
+// `DynTensor<Float32, [Int; 3]>` — rank survives, sizes do not. Only the
+// literal form below yields a shape-bearing type, which is why the probe
+// is written this way rather than with annotations.
+//
+// T1073.
+
+public fn main() -> Int {
+    let a = tensor<2, 3> Float32 { };
+    let b = tensor<5, 4> Float32 { };
+
+    // axis 0: 2 vs 5, axis 1: 3 vs 4 — neither is 1, so no broadcast.
+    let c = a + b;
+
+    0
+}

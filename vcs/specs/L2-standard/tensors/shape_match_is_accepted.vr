@@ -1,0 +1,36 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: tensors, shapes
+// @timeout: 30000
+// @expected-exit: 0
+// @expected-stdout: added
+// @ignore: no tensor literal survives execution today — measured
+//   2026-09-03, `let a = tensor<2, 3> Float32 { };` alone dies with
+//   `internal compiler error (worker thread panicked): Expected int, got
+//   Some(0)`, with or without a body and with or without arithmetic. A
+//   file containing no tensor runs. This file is the control for its
+//   sibling AND the pin for that crash.
+// @description: Adding tensors of the same shape works — the control
+//   without which the sibling's clean result proves nothing.
+
+// If shape checking is ever wired up, a version that refuses EVERYTHING
+// would satisfy `shape_mismatch_must_not_reach_the_backend.vr` on its
+// own. This file is what stops that.
+//
+// It also caught an error in the sibling's write-up: that file's first
+// version claimed "the same-shape control compiles and runs". The
+// control had been verified under `check` and reported under `run`.
+// Running it is what produced the ICE above. Two modes are two
+// measurements.
+//
+// T1073.
+
+public fn main() -> Int {
+    let a = tensor<2, 3> Float32 { };
+    let b = tensor<2, 3> Float32 { };
+    let c = a + b;
+
+    print("added");
+    0
+}
