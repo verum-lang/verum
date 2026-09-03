@@ -618,3 +618,58 @@ implement Display for Duration {
         self.fmt_debug(f)
     }
 }
+
+// =============================================================================
+// Postfix duration constructors
+// =============================================================================
+//
+// `100.millis()` reads better than `Duration.millis(100)` at a call
+// site that is already about time — a retry budget, a timeout, a tick.
+// The public documentation writes it that way at 56 call sites across
+// 19 pages, and until this block no file gave `Int` any of the six
+// methods: every one of those sites documented an API that did not
+// exist, and reported `no method named `millis` found for type `Int``.
+//
+// The vocabulary MIRRORS `Duration`'s own constructors exactly — one
+// method each for `nanos`, `micros`, `millis`, `secs`, `mins`, `hours`,
+// and no synonyms. A second spelling for one concept is the redundancy
+// this project's directive forbids, so `ms`/`seconds`/`minutes` are
+// deliberately absent: there is one way to say each duration.
+
+implement Int {
+    /// `5.nanos()` — the same duration as `Duration.nanos(5)`.
+    @inline(always)
+    public fn nanos(self) -> Duration {
+        Duration.nanos(self)
+    }
+
+    /// `5.micros()` — the same duration as `Duration.micros(5)`.
+    @inline(always)
+    public fn micros(self) -> Duration {
+        Duration.micros(self)
+    }
+
+    /// `100.millis()` — the same duration as `Duration.millis(100)`.
+    @inline(always)
+    public fn millis(self) -> Duration {
+        Duration.millis(self)
+    }
+
+    /// `5.secs()` — the same duration as `Duration.secs(5)`.
+    @inline(always)
+    public fn secs(self) -> Duration {
+        Duration.secs(self)
+    }
+
+    /// `2.mins()` — the same duration as `Duration.mins(2)`.
+    @inline(always)
+    public fn mins(self) -> Duration {
+        Duration.mins(self)
+    }
+
+    /// `3.hours()` — the same duration as `Duration.hours(3)`.
+    @inline(always)
+    public fn hours(self) -> Duration {
+        Duration.hours(self)
+    }
+}
