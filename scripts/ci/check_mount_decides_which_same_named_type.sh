@@ -71,6 +71,36 @@ public fn probe() -> Int {
 }
 VR
 
+# THIRD SUBJECT: the RENAMING form, `mount X as Y`.  The two fixtures
+# above both mount a name UNCHANGED, so they cannot see whether an alias
+# survives a contest — and it does not.  Measured 2026-09-03 (T1089):
+# core/ declares THREE distinct `Span` types, and
+# `mount …paragraph.{TextSpan as Span}` in core/term/style/text_builder.vr
+# is inert: calls still resolve to `core/meta/span.vr`'s `Span`, so
+# `Span.styled(…)` reports "no method named `styled` for type
+# `MetaSpan`".  Aliasing the re-export as well made it WORSE (0 -> 2
+# lenient), so no .vr edit repairs it.
+#
+# A gate whose fixtures share a property cannot report on that property.
+# This one asserted "the mount decides" while every subject spelled the
+# name identically on both sides.
+# The alias TARGET must be a contested name.  The first version of this
+# fixture renamed to `Cap`, which nothing else declares — it passed on a
+# binary where the real case fails, because renaming to an uncontested
+# name is not the property.  `Span` is declared by THREE modules in
+# core/ (term/widget/paragraph.vr as TextSpan, meta/span.vr,
+# tracing/data.vr), which is what makes this a contest at all.
+cat > "$TMP/renamed.vr" <<'VR'
+module probe.mount_decides_renamed;
+mount core.term.widget.paragraph.{TextSpan as Span};
+mount core.term.style.style.{Style};
+
+public fn probe() -> Int {
+    let _ = Span.styled("x".to_text(), Style.new());
+    0
+}
+VR
+
 cat > "$TMP/uncontested.vr" <<'VR'
 module probe.mount_decides_uncontested;
 mount core.prelude.*;
@@ -97,6 +127,7 @@ verdict() { # $1 file -> error count, or MUTE
 
 a=$(cd "$REPO" && verdict "$TMP/contested.vr")
 b=$(cd "$REPO" && verdict "$TMP/uncontested.vr")
+r=$(cd "$REPO" && verdict "$TMP/renamed.vr")
 
 if [ "$SELFTEST" -eq 1 ]; then
   printf 'module probe.mount_decides_broken;\n\npublic fn go() -> Int { no_such_name_xyz() }\n' \
@@ -136,4 +167,24 @@ if [ "$a" != 0 ]; then
   exit 1
 fi
 
-printf 'check_mount_decides: ok — contested and uncontested both clean (%s errors)\n' "$a"
+# The renaming form is asserted LAST because it is the newest and the
+# one a repair is most likely to miss; failing it names T1089 rather
+# than leaving the reader to compare three numbers.
+if [ "$r" = MUTE ]; then
+  printf 'check_mount_decides: FAILED — the renamed subject produced no output.\n'
+  exit 1
+fi
+
+if [ "$r" != 0 ]; then
+  printf 'check_mount_decides: FAILED — `mount X as Y` reported %s error(s).\n' "$r"
+  printf '  An explicit mount that RENAMES must decide the name just as one\n'
+  printf '  that does not. Measured in core/ (T1089): three distinct `Span`\n'
+  printf '  types exist, and `mount ...paragraph.{TextSpan as Span}` is inert\n'
+  printf '  — calls resolve to core/meta/span.vr instead, so `Span.styled(..)`\n'
+  printf '  reports "no method named `styled` for type `MetaSpan`". Aliasing\n'
+  printf '  the re-export too made it worse, so no .vr edit repairs this.\n'
+  exit 1
+fi
+
+printf 'check_mount_decides: ok — contested (%s), uncontested (%s) and renamed (%s) all clean\n' \
+  "$a" "$b" "$r"

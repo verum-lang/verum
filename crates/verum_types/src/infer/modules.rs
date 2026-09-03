@@ -85,6 +85,27 @@ impl TypeChecker {
             err,
             crate::TypeError::Mismatch { actual, .. } if actual.as_str() == "Unit"
         )
+        // AN UNBOUND NAME DOES NOT NEED AN ARM HERE (T0777, measured
+        // 2026-09-03).  Adding `|| matches!(err, UnboundVariable { .. })`
+        // is INERT, and the measurement that says so also names what the
+        // remaining gap actually is.  Same file, same binary, two modes:
+        //
+        //     core/collections/deque.vr   plain 19   STRICT 20
+        //
+        // and the single diagnostic STRICT adds is not a name at all:
+        //
+        //     error<E404>: Ambiguous type for `inner`: the inferred type
+        //     `_` is not fully determined by this function
+        //
+        // An undefined name is already reported under `core/` — measured
+        // on the same undefined identifier placed under a `/core/` path
+        // and outside one: 2 diagnostics either way, and identically on a
+        // binary built before this arm was tried.  `63a77b4c7` closed
+        // that half by removing the leniency at the value-name site.
+        // What is still swallowed in lenient mode is UNDERDETERMINED
+        // TYPES, which is a different judgement with a different (and
+        // real) cross-module justification — so it needs its own root,
+        // not another arm bolted onto this predicate.
     }
 
     /// Type check a top-level item (function, type, protocol, etc.)
@@ -25465,6 +25486,44 @@ impl TypeChecker {
                             .get(&verum_common::Text::from(cand.as_str()))
                             .map(Self::scheme_from_function_descriptor)
                     })
+                })
+                .or_else(|| {
+                    // QUALIFIED-CALL-FOLLOWS-A-REEXPORT (T0797).  The bake
+                    // keys a free function under its DECLARING module only,
+                    // so a `public mount` that re-exports it creates no
+                    // second key and the qualified spelling misses.
+                    // Measured with the tracer already in this function:
+                    //
+                    //   core.async.task.yield_now   cand hit=true
+                    //   core.async.yield_now        cand hit=false
+                    //   mount core.async.{yield_now} + bare call   clean
+                    //
+                    // The last line is the point: the re-export IS known —
+                    // `module_reexports` carries it and the MOUNT path
+                    // reads it.  One binding, two spellings, one served,
+                    // which is the shape T1089 and T1087 both had.
+                    //
+                    // So: split the candidate at its last dot, ask
+                    // `module_reexports` what that module re-exports under
+                    // that name, and retry with the true owner's key.  One
+                    // hop only — a chain of re-exports resolves on the next
+                    // call rather than looping here.
+                    let (module_part, item_part) = cand.as_str().rsplit_once('.')?;
+                    let meta = self.core_metadata()?;
+                    let leaves = meta
+                        .module_reexports
+                        .get(&verum_common::Text::from(module_part))?;
+                    let (_, true_name, source_module) = leaves
+                        .iter()
+                        .find(|(local, _, _)| local.as_str() == item_part)?;
+                    let key: verum_common::Text =
+                        format!("{}.{}", source_module.as_str(), true_name.as_str()).into();
+                    if std::env::var("VERUM_TRACE_QUALPATH").is_ok() {
+                        eprintln!("[qualpath]   reexport {} -> {}", cand, key);
+                    }
+                    meta.functions
+                        .get(&key)
+                        .map(Self::scheme_from_function_descriptor)
                 });
             if std::env::var("VERUM_TRACE_QUALPATH").is_ok() {
                 eprintln!("[qualpath]   cand={} hit={}", cand, scheme.is_some());
@@ -25585,7 +25644,27 @@ impl TypeChecker {
             };
 
             if let Some(type_name) = type_name {
-                let type_name = type_name.as_str();
+                // MOUNT-ALIAS-IN-STATIC-POSITION (T1089).  The key is
+                // built from the receiver's SPELLING, so an aliased
+                // mount never reaches the type it names.  Measured on
+                // core/, where three modules declare a `Span`:
+                //
+                //     mount ...paragraph.{TextSpan as Span};
+                //     Span.styled(t, s)
+                //       -> no method named `styled` for type `MetaSpan`
+                //     fn p(s: Span)                       clean
+                //
+                // The alias works in TYPE position and not in STATIC
+                // position — one binding, two spellings, one of them
+                // served.  `canonical_alias_target` already walks the
+                // alias chain and had exactly one caller in this file
+                // (the variant-constructor branch); this is its second.
+                let canonical = self.canonical_alias_target(type_name.as_str());
+                let type_name: &str = if canonical.as_str() != type_name.as_str() {
+                    canonical.as_str()
+                } else {
+                    type_name.as_str()
+                };
                 let method_name = method.name.as_str();
                 let qualified_name = format!("{}.{}", type_name, method_name);
 
