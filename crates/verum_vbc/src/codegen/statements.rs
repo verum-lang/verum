@@ -952,7 +952,29 @@ impl VbcCodegen {
         // This enables memory intrinsics like memcpy to work correctly with [UInt64; N] arrays
         if let Some((count, elem_size, is_float)) = self.detect_typed_array_type(ty)
             && let Some(expr) = value
+            // ONLY a literal array. See the block comment below.
+            && matches!(&expr.kind, verum_ast::ExprKind::Array(_))
         {
+            // THIS PATH MATERIALISES THE ARRAY ITSELF, so it may only
+            // run for an initialiser it can actually read: a repeat
+            // literal `[v; N]` or a list literal `[a, b, c]`. Anything
+            // else — a call, a path, a field — must compile normally,
+            // because the array it produces is the one the program
+            // means.
+            //
+            // Without this guard the branch allocated a fresh array of
+            // the annotated length filled with `init_value.unwrap_or(0)`
+            // and bound the pattern to THAT, discarding the initialiser
+            // (T1122). Measured:
+            //
+            //     let a: [Int;3] = three();   a[0] was 0
+            //     let a          = three();   a[0] is  1
+            //
+            // The length was right, indexing was right, and writing then
+            // reading worked — only the initial VALUES were gone, which
+            // is why it read as a numeric-decode bug. It is not: Bool,
+            // Text and Byte arrays were unaffected simply because
+            // `detect_typed_array_type` does not claim them.
             // Check for repeat syntax [value; N] or list syntax [a, b, c, ...]
             let init_value = self.get_typed_array_init_value(expr);
 
