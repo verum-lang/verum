@@ -1,0 +1,22 @@
+# CORPUS-TYPECHECK-RATCHET-1 (T1073). Three integers over `core/`.
+#
+# NOT YET ARMED with a real measurement: the numbers below are
+# placeholders and the gate is not wired into `make gates-source`,
+# because a full run is 2560 compiler invocations and `core/` is being
+# actively repaired by verum-2b's T1061 campaign right now. Taking a
+# baseline mid-campaign would pin a number that is about to move by
+# hundreds.
+#
+# To arm it:
+#   scripts/ci/corpus_typecheck_census.sh <binary> /tmp/census.tsv core
+#   read the TOTAL line, write the three numbers here, drop this notice
+#
+# Last known measurement (verum-2b, 2026-09-03 08:00, before the crypto
+# and CBOR repairs): 2560 files, 1709 errors, 376 failing, 0 mute. The
+# parse column did not exist yet — it is this gate's addition, and the
+# reason it exists is that a sweep that morning scored a file it had
+# BROKEN as its best result, because a parse failure truncates the file
+# and drops its error count.
+errors = 0
+parse = 0
+mute = 0
