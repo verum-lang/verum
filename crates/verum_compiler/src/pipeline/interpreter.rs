@@ -556,10 +556,37 @@ impl<'s> CompilationPipeline<'s> {
         // Wire cancel_flag from compiler options to interpreter for cooperative abort
         interpreter.state.config.cancel_flag = self.session.options().cancel_flag.clone();
 
-        // Step 2b: Skip global constructors in test mode.
-        // Global ctors are primarily FFI library initializers (e.g., kernel32.dll)
-        // that fail on macOS and corrupt interpreter state. VBC interpreter tests
-        // don't need FFI initialization.
+        // Step 2b: Global constructors, exactly as `phase_interpret` and
+        // `run_compiled_vbc` run them (T0732).
+        //
+        // This line used to say the opposite — "skip global constructors in
+        // test mode", on the premise that they are "primarily FFI library
+        // initializers (e.g. kernel32.dll) that fail on macOS", and that
+        // "VBC interpreter tests don't need FFI initialization". The second
+        // half is true and irrelevant; the first half is not what ctors are.
+        // `phase_interpret` states the rest of the population in its own
+        // comment: `@thread_local` static initializers, and the CBGR
+        // allocator's LOCAL_HEAP/CURRENT_HEAP bootstrap, which reads
+        // `Value::default()` out of an uninitialised TLS slot when nothing
+        // populated it.
+        //
+        // Measured 2026-09-03 on one file with one binary, four lines:
+        //
+        //     let v: Int = 10;  let r = &v;  print(r + 1);
+        //         verum run  -> 11        the harness -> -8589934593
+        //
+        // -8589934593 is 0xFFFF_FFFD_FFFF_FFFF: the reference itself, read
+        // as an integer, because it was built against a heap that was never
+        // bootstrapped. The control without the reference passes under both,
+        // which is why the gap survived — a suite of specs that never take a
+        // reference cannot see it.
+        //
+        // A ctor that genuinely fails must be reported, not skipped: the
+        // whole point of this task is that the harness executes the user's
+        // program, and a program whose initializers failed is not it.
+        if let Err(e) = interpreter.run_global_ctors() {
+            return Err(anyhow::anyhow!("VBC global_ctors error: {:?}", e));
+        }
 
         // Step 3: Try main() first, fall back to @test function discovery
         if let Ok(main_func_id) = self.find_main_function_id(&interpreter.state.module) {

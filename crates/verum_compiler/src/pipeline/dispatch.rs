@@ -466,6 +466,28 @@ impl<'s> CompilationPipeline<'s> {
         self.load_external_cog_modules()?;
         if trace { eprintln!("[run_interpreter] load_external_cog_modules: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
 
+        // NO MACRO EXPANSION HERE, and the reason is a measurement rather
+        // than an omission (T0732, 2026-09-03).
+        //
+        // `run_check_only` registers meta declarations and expands macros;
+        // `run_for_test` does too; this path does not, which reads like the
+        // drift this task is about. It is not. Measured on one file, two
+        // binaries, with a per-run nonce so the content-keyed VBC cache
+        // could not answer:
+        //
+        //     meta fn six() -> Int { 1 + 2 + 3 }
+        //     fn main() { print(@six()); }
+        //
+        //     verum check   warns E0410, no error
+        //     verum run     prints `nil`, warns E0410
+        //     the harness   prints `nil`, FAILED
+        //
+        // All three paths AGREE, before and after adding the two calls
+        // here — the addition was inert. `@meta_fn()` evaluating to `nil`
+        // and the parser's E0410 firing for a `meta` the same file
+        // declares are real defects, but they belong to the meta system,
+        // not to harness parity, and adding an unmeasured phase to the
+        // shipped path to chase them would be its own kind of drift.
         if std::env::var("VERUM_FULL_STDLIB").is_err() {
             self.clear_non_compilable_stdlib_modules(Some(&module));
         }
