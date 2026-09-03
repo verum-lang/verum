@@ -1,0 +1,42 @@
+// @test: check
+// @level: L2
+// @tier: 0
+// @tags: modules, aliases, protocols
+// @timeout: 20000
+// @expected-exit: 101
+// @expected-stderr: does not match the signature
+// @description: Mounting a protocol under an alias must not disable the
+//   conformance checks.
+
+// Measured 2026-09-03, before the fix:
+//
+//     mount probe.lib.{Shower};          E427 reported
+//     mount probe.lib.{Shower as S};     E427 SILENT
+//
+// The impl below is wrong either way — the protocol declares `-> Int`.
+// The alias silently disabled THREE checks at once (GAT arity, the
+// associated-type bound, and this signature check), because they all ask
+// the registry by the name AS WRITTEN and a miss returns no diagnostics.
+//
+// Not a wrong answer — a hole, and it opened on the spelling a user
+// reaches for precisely when two modules collide, which is when the
+// checks matter most.
+//
+// The resolver already existed: `canonical_alias_target` walks the alias
+// chain. It had one caller.
+//
+// T1073.
+
+mount probe.lib.{Shower as S};
+
+type Box is { v: Int };
+
+implement S for Box {
+    public fn show(&self) -> Bool {
+        true
+    }
+}
+
+fn main() {
+    print("built");
+}

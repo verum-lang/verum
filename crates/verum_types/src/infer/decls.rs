@@ -8067,11 +8067,36 @@ impl TypeChecker {
         let ImplKind::Protocol { protocol, for_type, .. } = &impl_decl.kind else {
             return;
         };
-        let Some(proto_ident) = protocol.segments.last().and_then(|s| match s {
+        let Some(written_ident) = protocol.segments.last().and_then(|s| match s {
             verum_ast::ty::PathSegment::Name(id) => Some(id.name.clone()),
             _ => None,
         }) else {
             return;
+        };
+        // The path as WRITTEN may be an alias: `mount m.{Shower as S}`
+        // then `implement S for T`. Every check below asks the registry
+        // by this name, and a miss returns no diagnostics — so an alias
+        // silently disabled the arity check, the associated-type bound
+        // check and the signature check at once, on exactly the code
+        // most likely to need them.
+        //
+        // This is the third instance in one day of one rule written for
+        // one of its several spellings: `SelfValue` handled and
+        // `Name("Self")` not (T1087), the protocol's own type parameters
+        // excluded and `Self` not (E427), and now the alias. The
+        // resolver for it already existed — `canonical_alias_target`
+        // walks the alias chain — with a single caller.
+        //
+        // Falls back to the written name when the alias does not
+        // resolve, so an unknown protocol behaves exactly as before.
+        let canonical = self.canonical_alias_target(written_ident.as_str());
+        let proto_ident = {
+            let guard = self.protocol_checker.read();
+            if guard.get_protocol(&canonical).is_some() {
+                canonical
+            } else {
+                written_ident
+            }
         };
 
         // No lazy-load here, deliberately. The obvious move is to pull the

@@ -1,0 +1,5 @@
+module probe.lib;
+
+public type Shower is protocol {
+    fn show(&self) -> Int;
+};
