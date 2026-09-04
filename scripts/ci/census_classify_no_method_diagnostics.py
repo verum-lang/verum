@@ -82,7 +82,21 @@ DIAG = re.compile(r"no method named `([^`]+)` found for type `([^`]+)`")
 # make a correct patch look partial.
 LEG2 = [
     re.compile(r"cannot index type '([^']+)'"),
-    re.compile(r"(?:field|no field) `?([A-Za-z_][A-Za-z0-9_]*)`? not found"),
+    # CAPTURE THE TYPE, NOT THE FIELD. The real diagnostic is
+    #     field 'kind' not found on type 'Finding'. Available members: [...]
+    # and the first version of this pattern took `kind`, then counted
+    # `type kind is` declarations — zero, always — so an entire class
+    # fell out of leg two silently.
+    #
+    # This face is the DANGEROUS one: the message names a field AND
+    # lists alternatives, which reads as a rename and invites fixing
+    # the caller. When the type name is declared twice with disjoint
+    # fields, that "fix" compiles — against the wrong type. Measured
+    # by verum-6c: `Finding` (integrity_walker_api vs cli/verify) and
+    # `ColumnMeta` (schema_cache vs mysql/binlog_rows), both live in
+    # one hour, beside `TbsCertificate` which really HAD been renamed
+    # and was a singleton. One grep separates them.
+    re.compile(r"field '[^']+' not found on type '([^']+)'"),
     re.compile(r"expected '(?:Output<)?([A-Za-z_][A-Za-z0-9_]*)"),
 ]
 
