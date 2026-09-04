@@ -46,6 +46,10 @@ check-bake-diagnostics: ## Gate (T0723): FIELD-GUESS + panic-stub counts in a ba
 	@test -n "$(BAKE_LOG)" || { echo "usage: make check-bake-diagnostics BAKE_LOG=<path>"; exit 2; }
 	python3 scripts/ci/check_bake_diagnostics.py "$(BAKE_LOG)" --check
 
+check-doc-examples: ## Gate: the website's self-contained examples still compile (needs VERUM=<binary>)
+	@test -n "$(VERUM)" || { echo "usage: make check-doc-examples VERUM=target/debug/verum"; exit 2; }
+	python3 scripts/ci/check_doc_examples_compile.py "$(VERUM)"
+
 check-archive-size: ## Gate (T0737): embedded stdlib archive size — a per-module duplication shows up as a MULTIPLE
 	python3 scripts/ci/check_archive_size.py "$(or $(ARCHIVE),target/precompiled-stdlib/runtime.vbca)" --check
 
