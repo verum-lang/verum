@@ -290,7 +290,7 @@ public async fn serve_http1<T: WeftTransport, S: Handler>(
         // If the listener started draining, disable keep-alive for the
         // next message so this connection closes cleanly afterwards.
         let drain_now = draining.load(core.sync.atomic.MemoryOrdering.Acquire);
-        let effective_cfg = if drain_now {
+        let effective_cfg: ConnectionConfig = if drain_now {
             ConnectionConfig { keep_alive: false, ..config.clone() }
         } else {
             config.clone()
@@ -449,7 +449,7 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
 
         // 0 disables the deadline (NOT recommended; allows
         // hostile peers to hold connections indefinitely).
-        let rr = if config.header_deadline_ms > 0 {
+        let rr: Result<Result<Int, IoError>, CancellationError> = if config.header_deadline_ms > 0 {
             match future_timeout_ms(
                 config.header_deadline_ms,
                 stream.read_cancellable(&mut chunk, token),
@@ -572,7 +572,7 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
             // Content-Length: 1000000 then drip-feed one byte
             // per minute to hold the connection open for 10⁶
             // minutes.
-            let rr = if config.body_deadline_ms > 0 {
+            let rr: Result<Result<Int, IoError>, CancellationError> = if config.body_deadline_ms > 0 {
                 match future_timeout_ms(
                     config.body_deadline_ms,
                     stream.read_cancellable(&mut chunk, token),
@@ -855,7 +855,7 @@ async fn read_chunked_body<T: WeftTransport>(
                 // Body-deadline wrap (redteam §2): chunked
                 // body's per-chunk read budget mirrors the
                 // Content-Length path's body deadline.
-                let rr = if config.body_deadline_ms > 0 {
+                let rr: Result<Result<Int, IoError>, CancellationError> = if config.body_deadline_ms > 0 {
                     match future_timeout_ms(
                         config.body_deadline_ms,
                         stream.read_cancellable(&mut chunk, token),
