@@ -476,19 +476,23 @@ public type Iterator is protocol {
     /// Sum all elements.
     fn sum(self) -> Self.Item
     where Self.Item: Add<Output = Self.Item> + Zero {
-        // MEASURED HARM, not inertness: `Self.Item` is an associated-type
-        // projection and has no witness index at either intercept, so this
-        // form does not merely fall back to the literal — it loses the
-        // protocol default's dispatch entirely and `list.iter().sum()`
-        // panics with `ListIter.sum not found`. Literal until the witness
-        // vector carries associated types.
+        // Literal, and the reason is narrower than an earlier revision of
+        // this comment claimed. `Self.Item` is an associated-type
+        // projection with no witness index at either intercept in
+        // `expressions.rs`, so `Self.Item.zero()` lowers to this same
+        // literal — inert, not harmful. The `ListIter.sum not found`
+        // panic that was once blamed here belonged to a codegen patch
+        // that has since been reverted, and the literal is the form
+        // measured green. It stays until the witness vector carries
+        // associated types, at which point it is worth revisiting.
         self.fold(0, |a, b| a + b)
     }
 
     /// Product of all elements.
     fn product(self) -> Self.Item
     where Self.Item: Mul<Output = Self.Item> + One {
-        // Same as `sum` above: `Self.Item` has no witness.
+        // Same as `sum` above: `Self.Item` has no witness index, so the
+        // identity is a literal.
         self.fold(1, |a, b| a * b)
     }
 
