@@ -37,6 +37,18 @@ DOCS = REPO / "internal" / "website" / "docs"
 BASELINE = REPO / "scripts" / "ci" / "doc_examples_known_failures.txt"
 # A name the PAGE supplies elsewhere, not a defect in the example itself.
 ELSEWHERE = ("error<E100>", "error<E101>", "error<E402>")
+# A block that ANNOUNCES its own failure is teaching that the compiler
+# refuses something. Failing is its job; counting it as staleness would
+# report the documentation's best pages as its worst.
+DELIBERATE = re.compile(
+    r"COMPILE ERROR|does not compile|will not compile|fails to compile|rejected|ERROR:",
+    re.I,
+)
+# `...` standing for omitted code is the documentation's own convention —
+# 446 lines across 111 pages use it. A block carrying one is ABRIDGED and
+# cannot compile by construction. Counting those as staleness would report
+# a house style, in its most common form, as the site's biggest defect.
+ABRIDGED = re.compile(r"(^|[\s({\[,])\.\.\.($|[\s)}\],;])", re.M)
 
 
 def blocks() -> list[tuple[str, str]]:
@@ -101,11 +113,24 @@ def main() -> int:
             if err:
                 failures[site] = err
 
-    frag = {k: v for k, v in failures.items() if v.startswith(ELSEWHERE)}
-    real = {k: v for k, v in failures.items() if not v.startswith(ELSEWHERE)}
+    src_of = dict(found)
+    def code_of(site):
+        body = src_of.get(site, "")
+        return "\n".join(l.split("//")[0] for l in body.split("\n"))
+
+    deliberate = {k for k in failures if DELIBERATE.search(src_of.get(k, ""))}
+    abridged = {k for k in failures
+                if k not in deliberate and ABRIDGED.search(code_of(k))}
+    excused = deliberate | abridged
+    frag = {k: v for k, v in failures.items()
+            if k not in excused and v.startswith(ELSEWHERE)}
+    real = {k: v for k, v in failures.items()
+            if k not in excused and not v.startswith(ELSEWHERE)}
     total = len(found)
     print(f"doc examples: {total} self-contained, {total - len(failures)} compile, "
-          f"{len(failures)} do not ({len(frag)} lean on the page, {len(real)} fail on their own)")
+          f"{len(failures)} do not — {len(deliberate)} announce their own failure, "
+          f"{len(abridged)} are abridged with `...`, {len(frag)} lean on the page, "
+          f"{len(real)} are stale")
 
     if listing:
         for site, err in sorted(real.items()):

@@ -16,10 +16,9 @@ language/syntax.md#d5a45541
 language/type-properties.md#6b41d0f2
 stdlib/context.md#05f3377d
 stdlib/context.md#1faf66fb
+stdlib/net/weft/overview.md#9b400b3e
 stdlib/net/weft/overview.md#e0e13691
-stdlib/net/weft/overview.md#e8f526c0
 stdlib/security/capabilities.md#1df7264b
-stdlib/security/capabilities.md#7b577d2c
 stdlib/simd.md#fce274bd
 stdlib/term/examples/todo-app.md#f816cea5
 stdlib/theory-interop.md#949199c4
