@@ -103,7 +103,9 @@ fn test_rotate_by_bit_width_is_identity() {
 
 @test
 fn test_reverse_bits_involution() {
-    let v: Int = 0xABCDEF1234567890;
+    // Same 64 bits as 0xABCDEF1234567890, spelled as the signed value
+    // `Int` can hold: that hex is 12379813812177893520, above Int.MAX.
+    let v: Int = -6066930261531658096;
     assert_eq(v.reverse_bits().reverse_bits(), v);
 }
 
