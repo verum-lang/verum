@@ -706,7 +706,7 @@ where
         let retrieved = self.vector_store.search(&query_embedding, self.retrieval_k);
 
         // 3. Build context from retrieved documents
-        let context = retrieved.iter()
+        let context: Text = retrieved.iter()
             .map(|(doc, score)| f"[Relevance: {score:.2}] {doc.content}")
             .collect<List<_>>()
             .join("\n\n");
@@ -738,7 +738,7 @@ where
             .map(|(doc, _)| doc.clone())
             .collect();
 
-        let context = sources.iter()
+        let context: Text = sources.iter()
             .enumerate()
             .map(|(i, doc)| f"[{i + 1}] {doc.content}")
             .collect<List<_>>()

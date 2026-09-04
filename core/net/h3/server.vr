@@ -210,7 +210,7 @@ implement H3Server {
             // Nursery-spawn the per-connection loop. Structured
             // concurrency means a panic / close in any one handler
             // does not leak.
-            let handler_ref = handler.clone();
+            let handler_ref: Heap<dyn H3Handler> = handler.clone();
             core.async.nursery.spawn(async move {
                 let _ = self.drive_connection(&mut conn, handler_ref).await;
             });
