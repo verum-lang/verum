@@ -75,9 +75,24 @@ mount super.size_class.{
 mount super.epoch.{GLOBAL_EPOCH};
 mount super.capability.{CAP_READ, CAP_WRITE, CAP_OWNED};
 
-// Platform-specific operations
-@cfg(target_os = "linux")
+// `random_bytes` is the CROSS-PLATFORM entry point — it owns the
+// per-platform split internally (core/sys/common.vr, one @cfg arm each)
+// — so its mount must not be platform-gated. It was, under the
+// `@cfg(target_os = "linux")` below, and on macOS the name was simply
+// never bound: `init_encoding_keys` called an unbound `random_bytes`
+// and the free-list pointer encoding kept its two compile-time
+// constants (T0807).
 mount sys.common.{random_bytes};
+
+// Platform-specific operations.
+//
+// EACH ONE NEEDS ITS OWN @cfg. The attribute covers exactly the
+// declaration that follows it, never a run of them — see
+// grammar/verum.ebnf §2.20.6a. Written as one @cfg over both mounts,
+// the second stayed unconditional and collided with the macOS mount
+// three lines down: `error<E602>: ambiguous name: 'get_tid_fast' is
+// imported from multiple modules`.
+@cfg(target_os = "linux")
 mount sys.linux.tls.{get_tid_fast};
 
 @cfg(target_os = "macos")
