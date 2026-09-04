@@ -32,7 +32,7 @@ fn integration_buffer_cursor_over_list_byte() {
 
 @test
 fn integration_buf_reader_constructs_over_buffer_cursor() {
-    let cursor = BufferCursor.new(List.new());
+    let cursor: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
     let reader = BufReader.new(cursor);
     assert_eq(reader.capacity(), DEFAULT_BUF_CAPACITY);
 }
@@ -43,7 +43,7 @@ fn integration_buf_reader_constructs_over_buffer_cursor() {
 
 @test
 fn integration_buf_writer_constructs_over_buffer_cursor() {
-    let cursor = BufferCursor.new(List.new());
+    let cursor: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
     let writer = BufWriter.new(cursor);
     assert(writer.capacity() >= MIN_BUF_CAPACITY);
     assert_eq(writer.buffer_len(), 0);

@@ -34,7 +34,7 @@ mount core.intrinsics.runtime.os.{__process_wait_raw};
 // carried-fact map (runtime TypeId → bare method → FunctionId).
 @test
 fn regression_buffer_cursor_write_then_read_round_trip() {
-    let mut c = BufferCursor.new(List.new());
+    let mut c: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
     c.write(&[1, 2, 3, 4]).unwrap();
     c.seek(SeekFrom.Start(0)).unwrap();
     let mut out: [Byte; 4] = [0, 0, 0, 0];
@@ -79,7 +79,7 @@ fn regression_buf_reader_over_cursor_reads_data() {
 
 @test
 fn regression_buf_writer_over_cursor_writes_data() {
-    let cursor = BufferCursor.new(List.new());
+    let cursor: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
     let mut writer = BufWriter.new(cursor);
     let buf: [Byte; 3] = [1, 2, 3];
     let n = writer.write(&buf).unwrap();
@@ -102,7 +102,7 @@ fn regression_buf_writer_over_cursor_writes_data() {
 fn regression_copy_reader_to_writer() {
     let src_data: List<Byte> = [1, 2, 3, 4, 5];
     let mut src = BufferCursor.new(src_data);
-    let mut dst = BufferCursor.new(List.new());
+    let mut dst: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
     let n = copy(&mut src, &mut dst).unwrap();
     assert_eq(n, 5);
 }
@@ -124,7 +124,7 @@ fn regression_read_all_collects_full_stream() {
 
 @test
 fn regression_line_writer_flushes_on_newline() {
-    let cursor = BufferCursor.new(List.new());
+    let cursor: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
     let mut lw = LineWriter.new(cursor);
     let buf: [Byte; 6] = [104, 105, 10, 121, 111, 33];  // "hi\nyo!"
     lw.write(&buf).unwrap();
