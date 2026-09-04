@@ -235,7 +235,7 @@ fn scalar_mult(
     // when available). The scalar-mult intrinsic is mandatory; it
     // panics on unsupported targets rather than silently
     // miscomputing — there is no in-Verum reference fallback.
-    let result = @intrinsic("verum.x25519.scalar_mult", scalar, u);
+    let result: [Byte; 32] = @intrinsic("verum.x25519.scalar_mult", scalar, u);
     let mut i = 0;
     while i < 32 {
         out[i] = result[i];
@@ -258,7 +258,7 @@ fn fill_random(buf: &mut [Byte; 32]) {
     // The runtime CSPRNG is wired at `verum.rng.fill_secure`; it maps
     // to `getrandom(2)` on Linux, `arc4random_buf` on macOS/BSD,
     // `BCryptGenRandom` on Windows.
-    let filled = @intrinsic("verum.rng.fill_secure", 32);
+    let filled: [Byte; 32] = @intrinsic("verum.rng.fill_secure", 32);
     let mut i = 0;
     while i < 32 {
         buf[i] = filled[i];

@@ -198,7 +198,7 @@ implement P256 {
     /// loops until a valid scalar is drawn (at most ~2 iterations
     /// on average).
     public fn generate_private_key() -> P256PrivateKey {
-        let bytes = @intrinsic("verum.p256.keygen", ());
+        let bytes: [Byte; 32] = @intrinsic("verum.p256.keygen", ());
         let mut sk: [Byte; 32] = [0; 32];
         let mut i = 0;
         while i < 32 { sk[i] = bytes[i]; i = i + 1; }

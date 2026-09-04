@@ -198,7 +198,7 @@ implement Ecvrf {
     /// point). The byte layout matches `Ed25519PublicKey`, so a single
     /// 32-byte string serves both protocols.
     public fn public_key(sk: &VrfSecretKey) -> VrfPublicKey {
-        let bytes = @intrinsic("verum.vrf.public_key", sk);
+        let bytes: [Byte; 32] = @intrinsic("verum.vrf.public_key", sk);
         let mut pk: [Byte; 32] = [0; 32];
         let mut i: Int = 0;
         while i < 32 { pk[i] = bytes[i]; i = i + 1; }
@@ -220,7 +220,7 @@ implement Ecvrf {
     /// let r = Ecvrf.prove(&sk, &alpha);
     /// ```
     public fn prove(sk: &VrfSecretKey, alpha: &[Byte]) -> VrfProveResult {
-        let raw = @intrinsic("verum.vrf.prove", sk, alpha);
+        let raw: [Byte; 144] = @intrinsic("verum.vrf.prove", sk, alpha);
         // Backend returns 80B proof || 64B output.
         let mut proof:  [Byte; 80] = [0; 80];
         let mut output: [Byte; 64] = [0; 64];

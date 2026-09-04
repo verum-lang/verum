@@ -327,9 +327,6 @@ core/security/cipher/aes.vr
 core/security/cipher/chacha20.vr
 core/security/ecc/bls12_381.vr
 core/security/ecc/ed25519.vr
-core/security/ecc/p256.vr
-core/security/ecc/vrf.vr
-core/security/ecc/x25519.vr
 core/security/hpke/mod.vr
 core/security/oidc.vr
 core/security/provenance.vr

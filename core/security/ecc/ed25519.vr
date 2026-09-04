@@ -188,7 +188,7 @@ implement Ed25519 {
     ///  3. `A = s * B` (B = Ed25519 base point)
     ///  4. Public key = compressed encoding of A
     public fn public_key(seed: &Ed25519Seed) -> Ed25519PublicKey {
-        let bytes = @intrinsic("verum.ed25519.keygen", seed);
+        let bytes: [Byte; 32] = @intrinsic("verum.ed25519.keygen", seed);
         let mut pk: [Byte; 32] = [0; 32];
         let mut i = 0;
         while i < 32 { pk[i] = bytes[i]; i = i + 1; }
@@ -205,7 +205,7 @@ implement Ed25519 {
     /// let sig = Ed25519.sign(&seed, b"release 1.2.3 sha256=...");
     /// ```
     public fn sign(seed: &Ed25519Seed, message: &[Byte]) -> Ed25519Signature {
-        let bytes = @intrinsic("verum.ed25519.sign", seed, message);
+        let bytes: [Byte; 64] = @intrinsic("verum.ed25519.sign", seed, message);
         let mut sig: [Byte; 64] = [0; 64];
         let mut i = 0;
         while i < 64 { sig[i] = bytes[i]; i = i + 1; }
