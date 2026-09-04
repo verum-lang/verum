@@ -21,7 +21,7 @@ mount core.runtime.{
     // From .config
     RuntimeIoError, IoHandle,
     // From .env (already covered in core-tests/runtime/env/)
-    ExecutionTier, IsolationLevel,
+    ExecutionTier,
     // From .recovery
     RecoveryRetryPolicy, RecoveryCircuitState,
     // From .supervisor
@@ -29,6 +29,13 @@ mount core.runtime.{
     // From .spawn
     SupervisorSpawnConfig, PriorityLevel,
 };
+
+// `IsolationLevel` moved out of `core.runtime` in 6388da42f — a batch
+// type-name disambiguation that kept ONE of the two copies it had
+// (`core/runtime/env.vr` and `core/async/spawn_config.vr` both declared
+// it). The surviving one is async's, and this file mounted the removed
+// one, which took every integration test in it to compile-error.
+mount core.async.spawn_config.{IsolationLevel};
 
 // =============================================================================
 // Section 1: Umbrella re-exports — each type resolves at the `core.runtime.X` level
