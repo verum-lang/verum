@@ -25,15 +25,26 @@ ROW = re.compile(r"^\| [A-Z]+\d+ \|")
 
 
 # Rows whose cell count already differs from their family's mode. A
-# RATCHET, not zero, and the distinction is load-bearing: five of the
-# sixteen carry one stray `|`, five are a two-column shape that may be
-# deliberate, one (A59) embeds whole tables and has 158, and one is
-# another session's row from an hour ago. Fixing them is separate work
-# on rows this session did not write. What the ratchet is FOR is the
-# case that produced it — A64 growing from 6 pipes to 8 under my own
-# edits, rendering the priority column as prose, while every other
-# check stayed green.
-WIDTH_BASELINE = 16
+# ZERO, and it took getting there to see why a ratchet was the wrong
+# shape. The baseline was 16 with 15 rows failing, so exactly one new
+# violation fitted in the headroom — and one did: A78, written the day
+# the ratchet was set, carried five stray `|` and the gate reported
+# "at the baseline, not growing". A ratchet with slack admits its next
+# instance silently.
+#
+# All sixteen are now fixed (2026-09-05), so the slack is gone:
+#   - the header `| # | Item | Pri | Anchor | Acceptance |` is the
+#     authority for five columns; six rows had two and got `—` for the
+#     three the prose never stated, four had a sixth cell that markdown
+#     drops, and thirty pipes inside inline code are now escaped `\|`;
+#   - A59 was one 80KB line that had swallowed a section heading, ten
+#     `A-*` rows and the whole nine-row B table — 21 rows in all had
+#     stopped being rows. They are rows again.
+#
+# What the check is FOR is the case that produced it: A64 growing from
+# 6 pipes to 8 under an edit of mine, rendering the priority column as
+# prose while every other check stayed green.
+WIDTH_BASELINE = 0
 
 
 def wrong_width(lines: list[str]) -> list[tuple[str, int, int, int]]:
@@ -64,7 +75,12 @@ def wrong_width(lines: list[str]) -> list[tuple[str, int, int, int]]:
             continue
         label = line.split("|")[1].strip()
         family = re.match(r"([A-Z]+)", label).group(1)
-        widths[family].append((label, i, line.count("|")))
+        # Count SEPARATORS, not pipe characters: markdown reads `\|`
+        # as a literal pipe inside a cell, so an author who escapes a
+        # stray pipe has already fixed the row. Measured 2026-09-05 on
+        # A78 — five correctly escaped pipes still read as five extra
+        # columns here, so the gate asked for a fix it would not accept.
+        widths[family].append((label, i, line.replace("\\|", "").count("|")))
 
     out: list[tuple[str, int, int, int]] = []
     for family, rows in widths.items():
@@ -74,6 +90,34 @@ def wrong_width(lines: list[str]) -> list[tuple[str, int, int, int]]:
         for label, ln, w in rows:
             if w != modal:
                 out.append((label, ln, w, modal))
+    return out
+
+
+BURIED = re.compile(r"\|\s*\|?\s*([A-Z][A-Za-z0-9-]*)\s*\|\s*(?:\*\*|~~)")
+
+
+def buried_rows(lines: list[str]) -> list[tuple[str, int, str]]:
+    """Rows that have swallowed another row's label mid-line.
+
+    A row swallowed this way is invisible to every reader that walks
+    rows, and its own row still looks well-formed. Measured 2026-09-05:
+    21 rows had stopped being rows — `A5` inside `A3` and `B6` inside
+    `B1d` for months, and ten `A-*` rows plus the whole nine-row B table
+    inside a single 80KB `A59` line, where a repair that rejoined
+    multi-line rows with ` — ` had run past the end of the row it was
+    repairing. That repair's control was a word count: 38157 words
+    before, 38157 after. It could not see the loss, because no word was
+    lost — only the structure was. Counting ROWS is the control that
+    sees it, so this check counts rows.
+    """
+    out = []
+    for i, line in enumerate(lines, 1):
+        if not ROW.match(line):
+            continue
+        own = line.split("|")[1].strip()
+        for m in BURIED.finditer(line):
+            if m.start() > 2:
+                out.append((own, i, m.group(1)))
     return out
 
 
@@ -110,11 +154,39 @@ WIDTH_SELF_TEST = [
     ([f"| A{i} | a | b |" for i in range(1, 6)]
      + ["| A9 | a |"], 1),
     (["| A1 | a | b |", "| A2 | a | b |"], 0),   # family too small to judge
+    # An ESCAPED pipe is a literal, not a separator — the row is correct.
+    ([f"| A{i} | a | b | c | d |" for i in range(1, 6)]
+     + [r"| A9 | a \| z | b | c | d |"], 0),
+    # …and an UNESCAPED stray pipe is still caught. Both poles are
+    # required: without the second, the escape rule could be widened to
+    # "ignore pipes" and the check would pass everything.
+    ([f"| A{i} | a | b | c | d |" for i in range(1, 6)]
+     + ["| A9 | a | z | b | c | d |"], 1),
+]
+
+
+BURIED_SELF_TEST = [
+    # A well-formed pair of rows buries nothing.
+    (["| A1 | **finding** | P1 | a | open |",
+      "| A2 | **finding** | P1 | a | open |"], 0),
+    # A row that swallowed the next one is caught even though it is
+    # still one line and still ends with `|` — the two checks above
+    # both pass on it.
+    (["| A1 | **finding** | P1 | a | open || A2 | **swallowed** | P1 | a | open |"], 1),
+    # A row that merely CITES another row's label is not a burial: the
+    # label must be in row position, `| Label | **`. Without this pole
+    # the check would fire on every cross-reference in the register.
+    (["| A1 | **finding**, see A2 and `| A2 |` above | P1 | a | open |"], 0),
 ]
 
 
 def self_test() -> int:
     bad = 0
+    for lines, want in BURIED_SELF_TEST:
+        got = len(buried_rows(lines))
+        if got != want:
+            bad += 1
+            print(f"FAIL buried {lines!r} -> {got}, expected {want}", file=sys.stderr)
     for lines, want in WIDTH_SELF_TEST:
         got = len(wrong_width(lines))
         if got != want:
@@ -139,6 +211,17 @@ def main() -> int:
     bad = broken_rows(lines)
     total = sum(1 for l in lines if ROW.match(l))
     widths = wrong_width(lines)
+    buried = buried_rows(lines)
+    if buried:
+        print(f"[fail] {len(buried)} register row(s) are buried inside another row:")
+        for owner, ln, victim in buried:
+            print(f"    {victim}  swallowed by {owner}  at line {ln}")
+        print(
+            "\nA row that swallowed the next one is still one line and still ends\n"
+            "with `|`, so neither check below sees it — but the swallowed row is\n"
+            "gone from every reader that walks rows.  Put it back on its own line."
+        )
+        return 1
     if bad:
         print(f"[fail] {len(bad)} register row(s) span more than one line:")
         for label, ln in bad:
