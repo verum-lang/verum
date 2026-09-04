@@ -71,13 +71,28 @@ def is_elision(body: str) -> bool:
 # bare type expression.
 ALIGNED_COMMENT = re.compile(r"^\S.*?\s{2,}//")
 
+# A reference page lists an API as bare signatures — no `fn`, often
+# several to a line separated by `/` or column alignment. Measured
+# 2026-09-04: 385 such lines across 50 files, 94 in `intrinsics.md`
+# alone. It is the house style for the stdlib reference, not 385
+# typos, and no compilation unit accepts it.
+BARE_SIGNATURE = re.compile(
+    r"^\s*[a-z_][A-Za-z0-9_]*(<[^>]*>)?\([^)]*\)\s*(->.*)?$")
+SIGNATURE_RUN = re.compile(
+    r"^\s*[a-z_][A-Za-z0-9_]*(<[^>]*>)?\s*(\([^)]*\))?"
+    r"(\s*(/|\s{2,})\s*[a-z_][A-Za-z0-9_]*(<[^>]*>)?\s*(\([^)]*\))?.*)+$")
+
 
 def is_table(body: str) -> bool:
     lines = [l for l in body.split("\n") if l.strip()]
     if not lines:
         return True
     marked = sum(1 for l in lines
-                 if TABLE_GLYPH.search(l) or ALIGNED_COMMENT.match(l))
+                 if TABLE_GLYPH.search(l)
+                 or ALIGNED_COMMENT.match(l)
+                 or BARE_SIGNATURE.match(l)
+                 or SIGNATURE_RUN.match(l)
+                 or l.strip().startswith("//"))
     return marked * 2 >= len(lines)
 
 
