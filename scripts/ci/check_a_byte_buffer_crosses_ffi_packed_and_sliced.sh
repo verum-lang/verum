@@ -1,30 +1,41 @@
 #!/usr/bin/env bash
-# A byte buffer that reaches the FFI boundary must be PACKED and passed
-# as a SUBSLICE.
+# Taking the RAW POINTER of an unannotated byte array and handing it to
+# C reads the object header, not the data.
 #
-# Two independent defects, documented as rules 1 and 2 of
-# docs/architecture/ffi-byte-buffer-contract.md, and they compose:
+# THE NARROW FORM IS THE WHOLE GATE, and the first edition of this file
+# was much wider — it also reported `&mut name` without `[..]`, on the
+# strength of rule 2's footgun in
+# docs/architecture/ffi-byte-buffer-contract.md. That produced 33
+# findings, and measurement said 30+ of them were healthy code:
 #
-#   let mut buf = [0_u8; 12];        // NaN-boxed List: one 8-byte
-#                                    // Value slot per element, so the
-#                                    // bytes C reads are STRIDED
-#   getsockopt(fd, lvl, opt, &mut buf, &mut len)
-#                                    // `&mut arr` where the parameter
-#                                    // is `&mut [Byte]` coerces to an
-#                                    // EMPTY slice
+#   float_to_string(self, &mut buf, n)   -> f"{x:.2}" prints 3.14
+#   src.read(&mut buf)  (chunked copy)   -> 14 bytes copied, identical
+#   sys_read(fd, &mut tmp)  (stdin)      -> the real line, right length
 #
-# Measured at core/net/unix.vr:877 (SO_PEERCRED): either alone loses the
-# data, together the callee never sees a byte, and nothing errors. The
-# correct form is
+# Two mechanisms make that form safe, and both are recorded in the
+# contract itself:
+#
+#   * commit 02e838a10 (task #24) made a bare `&arr` / `&mut arr` on a
+#     byte array unsize to the SAME packed `RefSlice` as `&arr[..]`.
+#     The empty-slice coercion this gate was built to catch NO LONGER
+#     EXISTS.
+#   * the interpreter's FFI marshaller has a `TypeId::LIST` writeback
+#     (interpreter/dispatch_table/handlers/ffi_extended.rs:1641): a
+#     NaN-boxed array is packed into scratch for C and written back
+#     element-by-element afterwards. So even a strided buffer that
+#     reaches a syscall through a SLICE survives on Tier 0. (Tier 1 /
+#     AOT is not measured — see the contract.)
+#
+# What is still a defect is rule 3: `.as_ptr()` / `.as_mut_ptr()`
+# applied to the ARRAY VARIABLE returns the object base, and no
+# writeback can repair a pointer that was wrong before the call. The
+# correct form takes the subslice first:
 #
 #   let mut buf: [Byte; 12] = [0; 12];
-#   getsockopt(fd, lvl, opt, &mut buf[..], &mut len)
+#   c_fn(buf[..].as_ptr() as &unsafe Byte, 12)
 #
-# NOT EVERY UNANNOTATED BUFFER IS A DEFECT. A buffer that never crosses
-# into C is fine as a List. So this gate does not report the
-# declaration — it reports a declaration whose NAME is later used in a
-# way that only makes sense at the boundary: `&mut name` without `[..]`,
-# or `.as_ptr()` / `.as_mut_ptr()` on the raw array.
+# A gate that reports 30 healthy sites teaches people to ignore it, so
+# this one reports only the form that is measurably still wrong.
 #
 # Usage:
 #   scripts/ci/check_a_byte_buffer_crosses_ffi_packed_and_sliced.sh
@@ -54,14 +65,17 @@ DECL = re.compile(r'\blet\s+mut\s+([a-z_][a-z0-9_]*)\s*=\s*\[\s*0_u8\s*;')
 WINDOW = 60
 
 def uses_at_boundary(lines, start, name):
-    """Return the 1-based line numbers where `name` is used in a way
-    that only makes sense across the FFI boundary."""
+    """Return the 1-based line numbers where `name` has its RAW POINTER
+    taken directly — `name.as_ptr()`, not `name[..].as_ptr()`.
+
+    `&mut name` is deliberately NOT matched: it unsizes to a packed
+    slice since 02e838a10, and three independent measurements found it
+    healthy. See the header."""
     bad = []
-    bare = re.compile(r'&\s*mut\s+' + re.escape(name) + r'\s*(?![\[\.\w])')
     ptr = re.compile(r'\b' + re.escape(name) + r'\s*\.\s*as_(mut_)?ptr\s*\(')
     for j in range(start, min(start + WINDOW, len(lines))):
         code = lines[j].split("//", 1)[0]
-        if bare.search(code) or ptr.search(code):
+        if ptr.search(code):
             bad.append(j + 1)
     return bad
 
@@ -104,16 +118,29 @@ if selftest:
         "    return scratch.len();\n"
         "}\n"
     )
+    good_bare = (
+        "fn m() {\n"
+        "    let mut buf = [0_u8; 64];\n"
+        "    let n = float_to_string(x, &mut buf, 2);\n"
+        "}\n"
+    )
     r1 = check_text("t.vr", bad_src)
     r2 = check_text("t.vr", bad_ptr)
     r3 = check_text("t.vr", good_slice)
     r4 = check_text("t.vr", good_local)
+    r5 = check_text("t.vr", good_bare)
     print("SELFTEST")
-    print(f"  `&mut buf` on an unannotated array reported:  {'yes' if r1 else 'NO — blind'}")
     print(f"  `.as_ptr()` on an unannotated array reported: {'yes' if r2 else 'NO — blind'}")
-    print(f"  packed + subslice stayed silent:             {'yes' if not r3 else 'NO — false positive'}")
+    print(f"  packed + subslice stayed silent:              {'yes' if not r3 else 'NO — false positive'}")
     print(f"  a buffer that never leaves Verum stayed silent: {'yes' if not r4 else 'NO — noise'}")
-    sys.exit(0 if (r1 and r2 and not r3 and not r4) else 1)
+    print(f"  bare `&mut buf` stayed silent (02e838a10):    {'yes' if not r5 else 'NO — stale rule'}")
+    print(f"  ...and so did the same form at a syscall:     {'yes' if not r1 else 'NO — stale rule'}")
+    print()
+    print("  The positive pole is `.as_ptr()` alone. `&mut buf` is now a")
+    print("  NEGATIVE control in two flavours — a Verum callee and a")
+    print("  syscall — because both were MEASURED healthy, and a gate")
+    print("  whose only pole is an absence passes for free.")
+    sys.exit(0 if (r2 and not r1 and not r3 and not r4 and not r5) else 1)
 
 files, findings = 0, []
 for dirpath, dirs, names in os.walk(ROOT):
@@ -134,13 +161,20 @@ if not findings:
     print("check-ffi-byte-buffers: OK")
     sys.exit(0)
 
-print(f"check-ffi-byte-buffers: {len(findings)} buffer use(s) cross the boundary unpacked\n")
+print(f"check-ffi-byte-buffers: {len(findings)} raw pointer(s) taken of an unpacked array\n")
 for p, decl, used, name in findings:
-    print(f"  {p}:{decl} declares `{name}` unannotated, used at :{used}")
+    print(f"  {p}:{decl} declares `{name}` unannotated, raw pointer taken at :{used}")
 print()
 print("`[0_u8; N]` is a NaN-boxed List (8-byte-strided Value slots), and")
-print("`&mut arr` where the parameter is `&mut [Byte]` coerces to an")
-print("EMPTY slice. Neither errors. See rules 1 and 2 of")
+print("`.as_ptr()` on the ARRAY VARIABLE returns the object base rather")
+print("than the data — so C reads the header. Taking the subslice first")
+print("fixes both at once:")
+print()
+print("    let mut buf: [Byte; N] = [0; N];")
+print("    c_fn(buf[..].as_ptr() as &unsafe Byte, N)")
+print()
+print("This does NOT apply to `&mut buf`, which unsizes correctly since")
+print("02e838a10. See rules 1 and 3 of")
 print("docs/architecture/ffi-byte-buffer-contract.md.")
 sys.exit(1)
 PY

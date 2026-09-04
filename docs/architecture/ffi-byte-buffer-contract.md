@@ -63,9 +63,33 @@ patterns below → `sent=4`, `recv=4`, payload bytes `112,105,110,103`
   `Repeat` arms) → `NewList`. Element `Value`s are 8-byte-strided; the low
   byte of `Value[i]` is `byte[i]`, but `byte[i+1]` lives 8 bytes on, not 1.
 
-Consequence: `let mut b = [0_u8; 128]` is **not** a byte buffer a syscall can
-write into — the kernel writes 16 contiguous bytes over `Value[0..1]` and
-corrupts the NaN-boxing. Always annotate: `let mut b: [Byte; 128] = [0; 128]`.
+Consequence: `let mut b = [0_u8; 128]` is **not** contiguous ABI bytes — the
+kernel would write 16 contiguous bytes over `Value[0..1]` and corrupt the
+NaN-boxing. Always annotate: `let mut b: [Byte; 128] = [0; 128]`.
+
+**But that consequence does NOT reach every call, and the difference is
+measured, not argued.** On Tier 0 an unannotated buffer that reaches a
+syscall *through a slice* survives, because the interpreter's FFI marshaller
+packs it into scratch for C and writes the result back element-by-element
+(`interpreter/dispatch_table/handlers/ffi_extended.rs:1641`, the
+`TypeId::LIST` branch). Three independent measurements, all healthy:
+
+| site | form | result |
+|---|---|---|
+| `float_to_string(x, &mut buf, n)` | Verum callee | `f"{x:.2}"` → `3.14` |
+| `src.read(&mut buf)` (chunked copy) | protocol → syscall | 14 bytes, identical |
+| `sys_read(fd, &mut tmp)` (stdin) | `safe_read` → `read(2)` | the real line, right length |
+
+So the rule to enforce is rule 3, not this one: the writeback repairs a
+STRIDE, and nothing can repair a pointer that was already wrong — which is
+what `.as_ptr()` on the array variable produces. Annotating remains correct
+hygiene (it avoids a per-call pack/unpack) and is required for the AOT path,
+which does **not** carry this writeback and is not measured here.
+
+Gate: `scripts/ci/check_a_byte_buffer_crosses_ffi_packed_and_sliced.sh`
+reports rule 3 only. Its first edition also reported `&mut name` on the
+strength of the paragraph above and produced 33 findings, 30+ of them
+healthy code.
 
 ## 2. The reserved-stride `FatRef`
 
