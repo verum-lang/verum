@@ -193,3 +193,28 @@ runs:
         if [[ -d llvm/install/bin ]]; then
           echo "VERUM_LLVM_BIN_DIR=${PWD}/llvm/install/bin" >> "$GITHUB_ENV"
         fi
+
+    - name: Assert the fetched LLVM carries the tools the compiler runs
+      # Phase 7.5 shells out to llc / opt / llvm-link. When the prebuilt
+      # lacks them the compiler silently falls back to the host's
+      # `opt-18`, mixes LLVM versions, and dies somewhere else — the
+      # failure surfaces as a no-libc smoke error, which is not what
+      # broke. One job in ci.yml asserted this; every OTHER job that
+      # fetches LLVM inherited the confusing failure instead. Measured
+      # 2026-09-04: the published linux prebuilt shipped 35 tools and
+      # none of the three, because the packaging step's keep-list had
+      # drifted from `REQUIRED_LLVM_TOOLS`.
+      shell: bash
+      run: |
+        set -euo pipefail
+        missing=""
+        for tool in llc opt llvm-link; do
+          [[ -f "llvm/install/bin/${tool}" || -f "llvm/install/bin/${tool}.exe" ]] \
+            || missing="${missing} ${tool}"
+        done
+        if [[ -n "${missing}" ]]; then
+          echo "::error::the LLVM fetched for this job lacks:${missing} —" \
+               "Phase 7.5 shells out to these and will fail later with an" \
+               "unrelated-looking error"
+          exit 1
+        fi
