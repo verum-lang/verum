@@ -136,14 +136,12 @@ core/collections/set.vr
 core/collections/slice.vr
 core/collections/trie.vr
 core/concurrency/process.vr
-core/configuration/convert.vr
 core/configuration/mod.vr
 core/configuration/toml.vr
 core/context/mod.vr
 core/context/provider.vr
 core/database/common/copy_metrics.vr
 core/database/common/db_handle.vr
-core/database/common/migrations/runner.vr
 core/database/common/pool_impl.vr
 core/database/mysql/async_binlog.vr
 core/database/mysql/async_binlog_consumer.vr
@@ -173,7 +171,6 @@ core/database/sqlite/native/bind_text_v2/engine.vr
 core/database/sqlite/native/bind_zeroblob/engine.vr
 core/database/sqlite/native/builtins/numeric_fns.vr
 core/database/sqlite/native/client_data/registry.vr
-core/database/sqlite/native/concat_ws_fn/fn_.vr
 core/database/sqlite/native/context_api/auxdata.vr
 core/database/sqlite/native/encryption/cipher.vr
 core/database/sqlite/native/exec/engine.vr
