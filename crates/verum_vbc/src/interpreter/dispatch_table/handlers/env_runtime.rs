@@ -404,9 +404,11 @@ fn intercept_set_current_dir(
 /// `intercept_arg` did no stripping at all. Measured on
 /// `verum run p.vr -- one two`:
 ///
-///     args()        -> ["one", "two"]                CORRECT
-///     args_count()  -> 5                             the verum argv
-///     arg(0)        -> "/path/to/verum"              the interpreter
+/// ```text
+/// args()        -> ["one", "two"]                CORRECT
+/// args_count()  -> 5                             the verum argv
+/// arg(0)        -> "/path/to/verum"              the interpreter
+/// ```
 ///
 /// A script asking for its first argument got the path to the binary
 /// running it — not a wrong number but a wrong KIND, failing an
