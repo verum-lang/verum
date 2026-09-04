@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: gates-source check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-silent-acceptance check-name-census check-panic-surface check-early-return-tenants check-dup-emitters check-homepage-examples
+.PHONY: gates-source check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-silent-acceptance check-name-census check-panic-surface check-early-return-tenants check-dup-emitters check-homepage-examples check-doc-indented-blocks
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -73,6 +73,10 @@ check-doc-examples: ## Gate: the Verum examples in the docs must compile — nee
 check-homepage-examples: ## Gate: the Verum samples on the marketing homepage must be real Verum — needs a built binary
 	python3 scripts/ci/check_homepage_examples.py --self-test
 	python3 scripts/ci/check_homepage_examples.py --check
+
+check-doc-indented-blocks: ## Gate: an indented block in a `///` comment is a Rust doctest — fence it
+	python3 scripts/ci/check_doc_indented_blocks.py --selftest
+	python3 scripts/ci/check_doc_indented_blocks.py
 
 check-determinism: ## Gate (T0927): the compiler must give the same answer twice — needs a built binary (VERUM_BIN=... to point at one)
 	python3 scripts/ci/check_determinism.py --self-test
