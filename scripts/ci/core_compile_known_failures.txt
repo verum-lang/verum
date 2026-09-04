@@ -333,7 +333,6 @@ core/security/webauthn/attestation.vr
 core/security/webauthn/authenticate.vr
 core/security/webauthn/register.vr
 core/security/x509/ocsp_client.vr
-core/security/x509/path_validation.vr
 core/security/x509/verifier.vr
 core/security/zk/halo2/mod.vr
 core/security/zk/halo2/prover.vr

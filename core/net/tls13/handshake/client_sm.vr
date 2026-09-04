@@ -804,7 +804,11 @@ fn verify_certificate_signature(
         return Result.Err(TlsError.BadCertificate);
     }
 
-    let pk = &cert.tbs.spki.public_key;
+    // `Certificate` holds DER only (x509/credential.vr:44); the parsed
+    // view carries `tbs`.  Same parse-and-map idiom as :474 in this file.
+    let parsed = parse_certificate(cert.der_data.as_slice())
+        .map_err(|_| TlsError.BadCertificate)?;
+    let pk = &parsed.tbs.spki.public_key;
     match cv.algorithm {
         // EdDSA — raw 64-byte signature, message is `signed`.
         SignatureScheme.Ed25519Scheme => match pk {

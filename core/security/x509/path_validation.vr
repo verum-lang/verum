@@ -858,7 +858,7 @@ fn prepare_for_next(
         Maybe.Some((_, b)) => b.clone(),
         Maybe.None         => return Result.Err(NotCa { index: i }),
     };
-    if !bc.ca { return Result.Err(NotCa { index: i }); }
+    if !bc.is_ca { return Result.Err(NotCa { index: i }); }
 
     // (l) keyUsage check.
     match &cert.tbs.extensions.key_usage {
