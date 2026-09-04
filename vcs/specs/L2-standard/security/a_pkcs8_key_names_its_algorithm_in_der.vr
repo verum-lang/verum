@@ -1,0 +1,79 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: security, x509, der, pkcs8, encoding
+// @timeout: 20000
+// @expected-stdout-begin
+// p256 Ec
+// ed25519 Ed25519
+// rsa Rsa
+// @expected-stdout-end
+// @description: A PKCS#8 key's algorithm is read from its DER, not its PEM banner.
+//
+//   All three keys below open with the same line:
+//
+//       -----BEGIN PRIVATE KEY-----
+//
+//   PKCS#8 (RFC 5208 SS5) does not name the algorithm in the banner. It
+//   names it in the DER, in the `privateKeyAlgorithm` field, which is
+//   the only place it can be read from:
+//
+//       PrivateKeyInfo is a SEQUENCE of
+//           version              INTEGER,
+//           privateKeyAlgorithm  AlgorithmIdentifier,
+//           privateKey           OCTET STRING, and optional attributes.
+//
+//   This pins the mechanism `PrivateKey.from_pem` depends on. Before
+//   2026-09-04 that function read the banner and defaulted every plain
+//   `PRIVATE KEY` to `Rsa` -- so a P-256 or Ed25519 key, which is what
+//   `openssl genpkey` and every ACME client emit, was labelled RSA and
+//   would have been signed with the wrong scheme mid-handshake.
+//
+//   `AlgorithmIdentifier` is the same structure SPKI carries, so
+//   `parse_public_key_alg` is the authority for both rather than two
+//   OID tables that can drift apart.
+
+mount core.encoding.der.{DerReader};
+mount core.security.x509.algorithm.{parse_public_key_alg, PublicKeyAlg};
+mount core.encoding.base64 as b64;
+
+fn pkcs8_alg_name(der: &[Byte]) -> Text {
+    let mut reader = DerReader.new(der);
+    match reader.read_sequence() {
+        Result.Err(_) => "not-a-sequence",
+        Result.Ok(mut seq) => {
+            match seq.read_int64() {
+                Result.Err(_) => "no-version",
+                Result.Ok(_v) => {
+                    match parse_public_key_alg(&mut seq) {
+                        Result.Err(_) => "bad-algorithm",
+                        Result.Ok(alg) => match alg {
+                            PublicKeyAlg.RsaEncryption  => "Rsa",
+                            PublicKeyAlg.EcPublicKey(_) => "Ec",
+                            PublicKeyAlg.Ed25519Key     => "Ed25519",
+                            _ => "unsupported",
+                        },
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn der_of(pem: &Text) -> List<Byte> {
+    let lines: List<Text> = pem.lines().filter(|l| !l.starts_with("-----")).collect();
+    match b64.decode(&lines.join("")) {
+        Result.Ok(b) => b,
+        Result.Err(_) => List.new(),
+    }
+}
+
+fn pem_p256() -> Text { "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgQuHk5MNlT2oQPypr\nAscMKnNamXdObaJlWsKCgHmimzKhRANCAATdO70ig27Wb/G9XoGvtWBZXMMeFiaT\nYeg0k2J6C1ML7JoE7xsztO+ADNNfKMCeu16YyxwCtJYnv59oB7F5FosO\n-----END PRIVATE KEY-----" }
+fn pem_ed25519() -> Text { "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIIY/+/qKzqwWJIU2SCZ6vDK+1MAunknecz35EVlqg77t\n-----END PRIVATE KEY-----" }
+fn pem_rsa() -> Text { "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDCE4bXEGhiMitr\nnHkJYtrHdYAUkbHUwJpSETKwspBYmCRiNiiELl8ADfZk2sRECr+xdgw8z84JITxA\nwH6UmxbUh/WuNXpAlYKJjgB+E4k38Z6oRcOXXhtE6h+PHTTq2yyAfgx2/w/VpLl7\nbQ1v/0fqbx5UlsgOlJDa2Pvr0i1JXUy8nF/zX1aD5aDF0s1/x9+kXFyRYsoIWreV\nTISq7jsgA5pIGppjFGpKln5oRU7WSVOD5vuTiXE8y/IjrseRVTbdbsq8JR7IVDDr\n8dGdtRv16oC3WJeT+oWTcL4smtJ/vlU/Hi8oI0gsQ5CpfWa0fcv9Ke0Xe7WG6aEJ\n71A57/lhAgMBAAECggEACe8K71YpKaGMxGjRbzAOp7f1ctgURKIJJBs6P34cUlST\nRC2mfEGNXkjYrEfgVOVB85jpvnEaiDAZz+yqbfvUOtOsuRqGo+ijMlxA3TMtyl3F\nM7LCdKx989SSAfbKPx0x1W/ePncGvfY9AjrOPcXQzgibAlRncAudsH37wxHSfJdB\nm+nEL6pBvB9htbD8ty3QECC/KRCTTGhDnVWlLZmsaX6cqSscTojWYQbxODYdcYIO\n2qbyl1NtHLJEL17GlLFbB4qTFCbGyrFOhZIRut09vSEgFfy1VzJjO8wXMGleEGGD\nfDVZpI5BreVw9UUxIk9NZf1c3elEhFMbYiqvcCqUOQKBgQDr4D/xVHI/KrIohGhD\n9KDdbjxgRFb6PBnSJyMZbmTab+vPbYneZG5aj5S194g5WmqwMYMceOu13E2o/kry\n8YMwTJCoBbSkHOqN+T2Aiu2w0crpZ9ALjOQ9/2gjMheCpkLYFcC0m36YJPunvkMM\nAO/Ty7t/0kwI4iklHo4Sj4dbbQKBgQDSolUssIVso93lE2IJBAinoSv7tG99dHKm\n9Wk3tHB/d+KDLBZw2eRNofN0e1InfCL9KswtE9KfjPTQBemxBou44nqmOZkyoVTc\nxC7k+kiwXnoVri4gWpjIxCAwGUODnE9GPFeTW+xxvlBuHHpj5bLaJASgYXNo6Bc9\nIQ/+wUOJRQKBgQDMaZOgdbloinzI5i5hre921iCWoMLrqwgJeodNc8ENGG84XMpd\nI5YK/2E17SVt5rCMruvb0eMbwKbArFeRgMFbKw81vXQVwUV38iZdboiccsMxURkX\n2Wq3W88IqVF8lM9a6kcNfa/Q9EPu09DQ50LvviBonnvsOurDU152MVJxZQKBgQCE\np0uxG3LMGt+Sd4SUXP/+YljK6rYUcpQKZiBfvrni7WOwbMGtTOyln8stnsT8rQd0\nHdH8ybEqXqGHqVGl9ZNlWu0XZsr+wfAqITvPZXkF6lpE8S+HnMcAGdSTtjV426Zp\ne3NEEO52K/+HeVPzOiRLkceAIh+HADQygXILZTfdaQKBgHF635UxudHHhG9sj7aC\nI2h1qJCQ/CU22ROJOuM3f9sPVi3RpgI4EBvoY1vsvNBLHOVF90WiJQna3mok5EOS\ntUo79YrkWRPqZb4BVWQqaa+r16NcbSO/+xCWsDIJ7lnehnRWXLsWbRcv99x+RaZu\nPIKIg4uojNxuIH2UlzxxZYJx\n-----END PRIVATE KEY-----" }
+
+fn main() {
+    print(f"p256 {pkcs8_alg_name(&der_of(&pem_p256())[..])}");
+    print(f"ed25519 {pkcs8_alg_name(&der_of(&pem_ed25519())[..])}");
+    print(f"rsa {pkcs8_alg_name(&der_of(&pem_rsa())[..])}");
+}
