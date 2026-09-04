@@ -258,7 +258,7 @@ implement VariantInfo {
         match self.kind {
             VariantKind.Unit => self.name.clone(),
             VariantKind.Tuple => {
-                let bindings = self.fields.iter()
+                let bindings: Text = self.fields.iter()
                     .enumerate()
                     .map(|(i, _)| f"_{i}")
                     .collect()
@@ -266,7 +266,7 @@ implement VariantInfo {
                 f"{self.name}({bindings})"
             }
             VariantKind.Struct => {
-                let bindings = self.fields.iter()
+                let bindings: Text = self.fields.iter()
                     .map(|f| f.name.clone())
                     .collect()
                     .join(", ");
@@ -338,7 +338,7 @@ implement GenericParam {
 
     /// Get declaration syntax
     public fn declaration(&self) -> Text {
-        let mut decl = self.name.clone();
+        let mut decl: Text = self.name.clone();
 
         if !self.bounds.is_empty() {
             decl = f"{decl}: {self.bounds.join(" + ")}";
@@ -524,7 +524,7 @@ implement FunctionInfo {
 
     /// Get function signature as string
     public fn signature(&self) -> Text {
-        let params = self.params.iter()
+        let params: Text = self.params.iter()
             .map(|p| p.declaration())
             .collect()
             .join(", ");
@@ -532,7 +532,7 @@ implement FunctionInfo {
         let mut sig = f"fn {self.name}";
 
         if !self.generics.is_empty() {
-            let gens = self.generics.iter()
+            let gens: Text = self.generics.iter()
                 .map(|g| g.declaration())
                 .collect()
                 .join(", ");
@@ -881,7 +881,7 @@ implement LifetimeParam {
 
     /// Get declaration with bounds
     public fn declaration(&self) -> Text {
-        let base = self.syntax();
+        let base: Text = self.syntax();
         if self.bounds.is_empty() {
             base
         } else {

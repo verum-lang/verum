@@ -269,7 +269,6 @@ core/mem/heap.vr
 core/mem/mod.vr
 core/mem/segment.vr
 core/meta/quote.vr
-core/meta/reflection.vr
 core/meta/token.vr
 core/net/h3/connection.vr
 core/net/h3/qpack/mod.vr
