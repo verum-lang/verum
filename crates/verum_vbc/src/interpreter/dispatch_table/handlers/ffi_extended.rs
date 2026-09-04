@@ -2801,7 +2801,12 @@ pub(super) fn get_platform_errno() -> i32 {
 /// Convert platform-neutral MemProt flags (read=1, write=2, exec=4) to
 /// Windows page protection constants.
 #[cfg(windows)]
-fn memprot_to_win_protect(prot_flags: i32) -> u32 {
+// Visible to the sibling handler modules, like `extract_memprot_flags`
+// beside it: `sys_extended`'s mmap path is the only caller and it lives
+// one module over. Declared private, it broke BOTH Windows targets of
+// the rolling dev release with E0425 and nothing else noticed, because
+// no other platform compiles this item.
+pub(in super::super) fn memprot_to_win_protect(prot_flags: i32) -> u32 {
     let read = prot_flags & 1 != 0;
     let write = prot_flags & 2 != 0;
     let exec = prot_flags & 4 != 0;

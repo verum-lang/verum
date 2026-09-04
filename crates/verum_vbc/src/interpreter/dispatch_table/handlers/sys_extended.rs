@@ -11,6 +11,10 @@ use super::bytecode_io::read_reg;
 use super::envelope::dispatch_enveloped;
 use crate::instruction::{Opcode, SysSubOpcode};
 use super::ffi_extended::{extract_filedesc, extract_mapflags, extract_memprot_flags, get_platform_errno, make_oserror_variant, make_oserror_variant_with_msg, make_result_ok_ptr, make_result_ok_unit};
+// Windows-only: the item itself is `#[cfg(windows)]`, so the import
+// must carry the same gate or every other target fails to resolve it.
+#[cfg(windows)]
+use super::ffi_extended::memprot_to_win_protect;
 use crate::interpreter::error::InterpreterError;
 use crate::value::Value;
 
