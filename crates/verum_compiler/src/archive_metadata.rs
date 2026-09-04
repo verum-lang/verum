@@ -1394,8 +1394,8 @@ fn register_module_metadata(
                     method_keys.push(format!("{}.{}", om, parent_name).into());
                 }
             }
-            for key in method_keys {
-                if let Some(td) = meta.types.get_mut(&key) {
+            for key in &method_keys {
+                if let Some(td) = meta.types.get_mut(key) {
                     if !td.methods.iter().any(|m| m == &simple_method_name) {
                         td.methods.push(simple_method_name.clone());
                     }
@@ -1405,10 +1405,26 @@ fn register_module_metadata(
             // `register_inherent_methods_from_metadata`'s
             // `metadata.functions.get("Text.with_capacity")` finds it.
             // Keep the simple-name slot first-wins for free fns.
-            let qualified_key: Text =
-                format!("{}.{}", parent_name, simple_method_name).into();
-            if !meta.functions.contains_key(&qualified_key) {
-                meta.functions.insert(qualified_key, descriptor.clone());
+            //
+            // BAKE-DUPNAME: register under EVERY parent key, not the bare
+            // type name alone. `core/` declares 113 type names more than
+            // once and 43 of those carry an `implement` block, so a bare
+            // `X.m` slot is first-wins BETWEEN UNRELATED TYPES and the
+            // loser's method simply vanishes from the archive — measured
+            // on `Capability.to_bit`, baked-absent and source-present.
+            // The free-function branch below already solved exactly this
+            // with `join_module_path`; its comment names the case
+            // (core.shell.exec.run vs core.sys.process_ops.run). Methods
+            // were left out of that remedy. Same three keys the types map
+            // uses above: one method fact, EVERY key. `method_keys[0]` is
+            // the bare name, so the old slot is still written first and
+            // this change is purely additive.
+            for key in &method_keys {
+                let qualified_key: Text =
+                    format!("{}.{}", key, simple_method_name).into();
+                if !meta.functions.contains_key(&qualified_key) {
+                    meta.functions.insert(qualified_key, descriptor.clone());
+                }
             }
         } else if !module_path.is_empty() {
             // Free function — register under MODULE-qualified key
