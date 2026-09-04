@@ -405,6 +405,22 @@ jobs:
           scripts/ci/check_a_byte_buffer_crosses_ffi_packed_and_sliced.sh --selftest
           scripts/ci/check_a_byte_buffer_crosses_ffi_packed_and_sliced.sh
 
+      # A disabled test is invisible in every green run: the suite
+      # reports success over a population that excludes it, so an
+      # absence and a pass read alike. 368 `@ignore` attributes in
+      # core-tests/, 336 of them naming no owning task.
+      #
+      # A RATCHET on those 336, not a demand for zero — a gate that
+      # lands red on 336 sites teaches everyone to ignore it, which is
+      # the defect it exists to cure. Removing a baseline line is a
+      # test that acquired an owner; adding one is a decision that
+      # belongs in a commit message.
+      - name: An ignored test names its task
+        timeout-minutes: 2
+        run: |
+          scripts/ci/check_an_ignored_test_names_its_task.sh --selftest
+          scripts/ci/check_an_ignored_test_names_its_task.sh
+
       - name: Doc examples compile
         timeout-minutes: 20
         run: cargo test --locked --doc -p verum_types -p verum_smt -p verum_common -p verum_ast -p verum_vbc -p verum_codegen
