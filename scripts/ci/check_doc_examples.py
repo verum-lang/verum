@@ -90,6 +90,15 @@ BLOCK = re.compile(r"^```verum\n(.*?)^```", re.M | re.S)
 # 12, blaming `core.collections.List`. Hence the controls below, which
 # run on every invocation: two that must resolve, two that must not.
 MOUNT = re.compile(r"^\s*(?:public\s+)?mount\s+(core(?:\.[A-Za-z_][A-Za-z0-9_]*)+)", re.M)
+# Modules the compiler SYNTHESISES — no file under core/, and mounting
+# them compiles. `core.prelude` is the one that matters: 531 files under
+# core-tests/ mount it, `mount core.prelude.{Bool, Int, Maybe, List,
+# Text};` type-checks clean, and an arbitrary absent module in the same
+# position answers `error<E402>`. A file-tree map cannot see it, so
+# without this list the gate reports a legal mount as phantom — it did,
+# and a documentation page was "corrected" on the strength of it before
+# the compiler was asked.
+SYNTHESISED_MODULES = {"core.prelude"}
 CORE = REPO / "core"
 # The four that remain are each documented AS absent on their own page
 # (a `:::caution`, a `:::danger`, or an "illustrative name" comment), so
@@ -175,7 +184,7 @@ def exports(mods, mod: str) -> set[str]:
 
 
 def mount_resolves(mods, path: str) -> bool:
-    if path in mods:
+    if path in SYNTHESISED_MODULES or path in mods:
         return True
     parent, _, leaf = path.rpartition(".")
     return parent in mods and leaf in exports(mods, parent)
