@@ -11,7 +11,7 @@
 // choose correct color profile and by event layer to select mouse protocol.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 4.4
+// Spec: 40-terminal-tui-architecture.md §4.4
 // =============================================================================
 
 @arch_module(

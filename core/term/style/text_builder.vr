@@ -5,7 +5,7 @@
 // construction. Provides bold(), italic(), color-named helpers, etc.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md#16.1
+// Spec: 40-terminal-tui-architecture.md §16.1
 // =============================================================================
 
 @arch_module(

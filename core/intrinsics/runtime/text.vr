@@ -9,7 +9,7 @@
 // For allocation-free byte operations, use memory.vr slice intrinsics.
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

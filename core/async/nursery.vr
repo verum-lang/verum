@@ -11,7 +11,7 @@
 // providing true structured concurrency semantics.
 //
 
-// Spec: docs/improvements.md Section 9 - Structured Concurrency
+// Spec: improvements.md §9 - Structured Concurrency
 //
 
 // ## Overview

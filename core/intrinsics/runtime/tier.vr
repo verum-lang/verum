@@ -11,7 +11,7 @@
 // - Tier 3: AOT compiled (~1ns/op)
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

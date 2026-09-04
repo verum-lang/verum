@@ -46,7 +46,7 @@
 // ```
 //
 
-// Spec: docs/architecture/mimalloc-allocator-plan.md
+// Spec: mimalloc-allocator-plan.md
 // =============================================================================
 
 @arch_module(

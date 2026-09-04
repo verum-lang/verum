@@ -32,7 +32,7 @@
 // ```
 //
 
-// Spec: docs/architecture/math-spec.md Section 6.4 - Internal API
+// Spec: math-spec.md §6.4 - Internal API
 // =============================================================================
 
 @arch_module(

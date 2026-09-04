@@ -5,7 +5,7 @@
 // @tags: errors, exit, two-channel, expected, defect, cause
 // @description: Tests for Two-Channel Error Model
 //
-// Spec: docs/detailed/20-error-handling.md Section 2.5.1-2.5.2 - Two-Channel Error Model
+// Spec: 20-error-handling.md §2.5.1-2.5.2 - Two-Channel Error Model
 // Separates business errors (Expected<E>) from programmer bugs (Defect).
 
 // ============================================================================

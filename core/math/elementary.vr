@@ -48,7 +48,7 @@
 // for use when domain cannot be statically verified.
 //
 
-// Spec: docs/architecture/math-spec.md Section 3
+// Spec: math-spec.md §3
 // =============================================================================
 
 @arch_module(

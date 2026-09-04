@@ -16,7 +16,7 @@
 //
 
 // All FFI dependencies on verum_runtime have been eliminated.
-// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// Spec: new-arch-spec.md §5.4
 //
 
 // =============================================================================

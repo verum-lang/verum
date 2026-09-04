@@ -15,7 +15,7 @@
 // - Windows: QueryPerformanceCounter via kernel32 FFI
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

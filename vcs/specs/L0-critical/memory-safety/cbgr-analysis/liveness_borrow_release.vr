@@ -12,7 +12,7 @@
 /// Key behavior: Borrows are released at the point of last use, not at
 /// lexical scope end. This allows earlier access to the borrowed place.
 ///
-/// Spec: docs/improvements.md Section 1 (Liveness-based Borrow Release)
+/// Spec: improvements.md §1 (Liveness-based Borrow Release)
 /// Impl: crates/verum_cbgr/src/nll_analysis.rs
 
 // ============================================================================

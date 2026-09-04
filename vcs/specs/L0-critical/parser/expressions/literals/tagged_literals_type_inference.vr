@@ -8,7 +8,7 @@
 // Note: Type annotations are demonstrative; actual type inference is tested in Rust unit tests
 // See: crates/verum_types/tests/tagged_literal_type_tests.rs
 // Spec: grammar/verum.ebnf Section 1.5.2.1
-// Spec: docs/detailed/05-syntax-grammar.md - Format Tag Categories
+// Spec: 05-syntax-grammar.md - Format Tag Categories
 
 // ============================================================================
 // SECTION 1: Data Interchange Formats

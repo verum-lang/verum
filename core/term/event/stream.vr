@@ -14,7 +14,7 @@
 // AsyncEventStream wraps EventStream for async iteration via async for.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.3
+// Spec: 40-terminal-tui-architecture.md §5.3
 // =============================================================================
 
 @arch_module(

@@ -5,7 +5,7 @@
 // @tags: errors, backoff, retry, exponential, jitter, constant
 // @description: Tests for Backoff Strategies
 //
-// Spec: docs/detailed/20-error-handling.md Section 2.5.7 - Rich Error Combinators
+// Spec: 20-error-handling.md §2.5.7 - Rich Error Combinators
 // Configurable retry delays for resilient error handling.
 
 // ============================================================================

@@ -6,7 +6,7 @@
 // and color space conversion utilities.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md#6
+// Spec: 40-terminal-tui-architecture.md §6
 // =============================================================================
 
 @arch_module(

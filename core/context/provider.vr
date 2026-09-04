@@ -3,7 +3,7 @@
 // =============================================================================
 // Grammar: provide_stmt = 'provide' context_path ['as' identifier] '='
 //  expression (';' | 'in' block_expr)
-// Spec: docs/detailed/16-context-system.md Section 2
+// Spec: 16-context-system.md §2
 // =============================================================================
 
 @arch_module(

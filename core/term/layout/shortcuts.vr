@@ -5,7 +5,7 @@
 // sidebar+main, centered boxes, equal columns/rows, percentage splits.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md#16.2
+// Spec: 40-terminal-tui-architecture.md §16.2
 // =============================================================================
 
 @arch_module(

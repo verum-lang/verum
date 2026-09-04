@@ -52,7 +52,7 @@
 // - CBGR validation: ~5ns (page-level mode)
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 6
+// Spec: new-arch-spec.md §6
 // =============================================================================
 
 @arch_module(
@@ -1384,7 +1384,7 @@ public fn get_header_from_ptr(ptr: &unsafe Byte) -> &AllocationHeader {
 // - Custom allocators for specialized use cases
 //
 
-// Spec: docs/architecture/new-arch-spec.md Appendix F.3
+// Spec: new-arch-spec.md Appendix F.3
 // =============================================================================
 
 /// Context slot ID for the allocator.

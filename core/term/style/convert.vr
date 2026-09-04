@@ -5,7 +5,7 @@
 // Used by color.vr, profile.vr, and theme.vr.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md#6.1
+// Spec: 40-terminal-tui-architecture.md §6.1
 // =============================================================================
 
 @arch_module(

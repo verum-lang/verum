@@ -8,8 +8,8 @@
 /// Generators have unique interactions with the context system and
 /// thread safety requirements that must be enforced by the type checker.
 /// Spec: grammar/verum.ebnf - fn_keyword, context_clause
-/// Spec: docs/detailed/10-concurrency-model.md Section 12 - Async Generators
-/// Spec: docs/detailed/16-context-system.md
+/// Spec: 10-concurrency-model.md §12 - Async Generators
+/// Spec: 16-context-system.md
 
 // ============================================================================
 // 1. CONTEXT REQUIREMENT PROPAGATION

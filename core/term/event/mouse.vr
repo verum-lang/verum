@@ -10,7 +10,7 @@
 // enable/disable escape sequences for mouse tracking modes.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 5
+// Spec: 40-terminal-tui-architecture.md §5
 // =============================================================================
 
 @arch_module(

@@ -1,8 +1,8 @@
 /// # Error Recovery Strategies
 ///
 
-/// Spec: docs/detailed/20-error-handling.md#3.2
-/// Spec: docs/detailed/26-unified-execution-architecture.md#recovery-strategies
+/// Spec: 20-error-handling.md §3.2
+/// Spec: 26-unified-execution-architecture.md#recovery-strategies
 ///
 
 /// Industrial-grade error recovery infrastructure providing:

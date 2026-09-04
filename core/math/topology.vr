@@ -2,7 +2,7 @@
 // topology.vr - Point-Set and Algebraic Topology
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
-// Spec: docs/detailed/13-formal-proofs.md
+// Spec: 13-formal-proofs.md
 //
 
 // Defines topological spaces, continuous maps, homeomorphisms, compactness,

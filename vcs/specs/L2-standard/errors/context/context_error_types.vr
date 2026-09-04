@@ -6,7 +6,7 @@
 
 /// Tests for typed context errors with throws clause integration.
 /// Per audit1.md Section 4.3.2: ContextError<C> for typed context errors.
-/// Spec: docs/audit1.md - Context Error Types recommendation
+/// Spec: audit1.md - Context Error Types recommendation
 /// Spec: grammar/verum.ebnf Section 2.4 - throws_clause with context
 
 // === Context Error Type Definition ===

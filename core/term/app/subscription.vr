@@ -2,7 +2,7 @@
 // subscription.vr - External message sources for TEA applications
 // =============================================================================
 // Layer: 6 (Application Framework)
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 12 (Subscriptions)
+// Spec: 40-terminal-tui-architecture.md §12 (Subscriptions)
 // =============================================================================
 //
 

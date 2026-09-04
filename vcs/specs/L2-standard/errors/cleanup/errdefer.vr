@@ -9,7 +9,7 @@
 /// errdefer: Only executes when scope exits via error path
 /// defer: Always executes at scope exit (success or error)
 /// Spec: grammar/verum.ebnf Section 2.13 - defer_stmt
-/// Spec: docs/detailed/20-error-handling.md Section 2.7 - The errdefer Pattern
+/// Spec: 20-error-handling.md §2.7 - The errdefer Pattern
 
 // === Types for testing ===
 

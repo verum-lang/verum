@@ -1,7 +1,7 @@
 /// # RuntimeConfig Protocol and Configurations
 ///
 
-/// Spec: docs/architecture/new-arch-spec.md#10-modular-runtime-architecture
+/// Spec: new-arch-spec.md §10-modular-runtime-architecture
 ///
 
 /// Provides pluggable runtime configurations for diverse target platforms:
@@ -271,7 +271,7 @@ implement AsyncExecutor for NoopExecutor {
 /// I/O engine protocol for completion-based or blocking I/O
 ///
 
-/// Spec: docs/architecture/new-arch-spec.md#7-async-runtime-verum-native
+/// Spec: new-arch-spec.md §7-async-runtime-verum-native
 public type RuntimeIoDriver is protocol {
     /// Submit I/O operation
     fn submit(&self, op: IoOp) -> Result<IoHandle, RuntimeIoError>;

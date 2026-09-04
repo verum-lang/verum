@@ -8,7 +8,7 @@
 /// Generator functions (fn*) and async generator functions (async fn*) have specific
 /// type constraints that must be enforced by the type checker.
 /// Spec: grammar/verum.ebnf - fn_keyword, yield_expr, for_await_loop
-/// Spec: docs/detailed/10-concurrency-model.md Section 12 - Async Generators
+/// Spec: 10-concurrency-model.md §12 - Async Generators
 
 // ============================================================================
 // 1. YIELD OUTSIDE GENERATOR CONTEXT

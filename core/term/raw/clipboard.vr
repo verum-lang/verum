@@ -10,7 +10,7 @@
 // Supported by most modern terminals (kitty, iTerm2, foot, wezterm, etc.).
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 11.2
+// Spec: 40-terminal-tui-architecture.md §11.2
 // =============================================================================
 
 @arch_module(

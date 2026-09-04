@@ -2,7 +2,7 @@
 // analysis.vr - Real and Functional Analysis Foundations
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
-// Spec: docs/detailed/13-formal-proofs.md
+// Spec: 13-formal-proofs.md
 //
 
 // Defines sequences, limits, continuity, differentiability, integration,

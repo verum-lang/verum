@@ -12,7 +12,7 @@
 // top-right corner of the screen.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 3
+// Spec: 40-terminal-tui-architecture.md §3
 // =============================================================================
 
 @arch_module(

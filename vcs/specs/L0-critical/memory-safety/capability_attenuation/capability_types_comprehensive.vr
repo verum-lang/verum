@@ -7,7 +7,7 @@
 //
 // Comprehensive Capability Attenuation Tests
 // ==========================================
-// Spec: docs/improvements.md Section 12 - Capability Attenuation as Types
+// Spec: improvements.md §12 - Capability Attenuation as Types
 //
 // This test file provides comprehensive coverage of the capability attenuation
 // feature, including syntax, subtyping, method filtering, and automatic coercion.

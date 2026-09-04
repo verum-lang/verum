@@ -2,7 +2,7 @@
 // context/random.vr — the randomness contract, on its own
 // =============================================================================
 // Layer: 0 (depends on: base)
-// Spec: docs/detailed/16-context-system.md
+// Spec: 16-context-system.md
 // =============================================================================
 //
 // WHY THIS IS NOT IN `context/standard.vr`.

@@ -18,7 +18,7 @@
 // that embeds the compiler).  In a stripped AOT binary with no compiler the
 // engine reports "source compilation unavailable" rather than mis-lowering.
 //
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

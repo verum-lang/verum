@@ -22,7 +22,7 @@
 // clarity and enable compile-time verification of mathematical preconditions.
 //
 
-// Spec: docs/architecture/math-spec.md Section 1
+// Spec: math-spec.md §1
 // =============================================================================
 
 @arch_module(

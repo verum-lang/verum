@@ -36,7 +36,7 @@
 // - `type_name<T>()` → use `T.name` instead
 //
 
-// Spec: docs/detailed/17-meta-system.md
+// Spec: 17-meta-system.md
 // =============================================================================
 
 @arch_module(

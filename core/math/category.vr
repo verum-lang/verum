@@ -2,7 +2,7 @@
 // category.vr - Category Theory Foundations
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
-// Spec: docs/detailed/13-formal-proofs.md
+// Spec: 13-formal-proofs.md
 //
 
 // A comprehensive category theory library defining categories, functors,

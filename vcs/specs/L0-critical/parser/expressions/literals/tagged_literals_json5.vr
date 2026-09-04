@@ -6,7 +6,7 @@
 // JSON5 Relaxed Syntax Tests
 // Tests for json# and json5# with relaxed JSON5-style syntax
 // Spec: grammar/verum.ebnf Section 1.5.2.1 - Format Relaxation
-// Spec: docs/detailed/05-syntax-grammar.md - Format-Specific Relaxation
+// Spec: 05-syntax-grammar.md - Format-Specific Relaxation
 
 // ============================================================================
 // SECTION 1: Unquoted Keys

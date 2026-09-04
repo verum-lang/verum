@@ -11,7 +11,7 @@
 // - Yield type consistency validation
 // - Generic generator type parameters
 // - Return type inference from yield expressions
-// Spec: docs/detailed/10-concurrency-model.md Section 12 - Async Generators
+// Spec: 10-concurrency-model.md §12 - Async Generators
 
 // =============================================================================
 // Type definitions needed for tests

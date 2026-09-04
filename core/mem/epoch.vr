@@ -48,7 +48,7 @@
 // This is done via callbacks registered with the EpochManager.
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 6.5
+// Spec: new-arch-spec.md §6.5
 // =============================================================================
 
 // Import intrinsics as functions

@@ -13,7 +13,7 @@
 // All operations map to LLVM intrinsics for optimal code generation.
 //
 
-// Spec: docs/architecture/math-spec.md Section 1.4
+// Spec: math-spec.md §1.4
 // =============================================================================
 
 @arch_module(

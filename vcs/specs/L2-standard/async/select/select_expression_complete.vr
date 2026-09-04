@@ -6,7 +6,7 @@
 // @timeout: 30000
 
 /// Comprehensive test for select expressions
-/// Spec: docs/detailed/05-syntax-grammar.md Section 2.12.1
+/// Spec: 05-syntax-grammar.md §2.12.1
 /// Grammar: grammar/verum.ebnf v2.9 - select_expr
 
 // ============================================================================

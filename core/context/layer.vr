@@ -4,7 +4,7 @@
 // Grammar: layer_def = visibility 'layer' identifier layer_body
 //  layer_body = '{' { provide_stmt } '}' | '=' layer_expr ';'
 //  layer_expr = identifier { '+' identifier }
-// Spec: docs/detailed/16-context-system.md
+// Spec: 16-context-system.md
 // =============================================================================
 
 @arch_module(

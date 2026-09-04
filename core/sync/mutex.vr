@@ -15,7 +15,7 @@
 // - Contended: ~1-10μs (OS-level sleep, no CPU waste)
 //
 
-// Spec: docs/audit1.md Section 11.5
+// Spec: audit1.md §11.5
 //
 
 // =============================================================================

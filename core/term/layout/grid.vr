@@ -21,7 +21,7 @@
 // ```
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 8
+// Spec: 40-terminal-tui-architecture.md §8
 // =============================================================================
 
 @arch_module(

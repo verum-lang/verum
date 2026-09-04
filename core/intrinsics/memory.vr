@@ -27,7 +27,7 @@
 // Care must be taken to ensure memory validity, alignment, and lifetime.
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

@@ -21,7 +21,7 @@
 // - Enumeration: gpu_enumerate_cuda, gpu_enumerate_metal, gpu_enumerate_rocm
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

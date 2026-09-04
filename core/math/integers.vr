@@ -20,7 +20,7 @@
 // This module provides all three for interoperability.
 //
 
-// Spec: docs/architecture/math-spec.md Section 1.2
+// Spec: math-spec.md §1.2
 // =============================================================================
 
 @arch_module(

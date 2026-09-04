@@ -5,7 +5,7 @@
 // @tags: supervision, restart-intensity, erlang, otp, fault-tolerance
 // @description: Tests for Restart Intensity
 //
-// Spec: docs/detailed/20-error-handling.md Section 3.1.5.1 - RestartIntensity
+// Spec: 20-error-handling.md §3.1.5.1 - RestartIntensity
 // Prevents restart storms by limiting restart frequency.
 //
 // Note: Types are prefixed with Mock to avoid shadowing stdlib types

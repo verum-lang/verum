@@ -10,7 +10,7 @@
 /// This test verifies that the CBGR lifetime analyzer correctly
 /// rejects code where a reference would outlive the data it points to.
 ///
-/// Spec: docs/detailed/cbgr-implementation.md#lifetime-analysis
+/// Spec: cbgr-implementation.md#lifetime-analysis
 
 fn create_dangling() -> &Int {
     let local = 42;

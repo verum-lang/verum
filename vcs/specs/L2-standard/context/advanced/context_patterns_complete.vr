@@ -6,7 +6,7 @@
 // @timeout: 30000
 
 /// Comprehensive test for advanced context patterns (16-context-system.md Section 2.11 - Advanced Context Patterns)
-/// Spec: docs/detailed/16-context-system.md Section 2.11
+/// Spec: 16-context-system.md §2.11
 /// Grammar: grammar/verum.ebnf v2.12 - extended_context_list
 
 // ============================================================================

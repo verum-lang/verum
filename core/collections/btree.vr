@@ -1711,7 +1711,7 @@ implement<K: Ord, V> BTreeMapIter<K, V> {
     ///
 
     /// This is O(log n) instead of O(n) for range queries.
-    /// Spec: docs/audit1.md Section 13.2 (BTreeMap range optimization)
+    /// Spec: audit1.md §13.2 (BTreeMap range optimization)
     fn seek_from(map: &BTreeMap<K, V>, start_key: &K) -> BTreeMapIter<K, V> {
         let mut iter = BTreeMapIter {
             stack: List.new(),
@@ -1911,7 +1911,7 @@ implement<K: Ord, V> IntoIterator for BTreeMapValues<K, V> {
 /// Uses binary search to seek to range start instead of scanning from beginning.
 ///
 
-/// Spec: docs/audit1.md Section 13.2 (BTreeMap range optimization)
+/// Spec: audit1.md §13.2 (BTreeMap range optimization)
 public type BTreeMapRange<K: Ord, V> is {
     iter: BTreeMapIter<K, V>,
     /// Start bound for filtering (only used when start is exclusive)

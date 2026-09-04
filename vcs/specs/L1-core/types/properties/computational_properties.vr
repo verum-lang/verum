@@ -7,7 +7,7 @@
 /// Tests for computational property inference system.
 /// Computational properties track compile-time side effects and runtime behavior.
 /// Unlike algebraic effects (which Verum rejects), these are zero-cost annotations.
-/// Spec: docs/detailed/03-type-system.md Section 10.2
+/// Spec: 03-type-system.md §10.2
 /// Grammar: grammar/verum.ebnf Section 2.4 - function_modifiers
 
 // ============================================================================

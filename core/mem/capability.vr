@@ -25,7 +25,7 @@
 // - NoEscape: Reference cannot escape current scope
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 6.3
+// Spec: new-arch-spec.md §6.3
 // =============================================================================
 
 // =============================================================================

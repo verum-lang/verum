@@ -64,7 +64,7 @@
 // Deallocation checks all threads' hazard arrays before reclaiming memory.
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 6.4
+// Spec: new-arch-spec.md §6.4
 // =============================================================================
 
 // Import intrinsics as functions

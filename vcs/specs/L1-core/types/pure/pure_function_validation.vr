@@ -28,7 +28,7 @@
 // 6. Pure context group equivalence: `pure fn` vs `using Pure`
 //
 // Grammar v2.12: grammar/verum.ebnf Section 2.4 - function_modifiers
-// Spec: docs/detailed/16-context-system.md Section 2.11 Section 6
+// Spec: 16-context-system.md §2.11 Section 6
 
 // ============================================================================
 // Context Definitions for Testing

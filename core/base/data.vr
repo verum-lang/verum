@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 0 (Core)
 // Dependencies: maybe.vr, result.vr, primitives.vr
-// Spec: docs/improvements.md Section 13.1 - Data Type
+// Spec: improvements.md §13.1 - Data Type
 // =============================================================================
 //
 

@@ -27,7 +27,7 @@
 // - INT8/INT4 Quantization: 2-4x memory reduction
 //
 
-// Spec: docs/architecture/math-spec.md#45-48
+// Spec: math-spec.md §45-48
 // =============================================================================
 
 @arch_module(

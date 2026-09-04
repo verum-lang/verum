@@ -19,7 +19,7 @@
 // - Bit manipulation: bswap, bitreverse
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

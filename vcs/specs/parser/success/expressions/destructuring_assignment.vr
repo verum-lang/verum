@@ -2,7 +2,7 @@
 // @level: L0
 // @tags: parser, expressions, destructuring, assignment, unified-destructuring
 // @description: Comprehensive tests for destructuring assignment expressions
-// Spec: docs/architecture/new-features.md - Cluster 1: Unified Destructuring System
+// Spec: new-features.md - Cluster 1: Unified Destructuring System
 
 // =============================================================================
 // Tuple Destructuring Assignment

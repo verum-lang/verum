@@ -16,7 +16,7 @@
 // freestanding/kernel environments with careful attention to ABI requirements.
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

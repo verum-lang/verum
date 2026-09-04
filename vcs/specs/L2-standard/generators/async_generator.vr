@@ -7,7 +7,7 @@
 //
 // Comprehensive integration tests for async generators (async fn*)
 // Tests interaction with context system, error handling (errdefer, throws), and generator pipelines
-// Spec: docs/detailed/10-concurrency-model.md Section 12 - Async Generators
+// Spec: 10-concurrency-model.md §12 - Async Generators
 
 // =============================================================================
 // Section 1: Context Definitions for Testing

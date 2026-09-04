@@ -11,7 +11,7 @@
 // (a specific rectangular area).
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 7.3
+// Spec: 40-terminal-tui-architecture.md §7.3
 // =============================================================================
 
 @arch_module(

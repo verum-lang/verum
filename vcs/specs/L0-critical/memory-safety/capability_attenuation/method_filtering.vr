@@ -7,7 +7,7 @@
 //
 // Capability-Based Method Filtering Tests
 // =======================================
-// Spec: docs/improvements.md Section 12 - Capability Attenuation as Types
+// Spec: improvements.md §12 - Capability Attenuation as Types
 //
 // Tests that methods are filtered based on available capabilities.
 // Method capability requirements are inferred from naming conventions:

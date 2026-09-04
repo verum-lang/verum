@@ -30,7 +30,7 @@
 // ```
 //
 
-// Spec: docs/architecture/math-spec.md Section 1.1
+// Spec: math-spec.md §1.1
 // =============================================================================
 
 @arch_module(

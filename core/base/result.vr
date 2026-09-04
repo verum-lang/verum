@@ -568,7 +568,7 @@ implement<T, E: Default> FromResidual<Maybe<Never>> for Result<T, E> {
 
 // =============================================================================
 // Advanced Combinators - Section 16 Error Handling Evolution
-// Spec: docs/improvements.md Section 16 - Error Handling Evolution
+// Spec: improvements.md §16 - Error Handling Evolution
 // =============================================================================
 
 implement<T, E> Result<T, E> {
@@ -759,7 +759,7 @@ implement<T, E> Result<T, E> {
 
 // =============================================================================
 // Context Error - Error with context chain
-// Spec: docs/improvements.md Section 16 - Cause<E> lossless error chain
+// Spec: improvements.md §16 - Cause<E> lossless error chain
 // =============================================================================
 
 /// Error wrapped with additional context.
@@ -822,7 +822,7 @@ implement<E: Clone> Clone for ResultContextError<E> {
 
 // =============================================================================
 // Exit Type - Two-channel error model
-// Spec: docs/improvements.md Section 16 - Exit<E, A> two-channel model
+// Spec: improvements.md §16 - Exit<E, A> two-channel model
 // =============================================================================
 
 /// Two-channel exit result: Expected errors vs Defects (bugs).
@@ -998,7 +998,7 @@ implement Clone for DefectInfo {
 
 // =============================================================================
 // Cause Type - Lossless error chain
-// Spec: docs/improvements.md Section 16 - Cause<E> lossless error chain
+// Spec: improvements.md §16 - Cause<E> lossless error chain
 // =============================================================================
 
 /// Lossless error chain preserving full error history.
@@ -1150,7 +1150,7 @@ implement<E: Clone> Clone for Cause<E> {
 
 // =============================================================================
 // Validated Type - Error accumulation
-// Spec: docs/improvements.md Section 16 - Validated<E, A>
+// Spec: improvements.md §16 - Validated<E, A>
 // =============================================================================
 
 /// Validated result that accumulates all errors instead of short-circuiting.

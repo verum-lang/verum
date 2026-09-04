@@ -2,7 +2,7 @@
 // context/scope.vr — DI Scope Types for Level 1 Static Injection
 // =============================================================================
 // Grammar: injection_scope = 'Scope' '.' ('Singleton' | 'Request' | 'Transient')
-// Spec: docs/detailed/16-context-system.md Section 1A
+// Spec: 16-context-system.md §1A
 // =============================================================================
 
 @arch_module(

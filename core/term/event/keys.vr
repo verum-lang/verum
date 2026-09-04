@@ -9,7 +9,7 @@
 // Covers all standard keys, function keys F1-F35, and modifier combinations.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.1
+// Spec: 40-terminal-tui-architecture.md §5.1
 // =============================================================================
 
 @arch_module(

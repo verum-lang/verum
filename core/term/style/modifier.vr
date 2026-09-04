@@ -6,7 +6,7 @@
 // difference).
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md#6.2
+// Spec: 40-terminal-tui-architecture.md §6.2
 // =============================================================================
 
 @arch_module(

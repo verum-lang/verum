@@ -6,7 +6,7 @@
 // Tagged Literal Interpolation Tests
 // Tests for ${expr} interpolation syntax in tagged literals
 // Spec: grammar/verum.ebnf Section 1.5.2.1 - Tagged Interpolation
-// Spec: docs/detailed/02-core-semantics.md Section 2.4.4
+// Spec: 02-core-semantics.md §2.4.4
 
 // ============================================================================
 // SECTION 1: Basic Interpolation

@@ -6,7 +6,7 @@
 //
 // Parser tests for 'for await' loop syntax
 // Verifies correct parsing of async iterator consumption per grammar/verum.ebnf v2.10
-// Spec: docs/detailed/10-concurrency-model.md Section 12.2 - for await Loop
+// Spec: 10-concurrency-model.md §12.2 - for await Loop
 //
 // Grammar Reference:
 // for_await_loop = 'for' , 'await' , pattern , 'in' , expression

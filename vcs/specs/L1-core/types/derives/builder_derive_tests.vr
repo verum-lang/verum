@@ -6,7 +6,7 @@
 // @expect: pass
 //
 // Tests for @builder derive macro.
-// Spec: docs/improvements.md Section 10 - Builder Pattern as First-Class Feature
+// Spec: improvements.md §10 - Builder Pattern as First-Class Feature
 
 // =============================================================================
 // TEST 1: Basic Builder with Required and Optional Fields

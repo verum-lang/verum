@@ -6,7 +6,7 @@
 // justify-content, align-items, and align-content.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md#8.3
+// Spec: 40-terminal-tui-architecture.md §8.3
 // =============================================================================
 
 @arch_module(

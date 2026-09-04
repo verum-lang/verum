@@ -10,7 +10,7 @@
 /// Types can be queried for their metadata using the T.property syntax.
 ///
 /// Spec: grammar/verum.ebnf Section 2.17 - Type Properties
-/// Spec: docs/detailed/05-syntax-grammar.md Section 2.17
+/// Spec: 05-syntax-grammar.md §2.17
 
 // ============================================================================
 // Type Property Definitions

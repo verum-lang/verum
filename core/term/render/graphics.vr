@@ -11,7 +11,7 @@
 // a Unicode Braille fallback for terminals without graphics support.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 11.1
+// Spec: 40-terminal-tui-architecture.md §11.1
 // =============================================================================
 
 @arch_module(

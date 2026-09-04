@@ -19,7 +19,7 @@
 // - rotl/rotr: ROL/ROR on x86, ROR on ARM
 //
 
-// Spec: docs/architecture/math-spec.md Section 1.3
+// Spec: math-spec.md §1.3
 // =============================================================================
 
 @arch_module(

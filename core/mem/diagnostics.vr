@@ -36,7 +36,7 @@
 // and tracing/metrics into a single observability surface.
 //
 
-// Spec: docs/architecture/observability.md (TODO)
+// Spec: observability.md (TODO)
 // =============================================================================
 
 @arch_module(

@@ -10,7 +10,7 @@
 //   protocol_type = 'type' , identifier , [ type_params ] , [ ':' , type_bounds ]
 //                 , [ where_clause ] , [ default_type ] , ';' ;
 //
-// Spec: docs/detailed/18-advanced-protocols.md Section 2.18.8
+// Spec: 18-advanced-protocols.md §2.18.8
 
 // ============================================================================
 // Basic default associated type

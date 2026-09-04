@@ -24,7 +24,7 @@
 // that avoid catastrophic cancellation for small arguments.
 //
 
-// Spec: docs/architecture/math-spec.md Section 3.3
+// Spec: math-spec.md §3.3
 // =============================================================================
 
 @arch_module(

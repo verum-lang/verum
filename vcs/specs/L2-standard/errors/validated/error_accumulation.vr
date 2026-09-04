@@ -5,7 +5,7 @@
 // @tags: errors, validated, accumulation, validation, applicative
 // @description: Tests for Validated<E, A> error accumulation
 //
-// Spec: docs/detailed/20-error-handling.md Section 2.5.8 - Error Accumulation (Validated Type)
+// Spec: 20-error-handling.md §2.5.8 - Error Accumulation (Validated Type)
 // Unlike Result which short-circuits on first error, Validated collects ALL errors.
 
 // ============================================================================

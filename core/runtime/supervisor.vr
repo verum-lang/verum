@@ -1,7 +1,7 @@
 /// # Erlang/OTP-Style Supervision Trees
 ///
 
-/// Spec: docs/detailed/20-error-handling.md#3.1
+/// Spec: 20-error-handling.md §3.1
 ///
 
 /// Production-grade fault-tolerance infrastructure with hierarchical process supervision.
@@ -134,7 +134,7 @@ implement ChildId {
 /// Supervision strategy determines how failures are handled
 ///
 
-/// Spec: docs/detailed/20-error-handling.md#3.1 (Three Supervision Strategies)
+/// Spec: 20-error-handling.md §3.1 (Three Supervision Strategies)
 @repr(UInt8)
 public type SupervisionStrategy is
     /// Restart only the failed child
@@ -297,7 +297,7 @@ implement ChildStatus {
 /// Child specification for supervision
 ///
 
-/// Spec: docs/detailed/20-error-handling.md#3.1 (Core Type Definitions)
+/// Spec: 20-error-handling.md §3.1 (Core Type Definitions)
 public type ChildSpec is {
     /// Human-readable identifier for this child
     name: Text,
@@ -650,7 +650,7 @@ implement EscalationReason {
 /// Shutdown strategy for child termination
 ///
 
-/// Spec: docs/detailed/20-error-handling.md#3.1 (ShutdownStrategy)
+/// Spec: 20-error-handling.md §3.1 (ShutdownStrategy)
 public type ShutdownStrategy is
     /// Graceful: Send cancel signal, wait for timeout, then force kill
     | Graceful { timeout_ms: UInt32 }

@@ -6,7 +6,7 @@
 // auto-detection via OSC 11 background color query.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md#6.3
+// Spec: 40-terminal-tui-architecture.md §6.3
 // =============================================================================
 
 @arch_module(

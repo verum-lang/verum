@@ -2,7 +2,7 @@
 // context/standard.vr - Standard Context Type Definitions
 // =============================================================================
 // Layer: 3 (depends on: base, collections, io, time)
-// Spec: docs/detailed/16-context-system.md
+// Spec: 16-context-system.md
 // =============================================================================
 //
 

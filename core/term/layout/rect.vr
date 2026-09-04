@@ -6,7 +6,7 @@
 // Position is a simple (x, y) point.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md#8.1
+// Spec: 40-terminal-tui-architecture.md §8.1
 // =============================================================================
 
 @arch_module(

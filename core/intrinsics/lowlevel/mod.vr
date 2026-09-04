@@ -30,7 +30,7 @@
 // - kernel: Platform entry points, naked functions
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

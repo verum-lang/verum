@@ -10,7 +10,7 @@
 /// These tests verify move semantics for heap-allocated and non-Copy types.
 /// Using arrays to demonstrate ownership transfer.
 ///
-/// Spec: docs/detailed/04-memory-model.md
+/// Spec: 04-memory-model.md
 
 // ============================================================================
 // TEST 1: Container moves (simulated with struct containing arrays)

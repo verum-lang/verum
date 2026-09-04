@@ -29,7 +29,7 @@
 // - GradientAccumulation: Micro-batching support
 //
 
-// Spec: docs/architecture/math-spec.md Part VII (L6)
+// Spec: math-spec.md Part VII (L6)
 // =============================================================================
 
 @arch_module(

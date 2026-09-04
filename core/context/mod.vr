@@ -2,7 +2,7 @@
 // context/mod.vr — Context System Standard Library
 // =============================================================================
 // Layer: 3 (depends on: base, collections, runtime)
-// Spec: docs/detailed/16-context-system.md
+// Spec: 16-context-system.md
 // Grammar: verum.ebnf lines 869-921 (context_def, context_clause, etc.)
 // =============================================================================
 //

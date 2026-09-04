@@ -29,7 +29,7 @@
 // - Maximum internal fragmentation: ~12.5%
 //
 
-// Spec: docs/architecture/mimalloc-allocator-plan.md
+// Spec: mimalloc-allocator-plan.md
 // =============================================================================
 
 // Import intrinsics as functions

@@ -5,7 +5,7 @@
 // @tags: errors, combinators, retry, fold, tap, timeout, advanced
 // @description: Tests for rich error combinators
 //
-// Spec: docs/detailed/20-error-handling.md Section 2.5.7 - Rich Error Combinators
+// Spec: 20-error-handling.md §2.5.7 - Rich Error Combinators
 // These combinators provide declarative error handling patterns.
 
 // ============================================================================

@@ -13,7 +13,7 @@
 // VBC Opcode: SyscallLinux (0xE0)
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

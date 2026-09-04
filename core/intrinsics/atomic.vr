@@ -30,7 +30,7 @@
 // - Fences: atomic_fence, compiler_fence
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

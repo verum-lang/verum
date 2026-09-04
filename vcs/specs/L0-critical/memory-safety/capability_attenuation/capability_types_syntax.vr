@@ -7,7 +7,7 @@
 //
 // Capability Type Syntax Tests
 // =============================
-// Spec: docs/improvements.md Section 12 - Capability Attenuation as Types
+// Spec: improvements.md §12 - Capability Attenuation as Types
 //
 // Tests parsing of capability-restricted type syntax: Type with [Caps]
 

@@ -1206,7 +1206,7 @@ implement<T> [T] {
 ///
 
 /// Supports double-ended iteration via `next()` and `next_back()`.
-/// Spec: docs/audit1.md Section 13.2 (Slice reverse iter)
+/// Spec: audit1.md §13.2 (Slice reverse iter)
 public type SliceIter<T> is {
     slice: &[T],
     /// Index of next element for forward iteration

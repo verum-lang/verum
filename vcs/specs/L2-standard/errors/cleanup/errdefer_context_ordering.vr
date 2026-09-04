@@ -12,7 +12,7 @@
 /// - LIFO order must be maintained
 /// - errdefer must be able to use context if declared after provide
 /// Spec: grammar/verum.ebnf Section 2.13 - defer_stmt (errdefer)
-/// Spec: docs/audit1.md - errdefer + Context Cleanup Priority
+/// Spec: audit1.md - errdefer + Context Cleanup Priority
 
 // === Context Definitions ===
 

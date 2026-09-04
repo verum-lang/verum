@@ -22,7 +22,7 @@
 // Each layer is fully self-contained — use Layer 0 without Layer 6.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md
+// Spec: 40-terminal-tui-architecture.md
 // =============================================================================
 
 @arch_module(

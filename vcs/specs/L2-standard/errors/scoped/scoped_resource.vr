@@ -5,7 +5,7 @@
 // @tags: errors, scoped, resource, raii, cleanup, composition
 // @description: Tests for Scoped Resource Safety
 //
-// Spec: docs/detailed/20-error-handling.md Section 2.5.10 - Scoped Resource Safety
+// Spec: 20-error-handling.md §2.5.10 - Scoped Resource Safety
 // Resources often need to be composed with guaranteed cleanup.
 
 // ============================================================================
@@ -155,7 +155,7 @@ implement Transaction {
 // ============================================================================
 
 /// Scoped resource with guaranteed cleanup
-/// Spec: docs/detailed/20-error-handling.md Section 2.5.10
+/// Spec: 20-error-handling.md §2.5.10
 type Scoped<R, E> is {
     acquire: fn() -> Result<R, E>,
     release: fn(&mut R) -> (),

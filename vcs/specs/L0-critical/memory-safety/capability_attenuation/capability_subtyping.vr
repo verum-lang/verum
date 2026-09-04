@@ -7,7 +7,7 @@
 //
 // Capability Subtyping Tests
 // ==========================
-// Spec: docs/improvements.md Section 12 - Capability Attenuation as Types
+// Spec: improvements.md §12 - Capability Attenuation as Types
 //
 // Tests subtyping rules for capability-restricted types:
 // - T with [A, B, C] <: T with [A, B] (more capabilities is subtype)

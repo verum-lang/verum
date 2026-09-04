@@ -77,7 +77,7 @@
 // ```
 //
 
-// Spec: docs/architecture/math-spec.md#part-vi-gpu-compute
+// Spec: math-spec.md#part-vi-gpu-compute
 // =============================================================================
 
 @arch_module(

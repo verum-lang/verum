@@ -12,7 +12,7 @@
 // and terminal size queries via ioctl(TIOCGWINSZ).
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 4.5
+// Spec: 40-terminal-tui-architecture.md §4.5
 // =============================================================================
 
 @cfg(not(target_os = "windows"))

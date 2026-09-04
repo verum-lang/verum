@@ -27,7 +27,7 @@
 // - MPI: DistributedMessage Passing Interface
 //
 
-// Spec: docs/architecture/math-spec.md#41-44
+// Spec: math-spec.md §41-44
 // =============================================================================
 
 @arch_module(

@@ -44,7 +44,7 @@
 // - Trait objects: `&dyn Protocol`
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 6.2
+// Spec: new-arch-spec.md §6.2
 // =============================================================================
 
 @arch_module(

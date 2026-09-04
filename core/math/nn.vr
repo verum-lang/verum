@@ -30,7 +30,7 @@
 // - ComputeDevice: Device placement
 //
 
-// Spec: docs/architecture/math-spec.md Part VIII (L7)
+// Spec: math-spec.md Part VIII (L7)
 // =============================================================================
 
 @arch_module(

@@ -453,7 +453,7 @@ public type StreamExt is protocol extends Stream {
 
     // =========================================================================
     // Backpressure & Flow Control Methods
-    // Spec: docs/improvements.md Section 17.4
+    // Spec: improvements.md §17.4
     // =========================================================================
 
     /// Buffer items with bounded capacity for backpressure control.
@@ -1989,7 +1989,7 @@ implement<S: Stream, P: StreamProduct<S.Item>> Future for ProductStream<S, P> {
 
 // =============================================================================
 // Backpressure & Flow Control Stream Adapters
-// Spec: docs/improvements.md Section 17.4
+// Spec: improvements.md §17.4
 // =============================================================================
 
 /// Buffered stream with bounded capacity for backpressure control.

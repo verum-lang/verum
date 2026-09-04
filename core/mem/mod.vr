@@ -55,7 +55,7 @@
 // - Reference overhead: 16 bytes (ThinRef) or 32 bytes (FatRef)
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 6
+// Spec: new-arch-spec.md §6
 // =============================================================================
 
 @arch_module(

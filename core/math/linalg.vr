@@ -30,7 +30,7 @@
 // - StaticMatrix<T, M, N>: Static matrix with compile-time dimensions M×N
 //
 
-// Spec: docs/architecture/math-spec.md Section 7-8
+// Spec: math-spec.md §7-8
 // =============================================================================
 
 @arch_module(

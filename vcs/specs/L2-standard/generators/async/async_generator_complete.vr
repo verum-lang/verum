@@ -23,7 +23,7 @@ implement FileHandle {
 }
 
 /// Comprehensive test for async generators
-/// Spec: docs/detailed/10-concurrency-model.md Section 12 - Async Generators
+/// Spec: 10-concurrency-model.md §12 - Async Generators
 /// Grammar: grammar/verum.ebnf v2.10 - fn_keyword, for_await_loop
 
 // ============================================================================

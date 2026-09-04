@@ -9,7 +9,7 @@
 // VBC Opcodes: Spawn (0xA0), Await (0xA1), IoSubmit (0xE7), IoPoll (0xE8)
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

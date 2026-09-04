@@ -39,7 +39,7 @@
 // ```
 //
 
-// Spec: docs/architecture/math-spec.md Section 6.3 - Advanced API
+// Spec: math-spec.md §6.3 - Advanced API
 // =============================================================================
 
 @arch_module(

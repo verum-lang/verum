@@ -1,7 +1,7 @@
 /// # Lock-Free Work-Stealing Task Queue
 ///
 
-/// Spec: docs/detailed/10-concurrency-model.md
+/// Spec: 10-concurrency-model.md
 ///
 
 /// Implements a Chase-Lev work-stealing deque for efficient load balancing

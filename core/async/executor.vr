@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 4 (Async)
 // Dependencies: core, collections, sync, async/future, async/waker, async/task
-// Spec: docs/architecture/new-arch-spec.md Section 7 (Async AsyncRuntime)
+// Spec: new-arch-spec.md §7 (Async AsyncRuntime)
 // =============================================================================
 //
 

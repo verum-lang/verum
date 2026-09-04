@@ -8,7 +8,7 @@
 // Result types. They maintain referential transparency while still being
 // able to signal and propagate errors.
 //
-// Spec: docs/detailed/20-error-handling.md Part I.5.4
+// Spec: 20-error-handling.md Part I.5.4
 // Grammar: grammar/verum.ebnf Section 2.4 (function_modifiers)
 //
 // Key points:

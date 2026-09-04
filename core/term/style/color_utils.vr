@@ -5,7 +5,7 @@
 // that wrap the core Rgb type with convenient one-liner APIs.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md#16.3
+// Spec: 40-terminal-tui-architecture.md §16.3
 // =============================================================================
 
 @arch_module(

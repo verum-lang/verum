@@ -2,7 +2,7 @@
 // command.vr - Command: out-going side effects for TEA applications
 // =============================================================================
 // Layer: 6 (Application Framework)
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 12 (Commands)
+// Spec: 40-terminal-tui-architecture.md §12 (Commands)
 // =============================================================================
 //
 

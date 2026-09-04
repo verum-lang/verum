@@ -32,7 +32,7 @@
 // - Random: PRNG for random tensors
 //
 
-// Spec: docs/architecture/math-spec.md Part V (L4)
+// Spec: math-spec.md Part V (L4)
 // =============================================================================
 
 @arch_module(

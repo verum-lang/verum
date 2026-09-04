@@ -6,7 +6,7 @@
 // @expect: pass
 //
 // Generator State Machine Tests
-// Spec: docs/improvements.md Section 17.5
+// Spec: improvements.md §17.5
 //
 // This test suite verifies the generator state machine implementation:
 // - Generator creation and initialization

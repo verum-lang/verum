@@ -28,7 +28,7 @@
 // 3. Linear-time complexity for long sequences
 //
 
-// Spec: docs/architecture/math-spec.md#38
+// Spec: math-spec.md §38
 // =============================================================================
 
 @arch_module(

@@ -18,7 +18,7 @@
 // ```
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 11.3
+// Spec: 40-terminal-tui-architecture.md §11.3
 // =============================================================================
 
 @arch_module(

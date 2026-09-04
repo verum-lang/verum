@@ -25,7 +25,7 @@
 // - Utility: tensor_clone, tensor_cast, tensor_contiguous, tensor_get_scalar
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

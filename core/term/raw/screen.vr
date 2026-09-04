@@ -11,7 +11,7 @@
 // independent of PosixTerminal/WindowsTerminal instances.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 4
+// Spec: 40-terminal-tui-architecture.md §4
 // =============================================================================
 
 @arch_module(

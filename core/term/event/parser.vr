@@ -19,7 +19,7 @@
 // All 9 states of the parser DFA are defined here.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.2
+// Spec: 40-terminal-tui-architecture.md §5.2
 // =============================================================================
 
 @arch_module(

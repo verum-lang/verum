@@ -5,7 +5,7 @@
 // @tags: errors, classification, error-kind, expected, unexpected, fatal
 // @description: Tests for Error Kind Classification
 //
-// Spec: docs/detailed/20-error-handling.md Section 2.5.3 - Error Kind Classification
+// Spec: 20-error-handling.md §2.5.3 - Error Kind Classification
 // Classifies errors by handling strategy: Expected (inline), Unexpected (supervisor), Fatal (terminate).
 
 // ============================================================================

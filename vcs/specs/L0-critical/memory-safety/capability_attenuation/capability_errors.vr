@@ -7,7 +7,7 @@
 //
 // Capability Error Tests (Negative Tests)
 // =======================================
-// Spec: docs/improvements.md Section 12 - Capability Attenuation as Types
+// Spec: improvements.md §12 - Capability Attenuation as Types
 //
 // These tests verify that the compiler correctly rejects invalid capability operations.
 // Each test case should produce a compile-time error.

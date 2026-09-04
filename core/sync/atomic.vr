@@ -28,7 +28,7 @@
 // - Windows: WaitForSingleObject via sys/windows/thread.vr
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// Spec: new-arch-spec.md §5.4
 // =============================================================================
 
 @arch_module(
@@ -1216,7 +1216,7 @@ const FUTEX_LOCKED_CONTENDED: Int = 2;
 // - Contended: ~1-10μs (much better than spinlock's CPU waste)
 //
 
-// Spec: docs/audit1.md Section 11.5
+// Spec: audit1.md §11.5
 public type FutexLock is {
     state: AtomicInt,
 };

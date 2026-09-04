@@ -1,7 +1,7 @@
 /// # Stack-Based Allocators for No-Heap Environments
 ///
 
-/// Spec: docs/architecture/new-arch-spec.md#embedded-support
+/// Spec: new-arch-spec.md#embedded-support
 ///
 
 /// Provides memory allocation strategies for environments without heap support:

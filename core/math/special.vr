@@ -19,7 +19,7 @@
 // Chebyshev for Bessel) achieving < 1 ULP accuracy in most cases.
 //
 
-// Spec: docs/architecture/math-spec.md Section 4
+// Spec: math-spec.md §4
 // =============================================================================
 
 @arch_module(

@@ -25,7 +25,7 @@
 // callbacks, sandboxing, a shared World, named-function calls, and a zero-copy
 // linked Session are all wired.
 //
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

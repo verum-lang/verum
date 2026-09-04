@@ -3856,7 +3856,7 @@ implement<T: Clone, F: fn(&T) -> Maybe<T>> Iterator for Successors<T, F> {
 
 // =============================================================================
 // Transducers - Composable Algorithmic Transformations
-// Spec: docs/improvements.md Section 17.3
+// Spec: improvements.md §17.3
 // =============================================================================
 //
 

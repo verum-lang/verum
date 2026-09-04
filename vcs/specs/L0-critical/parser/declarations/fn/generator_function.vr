@@ -6,7 +6,7 @@
 //
 // Parser tests for generator function declarations (fn* and async fn*)
 // Verifies correct parsing of generator syntax per grammar/verum.ebnf v2.10
-// Spec: docs/detailed/10-concurrency-model.md Section 12 - Async Generators
+// Spec: 10-concurrency-model.md §12 - Async Generators
 
 // =============================================================================
 // Section 1: Basic Sync Generator Declarations

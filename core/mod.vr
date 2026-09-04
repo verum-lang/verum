@@ -41,7 +41,7 @@
 // - Time: Native platform syscalls (sys/{linux,darwin,windows}/time.vr)
 //
 
-// Spec: docs/architecture/new-arch-spec.md
+// Spec: new-arch-spec.md
 //
 
 // # Usage
@@ -159,7 +159,7 @@ public module money;
 // Layer 2: Linear (vectors, matrices, BLAS, decompositions)
 // Layer 3: Analysis (differentiation, integration, ODEs, optimization)
 // Provides: sin, cos, exp, log, sqrt, Matrix, Vector, solve, etc.
-// Spec: docs/architecture/math-spec.md
+// Spec: math-spec.md
 public module math;
 
 // =============================================================================
@@ -183,7 +183,7 @@ public module collections;
 // Context system: DI scope types, error types, provider utilities.
 // Level 1 (@injectable/@inject): compile-time static DI, 0ns overhead.
 // Level 2 (provide/using): runtime DI via task-local storage, ~5-30ns.
-// Spec: docs/detailed/16-context-system.md
+// Spec: 16-context-system.md
 public module context;
 
 // =============================================================================
@@ -238,7 +238,7 @@ public module signal;
 // Terminal I/O and TUI framework: raw terminal, events, styles, rendering,
 // layout engine, widget library, application framework (Elm Architecture).
 // 7-layer architecture from raw termios to full TUI apps.
-// Spec: docs/detailed/40-terminal-tui-architecture.md
+// Spec: 40-terminal-tui-architecture.md
 public module term;
 
 // =============================================================================
@@ -359,7 +359,7 @@ public module protobuf;
 // Distributed tracing (OpenTelemetry-compatible): TraceId/SpanId,
 // SpanContext, Span, Tracer, Sampler, SpanProcessor, SpanExporter,
 // W3C Trace Context (traceparent/tracestate) propagation.
-// Spec: docs/detailed/tracing-architecture.md
+// Spec: tracing-architecture.md
 public module tracing;
 
 // =============================================================================
@@ -369,7 +369,7 @@ public module tracing;
 // Prometheus-compatible metrics: Counter, UpDownCounter, Gauge,
 // Histogram with bucketed observations, label-cardinality control,
 // Registry, and text-format exposition.
-// Spec: docs/detailed/metrics-architecture.md
+// Spec: metrics-architecture.md
 public module metrics;
 
 // =============================================================================
@@ -388,7 +388,7 @@ public module net;
 // surfaces into a single import target. Future folds: tracing/metrics
 // observability handle, capability audit log, symbolicated panic stack,
 // live_allocations iterator. Tracked in #197.
-// Spec: docs/architecture/observability.md (TODO)
+// Spec: observability.md (TODO)
 public module diagnostics;
 
 // =============================================================================
@@ -523,7 +523,7 @@ public module theory_interop;
 // Meta-programming: Code generation, type reflection, quasi-quotation.
 // Operates entirely at compile-time with zero runtime overhead.
 // Provides: TokenStream, TypeInfo, BuildAssets, quote { }, @derive.
-// Spec: docs/architecture/meta-audit.md
+// Spec: meta-audit.md
 public module meta;
 
 // =============================================================================

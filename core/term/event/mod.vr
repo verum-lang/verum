@@ -11,7 +11,7 @@
 // event source (poll/read), and sync/async EventStream.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 5
+// Spec: 40-terminal-tui-architecture.md §5
 // =============================================================================
 
 @arch_module(

@@ -49,7 +49,7 @@ public mount core.io.protocols.{IoResult, IoErrorKind, StreamError};
 /// without blocking. Returns `Poll.Pending` when no data is available yet.
 ///
 
-/// Spec: docs/detailed/14-module-system.md - I/O protocols
+/// Spec: 14-module-system.md - I/O protocols
 /// Spec: docs/architecture/weft-redteam-2026-05-01.md §4 — buffer is
 /// `List<Byte>` (1-byte-per-element) rather than `List<Int>` (8-byte
 /// NaN-boxed Value per element). At 10 000 connections × 16 KiB read

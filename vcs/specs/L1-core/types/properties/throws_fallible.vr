@@ -7,7 +7,7 @@
 /// Tests for throws clause and Fallible property correlation.
 /// Per audit1.md Section 4.3.1: throws clause should automatically imply Fallible property.
 /// Spec: grammar/verum.ebnf Section 2.4 - throws_clause
-/// Spec: docs/audit1.md - Fallible + throws correlation
+/// Spec: audit1.md - Fallible + throws correlation
 
 // === Error Types for Testing ===
 

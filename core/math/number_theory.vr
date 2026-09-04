@@ -2,7 +2,7 @@
 // number_theory.vr - Number Theory Foundations
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
-// Spec: docs/detailed/13-formal-proofs.md
+// Spec: 13-formal-proofs.md
 //
 
 // Defines the number-theoretic types and theorem statements:

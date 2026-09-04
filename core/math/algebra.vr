@@ -2,7 +2,7 @@
 // algebra.vr - Abstract Algebra Foundations
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
-// Spec: docs/detailed/13-formal-proofs.md
+// Spec: 13-formal-proofs.md
 //
 
 // Defines the algebraic hierarchy from magmas to fields, modules to algebras,

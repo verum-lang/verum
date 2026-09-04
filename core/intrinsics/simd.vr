@@ -21,7 +21,7 @@
 // - Bitwise reductions: simd_reduce_and, simd_reduce_or, simd_reduce_xor
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

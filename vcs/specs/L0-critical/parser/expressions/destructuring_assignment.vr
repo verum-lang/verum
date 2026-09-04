@@ -3,7 +3,7 @@
 // @tier: all
 // @tags: parser, expressions, destructuring, assignment, L0-critical
 // @description: Destructuring assignment expressions - core language feature
-// Spec: docs/architecture/new-features.md - Cluster 1: Unified Destructuring System
+// Spec: new-features.md - Cluster 1: Unified Destructuring System
 // Grammar: grammar/verum.ebnf lines 1113-1131
 
 // =============================================================================

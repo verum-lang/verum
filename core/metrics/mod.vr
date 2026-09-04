@@ -2,7 +2,7 @@
 // metrics/mod.vr — Prometheus-compatible metrics registry
 // =============================================================================
 // Layer: 4.95 (depends on core, text, collections, sync, time)
-// Spec: docs/detailed/metrics-architecture.md
+// Spec: metrics-architecture.md
 //  https://prometheus.io/docs/concepts/metric_types/
 //  https://opentelemetry.io/docs/specs/otel/metrics/api/
 // =============================================================================

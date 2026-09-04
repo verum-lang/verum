@@ -3,7 +3,7 @@
 // @tags: parser, expressions, destructuring, assignment, error
 // @description: Invalid destructuring assignment targets
 // @expected-error: E046
-// Spec: docs/architecture/new-features.md - Cluster 1: Unified Destructuring System
+// Spec: new-features.md - Cluster 1: Unified Destructuring System
 
 // =============================================================================
 // Literals Cannot Be Destructuring Targets

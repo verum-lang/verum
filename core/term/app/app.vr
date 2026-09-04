@@ -2,7 +2,7 @@
 // app.vr - The Elm Architecture for Verum TUI applications
 // =============================================================================
 // Layer: 6 (Application Framework)
-// Spec: docs/detailed/40-terminal-tui-architecture.md Section 12
+// Spec: 40-terminal-tui-architecture.md §12
 // =============================================================================
 //
 

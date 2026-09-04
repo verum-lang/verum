@@ -44,7 +44,7 @@
 //  via plain memcpy.
 //
 
-// Spec: docs/architecture/observability.md (TODO)
+// Spec: observability.md (TODO)
 // =============================================================================
 
 @arch_module(

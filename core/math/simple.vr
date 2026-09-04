@@ -36,7 +36,7 @@
 // ```
 //
 
-// Spec: docs/architecture/math-spec.md Section 6 - Progressive API Disclosure
+// Spec: math-spec.md §6 - Progressive API Disclosure
 // =============================================================================
 
 @arch_module(

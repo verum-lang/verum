@@ -5,7 +5,7 @@
 // Includes CIELAB-based perceptual distance for accurate downscaling.
 //
 
-// Spec: docs/detailed/40-terminal-tui-architecture.md#6.1
+// Spec: 40-terminal-tui-architecture.md §6.1
 // =============================================================================
 
 @arch_module(

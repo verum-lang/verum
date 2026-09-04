@@ -4,7 +4,7 @@
 // @tags: parser, expressions, destructuring, assignment, error, L0-critical
 // @description: Invalid destructuring assignment patterns - error detection
 // @expected-error: E046
-// Spec: docs/architecture/new-features.md - Cluster 1: Unified Destructuring System
+// Spec: new-features.md - Cluster 1: Unified Destructuring System
 
 // =============================================================================
 // Section 1: Literals Cannot Be Assignment Targets

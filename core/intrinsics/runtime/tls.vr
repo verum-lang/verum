@@ -12,7 +12,7 @@
 // VBC Opcodes: TlsGet (0xE9), TlsSet (0xEA)
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

@@ -28,7 +28,7 @@
 //  for builds that strip it (embedded targets).
 //
 
-// Spec: docs/architecture/observability.md (TODO)
+// Spec: observability.md (TODO)
 // =============================================================================
 
 @arch_module(

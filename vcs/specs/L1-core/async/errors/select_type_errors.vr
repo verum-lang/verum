@@ -8,7 +8,7 @@
 /// Select expressions race multiple async branches and execute the first to complete.
 /// These examples demonstrate type checking errors in select expressions.
 /// Spec: grammar/verum.ebnf - select_expr
-/// Spec: docs/detailed/05-syntax-grammar.md Section 2.12.1
+/// Spec: 05-syntax-grammar.md §2.12.1
 
 // ============================================================================
 // 1. BRANCH TYPES DON'T UNIFY

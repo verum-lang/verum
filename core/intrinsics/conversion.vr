@@ -19,7 +19,7 @@
 // - Endianness: to_le, to_be, from_le, from_be
 //
 
-// Spec: docs/detailed/05-syntax-grammar.md
+// Spec: 05-syntax-grammar.md
 // =============================================================================
 
 @arch_module(

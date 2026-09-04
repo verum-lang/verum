@@ -19,7 +19,7 @@
 // while maintaining type safety through protocols.
 //
 
-// Spec: docs/architecture/math-spec.md Section 10-12
+// Spec: math-spec.md §10-12
 // =============================================================================
 
 @arch_module(

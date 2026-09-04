@@ -15,7 +15,7 @@
 // as part of V-LLSI self-hosting initiative.
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 12 (Migration Plan)
+// Spec: new-arch-spec.md §12 (Migration Plan)
 // =============================================================================
 
 // Import native CBGR allocator

@@ -1,8 +1,8 @@
 /// # SupervisorSpawnConfig - Task Spawn Configuration
 ///
 
-/// Spec: docs/detailed/26-unified-execution-architecture.md#spawn-configuration-type
-/// Spec: docs/detailed/26-unified-execution-architecture.md#spawn_with()
+/// Spec: 26-unified-execution-architecture.md#spawn-configuration-type
+/// Spec: 26-unified-execution-architecture.md#spawn_with()
 ///
 
 /// Provides fine-grained control over spawned task behavior with a zero-cost
@@ -841,7 +841,7 @@ implement SpawnConfigBuilder {
 /// Spawn an async task with custom configuration
 ///
 
-/// Spec: docs/detailed/26-unified-execution-architecture.md Lines 521-556
+/// Spec: 26-unified-execution-architecture.md Lines 521-556
 ///
 
 /// This function spawns a new async task with the ability to override

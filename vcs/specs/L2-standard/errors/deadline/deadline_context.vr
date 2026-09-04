@@ -5,7 +5,7 @@
 // @tags: errors, deadline, context, timeout, propagation
 // @description: Tests for Context-Based Deadline Propagation
 //
-// Spec: docs/detailed/20-error-handling.md Section 2.5.9 - Context-Based Deadline Propagation
+// Spec: 20-error-handling.md §2.5.9 - Context-Based Deadline Propagation
 // Automatic deadline propagation through call chains.
 
 // ============================================================================
@@ -104,7 +104,7 @@ implement DeadlineExceeded {
 // ============================================================================
 
 /// Deadline context for automatic propagation
-/// Spec: docs/detailed/16-context-system.md Section - Deadline Context
+/// Spec: 16-context-system.md Section - Deadline Context
 type Deadline is {
     expires_at: Instant,
 };
