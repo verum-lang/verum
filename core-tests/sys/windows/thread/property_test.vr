@@ -173,9 +173,9 @@ fn wx_thread_error_eq_unit_vs_code_variant() {
 
 @test
 fn wx_thread_error_message_unit_variants_distinct() {
-    let m_tls = WindowsThreadError.TlsInitFailed.message();
-    let m_join = WindowsThreadError.AlreadyJoined.message();
-    let m_detach = WindowsThreadError.AlreadyDetached.message();
+    let m_tls: Text = WindowsThreadError.TlsInitFailed.message();
+    let m_join: Text = WindowsThreadError.AlreadyJoined.message();
+    let m_detach: Text = WindowsThreadError.AlreadyDetached.message();
     assert(m_tls != m_join);
     assert(m_tls != m_detach);
     assert(m_join != m_detach);
