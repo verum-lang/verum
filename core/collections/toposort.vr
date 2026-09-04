@@ -187,7 +187,7 @@ implement<N: Hash + Eq> TopoGraph<N> {
         let mut out: List<N> = [];
         let mut cursor: Int = 0;
         while cursor < queue.len() {
-            let node = queue[cursor].clone();
+            let node: N = queue[cursor].clone();
             cursor = cursor + 1;
             out.push(node.clone());
             // Decrement every dependent's in_deg.

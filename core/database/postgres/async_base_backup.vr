@@ -180,7 +180,8 @@ public async fn connect_and_start_async(
     // Phase 1 — sync connect + sync start (offloaded to blocking pool).
     let cfg_owned = cfg.clone();
     let opts_owned = opts.clone();
-    let init_jh = spawn_blocking(move || -> Result<BaseBackupSession, DbError> {
+    let init_jh: JoinHandle<Result<BaseBackupSession, DbError>> =
+        spawn_blocking(move || -> Result<BaseBackupSession, DbError> {
         let conn = core.database.postgres.replication.connect_replication(&cfg_owned)?;
         core.database.postgres.base_backup.start(conn, &opts_owned)
     });

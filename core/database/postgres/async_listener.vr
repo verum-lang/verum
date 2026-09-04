@@ -204,7 +204,8 @@ public async fn connect_listener_async(
     cfg: PgConfig,
 ) -> Result<AsyncPgListener, DbError> {
     let cfg_owned = cfg.clone();
-    let conn_jh = spawn_blocking(move || -> Result<PgConnection, DbError> {
+    let conn_jh: JoinHandle<Result<PgConnection, DbError>> =
+        spawn_blocking(move || -> Result<PgConnection, DbError> {
         // Fully-qualified path instead of `mount connect as sync_connect`
         // — the rename-aliased import doesn't surface to AOT codegen's
         // function-table lookup (defect class shared with task #17/#39

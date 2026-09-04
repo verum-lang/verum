@@ -445,7 +445,8 @@ public async fn connect(
 ) -> Result<AsyncMysqlConnection, DbError> {
     let cfg_owned = cfg.clone();
     let cancel_cfg = cfg.clone();
-    let conn_jh = spawn_blocking(move || -> Result<MysqlConnection, DbError> {
+    let conn_jh: JoinHandle<Result<MysqlConnection, DbError>> =
+        spawn_blocking(move || -> Result<MysqlConnection, DbError> {
         core.database.mysql.connection.connect(&cfg_owned)
     });
     let conn = match conn_jh.join().await {

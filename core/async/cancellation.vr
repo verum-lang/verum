@@ -330,7 +330,7 @@ implement CancellationFlag {
         }
 
         // Propagate to children (weak → strong upgrade; skip dead).
-        let children_snapshot = {
+        let children_snapshot: List<Weak<CancellationFlag>> = {
             let cg = self.children.lock().unwrap_or_else(|p| p.into_inner());
             cg.iter().map(|w| w.clone()).collect<List<_>>()
         };
