@@ -105,11 +105,11 @@ fn test_priority_level_to_u8_critical_255() {
 @test
 fn test_priority_level_to_u8_monotone_increasing() {
     // Spec: Background < Low < Normal < High < Critical
-    let bg = PriorityLevel.Background.to_u8();
-    let lo = PriorityLevel.Low.to_u8();
-    let no = PriorityLevel.Normal.to_u8();
-    let hi = PriorityLevel.High.to_u8();
-    let cr = PriorityLevel.Critical.to_u8();
+    let bg: UInt8 = PriorityLevel.Background.to_u8();
+    let lo: UInt8 = PriorityLevel.Low.to_u8();
+    let no: UInt8 = PriorityLevel.Normal.to_u8();
+    let hi: UInt8 = PriorityLevel.High.to_u8();
+    let cr: UInt8 = PriorityLevel.Critical.to_u8();
     assert(bg < lo);
     assert(lo < no);
     assert(no < hi);

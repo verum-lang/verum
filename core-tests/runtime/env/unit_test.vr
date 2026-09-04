@@ -83,10 +83,10 @@ fn test_execution_tier_overhead_tier3_unchecked_zero() {
 @test
 fn test_execution_tier_overhead_monotone_decreasing() {
     // Spec: t0 > t1 > t2 > t3 (more checks = more cost)
-    let t0 = ExecutionTier.Tier0_Full.overhead_ns();
-    let t1 = ExecutionTier.Tier1_Epoch.overhead_ns();
-    let t2 = ExecutionTier.Tier2_Gen.overhead_ns();
-    let t3 = ExecutionTier.Tier3_Unchecked.overhead_ns();
+    let t0: Int = ExecutionTier.Tier0_Full.overhead_ns();
+    let t1: Int = ExecutionTier.Tier1_Epoch.overhead_ns();
+    let t2: Int = ExecutionTier.Tier2_Gen.overhead_ns();
+    let t3: Int = ExecutionTier.Tier3_Unchecked.overhead_ns();
     assert(t0 > t1);
     assert(t1 > t2);
     assert(t2 > t3);
