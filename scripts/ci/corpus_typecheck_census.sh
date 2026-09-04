@@ -70,9 +70,29 @@ cd "$(dirname "$0")/../.."
 
 # Deterministic order, so a sample is the SAME sample between runs and
 # two censuses are comparable. `sort` is the whole of the determinism.
+#
+# BUT: `head -n` takes the alphabetically FIRST N, which is comparable
+# and NOT representative.  A sorted prefix of core/ is core/action,
+# core/architecture, core/async — and those corners differ from the tree.
+# Measured 2026-09-04: `head -12` of the known-failures list reported
+# E0319 (unproved theorems) at 46 of 61 diagnostics and read as "theorem
+# failures dominate the backlog"; over all 345 files E0319 is 72 of
+# ~1200, sixth.  The first twelve were all core/action, the theorem-heavy
+# corner.  Sorted order is not random order and `head` is not a sample.
+#
+# So: use the default (prefix) when COMPARING two censuses, and
+# CENSUS_STRIDE=1 when characterising a tree.  The stride keeps the same
+# count and spreads it, and stays deterministic so it is still
+# comparable with itself.
 FILES=$(find "$ROOT" -name '*.vr' | sort)
 if [ "$SAMPLE" -gt 0 ]; then
-  FILES=$(printf '%s\n' "$FILES" | head -n "$SAMPLE")
+  total=$(printf '%s\n' "$FILES" | wc -l | tr -d ' ')
+  if [ -n "${CENSUS_STRIDE:-}" ] && [ "$total" -gt "$SAMPLE" ]; then
+    step=$(( total / SAMPLE )); [ "$step" -lt 1 ] && step=1
+    FILES=$(printf '%s\n' "$FILES" | awk -v s="$step" 'NR % s == 1')
+  else
+    FILES=$(printf '%s\n' "$FILES" | head -n "$SAMPLE")
+  fi
 fi
 
 : > "$OUT"
