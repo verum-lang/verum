@@ -81,13 +81,14 @@ fn test_shim_validate_live_heap_ref() {
 // Section 3: epoch reads — stability law
 // =============================================================================
 
-@test
-fn test_epoch_non_negative() {
-    assert(cbgr_current_epoch() >= 0);
-}
+// `test_epoch_non_negative` lived here and asserted
+// `cbgr_current_epoch() >= 0` — which is exactly what
+// `test_current_epoch_reads` below already asserts, in the better-typed
+// form. It was named for `cbgr_get_epoch`, and renaming it onto the
+// surviving name made it a second spelling of one check. Removed.
 
 @test
-fn test_epoch_stable_across_adjacent_reads() {
+fn test_current_epoch_stable_across_adjacent_reads() {
     // No epoch mutator runs between the two reads in a synchronous
     // scope — this is the load-bearing invariant for every caller
     // that grabs the epoch, checks, and uses a reference within the

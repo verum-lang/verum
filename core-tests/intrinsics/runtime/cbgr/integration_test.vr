@@ -12,7 +12,12 @@ mount core.intrinsics.runtime.cbgr.{
     cbgr_allocate, cbgr_deallocate, cbgr_realloc, cbgr_validate,
 };
 mount core.intrinsics.runtime.mem_raw.{
-    memcpy, memcmp, memset, load_byte, store_byte,
+    memcpy_addr, memcmp_addr, memset_addr, load_byte, store_byte,
+    // Renamed with the `_addr` suffix: `core/intrinsics/runtime/mem_raw.vr`
+    // is the raw-address (`Int`-pointer) API, and the bare names now belong
+    // to the typed-reference variant in `core/intrinsics/memory.vr`
+    // (`memcpy_addr(dst: &mut Byte, …)`). This file allocates through
+    // `cbgr_allocate`, which hands back `Int` addresses, so it wants these.
 };
 
 fn validate_through_call(r: &Int) -> Bool {
@@ -32,11 +37,11 @@ fn integration_alloc_fill_copy_realloc_pipeline() {
         i = i + 1;
     }
     let dst = cbgr_allocate(16, 8);
-    memcpy(dst, src, 16);
-    assert_eq(memcmp(src, dst, 16), 0);
+    memcpy_addr(dst, src, 16);
+    assert_eq(memcmp_addr(src, dst, 16), 0);
     // Growing the copy must not disturb its contents.
     let grown = cbgr_realloc(dst, 64);
-    assert_eq(memcmp(src, grown, 16), 0);
+    assert_eq(memcmp_addr(src, grown, 16), 0);
     cbgr_deallocate(src);
     cbgr_deallocate(grown);
 }
@@ -45,7 +50,7 @@ fn integration_alloc_fill_copy_realloc_pipeline() {
 fn integration_memset_over_reallocated_extent() {
     let p = cbgr_allocate(8, 8);
     let q = cbgr_realloc(p, 32);
-    memset(q, 7, 32);
+    memset_addr(q, 7, 32);
     assert_eq(load_byte(q), 7);
     assert_eq(load_byte(q + 31), 7);
     cbgr_deallocate(q);

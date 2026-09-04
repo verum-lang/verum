@@ -20,7 +20,12 @@
 mount core.prelude.*;
 mount core.intrinsics.runtime.cbgr.{
     cbgr_allocate, cbgr_deallocate, cbgr_realloc,
-    cbgr_validate, cbgr_get_epoch, cbgr_current_epoch,
+    cbgr_validate, cbgr_current_epoch,
+    // `cbgr_get_epoch` was mounted here until 2026-09-04.
+    // `core/intrinsics/runtime/cbgr.vr:130` records it as deliberately
+    // removed under T0846: a second name for `cbgr_current_epoch` with
+    // no callers, no registry entry and no handler. One missing symbol
+    // took this whole file (6 ok / 17 compile-error before).
 };
 mount core.intrinsics.runtime.mem_raw.{load_byte, store_byte};
 
@@ -134,16 +139,16 @@ fn test_validate_live_heap_value_ref_is_true() {
 // Section 5: epoch reads
 // =============================================================================
 
-@test
-fn test_get_epoch_non_negative() {
-    assert(cbgr_get_epoch() >= 0);
-}
+// `test_get_epoch_non_negative` asserted `>= 0` on the removed alias —
+// the same property `test_current_epoch_reads` below already asserts,
+// in the better-typed form. Removed rather than renamed onto a second
+// spelling of one check.
 
 @test
-fn test_get_epoch_stable_across_adjacent_reads() {
+fn test_current_epoch_stable_across_adjacent_reads() {
     // No epoch mutator runs in this suite, so two adjacent reads see the
     // same epoch (another thread advancing is out-of-scope for core-tests).
-    assert_eq(cbgr_get_epoch(), cbgr_get_epoch());
+    assert_eq(cbgr_current_epoch(), cbgr_current_epoch());
 }
 
 @test
