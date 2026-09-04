@@ -163,3 +163,43 @@ fn regression_bare_none_in_closure_body() {
 fn main() {
     // Tests run via @test annotations
 }
+
+// -----------------------------------------------------------------
+// T0622-LITERAL-IDENTITY-1 — `sum`/`product` folded from a literal
+// `0`/`1` instead of `Self.Item.zero()`/`.one()`.
+//
+// Over Int the literal IS the identity, so the defect was invisible
+// to every test.  Over a user type implementing Zero it was not a
+// wrong number but a panic:
+//
+//     Panic: GetFieldNamed: receiver is not a heap object
+//
+// because the accumulator entered the fold as an Int.  Both arms are
+// pinned: the Int arm is what always passed, and it is what makes
+// the V2 arm legible as type-dependence.
+// -----------------------------------------------------------------
+
+type SumV2 is { x: Int, y: Int };
+
+implement Zero for SumV2 {
+    fn zero() -> SumV2 { SumV2 { x: 0, y: 0 } }
+    fn is_zero(&self) -> Bool { self.x == 0 && self.y == 0 }
+}
+
+implement Add<Output = SumV2> for SumV2 {
+    fn add(self, o: SumV2) -> SumV2 { SumV2 { x: self.x + o.x, y: self.y + o.y } }
+}
+
+@test
+fn regression_iterator_sum_over_user_zero_type() {
+    let l: List<SumV2> = List.from([SumV2 { x: 1, y: 2 }, SumV2 { x: 3, y: 4 }]);
+    let s = l.iter().sum();
+    assert_eq(s.x, 4);
+    assert_eq(s.y, 6);
+}
+
+@test
+fn regression_iterator_sum_int_unchanged() {
+    let l: List<Int> = List.from([2, 3, 4]);
+    assert_eq(l.iter().sum(), 9);
+}

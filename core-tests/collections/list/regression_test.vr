@@ -201,3 +201,25 @@ fn regression_list_contains_primitive_needle_via_ref() {
 }
 
 fn main() {}
+
+// -----------------------------------------------------------------
+// T0622-LITERAL-IDENTITY-1 — a generic default was a literal `0`.
+//
+// Twenty-five stdlib sites substituted a literal zero (or one) for
+// the generic identity, from a time when Tier-0 had no runtime
+// witness for `T`.  T0622 (2026-07-25) supplied the witness; the
+// substitutions stayed.  Correct EXACTLY for `T = Int`, which is the
+// type every existing test of these APIs used.
+// -----------------------------------------------------------------
+
+@test
+fn regression_list_sum_int_unchanged() {
+    let l: List<Int> = List.from([2, 3, 4]);
+    assert_eq(l.sum(), 9);
+}
+
+@test
+fn regression_list_product_int_unchanged() {
+    let l: List<Int> = List.from([2, 3, 4]);
+    assert_eq(l.product(), 24);
+}

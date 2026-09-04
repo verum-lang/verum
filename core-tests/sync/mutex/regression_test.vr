@@ -138,3 +138,22 @@ fn regression_mutex_guard_writes_are_visible_after_release() {
     let g2 = m.lock().unwrap();
     assert_eq(*g2, 42, "a write through the guard must survive release");
 }
+
+// -----------------------------------------------------------------
+// T0622-LITERAL-IDENTITY-1 — a generic default was a literal `0`.
+//
+// Twenty-five stdlib sites substituted a literal zero (or one) for
+// the generic identity, from a time when Tier-0 had no runtime
+// witness for `T`.  T0622 (2026-07-25) supplied the witness; the
+// substitutions stayed.  Correct EXACTLY for `T = Int`, which is the
+// type every existing test of these APIs used.
+// -----------------------------------------------------------------
+
+@test
+fn regression_mutex_default_text_is_empty() {
+    let m: Mutex<Text> = Mutex.default();
+    match m.lock() {
+        Result.Ok(g) => assert_eq(*g, Text.from("")),
+        Result.Err(_) => assert(false),
+    }
+}

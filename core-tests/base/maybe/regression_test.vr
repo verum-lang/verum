@@ -93,3 +93,37 @@ fn regression_assign_then_let() {
     assert(a is Maybe.Some);
     assert(b is Maybe.Some);
 }
+
+// -----------------------------------------------------------------
+// T0622-LITERAL-IDENTITY-1 — `unwrap_or_default` returned a literal
+// `0`, not `T.default()`.
+//
+// Twenty-five stdlib sites substituted a literal zero for the generic
+// identity because Tier-0 once had no runtime witness for `T`.  T0622
+// (2026-07-25) supplied that witness; the substitutions stayed.  The
+// substitution is correct EXACTLY for `T = Int`, so every existing
+// test of this API — all of which used Int — passed while
+// `Maybe<Text>` handed the caller a raw NaN-boxed payload.
+//
+// The Int arm is kept deliberately: it is the arm that always
+// passed, and it is what makes the Text arm's failure legible as a
+// type-dependence rather than a general breakage.
+// -----------------------------------------------------------------
+
+@test
+fn regression_unwrap_or_default_text_is_empty_not_zero() {
+    let m: Maybe<Text> = Maybe.None;
+    assert_eq(m.unwrap_or_default(), Text.from(""));
+}
+
+@test
+fn regression_unwrap_or_default_int_still_zero() {
+    let m: Maybe<Int> = Maybe.None;
+    assert_eq(m.unwrap_or_default(), 0);
+}
+
+@test
+fn regression_unwrap_or_default_some_is_untouched() {
+    let m: Maybe<Text> = Maybe.Some(Text.from("kept"));
+    assert_eq(m.unwrap_or_default(), Text.from("kept"));
+}

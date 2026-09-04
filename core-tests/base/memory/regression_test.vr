@@ -99,3 +99,31 @@ fn regression_heap_into_inner_returns_value() {
 fn main() {
     // `verum test` synthesises a per-test main.
 }
+
+// -----------------------------------------------------------------
+// T0622-LITERAL-IDENTITY-1 — a generic default was a literal `0`.
+//
+// Twenty-five stdlib sites substituted a literal zero (or one) for
+// the generic identity, from a time when Tier-0 had no runtime
+// witness for `T`.  T0622 (2026-07-25) supplied the witness; the
+// substitutions stayed.  Correct EXACTLY for `T = Int`, which is the
+// type every existing test of these APIs used.
+// -----------------------------------------------------------------
+
+@test
+fn regression_heap_new_default_text_is_empty() {
+    let h: Heap<Text> = Heap.new_default();
+    assert_eq(*h, Text.from(""));
+}
+
+@test
+fn regression_shared_new_default_text_is_empty() {
+    let s: Shared<Text> = Shared.new_default();
+    assert_eq(*s, Text.from(""));
+}
+
+@test
+fn regression_heap_new_default_int_still_zero() {
+    let h: Heap<Int> = Heap.new_default();
+    assert_eq(*h, 0);
+}
