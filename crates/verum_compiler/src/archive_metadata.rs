@@ -1394,8 +1394,8 @@ fn register_module_metadata(
                     method_keys.push(format!("{}.{}", om, parent_name).into());
                 }
             }
-            for key in &method_keys {
-                if let Some(td) = meta.types.get_mut(key) {
+            for key in method_keys {
+                if let Some(td) = meta.types.get_mut(&key) {
                     if !td.methods.iter().any(|m| m == &simple_method_name) {
                         td.methods.push(simple_method_name.clone());
                     }
@@ -1405,60 +1405,10 @@ fn register_module_metadata(
             // `register_inherent_methods_from_metadata`'s
             // `metadata.functions.get("Text.with_capacity")` finds it.
             // Keep the simple-name slot first-wins for free fns.
-            //
-            // MEASURED INERT (T0458, v34: archive 25009877 -> 25010896
-            // bytes, so the keys ARE written; `Capability.to_bit` still
-            // does not resolve). Reading the emitted keys says why, and
-            // it is two defects, not one:
-            //
-            //   Capability.to_bit                          x4  bare slot
-            //   core.architecture.types.Capability.to_bit  x1  WRONG TYPE
-            //   core.mem.Capability.to_bit                 x1  parent, not
-            //                                                  the module
-            //   core.mem.capability.Capability.to_bit      x0  needed
-            //
-            // 1. GRANULARITY: `to_bit` lives in core/mem/capability.vr,
-            //    module `core.mem.capability`; this writes `core.mem.…`.
-            //    The loader probes with `type_desc.module_path`, so the
-            //    two spellings can never meet.
-            // 2. UPSTREAM: `core.architecture.types.Capability` does not
-            //    declare `to_bit` at all, yet received a qualified key
-            //    for it — so `method_keys` is built from a parent-type
-            //    resolution that had ALREADY picked the wrong one of
-            //    core/'s FOUR `Capability` types. Qualifying a key
-            //    cannot help when the qualification comes from the wrong
-            //    type; (2) is upstream of (1).
-            //
-            // Kept because it is additive and harmless — the regression
-            // canary (three instance methods on singleton types) is
-            // unchanged — and because it is a step the real fix needs.
-            //
-            // The 113/43 figures below are ALSO wrong, and by the same
-            // kind of error the census warns about: the pattern behind
-            // them was `type NAME is`, blind to `type NAME<T> is`. The
-            // grammar-aware count in
-            // scripts/ci/check_type_name_collisions.py is 132 names /
-            // 280 declarations / 68 carrying an implement block.
-            //
-            // BAKE-DUPNAME: register under EVERY parent key, not the bare
-            // type name alone. `core/` declares 113 type names more than
-            // once and 43 of those carry an `implement` block, so a bare
-            // `X.m` slot is first-wins BETWEEN UNRELATED TYPES and the
-            // loser's method simply vanishes from the archive — measured
-            // on `Capability.to_bit`, baked-absent and source-present.
-            // The free-function branch below already solved exactly this
-            // with `join_module_path`; its comment names the case
-            // (core.shell.exec.run vs core.sys.process_ops.run). Methods
-            // were left out of that remedy. Same three keys the types map
-            // uses above: one method fact, EVERY key. `method_keys[0]` is
-            // the bare name, so the old slot is still written first and
-            // this change is purely additive.
-            for key in &method_keys {
-                let qualified_key: Text =
-                    format!("{}.{}", key, simple_method_name).into();
-                if !meta.functions.contains_key(&qualified_key) {
-                    meta.functions.insert(qualified_key, descriptor.clone());
-                }
+            let qualified_key: Text =
+                format!("{}.{}", parent_name, simple_method_name).into();
+            if !meta.functions.contains_key(&qualified_key) {
+                meta.functions.insert(qualified_key, descriptor.clone());
             }
         } else if !module_path.is_empty() {
             // Free function — register under MODULE-qualified key

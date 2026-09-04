@@ -2910,26 +2910,13 @@ impl TypeChecker {
             // Text + TextBuilder + List) resolves to the descriptor
             // belonging to THIS type.  Fall back to the bare simple
             // name for free functions / single-type methods.
-            // BAKE-DUPNAME: probe the MODULE-QUALIFIED slots BEFORE the
-            // bare `Type.method` one. 113 core type names are declared more
-            // than once (43 with an `implement` block), so the bare slot is
-            // first-wins between unrelated types; the bake now also emits
-            // `<module>.<Type>.<method>` for every parent key. The bare
-            // probes stay last so an OLDER archive still resolves.
-            let mut probes: Vec<Text> = Vec::with_capacity(4);
-            if let Maybe::Some(om) = &type_desc.origin_module_path {
-                probes.push(format!("{}.{}.{}", om, type_name, method_name).into());
-            }
-            if !type_desc.module_path.as_str().is_empty() {
-                probes.push(
-                    format!("{}.{}.{}", type_desc.module_path, type_name, method_name).into(),
-                );
-            }
-            probes.push(format!("{}.{}", type_name, method_name).into());
-            probes.push(method_name.clone());
-            let fn_desc = match probes.iter().find_map(|k| metadata.functions.get(k)) {
+            let qualified: Text = format!("{}.{}", type_name, method_name).into();
+            let fn_desc = match metadata.functions.get(&qualified) {
                 Some(d) => d,
-                None => continue,
+                None => match metadata.functions.get(method_name) {
+                    Some(d) => d,
+                    None => continue,
+                },
             };
             // Build the function type from the descriptor.
             // `parse_descriptor_type_string` handles primitives,
