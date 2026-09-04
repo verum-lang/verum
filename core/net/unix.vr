@@ -869,14 +869,24 @@ implement UnixStream {
         // SOL_SOCKET = 1, SO_PEERCRED = 17
         const SOL_SOCKET: Int32 = 1;
         const SO_PEERCRED: Int32 = 17;
-        let mut buf = [0_u8; 12];
+        // T1135: packed `[Byte; 12]`, and the subslice form. Written
+        // `[0_u8; 12]` this is a NaN-boxed List of 8-byte-strided Value
+        // slots, and `&mut buf` on an array coerces to an EMPTY slice —
+        // so the kernel would have written a `struct ucred` into
+        // nothing while the call reported success.
+        let mut buf: [Byte; 12] = [0; 12];
         let mut len: UInt32 = 12;
         // No-libc policy (#72): use the direct-syscall getsockopt from
         // `core/sys/linux/syscall.vr` — it issues SYS_GETSOCKOPT (#54)
         // via inline asm, no glibc dependency.
-        match super.linux.syscall.getsockopt(
+        //
+        // T1143: ABSOLUTE path. `super` here is `core.net`, so
+        // `super.linux.syscall` named `core/net/linux/syscall`, which
+        // does not exist — and a path that resolves to nothing is
+        // SILENT, so this call was never made at all.
+        match core.sys.linux.syscall.getsockopt(
             self.fd, SOL_SOCKET as Int, SO_PEERCRED as Int,
-            &mut buf, &mut len,
+            &mut buf[..], &mut len,
         ) {
             Result.Ok(()) => {}
             Result.Err(_) => return Result.Err(UnixError.IoFailure("SO_PEERCRED failed".into())),

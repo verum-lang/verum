@@ -41,9 +41,15 @@
 )
 module core.random.deterministic;
 
-mount super.constants.{PI, E};
-mount super.elementary.{sqrt, log, cos, sin, exp, abs, floor};
-mount super.linalg.{Vector};
+// T1143: ABSOLUTE, not `super.`. This file was moved out of
+// core/math/ and its relative mounts came with it — `super` changed
+// meaning underneath them and named core/random/constants, which does
+// not exist. A path that resolves to nothing is SILENT, so the file
+// compiled, mounted nothing, and every name below read as nil. A
+// corrected `super.` would break the same way at the next move.
+mount core.math.constants.{PI, E};
+mount core.math.elementary.{sqrt, log, cos, sin, exp, abs, floor};
+mount core.math.linalg.{Vector};
 // Reached through ambient visibility rather than a request
 // until now (T0780 census).
 mount core.collections.list.{List};
@@ -556,7 +562,9 @@ fn tan(x: Float) -> Float {
 
 // Power function (import helper)
 fn pow(base: Float, exp: Float) -> Float {
-    super.elementary.pow(base, exp)
+    // Called by its absolute path rather than mounted: a local `fn pow`
+    // that mounted `pow` would resolve to itself. (T1143)
+    core.math.elementary.pow(base, exp)
 }
 
 // =============================================================================
