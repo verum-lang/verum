@@ -153,7 +153,7 @@ public fn cursor_seek(
         Maybe.Some(b) => b,
         Maybe.None    => return Result.Err(InvalidRootPage(root_page)),
     };
-    let (root_hdr, _) = match parse_page_header(&root_bytes, header_offset_for_root(root_page)) {
+    let root_hdr = match parse_page_header(&root_bytes, header_offset_for_root(root_page)) {
         Result.Ok(p)  => p,
         Result.Err(_) => return Result.Err(CorruptPage(root_page)),
     };
@@ -174,13 +174,13 @@ public fn cursor_seek(
             Maybe.None    => return Result.Err(PageNotFound(cur_page)),
         };
         let hdr_off = header_offset_for_root_or_zero(cur_page, c.root_page);
-        let (hdr, _) = match parse_page_header(&bytes, hdr_off) {
+        let hdr = match parse_page_header(&bytes, hdr_off) {
             Result.Ok(p)  => p,
             Result.Err(_) => return Result.Err(CorruptPage(cur_page)),
         };
 
         // Binary-search cells at this level.
-        let bsr = match binary_search_with_layout(&bytes, &hdr, target) {
+        let bsr = match binary_search_with_layout(&bytes, hdr_off, &hdr, target) {
             Result.Ok(r)  => r,
             Result.Err(_) => return Result.Err(CorruptPage(cur_page)),
         };
@@ -191,7 +191,7 @@ public fn cursor_seek(
             // left_child for index trees; for table interior cells
             // (which only carry rowids) descend via cell i's left_child
             // when the rowid is <= target, else cell i+1's left_child.
-            let child_page = pick_interior_child(&bytes, &hdr, &bsr);
+            let child_page = pick_interior_child(&bytes, hdr_off, &hdr, &bsr);
             // Update path: bump current cell index to the chosen
             // separator, then push child.
             c.bump_cell(bsr.index - cursor_current_cell(c));
@@ -226,12 +226,13 @@ fn header_offset_for_root_or_zero(cur_page: Int, root_page: Int) -> Int {
 /// comparator.vr with the page-layout-aware cell-at closure.
 fn binary_search_with_layout(
     bytes: &List<Byte>,
+    page_start: Int,
     hdr: &PageHeader,
     target: &SeekKey,
 ) -> Result<BinarySearchResult, Text> {
     // Parse cell-pointer array once; reuse it for each `cell_at`
     // call inside the binary search.
-    let pointers = match parse_cell_pointer_array(bytes, &hdr.cell_pointer_offset, hdr.cell_count) {
+    let pointers = match parse_cell_pointer_array(bytes, page_start, hdr) {
         Result.Ok(p)  => p,
         Result.Err(_) => return Result.Err("cell pointer array parse failed".clone()),
     };
@@ -288,22 +289,23 @@ fn slice_bytes(src: &List<Byte>, start: Int, end: Int) -> List<Byte> {
 /// the last child sits in the page's `right_pointer` field.
 fn pick_interior_child(
     bytes: &List<Byte>,
+    page_start: Int,
     hdr: &PageHeader,
     bsr: &BinarySearchResult,
 ) -> Int {
     if bsr.index >= hdr.cell_count {
-        return hdr.right_child as Int;
+        return hdr.right_ptr as Int;
     }
-    let pointers = match parse_cell_pointer_array(bytes, &hdr.cell_pointer_offset, hdr.cell_count) {
+    let pointers = match parse_cell_pointer_array(bytes, page_start, hdr) {
         Result.Ok(p)  => p,
-        Result.Err(_) => return hdr.right_child as Int,
+        Result.Err(_) => return hdr.right_ptr as Int,
     };
     let cell_off = pointers[bsr.index];
     let local_max: Int = 100;
     match parse_cell(bytes, cell_off, hdr.kind.clone(), local_max) {
         Result.Ok(TableInteriorCell(left, _))                  => left as Int,
         Result.Ok(IndexInteriorCell(left, _, _, _))           => left as Int,
-        _ => hdr.right_child as Int,
+        _ => hdr.right_ptr as Int,
     }
 }
 
@@ -377,7 +379,7 @@ public fn cursor_next(
         Maybe.Some(b) => b,
         Maybe.None    => return Result.Err(PageNotFound(cur_page)),
     };
-    let (hdr, _) = match parse_page_header(&bytes, header_offset_for_root_or_zero(cur_page, c.root_page)) {
+    let hdr = match parse_page_header(&bytes, header_offset_for_root_or_zero(cur_page, c.root_page)) {
         Result.Ok(p)  => p,
         Result.Err(_) => return Result.Err(CorruptPage(cur_page)),
     };
@@ -405,25 +407,26 @@ public fn cursor_next(
             Maybe.Some(b) => b,
             Maybe.None    => return Result.Err(PageNotFound(cp)),
         };
-        let (h, _) = match parse_page_header(&pb, header_offset_for_root_or_zero(cp, c.root_page)) {
+        let pg_start = header_offset_for_root_or_zero(cp, c.root_page);
+        let h = match parse_page_header(&pb, pg_start) {
             Result.Ok(p)  => p,
             Result.Err(_) => return Result.Err(CorruptPage(cp)),
         };
         if !page_kind_is_interior(h.kind) { break; }
         // Pick the leftmost child = first cell's left_child.
-        let pointers = match parse_cell_pointer_array(&pb, &h.cell_pointer_offset, h.cell_count) {
+        let pointers = match parse_cell_pointer_array(&pb, pg_start, &h) {
             Result.Ok(p)  => p,
             Result.Err(_) => return Result.Err(CorruptPage(cp)),
         };
         if h.cell_count == 0 {
             // Empty interior — descend via right_child as fallback.
-            c.descend(h.right_child as Int);
+            c.descend(h.right_ptr as Int);
         } else {
             let cell_off = pointers[0];
             let child = match parse_cell(&pb, cell_off, h.kind.clone(), 100) {
                 Result.Ok(TableInteriorCell(l, _))               => l as Int,
                 Result.Ok(IndexInteriorCell(l, _, _, _))         => l as Int,
-                _ => h.right_child as Int,
+                _ => h.right_ptr as Int,
             };
             c.descend(child);
         }
@@ -467,7 +470,8 @@ fn descend_rightmost(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, Btr
             Maybe.Some(b) => b,
             Maybe.None    => return Result.Err(PageNotFound(cp)),
         };
-        let (h, _) = match parse_page_header(&pb, header_offset_for_root_or_zero(cp, c.root_page)) {
+        let pg_start = header_offset_for_root_or_zero(cp, c.root_page);
+        let h = match parse_page_header(&pb, pg_start) {
             Result.Ok(p)  => p,
             Result.Err(_) => return Result.Err(CorruptPage(cp)),
         };
@@ -480,7 +484,7 @@ fn descend_rightmost(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, Btr
             c.mark_at_end();
             return Result.Ok(false);
         }
-        c.descend(h.right_child as Int);
+        c.descend(h.right_ptr as Int);
         guard = guard + 1;
     }
     Result.Err(MaxDepthExceeded(64))
@@ -500,7 +504,8 @@ public fn cursor_first(
             Maybe.Some(b) => b,
             Maybe.None    => return Result.Err(PageNotFound(cp)),
         };
-        let (h, _) = match parse_page_header(&pb, header_offset_for_root_or_zero(cp, c.root_page)) {
+        let pg_start = header_offset_for_root_or_zero(cp, c.root_page);
+        let h = match parse_page_header(&pb, pg_start) {
             Result.Ok(p)  => p,
             Result.Err(_) => return Result.Err(CorruptPage(cp)),
         };
@@ -511,17 +516,17 @@ public fn cursor_first(
             }
             return Result.Ok(true);
         }
-        let pointers = match parse_cell_pointer_array(&pb, &h.cell_pointer_offset, h.cell_count) {
+        let pointers = match parse_cell_pointer_array(&pb, pg_start, &h) {
             Result.Ok(p)  => p,
             Result.Err(_) => return Result.Err(CorruptPage(cp)),
         };
         let child = if h.cell_count == 0 {
-            h.right_child as Int
+            h.right_ptr as Int
         } else {
             match parse_cell(&pb, pointers[0], h.kind.clone(), 100) {
                 Result.Ok(TableInteriorCell(l, _))               => l as Int,
                 Result.Ok(IndexInteriorCell(l, _, _, _))         => l as Int,
-                _ => h.right_child as Int,
+                _ => h.right_ptr as Int,
             }
         };
         c.descend(child);

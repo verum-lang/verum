@@ -186,7 +186,6 @@ core/database/sqlite/native/l1_pager/wal_reader.vr
 core/database/sqlite/native/l1_pager/wal_writer.vr
 core/database/sqlite/native/l2_record/mod.vr
 core/database/sqlite/native/l3_btree/btree_ops.vr
-core/database/sqlite/native/l3_btree/cursor_seek.vr
 core/database/sqlite/native/l3_btree/integrity.vr
 core/database/sqlite/native/l3_btree/mod.vr
 core/database/sqlite/native/l3_btree/page_writer.vr
