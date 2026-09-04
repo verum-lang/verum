@@ -96,9 +96,30 @@ SELF_TEST = [
     (["| A1 | trailing space |   "], 0),
 ]
 
+# The width check needs its own poles: `broken_rows` above cannot see a
+# stray `|`, which is the whole reason `wrong_width` exists. Measured
+# 2026-09-04 — inverting a pole in SELF_TEST left this function
+# untouched and the gate green, so for ten minutes it had no control at
+# all. Five members minimum, because a mode needs something to be modal
+# about.
+WIDTH_SELF_TEST = [
+    # (lines, expected number of wrong-width rows)
+    ([f"| A{i} | a | b | c | d |" for i in range(1, 7)], 0),
+    ([f"| A{i} | a | b | c | d |" for i in range(1, 6)]
+     + ["| A9 | a | b | c | d | e |"], 1),
+    ([f"| A{i} | a | b |" for i in range(1, 6)]
+     + ["| A9 | a |"], 1),
+    (["| A1 | a | b |", "| A2 | a | b |"], 0),   # family too small to judge
+]
+
 
 def self_test() -> int:
     bad = 0
+    for lines, want in WIDTH_SELF_TEST:
+        got = len(wrong_width(lines))
+        if got != want:
+            bad += 1
+            print(f"FAIL width {lines!r} -> {got}, expected {want}", file=sys.stderr)
     for lines, want in SELF_TEST:
         got = len(broken_rows(lines))
         if got != want:
@@ -107,7 +128,7 @@ def self_test() -> int:
     if bad:
         print(f"self-test: {bad} of {len(SELF_TEST)} case(s) FAILED", file=sys.stderr)
         return 1
-    print(f"[ok] self-test: {len(SELF_TEST)} case(s) hold")
+    print(f"[ok] self-test: {len(SELF_TEST) + len(WIDTH_SELF_TEST)} case(s) hold")
     return 0
 
 
