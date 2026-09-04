@@ -59,10 +59,37 @@ def module_of(path):
         parts = parts[:-1]
     return parts
 
+# A module need not be a FILE. `core/mod.vr:535` declares
+# `public module prelude { … }` inline, and core.prelude is a published
+# surface that fifteen files mount. Without this index the gate reported
+# forty-five false positives, all of them that one module.
+INLINE = set()
+def index_inline_modules(root):
+    decl = re.compile(r'^\s*(?:public\s+)?module\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{')
+    for dirpath, dirs, names in os.walk(root):
+        for n in names:
+            if not n.endswith(".vr"):
+                continue
+            fp = os.path.join(dirpath, n)
+            parts = fp[:-3].split(os.sep)
+            if parts[-1] == "mod":
+                parts = parts[:-1]
+            try:
+                text = open(fp, encoding="utf-8", errors="replace").read()
+            except OSError:
+                continue
+            for line in text.split("\n"):
+                m = decl.match(line)
+                if m:
+                    INLINE.add(tuple(parts + [m.group(1)]))
+
 def exists(mod_parts):
-    """A module exists if <p>.vr or <p>/mod.vr is a file."""
+    """A module exists if <p>.vr or <p>/mod.vr is a file, or if some
+    file declares it INLINE (`public module X { … }`)."""
     p = os.sep.join(mod_parts)
-    return os.path.isfile(p + ".vr") or os.path.isfile(os.path.join(p, "mod.vr"))
+    if os.path.isfile(p + ".vr") or os.path.isfile(os.path.join(p, "mod.vr")):
+        return True
+    return tuple(mod_parts) in INLINE
 
 def check_text(path, text):
     """Return the list of (line, call) whose every prefix is unresolvable."""
@@ -133,7 +160,12 @@ def check_text(path, text):
             # taking every segment turned 13 findings into 161, all of
             # them the second form.
             if code.lstrip().startswith("mount"):
-                brace = code[m.end():].lstrip().startswith(".{")
+                # `.{` and `.*` are the same case: a brace list and a glob
+                # both import FROM a module, so every captured segment is
+                # part of the path. Reading only `.{` flagged
+                # `mount core.collections.*;` whose module plainly exists.
+                rest = code[m.end():].lstrip()
+                brace = rest.startswith(".{") or rest.startswith(".*")
                 candidates = [segs] if brace else [segs[:-1]]
             elif segs[-1][0].isupper():
                 candidates = [segs[:-1]]
@@ -144,6 +176,7 @@ def check_text(path, text):
     return bad
 
 if selftest:
+    index_inline_modules(ROOT)
     # POSITIVE CONTROL — a module that cannot exist, from a real file's
     # position, must be reported.
     planted = "fn f() { super.zzqnosuch.alsonot.call(1); }\n"
@@ -155,6 +188,40 @@ if selftest:
     got2 = check_text(os.path.join("core", "sys", "common.vr"), ok)
     print(f"  resolvable call stayed silent:      {'yes' if not got2 else 'NO — false positive'}")
     sys.exit(0 if (got and not got2) else 1)
+
+# ---------------------------------------------------------------- absolute
+# The same file-existence rule, applied to `mount core.a.b...`. A move
+# breaks relative imports; a rename or a deletion breaks absolute ones,
+# and both are silent. Same four path forms, same conservative
+# resolution — only the base differs, and here it is the tree root.
+ABS = re.compile(r'\bcore((?:\.[A-Za-z_][A-Za-z0-9_]*)+)')
+
+def check_absolute(path, text):
+    bad = []
+    for i, line in enumerate(text.split("\n"), 1):
+        code = line.split("//", 1)[0]
+        if "core." not in code:
+            continue
+        stripped = code.lstrip()
+        if not stripped.startswith("mount"):
+            continue
+        for m in ABS.finditer(code):
+            segs = [x for x in m.group(1).split(".") if x]
+            if not segs:
+                continue
+            rest = code[m.end():].lstrip()
+            brace = rest.startswith(".{") or rest.startswith(".*")
+            if brace:
+                candidates = [segs]
+            elif segs[-1][0].isupper():
+                candidates = [segs[:-1]]
+            else:
+                candidates = [segs[:-1], segs[:-2]]
+            if not any(c and exists(["core"] + c) for c in candidates):
+                bad.append((i, m.group(0)))
+    return bad
+
+index_inline_modules(ROOT)
 
 files, findings = 0, []
 for dirpath, dirs, names in os.walk(ROOT):
@@ -168,6 +235,8 @@ for dirpath, dirs, names in os.walk(ROOT):
         except OSError:
             continue
         for line, call in check_text(p, text):
+            findings.append((p, line, call))
+        for line, call in check_absolute(p, text):
             findings.append((p, line, call))
 
 print(f"scanned {files} .vr files under {ROOT}/")
