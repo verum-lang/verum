@@ -18,6 +18,24 @@
 # A green suite reads as "this rule is enforced". This census asks the
 # question the suite cannot: is anything but the suite asking?
 #
+# NOT A DUPLICATE of scripts/ci/census_unconsumed_mechanisms.py, which
+# asks the neighbouring question — "public fn with NO callers". Checked
+# before writing this, and the two differ in the three ways that decide
+# whether today's defects are visible:
+#
+#   scope      that one reads exactly three crates (verum_vbc,
+#              verum_types, verum_codegen). T1138 lives in verum_lsp and
+#              T1102 in verum_cbgr, so neither is in its field of view.
+#   tests      it has no notion of tests/ or #[cfg(test)] — zero
+#              mentions. A function called ten times by its own inline
+#              test module therefore reads as USED. That is exactly how
+#              check_full_conformance stayed invisible.
+#   the set    "no callers" is dead code. "callers, all of them tests"
+#              is the deceptive case: it looks maintained, it looks
+#              covered, and a green suite argues for it.
+#
+# Run both. They disagree on purpose.
+#
 # ADVISORY, NOT A GATE. A name it prints is a QUESTION, not a defect —
 # a genuinely public API, a trait method called through dyn dispatch, or
 # a macro-generated call site all land here legitimately. Making it
