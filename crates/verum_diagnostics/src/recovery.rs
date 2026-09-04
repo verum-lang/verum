@@ -120,7 +120,11 @@ impl ErrorRecovery {
             TypeConversion {
                 from: "Text".into(),
                 to: "Int".into(),
-                template: "{value}.parse::<Int>()?".into(),
+                // Verum names the parse per target type — `parse_int`,
+                // `parse_float`, `parse_bool` (core/text/text.vr:1850,
+                // 2114, 2159). There is no turbofish; `::` is not Verum
+                // syntax. (T1142)
+                template: "{value}.parse_int()?".into(),
                 description: "Parse text as integer".into(),
                 confidence: 85,
                 infallible: false,
@@ -183,20 +187,25 @@ impl ErrorRecovery {
                 confidence: 70,
                 infallible: false,
             },
-            // List/Array conversions
+            // Slice/List conversions.
+            //
+            // There is no `Array<T>` in Verum: grammar/verum.ebnf:1577
+            // spells a fixed-size array `[T; N]`, and `Array<` appears
+            // nowhere in core/. The entry that used to sit here offered
+            // `List<T> -> Array<T>` via `into_array()` — a method that
+            // exists nowhere either — and has been removed rather than
+            // renamed, because core/ has no List-to-fixed-array
+            // conversion to point at. `to_array` exists only on a SIMD
+            // vector (core/simd/mod.vr:248), which is a different
+            // operation.
+            //
+            // The reverse IS real, on a SLICE: core/collections/slice.vr
+            // declares `implement<T> [T] { fn to_list() }`. (T1142)
             TypeConversion {
-                from: "List<T>".into(),
-                to: "Array<T>".into(),
-                template: "{value}.into_array()".into(),
-                description: "Convert list to fixed-size array".into(),
-                confidence: 75,
-                infallible: false,
-            },
-            TypeConversion {
-                from: "Array<T>".into(),
+                from: "[T]".into(),
                 to: "List<T>".into(),
                 template: "{value}.to_list()".into(),
-                description: "Convert array to list".into(),
+                description: "Collect slice into a list".into(),
                 confidence: 95,
                 infallible: true,
             },
@@ -204,7 +213,10 @@ impl ErrorRecovery {
             TypeConversion {
                 from: "T".into(),
                 to: "Maybe<T>".into(),
-                template: "Maybe::Some({value})".into(),
+                // `Maybe.Some(x)` with a DOT — core/ writes it that way
+                // throughout (core/diagnostics.vr:206 and on). `::` is
+                // not Verum syntax at all. (T1142)
+                template: "Maybe.Some({value})".into(),
                 description: "Wrap value in Maybe".into(),
                 confidence: 95,
                 infallible: true,
@@ -334,11 +346,13 @@ impl ErrorRecovery {
         if self.is_refinement_mismatch(expected, found) {
             suggestions.push(RecoveryAction {
                 description: Text::from(format!(
-                    "Add runtime check: {}::try_from(value)?",
+                    // `Int8.try_from(val)` — dot form; core/base/primitives.vr:6604
+                    // declares it, core/text/text.vr:3928 calls it. (T1142)
+                    "Add runtime check: {}.try_from(value)?",
                     expected
                 )),
                 code_change: Maybe::Some(Text::from(format!(
-                    "{}::try_from({})?",
+                    "{}.try_from({})?",
                     expected, "value"
                 ))),
                 confidence: 90,

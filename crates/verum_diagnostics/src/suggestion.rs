@@ -237,11 +237,16 @@ pub mod templates {
             .build()
     }
 
-    /// Suggest using Option type
-    pub fn use_option_type(type_name: &str) -> Suggestion {
-        SuggestionBuilder::new("Return Option type")
+    /// Suggest using Maybe type
+    ///
+    /// Verum has no `Option`: the optional type is `Maybe<T>` with
+    /// variants `None | Some(T)`. Both the emitted code and this
+    /// function's own name said Option until T1142 — a suggester
+    /// teaching the exact mistake it exists to correct.
+    pub fn use_maybe_type(type_name: &str) -> Suggestion {
+        SuggestionBuilder::new("Return Maybe type")
             .description("Return None when the operation cannot succeed")
-            .code(format!("-> Option<{}>", type_name))
+            .code(format!("-> Maybe<{}>", type_name))
             .alternative()
             .build()
     }
@@ -477,7 +482,9 @@ impl TypeSuggestionTemplates {
     pub fn wrap_in_maybe(value_expr: &str) -> Suggestion {
         SuggestionBuilder::new("Wrap value in Maybe")
             .description("Convert value to Maybe<T> to handle optional case")
-            .code(format!("Maybe::Some({})", value_expr))
+            // `Maybe.Some(x)` with a dot; core/ writes it that way
+            // throughout (core/diagnostics.vr:206). (T1142)
+            .code(format!("Maybe.Some({})", value_expr))
             .applicability(Applicability::Recommended)
             .build()
     }
@@ -528,7 +535,13 @@ impl TypeSuggestionTemplates {
                 "Reference the associated type from trait '{}'",
                 trait_name
             ))
-            .code(format!("<Self as {}>::{}", trait_name, assoc_type))
+            // Verum reaches a protocol's associated type as `Self.Item`
+            // — see the protocol example in CLAUDE.md and
+            // core/mesh/k8s/client.vr:280 (`Maybe<Self.Item>`). There is
+            // no `<Self as Trait>::Assoc` qualified form; the protocol
+            // is named in the description instead, where it belongs.
+            // (T1142)
+            .code(format!("Self.{}", assoc_type))
             .applicability(Applicability::Alternative)
             .build()
     }
@@ -564,7 +577,9 @@ impl ErrorHandlingSuggestionTemplates {
         SuggestionBuilder::new("Use if let for optional value")
             .description("Conditionally execute code when value is present")
             .code(format!(
-                "if let Maybe::Some({}) = {} {{\n    // use {}\n}}",
+                // `if let` IS Verum (grammar/verum.ebnf:1982, 449 uses in
+                // core/); only the `::` was wrong. (T1142)
+                "if let Maybe.Some({}) = {} {{\n    // use {}\n}}",
                 var_name, maybe_expr, var_name
             ))
             .applicability(Applicability::Recommended)
@@ -575,7 +590,9 @@ impl ErrorHandlingSuggestionTemplates {
     pub fn convert_error_type(from_err: &str, to_err: &str) -> Suggestion {
         SuggestionBuilder::new(format!("Convert {} to {}", from_err, to_err))
             .description("Use map_err to convert the error type")
-            .code(format!(".map_err(|e| {}::from(e))", to_err))
+            // A type-associated function is reached with a dot in
+            // Verum — `Heap.new(x)`, `List.with_capacity(n)`. (T1142)
+            .code(format!(".map_err(|e| {}.from(e))", to_err))
             .applicability(Applicability::Recommended)
             .build()
     }
@@ -682,7 +699,12 @@ impl SyntaxSuggestionTemplates {
                 "Add import statement to use '{}' from '{}'",
                 symbol, module
             ))
-            .code(format!("using {}::{};", module, symbol))
+            // Doubly wrong before: `using [...]` is Verum's CONTEXT
+            // clause (dependency injection), not an import, and
+            // paths are dotted. The import statement is `mount`
+            // (core/signal.vr:74: `mount core.async.timer.sleep;`).
+            // (T1142)
+            .code(format!("mount {}.{};", module, symbol))
             .applicability(Applicability::Recommended)
             .build()
     }
@@ -705,7 +727,8 @@ impl PerformanceSuggestionTemplates {
     pub fn use_with_capacity(collection_type: &str, hint: &str) -> Suggestion {
         SuggestionBuilder::new("Pre-allocate collection capacity")
             .description("Avoid reallocations by specifying initial capacity")
-            .code(format!("{}::with_capacity({})", collection_type, hint))
+            // `List.with_capacity(n)` — core/metrics/label.vr:31. (T1142)
+            .code(format!("{}.with_capacity({})", collection_type, hint))
             .applicability(Applicability::Alternative)
             .build()
     }

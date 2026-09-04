@@ -92,7 +92,11 @@ fn test_type_use_refinement_type() {
 fn test_type_wrap_in_maybe() {
     let suggestion = TypeSuggestionTemplates::wrap_in_maybe("value");
     assert!(suggestion.title().contains("Maybe"));
-    assert!(suggestion.code().contains("Maybe::Some"));
+    assert!(suggestion.code().contains("Maybe.Some"));
+    // Was `Maybe::Some` until T1142. This assertion did not miss the
+    // defect — it PINNED it: `::` is not Verum syntax, and the test
+    // required the suggester to keep emitting it.
+    assert!(!suggestion.code().contains("::"));
 }
 
 #[test]
@@ -144,7 +148,10 @@ fn test_error_match_result() {
 fn test_error_use_if_let() {
     let suggestion = ErrorHandlingSuggestionTemplates::use_if_let("maybe_value", "v");
     assert!(suggestion.title().contains("if let"));
-    assert!(suggestion.code().contains("if let Maybe::Some(v)"));
+    assert!(suggestion.code().contains("if let Maybe.Some(v)"));
+    // `if let` itself is correct Verum (grammar/verum.ebnf:1982);
+    // only the path separator was Rust. (T1142)
+    assert!(!suggestion.code().contains("::"));
 }
 
 #[test]

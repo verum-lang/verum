@@ -117,7 +117,7 @@ fn main() {
         .suggestion_obj(suggestion::templates::add_refinement_constraint(
             "x", ">= 0",
         ))
-        .suggestion_obj(suggestion::templates::use_option_type("Float"))
+        .suggestion_obj(suggestion::templates::use_maybe_type("Float"))
         .context("in function sqrt")
         .build();
 

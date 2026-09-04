@@ -153,7 +153,7 @@ fn test_complete_refinement_error() {
         .suggestion_obj(suggestion::templates::add_refinement_constraint(
             "x", ">= 0",
         ))
-        .suggestion_obj(suggestion::templates::use_option_type("Float"))
+        .suggestion_obj(suggestion::templates::use_maybe_type("Float"))
         .context("in function sqrt")
         .build();
 
@@ -255,8 +255,13 @@ fn test_suggestion_templates() {
     let runtime_check = suggestion::templates::runtime_check("x > 0", "return Err(...)");
     assert_eq!(runtime_check.applicability(), Applicability::Alternative);
 
-    let use_option = suggestion::templates::use_option_type("Int");
-    assert!(use_option.snippet().unwrap().code.contains("Option<Int>"));
+    // Verum has no `Option`; the optional type is `Maybe<T>`. This
+    // assertion required the suggester to emit `Option<Int>` until
+    // T1142 — the third test in this crate found to be PINNING a
+    // Rust spelling rather than missing it.
+    let use_maybe = suggestion::templates::use_maybe_type("Int");
+    assert!(use_maybe.snippet().unwrap().code.contains("Maybe<Int>"));
+    assert!(!use_maybe.snippet().unwrap().code.contains("Option"));
 
     let assertion = suggestion::templates::add_assertion("x > 0", "value must be positive");
     assert_eq!(assertion.applicability(), Applicability::MaybeIncorrect);
