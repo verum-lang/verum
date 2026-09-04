@@ -2960,7 +2960,16 @@ public fn current_runtime() -> Maybe<&AsyncRuntime> {
 ///
 
 /// # Performance
-/// - Fork: ~50ns (memcpy of context array)
+///
+/// Platform-dependent, because the platforms do not share a context
+/// model. Linux chains whole frames, so a fork is one allocation plus a
+/// pointer swap. macOS and Windows give every slot its own stack, so a
+/// fork walks MAX_CONTEXT_SLOTS (256) entries and saves each one — more
+/// than a pointer swap, still bounded and allocation-free (T0822).
+///
+/// The figure that stood here — "~50ns (memcpy of context array)" —
+/// described the Linux model as if it were all of them, and was written
+/// before the other two arms existed at all.
 public fn with_forked_env<T, F: fn() -> T>(f: F) -> T {
     // Push new context frame (inherits from parent)
     match ctx_push_frame() {

@@ -522,6 +522,67 @@ public fn ctx_pop(slot: Int) -> Result<&unsafe Byte, WindowsTlsError> {
     }
 }
 
+/// Push a whole context FRAME (T0822).
+///
+/// Windows shares Darwin's model, not Linux's: each `WindowsContextEntry`
+/// carries its own `value`, `stack[CONTEXT_STACK_DEPTH]` and `depth`, and
+/// `ctx_push` / `ctx_pop` move ONE slot.  A frame push therefore means
+/// "save EVERY slot's current value on its own stack", so that one
+/// `ctx_pop_frame` restores them together — what `with_forked_env` asks
+/// for, a child inheriting the parent's contexts whose writes stay in the
+/// child.
+///
+/// Slots already at `CONTEXT_STACK_DEPTH` are left alone rather than
+/// failing the whole push: a frame that cannot deepen one slot must not
+/// abandon the 255 it already saved.
+///
+/// `common.vr`'s Windows arm used to carry a copy of the LINUX body,
+/// which could not have compiled for this target — `get_context_slots`
+/// returns `Maybe<&mut WindowsContextSlots>` here and `ctx_push` takes
+/// (slot, value).  An excluded `@cfg` arm is never type-checked (T0810),
+/// so nothing said so.  This function is what that arm now calls.
+public fn ctx_push_frame() -> Result<&unsafe Byte, WindowsTlsError> {
+    match get_context_slots() {
+        Maybe.Some(slots) => {
+            let mut i = 0;
+            while i < MAX_CONTEXT_SLOTS {
+                let entry = &mut slots.slots[i];
+                if entry.depth < CONTEXT_STACK_DEPTH {
+                    entry.stack[entry.depth] = entry.value;
+                    entry.depth += 1;
+                }
+                i += 1;
+            }
+            Result.Ok(0 as &unsafe Byte)
+        }
+        Maybe.None => Result.Err(WindowsTlsError.NotInitialized),
+    }
+}
+
+/// Pop a whole context frame (T0822) — the mirror of `ctx_push_frame`.
+///
+/// A slot at depth zero is skipped rather than reported: `ctx_pop_frame`
+/// in `common.vr` returns nothing, so there is no channel for a per-slot
+/// underflow, and a slot that was never pushed has nothing to restore.
+public fn ctx_pop_frame() -> Result<(), WindowsTlsError> {
+    match get_context_slots() {
+        Maybe.Some(slots) => {
+            let mut i = 0;
+            while i < MAX_CONTEXT_SLOTS {
+                let entry = &mut slots.slots[i];
+                if entry.depth > 0 {
+                    entry.depth -= 1;
+                    entry.value = entry.stack[entry.depth];
+                    entry.stack[entry.depth] = 0 as &unsafe Byte;
+                }
+                i += 1;
+            }
+            Result.Ok(())
+        }
+        Maybe.None => Result.Err(WindowsTlsError.NotInitialized),
+    }
+}
+
 /// Get the current stack depth for a context slot.
 public fn ctx_depth(slot: Int) -> Maybe<Int> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {

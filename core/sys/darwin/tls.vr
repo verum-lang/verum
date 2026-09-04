@@ -529,6 +529,70 @@ public fn ctx_pop(slot: Int) -> Result<&unsafe Byte, SysTlsError> {
     }
 }
 
+/// Push a whole context FRAME (T0822).
+///
+/// Darwin's model is per-slot, not per-frame: each `DarwinContextEntry`
+/// carries its own `value`, `stack[CONTEXT_STACK_DEPTH]` and `depth`, and
+/// `ctx_push` / `ctx_pop` move ONE slot.  Linux instead chains whole
+/// frames, and `core/sys/common.vr` was written against Linux.
+///
+/// A frame push here therefore means "save EVERY slot's current value on
+/// its own stack", so that one `ctx_pop_frame` restores them together.
+/// That is exactly what the caller asks for: `with_forked_env` wants the
+/// child to inherit the parent's contexts while its own writes stay in
+/// the child.
+///
+/// Slots already at `CONTEXT_STACK_DEPTH` are left alone rather than
+/// failing the whole push: a frame that cannot deepen one slot must not
+/// abandon the 255 it already saved, and the unsaved slot keeps its
+/// value, which is the same answer inheritance would have given.
+///
+/// This function is what `common.vr`'s macOS arm always called; it had
+/// never been written, and a call to a name that does not exist returns
+/// nil in silence.
+public fn ctx_push_frame() -> Result<&unsafe Byte, SysTlsError> {
+    match get_context_slots() {
+        Maybe.Some(slots) => {
+            let mut i = 0;
+            while i < MAX_CONTEXT_SLOTS {
+                let entry = &mut slots.slots[i];
+                if entry.depth < CONTEXT_STACK_DEPTH {
+                    entry.stack[entry.depth] = entry.value;
+                    entry.depth += 1;
+                }
+                i += 1;
+            }
+            Result.Ok(0 as &unsafe Byte)
+        }
+        Maybe.None => Result.Err(SysTlsError.NotInitialized),
+    }
+}
+
+/// Pop a whole context frame (T0822) — the mirror of `ctx_push_frame`.
+///
+/// Restores every slot that has something saved.  A slot at depth zero is
+/// skipped rather than reported: `ctx_pop_frame` in `common.vr` returns
+/// nothing, so there is no channel for a per-slot underflow, and a slot
+/// that was never pushed has nothing to restore.
+public fn ctx_pop_frame() -> Result<(), SysTlsError> {
+    match get_context_slots() {
+        Maybe.Some(slots) => {
+            let mut i = 0;
+            while i < MAX_CONTEXT_SLOTS {
+                let entry = &mut slots.slots[i];
+                if entry.depth > 0 {
+                    entry.depth -= 1;
+                    entry.value = entry.stack[entry.depth];
+                    entry.stack[entry.depth] = 0 as &unsafe Byte;
+                }
+                i += 1;
+            }
+            Result.Ok(())
+        }
+        Maybe.None => Result.Err(SysTlsError.NotInitialized),
+    }
+}
+
 /// Get the current stack depth for a context slot.
 public fn ctx_depth(slot: Int) -> Maybe<Int> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {

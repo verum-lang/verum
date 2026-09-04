@@ -43,7 +43,15 @@ PRELUDE_SOURCE = CORE / "mod.vr"
 # and renaming a function resolves (renaming a `const` does not, which
 # is a separate defect).  A family where one of three siblings carries
 # the documented shorthand is worse than one counted collision.
-BASELINE_ALL = 615
+# 617 since T0822: `ctx_push_frame/0` and `ctx_pop_frame/0` are now declared in BOTH
+# core/sys/darwin/tls.vr and core/sys/windows/tls.vr.  That is the tree's established
+# shape for platform code — `get_context_slots/0` is same-named in all three platform
+# modules, and 59 of the collisions counted here have ALL their participants under
+# core/sys/<platform>/ — and the hazard this gate names does not apply to them: they
+# are never called by bare name (common.vr calls them qualified, `super.darwin.tls.…`)
+# and they sit behind mutually exclusive @cfg arms, so bare-name resolution is never
+# asked to CHOOSE between them.
+BASELINE_ALL = 617
 BASELINE_SQLITE = 84
 # The PRELUDE scope — the subset a user meets without importing anything.
 # This is not a stylistic count: for these names the ambiguity DECIDES which

@@ -1649,16 +1649,42 @@ public fn ctx_push_frame() -> Result<&unsafe Byte, SysContextError> {
 
     @cfg(target_os = "macos")
     {
-        // Darwin uses stack-based context with ctx_push/ctx_pop
-        return super.darwin.tls.ctx_push_frame();
+        // The implementation lives in `darwin/tls.vr`, not here, and that
+        // is not a style choice: `DarwinContextSlots` is declared there,
+        // so a frame push written in THIS file cannot reach `slots.slots`
+        // — the field type is invisible from a sibling module and the
+        // expression types as `!`.  The call below is what the original
+        // author intended; the function it names simply had never been
+        // written (T0822).
+        // The platform function reports `SysTlsError`;
+        // this one reports `SysContextError`.  The mapping is written out
+        // rather than left to inference, because a cross-module return type
+        // resolves to `!` in a single-file check and a mismatch here would
+        // be invisible until some other mode looked.
+        match super.darwin.tls.ctx_push_frame() {
+            Result.Ok(frame) => { return Result.Ok(frame); }
+            Result.Err(_) => { return Result.Err(SysContextError.TlsNotInitialized); }
+        }
     }
 
     @cfg(target_os = "windows")
     {
-        let current = super.windows.tls.get_context_slots();
-        let new_frame = super.windows.tls.ctx_push(current);
-        super.windows.tls.set_context_slots(&new_frame);
-        return Result.Ok(current as &unsafe Byte);
+        // Windows agrees with Darwin, not with Linux — the same per-slot
+        // entries and the same `ctx_push(slot, value)` signature.  The
+        // body that stood here was copied from the Linux arm and could
+        // not have compiled for this target: `get_context_slots` returns
+        // `Maybe<&mut WindowsContextSlots>`, and `ctx_push` takes
+        // (slot, value), not a slots value.  An excluded @cfg arm is
+        // never type-checked (T0810), so nothing said so.
+        // The platform function reports `WindowsTlsError`;
+        // this one reports `SysContextError`.  The mapping is written out
+        // rather than left to inference, because a cross-module return type
+        // resolves to `!` in a single-file check and a mismatch here would
+        // be invisible until some other mode looked.
+        match super.windows.tls.ctx_push_frame() {
+            Result.Ok(frame) => { return Result.Ok(frame); }
+            Result.Err(_) => { return Result.Err(SysContextError.TlsNotInitialized); }
+        }
     }
 
     @cfg(runtime = "embedded")
@@ -1673,10 +1699,20 @@ public fn ctx_pop_frame() {
     { super.linux.tls.ctx_pop() }
 
     @cfg(target_os = "macos")
-    { super.darwin.tls.ctx_pop() }
+    {
+        // NOT `ctx_pop()`: Darwin's `ctx_pop` takes a SLOT and returns the
+        // popped value.  Calling it with no argument is the mirror of the
+        // push arm's defect (T0822) — a whole frame is what this function
+        // promises, and `darwin.tls.ctx_pop_frame` is what restores one.
+        let _ = super.darwin.tls.ctx_pop_frame();
+    }
 
     @cfg(target_os = "windows")
-    { super.windows.tls.ctx_pop() }
+    {
+        // Same shape as Darwin: `ctx_pop` takes a slot, `ctx_pop_frame`
+        // restores the frame.
+        let _ = super.windows.tls.ctx_pop_frame();
+    }
 
     @cfg(runtime = "embedded")
     { embedded_ctx_pop_frame() }
