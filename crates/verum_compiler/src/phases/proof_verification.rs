@@ -1510,6 +1510,52 @@ pub fn verify_proof_body_with_aliases_and_graph(
                 // registry means something to the solver context that
                 // a theorem parameter must not be pushed into blindly.
                 // That is its own question, not this fix's.
+                //
+                // T1151 — AND THE ANSWER IS "NOT BLINDLY", NOT "NOT AT
+                // ALL". The regression above is real and this does not
+                // override it; it narrows what gets registered to the
+                // half that cannot cause it.
+                //
+                // The defect: a theorem's parameter reaches the solver
+                // as an Int whatever its declared type, so a goal
+                // applies a symbol the reflection registry declared
+                // over `Bool` to an Int and the application is refused —
+                //
+                //     over_bool (argument 0 is Int, declared "Bool")
+                //
+                // reported as an unproved goal, indistinguishable from
+                // a claim the solver could not show. Measured, three
+                // theorems in one file with the control first, since
+                // Int is the default and passes either way:
+                //
+                //     over_int(n: Int)   -> PROVES   (control)
+                //     over_bool(b: Bool) -> E0319
+                //     over_text(t: Text) -> E0319
+                //
+                // `verum verify` proves all three, because
+                // `verify_cmd.rs` registers the sort. One binary, two
+                // entry points, opposite answers — so the fix is known
+                // to work and the only question was which half of it is
+                // safe.
+                //
+                // A PRIMITIVE SORT IS SAFE; AN OPAQUE ONE IS THE ONE
+                // THAT REGRESSED. `type_to_sort_and_name` answers
+                // `Verum!X` for any named type it cannot resolve, and
+                // pushing that into the solver context is what the
+                // corpus measured. `verify_cmd.rs` does not have that
+                // problem because it computes the sort with
+                // `declared_sort_of`, which consults the record,
+                // variant and positional layout registries — registries
+                // this entry point does not have.
+                //
+                // So: register Int / Bool / Real / String, which are
+                // exactly the sorts that cannot be an unresolved name,
+                // and leave `Verum!X` alone until the registries reach
+                // here. That larger change keeps the corpus figures
+                // above as its negative pole.
+                if matches!(sort.as_str(), "Int" | "Bool" | "Real" | "String") {
+                    engine.register_value_sort(name.name.clone(), Text::from(sort.as_str()));
+                }
                 if sort == "Bool" {
                     engine.register_bool_hypothesis(name.name.clone());
                 }
