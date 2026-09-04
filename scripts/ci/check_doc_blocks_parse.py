@@ -64,11 +64,20 @@ def is_elision(body: str) -> bool:
     return "..." in body or "/* body */" in body or "…" in body
 
 
+# A trailing comment sitting in the same column on most lines is a
+# rendering of a mapping, the same as an arrow glyph. Measured on
+# `ffi.md` block 4 — four pointer spellings each with an aligned `//`
+# gloss, reported as a DEFECT because no compilation unit accepts a
+# bare type expression.
+ALIGNED_COMMENT = re.compile(r"^\S.*?\s{2,}//")
+
+
 def is_table(body: str) -> bool:
     lines = [l for l in body.split("\n") if l.strip()]
     if not lines:
         return True
-    marked = sum(1 for l in lines if TABLE_GLYPH.search(l))
+    marked = sum(1 for l in lines
+                 if TABLE_GLYPH.search(l) or ALIGNED_COMMENT.match(l))
     return marked * 2 >= len(lines)
 
 
