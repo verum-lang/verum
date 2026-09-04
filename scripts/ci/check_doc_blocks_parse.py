@@ -53,7 +53,12 @@ TABLE_GLYPH = re.compile(r"->|≡|⇒|→")
 # `--check` refuses to run until this is a number somebody counted:
 # a ratchet on an estimate legitimises whatever the estimate was wrong
 # about, in whichever direction it was wrong.
-BASELINE = None
+# Measured 2026-09-05 over the whole estate, 68 minutes: 2845 blocks —
+# 1483 ok, 406 table, 383 elision, 345 fragment, 13 mixed,
+# 2 counter-example, 213 DEFECT. A ratchet, not zero: the 213 are
+# real and include parser defects (A65, A69, A70, A71) whose fix is
+# not a documentation edit.
+BASELINE = 213
 
 
 def verum_binary() -> str:
@@ -207,10 +212,16 @@ def run(argv: list[str]) -> int:
     total = sum(counts.values())
     print(f"check-doc-blocks-parse: {total} block(s) — "
           + ", ".join(f"{v} {k}" for k, v in counts.items()))
+    # A per-directory tally first: 213 lines of block references say
+    # nothing about where the work is, and a truncated list says less.
+    from collections import Counter
+    by_dir = Counter(d.split("/")[0] if "/" in d else "(root)" for d in defects)
+    for name, n in by_dir.most_common():
+        print(f"  {n:>4}  {name}")
     for d in defects[:20]:
-        print(f"  {d}")
+        print(f"      {d}")
     if len(defects) > 20:
-        print(f"  … and {len(defects) - 20} more")
+        print(f"      … and {len(defects) - 20} more block references")
     if "--check" in argv:
         if sub:
             print("--check needs the whole estate; a subtree cannot be "
