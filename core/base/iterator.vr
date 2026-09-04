@@ -476,13 +476,20 @@ public type Iterator is protocol {
     /// Sum all elements.
     fn sum(self) -> Self.Item
     where Self.Item: Add<Output = Self.Item> + Zero {
-        self.fold(Self.Item.zero(), |a, b| a + b)
+        // MEASURED HARM, not inertness: `Self.Item` is an associated-type
+        // projection and has no witness index at either intercept, so this
+        // form does not merely fall back to the literal — it loses the
+        // protocol default's dispatch entirely and `list.iter().sum()`
+        // panics with `ListIter.sum not found`. Literal until the witness
+        // vector carries associated types.
+        self.fold(0, |a, b| a + b)
     }
 
     /// Product of all elements.
     fn product(self) -> Self.Item
     where Self.Item: Mul<Output = Self.Item> + One {
-        self.fold(Self.Item.one(), |a, b| a * b)
+        // Same as `sum` above: `Self.Item` has no witness.
+        self.fold(1, |a, b| a * b)
     }
 
     /// Sum elements by extracting a numeric key from each item.
