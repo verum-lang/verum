@@ -149,6 +149,35 @@ def verum_binary() -> Path:
     )
 
 
+def binary_age_hours(binary: Path) -> float:
+    """Hours by which `binary` predates the newest source it judges.
+
+    A binary older than its subject reports the tree's PAST.
+
+    Measured 2026-09-04: `target/release/verum` was four days old and this
+    gate failed on docs/stdlib/net/weft/overview.md, an example that had
+    been repaired in `core/` since that build.  The same run on a
+    same-day binary is green.  The failure is indistinguishable from a
+    broken example — it names a file, a line and a real diagnostic — so
+    the age has to be printed rather than inferred.
+    """
+    import time
+
+    try:
+        bin_mtime = binary.stat().st_mtime
+    except OSError:
+        return 0.0
+    newest = 0.0
+    for d in (CORE, DOCS):
+        for f in d.rglob("*"):
+            if f.is_file():
+                try:
+                    newest = max(newest, f.stat().st_mtime)
+                except OSError:
+                    pass
+    return (newest - bin_mtime) / 3600.0 if newest > bin_mtime else 0.0
+
+
 def blocks():
     for d in sorted(DOCS.rglob("*.md")):
         text = d.read_text(errors="ignore")
@@ -317,6 +346,7 @@ def main() -> int:
         print()
 
     binary = verum_binary()
+    stale_h = binary_age_hours(binary)
     buckets: Counter[str] = Counter()
     detail: dict[str, list] = defaultdict(list)
     stale_markers: list = []
@@ -388,6 +418,14 @@ def main() -> int:
         gone = sorted(known - set(tracked))
         if new:
             print(f"\n[fail] {len(new)} example(s) newly cannot be trusted:")
+            if stale_h > 0:
+                print(
+                    f"    NOTE: {binary} predates the newest source it judges by "
+                    f"{stale_h:.1f}h. A failure here may be the BINARY rather than\n"
+                    f"    the example — 2026-09-04 a four-day-old binary failed\n"
+                    f"    weft/overview.md on an example repaired since. Re-run with\n"
+                    f"    VERUM_BIN=<current> before editing any doc."
+                )
             for k in new:
                 bucket, where, err = tracked[k]
                 print(f"    {where}  [{bucket}]\n        {err}")
