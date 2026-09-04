@@ -112,8 +112,8 @@ fn property_canonical_signals_within_posix_range() {
 @test
 fn property_shutdown_signal_triple_distinct() {
     let sigint  = Signal.Int.to_raw();
-    let sigterm = Signal.Term.to_raw();
-    let sigkill = Signal.Kill.to_raw();
+    let sigterm: Int = Signal.Term.to_raw();
+    let sigkill: Int = Signal.Kill.to_raw();
     assert(sigint  != sigterm);
     assert(sigint  != sigkill);
     assert(sigterm != sigkill);
