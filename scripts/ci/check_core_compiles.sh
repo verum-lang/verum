@@ -54,7 +54,18 @@ if [ "$SAMPLE" -eq 0 ] 2>/dev/null || [ "$SAMPLE" -ge "$total" ] 2>/dev/null; th
 else
   step=$(( total / SAMPLE ))
   [ "$step" -lt 1 ] && step=1
-  files=$(printf '%s\n' "$all" | awk -v s="$step" 'NR % s == 1')
+  # ROTATING OFFSET.  The stride used to be `NR % s == 1`, which picks the
+  # SAME files every run: with 2561 files and a 200 sample the other ~92%
+  # of the tree was never checked, not rarely — never.  A fixed-stride
+  # sample has a PERMANENT blind spot, which is worse than a random one
+  # because nothing ever wanders into it.
+  #
+  # The offset walks by day-of-year, so consecutive runs take different
+  # slices and the whole tree is covered every `step` days.  Override with
+  # CORE_COMPILE_OFFSET to reproduce a specific run's sample exactly.
+  offset="${CORE_COMPILE_OFFSET:-$(date +%j)}"
+  pick=$(( offset % step + 1 ))
+  files=$(printf '%s\n' "$all" | awk -v s="$step" -v p="$pick" 'NR % s == p % s')
 fi
 count=$(printf '%s\n' "$files" | wc -l | tr -d ' ')
 

@@ -111,11 +111,15 @@ core/action/monads/state.vr
 core/action/monads/writer.vr
 core/action/verify.vr
 core/archive/tar.vr
+core/async/async_iterator.vr
 core/async/executor.vr
+core/async/future.vr
 core/async/select.vr
 core/async/stream.vr
 core/base/iterator.vr
 core/base/memory.vr
+core/base/primitives.vr
+core/cli/config.vr
 core/cli/parser.vr
 core/cli/repl.vr
 core/cli/runtime.vr
@@ -130,11 +134,13 @@ core/collections/heap.vr
 core/collections/map.vr
 core/collections/multiset.vr
 core/collections/set.vr
+core/collections/slice.vr
 core/collections/trie.vr
 core/concurrency/process.vr
 core/configuration/convert.vr
 core/configuration/mod.vr
 core/configuration/toml.vr
+core/context/mod.vr
 core/context/provider.vr
 core/database/common/copy_metrics.vr
 core/database/common/db_handle.vr
@@ -178,6 +184,7 @@ core/database/sqlite/native/get_table_api/engine.vr
 core/database/sqlite/native/hash_api/table.vr
 core/database/sqlite/native/hooks_api/mod.vr
 core/database/sqlite/native/integrity_walker_api/walker.vr
+core/database/sqlite/native/l0_vfs/locking.vr
 core/database/sqlite/native/l0_vfs/posix_vfs.vr
 core/database/sqlite/native/l1_pager/mod.vr
 core/database/sqlite/native/l1_pager/recovery.vr
@@ -197,6 +204,7 @@ core/database/sqlite/native/l5_sql/access_planning.vr
 core/database/sqlite/native/l5_sql/codegen.vr
 core/database/sqlite/native/l5_sql/compile.vr
 core/database/sqlite/native/l5_sql/parser/ddl.vr
+core/database/sqlite/native/l5_sql/parser/expr.vr
 core/database/sqlite/native/l5_sql/parser/select.vr
 core/database/sqlite/native/l5_sql/planner.vr
 core/database/sqlite/native/l5_sql/resolver.vr
@@ -221,8 +229,10 @@ core/database/sqlite/native/vtab_in/registry.vr
 core/database/sqlite/native/vtabs/fts5/dml.vr
 core/database/sqlite/native/vtabs/fts5/functions.vr
 core/database/sqlite/native/vtabs/fts5/query.vr
+core/intrinsics/arithmetic.vr
 core/intrinsics/lowlevel/aarch64.vr
 core/intrinsics/mod.vr
+core/io/buffer.vr
 core/io/file.vr
 core/io/stdio.vr
 core/mac/poly1305.vr
@@ -235,6 +245,7 @@ core/math/cubical.vr
 core/math/day_convolution.vr
 core/math/distributed.vr
 core/math/dual_absolute_layer.vr
+core/math/elementary.vr
 core/math/epistemic.vr
 core/math/examples.vr
 core/math/foundations/mod.vr
@@ -245,7 +256,9 @@ core/math/frameworks/owl2_fs/count.vr
 core/math/frameworks/owl2_fs/mod.vr
 core/math/giry.vr
 core/math/graph.vr
+core/math/guardrails.vr
 core/math/hott.vr
+core/math/ieee754.vr
 core/math/integers.vr
 core/math/kan_extension.vr
 core/math/linalg.vr
@@ -255,6 +268,7 @@ core/math/rag.vr
 core/math/s_definable/class_s_s.vr
 core/math/s_definable/lemma_3_4.vr
 core/math/simple.vr
+core/math/special.vr
 core/math/ssm.vr
 core/math/syn_mod.vr
 core/math/tensor.vr
@@ -264,7 +278,9 @@ core/mem/heap.vr
 core/mem/mod.vr
 core/mem/segment.vr
 core/meta/quote.vr
+core/meta/span.vr
 core/meta/token.vr
+core/net/dns.vr
 core/net/h3/connection.vr
 core/net/h3/qpack/mod.vr
 core/net/h3/qpack/session.vr
@@ -288,7 +304,9 @@ core/net/tls13/mod.vr
 core/net/tls13/session/client.vr
 core/net/tls13/session/server.vr
 core/net/unix.vr
+core/net/weft/arena_pool.vr
 core/net/weft/h3.vr
+core/net/weft/handler.vr
 core/net/weft/health.vr
 core/net/weft/http2.vr
 core/net/weft/http3.vr
@@ -325,6 +343,7 @@ core/security/sigstore/fulcio.vr
 core/security/sigstore/rekor.vr
 core/security/sigstore/types.vr
 core/security/sigstore/verify.vr
+core/security/spiffe/workload_api.vr
 core/security/transparency_log.vr
 core/security/tuf/client.vr
 core/security/tuf/repository.vr
@@ -332,6 +351,7 @@ core/security/webauthn/attestation.vr
 core/security/webauthn/authenticate.vr
 core/security/webauthn/register.vr
 core/security/x509/ocsp_client.vr
+core/security/x509/path_building.vr
 core/security/x509/verifier.vr
 core/security/zk/halo2/mod.vr
 core/security/zk/halo2/prover.vr
@@ -342,12 +362,14 @@ core/shell/executor.vr
 core/shell/glob.vr
 core/shell/jobs.vr
 core/shell/permissions.vr
+core/shell/progress.vr
 core/shell/resources.vr
 core/shell/stream.vr
 core/shell/transducer.vr
 core/shell/watch.vr
 core/storage/s3/client.vr
 core/sync/barrier.vr
+core/sys/common.vr
 core/sys/darwin/io.vr
 core/sys/darwin/mod.vr
 core/sys/darwin/thread.vr
@@ -355,6 +377,7 @@ core/sys/darwin/time.vr
 core/sys/darwin/tls.vr
 core/sys/embedded.vr
 core/sys/fs_watch.vr
+core/sys/init.vr
 core/sys/interrupt.vr
 core/sys/linux/io.vr
 core/sys/linux/mod.vr
@@ -381,7 +404,9 @@ core/term/raw/termios.vr
 core/term/raw/wincon.vr
 core/term/render/diff.vr
 core/term/style/color.vr
+core/term/widget/dialog.vr
 core/term/widget/input.vr
+core/term/widget/menu.vr
 core/term/widget/mod.vr
 core/term/widget/table.vr
 core/term/widget/textarea.vr
@@ -390,6 +415,7 @@ core/theory_interop/bridges/mod.vr
 core/theory_interop/core.vr
 core/theory_interop/protocol.vr
 core/tracing/tracer.vr
+core/types/qtt.vr
 core/verify/attempt.vr
 core/verify/kernel_soundness/theorem.vr
 core/verify/kernel_v0/judgment.vr
@@ -398,3 +424,11 @@ core/verify/kernel_v0/lemmas/cartesian.vr
 core/verify/kernel_v0/lemmas/eta.vr
 core/verify/kernel_v0/lemmas/sub.vr
 core/verify/kernel_v0/lemmas/subst.vr
+core/verify/kernel_v0/rules/k_app_elim.vr
+core/verify/kernel_v0/rules/k_beta.vr
+core/verify/kernel_v0/rules/k_eta.vr
+core/verify/kernel_v0/rules/k_lam_intro.vr
+core/verify/kernel_v0/rules/k_pi_form.vr
+core/verify/kernel_v0/rules/k_pos.vr
+core/verify/kernel_v0/rules/k_sub.vr
+core/verify/kernel_v0/soundness.vr
