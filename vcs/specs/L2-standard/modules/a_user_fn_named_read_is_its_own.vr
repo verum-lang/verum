@@ -1,0 +1,57 @@
+// @test: run-interpreter
+// @level: L2
+// @tier: 0
+// @tags: modules, intercepts, shadowing, stdlib
+// @timeout: 30000
+// @expected-stdout-begin
+// read 3
+// write 3
+// open 3
+// close 3
+// @expected-stdout-end
+// @description: A user function named like a runtime intercept is its own.
+//
+//   T1134. `fn read(v: &List<Byte>) -> Int { v.len() }` never ran:
+//
+//       read=Err({NotFound, Some(No such file or directory (os error 2))})
+//       WARN file intercept: argument is not a path in any known shape
+//
+//   The intercept recognised that the argument was not a path, said so
+//   on the log, and answered anyway. `write`, `open` and `close`
+//   declared identically are unaffected, which is what makes the shape
+//   worth pinning rather than the one name: the guard admits a set it
+//   did not intend, and which names fall inside it today is an accident
+//   of which intercepts exist.
+//
+//   ROOT is the guard's own first clause
+//   (verum_vbc/.../file_runtime.rs, `try_intercept_file_runtime`):
+//
+//       let qualifier_ok = func_name == bare
+//           || func_name.starts_with("File.") ...
+//
+//   The comment above it explains that the gate exists because "the
+//   bare names match too aggressively (`write` / `read` / `len` /
+//   `exists` are widely used method names)" — and `func_name == bare`
+//   is true exactly when the name carries NO qualifier, i.e. for a
+//   user's own top-level function. The guard is true on a larger set
+//   than the sentence describing it.
+//
+//   All four names are kept, not just `read`: three of them pass today,
+//   and a spec that asserted only the broken one would go green the day
+//   somebody stopped intercepting everything.
+
+fn read(v: &List<Byte>) -> Int { v.len() }
+fn write(v: &List<Byte>) -> Int { v.len() }
+fn open(v: &List<Byte>) -> Int { v.len() }
+fn close(v: &List<Byte>) -> Int { v.len() }
+
+fn main() {
+    let mut v: List<Byte> = List.new();
+    v.push(1);
+    v.push(2);
+    v.push(3);
+    print(f"read {read(&v)}");
+    print(f"write {write(&v)}");
+    print(f"open {open(&v)}");
+    print(f"close {close(&v)}");
+}

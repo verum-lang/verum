@@ -257,6 +257,29 @@ fn intercept_read_bytes(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     let path = extract_path_arg(state, args_start_reg, caller_base);
+    // T1134 — DECLINE RATHER THAN FAIL when the argument is not a path.
+    //
+    // `extract_path_arg` answers the empty string when the value is not
+    // a path in any shape it knows, and warns on the way past (T0899:
+    // a debug rendering must never become a filename). Proceeding from
+    // there produced a `NotFound` for a call that was never about the
+    // filesystem: a user's own
+    //
+    //     fn read(v: &List<Byte>) -> Int { v.len() }
+    //
+    // was swallowed by this intercept and answered
+    // `Err({NotFound, No such file or directory})` — the declaration
+    // never ran. The guard above admits any UNQUALIFIED name
+    // (`func_name == bare`), which is exactly a user's top-level
+    // function, so the name alone cannot tell the two apart.
+    //
+    // The path can: no `std::fs` call is satisfied by an empty
+    // filename, so declining here cannot take away a read that works
+    // today, and it hands the call back to the real body — which is
+    // what should have happened.
+    if path.is_empty() {
+        return Ok(None);
+    }
     if let Some(denied) = check_fs_permission(state, "read", &path) {
         return Ok(Some(denied));
     }
