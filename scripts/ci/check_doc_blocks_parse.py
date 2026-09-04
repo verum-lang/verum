@@ -92,6 +92,22 @@ def classify(binary: str, body: str, tmp: str, tag: str) -> str:
         return "table"
     if parses(binary, "fn zz_wrap() {\n" + body + "\n}", tmp, tag + "w"):
         return "fragment"
+    # MIXED: top-level items AND a bare expression in one block, which
+    # neither test can accept — the expression is illegal at top level,
+    # and the items are illegal inside the wrapper. Measured on
+    # `active-patterns.md` block 10: `pattern` declarations followed by
+    # a bare `match`, a shape a reader understands and no single
+    # compilation unit does. Splitting the last statement off and
+    # wrapping only that answers the question the block poses.
+    lines = body.split("\n")
+    for cut in range(len(lines) - 1, 0, -1):
+        head, tail = "\n".join(lines[:cut]), "\n".join(lines[cut:])
+        if not tail.strip():
+            continue
+        if parses(binary, head, tmp, tag + "h") and parses(
+            binary, head + "\nfn zz_wrap() {\n" + tail + "\n}", tmp, tag + "m"
+        ):
+            return "mixed"
     return "DEFECT"
 
 
@@ -106,7 +122,7 @@ def run(argv: list[str]) -> int:
         print(f"check-doc-blocks-parse: no verum binary at {binary}, skipped")
         return 0
 
-    counts = {"ok": 0, "elision": 0, "table": 0, "fragment": 0, "DEFECT": 0}
+    counts = {"ok": 0, "elision": 0, "table": 0, "fragment": 0, "mixed": 0, "DEFECT": 0}
     defects: list[str] = []
     # An optional subtree, so a section can be measured in ten minutes
     # instead of the whole estate in an hour. The BASELINE only means
@@ -116,7 +132,8 @@ def run(argv: list[str]) -> int:
     if not root.exists():
         print(f"check-doc-blocks-parse: {root} does not exist", file=sys.stderr)
         return 1
-    todo = [(md, i, b) for md in sorted(root.rglob("*.md"))
+    mds = [root] if root.is_file() else sorted(root.rglob("*.md"))
+    todo = [(md, i, b) for md in mds
             for i, b in enumerate(BLOCK.findall(md.read_text()))]
     # A run that prints nothing for forty minutes cannot be told from a
     # run that has hung, and I killed one to find out which it was.
