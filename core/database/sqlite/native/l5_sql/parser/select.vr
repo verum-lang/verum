@@ -79,7 +79,7 @@ public fn parse_select(ts: &mut SqlTokenStream) -> Result<SelectStmt, SqlParseEr
                 };
                 let lhs_wrapped = SelectStmt { kind: kind, order_by: List.new(), limit: Maybe.None };
                 let rhs_wrapped = SelectStmt { kind: SkSimple(rhs), order_by: List.new(), limit: Maybe.None };
-                kind = SkCompound(op, Heap(lhs_wrapped), Heap(rhs_wrapped));
+                kind = SkCompound(op, Heap.new(lhs_wrapped), Heap.new(rhs_wrapped));
             }
             Maybe.None => break,
         }
@@ -304,11 +304,11 @@ fn parse_from_clause(ts: &mut SqlTokenStream) -> Result<FromItem, SqlParseError>
                 }
                 let jc = JoinClause {
                     kind: jk,
-                    right: Heap(right),
+                    right: Heap.new(right),
                     on: on,
                     using_cols: using_cols,
                 };
-                left = FiJoin(Heap(left), jc);
+                left = FiJoin(Heap.new(left), jc);
             }
             Maybe.None => {
                 // A comma-separated FROM list is parsed as a chain of
@@ -319,11 +319,11 @@ fn parse_from_clause(ts: &mut SqlTokenStream) -> Result<FromItem, SqlParseError>
                     };
                     let jc = JoinClause {
                         kind: JCross,
-                        right: Heap(right),
+                        right: Heap.new(right),
                         on: Maybe.None,
                         using_cols: List.new(),
                     };
-                    left = FiJoin(Heap(left), jc);
+                    left = FiJoin(Heap.new(left), jc);
                     continue;
                 }
                 break;

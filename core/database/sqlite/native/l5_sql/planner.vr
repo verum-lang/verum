@@ -202,14 +202,14 @@ fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
             let rp = plan_select(rhs)?;
             let n_proj = compound_proj_count(lhs);
             let mut compound: PlanNode = match op {
-                CoUnionAll  => PnUnionAll(Heap(lp), Heap(rp)),
-                CoUnion     => PnUnion(Heap(lp), Heap(rp), n_proj),
-                CoIntersect => PnIntersect(Heap(lp), Heap(rp), n_proj),
-                CoExcept    => PnExcept(Heap(lp), Heap(rp), n_proj),
+                CoUnionAll  => PnUnionAll(Heap.new(lp), Heap.new(rp)),
+                CoUnion     => PnUnion(Heap.new(lp), Heap.new(rp), n_proj),
+                CoIntersect => PnIntersect(Heap.new(lp), Heap.new(rp), n_proj),
+                CoExcept    => PnExcept(Heap.new(lp), Heap.new(rp), n_proj),
             };
             // Outer ORDER BY / LIMIT applies to the compound result.
             if sel.order_by.len() > 0 {
-                compound = PnSort(Heap(compound), clone_order_terms(&sel.order_by));
+                compound = PnSort(Heap.new(compound), clone_order_terms(&sel.order_by));
             }
             match sel.limit {
                 Maybe.Some(ref lc) => {
@@ -217,7 +217,7 @@ fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
                         Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
                         Maybe.None => Maybe.None,
                     };
-                    compound = PnLimit(Heap(compound), clone_expr(&lc.limit), off);
+                    compound = PnLimit(Heap.new(compound), clone_expr(&lc.limit), off);
                 }
                 Maybe.None => {}
             }
@@ -251,7 +251,7 @@ fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
 
     // WHERE.
     match simple.where_clause {
-        Maybe.Some(ref w) => { node = PnFilter(Heap(node), clone_expr(w)); }
+        Maybe.Some(ref w) => { node = PnFilter(Heap.new(node), clone_expr(w)); }
         Maybe.None => {}
     }
 
@@ -279,12 +279,12 @@ fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
             }
             i = i + 1;
         }
-        node = PnProject(Heap(node), cols);
+        node = PnProject(Heap.new(node), cols);
     }
 
     // ORDER BY.
     if sel.order_by.len() > 0 {
-        node = PnSort(Heap(node), clone_order_terms(&sel.order_by));
+        node = PnSort(Heap.new(node), clone_order_terms(&sel.order_by));
     }
 
     // LIMIT / OFFSET.
@@ -294,7 +294,7 @@ fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
                 Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
                 Maybe.None => Maybe.None,
             };
-            node = PnLimit(Heap(node), clone_expr(&lc.limit), off);
+            node = PnLimit(Heap.new(node), clone_expr(&lc.limit), off);
         }
         Maybe.None => {}
     }
@@ -327,7 +327,7 @@ fn plan_insert(ins: &InsertStmt) -> Result<PlanNode, PlanError> {
     Result.Ok(PnInsert(
         clone_table_ref(&ins.table),
         clone_text_list(&ins.columns),
-        Heap(source),
+        Heap.new(source),
         clone_opt_on_conflict(&ins.on_conflict),
     ))
 }
@@ -498,15 +498,15 @@ public fn clone_expr(e: &Expr) -> Expr {
         EColumn(ref t, ref n) => EColumn(clone_table_ref(t), n.clone()),
         EVar(ref s)        => EVar(s.clone()),
         EPositional(n)     => EPositional(n),
-        EUnary(op, ref x)  => EUnary(op, Heap(clone_expr(x))),
-        EBinary(op, ref a, ref b) => EBinary(op, Heap(clone_expr(a)), Heap(clone_expr(b))),
+        EUnary(op, ref x)  => EUnary(op, Heap.new(clone_expr(x))),
+        EBinary(op, ref a, ref b) => EBinary(op, Heap.new(clone_expr(a)), Heap.new(clone_expr(b))),
         EFunc(ref n, ref args, d) => EFunc(n.clone(), clone_expr_list(args), d),
         ECase(ref s, ref arms, ref el) => ECase(
-            match s { Maybe.Some(ref x) => Maybe.Some(Heap(clone_expr(x))), Maybe.None => Maybe.None },
+            match s { Maybe.Some(ref x) => Maybe.Some(Heap.new(clone_expr(x))), Maybe.None => Maybe.None },
             clone_case_arms(arms),
-            match el { Maybe.Some(ref x) => Maybe.Some(Heap(clone_expr(x))), Maybe.None => Maybe.None },
+            match el { Maybe.Some(ref x) => Maybe.Some(Heap.new(clone_expr(x))), Maybe.None => Maybe.None },
         ),
-        EIn(ref e, ref xs, neg) => EIn(Heap(clone_expr(e)), clone_expr_list(xs), neg),
+        EIn(ref e, ref xs, neg) => EIn(Heap.new(clone_expr(e)), clone_expr_list(xs), neg),
         // Subquery expressions are rejected by the resolver
         // (`TooComplex("subquery in expression")`) before reaching
         // clone_expr. Pre-fix these arms silently coerced to
@@ -518,19 +518,19 @@ public fn clone_expr(e: &Expr) -> Expr {
         // returning a wrong-answer result set.
         EInSubquery(_, _, _) => panic("clone_expr: EInSubquery should be rejected by the resolver before clone"),
         EBetween(ref e, ref lo, ref hi, neg) => EBetween(
-            Heap(clone_expr(e)), Heap(clone_expr(lo)), Heap(clone_expr(hi)), neg,
+            Heap.new(clone_expr(e)), Heap.new(clone_expr(lo)), Heap.new(clone_expr(hi)), neg,
         ),
         ELike(ref e, ref p, ref esc, neg) => ELike(
-            Heap(clone_expr(e)),
-            Heap(clone_expr(p)),
-            match esc { Maybe.Some(ref x) => Maybe.Some(Heap(clone_expr(x))), Maybe.None => Maybe.None },
+            Heap.new(clone_expr(e)),
+            Heap.new(clone_expr(p)),
+            match esc { Maybe.Some(ref x) => Maybe.Some(Heap.new(clone_expr(x))), Maybe.None => Maybe.None },
             neg,
         ),
-        ECast(ref x, ref t) => ECast(Heap(clone_expr(x)), t.clone()),
-        ECollate(ref x, ref n) => ECollate(Heap(clone_expr(x)), n.clone()),
+        ECast(ref x, ref t) => ECast(Heap.new(clone_expr(x)), t.clone()),
+        ECollate(ref x, ref n) => ECollate(Heap.new(clone_expr(x)), n.clone()),
         EExists(_, _)   => panic("clone_expr: EExists should be rejected by the resolver before clone"),
         ESubquery(_)    => panic("clone_expr: ESubquery should be rejected by the resolver before clone"),
-        ENullIf(ref a, ref b) => ENullIf(Heap(clone_expr(a)), Heap(clone_expr(b))),
+        ENullIf(ref a, ref b) => ENullIf(Heap.new(clone_expr(a)), Heap.new(clone_expr(b))),
         ECoalesce(ref xs)     => ECoalesce(clone_expr_list(xs)),
         EColumnRef(cid, idx)  => EColumnRef(cid, idx),
     }
@@ -655,7 +655,7 @@ fn plan_insert_with_schema(
     Result.Ok(PnInsert(
         clone_table_ref(&ins.table),
         clone_text_list(&ins.columns),
-        Heap(source),
+        Heap.new(source),
         clone_opt_on_conflict(&ins.on_conflict),
     ))
 }
@@ -841,10 +841,10 @@ fn plan_from_for_select(
                 }
                 let null_filter = EBinary(
                     BIs,
-                    Heap(EColumnRef(1, 0)),
-                    Heap(ELit(LNull)),
+                    Heap.new(EColumnRef(1, 0)),
+                    Heap.new(ELit(LNull)),
                 );
-                let filtered = PnFilter(Heap(swapped), null_filter);
+                let filtered = PnFilter(Heap.new(swapped), null_filter);
 
                 // PnProject: reorder swapped output [B.cols..., A.cols...]
                 // → [A.cols..., B.cols...] so the UNION ALL operands have
@@ -866,9 +866,9 @@ fn plan_from_for_select(
                     });
                     bj = bj + 1;
                 }
-                let projected = PnProject(Heap(filtered), project_cols);
+                let projected = PnProject(Heap.new(filtered), project_cols);
 
-                let union_node = PnUnionAll(Heap(left_join), Heap(projected));
+                let union_node = PnUnionAll(Heap.new(left_join), Heap.new(projected));
 
                 // Outer scope for the surrounding query: A@0, B@1 (matches
                 // left_join's natural shape, which UNION ALL preserves).
@@ -940,10 +940,10 @@ fn plan_select_with_schema(
                 n_proj_left
             };
             let mut compound: PlanNode = match op {
-                CoUnionAll  => PnUnionAll(Heap(lp), Heap(rp)),
-                CoUnion     => PnUnion(Heap(lp), Heap(rp), n_proj),
-                CoIntersect => PnIntersect(Heap(lp), Heap(rp), n_proj),
-                CoExcept    => PnExcept(Heap(lp), Heap(rp), n_proj),
+                CoUnionAll  => PnUnionAll(Heap.new(lp), Heap.new(rp)),
+                CoUnion     => PnUnion(Heap.new(lp), Heap.new(rp), n_proj),
+                CoIntersect => PnIntersect(Heap.new(lp), Heap.new(rp), n_proj),
+                CoExcept    => PnExcept(Heap.new(lp), Heap.new(rp), n_proj),
             };
             // Outer ORDER BY / LIMIT applies AFTER the compound op.
             if sel.order_by.len() > 0 {
@@ -962,7 +962,7 @@ fn plan_select_with_schema(
                     });
                     t = t + 1;
                 }
-                compound = PnSort(Heap(compound), resolved_terms);
+                compound = PnSort(Heap.new(compound), resolved_terms);
             }
             match sel.limit {
                 Maybe.Some(ref lc) => {
@@ -970,7 +970,7 @@ fn plan_select_with_schema(
                         Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
                         Maybe.None => Maybe.None,
                     };
-                    compound = PnLimit(Heap(compound), clone_expr(&lc.limit), off);
+                    compound = PnLimit(Heap.new(compound), clone_expr(&lc.limit), off);
                 }
                 Maybe.None => {}
             }
@@ -1002,7 +1002,7 @@ fn plan_select_with_schema(
                 Result.Ok(e)  => e,
                 Result.Err(_) => { return Result.Err(plan_error("WHERE resolve failed".clone())); }
             };
-            node = PnFilter(Heap(node), resolved);
+            node = PnFilter(Heap.new(node), resolved);
         }
         Maybe.None => {}
     }
@@ -1065,13 +1065,13 @@ fn plan_select_with_schema(
             },
             Maybe.None => Maybe.None,
         };
-        node = PnGroupBy(Heap(node), resolved_keys, plan_cols, having);
+        node = PnGroupBy(Heap.new(node), resolved_keys, plan_cols, having);
     } else {
-        node = PnProject(Heap(node), plan_cols);
+        node = PnProject(Heap.new(node), plan_cols);
         // DISTINCT — wrap after projection so the distinct rows match what
         // the user would see.
         if simple.distinct {
-            node = PnDistinct(Heap(node), n_proj);
+            node = PnDistinct(Heap.new(node), n_proj);
         }
     }
 
@@ -1092,7 +1092,7 @@ fn plan_select_with_schema(
             });
             t = t + 1;
         }
-        node = PnSort(Heap(node), resolved_terms);
+        node = PnSort(Heap.new(node), resolved_terms);
     }
 
     // LIMIT / OFFSET.
@@ -1102,7 +1102,7 @@ fn plan_select_with_schema(
                 Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
                 Maybe.None => Maybe.None,
             };
-            node = PnLimit(Heap(node), clone_expr(&lc.limit), off);
+            node = PnLimit(Heap.new(node), clone_expr(&lc.limit), off);
         }
         Maybe.None => {}
     }

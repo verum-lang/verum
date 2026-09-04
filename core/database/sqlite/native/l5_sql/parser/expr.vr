@@ -70,7 +70,7 @@ fn parse_or(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
             Result.Ok(e)  => e,
             Result.Err(e) => { return Result.Err(e); }
         };
-        left = EBinary(BOr, Heap(left), Heap(right));
+        left = EBinary(BOr, Heap.new(left), Heap.new(right));
     }
     Result.Ok(left)
 }
@@ -89,7 +89,7 @@ fn parse_and(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
             Result.Ok(e)  => e,
             Result.Err(e) => { return Result.Err(e); }
         };
-        left = EBinary(BAnd, Heap(left), Heap(right));
+        left = EBinary(BAnd, Heap.new(left), Heap.new(right));
     }
     Result.Ok(left)
 }
@@ -104,7 +104,7 @@ fn parse_not(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
             Result.Ok(e)  => e,
             Result.Err(e) => { return Result.Err(e); }
         };
-        return Result.Ok(EUnary(UNot, Heap(inner)));
+        return Result.Ok(EUnary(UNot, Heap.new(inner)));
     }
     parse_equality(ts)
 }
@@ -127,7 +127,7 @@ fn parse_equality(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
                     Result.Ok(e)  => e,
                     Result.Err(e) => { return Result.Err(e); }
                 };
-                left = EBinary(op, Heap(left), Heap(right));
+                left = EBinary(op, Heap.new(left), Heap.new(right));
             }
             Maybe.None => {
                 // Check for NOT-prefixed forms (NOT IN, NOT LIKE, etc.).
@@ -141,7 +141,7 @@ fn parse_equality(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
                     let hi = match parse_comparison(ts) {
                         Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                     };
-                    left = EBetween(Heap(left), Heap(lo), Heap(hi), negated);
+                    left = EBetween(Heap.new(left), Heap.new(lo), Heap.new(hi), negated);
                     continue;
                 }
 
@@ -155,7 +155,7 @@ fn parse_equality(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
                     } else {
                         Maybe.None
                     };
-                    left = ELike(Heap(left), Heap(pattern), escape, negated);
+                    left = ELike(Heap.new(left), Heap.new(pattern), escape, negated);
                     continue;
                 }
 
@@ -177,7 +177,7 @@ fn parse_equality(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
                         Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                     };
                     let op: BinOp = if is_not { BIsNot } else { BIs };
-                    left = EBinary(op, Heap(left), Heap(right));
+                    left = EBinary(op, Heap.new(left), Heap.new(right));
                     continue;
                 }
 
@@ -211,7 +211,7 @@ fn parse_in_rhs(
         }
     }
     match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
-    Result.Ok(EIn(Heap(left), items, negated))
+    Result.Ok(EIn(Heap.new(left), items, negated))
 }
 
 // -----------------------------------------------------------------------------
@@ -233,7 +233,7 @@ fn parse_comparison(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
                 let right = match parse_bit(ts) {
                     Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                 };
-                left = EBinary(op, Heap(left), Heap(right));
+                left = EBinary(op, Heap.new(left), Heap.new(right));
             }
             Maybe.None => break,
         }
@@ -260,7 +260,7 @@ fn parse_bit(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
                 let right = match parse_add(ts) {
                     Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                 };
-                left = EBinary(op, Heap(left), Heap(right));
+                left = EBinary(op, Heap.new(left), Heap.new(right));
             }
             Maybe.None => break,
         }
@@ -285,7 +285,7 @@ fn parse_add(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
                 let right = match parse_mul(ts) {
                     Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                 };
-                left = EBinary(op, Heap(left), Heap(right));
+                left = EBinary(op, Heap.new(left), Heap.new(right));
             }
             Maybe.None => break,
         }
@@ -317,7 +317,7 @@ fn parse_mul(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
                 let right = match parse_concat(ts) {
                     Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                 };
-                left = EBinary(op, Heap(left), Heap(right));
+                left = EBinary(op, Heap.new(left), Heap.new(right));
             }
             Maybe.None => break,
         }
@@ -337,7 +337,7 @@ fn parse_concat(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
         let right = match parse_unary(ts) {
             Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
         };
-        left = EBinary(BConcat, Heap(left), Heap(right));
+        left = EBinary(BConcat, Heap.new(left), Heap.new(right));
     }
     Result.Ok(left)
 }
@@ -351,19 +351,19 @@ fn parse_unary(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
         let inner = match parse_unary(ts) {
             Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
         };
-        return Result.Ok(EUnary(UNeg, Heap(inner)));
+        return Result.Ok(EUnary(UNeg, Heap.new(inner)));
     }
     if ts.accept_op(OpPlus) {
         let inner = match parse_unary(ts) {
             Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
         };
-        return Result.Ok(EUnary(UPlus, Heap(inner)));
+        return Result.Ok(EUnary(UPlus, Heap.new(inner)));
     }
     if ts.accept_op(OpBitNot) {
         let inner = match parse_unary(ts) {
             Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
         };
-        return Result.Ok(EUnary(UBitNot, Heap(inner)));
+        return Result.Ok(EUnary(UBitNot, Heap.new(inner)));
     }
     parse_collate(ts)
 }
@@ -380,7 +380,7 @@ fn parse_collate(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
         let coll = match ts.expect_ident() {
             Result.Ok(s)  => s, Result.Err(err) => { return Result.Err(err); }
         };
-        e = ECollate(Heap(e), coll);
+        e = ECollate(Heap.new(e), coll);
     }
     Result.Ok(e)
 }
@@ -513,7 +513,7 @@ fn parse_case(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
         let e = match parse_expr(ts) {
             Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
-        Maybe.Some(Heap(e))
+        Maybe.Some(Heap.new(e))
     };
 
     let mut arms: List<(Expr, Expr)> = List.new();
@@ -532,7 +532,7 @@ fn parse_case(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
         let e = match parse_expr(ts) {
             Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
-        Maybe.Some(Heap(e))
+        Maybe.Some(Heap.new(e))
     } else {
         Maybe.None
     };
@@ -553,7 +553,7 @@ fn parse_cast(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
         Result.Ok(s)  => s, Result.Err(err) => { return Result.Err(err); }
     };
     match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
-    Result.Ok(ECast(Heap(inner), ty))
+    Result.Ok(ECast(Heap.new(inner), ty))
 }
 
 fn parse_exists(ts: &mut SqlTokenStream, negated: Bool) -> Result<Expr, SqlParseError> {

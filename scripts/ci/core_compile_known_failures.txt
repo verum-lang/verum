@@ -201,8 +201,6 @@ core/database/sqlite/native/l5_sql/access_planning.vr
 core/database/sqlite/native/l5_sql/codegen.vr
 core/database/sqlite/native/l5_sql/compile.vr
 core/database/sqlite/native/l5_sql/parser/ddl.vr
-core/database/sqlite/native/l5_sql/parser/expr.vr
-core/database/sqlite/native/l5_sql/parser/select.vr
 core/database/sqlite/native/l5_sql/planner.vr
 core/database/sqlite/native/l5_sql/resolver.vr
 core/database/sqlite/native/l6_session/connection.vr
