@@ -1490,6 +1490,45 @@ pub fn verify_proof_body_with_aliases_and_graph(
     apply_graph: Option<&verum_kernel::soundness::apply_graph::ApplyGraph>,
     module: Option<&verum_ast::Module>,
 ) -> ProofVerificationResult {
+    // RECORD LAYOUTS, for the same reason and from the same authority
+    // (T0905). `verify_cmd.rs:948` registers these and this entry point
+    // did not, so a goal mentioning `r.v` could not build the
+    // projection the reflection side emits and fell to a free constant:
+    //
+    //     definition   (= (on_rec r) (> (Verum!proj!Rec!v r) 0))
+    //     goal         (not (= (on_rec r) (> field_r__v 0)))
+    //
+    // `field_r__v` is a nullary constant unrelated to `r`, so `r.v > 0`
+    // — the SAME expression on both sides of the source — reached Z3 as
+    // two unconnected terms and nothing could be decided. Measured: the
+    // record claim proves under `verum verify` and fails under `verum
+    // check`, same binary, same file.
+    //
+    // The fallback that produced `field_r__v` documents itself as being
+    // "for a receiver whose type the obligation never declared" — and
+    // on this path NO record type was ever declared, so it was not a
+    // fallback here but the only route.
+    if let Some(m) = module {
+        use verum_ast::decl::TypeDeclBody;
+        for item in &m.items {
+            let verum_ast::ItemKind::Type(td) = &item.kind else {
+                continue;
+            };
+            let TypeDeclBody::Record(fields) = &td.body else {
+                continue;
+            };
+            let mut layout: std::collections::HashMap<String, (String, Option<String>)> =
+                std::collections::HashMap::new();
+            for f in fields.iter() {
+                layout.insert(
+                    f.name.name.as_str().to_string(),
+                    verum_smt::expr_to_smtlib::type_to_sort_and_name(&f.ty),
+                );
+            }
+            engine.register_record_type(td.name.name.clone(), layout);
+        }
+    }
+
     // Type names this module declares. `declared_sort_of` in
     // `verify_cmd.rs` asks the same question of three separate
     // registries — records, variants, positional (newtype) layouts —
