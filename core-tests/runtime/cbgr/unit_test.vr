@@ -30,8 +30,15 @@ mount core.runtime.cbgr.{
     cbgr_validate,
     cbgr_allocate, cbgr_deallocate, cbgr_realloc,
     cbgr_invalidate,
-    cbgr_get_epoch, cbgr_current_epoch,
+    cbgr_current_epoch,
 };
+
+// `cbgr_get_epoch` was mounted here until 2026-09-04. It is deliberately
+// gone — `core/intrinsics/runtime/cbgr.vr:130` records it as a second
+// name for `cbgr_current_epoch` with no callers, no registry entry and
+// no handler, removed under T0846 for the one-concept-one-name rule.
+// The two Section 3 tests below call the surviving name; neither was
+// asserting that the alias existed.
 
 // =============================================================================
 // Section 1: re-export coherence — allocation bridge through the shim
@@ -76,7 +83,7 @@ fn test_shim_validate_live_heap_ref() {
 
 @test
 fn test_epoch_non_negative() {
-    assert(cbgr_get_epoch() >= 0);
+    assert(cbgr_current_epoch() >= 0);
 }
 
 @test
@@ -85,7 +92,7 @@ fn test_epoch_stable_across_adjacent_reads() {
     // scope — this is the load-bearing invariant for every caller
     // that grabs the epoch, checks, and uses a reference within the
     // same epoch window.
-    assert_eq(cbgr_get_epoch(), cbgr_get_epoch());
+    assert_eq(cbgr_current_epoch(), cbgr_current_epoch());
 }
 
 @test
