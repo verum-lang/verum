@@ -62,9 +62,10 @@ fn regression_display_direct_ctor_renders_uppercase_name() {
     assert_eq(f"{ContextLogLevel.Fatal}", "FATAL");
 }
 
-// LIVE companion: Display DOES dispatch via a bound variable — pin the
-// working idiom so the coverage survives while the direct-ctor form above
-// is @ignore'd.
+// Companion: Display DOES dispatch via a bound variable. This pin was
+// written while the direct-ctor form above was ignored; that one was
+// un-ignored 2026-06-01 and both run now. Kept because the two forms
+// reach Display by different paths and only one of them regressed.
 @test
 fn regression_display_via_bound_var_dispatches() {
     let t = ContextLogLevel.Trace;

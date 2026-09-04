@@ -108,9 +108,10 @@ fn regression_select_best_media_no_match_none() {
 // (SIGSEGV in VBC codegen) — distinct from the working
 // `select_best_coding` path; the difference is `score_media`'s tuple
 // `(Float, Int)` return threaded through the monomorphised body.
-// property_test.vr §2-§7 (the select_best_media laws) are @ignore'd on
-// this pin; parse_accept + select_best_coding coverage stays live.
-// @ignore'd: crashes at COMPILE time.
+// CLOSED: T0149 triaged this crash class and property_test.vr now
+// carries no @ignore at all — the select_best_media laws it says were
+// pinned here are live again, and so is this test. The paragraph above
+// is kept as the record of what the crash was, not as a current state.
 @test
 fn regression_select_best_media_codegen_crash() {
     let prefs = parse_accept(&"text/*, text/html".clone());
