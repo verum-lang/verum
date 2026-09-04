@@ -6,7 +6,26 @@
 // =============================================================================
 //
 
-// The contract every adapter implements. Two design pillars:
+// The contract every adapter is written AGAINST. Measured 2026-09-04,
+// and worth knowing before reading the rest as a live interface: no
+// adapter in this tree implements any of it.
+//
+// `implement Connection for ...`, `implement Row for ...`,
+// `implement Adapter for ...`, `implement Pool for ...` — zero
+// occurrences each, across all of core/. The concrete types are
+// independent: `PgConnection` and `AsyncPgConnection` have their own
+// inherent `implement` blocks, and so do the MySQL and SQLite ones.
+// So nothing can be written generically over `Adapter`, and the
+// arena-lifetime rule stated on `Connection.arena` below binds nobody.
+//
+// This is a specification, in other words, not a seam that is load-
+// bearing today. Recorded as A51 in docs/architecture/tech-debt-
+// register.md, together with `Supervisor` and `HttpClient`, which have
+// the same shape for different reasons — the HTTP one deliberately
+// (the library ships the vocabulary and you bring the transport), this
+// one not (the drivers are in this tree).
+//
+// Two design pillars:
 //
 
 //  1. `Transaction` is `affine` — the value MUST be consumed by exactly
