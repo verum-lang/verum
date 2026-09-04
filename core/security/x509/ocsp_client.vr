@@ -158,7 +158,7 @@ public fn build_cert_id(
 ) -> CertId {
     let issuer_name_hash = hash_bytes(&hash, issuer.tbs.subject.raw_der.as_slice());
     let issuer_key_hash = hash_bytes(&hash, extract_spki_pubkey_bits(issuer).as_slice());
-    let serial = cert.tbs.serial_number_bytes.clone();
+    let serial = cert.tbs.serial_number.clone();
     CertId {
         raw_hash_algorithm: encode_alg_id(&cert_id_hash_oid(&hash)),
         issuer_name_hash,
@@ -528,7 +528,7 @@ public async fn check_certificate_status<C: HttpClient>(
     };
 
     // Step 4: locate SingleResponse for our cert.
-    let single = find_single_response(&basic, cert.tbs.serial_number_bytes.as_slice())
+    let single = find_single_response(&basic, cert.tbs.serial_number.as_slice())
         .ok_or_else(|| OcspCheckError.NoSingleResponse)?;
 
     // Step 5: signature verification — issuer-direct OR delegated.
