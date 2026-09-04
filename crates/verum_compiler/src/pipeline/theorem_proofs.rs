@@ -258,6 +258,7 @@ impl<'s> CompilationPipeline<'s> {
                         thm,
                         &alias_map,
                         Some(&apply_graph),
+                        Some(module),
                     ) {
                         ProofVerificationResult::Verified(cert) => {
                             let elapsed = verify_start.elapsed().as_millis() as u64;
@@ -335,6 +336,7 @@ impl<'s> CompilationPipeline<'s> {
                         thm,
                         &alias_map,
                         Some(&apply_graph),
+                        Some(module),
                     ) {
                         ProofVerificationResult::Verified(cert) => {
                             verified_count += 1;

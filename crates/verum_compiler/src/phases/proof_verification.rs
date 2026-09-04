@@ -1458,7 +1458,7 @@ pub fn verify_proof_body_with_aliases(
     theorem: &TheoremDecl,
     alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
 ) -> ProofVerificationResult {
-    verify_proof_body_with_aliases_and_graph(engine, smt_ctx, theorem, alias_map, None)
+    verify_proof_body_with_aliases_and_graph(engine, smt_ctx, theorem, alias_map, None, None)
 }
 
 /// Same as [`verify_proof_body_with_aliases`] but accepts an optional
@@ -1472,13 +1472,41 @@ pub fn verify_proof_body_with_aliases(
 /// (`pipeline::theorem_proofs::verify_theorem_proofs`) builds one.
 /// The optional shape keeps the legacy entry zero-overhead while
 /// enabling the rich-diagnostic path when context is available.
+/// **Why `module` is an `Option` (T1151).** A parameter typed by a
+/// record, variant or newtype translates to an opaque sort
+/// `Verum!Name`, and registering that sort is safe only when the module
+/// actually DECLARES `Name` — otherwise the solver is told a value has
+/// a sort nothing in scope defines, which is the shape the corpus
+/// regression below was made of. `verify_cmd.rs` answers the same
+/// question with three layout registries; here the module itself is the
+/// registry, and it is optional for the same reason `apply_graph` is:
+/// the legacy single-theorem entries have no module to hand and must
+/// stay zero-overhead.
 pub fn verify_proof_body_with_aliases_and_graph(
     engine: &mut ProofSearchEngine,
     smt_ctx: &Context,
     theorem: &TheoremDecl,
     alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
     apply_graph: Option<&verum_kernel::soundness::apply_graph::ApplyGraph>,
+    module: Option<&verum_ast::Module>,
 ) -> ProofVerificationResult {
+    // Type names this module declares. `declared_sort_of` in
+    // `verify_cmd.rs` asks the same question of three separate
+    // registries — records, variants, positional (newtype) layouts —
+    // and all three reduce to "is this name declared here". The module
+    // is the one authority that answers for all three at once, and it
+    // is what this entry point has.
+    let declared_types: std::collections::HashSet<String> = module
+        .map(|m| {
+            m.items
+                .iter()
+                .filter_map(|it| match &it.kind {
+                    verum_ast::ItemKind::Type(td) => Some(td.name.name.as_str().to_string()),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let proof_start = Instant::now();
     let theorem_name = theorem.name.name.clone();
 
@@ -1490,11 +1518,11 @@ pub fn verify_proof_body_with_aliases_and_graph(
         if let FunctionParamKind::Regular { pattern, ty, .. } = &p.kind {
             if let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind {
                 let (sort, type_name) = verum_smt::expr_to_smtlib::type_to_sort_and_name(ty);
-                if let Some(type_name) = type_name {
-                    engine.register_value_type(
-                        name.name.clone(),
-                        Text::from(type_name.as_str()),
-                    );
+                // Borrowed, not moved: the opaque-sort test below needs
+                // the same name, and moving it here is what stopped it
+                // being asked at all.
+                if let Some(tn) = &type_name {
+                    engine.register_value_type(name.name.clone(), Text::from(tn.as_str()));
                 }
                 // A Bool parameter must be known to be Bool: `cases b`
                 // on a `b: Bool` parameter failed "Hypothesis 'b' not
@@ -1553,7 +1581,22 @@ pub fn verify_proof_body_with_aliases_and_graph(
                 // and leave `Verum!X` alone until the registries reach
                 // here. That larger change keeps the corpus figures
                 // above as its negative pole.
-                if matches!(sort.as_str(), "Int" | "Bool" | "Real" | "String") {
+                // A primitive sort cannot be an unresolved name, so it is
+                // always safe. An OPAQUE sort is safe exactly when this
+                // module declares the type it names — which is the test
+                // `declared_sort_of` performs against its three
+                // registries, asked here of the module instead.
+                //
+                // Without the second half, eight of the proving ground's
+                // ten obligations stay unstatable: their predicates take
+                // `&CachedEntry`, `&Hash`, `&Version`, and the goal
+                // applies a symbol declared over `Verum!Hash` to an Int.
+                let safe_sort = matches!(sort.as_str(), "Int" | "Bool" | "Real" | "String")
+                    || (sort.starts_with("Verum!")
+                        && type_name
+                            .as_deref()
+                            .is_some_and(|n| declared_types.contains(n)));
+                if safe_sort {
                     engine.register_value_sort(name.name.clone(), Text::from(sort.as_str()));
                 }
                 if sort == "Bool" {
