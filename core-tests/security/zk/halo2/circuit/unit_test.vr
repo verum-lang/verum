@@ -3,77 +3,77 @@
 // =============================================================================
 //
 // `core/security/zk/halo2/circuit.vr` —
-//   * ColumnType 4-variant ADT (Advice / Instance / Fixed / SelectorColumn)
+//   * CircuitColumnType 4-variant ADT (Advice / Instance / Fixed / SelectorColumn)
 //   * Column record (index, kind, name)
 //   * Selector record (column)
 // =============================================================================
 
-mount core.security.zk.halo2.circuit.{ColumnType, Column, Selector};
+mount core.security.zk.halo2.circuit.{CircuitColumnType, Column, Selector};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
-// Section 1: ColumnType 4-variant construction
+// Section 1: CircuitColumnType 4-variant construction
 // =============================================================================
 
 @test
 fn test_column_type_advice_variant() {
-    let t: ColumnType = ColumnType.Advice;
-    assert(t is ColumnType.Advice);
+    let t: CircuitColumnType = CircuitColumnType.Advice;
+    assert(t is CircuitColumnType.Advice);
 }
 
 @test
 fn test_column_type_instance_variant() {
-    let t: ColumnType = ColumnType.Instance;
-    assert(t is ColumnType.Instance);
+    let t: CircuitColumnType = CircuitColumnType.Instance;
+    assert(t is CircuitColumnType.Instance);
 }
 
 @test
 fn test_column_type_fixed_variant() {
-    let t: ColumnType = ColumnType.Fixed;
-    assert(t is ColumnType.Fixed);
+    let t: CircuitColumnType = CircuitColumnType.Fixed;
+    assert(t is CircuitColumnType.Fixed);
 }
 
 @test
 fn test_column_type_selector_column_variant() {
-    let t: ColumnType = ColumnType.SelectorColumn;
-    assert(t is ColumnType.SelectorColumn);
+    let t: CircuitColumnType = CircuitColumnType.SelectorColumn;
+    assert(t is CircuitColumnType.SelectorColumn);
 }
 
 // =============================================================================
-// Section 2: ColumnType pairwise disjointness
+// Section 2: CircuitColumnType pairwise disjointness
 // =============================================================================
 
 @test
 fn test_column_type_advice_disjoint() {
-    let t: ColumnType = ColumnType.Advice;
-    assert(!(t is ColumnType.Instance));
-    assert(!(t is ColumnType.Fixed));
-    assert(!(t is ColumnType.SelectorColumn));
+    let t: CircuitColumnType = CircuitColumnType.Advice;
+    assert(!(t is CircuitColumnType.Instance));
+    assert(!(t is CircuitColumnType.Fixed));
+    assert(!(t is CircuitColumnType.SelectorColumn));
 }
 
 @test
 fn test_column_type_instance_disjoint() {
-    let t: ColumnType = ColumnType.Instance;
-    assert(!(t is ColumnType.Advice));
-    assert(!(t is ColumnType.Fixed));
-    assert(!(t is ColumnType.SelectorColumn));
+    let t: CircuitColumnType = CircuitColumnType.Instance;
+    assert(!(t is CircuitColumnType.Advice));
+    assert(!(t is CircuitColumnType.Fixed));
+    assert(!(t is CircuitColumnType.SelectorColumn));
 }
 
 @test
 fn test_column_type_fixed_disjoint() {
-    let t: ColumnType = ColumnType.Fixed;
-    assert(!(t is ColumnType.Advice));
-    assert(!(t is ColumnType.Instance));
-    assert(!(t is ColumnType.SelectorColumn));
+    let t: CircuitColumnType = CircuitColumnType.Fixed;
+    assert(!(t is CircuitColumnType.Advice));
+    assert(!(t is CircuitColumnType.Instance));
+    assert(!(t is CircuitColumnType.SelectorColumn));
 }
 
 @test
 fn test_column_type_selector_column_disjoint() {
-    let t: ColumnType = ColumnType.SelectorColumn;
-    assert(!(t is ColumnType.Advice));
-    assert(!(t is ColumnType.Instance));
-    assert(!(t is ColumnType.Fixed));
+    let t: CircuitColumnType = CircuitColumnType.SelectorColumn;
+    assert(!(t is CircuitColumnType.Advice));
+    assert(!(t is CircuitColumnType.Instance));
+    assert(!(t is CircuitColumnType.Fixed));
 }
 
 // =============================================================================
@@ -84,11 +84,11 @@ fn test_column_type_selector_column_disjoint() {
 fn test_column_advice_record_construction() {
     let c: Column = Column {
         index: 0,
-        kind: ColumnType.Advice,
+        kind: CircuitColumnType.Advice,
         name: "witness_a".to_text(),
     };
     assert_eq(c.index, 0);
-    assert(c.kind is ColumnType.Advice);
+    assert(c.kind is CircuitColumnType.Advice);
     assert_eq(c.name, "witness_a");
 }
 
@@ -96,10 +96,10 @@ fn test_column_advice_record_construction() {
 fn test_column_instance_record_construction() {
     let c: Column = Column {
         index: 0,
-        kind: ColumnType.Instance,
+        kind: CircuitColumnType.Instance,
         name: "public_input".to_text(),
     };
-    assert(c.kind is ColumnType.Instance);
+    assert(c.kind is CircuitColumnType.Instance);
     assert_eq(c.name, "public_input");
 }
 
@@ -107,23 +107,23 @@ fn test_column_instance_record_construction() {
 fn test_column_fixed_record_construction() {
     let c: Column = Column {
         index: 7,
-        kind: ColumnType.Fixed,
+        kind: CircuitColumnType.Fixed,
         name: "constant_table".to_text(),
     };
     assert_eq(c.index, 7);
-    assert(c.kind is ColumnType.Fixed);
+    assert(c.kind is CircuitColumnType.Fixed);
 }
 
 @test
 fn test_column_field_independence() {
     let a: Column = Column {
         index: 0,
-        kind: ColumnType.Advice,
+        kind: CircuitColumnType.Advice,
         name: "a".to_text(),
     };
     let b: Column = Column {
         index: 1,
-        kind: ColumnType.Advice,
+        kind: CircuitColumnType.Advice,
         name: "b".to_text(),
     };
     assert_eq(a.index, 0);
@@ -144,11 +144,11 @@ fn test_column_field_independence() {
 fn test_selector_wraps_selector_column() {
     let col: Column = Column {
         index: 0,
-        kind: ColumnType.SelectorColumn,
+        kind: CircuitColumnType.SelectorColumn,
         name: "s0".to_text(),
     };
     let s: Selector = Selector { column: col };
-    assert(s.column.kind is ColumnType.SelectorColumn);
+    assert(s.column.kind is CircuitColumnType.SelectorColumn);
     assert_eq(s.column.index, 0);
     assert_eq(s.column.name, "s0");
 }
