@@ -146,10 +146,11 @@ pub(in super::super) fn try_intercept_env_runtime(
             if arg_count != 0 {
                 return Ok(None);
             }
+            // The same source and the same rule as `args`, because
+            // this answers `args().len()` and the stdlib body says so
+            // literally: `pure fn args_count() -> Int { args().len() }`.
             let strip_argv0 = func_name.contains("script");
-            let count = std::env::args().count();
-            let adjusted = if strip_argv0 && count > 0 { count - 1 } else { count };
-            Ok(Some(Value::from_i64(adjusted as i64)))
+            Ok(Some(Value::from_i64(script_argv(strip_argv0).len() as i64)))
         }
         "arg" => {
             // Same reasoning as `args` — 1-arg variant. Collisions
@@ -396,10 +397,25 @@ fn intercept_set_current_dir(
     }
 }
 
-fn intercept_args(
-    state: &mut InterpreterState,
-    strip_argv0: bool,
-) -> InterpreterResult<Option<Value>> {
+/// The argument vector a SCRIPT sees.
+///
+/// ONE RULE, THREE CALLERS. It used to be three rules: this walk lived
+/// inside `intercept_args`, `args_count` did `count - 1`, and
+/// `intercept_arg` did no stripping at all. Measured on
+/// `verum run p.vr -- one two`:
+///
+///     args()        -> ["one", "two"]                CORRECT
+///     args_count()  -> 5                             the verum argv
+///     arg(0)        -> "/path/to/verum"              the interpreter
+///
+/// A script asking for its first argument got the path to the binary
+/// running it — not a wrong number but a wrong KIND, failing an
+/// argument parse in a way that reads as the caller's mistake.
+///
+/// The rule was stated once, in prose, and re-implemented twice within
+/// forty lines. Extracting it is the repair; the two wrong versions
+/// were the symptom (T0916).
+fn script_argv(strip_argv0: bool) -> Vec<String> {
     let mut argv: Vec<String> = std::env::args().collect();
     if strip_argv0 && !argv.is_empty() {
         // Script-level args() strips the program name (argv[0]).
@@ -424,6 +440,14 @@ fn intercept_args(
             argv.remove(0);
         }
     }
+    argv
+}
+
+fn intercept_args(
+    state: &mut InterpreterState,
+    strip_argv0: bool,
+) -> InterpreterResult<Option<Value>> {
+    let argv = script_argv(strip_argv0);
     let mut text_values: Vec<Value> = Vec::with_capacity(argv.len());
     for s in &argv {
         text_values.push(alloc_string_value(state, s)?);
@@ -445,7 +469,9 @@ fn intercept_arg(
     } else {
         idx_val.as_i64()
     };
-    let argv: Vec<String> = std::env::args().collect();
+    // Indexes the SCRIPT's arguments, not the interpreter's. Reading
+    // the raw process argv here made `arg(0)` the path to `verum`.
+    let argv: Vec<String> = script_argv(true);
     // `arg(idx) -> Maybe<Text>` per `core/base/env.vr:156` — out-of-bounds
     // returns `Maybe.None`, in-bounds returns `Maybe.Some(text)`. The
     // pre-fix interceptor returned a bare `Text` Value (empty string for
