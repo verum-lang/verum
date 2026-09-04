@@ -2075,10 +2075,19 @@ public fn safe_setsockopt(
     fd: FileDesc,
     level: Int,
     optname: Int,
-    optval: &unsafe Byte,
+    // T1135: `&[Byte]`, not `&unsafe Byte`. A raw pointer produced by
+    // the CALLER is produced in the one position where `.as_ptr()`
+    // returns the object header rather than the data
+    // (ffi-byte-buffer-contract.md §3); produced HERE, from a subslice
+    // parameter, it returns the packed data pointer. This is exactly
+    // the shape `safe_getsockopt` already has, and the asymmetry
+    // between them was the defect.
+    optval: &[Byte],
     optlen: Int
 ) -> Result<(), OSError> {
-    let result = unsafe { setsockopt(fd.0, level, optname, optval as &Byte, optlen) };
+    let result = unsafe {
+        setsockopt(fd.0, level, optname, optval.as_ptr() as &Byte, optlen)
+    };
     if result < 0 {
         let err = errno();
         Result.Err(OSError.new(err, errno_to_message(err)))
@@ -2089,8 +2098,34 @@ public fn safe_setsockopt(
 
 /// Set an integer socket option (convenience wrapper)
 public fn safe_setsockopt_int(fd: FileDesc, level: Int, optname: Int, value: Int) -> Result<(), OSError> {
-    let val: Int32 = value as Int32;
-    safe_setsockopt(fd, level, optname, &val as &unsafe Byte, 4)
+    // T1135. This read `&val as &unsafe Byte` on a scalar LOCAL, and
+    // that cannot work: the value in that register is a NaN-boxed Int,
+    // so its address gives the kernel eight bytes with tag bits where
+    // `setsockopt` reads four clean ones. The marshaller refuses it —
+    //
+    //     FFI marshal error: unsupported conversion from Unknown to Ptr
+    //
+    // — and refusing is CORRECT. Accepting it would have handed C the
+    // address of a boxed slot and turned a loud refusal into silent
+    // corruption of whatever option was being set.
+    //
+    // Packed `[Byte; 4]` (TypeId U8) is the shape whose address IS
+    // contiguous ABI bytes; `local_addr` in core/net/tcp.vr carries the
+    // same reasoning for its sockaddr buffer, and
+    // docs/architecture/ffi-byte-buffer-contract.md states the rule.
+    // Little-endian, because every platform this file targets is.
+    //
+    // RADIUS: 13 callers route through here — SO_NOSIGPIPE, SO_KEEPALIVE,
+    // SO_BROADCAST, SO_SNDBUF, SO_RCVBUF and the rest. Until this line,
+    // NO socket option could be set on macOS, which is why
+    // `TcpListener.accept()` died: it sets SO_NOSIGPIPE on the accepted
+    // socket, one line after the accept itself succeeded.
+    let mut optval: [Byte; 4] = [0; 4];
+    optval[0] = (value & 0xFF) as Byte;
+    optval[1] = ((value >> 8) & 0xFF) as Byte;
+    optval[2] = ((value >> 16) & 0xFF) as Byte;
+    optval[3] = ((value >> 24) & 0xFF) as Byte;
+    safe_setsockopt(fd, level, optname, &optval[..], 4)
 }
 
 /// Get a socket option (safe wrapper).
@@ -2118,9 +2153,20 @@ public fn safe_getsockopt(
 
 /// Get socket error (convenience wrapper).
 public fn safe_getsockopt_error(fd: FileDesc) -> Result<Int, OSError> {
-    let mut buf = [0_u8; 4];
+    // T1135, third instance in this file and the only one carrying BOTH
+    // halves of the defect:
+    //   * `[0_u8; 4]` is a NaN-boxed List — 8-byte-strided Value slots,
+    //     not contiguous ABI bytes. Packed `[Byte; 4]` is.
+    //   * `&mut buf` on an ARRAY, where the parameter is `&mut [Byte]`,
+    //     is the `&arr` vs `&arr[..]` coercion footgun recorded in
+    //     docs/architecture/ffi-byte-buffer-contract.md (task #24): the
+    //     array-to-slice coercion yields an EMPTY slice and the callee
+    //     reads nothing, with no error anywhere.
+    // Together they mean SO_ERROR has been returning whatever `buf`
+    // happened to hold.
+    let mut buf: [Byte; 4] = [0; 4];
     let mut len: UInt32 = 4;
-    safe_getsockopt(fd, SOL_SOCKET, SO_ERROR, &mut buf, &mut len)?;
+    safe_getsockopt(fd, SOL_SOCKET, SO_ERROR, &mut buf[..], &mut len)?;
     let error = (buf[0] as Int) | ((buf[1] as Int) << 8) |
                 ((buf[2] as Int) << 16) | ((buf[3] as Int) << 24);
     Result.Ok(error)
@@ -2219,26 +2265,31 @@ public fn safe_set_socket_timeout(fd: FileDesc, timeout_ms: Int, is_recv: Bool) 
 
     // struct timeval { time_t tv_sec; suseconds_t tv_usec; }
     // On macOS: 8 + 4 = 12 bytes (but may be padded to 16)
-    let mut timeval = [0_u8; 16];
+    // T1135, same rule as safe_setsockopt_int above: written `[0_u8; 16]`
+    // this is a NaN-boxed List whose backing is one 8-byte Value slot per
+    // element, so `as_ptr()` hands the kernel a STRIDED address and the
+    // timeval it reads is scattered. Packed `[Byte; 16]` (TypeId U8) is
+    // contiguous ABI bytes.
+    let mut timeval: [Byte; 16] = [0; 16];
 
     // Write tv_sec (little-endian Int64)
-    timeval[0] = (tv_sec & 0xFF) as UInt8;
-    timeval[1] = ((tv_sec >> 8) & 0xFF) as UInt8;
-    timeval[2] = ((tv_sec >> 16) & 0xFF) as UInt8;
-    timeval[3] = ((tv_sec >> 24) & 0xFF) as UInt8;
-    timeval[4] = ((tv_sec >> 32) & 0xFF) as UInt8;
-    timeval[5] = ((tv_sec >> 40) & 0xFF) as UInt8;
-    timeval[6] = ((tv_sec >> 48) & 0xFF) as UInt8;
-    timeval[7] = ((tv_sec >> 56) & 0xFF) as UInt8;
+    timeval[0] = (tv_sec & 0xFF) as Byte;
+    timeval[1] = ((tv_sec >> 8) & 0xFF) as Byte;
+    timeval[2] = ((tv_sec >> 16) & 0xFF) as Byte;
+    timeval[3] = ((tv_sec >> 24) & 0xFF) as Byte;
+    timeval[4] = ((tv_sec >> 32) & 0xFF) as Byte;
+    timeval[5] = ((tv_sec >> 40) & 0xFF) as Byte;
+    timeval[6] = ((tv_sec >> 48) & 0xFF) as Byte;
+    timeval[7] = ((tv_sec >> 56) & 0xFF) as Byte;
 
     // Write tv_usec (little-endian Int32 on macOS)
-    timeval[8] = (tv_usec & 0xFF) as UInt8;
-    timeval[9] = ((tv_usec >> 8) & 0xFF) as UInt8;
-    timeval[10] = ((tv_usec >> 16) & 0xFF) as UInt8;
-    timeval[11] = ((tv_usec >> 24) & 0xFF) as UInt8;
+    timeval[8] = (tv_usec & 0xFF) as Byte;
+    timeval[9] = ((tv_usec >> 8) & 0xFF) as Byte;
+    timeval[10] = ((tv_usec >> 16) & 0xFF) as Byte;
+    timeval[11] = ((tv_usec >> 24) & 0xFF) as Byte;
 
     let optname = if is_recv { SO_RCVTIMEO } else { SO_SNDTIMEO };
-    safe_setsockopt(fd, SOL_SOCKET, optname, timeval.as_ptr() as &unsafe Byte, 16)
+    safe_setsockopt(fd, SOL_SOCKET, optname, &timeval[..], 16)
 }
 
 /// Set SO_BROADCAST option (required for UDP broadcast)
@@ -2256,12 +2307,11 @@ public fn safe_set_recv_buffer_size(fd: FileDesc, size: Int) -> Result<(), OSErr
     safe_setsockopt_int(fd, SOL_SOCKET, SO_RCVBUF, size)
 }
 
-/// struct ip_mreq for multicast membership
-@repr(C)
-public type DarwinIpMreq is {
-    imr_multiaddr: UInt32,   // Multicast group address (network byte order)
-    imr_interface: UInt32,   // Interface address (network byte order), 0 = default
-};
+// T1135: `DarwinIpMreq` is gone. It existed only to be handed to C by
+// reference — `&mreq as &unsafe Byte` — which passes the record's
+// ObjectHeader, not its fields. Its two call sites now serialise the
+// eight bytes `struct ip_mreq` actually is. Deleting the record removes
+// the temptation to reintroduce the shape that caused the defect.
 
 /// Join an IPv4 multicast group
 ///
@@ -2269,22 +2319,36 @@ public type DarwinIpMreq is {
 /// multiaddr: multicast group address (network byte order)
 /// interface: local interface address (network byte order), 0 = default
 public fn safe_join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
-    let mreq = DarwinIpMreq {
-        imr_multiaddr: multiaddr,
-        imr_interface: interface,
-    };
-    safe_setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP,
-                    &mreq as &unsafe Byte, 8)  // sizeof(ip_mreq) = 8
+    // T1135: `&record as &unsafe Byte` hands C the record's heap
+    // header, not its fields. `struct ip_mreq { in_addr imr_multiaddr;
+    // in_addr imr_interface; }` is eight bytes; write them.
+    let mut mreq: [Byte; 8] = [0; 8];
+    mreq[0] = (multiaddr & 0xFF) as Byte;
+    mreq[1] = ((multiaddr >> 8) & 0xFF) as Byte;
+    mreq[2] = ((multiaddr >> 16) & 0xFF) as Byte;
+    mreq[3] = ((multiaddr >> 24) & 0xFF) as Byte;
+    mreq[4] = (interface & 0xFF) as Byte;
+    mreq[5] = ((interface >> 8) & 0xFF) as Byte;
+    mreq[6] = ((interface >> 16) & 0xFF) as Byte;
+    mreq[7] = ((interface >> 24) & 0xFF) as Byte;
+    safe_setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq[..], 8)  // sizeof(ip_mreq) = 8
 }
 
 /// Leave an IPv4 multicast group
 public fn safe_leave_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
-    let mreq = DarwinIpMreq {
-        imr_multiaddr: multiaddr,
-        imr_interface: interface,
-    };
-    safe_setsockopt(fd, IPPROTO_IP, IP_DROP_MEMBERSHIP,
-                    &mreq as &unsafe Byte, 8)
+    // T1135: `&record as &unsafe Byte` hands C the record's heap
+    // header, not its fields. `struct ip_mreq { in_addr imr_multiaddr;
+    // in_addr imr_interface; }` is eight bytes; write them.
+    let mut mreq: [Byte; 8] = [0; 8];
+    mreq[0] = (multiaddr & 0xFF) as Byte;
+    mreq[1] = ((multiaddr >> 8) & 0xFF) as Byte;
+    mreq[2] = ((multiaddr >> 16) & 0xFF) as Byte;
+    mreq[3] = ((multiaddr >> 24) & 0xFF) as Byte;
+    mreq[4] = (interface & 0xFF) as Byte;
+    mreq[5] = ((interface >> 8) & 0xFF) as Byte;
+    mreq[6] = ((interface >> 16) & 0xFF) as Byte;
+    mreq[7] = ((interface >> 24) & 0xFF) as Byte;
+    safe_setsockopt(fd, IPPROTO_IP, IP_DROP_MEMBERSHIP, &mreq[..], 8)
 }
 
 /// Set multicast TTL for IPv4

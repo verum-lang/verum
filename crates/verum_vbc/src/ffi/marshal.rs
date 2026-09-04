@@ -271,6 +271,71 @@ impl Marshaller {
                 return Ok(ptr);
             }
 
+            // T1135 — THE THREE REFERENCE ENCODINGS.
+            //
+            // A `&T` argument reaches an FFI call in more shapes than a
+            // plain heap pointer, and this path knew only that one plus
+            // the scalars above. Everything else fell to the error
+            // below, whose own words were the symptom:
+            //
+            //     FFI marshal error: unsupported conversion from
+            //     Unknown to Ptr
+            //
+            // "Unknown" is `value_type_name`'s answer for a value that
+            // matches none of the NaN-box tags — which is exactly what
+            // a FatRef or a BYTE_SLICE view is. Measured: a Verum
+            // program that binds a TcpListener and accepts a real
+            // connection died here, because
+            // `accept(fd, addr_buf.as_mut_ptr() as &unsafe Byte, …)`
+            // hands this function a slice view, not a bare pointer.
+            // That stopped every HTTP server on this platform, since
+            // `accept` is the only path Weft's loop has.
+            //
+            // BYTE_SLICE first: it is the canonical typed `&[Byte]`
+            // shape (`{ptr, len}`), and its pointer is the one C wants.
+            if let Some((p, _len)) = crate::interpreter::value_as_byte_slice(&value) {
+                return Ok(p as u64);
+            }
+            // A FatRef carries the pointer in the same position — but
+            // ONLY when its payload is packed bytes.
+            //
+            // `reserved == 1` is the packed `[Byte; N]` layout, whose
+            // address C can read directly. `reserved == 0` is a
+            // NaN-boxed `List` view: one 8-byte Value slot per element,
+            // so the bytes are STRIDED. Handing that address to C would
+            // scatter the struct it is trying to fill across Value
+            // slots — `extract_byte_slice` in heap_helpers.rs already
+            // makes exactly this distinction, unpacking element by
+            // element for the strided case.
+            //
+            // Refusing the strided case is deliberate. This function
+            // widens what the marshaller accepts, and the failure mode
+            // of widening too far is not a crash: it is C writing into
+            // the wrong bytes and everything continuing. A loud
+            // `unsupported conversion` is the better answer, and the
+            // caller's fix is to declare the buffer as `[Byte; N]` —
+            // which is what `core/net/tcp.vr`'s `local_addr` does, with
+            // a comment saying why (FFI-BYTE-BUFFER-STRIDE-1), and what
+            // its `accept` neighbour was missing.
+            if value.is_fat_ref() {
+                let fr = value.as_fat_ref();
+                if fr.reserved == 1 {
+                    let p = fr.ptr();
+                    if p.is_null() {
+                        return Ok(0);
+                    }
+                    return Ok(p as u64);
+                }
+            }
+            // A ThinRef is deliberately NOT accepted here. It is the
+            // 16-byte CBGR reference, and its target is a NaN-boxed
+            // Value slot — not raw bytes. Handing C that address is the
+            // same corruption the strided FatRef case above refuses,
+            // wearing a different shape: the callee would read a boxed
+            // Value as though it were the `int` or `struct` it asked
+            // for. If a legitimate need for it appears, it needs its
+            // own unboxing, not a pointer.
+
             // Null/unit becomes null pointer
             if value.is_nil() || value.is_unit() {
                 return Ok(0);

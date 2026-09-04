@@ -843,7 +843,13 @@ implement AsyncRead for TcpStream {
     fn poll_read(&mut self, cx: &mut Context, buf: &mut List<Byte>) -> Poll<IoResult<Int>> {
         // Try a non-blocking read first. If WouldBlock, register waker.
         let cap = buf.capacity();
-        let mut byte_buf = [0_u8; STREAM_CHUNK_SIZE];
+        // Packed `[Byte; N]`, for the reason `local_addr` states: a
+        // NaN-boxed List is 8-byte-strided, and `recv`/`send` write and
+        // read CONTIGUOUS bytes. Same shape as the sockaddr buffers
+        // fixed under T1135 — this is the buffer every request body
+        // travels through, so a server that could accept would still
+        // have failed here.
+        let mut byte_buf: [Byte; STREAM_CHUNK_SIZE] = [0; STREAM_CHUNK_SIZE];
         let read_len = if cap < STREAM_CHUNK_SIZE { cap } else { STREAM_CHUNK_SIZE };
         if read_len == 0 {
             return Poll.Ready(Result.Ok(0));
@@ -883,7 +889,13 @@ implement AsyncWrite for TcpStream {
         }
 
         // Direct byte slice — no Int → Byte marshalling needed post-§4.
-        let mut byte_buf = [0_u8; STREAM_CHUNK_SIZE];
+        // Packed `[Byte; N]`, for the reason `local_addr` states: a
+        // NaN-boxed List is 8-byte-strided, and `recv`/`send` write and
+        // read CONTIGUOUS bytes. Same shape as the sockaddr buffers
+        // fixed under T1135 — this is the buffer every request body
+        // travels through, so a server that could accept would still
+        // have failed here.
+        let mut byte_buf: [Byte; STREAM_CHUNK_SIZE] = [0; STREAM_CHUNK_SIZE];
         let write_len = if buf.len() < STREAM_CHUNK_SIZE { buf.len() } else { STREAM_CHUNK_SIZE };
         for i in 0..write_len { byte_buf[i] = buf[i]; }
 
@@ -1242,7 +1254,20 @@ implement TcpListener {
     /// This function blocks until a new connection is available.
     /// Returns the connected TcpStream and the peer's socket address.
     public fn accept(&self) -> Result<(TcpStream, SocketAddr), IoError> {
-        let mut addr_buf = [0_u8; 128];
+        // Packed `[Byte; 128]` (TypeId U8), for the reason `local_addr`
+        // states above it: its `&mut` slice hands the kernel CONTIGUOUS
+        // ABI bytes. Written `[0_u8; 128]` without the annotation it is
+        // a NaN-boxed List — 8-byte-strided Value slots — and the
+        // sockaddr the kernel writes would be scattered across them.
+        //
+        // T1135: unannotated, this did not merely scatter. The FFI
+        // marshaller refused the shape outright —
+        //     unsupported conversion from Unknown to Ptr
+        // — so `accept` failed the moment a connection arrived, and
+        // with it every HTTP server on this platform, since Weft's
+        // accept loop has no other path. `local_addr` carried the
+        // annotation and the comment; its neighbour here did not.
+        let mut addr_buf: [Byte; 128] = [0; 128];
         let mut addr_len: UInt32 = 128;
 
         // Linux: use accept4 with SOCK_CLOEXEC for atomic close-on-exec
@@ -1284,7 +1309,10 @@ implement TcpListener {
         const EAGAIN: Int = 35;
 
         loop {
-            let mut addr_buf = [0_u8; 128];
+            // Packed `[Byte; 128]`, not a NaN-boxed List — see `accept`
+            // and `local_addr`. This is the buffer Weft's accept loop
+            // actually reaches (T1135).
+            let mut addr_buf: [Byte; 128] = [0; 128];
             let mut addr_len: UInt32 = 128;
 
             // Try to accept immediately
@@ -1410,7 +1438,8 @@ implement<'a> Stream for AsyncIncoming<'a> {
     type Item = Result<TcpStream, IoError>;
 
     fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Result<TcpStream, IoError>>> {
-        let mut addr_buf = [0_u8; 128];
+        // Packed `[Byte; 128]`, not a NaN-boxed List — see `accept` (T1135).
+        let mut addr_buf: [Byte; 128] = [0; 128];
         let mut addr_len: UInt32 = 128;
 
         @cfg(any(target_os = "linux", target_os = "windows"))

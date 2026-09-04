@@ -1,0 +1,69 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: ffi, net, references, marshalling
+// @timeout: 20000
+// @expected-stdout-begin
+// bound
+// local_addr answered the SOCKET
+// @expected-stdout-end
+// @description: A sockaddr buffer crosses the FFI boundary as a pointer.
+//
+//   T1135. `TcpListener.accept()` passes the sockaddr buffer as
+//   `addr_buf.as_mut_ptr() as &unsafe Byte`, and the FFI marshaller
+//   refused it:
+//
+//       FFI runtime error: FFI marshal error:
+//       unsupported conversion from Unknown to Ptr
+//
+//   "Unknown" is the marshaller's own word for a value matching none of
+//   the NaN-box tags — which is exactly what a BYTE_SLICE view or a
+//   FatRef is. The pointer path knew `is_ptr`, `is_int`, `is_float`,
+//   `is_bool` and nil, and none of the three encodings a Verum
+//   reference actually arrives in. Every extern taking a pointer goes
+//   through that one function, so this stopped `accept` — and with it
+//   every HTTP server on this platform, since Weft's accept loop has no
+//   other path.
+//
+//   WHY IT EXERCISES `local_addr` AND NOT `accept`. A conformance suite
+//   has no client, so asserting that a connection is accepted is out of
+//   reach, and a NON-BLOCKING accept is out of reach too: `set_nonblocking`
+//   reports success and leaves the socket blocking (T1136), so the
+//   obvious self-contained design hangs. `local_addr` fills the same
+//   sockaddr buffer through the same `value_to_c_ref` path and returns
+//   at once.
+//
+//   That makes this a POSITIVE pin rather than a regression test for the
+//   original failure — stated plainly because the difference matters: it
+//   guards the buffer-and-marshal path staying reachable, and it would
+//   NOT have caught the original defect, which lived in `accept`'s
+//   unannotated buffer. The regression pole for that is the acceptance
+//   script, which connects a real client.
+//
+//   The distinction the spec pins:
+//
+//       Ok / Err(IoError)     the call reached the kernel   PASS
+//       marshal error         it never left the marshaller  FAIL
+//
+//   Binding is checked on the line above, so a failure to bind cannot be
+//   mistaken for the thing under test.
+
+mount core.net.tcp.{TcpListener};
+
+fn main() {
+    match TcpListener.bind("127.0.0.1:8096") {
+        Err(_) => print("bind FAILED"),
+        Ok(l) => {
+            print("bound");
+            // `local_addr` fills a sockaddr buffer through the same
+            // marshal path `accept` uses, and returns without waiting
+            // for a client. Either arm means the arguments crossed the
+            // FFI boundary; a marshal error aborts the program instead
+            // of returning here.
+            match l.local_addr() {
+                Ok(_) => print("local_addr answered the SOCKET"),
+                Err(_) => print("local_addr answered the SOCKET"),
+            }
+        }
+    }
+}

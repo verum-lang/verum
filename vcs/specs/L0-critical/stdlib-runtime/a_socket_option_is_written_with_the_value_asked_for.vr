@@ -1,0 +1,65 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: ffi, net, sockopt, byte-buffer
+// @timeout: 20000
+// @requires: runtime
+// @expected-stdout-begin
+// readback 65536
+// @expected-stdout-end
+// @description: A socket option is written with the value asked for.
+//
+//   T1135. `safe_setsockopt` took `optval: &unsafe Byte`, so each of
+//   its four callers produced the raw pointer itself — the one position
+//   where `.as_ptr()` returns the object base rather than the data
+//   (docs/architecture/ffi-byte-buffer-contract.md §3). Three wrong
+//   shapes existed: `&val` on a scalar local, `.as_ptr()` on a raw
+//   array, and `&mreq` on a record.
+//
+//   THE ACCEPTANCE IS A READ, NOT A RETURN CODE, and this spec exists
+//   because the obvious version could not see the defect:
+//
+//     set SO_NOSIGPIPE, read it back  ->  1 whether the write landed
+//                                         or not
+//     set SO_SNDBUF 65536, read back  ->  65536 if it landed
+//                                         8388608 if it did not
+//
+//   Measured across three binaries while the repair was being made:
+//   the original scalar form died with `FFI marshal error`; an
+//   intermediate `.as_ptr()`-on-a-raw-array form MARSHALLED CLEANLY,
+//   returned Ok, and read back 8388608 — the kernel clamping a garbage
+//   request. Only the signature form (`optval: &[Byte]`, `.as_ptr()`
+//   inside the wrapper) reads back what was asked for.
+//
+//   65536 is chosen because no header byte pattern and no default
+//   produces it. A boolean option can be right by accident; a buffer
+//   size cannot.
+
+mount core.sys.darwin.libsystem.{
+    safe_socket, safe_setsockopt_int, safe_getsockopt, safe_close,
+    AF_INET, SOCK_STREAM, SOL_SOCKET, SO_SNDBUF,
+};
+
+fn main() {
+    match safe_socket(AF_INET, SOCK_STREAM, 0) {
+        Err(_) => print("socket FAILED"),
+        Ok(fd) => {
+            match safe_setsockopt_int(fd, SOL_SOCKET, SO_SNDBUF, 65536) {
+                Err(_) => print("set FAILED"),
+                Ok(_) => {
+                    let mut buf: [Byte; 4] = [0; 4];
+                    let mut len: UInt32 = 4;
+                    match safe_getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &mut buf[..], &mut len) {
+                        Err(_) => print("get FAILED"),
+                        Ok(_) => {
+                            let v = (buf[0] as Int) | ((buf[1] as Int) << 8)
+                                  | ((buf[2] as Int) << 16) | ((buf[3] as Int) << 24);
+                            print(f"readback {v}");
+                        }
+                    }
+                }
+            }
+            let _ = safe_close(fd);
+        }
+    }
+}
