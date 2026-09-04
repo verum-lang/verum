@@ -1076,6 +1076,21 @@ locally, which is the argument for the root: the workaround is cheap
 ONCE and the cost is that nobody ever pays for the root.
 
 | A60 | **THE CBGR DANGLING CHECK HAD NO TRUE POSITIVES — its entire output was false** (2026-09-04, T1102, 6ada2105a) — `E312 dangling reference detected` came out of three independently healthy programs AND one genuine use-after-free, identical down to the raw fields (`ref=RefId(1) at=BlockId(0) span=NONE`). One unsound constraint produced all of it: the successor-edge rule demanded a lifetime be live at the PREDECESSOR of the block that DEFINES it, so every `&` in a function with more than one basic block qualified. |
+| A61 | **ON macOS THE RUNTIME'S ABORT PATH IS UNREACHABLE — a failed `verum_init()` proceeds into `unreachable()`.** `core/sys/init.vr:623` is the failure arm of runtime initialisation:
+
+        match super.verum_init() {
+            Result.Ok(()) => {}
+            Result.Err(_) => {
+                sys.darwin.libsystem.exit(1);
+                unreachable()
+            }
+        }
+
+`exit` is declared `fn exit(status: Int32) -> !;` INSIDE the `@ffi(...) extern { }` block at `core/sys/darwin/libsystem.vr:197`, and a name declared inside such a block is exported but registered callable nowhere — the T1085 class. So the qualified cross-module call does not resolve (`error<E100>: unbound variable: sys.darwin.libsystem.exit`) and the process cannot exit. Control in the SAME file: `pthread_exit` at :279 is `public` and outside the block, and resolves; two exits, one platform, one file, opposite outcomes.
+
+WHY THIS IS NOT MERELY A COMPILE ERROR: the E100 is how the defect became visible, not what it is. A runtime that fails to initialise on macOS falls through its abort into a state the code declares impossible. T1085's cost was previously framed as "five sites pay a local tax", which reads as workarounds being cheap; this site is not a tax, it is a missing abort.
+
+NO PORTABLE ROUTE AROUND IT: `core/sys/mod.vr:273` does re-export `exit`, but from `.linux.syscall`, and this is the macOS branch. The repair is a `safe_exit` wrapper outside the extern block plus the call site — the same shape as the opendir/readdir/closedir wrappers — and is held by the session working T1085. The file stays in `core_compile_known_failures.txt` until that lands, deliberately: a gate going red on a file everyone expects repaired within the hour teaches people to ignore the gate. | P1 | `core/sys/init.vr:623`, `core/sys/darwin/libsystem.vr:197` vs `:279`; T1085 | open |
 
     healthy `let r = &x`      E312=1 -> 0
     healthy `takes(&mk())`    E312=1 -> 0
