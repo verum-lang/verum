@@ -188,9 +188,9 @@ fn prop_key_type_as_str_ed25519() {
 
 @test
 fn prop_key_type_as_str_pairwise_unique() {
-    let a = KeyType.Rsa.as_str();
-    let b = KeyType.Ec.as_str();
-    let c = KeyType.Ed25519.as_str();
+    let a: Text = KeyType.Rsa.as_str();
+    let b: Text = KeyType.Ec.as_str();
+    let c: Text = KeyType.Ed25519.as_str();
     assert(a != b);
     assert(a != c);
     assert(b != c);
