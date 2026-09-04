@@ -172,7 +172,7 @@ lexer_only_reserved = 'as' | 'checked' | 'cofix' | 'coinductive' | 'extern'
                     | 'move' | 'private' | 'quote' | 'ref' | 'throw'
                     | 'true' | 'typeof' | 'unknown' | 'view' | 'with' ;
 
-(* The sixteen contextual ones, usable as identifiers today and listed
+(* The eighteen contextual ones, usable as identifiers today and listed
  * so the next measurement can tell a change from a discovery:
  * assumption, auto, blast, crate, field, gen, implies, layer, link,
  * omega, pattern, ring, set, simp, smt, stage, trivial, volatile.
