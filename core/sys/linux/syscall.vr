@@ -25,7 +25,8 @@ module core.sys.linux.syscall;
 // (openat, newfstatat, mkdirat, ...) are available on both architectures.
 //
 
-// Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
+// Spec: no-libc-architecture.md — Linux reaches the kernel through the
+// `syscall` / `svc #0` instruction and never through libc.
 // =============================================================================
 
 // Re-export common types for consumers of this module

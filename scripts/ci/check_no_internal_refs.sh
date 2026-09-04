@@ -42,7 +42,7 @@ echo "check-internal-refs: OK"
 # a dangling citation to a NEW file therefore reports nothing and looks like
 # a dead gate — append it to a tracked file instead. (Verified both ways:
 # rc=1 on a tracked file, back to rc=0 when reverted.)
-SPEC_BASELINE=2
+SPEC_BASELINE=0
 spec_dangling=$(git grep -hoE '(//+|/\*+)[[:space:]]*Spec:[[:space:]]*docs/[^[:space:]#,;]+' \
     -- '*.vr' '*.rs' 2>/dev/null \
   | sed -E 's|.*Spec:[[:space:]]*||' | sort -u \

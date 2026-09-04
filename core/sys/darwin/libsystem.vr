@@ -26,7 +26,8 @@ mount core.base.coercion.{IntCoercible, BytewiseFfi};
 // This module provides FFI bindings to libSystem for stable system access.
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// Spec: no-libc-architecture.md — libSystem is the Apple-required
+// boundary on macOS, and the ONLY one this file may cross.
 // =============================================================================
 
 mount super.super.common.{OSError, FileDesc, IOVec, MemProt, MapFlags};
