@@ -17036,7 +17036,6 @@ mod tests {
         }
     }
 
-    #[test]
     // ========================================================================
     // T0852 family pin-gate — every gateway enum round-trips its byte
     // space and answers for its pinned variant count.  A byte listed in
