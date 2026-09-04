@@ -75,10 +75,22 @@ TOKEN_RE = re.compile(
 )
 GREEN_CLAIMS = {"stable", "complete", "regression-only"}
 # Explicit numeric green claims, most-specific first.
+#
+# The third pattern used to demand a LITERAL `0 failed`, which blinded
+# L2 to 20 of the 54 rows that pin a pass count — every row whose
+# measurement recorded some failures alongside the passes. Measured
+# 2026-09-04 on `sys/signal`: the row pins "69 passed / 3 failed", a
+# fresh interp run measures 58 passed and 14 compile-error, and the
+# gate said OK because no pattern matched the row at all.
+#
+# The pinned number is the PASS COUNT, and a shrink in it is drift
+# whatever the failure count beside it says. A row admitting failures
+# is if anything the more important one to hold: it is already known to
+# be mixed, so nothing else in the table would notice it getting worse.
 COUNT_RES = [
     re.compile(r"\b(\d+)\s*/\s*\d+\s+GREEN\b"),
     re.compile(r"\b(\d+)\s+GREEN\b"),
-    re.compile(r"\b(\d+)\s+passed\s*/\s*0\s+failed\b"),
+    re.compile(r"\b(\d+)\s+passed\s*/\s*\d+\s+failed\b"),
 ]
 # Directories under core-tests/ that are infrastructure, not modules.
 NON_MODULE_DIRS = {"target"}
