@@ -24373,12 +24373,20 @@ fn lower_cbgr_extended<'ctx>(
             // `return_type` here answered `false` on every one of 125
             // RefField sites in the probe.
             //
-            // The BODY carries the fact instead, and unambiguously: a
-            // `RefField` result that reaches `Ret` with no intervening
-            // `Deref` IS a returned reference — `RefField` is what the
-            // compiler emits for `&expr`, and a by-value return of
-            // `&self.x` would have to deref first.
-            let returns_this_slot = {
+            // The BODY carries the fact instead, and unambiguously.
+            // Two shapes want the ADDRESS and the body names both:
+            //
+            //   Ret of an alias      the reference LEAVES this function
+            //                        (T1056) — the caller derefs it.
+            //   Deref of an alias    the reference is consumed HERE
+            //                        (T1155) — the Deref arm derefs it.
+            //
+            // Everything else wants the loaded VALUE.  `RefField` is
+            // what the compiler emits for `&expr`, so a by-value use
+            // of `&self.x` would have to deref first — which is
+            // precisely the Deref case, and it is the CONSUMER that
+            // performs the load in both address shapes.
+            let yield_slot_address = {
                 {
                     ctx.vbc_module()
                         .and_then(|vbc| {
@@ -24407,13 +24415,56 @@ fn lower_cbgr_extended<'ctx>(
                                     verum_vbc::Instruction::Mov { dst: d, .. } => {
                                         alias.remove(&d.0);
                                     }
-                                    // A Deref of an alias means the
-                                    // VALUE is what leaves, not the
-                                    // slot — the load below is right.
+                                    // REFFIELD-LOCAL-DEREF-1 (T1155): a
+                                    // `Deref` of an alias needs the
+                                    // ADDRESS, not the value.  The
+                                    // Deref arm below unconditionally
+                                    // emits `load i64` through whatever
+                                    // this register holds, so handing
+                                    // it the loaded VALUE makes it load
+                                    // a SECOND time with the field's
+                                    // contents as the pointer:
+                                    //
+                                    //   type Rec is { a: Int, b: Int };
+                                    //   let r = Rec { a: 7, b: 41 };
+                                    //   print(f"{*(&r.a)}")
+                                    //
+                                    //   %deref_load = load i64,
+                                    //       ptr inttoptr (i64 7 to ptr)
+                                    //
+                                    // Address 7 — the field's value used
+                                    // as its address.  SIGSEGV when the
+                                    // field holds a small number, a
+                                    // plausible-looking address when it
+                                    // holds a pointer (`*shared` printed
+                                    // 4413472768 instead of the payload),
+                                    // 0 when it holds 0.  One bug, four
+                                    // faces, decided only by the bytes.
+                                    //
+                                    // This is the same answer the `Ret`
+                                    // arm below already gives, to the
+                                    // same consumer: a raw
+                                    // `ptr_to_int(field_ptr)` that the
+                                    // Deref arm untags (a mask of the
+                                    // low bit, harmless on an 8-aligned
+                                    // field) and loads once.  The
+                                    // returned-reference path has been
+                                    // handing this exact shape to a
+                                    // caller's `Deref` since T1056; the
+                                    // gap was only that a Deref in the
+                                    // SAME function took the value path.
+                                    //
+                                    // Narrow by construction: the value
+                                    // path stays for every consumer that
+                                    // is not a Deref, so the
+                                    // REFFIELD-SCALAR-ADDR-1 regression
+                                    // (`d.as_nanos()` returning its own
+                                    // address) cannot recur — that site
+                                    // has no Deref on the alias.
                                     verum_vbc::Instruction::Deref { ref_reg, .. }
                                         if alias.contains(&ref_reg.0) =>
                                     {
-                                        return false;
+                                        return true;
                                     }
                                     verum_vbc::Instruction::Ret { value } => {
                                         if alias.contains(&value.0) {
@@ -24441,10 +24492,10 @@ fn lower_cbgr_extended<'ctx>(
                     fd_found.is_some(),
                     fd_found.map(|fd| format!("{:?}", fd.return_type)),
                     fd_found.map(|fd| fd.instructions.as_ref().map(|i| i.len())),
-                    returns_this_slot
+                    yield_slot_address
                 );
             }
-            if returns_this_slot {
+            if yield_slot_address {
                 let addr = ctx
                     .builder()
                     .build_ptr_to_int(field_ptr, i64_type, "refield_slot_addr")
