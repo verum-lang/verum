@@ -565,6 +565,14 @@ WHAT ACTUALLY DOMINATES is the same pair being fixed by hand in `core-tests` all
 
 **20 FILES IN THE LIST ALREADY PASS** and were removed, 345 -> 325. A stale known-failures line hides two things at once: work someone finished, and new breakage that can hide behind an old name.
 
+**THE BASELINE IS 100% ACCURATE AND 65% COMPLETE — two properties, and only the second is broken.** Diffed against verum-2b's full 2561-file sweep (463 failing):
+
+    in both, still failing        301   every line the list carries
+    failing, NOT in the baseline  162
+    in the baseline, now passing    0   nothing stale
+
+So after today's 34 removals not one listed file passes and not one removed file fails — the removals were exactly the right ones. What the list cannot do is see the other 162. `check_core_compiles.sh` samples `${1:-200}` of 2561 per run, about 8%, so three weeks of new breakage outran the sampler: those 162 files WOULD fail the gate, and mostly are never looked at. The gate does not lie — it answers about its SAMPLE and is read as answering about the tree, which is the same shape as the collision ratchet counting names without asking whether any cost anything.
+
 **E404 IS NOT ONE DEFECT — IT CONFLATES TWO, AND THE TEXT IS IDENTICAL.** `core/math/nn.vr` reported `Ambiguous type for 'bound': the inferred type 'DynTensor<_>'` for `let bound = sqrt(6.0 / fan_in as Float);`. The argument is a Float and the value is a Float; nothing is un-narrowed. `sqrt` simply has a tensor overload as well, and the checker had chosen it. So under one error code live (a) a type the checker COULD NOT narrow — the annotation supplies what was missing — and (b) a type it narrowed to the WRONG candidate, where the annotation is rejecting a choice rather than supplying a fact. Both are fixed by the same edit, which is why the distinction stayed invisible while the count was all that was being read. It matters for the sizing: an overload ambiguity is a symptom of duplicate NAMES across the numeric and tensor libraries, which is the same root as A55's duplicate type names, one namespace over. | P2 | `scripts/ci/core_compile_known_failures.txt`; measured 2026-09-04 | open |
 
 CONTROL, and it is decisive: the same shape declared LOCALLY compiles clean — `fn take<T>(f: fn() -> T) -> T` called as `take<Int>(forty_two)` with a bare fn argument, 0 errors on the same binary and the same run. So explicit instantiation itself works; it fails for generics that arrive through metadata. That is the SAME boundary as T0689 (an unbound method reference loses its receiver only for metadata-loaded types), which makes two independent defects sharing one frontier — worth treating as one investigation into what the descriptor path drops.
