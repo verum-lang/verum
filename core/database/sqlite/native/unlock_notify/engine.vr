@@ -104,7 +104,7 @@ implement UnlockNotifyEngine {
     /// Fire + drain every registration that was waiting for `blocker`.
     /// Returns the number of notifications delivered.
     public fn blocker_released(&mut self, blocker: Int64) -> Int {
-        let mut out = List.new();
+        let mut out: List<Int64> = List.new();
         let mut i: Int = 0;
         while i < self.pending.len() {
             if self.pending.get(i).blocker == blocker {
