@@ -95,6 +95,10 @@ check-verdict-phases: ## Gate: a verdict phase must be reachable from every entr
 	python3 scripts/ci/check_verdict_phases_reach_every_entry_point.py --self-test
 	python3 scripts/ci/check_verdict_phases_reach_every_entry_point.py --check
 
+check-register-rows: ## Gate: every tech-debt register row is one markdown line
+	python3 scripts/ci/check_register_rows_are_rows.py --self-test
+	python3 scripts/ci/check_register_rows_are_rows.py
+
 check-gate-tables: ## Gate: a table inside a gate must not have the same key twice
 	python3 scripts/ci/check_gate_tables_have_no_duplicate_keys.py --self-test
 	python3 scripts/ci/check_gate_tables_have_no_duplicate_keys.py --check
