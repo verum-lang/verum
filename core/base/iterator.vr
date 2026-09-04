@@ -505,13 +505,19 @@ public type Iterator is protocol {
     /// let total_age = people.iter().sum_by(|p| p.age);
     /// ```
     fn sum_by<B: Add<Output = B> + Zero, F: fn(&Self.Item) -> B>(self, f: F) -> B {
-        self.fold(B.zero(), |acc, item| acc + f(&item))
+        // Literal, measured. `B.zero()` here typechecks and changes the
+        // RESULT TYPE: `list.iter().sum_by(|x| *x)` over `List<Int>`
+        // returned 9 before and 9.0 after, because the witness-less
+        // `zero()` resolves to a Float. A `verum check` error count
+        // cannot see that — only running it can.
+        self.fold(0, |acc, item| acc + f(&item))
     }
 
     /// Multiply elements by extracting a numeric key from each item.
     /// Equivalent to `.map(f).product()` but reads more naturally.
     fn product_by<B: Mul<Output = B> + One, F: fn(&Self.Item) -> B>(self, f: F) -> B {
-        self.fold(B.one(), |acc, item| acc * f(&item))
+        // Same as `sum_by` above: the literal keeps the result type.
+        self.fold(1, |acc, item| acc * f(&item))
     }
 
     // =========================================================================
