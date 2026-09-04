@@ -19,7 +19,7 @@ mount core.base.coercion.{IntCoercible};
 // (Verum Low-Level System Interface) bootstrap kernel.
 //
 
-// Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
+// Spec: new-arch-spec.md (V-LLSI Bootstrap Kernel)
 // =============================================================================
 
 // =============================================================================
@@ -1280,7 +1280,7 @@ public fn random_bytes(buf: &mut [Byte]) -> Result<(), OSError> {
 // - V-LLSI array index: ~2ns (10x faster)
 //
 
-// Spec: docs/architecture/new-arch-spec.md Appendix F.3
+// Spec: new-arch-spec.md Appendix F.3
 // =============================================================================
 
 /// Maximum number of context slots per thread.

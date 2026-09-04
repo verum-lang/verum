@@ -26,7 +26,7 @@ module core.sys.darwin.tls;
 // - Stack-based context scoping (push/pop)
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.4, Appendix F.3.2.2
+// Spec: new-arch-spec.md §5.4, Appendix F.3.2.2
 // =============================================================================
 
 mount sys.common.OSError;

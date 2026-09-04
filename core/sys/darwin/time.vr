@@ -27,7 +27,7 @@ module core.sys.darwin.time;
 // - No direct TSC access (use mach_absolute_time instead)
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// Spec: new-arch-spec.md §5.4
 // =============================================================================
 
 mount sys.common.OSError;

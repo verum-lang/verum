@@ -35,7 +35,7 @@ mount sys.mmio.{volatile_load, volatile_store};
 //  let ptr = alloc.alloc(64, 8); // 64 bytes, 8-byte aligned
 //
 
-// Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
+// Spec: new-arch-spec.md (V-LLSI Bootstrap Kernel)
 // =============================================================================
 
 // =============================================================================

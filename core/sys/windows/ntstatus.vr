@@ -23,7 +23,7 @@ module core.sys.windows.ntstatus;
 // - Bits 15-0: Code
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// Spec: new-arch-spec.md §5.4
 // =============================================================================
 
 // =============================================================================

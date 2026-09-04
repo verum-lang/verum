@@ -21,7 +21,7 @@ module core.sys.windows.kernel32;
 // IMPORTANT: Uses IAT imports (@extern) for stable, supported API access.
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// Spec: new-arch-spec.md §5.4
 // =============================================================================
 
 mount super.ntstatus.NtStatus;

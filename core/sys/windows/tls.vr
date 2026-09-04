@@ -24,7 +24,7 @@ module core.sys.windows.tls;
 // - Stack-based context scoping (push/pop)
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.4, Appendix F.3.2.3
+// Spec: new-arch-spec.md §5.4, Appendix F.3.2.3
 // =============================================================================
 
 mount sys.common.OSError;

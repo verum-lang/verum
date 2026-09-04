@@ -34,7 +34,7 @@ module core.sys.windows.winsock2;
 // - IOCP integration available via sys/windows/io.vr for async I/O
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// Spec: new-arch-spec.md §5.4
 // =============================================================================
 
 @cfg(target_os = "windows")

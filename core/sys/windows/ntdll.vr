@@ -23,7 +23,7 @@ module core.sys.windows.ntdll;
 // correct approach for non-malware code.
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// Spec: new-arch-spec.md §5.4
 // Reference: experiments/ntapi
 // =============================================================================
 

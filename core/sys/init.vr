@@ -41,7 +41,7 @@ module core.sys.init;
 // - Embedded: Reset_Handler → verum_init (no TLS needed)
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 9 (Bootstrap Kernel)
+// Spec: new-arch-spec.md §9 (Bootstrap Kernel)
 // =============================================================================
 
 mount super.common.{OSError, FileDesc, init_runtime, cleanup_runtime, is_runtime_initialized, init_process_args};

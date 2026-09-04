@@ -29,7 +29,7 @@ module core.sys;
 // Section 5.4 for details.
 //
 
-// Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
+// Spec: new-arch-spec.md (V-LLSI Bootstrap Kernel)
 // =============================================================================
 
 // Export common types

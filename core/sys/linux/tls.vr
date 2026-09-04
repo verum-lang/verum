@@ -36,7 +36,7 @@ module core.sys.linux.tls;
 // For spawned threads, clone() with CLONE_SETTLS flag initializes TLS.
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 2.2.A (TLS Bootstrap)
+// Spec: new-arch-spec.md §2.2.A (TLS Bootstrap)
 // =============================================================================
 
 mount core.intrinsics.memory.{null_ptr};

@@ -18,7 +18,7 @@ module core.sys.darwin.errno;
 // Reference: /usr/include/sys/errno.h
 //
 
-// Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
+// Spec: new-arch-spec.md (V-LLSI Bootstrap Kernel)
 // =============================================================================
 
 // =============================================================================

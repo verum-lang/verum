@@ -26,7 +26,7 @@ module core.sys.darwin.thread;
 // - Spin lock (atomic-based for low-contention scenarios)
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// Spec: new-arch-spec.md §5.4
 // =============================================================================
 
 mount sys.common.OSError;

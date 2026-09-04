@@ -26,7 +26,7 @@ module core.sys.windows.io;
 // - GetQueuedCompletionStatus: Dequeue completed I/O operations
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.5
+// Spec: new-arch-spec.md §5.5
 // =============================================================================
 
 mount sys.common.{OSError, FileDesc};

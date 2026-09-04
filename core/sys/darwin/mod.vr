@@ -33,7 +33,7 @@ module core.sys.darwin;
 // - time.vr: Duration, Instant, and timing utilities
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// Spec: new-arch-spec.md §5.4
 // =============================================================================
 
 // BSD/POSIX functions via libSystem

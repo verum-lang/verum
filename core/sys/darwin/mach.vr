@@ -32,7 +32,7 @@ mount core.base.coercion.{IntCoercible};
 // All calls go through libSystem.B.dylib (stable API).
 //
 
-// Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
+// Spec: new-arch-spec.md (V-LLSI Bootstrap Kernel)
 // =============================================================================
 
 // Re-export MachPort for use by other modules

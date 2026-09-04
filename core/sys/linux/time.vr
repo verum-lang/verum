@@ -28,7 +28,7 @@ module core.sys.linux.time;
 // - CLOCK_THREAD_CPUTIME_ID: LinuxThread CPU time
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// Spec: new-arch-spec.md §5.4
 // =============================================================================
 
 mount sys.common.OSError;

@@ -32,7 +32,7 @@ module core.sys.windows;
 // Windows uses IAT imports via @extern("dll.dll") for API access.
 //
 
-// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// Spec: new-arch-spec.md §5.4
 // =============================================================================
 
 // =============================================================================
