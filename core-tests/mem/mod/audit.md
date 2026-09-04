@@ -274,7 +274,7 @@ across `memory/`):
 | # | Defect | Layer | Fix |
 |---|---|---|---|
 | 1 | Missing test coverage for `core/mem/mod.vr` module-root surface | `core-tests/mem/mod/{unit,property,integration,regression}_test.vr` | New 4-file suite + this audit |
-| 2 | Cross-module method-body field-shift defect documented for `UseAfterFreeError` | §3.1 above | 3 `@ignore`'d tests pin the defect surface; fundamental fix tracked in `memory/use_after_free_error_field_shift_2026-05-27.md` |
+| 2 | Cross-module method-body field-shift defect documented for `UseAfterFreeError` | §3.1 above | 3 `@ignore`'d tests pin the defect surface; fundamental fix is multi-day VBC codegen work |
 
 ## 5. Action items deferred
 

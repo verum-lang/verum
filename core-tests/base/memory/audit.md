@@ -51,7 +51,7 @@ Drift surfaces:
 | 32-byte CBGR header offset | `header_addr = self.ptr as Int - 32` (4 sites in memory.vr lines 263/372/383/406/415/443) | If the allocator header grows past 32 bytes, every `is_valid`/`is_allocated`/`is_freed`/`current_epoch`/`capabilities` validation reads garbage. Pin this with a compile-time-asserted constant in the allocator. |
 | `cbgr_alloc` return shape `(ptr, gen, epoch)` | 3-tuple — Heap/Shared/MaybeUninit unpack identically | If the allocator changes its return-shape these three call sites diverge silently. |
 | `ORDERING_RELAXED/ACQUIRE/RELEASE/ACQ_REL/SEQ_CST` constants | Memory-ordering ints | LLVM lowering must agree on these magic numbers; cross-tier divergence is a kernel-soundness incident. |
-| `intrinsic_name = "ptr_read"` propagation | `compile_function` must copy `intrinsic_name` to the descriptor (see MEMORY.md task #44) | If propagation regresses, `Heap.new(value)`'s `ptr_write` falls through to a body-recursion StackOverflow. |
+| `intrinsic_name = "ptr_read"` propagation | `compile_function` must copy `intrinsic_name` to the descriptor | If propagation regresses, `Heap.new(value)`'s `ptr_write` falls through to a body-recursion StackOverflow. |
 
 ## 3. Language-implementation gaps
 

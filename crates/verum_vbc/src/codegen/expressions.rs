@@ -15144,9 +15144,14 @@ impl VbcCodegen {
         // `Heap.new_default<Int>` / `Shared.new_default<Int>` /
         // `Result<Int,_>.unwrap_or_default()` / `Maybe<Int>.unwrap_or_default()`
         // class of primitive-default tests.
-        // Cross-ref: `memory/callg_emission_fix_blueprint_2026-05-19.md`
-        // documents the fundamental monomorphisation fix that closes
-        // non-primitive-T cases properly.
+        // The parenthetical above is FALSE and this is where it costs:
+        // `Text` satisfies `where T: Default` and has a known default, as
+        // does every type with a Default impl.  Non-primitive T does not
+        // "still get a zero Int payload" harmlessly — retagged as Text it
+        // reaches the caller as the nil sentinel 0x7ff9…, which is what
+        // `Maybe<Text>.unwrap_or_default()` returned.  T0622 landed the
+        // witness channel that answers this; the Phase 0 site above uses
+        // it and this one does not.
         let task17_primitive_identity = match method_name.as_str() {
             "default" | "zero" => Some(0i64),
             "one" => Some(1i64),
