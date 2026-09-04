@@ -1,0 +1,194 @@
+// @test: verify-fail
+// @level: L3
+// @tier: 0
+// @tags: verification, smt, refinement-reflection, soundness
+// @timeout: 30000
+// @description: Declaring an untranslatable function's SIGNATURE does
+//   not make its BODY known, and is not done at all for a function
+//   whose result may vary.
+//
+// The soundness pole of `opaque_untranslatable_predicate.vr`. That
+// spec shows an un-translatable predicate gets a name the solver
+// knows; this one bounds what that name buys.
+//
+// TWO KINDS OF FAILURE LIVE HERE, and telling them apart is the whole
+// point of the change:
+//
+//   §1  claims about the VALUE of an opaque function. The symbol is
+//       declared, the goal is well-formed, and the solver correctly
+//       answers "I cannot show that". A proof failure on the merits.
+//       THREE poles.
+//
+//   §2  a function that is NOT declared `pure`. No symbol is emitted
+//       at all, so the goal is not well-formed. A failure BEFORE the
+//       merits. ONE pole, and one CONTROL that passes deliberately.
+//
+//   §3  prose: the pole that cannot be written, and why its refusal to
+//       compile is the answer rather than an obstacle.
+//
+// FOUR E0319, MEASURED, on both the binary that predates this change
+// and the one that carries it. That the number does not MOVE is the
+// assertion — a widening change errs by accepting, so its acceptance
+// has to contain something that must stay red.
+//
+// Both report as failure, which is exactly why the distinction had to
+// be built rather than observed: before T0905 every reflection decline
+// produced the §2 shape, including the ones that deserved §1, so
+// "unprovable" and "unmentionable" were one outcome.
+//
+// A CONTROL THIS FILE CANNOT CARRY ALONE: a parse or type error would
+// also read as verify-fail, making every assertion below vacuous. The
+// paired pass spec uses the SAME constructs — `pure fn`, `while`, a
+// local `mut`, `Int` arithmetic — so a construct-level breakage turns
+// that file red. Read the two together; a green pass spec is what
+// makes this file's red meaningful.
+
+// ---------------------------------------------------------------
+// §1  DECLARED, AND STILL UNKNOWN
+// ---------------------------------------------------------------
+
+/// The same shape as the pass spec's `sum_to`: pure, loop-bodied,
+/// declared as an opaque symbol.
+public pure fn sum_to(n: Int) -> Int {
+    let mut acc: Int = 0;
+    let mut i: Int = 0;
+    while i < n {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+/// FALSE in general, and — more to the point — not something the
+/// declaration could ever support. `sum_to(4)` is 6.
+///
+/// If this ever proves, the opaque path has started emitting a BODY
+/// axiom, which would mean the translator invented a meaning for a
+/// loop it declined to read.
+@verify(formal)
+public theorem an_opaque_symbol_has_no_known_value(n: Int)
+    ensures sum_to(n) == 0
+    proof by auto;
+
+/// Also false, and it fails for a subtler reason worth pinning: the
+/// declaration says `sum_to` is a function, not that it is monotone,
+/// non-negative, or bounded. Every property of the BODY is outside
+/// what was asserted.
+@verify(formal)
+public theorem an_opaque_symbol_has_no_known_sign(n: Int)
+    ensures sum_to(n) >= 0
+    proof by auto;
+
+/// Two different opaque functions are two different symbols. Nothing
+/// relates them — in particular, sharing a signature does not.
+public pure fn product_to(n: Int) -> Int {
+    let mut acc: Int = 1;
+    let mut i: Int = 1;
+    while i < n {
+        acc = acc * i;
+        i = i + 1;
+    }
+    acc
+}
+
+@verify(formal)
+public theorem two_opaque_symbols_are_unrelated(n: Int)
+    ensures sum_to(n) == product_to(n)
+    proof by auto;
+
+// ---------------------------------------------------------------
+// §2  NOT DECLARED AT ALL
+// ---------------------------------------------------------------
+
+/// The determinism pole. Identical body to `reaches` in the pass spec
+/// — the ONLY difference is the missing `pure`.
+///
+/// Without that modifier nothing warrants asserting the function
+/// returns the same answer twice, so no symbol is emitted, and even
+/// excluded middle is unavailable. The pass spec proves this exact
+/// claim for the `pure` twin; this file failing it is what says the
+/// gate is real rather than decorative.
+///
+/// If this ever proves, the `pure` gate has been dropped, and the
+/// opaque path has begun asserting determinism it has no basis for —
+/// which is the one way this change could be unsound.
+public fn reaches_impure(n: Int) -> Bool {
+    let mut i: Int = 0;
+    while i < n {
+        i = i + 1;
+    }
+    i >= n
+}
+
+@verify(formal)
+public theorem an_undeclared_symbol_has_no_excluded_middle(n: Int)
+    ensures reaches_impure(n) || !reaches_impure(n)
+    proof by auto;
+
+/// NOT A POLE — A CONTROL, and it was written as a pole by mistake.
+///
+/// The intent was "say the same thing as determinism directly, so the
+/// failure cannot be blamed on the shape of the disjunction". It
+/// PASSES, on both binaries, and it should: the goal translator renders
+/// a call as `(name args…)` keyed on the name, so both sides are the
+/// same TERM and congruence closure closes it whether or not any symbol
+/// was declared.
+///
+/// The pass spec's `term_identity_needs_no_declaration` is the same
+/// observation about a DECLARED symbol. Together they are the useful
+/// half: `f(x) == f(x)` proves for a declared symbol AND for an
+/// undeclared one, so it distinguishes nothing and is evidence for
+/// nothing. Excluded middle, one theorem above, is the claim that
+/// actually needs the declaration — and it is the one that moved.
+///
+/// Kept in the file so the next reader finds the note instead of
+/// writing the pole again. Twice in one pair was enough.
+@verify(formal)
+public theorem term_identity_proves_for_an_undeclared_symbol_too(n: Int)
+    ensures reaches_impure(n) == reaches_impure(n)
+    proof by auto;
+
+// ---------------------------------------------------------------
+// §3  THE POLE THAT CANNOT BE WRITTEN, AND WHY THAT IS THE ANSWER
+// ---------------------------------------------------------------
+//
+// This section held a third pole: a function declared `pure` that
+// mutates a module static, whose excluded middle must still fail. The
+// reasoning was that §2's gate rests on the author's word and
+// `two_calls_to_one_impure_function_are_not_equal.vr` (L0, red until
+// T0982) says the property inferrer does not treat a `static mut` write
+// as state at all — so the word could be false and be believed.
+//
+// THE POLE DOES NOT COMPILE, and the refusal is the finding. Measured
+// on the same binary as every number in this file:
+//
+//     error<E503>: pure function `ticking` has side effects:
+//                  Mutates, WritesExternal, ReadsExternal
+//     help: remove the `pure` modifier or eliminate side effects
+//
+// So `pure` IS enforced against a static write, and T0982's sentence
+// is about a DIFFERENT gate: its `tick()` is declared plain `fn`, and
+// the defect is what the inferrer COMPUTES for an undeclared function,
+// not what E503 checks on a declared one. Two gates, one word, and
+// reading the first as evidence about the second is how a pole that
+// could not exist got written.
+//
+// Measured alongside it, three files, one pole each, because a refusal
+// fails the whole compilation unit and poles sharing one cannot be told
+// apart:
+//
+//     `pure` + print()                -> REFUSED  E503
+//     `pure` + a `using [...]` call   -> REFUSED  E018
+//     genuinely pure                  -> ACCEPTED 0 errors
+//
+// Two refusals and one acceptance: the modifier is real, so §2's gate
+// is real, and the opaque path rests on something the compiler checks
+// rather than on an author's promise.
+//
+// Left as prose rather than deleted, because "there is no third pole"
+// and "the third pole was never tried" look identical in a spec file,
+// and only one of them is a measurement.
+
+fn main() {
+    print("opaque-untranslatable-unsound");
+}

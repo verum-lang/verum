@@ -74,7 +74,17 @@ pub struct ReflectedFunction {
 impl ReflectedFunction {
     /// Render the universally-quantified axiom in SMT-LIB form:
     /// `(forall ((x₁ S₁) ... (xₙ Sₙ)) (= (f x₁ ... xₙ) body))`.
+    ///
+    /// An entry with an EMPTY body is an OPAQUE declaration — a
+    /// function whose body this translator could not express, kept so
+    /// its NAME is declared rather than absent (T0905). It has no
+    /// axiom to state, and the empty Text is how it says so: the
+    /// alternative, `(= (f x) )`, is not a weaker axiom but a syntax
+    /// error that Z3 rejects for the whole block.
     pub fn to_smtlib_axiom(&self) -> Text {
+        if self.body_smtlib.as_str().is_empty() {
+            return Text::from("");
+        }
         let mut out = String::with_capacity(64 + self.body_smtlib.as_str().len());
         if self.parameters.is_empty() {
             // Nullary functions reflect as a plain equality.
@@ -376,7 +386,16 @@ impl RefinementReflectionRegistry {
             out.push('\n');
         }
         for n in &names {
-            out.push_str(self.by_name[*n].to_smtlib_axiom().as_str());
+            // Opaque entries answer the empty Text here; pushing it
+            // would leave a blank line, which is harmless, but the
+            // explicit skip is what makes "declared but not defined"
+            // legible in the emitted block rather than an accident of
+            // whitespace.
+            let ax = self.by_name[*n].to_smtlib_axiom();
+            if ax.as_str().is_empty() {
+                continue;
+            }
+            out.push_str(ax.as_str());
             out.push('\n');
         }
         Text::from(out)

@@ -1196,6 +1196,35 @@ fn path_to_smtlib(path: &verum_ast::ty::Path) -> SmtResult {
 
 /// Extract parameter names from a function's parameter list.
 /// Returns `(name, sort)` pairs suitable for `ReflectedFunction`.
+/// The sort a reflected function returns.
+///
+/// The RETURN type gets the same rule as the parameters: `T` in
+/// `fn ident<T>(x: T) -> T` is the caller's type, not an opaque one
+/// this module declares. Fixing only the parameter side left
+/// `theorem t(n: Int): ident(n) == n` failing, because the definition
+/// still returned `Verum!T` where the goal wanted Int — half a
+/// signature agreeing is still two functions (T0980).
+pub fn return_sort_of(func: &verum_ast::FunctionDecl) -> String {
+    let own_type_params: std::collections::HashSet<&str> = func
+        .generics
+        .iter()
+        .filter_map(|g| match &g.kind {
+            verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name.name.as_str()),
+            _ => None,
+        })
+        .collect();
+    func.return_type
+        .as_ref()
+        .map(|t| {
+            if is_own_type_parameter(t, &own_type_params) {
+                "Int".to_string()
+            } else {
+                type_to_sort(t)
+            }
+        })
+        .unwrap_or_else(|| "Int".to_string())
+}
+
 pub fn extract_params(func: &verum_ast::FunctionDecl) -> Vec<(String, String)> {
     // The function's OWN type parameters. A parameter typed `T` where
     // `T` is one of them is not a value of some opaque type the module
@@ -1879,9 +1908,17 @@ pub fn try_reflect_function_with_env(
         // Every decline says WHY, on the tracing channel.
         //
         // This used to answer a bare `None`, so the only way to learn
-        // why a predicate stayed an uninterpreted symbol — and every
-        // claim about it therefore unprovable — was to guess and
-        // re-measure. The reason was computed and then thrown away.
+        // why a predicate was refused — and every claim about it
+        // therefore unprovable — was to guess and re-measure. The
+        // reason was computed and then thrown away.
+        //
+        // A note this comment used to get WRONG: a declined function
+        // did NOT become "an uninterpreted symbol". It became an
+        // UNDECLARED one, which is a different and worse thing — a
+        // goal naming it fails on well-formedness, not on its merits.
+        // Making that sentence true for the translatability class is
+        // what `opaque` below does; this path remains the one where
+        // nothing at all can be said (T0905).
         tracing::debug!(
             "reflection declined `{}`: {}",
             func.name.name.as_str(),
@@ -1905,6 +1942,124 @@ pub fn try_reflect_function_with_env(
         verum_common::Maybe::None => return decline("no body"),
     };
 
+    // ---- THE SIGNATURE IS COMPUTED BEFORE THE BODY GATES ----
+    //
+    // Two different things can go wrong with a candidate, and until
+    // now both answered `None`:
+    //
+    //   DETERMINISM   the function may return different results for
+    //                 the same arguments (contexts, effects). Nothing
+    //                 true can be said about it.
+    //   TRANSLATABILITY
+    //                 the function is a perfectly good mathematical
+    //                 function; this translator cannot express its
+    //                 BODY (a loop, an unsupported operator).
+    //
+    // The second kind still supports one true statement — `f` is a
+    // function, so `f(x) == f(x)` — and that statement is exactly
+    // what `(declare-fun f (S…) S)` makes. Without it the name is
+    // not merely un-unfoldable but UNDECLARED, and a goal mentioning
+    // it fails on well-formedness rather than on its merits (T0905).
+    //
+    // Computing the signature here, rather than after the body
+    // succeeds, is what lets the two classes diverge: an opaque
+    // declaration needs the signature and nothing else.
+    let params = extract_params(func);
+    if params.is_empty() {
+        return decline("no regular parameters");
+    }
+    let return_sort = return_sort_of(func);
+    let sort_decls = |ps: &[(String, String)], rs: &str| -> std::collections::BTreeSet<String> {
+        // Parameter sorts may themselves be opaque (`Verum!T`) — their
+        // declare-sort lines must travel with the entry too, or the
+        // block's own `(declare-fun f (Verum!T) Bool)` names an
+        // undeclared sort.
+        let mut s = std::collections::BTreeSet::new();
+        for (_, ps) in ps {
+            if ps.starts_with("Verum!") {
+                s.insert(format!("(declare-sort {} 0)", ps));
+            }
+        }
+        if rs.starts_with("Verum!") {
+            s.insert(format!("(declare-sort {} 0)", rs));
+        }
+        s
+    };
+
+    // An opaque declaration ASSERTS DETERMINISM. That is a weaker
+    // claim than the definitional axiom this function normally emits,
+    // but it is not the empty claim, so it needs its own warrant.
+    //
+    // The warrant used is the DECLARED `pure` modifier, not the
+    // absence of evidence to the contrary. Today the definitional
+    // path has no purity gate at all — impure functions are filtered
+    // only INCIDENTALLY, by their bodies failing to translate — and
+    // moving a decline onto this path would remove exactly that
+    // accident. So the opaque path carries the gate the definitional
+    // path never had, and is strictly the more conservative of the
+    // two.
+    let opaque = |reason: &str| -> Option<crate::refinement_reflection::ReflectedFunction> {
+        // `pure` IS ENFORCED, and that was measured rather than assumed
+        // — this gate would rest on nothing otherwise. Three poles, one
+        // per file because a refusal fails the whole compilation unit
+        // and poles sharing one cannot be told apart:
+        //
+        //     `pure` + print()               REFUSED   E503
+        //     `pure` + a `using [...]` call  REFUSED   E018
+        //     genuinely pure                 ACCEPTED  0 errors
+        //
+        // A `pure` function that writes a module static is refused too:
+        //
+        //     error<E503>: pure function `ticking` has side effects:
+        //                  Mutates, WritesExternal, ReadsExternal
+        //
+        // This carried a hand-written walker for exactly that case,
+        // because `two_calls_to_one_impure_function_are_not_equal.vr`
+        // (L0, red until T0982) says the property inferrer does not see
+        // a `static mut` write as state. The walker was REMOVED once
+        // E503 was measured: T0982's sentence is about what the
+        // inferrer COMPUTES for a function declared plain `fn`, not
+        // about what E503 checks on one declared `pure`. Two gates, one
+        // word, and reading the first as evidence about the second is
+        // how ninety lines of untestable duplicate got written.
+        //
+        // Recorded here rather than deleted silently, because "the
+        // check was considered and is unnecessary" and "the check was
+        // never thought of" look identical in a diff.
+        let deterministic = func.is_pure
+            && !func.is_async
+            && !func.is_generator
+            && func.extern_abi.is_none()
+            && func.throws_clause.is_none();
+        if !deterministic {
+            tracing::debug!(
+                "reflection declined `{}`: {} (and is not declared `pure`, so \
+                 not even an opaque symbol can be declared for it)",
+                func.name.name.as_str(),
+                reason
+            );
+            return None;
+        }
+        tracing::debug!(
+            "reflection declared `{}` OPAQUE: {} — signature only, no body axiom",
+            func.name.name.as_str(),
+            reason
+        );
+        Some(crate::refinement_reflection::ReflectedFunction {
+            name: Text::from(func.name.name.as_str()),
+            parameters: params.iter().map(|(n, _)| Text::from(n.as_str())).collect(),
+            // The EMPTY body is the signal. `to_smtlib_decl` still
+            // emits the declaration; `to_smtlib_axiom` emits nothing.
+            body_smtlib: Text::from(""),
+            return_sort: Text::from(return_sort.as_str()),
+            parameter_sorts: params.iter().map(|(_, s)| Text::from(s.as_str())).collect(),
+            aux_decls: sort_decls(&params, &return_sort)
+                .into_iter()
+                .map(Text::from)
+                .collect(),
+        })
+    };
+
     // Gate: body must be a Block with a tail expression. STRAIGHT-LINE
     // `let` bindings are folded into that tail by substitution;
     // anything else in the statement list still declines.
@@ -1926,7 +2081,7 @@ pub fn try_reflect_function_with_env(
             let tail = match &block.expr {
                 verum_common::Maybe::Some(e) => e,
                 verum_common::Maybe::None => {
-                    return decline("block body with no tail expression");
+                    return opaque("block body with no tail expression");
                 }
             };
             if block.stmts.is_empty() {
@@ -1949,7 +2104,7 @@ pub fn try_reflect_function_with_env(
                         &folded_tail
                     }
                     None => {
-                        return decline(
+                        return opaque(
                             "body has a statement that is neither a `let`, an \
                              assignment to a local, nor an early-return guard",
                         );
@@ -1958,7 +2113,7 @@ pub fn try_reflect_function_with_env(
             }
         }
         verum_ast::decl::FunctionBody::Expr(e) => e,
-        _ => return decline("body is not a block or an expression"),
+        _ => return opaque("body is not a block or an expression"),
     };
 
     // Parameter bindings: names of NAMED-typed parameters feed the
@@ -1979,52 +2134,10 @@ pub fn try_reflect_function_with_env(
     let mut aux = std::collections::BTreeSet::new();
     let body_smtlib = match expr_to_smtlib_env(tail_expr, &env, &mut aux) {
         Ok(s) => s,
-        Err(e) => return decline(&format!("body does not translate: {}", e)),
+        Err(e) => return opaque(&format!("body does not translate: {}", e)),
     };
 
-    let params = extract_params(func);
-    if params.is_empty() {
-        return decline("no regular parameters");
-    }
-
-    // The RETURN type gets the same rule as the parameters: `T` in
-    // `fn ident<T>(x: T) -> T` is the caller's type, not an opaque one
-    // this module declares. Fixing only the parameter side left
-    // `theorem t(n: Int): ident(n) == n` failing, because the
-    // definition still returned `Verum!T` where the goal wanted Int —
-    // half a signature agreeing is still two functions (T0980).
-    let own_type_params: std::collections::HashSet<&str> = func
-        .generics
-        .iter()
-        .filter_map(|g| match &g.kind {
-            verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name.name.as_str()),
-            _ => None,
-        })
-        .collect();
-    let return_sort = func
-        .return_type
-        .as_ref()
-        .map(|t| {
-            if is_own_type_parameter(t, &own_type_params) {
-                "Int".to_string()
-            } else {
-                type_to_sort(t)
-            }
-        })
-        .unwrap_or_else(|| "Int".to_string());
-
-    // Parameter sorts may themselves be opaque (`Verum!T`) — their
-    // declare-sort lines must travel with the entry too, or the
-    // block's own `(declare-fun f (Verum!T) Bool)` names an
-    // undeclared sort.
-    for (_, s) in &params {
-        if s.starts_with("Verum!") {
-            aux.insert(format!("(declare-sort {} 0)", s));
-        }
-    }
-    if return_sort.starts_with("Verum!") {
-        aux.insert(format!("(declare-sort {} 0)", return_sort));
-    }
+    aux.extend(sort_decls(&params, &return_sort));
 
     Some(crate::refinement_reflection::ReflectedFunction {
         name: Text::from(func.name.name.as_str()),

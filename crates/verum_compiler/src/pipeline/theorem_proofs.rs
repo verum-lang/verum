@@ -116,7 +116,19 @@ impl<'s> CompilationPipeline<'s> {
 
         // Conservative: functions that can't be translated (multi-
         // statement bodies, unsupported operators, closures, etc.)
-        // are silently skipped — no incorrect axiom is ever emitted.
+        // yield no axiom. A DECLARED-`pure` one still yields its
+        // SIGNATURE, so the name exists as an uninterpreted symbol and
+        // a goal mentioning it fails on its merits instead of on
+        // well-formedness; anything not declared `pure` is skipped
+        // entirely (T0905). No incorrect axiom is ever emitted either
+        // way.
+        //
+        // NOTE for whoever tightens this next: the loop below passes
+        // EVERY function, so the "pure" in the paragraph above is a
+        // property of the reflection gates, not of this filter. The
+        // definitional path has no purity gate at all — impure
+        // functions are excluded only INCIDENTALLY, by their bodies
+        // failing to translate.
         {
             use verum_smt::expr_to_smtlib::{ReflectionTypeEnv, try_reflect_function_with_env};
             use verum_smt::refinement_reflection::RefinementReflectionRegistry;

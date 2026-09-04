@@ -1,0 +1,134 @@
+// @test: verify-pass
+// @level: L3
+// @tier: 0
+// @tags: verification, smt, refinement-reflection, proofs
+// @timeout: 30000
+// @description: A predicate this translator cannot express still has a
+//   NAME the solver knows, so claims that follow from being a function
+//   are provable about it.
+//
+// Two different things can go wrong with a reflection candidate, and
+// until T0905 both answered the same way — nothing at all:
+//
+//   DETERMINISM      the function may return different results for the
+//                    same arguments (contexts, effects). Nothing true
+//                    can be said about it, and nothing is.
+//   TRANSLATABILITY  the function is a perfectly good mathematical
+//                    function; this translator cannot express its BODY.
+//                    A loop is the ordinary case.
+//
+// The second kind still supports one true statement — `f` is a
+// function, so `f(x)` equals itself — and `(declare-fun f (S…) S)` is
+// exactly that statement. Emitting nothing did not make the name
+// UNINTERPRETED, which is how the code described it; it made the name
+// UNDECLARED, which is a different and worse thing. A goal mentioning
+// an undeclared symbol fails on WELL-FORMEDNESS, and that failure is
+// reported in the same shape as a failed proof — so "this property is
+// not provable" and "this file does not typecheck for the solver" were
+// indistinguishable in the output.
+//
+// Nothing here asks the solver to know what the loop COMPUTES. Each
+// claim below follows from `sum_to` being a function and from nothing
+// else, which is the whole of what a declaration asserts.
+//
+// `_unsound.vr` is the pole, and it carries TWO kinds of failure that
+// must be told apart — see its header.
+
+/// The body is a `while` loop: not a `let`, not an assignment to a
+/// local, not an early-return guard, so the reflector's straight-line
+/// fold declines it. Only Int arithmetic, so that a failure here can
+/// only be about the loop and not about lists, iterators or generics.
+///
+/// `pure` is load-bearing and is NOT decoration. A declaration asserts
+/// determinism, so the opaque path emits one only for a function
+/// declared `pure`. The definitional path never had that gate — impure
+/// functions are excluded from it only INCIDENTALLY, by their bodies
+/// failing to translate — which is precisely the accident this change
+/// would have removed had the gate not been added with it.
+public pure fn sum_to(n: Int) -> Int {
+    let mut acc: Int = 0;
+    let mut i: Int = 0;
+    while i < n {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+/// Excluded middle over the predicate form. True for any declared
+/// symbol of Bool sort and unstatable about a symbol that does not
+/// exist — which makes it the narrowest possible witness that the
+/// declaration is emitted.
+public pure fn reaches(n: Int) -> Bool {
+    let mut i: Int = 0;
+    while i < n {
+        i = i + 1;
+    }
+    i >= n
+}
+
+@verify(formal)
+public theorem an_untranslatable_predicate_still_has_excluded_middle(n: Int)
+    ensures reaches(n) || !reaches(n)
+    proof by auto;
+
+/// A SECOND CONTROL, and it is here because it looked like a witness
+/// and is not.
+///
+/// `sum_to(n) == sum_to(n)` reads as "determinism, said directly — the
+/// entire content of a `declare-fun`". Measured on the binary that
+/// predates this change, it ALREADY PROVED. The goal translator renders
+/// a call as `(name args…)` keyed on the name, so both sides are the
+/// same term and congruence closure closes it without any declaration
+/// existing.
+///
+/// Kept, relabelled, rather than deleted: it marks the boundary between
+/// what a declaration buys and what term identity gives for free, and
+/// the next person to reach for "f(x) == f(x)" as evidence that a
+/// symbol exists needs to find this note instead of repeating the
+/// measurement. The two theorems that DID move are the ones above and
+/// below.
+@verify(formal)
+public theorem term_identity_needs_no_declaration(n: Int)
+    ensures sum_to(n) == sum_to(n)
+    proof by auto;
+
+/// THE SECOND EFFECT, and the one that reaches real modules.
+///
+/// The registry closes itself under its call graph and drops any entry
+/// whose body names a symbol the block never declares (T0489) — one
+/// bad axiom must degrade one function, not poison the module. But an
+/// un-translatable helper WAS such an undeclared symbol, so every
+/// caller of one was dropped too, losing an axiom that translated
+/// perfectly well. Declaring the helper closes the graph and the
+/// caller survives.
+///
+/// `negated` is fully translatable; it is here only as something that
+/// calls `reaches`.
+public pure fn negated(n: Int) -> Bool {
+    !reaches(n)
+}
+
+@verify(formal)
+public theorem a_caller_of_an_opaque_helper_keeps_its_own_axiom(n: Int)
+    ensures negated(n) == !reaches(n)
+    proof by auto;
+
+/// The control: a fully translatable predicate, no loop anywhere. It
+/// proved before this change and must keep proving. Without it, a
+/// change that emptied the reflector entirely would still let every
+/// assertion above pass for the wrong reason — an undeclared symbol
+/// and a declared one both admit excluded middle if the goal itself is
+/// never reached.
+public fn direct(n: Int) -> Bool {
+    n + 0 == n
+}
+
+@verify(formal)
+public theorem the_translatable_control_still_proves(n: Int)
+    ensures direct(n)
+    proof by auto;
+
+fn main() {
+    print("opaque-untranslatable");
+}
