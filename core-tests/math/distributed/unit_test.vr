@@ -7,7 +7,11 @@
 // Surface tested:
 //   * CommBackend 3-variant (NCCL / Gloo / MPI) — qualified to dodge bare-name
 //     collision with MPI standard symbol
-//   * ReduceOp 5-variant (Sum / Avg / Min / Max / Product) — qualified to
+//   * ReduceOp — `core.math.tensor` declares ELEVEN variants
+//     (Sum / Prod / Max / Min / Mean / Var / Std / Norm / LogSumExp /
+//     All / Any).  This file was written against an older five-variant
+//     shape and spelled two of them `Avg` and `Product`; both are now
+//     `Mean` and `Prod`.  Qualified to
 //     dodge Min/Max/Sum bare-name collisions
 //
 // current_rank / world_size + collective ops (all_reduce / all_gather /
@@ -77,8 +81,8 @@ fn test_reduce_op_sum_variant() {
 
 @test
 fn test_reduce_op_avg_variant() {
-    let r: ReduceOp = ReduceOp.Avg;
-    assert(r is ReduceOp.Avg);
+    let r: ReduceOp = ReduceOp.Mean;
+    assert(r is ReduceOp.Mean);
 }
 
 @test
@@ -95,8 +99,8 @@ fn test_reduce_op_max_variant() {
 
 @test
 fn test_reduce_op_product_variant() {
-    let r: ReduceOp = ReduceOp.Product;
-    assert(r is ReduceOp.Product);
+    let r: ReduceOp = ReduceOp.Prod;
+    assert(r is ReduceOp.Prod);
 }
 
 // =============================================================================
@@ -106,9 +110,9 @@ fn test_reduce_op_product_variant() {
 @test
 fn test_reduce_op_sum_disjoint_from_avg() {
     let s: ReduceOp = ReduceOp.Sum;
-    let a: ReduceOp = ReduceOp.Avg;
-    assert(s is ReduceOp.Sum && !(s is ReduceOp.Avg));
-    assert(a is ReduceOp.Avg && !(a is ReduceOp.Sum));
+    let a: ReduceOp = ReduceOp.Mean;
+    assert(s is ReduceOp.Sum && !(s is ReduceOp.Mean));
+    assert(a is ReduceOp.Mean && !(a is ReduceOp.Sum));
 }
 
 @test
@@ -122,17 +126,17 @@ fn test_reduce_op_min_disjoint_from_max() {
 @test
 fn test_reduce_op_sum_disjoint_from_product() {
     let s: ReduceOp = ReduceOp.Sum;
-    let p: ReduceOp = ReduceOp.Product;
-    assert(!(s is ReduceOp.Product));
+    let p: ReduceOp = ReduceOp.Prod;
+    assert(!(s is ReduceOp.Prod));
     assert(!(p is ReduceOp.Sum));
 }
 
 @test
 fn test_reduce_op_avg_disjoint_from_min() {
-    let a: ReduceOp = ReduceOp.Avg;
+    let a: ReduceOp = ReduceOp.Mean;
     let mi: ReduceOp = ReduceOp.Min;
     assert(!(a is ReduceOp.Min));
-    assert(!(mi is ReduceOp.Avg));
+    assert(!(mi is ReduceOp.Mean));
 }
 
 fn main() {}
