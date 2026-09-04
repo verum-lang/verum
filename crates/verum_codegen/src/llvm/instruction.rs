@@ -2792,13 +2792,45 @@ fn resolve_llvm_function<'a, 'ctx>(
             return Ok(f);
         }
     }
-    // Fall back to primary even if param count doesn't match
-    module.get_function(func_name).ok_or_else(|| {
+    // Fall back to primary even if param count doesn't match.
+    //
+    // THIS STEP EMITS IR THAT CANNOT VERIFY (T1153). The two checks
+    // above measured the mismatch and this discards the measurement:
+    // the caller then builds a call with `expected_param_count`
+    // arguments against a function that takes a different number, and
+    // the LLVM verifier — not this compiler — is what notices:
+    //
+    //     Incorrect number of arguments passed to called function!
+    //       call fastcc i64 @Cow.clone(i64 %r10, i64 %r11)
+    //     define internal fastcc i64 @Cow.clone(i64 %0)
+    //
+    // One module of the registry showcase refuses to verify for that
+    // pair, and the whole program dies with SIGSEGV in
+    // `generate_native` rather than a diagnostic naming a call site.
+    //
+    // NOT CHANGED BLIND. Returning an error here would be a NARROWING,
+    // and a fallback that legitimately succeeds today would start
+    // failing — the same shape as the FFI marshaller's integer arm.
+    // `VERUM_TRACE_ARITY_FALLBACK` counts how often this fires and with
+    // what mismatch, so the question "is this dead weight hiding
+    // defects, or does it have real cases" gets an answer instead of an
+    // argument.
+    let f = module.get_function(func_name).ok_or_else(|| {
         LlvmLoweringError::internal(format!(
             "{}: function '{}' (expected {} params) not found in LLVM module",
             call_kind, func_name, expected_param_count
         ))
-    })
+    })?;
+    if std::env::var_os("VERUM_TRACE_ARITY_FALLBACK").is_some() {
+        eprintln!(
+            "[arity-fallback] {} '{}': call passes {}, definition takes {}",
+            call_kind,
+            func_name,
+            expected_param_count,
+            f.count_params()
+        );
+    }
+    Ok(f)
 }
 
 pub fn lower_instruction<'ctx>(
@@ -14274,6 +14306,33 @@ fn lower_call<'ctx>(
             }
         })
         .collect::<Result<Vec<_>>>()?;
+    // T1153 — THE DIRECT-CALL PATH NEVER COMPARES ITS ARGUMENT COUNT
+    // WITH THE CALLEE'S. `param_types` above is consulted per INDEX for
+    // coercion and never for LENGTH, so a call carrying one value too
+    // many is emitted as-is and the LLVM verifier rejects the module:
+    //
+    //     Incorrect number of arguments passed to called function!
+    //       call fastcc i64 @Cow.clone(i64 %r10, i64 %r11)
+    //     define internal fastcc i64 @Cow.clone(i64 %0)
+    //
+    // The sibling builder at ~34760 (`rts_call`) DOES reconcile, and
+    // its `pc + 1 == arg_vals.len()` branch is exactly this shape — a
+    // spare leading receiver the callee does not take.
+    //
+    // Counting before copying it: a fix here would be a WIDENING, and
+    // whether the reconciliation is targeted or load-bearing depends
+    // on how often direct calls disagree. This says.
+    if std::env::var_os("VERUM_TRACE_ARITY_FALLBACK").is_some() {
+        let pc = llvm_fn.count_params() as usize;
+        if pc != arg_vals.len() {
+            eprintln!(
+                "[arity-direct] '{}': call passes {}, definition takes {}",
+                llvm_fn.get_name().to_string_lossy(),
+                arg_vals.len(),
+                pc
+            );
+        }
+    }
     let call_site = ctx
         .builder()
         .build_call(llvm_fn, &arg_vals, "call_result")
