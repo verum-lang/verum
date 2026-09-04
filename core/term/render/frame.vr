@@ -69,7 +69,7 @@ implement Terminal {
     /// Create a terminal with auto-detected capabilities.
     public fn new() -> IoResult<Terminal> {
         let backend = PosixTerminal.new()?;
-        let size = backend.size()?;
+        let size: TerminalSize = backend.size()?;
         let w = size.columns;
         let h = size.rows;
 
@@ -94,7 +94,7 @@ implement Terminal {
     /// Draw one frame. Calls `draw_fn` with a Frame, then flushes the diff.
     public fn draw(&mut self, draw_fn: fn(&mut Frame)) -> IoResult<()> {
         // Check for resize
-        let size = self.backend.size()?;
+        let size: TerminalSize = self.backend.size()?;
         if size.columns != self.back_buffer.width || size.rows != self.back_buffer.height {
             self.resize(size.columns, size.rows);
         }

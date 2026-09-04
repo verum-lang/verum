@@ -390,7 +390,6 @@ core/term/raw/screen.vr
 core/term/raw/termios.vr
 core/term/raw/wincon.vr
 core/term/render/diff.vr
-core/term/render/frame.vr
 core/term/style/color.vr
 core/term/widget/input.vr
 core/term/widget/mod.vr
