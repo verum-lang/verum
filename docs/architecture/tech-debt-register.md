@@ -1099,7 +1099,22 @@ NO PORTABLE ROUTE AROUND IT: `core/sys/mod.vr:273` does re-export `exit`, but fr
     core/mem/segment.vr       (mmap family)     6 errors, `unbound variable: mmap`
     core/mem/allocator.vr     errno x2          `errno` is declared OUTSIDE the block and resolves
 
-So the rule is not "a raw extern name cannot be called" — it is "a name declared INSIDE `extern { }` cannot", and `errno` being raw and fine is what separates the two. `mem/segment.vr` and `mem/allocator.vr` are the allocator's page path, which makes this class more than a CLI concern. | P1 | `core/sys/init.vr:623`, `core/sys/darwin/libsystem.vr:197` vs `:279`; T1085 | open |
+So the rule is not "a raw extern name cannot be called" — it is "a name declared INSIDE `extern { }` cannot", and `errno` being raw and fine is what separates the two. `mem/segment.vr` and `mem/allocator.vr` are the allocator's page path, which makes this class more than a CLI concern.
+
+**AND THE REAL BLAST RADIUS IS THE macOS PLATFORM LAYER: 13 FILES, 75 DIAGNOSTICS.** Both of our earlier counts came from grepping mount statements — mine found 10 raw call sites, verum-2b's found 12 instances in 3 files. Measured instead from the COMPILER'S diagnostics, matching every `unbound variable` against the 163 names declared inside an `extern { }` block anywhere in `core/`:
+
+    20  core/sys/process_native.vr    process spawning
+    18  core/sys/darwin/thread.vr     threading
+    11  core/sys/darwin/time.vr       time
+     7  core/sys/darwin/tls.vr        thread-local storage
+     4  darwin/io.vr · mem/segment.vr · sys/fs_watch.vr
+     2  core/shell/resources.vr
+
+    most-missed names: 12 `close` · 7 `munmap` · 6 `kevent` · 5 `clock_gettime_ffi` · 4 `mach_absolute_time`
+
+Verified independently here on `verum_v32`: thread.vr 18 unbound, process_native 20, time 11, tls 7 — matching name for name. So processes, threads, time, TLS, mmap and file-watching are all unreachable through these paths on macOS, with the abort path above sitting on top. The priority stays P1 rather than moving to P0 only because "18 diagnostics in thread.vr" and "threading does not work" are different claims and only the first is measured.
+
+METHOD NOTE, and it is the sixth instance today: **where a full run exists, read the run — do not re-derive its subject from source text.** Both hand-greps understated this by an order of magnitude, and both looked thorough. | P1 | `core/sys/init.vr:623`, `core/sys/darwin/libsystem.vr:197` vs `:279`; T1085 | open |
 
     healthy `let r = &x`      E312=1 -> 0
     healthy `takes(&mk())`    E312=1 -> 0
