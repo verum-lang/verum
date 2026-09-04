@@ -100,6 +100,16 @@ DECL = re.compile(
 GLOB_REEXPORT = re.compile(r"^\s*public\s+mount\s+\.?([a-z_]\w*)\s*\.\s*\*\s*;", re.M)
 LIST_REEXPORT = re.compile(r"public\s+mount\s+\.?([a-z_]\w*)\.\{(.*?)\}\s*;", re.S)
 
+# 7 since 2026-09-04, and the CHEAP ones are gone — triaged, so the next reader does not
+# repeat it.  What was cheap: `ctx_push_frame` (the wrapper was never written; T0822) and
+# `get_errno` (asked of linux/errno.vr, which holds predicates OVER an errno, while the
+# reader lives in linux/tls.vr; T0808) — three call sites, one word each.
+#
+# The seven that remain are NOT more of that.  Checked one by one: write_stderr,
+# thread_join, thread_yield, GetCommandLineA and query_performance_counter_ns are not
+# declared ANYWHERE in their platform tree, under any module.  Each needs a real binding
+# at the platform boundary — libSystem for darwin, kernel32 for windows — not a corrected
+# path.  Six of the seven are Windows, which nothing here can run.
 BASELINE = 7
 
 _declared: dict[Path, set[str]] = {}
