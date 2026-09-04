@@ -445,8 +445,8 @@ impl ErrorRecovery {
                 Text::from("value.to_string()"),
             )),
             ("Int", "Text") => Maybe::Some((
-                Text::from("Parse to integer: value.parse::<Int>()?"),
-                Text::from("value.parse::<Int>()?"),
+                Text::from("Parse to integer: value.parse_int()?"),
+                Text::from("value.parse_int()?"),
             )),
             ("Float", "Int") => Maybe::Some((
                 Text::from("Convert to float: value as Float"),
@@ -457,8 +457,8 @@ impl ErrorRecovery {
                 Text::from("value as Int"),
             )),
             (e, f) if e.starts_with("Maybe<") && !f.starts_with("Maybe<") => Maybe::Some((
-                Text::from("Wrap in Maybe: Maybe::Some(value)"),
-                Text::from("Maybe::Some(value)"),
+                Text::from("Wrap in Maybe: Maybe.Some(value)"),
+                Text::from("Maybe.Some(value)"),
             )),
             (e, f) if !e.starts_with("Maybe<") && f.starts_with("Maybe<") => Maybe::Some((
                 Text::from("Unwrap Maybe: value? or value.unwrap()"),

@@ -41,7 +41,16 @@ fn emitted_snippets(src: &str) -> Vec<(usize, String)> {
         if trimmed.starts_with("//") {
             continue;
         }
-        let is_emit_site = line.contains(".code(") || line.contains("template:");
+        // THREE spellings, and each one was found only after the
+        // previous set reported clean. `.code(` and `template:` were the
+        // first two; scanning just them reported 0 problems while four
+        // `Text::from("...")` suggestions still said `parse::<Int>()?`
+        // and `Maybe::Some(value)`. Sizing a surface by one of its
+        // spellings is how this defect survived three separate censuses.
+        let is_emit_site = line.contains(".code(")
+            || line.contains("template:")
+            || line.contains("Text::from(")
+            || line.contains("description:");
         // A `format!` argument list puts the format string on its own
         // line; `.code(format!(` then sits on the line above. Catch a
         // bare string literal that carries `{}` placeholders too.

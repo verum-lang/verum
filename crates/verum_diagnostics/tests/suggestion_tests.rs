@@ -124,7 +124,11 @@ fn test_type_add_generic_parameter() {
 fn test_type_use_associated_type() {
     let suggestion = TypeSuggestionTemplates::use_associated_type("Iterator", "Item");
     assert!(suggestion.title().contains("associated type"));
-    assert!(suggestion.code().contains("<Self as Iterator>::Item"));
+    // Verum reaches a protocol's associated type as `Self.Item`
+    // (CLAUDE.md protocol example; core/mesh/k8s/client.vr:280).
+    // This asserted the Rust qualified form until T1142.
+    assert!(suggestion.code().contains("Self.Item"));
+    assert!(!suggestion.code().contains("::"));
 }
 
 // === ErrorHandlingSuggestionTemplates Tests ===
@@ -159,7 +163,9 @@ fn test_error_convert_error_type() {
     let suggestion = ErrorHandlingSuggestionTemplates::convert_error_type("IoError", "AppError");
     assert!(suggestion.title().contains("Convert"));
     assert!(suggestion.code().contains("map_err"));
-    assert!(suggestion.code().contains("AppError::from"));
+    // A type-associated function takes a dot in Verum. (T1142)
+    assert!(suggestion.code().contains("AppError.from"));
+    assert!(!suggestion.code().contains("::"));
 }
 
 #[test]
@@ -231,13 +237,14 @@ fn test_syntax_add_module_declaration() {
 
 #[test]
 fn test_syntax_import_symbol() {
-    let suggestion = SyntaxSuggestionTemplates::import_symbol("HashMap", "std::collections");
+    // Both the arguments and the expectation were Rust until T1142:
+    // `std::collections::HashMap` is Rust's standard library, `using`
+    // is Verum's CONTEXT clause rather than an import, and Verum's map
+    // is `Map`. The import statement is `mount a.b.C;`.
+    let suggestion = SyntaxSuggestionTemplates::import_symbol("Map", "core.collections");
     assert!(suggestion.title().contains("Import"));
-    assert!(
-        suggestion
-            .code()
-            .contains("using std::collections::HashMap")
-    );
+    assert!(suggestion.code().contains("mount core.collections.Map;"));
+    assert!(!suggestion.code().contains("::"));
 }
 
 // === PerformanceSuggestionTemplates Tests ===
