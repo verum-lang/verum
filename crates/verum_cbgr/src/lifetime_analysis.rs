@@ -770,6 +770,26 @@ impl LifetimeAnalyzer {
                 // Any reference live at successor entry must be live at this block's exit
                 for (_ref_id, &lifetime_id) in &self.ref_lifetimes {
                     if let Some(lifetime) = self.lifetimes.get(&lifetime_id) {
+                        // ...UNLESS THE SUCCESSOR IS WHERE IT WAS MADE.
+                        //
+                        // Liveness flows backward, and a value defined in
+                        // the successor is the standing exception: it is
+                        // live there *because* the successor creates it, so
+                        // demanding it also be live in the predecessor asks
+                        // the reference to exist before its definition.
+                        //
+                        // Measured (T1102): without this, every `&` in a
+                        // function with more than one basic block produced
+                        // E312 "dangling reference detected" — including
+                        // `let x = 5; let r = &x; print(*r);`, and including
+                        // four sites in core/collections/list.vr on the
+                        // ordinary `result + &items[i].to_text()` shape.
+                        // `Lifetime.entry` is set by the first
+                        // `add_live_block`, which `create_lifetimes` calls
+                        // with the defining block.
+                        if lifetime.entry == Some(succ_id) {
+                            continue;
+                        }
                         if lifetime.live_blocks.contains(&succ_id) {
                             // Create outlives constraint
                             // This reference must outlive the path to successor
