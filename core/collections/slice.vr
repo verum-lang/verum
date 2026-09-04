@@ -749,7 +749,7 @@ implement<T> [T] {
     where T: Default
     {
         for i in range(0, self.len()) {
-            self[i] = T.default();
+            self[i] = 0;
         }
     }
 

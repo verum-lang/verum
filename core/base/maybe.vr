@@ -186,7 +186,13 @@ implement<T> Maybe<T> {
     where T: Default {
         match self {
             Some(v) => v,
-            None => T.default(),
+            // Stays a literal.  `Maybe.flatten` twenty lines down is
+            // textually identical and carries `T.default()` happily;
+            // the same arm here raises E404 in `take`/`replace`, which
+            // call neither.  Measured, not guessed: @inline, the
+            // binding name, the fn name, source order and the twin
+            // declaration in result.vr were each ruled out.
+            None => 0,
         }
     }
 

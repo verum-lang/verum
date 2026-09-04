@@ -193,7 +193,7 @@ implement<T> Heap<T> {
     ///
     public fn new_default() -> Heap<T>
     where T: Default {
-        Heap.new(T.default())
+        Heap.new(0)
     }
 
     /// Allocate zeroed memory (for types where zero bits are valid).
@@ -569,7 +569,7 @@ implement<T: Hash> Hash for Heap<T> {
 // Default if T is Default
 implement<T: Default> Default for Heap<T> {
     fn default() -> Heap<T> {
-        Heap.new(T.default())
+        Heap.new(0)
     }
 }
 
