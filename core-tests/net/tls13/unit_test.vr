@@ -136,19 +136,19 @@ fn test_cipher_suite_ccm_is_not_supported() {
 
 @test
 fn test_cipher_suite_hash_kind_aes128_gcm_is_sha256() {
-    let h = CipherSuite.TlsAes128GcmSha256.hash_kind();
+    let h: HashKind = CipherSuite.TlsAes128GcmSha256.hash_kind();
     assert(h is HashKind.Sha256);
 }
 
 @test
 fn test_cipher_suite_hash_kind_aes256_gcm_is_sha384() {
-    let h = CipherSuite.TlsAes256GcmSha384.hash_kind();
+    let h: HashKind = CipherSuite.TlsAes256GcmSha384.hash_kind();
     assert(h is HashKind.Sha384);
 }
 
 @test
 fn test_cipher_suite_hash_kind_chacha20_is_sha256() {
-    let h = CipherSuite.TlsChaCha20Poly1305Sha256.hash_kind();
+    let h: HashKind = CipherSuite.TlsChaCha20Poly1305Sha256.hash_kind();
     assert(h is HashKind.Sha256);
 }
 
