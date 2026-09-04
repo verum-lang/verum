@@ -1,0 +1,76 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: io, references, slices, coercion, data-loss
+// @timeout: 20000
+// @expected-stdout-begin
+// field 10
+// local 10
+// param 10
+// clone 10
+// slice 10
+// @expected-stdout-end
+// @description: A byte list held in a record field reaches a slice
+//   parameter with its bytes.
+//
+//   THE READ SIDE of `path_held_in_a_field.vr` beside it. That spec
+//   (T0899) pinned a `Text` in a field reaching a stdlib WRITE — where
+//   the field's rendering became a filename. This one pins a
+//   `List<Byte>` in a field reaching a stdlib READ, where the
+//   `&List<T>` -> `&[T]` coercion produced an EMPTY slice. Same
+//   question — does a value held in a field arrive intact at a stdlib
+//   boundary — asked of the other direction, and answered wrong in a
+//   different way. Keeping them adjacent is deliberate: whoever
+//   touches the field-argument path should see both poles.
+//
+//   T1130. `Text.from_utf8` takes `&[Byte]`; the argument here is a
+//   `List<Byte>` living in a record field, and the `&List<T>` -> `&[T]`
+//   coercion produced an EMPTY slice in that position:
+//
+//       Text.from_utf8(&r.body)       -> Ok("")   for a 10-byte field
+//       Text.from_utf8(&r.body[..])   -> 10       explicit slice
+//       Text.from_utf8(&local)        -> 10       same bytes, a local
+//       user_fn(&r.body)              -> 10       user fn taking &List
+//
+//   It returns `Ok`, not `Err`: the caller receives a well-formed
+//   answer about no data, which is why nothing anywhere reported it.
+//
+//   The five lines are kept because each rules out a different
+//   explanation. `local` and `param` say the bytes and the reference
+//   are fine; `clone` says the value is intact; `slice` says the
+//   spelling `[..]` reaches the same data; only `field` was wrong. A
+//   spec with the `field` line alone would pass the day somebody
+//   "fixed" it by making every slice empty.
+//
+//   Where it bit: a registry's publish route read its request body with
+//   `Text.from_utf8(&req.body)`. A 282-byte body decoded as "", the JSON
+//   parse failed, and three different requests — well-formed, malformed,
+//   and unauthorised — all answered 400 with an empty message. Every
+//   stdlib function with a `&[T]` parameter is exposed, and a struct
+//   field is the ordinary place to keep bytes.
+
+type Req is { body: List<Byte>, path: Text };
+
+// NOT named `read`: a user `fn read(&List<Byte>)` is intercepted by
+// the stdlib's FILE read at run time and answers
+// `Err({NotFound, No such file or directory})` — a unit's own
+// declaration losing to a builtin, the runtime twin of T1120. Named
+// around here so this spec measures T1130 and not that.
+fn via_param(v: &List<Byte>) -> Int {
+    match Text.from_utf8(v) { Ok(t) => t.len(), Err(_) => 0 - 1 }
+}
+
+fn main() {
+    let t = "abcdefghij";
+    let mut v: List<Byte> = List.new();
+    for b in t.bytes() { v.push(b); }
+    let copy_for_clone = v.clone();
+    let copy_for_local = v.clone();
+    let r = Req { body: v, path: "/x" };
+
+    print(f"field {match Text.from_utf8(&r.body) { Ok(x) => x.len(), Err(_) => 0 - 1 }}");
+    print(f"local {match Text.from_utf8(&copy_for_local) { Ok(x) => x.len(), Err(_) => 0 - 1 }}");
+    print(f"param {via_param(&r.body)}");
+    print(f"clone {match Text.from_utf8(&copy_for_clone) { Ok(x) => x.len(), Err(_) => 0 - 1 }}");
+    print(f"slice {match Text.from_utf8(&r.body[..]) { Ok(x) => x.len(), Err(_) => 0 - 1 }}");
+}

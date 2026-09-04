@@ -217,12 +217,30 @@ pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base
     let v = state
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
-    let unwrapped = if is_cbgr_ref(&v) {
-        let (abs_index, _) = decode_cbgr_ref(v);
-        state.registers.get_absolute(abs_index)
-    } else {
-        v
-    };
+    // T1130 — PEEL BOTH REF ENCODINGS, via the one authority.
+    //
+    // A `&T` argument reaches an intercept in two shapes: a CBGR
+    // REGISTER-ref (from `&var`), and a heap-anchored INTERIOR pointer
+    // tracked in `state.cbgr_mutable_ptrs` (from `&record.field` or
+    // `&list[i]`, emitted by `RefField`). This helper peeled only the
+    // first, so a `List<Byte>` held in a record field arrived as the
+    // raw slot pointer, matched none of the shape branches below, and
+    // fell out of the tail as an EMPTY vector.
+    //
+    // Measured: `Text.from_utf8(&r.body)` answered `Ok("")` for a
+    // ten-byte field — not `Err`, a well-formed answer about no data —
+    // and it TRAVELLED: passing `&r.body` through a user function and
+    // calling from_utf8 on the parameter was empty too, because the
+    // reference is still the same interior pointer. `&r.body[..]`, a
+    // clone, and a local all worked.
+    //
+    // `resolve_arg_value` is the canonical peel (it also guards the
+    // bridge-extent case where an interior pointer must NOT be
+    // dereferenced) and `file_runtime` already routes through it. This
+    // is the fourth instance of the class recorded at T0403 / T0899 /
+    // T0911: a deref helper that knows register-refs and not interior
+    // pointers is a latent `&field`-argument corruptor.
+    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, v);
     // BYTE_SLICE byte view (`Text.as_bytes()`, ARCH-P5): raw
     // `{ptr, len}` payload — the canonical typed `&[Byte]` shape.
     if let Some((p, len)) = heap::value_as_byte_slice(&unwrapped) {
