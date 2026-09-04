@@ -147,10 +147,17 @@ public type AsyncRuntimeConfig is {
     poll_budget: Int,
 };
 
-/// Public alias — short canonical name; conformance tests
-/// `mount core.async.executor.{AsyncRuntimeConfig}` for the async
-/// runtime config (distinct from the protocol-typed `AsyncRuntimeConfig`
-/// in core.runtime.config — those are different abstractions).
+/// NOTE — there is deliberately NO short `RuntimeConfig` alias here.
+/// `RuntimeConfig` is a PROTOCOL in core/runtime/config.vr:172, a
+/// different abstraction; exporting a record under that name from this
+/// module would put two unrelated types on one bare name, which the
+/// archive resolves to whichever it saw last (see the duplicate-name
+/// row in docs/architecture/tech-debt-register.md).  Mount
+/// `core.async.executor.{AsyncRuntimeConfig}` by its full name.
+///
+/// This comment previously described the alias as existing.  It did
+/// not, and a conformance test pinned the promise rather than the
+/// code — one unresolved mount failed the whole file.
 
 // Manifest→runtime bridge (#261). Each getter loads from a
 // const-initialised LLVM global emitted by

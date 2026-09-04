@@ -35,7 +35,7 @@
 // =============================================================================
 
 mount core.async.executor.{
-    RuntimeBuilder, AsyncRuntimeConfig, RuntimeConfig,
+    RuntimeBuilder, AsyncRuntimeConfig,
 };
 
 // =============================================================================
@@ -79,11 +79,14 @@ fn test_executor_async_runtime_config_io_bound_constructs() {
 }
 
 @test
-fn test_executor_runtime_config_alias_mounts() {
-    // RuntimeConfig is the canonical short-name alias for
-    // AsyncRuntimeConfig — pinned here so the alias stays stable
-    // across stdlib re-export reshuffles.
-    let _c: RuntimeConfig = AsyncRuntimeConfig.default();
+fn test_executor_async_runtime_config_is_not_the_protocol() {
+    // There is NO short-name alias, and there should not be one:
+    // `RuntimeConfig` is a PROTOCOL declared in core/runtime/config.vr:172,
+    // a different abstraction from this record.  The previous spelling
+    // mounted `RuntimeConfig` from core.async.executor and annotated with
+    // it, pinning an alias that module has never exported — so the mount
+    // failed and one unresolved name took the whole file with it.
+    let _c: AsyncRuntimeConfig = AsyncRuntimeConfig.default();
     assert(true);
 }
 
