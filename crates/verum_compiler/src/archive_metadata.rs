@@ -1406,6 +1406,40 @@ fn register_module_metadata(
             // `metadata.functions.get("Text.with_capacity")` finds it.
             // Keep the simple-name slot first-wins for free fns.
             //
+            // MEASURED INERT (T0458, v34: archive 25009877 -> 25010896
+            // bytes, so the keys ARE written; `Capability.to_bit` still
+            // does not resolve). Reading the emitted keys says why, and
+            // it is two defects, not one:
+            //
+            //   Capability.to_bit                          x4  bare slot
+            //   core.architecture.types.Capability.to_bit  x1  WRONG TYPE
+            //   core.mem.Capability.to_bit                 x1  parent, not
+            //                                                  the module
+            //   core.mem.capability.Capability.to_bit      x0  needed
+            //
+            // 1. GRANULARITY: `to_bit` lives in core/mem/capability.vr,
+            //    module `core.mem.capability`; this writes `core.mem.…`.
+            //    The loader probes with `type_desc.module_path`, so the
+            //    two spellings can never meet.
+            // 2. UPSTREAM: `core.architecture.types.Capability` does not
+            //    declare `to_bit` at all, yet received a qualified key
+            //    for it — so `method_keys` is built from a parent-type
+            //    resolution that had ALREADY picked the wrong one of
+            //    core/'s FOUR `Capability` types. Qualifying a key
+            //    cannot help when the qualification comes from the wrong
+            //    type; (2) is upstream of (1).
+            //
+            // Kept because it is additive and harmless — the regression
+            // canary (three instance methods on singleton types) is
+            // unchanged — and because it is a step the real fix needs.
+            //
+            // The 113/43 figures below are ALSO wrong, and by the same
+            // kind of error the census warns about: the pattern behind
+            // them was `type NAME is`, blind to `type NAME<T> is`. The
+            // grammar-aware count in
+            // scripts/ci/check_type_name_collisions.py is 132 names /
+            // 280 declarations / 68 carrying an implement block.
+            //
             // BAKE-DUPNAME: register under EVERY parent key, not the bare
             // type name alone. `core/` declares 113 type names more than
             // once and 43 of those carry an `implement` block, so a bare
