@@ -627,7 +627,7 @@ jobs:
   # the lint job below.
   # ---------------------------------------------------------------------------
   strict-gates:
-    name: STRICT gates (mono + signatures, advisory)
+    name: STRICT gates (mono + signatures — BLOCKING except the AOT smoke)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
