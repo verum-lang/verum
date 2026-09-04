@@ -49,7 +49,7 @@ public type AirVk is {
 
 implement AirVk {
     public fn from_air(air: Air) -> AirVk {
-        let digest = @intrinsic("verum.crypto.stark_air_digest", &air);
+        let digest: [Byte; 32] = @intrinsic("verum.crypto.stark_air_digest", &air);
         let mut d: [Byte; 32] = [0; 32];
         let mut i: Int = 0; while i < 32 { d[i] = digest[i]; i = i + 1; }
         AirVk { digest: d, air }

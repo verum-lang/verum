@@ -346,7 +346,6 @@ core/security/x509/verifier.vr
 core/security/zk/halo2/mod.vr
 core/security/zk/halo2/prover.vr
 core/security/zk/halo2/srs.vr
-core/security/zk/stark/verifier.vr
 core/shell/builtins.vr
 core/shell/context.vr
 core/shell/executor.vr
