@@ -3011,6 +3011,36 @@ builtin_call = builtin_name , '(' , [ argument_list ] , ')' ;
    @concat(a, b)       // Token concatenation (NOT concat!())
    @cfg(condition)     // Configuration check (NOT cfg!())
 *)
+
+(* 2.20.6a  @cfg SCOPE — it covers ONE item, never a run of them.
+
+   `@cfg(...)` is an attribute and attaches to the SINGLE declaration
+   that follows it.  To guard several, write the BLOCK form or repeat
+   the attribute:
+
+       @cfg(target_os = "linux")
+       mount sys.common.{random_bytes};      (* guarded   *)
+       mount sys.linux.tls.{get_tid_fast};   (* NOT guarded — unconditional *)
+
+       @cfg(target_os = "linux") { ... }     (* guards everything inside *)
+
+   Measured 2026-09-04 in core/mem/heap.vr:79-84, where the one-item
+   rule produced TWO defects from one misreading — and neither was
+   visible at the guarded line:
+
+     * the guarded mount was the CROSS-PLATFORM entry point
+       `random_bytes`, so on macOS it was never mounted at all and the
+       heap's free-list encoding kept its compile-time constants
+       (`error<E100>: unbound variable: random_bytes`);
+     * the unguarded `sys.linux.tls` mount stayed live on every
+       platform and collided with the macOS one three lines later
+       (`error<E602>: ambiguous name: 'get_tid_fast' is imported from
+       multiple modules`).
+
+   The failure is asymmetric and that is why it survives review: the
+   line you WANTED guarded silently loses its binding, while the line
+   you did not is only caught when a second mount of the same name
+   happens to exist. *)
 meta_function = '@' , meta_function_name , [ '(' , [ argument_list ] , ')' ] ;
 meta_function_name = 'const' | 'error' | 'warning' | 'stringify' | 'concat' | 'cfg'
                    | 'file' | 'line' | 'column' | 'module' | 'function'

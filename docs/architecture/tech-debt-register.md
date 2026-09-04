@@ -970,7 +970,7 @@ block, so `read_dir` works on macOS. Five sites now pay this tax
 locally, which is the argument for the root: the workaround is cheap
 ONCE and the cost is that nobody ever pays for the root.
 
-| A58 | **THE CBGR DANGLING CHECK HAD NO TRUE POSITIVES — its entire output was false** (2026-09-04, T1102, 6ada2105a) — `E312 dangling reference detected` came out of three independently healthy programs AND one genuine use-after-free, identical down to the raw fields (`ref=RefId(1) at=BlockId(0) span=NONE`). One unsound constraint produced all of it: the successor-edge rule demanded a lifetime be live at the PREDECESSOR of the block that DEFINES it, so every `&` in a function with more than one basic block qualified. |
+| A60 | **THE CBGR DANGLING CHECK HAD NO TRUE POSITIVES — its entire output was false** (2026-09-04, T1102, 6ada2105a) — `E312 dangling reference detected` came out of three independently healthy programs AND one genuine use-after-free, identical down to the raw fields (`ref=RefId(1) at=BlockId(0) span=NONE`). One unsound constraint produced all of it: the successor-edge rule demanded a lifetime be live at the PREDECESSOR of the block that DEFINES it, so every `&` in a function with more than one basic block qualified. |
 
     healthy `let r = &x`      E312=1 -> 0
     healthy `takes(&mk())`    E312=1 -> 0
