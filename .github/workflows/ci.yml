@@ -378,6 +378,33 @@ jobs:
           python3 scripts/ci/check_doc_indented_blocks.py --selftest
           python3 scripts/ci/check_doc_indented_blocks.py
 
+      # A dotted path that resolves to nothing is SILENT (register row
+      # A38): the module compiles, the callee is never entered, the
+      # out-params are never written, and the caller's success path runs
+      # anyway. Three mounts in core/random/deterministic.vr had pointed
+      # at core/math since the file moved, and the Windows CSPRNG called
+      # a bcrypt module that did not exist (T0807) — none of it visible
+      # to any build.
+      #
+      # The selftest runs first because the normal output is an ABSENCE,
+      # and an absence passes for free when the finder is broken.
+      - name: A super-path names a module that exists
+        timeout-minutes: 2
+        run: |
+          scripts/ci/check_a_super_path_call_names_a_file_that_exists.sh --selftest
+          scripts/ci/check_a_super_path_call_names_a_file_that_exists.sh
+
+      # `.as_ptr()` on an unannotated byte ARRAY returns the object base,
+      # not the data, and no FFI writeback can repair a pointer that was
+      # already wrong. Narrow on purpose: the sibling `&mut arr` form
+      # unsizes correctly since 02e838a10, and reporting it produced 30
+      # findings on healthy code.
+      - name: A byte buffer crosses FFI packed and sliced
+        timeout-minutes: 2
+        run: |
+          scripts/ci/check_a_byte_buffer_crosses_ffi_packed_and_sliced.sh --selftest
+          scripts/ci/check_a_byte_buffer_crosses_ffi_packed_and_sliced.sh
+
       - name: Doc examples compile
         timeout-minutes: 20
         run: cargo test --locked --doc -p verum_types -p verum_smt -p verum_common -p verum_ast -p verum_vbc -p verum_codegen

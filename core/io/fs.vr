@@ -874,7 +874,9 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
     let path_bytes = path_str.as_bytes();
 
     // Null-terminate the path
-    let mut path_buf = [0_u8; PATH_MAX_BYTES];
+    // PACKED, not `[0_u8; N]`: the bare form is a NaN-boxed List of
+    // 8-byte-strided Value slots, and this buffer is handed to C.
+    let mut path_buf: [Byte; PATH_MAX_BYTES] = [0; PATH_MAX_BYTES];
     let len = path_bytes.len().min(PATH_MAX_BYTES - 1);
     path_buf[..len].copy_from_slice(&path_bytes[..len]);
     path_buf[len] = 0;
@@ -896,7 +898,10 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
     // directory — the first thing any build tool does — was impossible
     // from Verum (T0916). The language-level defect is filed separately:
     // a module-path call that resolves to nothing must be an error.
-    let dir_handle = unsafe { sys_opendir(path_buf.as_ptr() as &Byte) };
+    // SUBSLICE first. `.as_ptr()` on the array VARIABLE returns the
+    // object base — C would read the ObjectHeader as the path.
+    // Rule 3, docs/architecture/ffi-byte-buffer-contract.md.
+    let dir_handle = unsafe { sys_opendir(path_buf[..].as_ptr() as &Byte) };
     if dir_handle.is_null() {
         let err = errno();
         return Result.Err(StreamError { kind: io_error_kind_from_os_code(err), message: Maybe.Some(f"OS error {err}") });
