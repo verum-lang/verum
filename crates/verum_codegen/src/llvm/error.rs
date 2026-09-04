@@ -767,6 +767,52 @@ pub fn take_unresolved_generic_calls() -> Vec<UnresolvedGenericCall> {
     }
 }
 
+/// Unique-site counts from the most recent
+/// `check_no_unresolved_generic_calls()` in this process, as
+/// `(total, reachable)`.
+///
+/// The check DRAINS its registry, so after it runs the numbers exist
+/// only in the message it printed. They are needed after the fact
+/// because THE COUNT BELONGS TO THE ARTEFACT, NOT TO THE RUN THAT
+/// PRODUCED IT (T1157): an AOT object served from the object cache
+/// skips lowering entirely, so nothing registers, the check returns at
+/// its first line, and a build over a binary with 197 degraded calls
+/// prints nothing at all — while the binary computes exactly the same
+/// wrong results as the cold build that warned about it.
+///
+/// Persisting these two numbers into the cache sidecar lets a cache HIT
+/// replay the warning instead of inheriting silence.
+static LAST_UNRESOLVED: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+static LAST_UNRESOLVED_REACHABLE: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// `(total, reachable)` unique degraded sites from the last check.
+/// Both zero when no lowering ran in this process — which is exactly
+/// the cache-hit case the caller must not confuse with "clean".
+pub fn last_unresolved_counts() -> (usize, usize) {
+    use std::sync::atomic::Ordering::Relaxed;
+    (
+        LAST_UNRESOLVED.load(Relaxed),
+        LAST_UNRESOLVED_REACHABLE.load(Relaxed),
+    )
+}
+
+/// Render the same warning text a cold lowering would have printed,
+/// from counts recovered elsewhere (the cache sidecar). Deliberately
+/// says WHERE the numbers came from: a replayed warning must not read
+/// as a fresh measurement.
+pub fn replayed_unresolved_warning(total: usize, reachable: usize) -> String {
+    format!(
+        "{} unresolved call(s) degraded to a const-zero stub during AOT \
+         lowering ({} in REACHABLE code) — replayed from the object \
+         cache, which served this binary without re-running lowering. \
+         The binary is the one those counts describe. Set \
+         VERUM_NO_OBJECT_CACHE=1 to re-measure.",
+        total, reachable
+    )
+}
+
 /// Drain + surface the unresolved-generic-call stubs.
 ///
 /// **Default** (warning): stderr, `Ok(())`.  **Strict** (`VERUM_STRICT_MONO=1`):
@@ -786,6 +832,14 @@ pub fn check_no_unresolved_generic_calls() -> Result<()> {
         .collect();
     let reachable_count = unique.iter().filter(|c| c.reachable).count();
     let dead_count = unique.len() - reachable_count;
+    // Publish before the message is built: the check drains its
+    // registry, so this is the only surviving record of the counts once
+    // it returns (T1157).
+    {
+        use std::sync::atomic::Ordering::Relaxed;
+        LAST_UNRESOLVED.store(unique.len(), Relaxed);
+        LAST_UNRESOLVED_REACHABLE.store(reachable_count, Relaxed);
+    }
     // Cap the per-entry list so the warning stays readable on a large
     // stdlib build (the strict gate still counts every unique site).
     // REACHABLE sites list first — they are the ones that can actually

@@ -84,7 +84,10 @@ use tracing::{debug, info};
 /// meta format, key composition).  Old entries then miss and age out
 /// via LRU.  v2: input-content key (source bytes + stdlib tree)
 /// replacing the never-hitting serialized-VBC key of v1.
-const CACHE_FORMAT_VERSION: u32 = 2;
+/// v3 (T1157): the sidecar also carries `unresolved=` /
+/// `unresolved_reachable=`, so a cache HIT can replay the
+/// degraded-call warning instead of serving a wrong binary in silence.
+const CACHE_FORMAT_VERSION: u32 = 3;
 
 /// LRU caps — enforced on insert, oldest-mtime first.
 const MAX_ENTRIES: usize = 50;
@@ -142,6 +145,21 @@ pub(super) struct CacheHit {
     /// drives the Metal/Foundation/objc framework link decision.
     pub needs_metal: bool,
 }
+
+// The degraded-call counts (T1157) are NOT carried on `CacheHit`. They
+// are read from the sidecar and warned about inside `try_fetch`, where
+// the hit is detected; putting them on the struct as well gave a field
+// nobody read (`dead_code`), and a fact stored in two places is how the
+// two start disagreeing.
+//
+// Why the sidecar carries them at all: a cache hit skips lowering, so
+// the check that normally reports these finds an empty registry and
+// prints nothing — over a binary exactly as wrong as the cold build
+// that warned about it. Measured: the same program built twice printed
+// "197 unresolved call(s) … a wrong-result or SIGSEGV at runtime" the
+// first time and nothing the second, both binaries producing the same
+// wrong output. The counts describe the ARTEFACT, so they travel with
+// it.
 
 impl AotObjectCache {
     /// Derive the cache key from the compile's deterministic
@@ -254,8 +272,8 @@ impl AotObjectCache {
                 return None;
             }
         };
-        let needs_metal = match parse_meta(&meta) {
-            Some(nm) => nm,
+        let (needs_metal, unresolved) = match parse_meta(&meta) {
+            Some(facts) => facts,
             None => {
                 if trace_enabled() {
                     eprintln!(
@@ -287,6 +305,19 @@ impl AotObjectCache {
                 "[aot-object-cache] HIT key={} fetch={:?}",
                 self.key,
                 t0.elapsed()
+            );
+        }
+        // Replay the degraded-call warning the skipped lowering would
+        // have printed. Silence here reads as "clean build" and is the
+        // whole defect T1157 names, so the text says plainly that the
+        // numbers were recovered rather than measured.
+        if unresolved.0 > 0 {
+            eprintln!(
+                "[codegen-warn] {}",
+                verum_codegen::llvm::error::replayed_unresolved_warning(
+                    unresolved.0,
+                    unresolved.1
+                )
             );
         }
         Some(CacheHit { needs_metal })
@@ -327,13 +358,22 @@ impl AotObjectCache {
         std::fs::copy(obj_path, &obj_tmp)?;
         std::fs::rename(&obj_tmp, self.obj_path())?;
 
+        // The degraded-call counts of the lowering that just produced
+        // this object (T1157). Read here rather than threaded through
+        // the call chain because the check that computes them DRAINS
+        // its registry — by the time control reaches a store, the
+        // published counts are the only surviving copy.
+        let (unres_total, unres_reachable) =
+            verum_codegen::llvm::error::last_unresolved_counts();
         let meta_tmp = self.dir.join(format!("{}.meta.tmp.{}", self.key, pid));
         std::fs::write(
             &meta_tmp,
             format!(
-                "version={}\nneeds_metal={}\n",
+                "version={}\nneeds_metal={}\nunresolved={}\nunresolved_reachable={}\n",
                 CACHE_FORMAT_VERSION,
-                if needs_metal { 1 } else { 0 }
+                if needs_metal { 1 } else { 0 },
+                unres_total,
+                unres_reachable
             ),
         )?;
         std::fs::rename(&meta_tmp, self.meta_path())?;
@@ -413,9 +453,14 @@ impl AotObjectCache {
 
 /// Parse the sidecar meta.  `None` on version mismatch or missing
 /// fields (treated as a miss by the caller).
-fn parse_meta(meta: &str) -> Option<bool> {
+fn parse_meta(meta: &str) -> Option<(bool, (usize, usize))> {
     let mut version_ok = false;
     let mut needs_metal = None;
+    // Absent counts parse as (0, 0) rather than failing the whole meta:
+    // a v3 entry always writes them, and treating a missing pair as a
+    // MISS would be indistinguishable from a version bump.
+    let mut total = 0usize;
+    let mut reachable = 0usize;
     for line in meta.lines() {
         if let Some(v) = line.strip_prefix("version=") {
             version_ok = v.trim() == CACHE_FORMAT_VERSION.to_string();
@@ -425,9 +470,17 @@ fn parse_meta(meta: &str) -> Option<bool> {
                 "1" => Some(true),
                 _ => None,
             };
+        } else if let Some(v) = line.strip_prefix("unresolved=") {
+            total = v.trim().parse().unwrap_or(0);
+        } else if let Some(v) = line.strip_prefix("unresolved_reachable=") {
+            reachable = v.trim().parse().unwrap_or(0);
         }
     }
-    if version_ok { needs_metal } else { None }
+    if version_ok {
+        needs_metal.map(|nm| (nm, (total, reachable)))
+    } else {
+        None
+    }
 }
 
 /// Best-effort mtime bump for LRU ordering.
