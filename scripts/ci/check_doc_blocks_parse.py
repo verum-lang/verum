@@ -108,7 +108,15 @@ def run(argv: list[str]) -> int:
 
     counts = {"ok": 0, "elision": 0, "table": 0, "fragment": 0, "DEFECT": 0}
     defects: list[str] = []
-    todo = [(md, i, b) for md in sorted(DOCS.rglob("*.md"))
+    # An optional subtree, so a section can be measured in ten minutes
+    # instead of the whole estate in an hour. The BASELINE only means
+    # anything for a full run, and --check refuses a partial one.
+    sub = [a for a in argv if not a.startswith("--")]
+    root = DOCS / sub[0] if sub else DOCS
+    if not root.exists():
+        print(f"check-doc-blocks-parse: {root} does not exist", file=sys.stderr)
+        return 1
+    todo = [(md, i, b) for md in sorted(root.rglob("*.md"))
             for i, b in enumerate(BLOCK.findall(md.read_text()))]
     # A run that prints nothing for forty minutes cannot be told from a
     # run that has hung, and I killed one to find out which it was.
@@ -133,6 +141,10 @@ def run(argv: list[str]) -> int:
     if len(defects) > 20:
         print(f"  … and {len(defects) - 20} more")
     if "--check" in argv:
+        if sub:
+            print("--check needs the whole estate; a subtree cannot be "
+                  "compared against a whole-estate baseline.", file=sys.stderr)
+            return 1
         if BASELINE is None:
             print("--check needs a BASELINE somebody has counted; run without it "
                   "to get the figure, then set it.", file=sys.stderr)
