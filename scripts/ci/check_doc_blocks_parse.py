@@ -60,6 +60,20 @@ def verum_binary() -> str:
     return os.environ.get("VERUM_BIN") or str(REPO / "target" / "debug" / "verum")
 
 
+# A block that announces its own failure is a counter-example: the page
+# is SHOWING what the compiler refuses. Measured 2026-09-04: 39 such
+# blocks in 25 files. Reporting them as defects inverts their purpose —
+# the day one of them starts compiling, the PAGE is wrong, not the
+# block, and that is a different check.
+COUNTER_EXAMPLE = re.compile(
+    r"//[^\n]*\b(COMPILE ERROR|does not compile|not yet supported|"
+    r"is refused|is rejected|will not compile)\b", re.I)
+
+
+def is_counter_example(body: str) -> bool:
+    return COUNTER_EXAMPLE.search(body) is not None
+
+
 def is_elision(body: str) -> bool:
     return "..." in body or "/* body */" in body or "…" in body
 
@@ -78,6 +92,12 @@ ALIGNED_COMMENT = re.compile(r"^\S.*?\s{2,}//")
 # typos, and no compilation unit accepts it.
 BARE_SIGNATURE = re.compile(
     r"^\s*[a-z_][A-Za-z0-9_]*(<[^>]*>)?\([^)]*\)\s*(->.*)?$")
+# The same house style with a receiver: `c.is_ascii()  c.is_digit()`,
+# several method calls to a line and no statement terminator. Measured
+# on `text.md` block 17 — nine such lines, no `;` anywhere.
+METHOD_RUN = re.compile(
+    r"^\s*[a-z_][A-Za-z0-9_]*\.[a-z_][A-Za-z0-9_]*\([^)]*\)"
+    r"(\s{2,}[a-z_][A-Za-z0-9_]*\.[a-z_][A-Za-z0-9_]*\([^)]*\))+\s*$")
 SIGNATURE_RUN = re.compile(
     r"^\s*[a-z_][A-Za-z0-9_]*(<[^>]*>)?\s*(\([^)]*\))?"
     r"(\s*(/|\s{2,})\s*[a-z_][A-Za-z0-9_]*(<[^>]*>)?\s*(\([^)]*\))?.*)+$")
@@ -92,6 +112,7 @@ def is_table(body: str) -> bool:
                  or ALIGNED_COMMENT.match(l)
                  or BARE_SIGNATURE.match(l)
                  or SIGNATURE_RUN.match(l)
+                 or METHOD_RUN.match(l)
                  or l.strip().startswith("//"))
     return marked * 2 >= len(lines)
 
@@ -112,6 +133,14 @@ def classify(binary: str, body: str, tmp: str, tag: str) -> str:
         return "elision"
     if parses(binary, body, tmp, tag):
         return "ok"
+    # A counter-example is a block that ANNOUNCES its own failure and
+    # then fails. Both halves are required: measured 2026-09-04, ten
+    # blocks carry the marker and EIGHT of them parse — the marker is
+    # usually about a diagnostic the example DISCUSSES, not about the
+    # block itself, so the marker alone would have absorbed eight
+    # working examples.
+    if is_counter_example(body):
+        return "counter-example"
     if is_table(body):
         return "table"
     if parses(binary, "fn zz_wrap() {\n" + body + "\n}", tmp, tag + "w"):
@@ -146,7 +175,8 @@ def run(argv: list[str]) -> int:
         print(f"check-doc-blocks-parse: no verum binary at {binary}, skipped")
         return 0
 
-    counts = {"ok": 0, "elision": 0, "table": 0, "fragment": 0, "mixed": 0, "DEFECT": 0}
+    counts = {"ok": 0, "counter-example": 0, "elision": 0, "table": 0,
+              "fragment": 0, "mixed": 0, "DEFECT": 0}
     defects: list[str] = []
     # An optional subtree, so a section can be measured in ten minutes
     # instead of the whole estate in an hour. The BASELINE only means
