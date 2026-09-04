@@ -145,7 +145,6 @@ core/database/mysql/async_binlog.vr
 core/database/mysql/async_binlog_consumer.vr
 core/database/mysql/async_load_data.vr
 core/database/mysql/async_transaction.vr
-core/database/mysql/async_typed_database.vr
 core/database/mysql/binlog_rows.vr
 core/database/mysql/gtid.vr
 core/database/mysql/typed_database.vr
@@ -155,7 +154,6 @@ core/database/postgres/async_pgoutput_buffered.vr
 core/database/postgres/async_pool.vr
 core/database/postgres/async_replication.vr
 core/database/postgres/async_transaction.vr
-core/database/postgres/async_typed_database.vr
 core/database/postgres/migrations/store.vr
 core/database/postgres/mod.vr
 core/database/postgres/notify.vr
@@ -218,7 +216,6 @@ core/database/sqlite/native/pcache_api/cache.vr
 core/database/sqlite/native/returning_clause_api/spec.vr
 core/database/sqlite/native/rtree/tree.vr
 core/database/sqlite/native/txn/engine.vr
-core/database/sqlite/native/unlock_notify/engine.vr
 core/database/sqlite/native/value_dup_api/registry.vr
 core/database/sqlite/native/verify/btree_invariants.vr
 core/database/sqlite/native/version_api/compile_option.vr

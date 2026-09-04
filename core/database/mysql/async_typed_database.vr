@@ -43,7 +43,7 @@ implement<C: CanRead> Database<AsyncMysqlPool, C> {
     public async fn query_simple(&self, sql: &Text)
         -> Result<MySimpleQueryResult, DbError>
     {
-        let guard = self.pool.acquire().await?;
+        let guard: AsyncMysqlPoolGuard = self.pool.acquire().await?;
         guard.conn_ref().simple_query(sql).await
     }
 }
@@ -53,7 +53,7 @@ implement<C: CanWrite> Database<AsyncMysqlPool, C> {
     public async fn execute_simple(&self, sql: &Text)
         -> Result<Int, DbError>
     {
-        let guard = self.pool.acquire().await?;
+        let guard: AsyncMysqlPoolGuard = self.pool.acquire().await?;
         guard.conn_ref().execute(sql).await
     }
 }
@@ -68,7 +68,7 @@ implement<C: CanTx> Database<AsyncMysqlPool, C> {
     public async fn begin_with_opts(&self, opts: &MyTxOpts)
         -> Result<AsyncMysqlTxScope, DbError>
     {
-        let guard = self.pool.acquire().await?;
+        let guard: AsyncMysqlPoolGuard = self.pool.acquire().await?;
         let conn = guard.conn();
         let tx = begin_tx_with_async(&conn, opts.clone()).await?;
         Result.Ok(AsyncMysqlTxScope {
