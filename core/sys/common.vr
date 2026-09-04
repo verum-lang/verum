@@ -1252,17 +1252,28 @@ public fn random_bytes(buf: &mut [Byte]) -> Result<(), OSError> {
 
     @cfg(target_os = "windows")
     {
-        // BCRYPT_USE_SYSTEM_PREFERRED_RNG = 0x00000002
+        // Absolute path, not `super.windows.…`: a relative path SURVIVES
+        // a file move and then resolves to nothing SILENTLY — the call is
+        // never entered, the buffer is never written, and the success path
+        // runs anyway. In a CSPRNG that is the worst possible failure
+        // shape. Gate:
+        // scripts/ci/check_a_super_path_call_names_a_file_that_exists.sh
         let status = unsafe {
-            super.windows.bcrypt.BCryptGenRandom(
+            core.sys.windows.bcrypt.BCryptGenRandom(
                 0 as &unsafe Byte,
                 buf.as_mut_ptr() as &unsafe mut Byte,
                 buf.len() as UInt32,
-                0x00000002 as UInt32,
+                core.sys.windows.bcrypt.BCRYPT_USE_SYSTEM_PREFERRED_RNG,
             )
         };
-        if status != 0 {
-            return Result.Err(OSError { code: status as Int, message: "BCryptGenRandom failed" });
+        // NTSTATUS severity lives in the top bit, so `!= 0` is not the
+        // success test: informational codes are successes too. The house
+        // idiom in core/sys/windows is `.is_success()`.
+        if !status.is_success() {
+            return Result.Err(OSError {
+                code: status.0 as Int,
+                message: "BCryptGenRandom failed",
+            });
         }
         return Result.Ok(());
     }

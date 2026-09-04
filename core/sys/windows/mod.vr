@@ -63,6 +63,9 @@ public module time;
 /// Winsock2 networking (ws2_32.dll)
 public module winsock2;
 
+/// Cryptography Next Generation — the system CSPRNG (bcrypt.dll)
+public module bcrypt;
+
 // =============================================================================
 // NT Status Re-exports
 // =============================================================================

@@ -1,0 +1,68 @@
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
+module core.sys.windows.bcrypt;
+
+// =============================================================================
+// sys/windows/bcrypt.vr - Cryptography Next Generation (bcrypt.dll) FFI
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/windows/ntstatus
+// Platform: Windows (x86_64)
+// =============================================================================
+//
+
+// The one entry point Verum needs from CNG: a system CSPRNG.
+// `core/sys/common.vr` fills a byte buffer from `/dev/urandom` on Linux,
+// `getentropy` on Darwin, and this on Windows.
+//
+
+// WHY THIS FILE EXISTS AS A FILE. `common.vr` already called
+// `super.windows.bcrypt.BCryptGenRandom(...)` while
+// `core/sys/windows/bcrypt.vr` did not exist. A dotted path that
+// resolves to nothing is SILENT — the module compiles, the call yields
+// nil, and the failure surfaces as a cryptographic generator that
+// returns no entropy rather than as a build error.
+//
+
+// WHY bcrypt.dll IS ALLOWED HERE. The no-libc rule forbids the MSVC CRT
+// and the UCRT; it does not forbid Windows system libraries, and core
+// already imports ws2_32.dll and iphlpapi.dll on the same footing.
+// bcrypt.dll is the documented, non-legacy CNG surface — the CryptoAPI
+// (advapi32 `CryptGenRandom`) path is deprecated and is deliberately
+// not used.
+//
+
+// Reference: docs/architecture/no-libc-architecture.md
+// =============================================================================
+
+mount super.ntstatus.{NtStatus};
+
+// =============================================================================
+// Flags
+// =============================================================================
+
+/// Use the system-preferred RNG, so no algorithm provider has to be
+/// opened first and `hAlgorithm` may be NULL.
+public const BCRYPT_USE_SYSTEM_PREFERRED_RNG: UInt32 = 0x00000002;
+
+// =============================================================================
+// FFI
+// =============================================================================
+
+/// Fill `buffer` with `size` cryptographically random bytes.
+///
+/// `algorithm` is a `BCRYPT_ALG_HANDLE`; pass a null pointer together
+/// with `BCRYPT_USE_SYSTEM_PREFERRED_RNG`.
+///
+/// Returns an `NTSTATUS`. Test it with `.is_success()` — severity lives
+/// in the top bit, so a non-zero status is not necessarily a failure.
+@extern("bcrypt.dll")
+public fn BCryptGenRandom(
+    algorithm: &unsafe Byte,
+    buffer: &unsafe mut Byte,
+    size: UInt32,
+    flags: UInt32,
+) -> NtStatus;
