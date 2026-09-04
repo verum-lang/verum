@@ -4,9 +4,12 @@
 // @tags: security, x509, der, pkcs8, encoding
 // @timeout: 20000
 // @expected-stdout-begin
-// p256 Ec
-// ed25519 Ed25519
-// rsa Rsa
+// p256_pkcs8 Ec
+// ed25519_pkcs8 Ed25519
+// rsa_pkcs8 Rsa
+// ec_sec1 Ec
+// rsa_pkcs1 Rsa
+// garbage unrecognized
 // @expected-stdout-end
 // @description: A PKCS#8 key's algorithm is read from its DER, not its PEM banner.
 //
@@ -37,43 +40,54 @@ mount core.encoding.der.{DerReader};
 mount core.security.x509.algorithm.{parse_public_key_alg, PublicKeyAlg};
 mount core.encoding.base64 as b64;
 
-fn pkcs8_alg_name(der: &[Byte]) -> Text {
+// The WHOLE rewritten from_pem, run as user code: the branch dispatch
+// as well as the DER lookup.
+fn key_type_of(pem: &Text) -> Text {
+    let is_pkcs1_rsa = pem.contains("RSA PRIVATE KEY");
+    let is_sec1_ec   = pem.contains("EC PRIVATE KEY");
+    if !is_pkcs1_rsa && !is_sec1_ec && !pem.contains("PRIVATE KEY") {
+        return "unrecognized";
+    }
+    let lines: List<Text> = pem.lines().filter(|l| !l.starts_with("-----")).collect();
+    let der = match b64.decode(&lines.join("")) {
+        Result.Ok(b) => b,
+        Result.Err(_) => return "bad-base64",
+    };
+    if is_pkcs1_rsa { return "Rsa"; }
+    if is_sec1_ec   { return "Ec"; }
+    pkcs8_key_type(&der[..])
+}
+
+fn pkcs8_key_type(der: &[Byte]) -> Text {
     let mut reader = DerReader.new(der);
     match reader.read_sequence() {
-        Result.Err(_) => "not-a-sequence",
-        Result.Ok(mut seq) => {
-            match seq.read_int64() {
-                Result.Err(_) => "no-version",
-                Result.Ok(_v) => {
-                    match parse_public_key_alg(&mut seq) {
-                        Result.Err(_) => "bad-algorithm",
-                        Result.Ok(alg) => match alg {
-                            PublicKeyAlg.RsaEncryption  => "Rsa",
-                            PublicKeyAlg.EcPublicKey(_) => "Ec",
-                            PublicKeyAlg.Ed25519Key     => "Ed25519",
-                            _ => "unsupported",
-                        },
-                    }
-                }
-            }
-        }
+        Result.Err(_) => "pkcs8-not-a-sequence",
+        Result.Ok(mut seq) => match seq.read_int64() {
+            Result.Err(_) => "pkcs8-no-version",
+            Result.Ok(_v) => match parse_public_key_alg(&mut seq) {
+                Result.Err(_) => "pkcs8-bad-algorithm",
+                Result.Ok(alg) => match alg {
+                    PublicKeyAlg.RsaEncryption  => "Rsa",
+                    PublicKeyAlg.EcPublicKey(_) => "Ec",
+                    PublicKeyAlg.Ed25519Key     => "Ed25519",
+                    _ => "unsupported",
+                },
+            },
+        },
     }
 }
 
-fn der_of(pem: &Text) -> List<Byte> {
-    let lines: List<Text> = pem.lines().filter(|l| !l.starts_with("-----")).collect();
-    match b64.decode(&lines.join("")) {
-        Result.Ok(b) => b,
-        Result.Err(_) => List.new(),
-    }
-}
-
-fn pem_p256() -> Text { "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgQuHk5MNlT2oQPypr\nAscMKnNamXdObaJlWsKCgHmimzKhRANCAATdO70ig27Wb/G9XoGvtWBZXMMeFiaT\nYeg0k2J6C1ML7JoE7xsztO+ADNNfKMCeu16YyxwCtJYnv59oB7F5FosO\n-----END PRIVATE KEY-----" }
-fn pem_ed25519() -> Text { "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIIY/+/qKzqwWJIU2SCZ6vDK+1MAunknecz35EVlqg77t\n-----END PRIVATE KEY-----" }
-fn pem_rsa() -> Text { "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDCE4bXEGhiMitr\nnHkJYtrHdYAUkbHUwJpSETKwspBYmCRiNiiELl8ADfZk2sRECr+xdgw8z84JITxA\nwH6UmxbUh/WuNXpAlYKJjgB+E4k38Z6oRcOXXhtE6h+PHTTq2yyAfgx2/w/VpLl7\nbQ1v/0fqbx5UlsgOlJDa2Pvr0i1JXUy8nF/zX1aD5aDF0s1/x9+kXFyRYsoIWreV\nTISq7jsgA5pIGppjFGpKln5oRU7WSVOD5vuTiXE8y/IjrseRVTbdbsq8JR7IVDDr\n8dGdtRv16oC3WJeT+oWTcL4smtJ/vlU/Hi8oI0gsQ5CpfWa0fcv9Ke0Xe7WG6aEJ\n71A57/lhAgMBAAECggEACe8K71YpKaGMxGjRbzAOp7f1ctgURKIJJBs6P34cUlST\nRC2mfEGNXkjYrEfgVOVB85jpvnEaiDAZz+yqbfvUOtOsuRqGo+ijMlxA3TMtyl3F\nM7LCdKx989SSAfbKPx0x1W/ePncGvfY9AjrOPcXQzgibAlRncAudsH37wxHSfJdB\nm+nEL6pBvB9htbD8ty3QECC/KRCTTGhDnVWlLZmsaX6cqSscTojWYQbxODYdcYIO\n2qbyl1NtHLJEL17GlLFbB4qTFCbGyrFOhZIRut09vSEgFfy1VzJjO8wXMGleEGGD\nfDVZpI5BreVw9UUxIk9NZf1c3elEhFMbYiqvcCqUOQKBgQDr4D/xVHI/KrIohGhD\n9KDdbjxgRFb6PBnSJyMZbmTab+vPbYneZG5aj5S194g5WmqwMYMceOu13E2o/kry\n8YMwTJCoBbSkHOqN+T2Aiu2w0crpZ9ALjOQ9/2gjMheCpkLYFcC0m36YJPunvkMM\nAO/Ty7t/0kwI4iklHo4Sj4dbbQKBgQDSolUssIVso93lE2IJBAinoSv7tG99dHKm\n9Wk3tHB/d+KDLBZw2eRNofN0e1InfCL9KswtE9KfjPTQBemxBou44nqmOZkyoVTc\nxC7k+kiwXnoVri4gWpjIxCAwGUODnE9GPFeTW+xxvlBuHHpj5bLaJASgYXNo6Bc9\nIQ/+wUOJRQKBgQDMaZOgdbloinzI5i5hre921iCWoMLrqwgJeodNc8ENGG84XMpd\nI5YK/2E17SVt5rCMruvb0eMbwKbArFeRgMFbKw81vXQVwUV38iZdboiccsMxURkX\n2Wq3W88IqVF8lM9a6kcNfa/Q9EPu09DQ50LvviBonnvsOurDU152MVJxZQKBgQCE\np0uxG3LMGt+Sd4SUXP/+YljK6rYUcpQKZiBfvrni7WOwbMGtTOyln8stnsT8rQd0\nHdH8ybEqXqGHqVGl9ZNlWu0XZsr+wfAqITvPZXkF6lpE8S+HnMcAGdSTtjV426Zp\ne3NEEO52K/+HeVPzOiRLkceAIh+HADQygXILZTfdaQKBgHF635UxudHHhG9sj7aC\nI2h1qJCQ/CU22ROJOuM3f9sPVi3RpgI4EBvoY1vsvNBLHOVF90WiJQna3mok5EOS\ntUo79YrkWRPqZb4BVWQqaa+r16NcbSO/+xCWsDIJ7lnehnRWXLsWbRcv99x+RaZu\nPIKIg4uojNxuIH2UlzxxZYJx\n-----END PRIVATE KEY-----" }
+fn pem_p256_pkcs8() -> Text { "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgQuHk5MNlT2oQPypr\nAscMKnNamXdObaJlWsKCgHmimzKhRANCAATdO70ig27Wb/G9XoGvtWBZXMMeFiaT\nYeg0k2J6C1ML7JoE7xsztO+ADNNfKMCeu16YyxwCtJYnv59oB7F5FosO\n-----END PRIVATE KEY-----" }
+fn pem_ed25519_pkcs8() -> Text { "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIIY/+/qKzqwWJIU2SCZ6vDK+1MAunknecz35EVlqg77t\n-----END PRIVATE KEY-----" }
+fn pem_rsa_pkcs8() -> Text { "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDCE4bXEGhiMitr\nnHkJYtrHdYAUkbHUwJpSETKwspBYmCRiNiiELl8ADfZk2sRECr+xdgw8z84JITxA\nwH6UmxbUh/WuNXpAlYKJjgB+E4k38Z6oRcOXXhtE6h+PHTTq2yyAfgx2/w/VpLl7\nbQ1v/0fqbx5UlsgOlJDa2Pvr0i1JXUy8nF/zX1aD5aDF0s1/x9+kXFyRYsoIWreV\nTISq7jsgA5pIGppjFGpKln5oRU7WSVOD5vuTiXE8y/IjrseRVTbdbsq8JR7IVDDr\n8dGdtRv16oC3WJeT+oWTcL4smtJ/vlU/Hi8oI0gsQ5CpfWa0fcv9Ke0Xe7WG6aEJ\n71A57/lhAgMBAAECggEACe8K71YpKaGMxGjRbzAOp7f1ctgURKIJJBs6P34cUlST\nRC2mfEGNXkjYrEfgVOVB85jpvnEaiDAZz+yqbfvUOtOsuRqGo+ijMlxA3TMtyl3F\nM7LCdKx989SSAfbKPx0x1W/ePncGvfY9AjrOPcXQzgibAlRncAudsH37wxHSfJdB\nm+nEL6pBvB9htbD8ty3QECC/KRCTTGhDnVWlLZmsaX6cqSscTojWYQbxODYdcYIO\n2qbyl1NtHLJEL17GlLFbB4qTFCbGyrFOhZIRut09vSEgFfy1VzJjO8wXMGleEGGD\nfDVZpI5BreVw9UUxIk9NZf1c3elEhFMbYiqvcCqUOQKBgQDr4D/xVHI/KrIohGhD\n9KDdbjxgRFb6PBnSJyMZbmTab+vPbYneZG5aj5S194g5WmqwMYMceOu13E2o/kry\n8YMwTJCoBbSkHOqN+T2Aiu2w0crpZ9ALjOQ9/2gjMheCpkLYFcC0m36YJPunvkMM\nAO/Ty7t/0kwI4iklHo4Sj4dbbQKBgQDSolUssIVso93lE2IJBAinoSv7tG99dHKm\n9Wk3tHB/d+KDLBZw2eRNofN0e1InfCL9KswtE9KfjPTQBemxBou44nqmOZkyoVTc\nxC7k+kiwXnoVri4gWpjIxCAwGUODnE9GPFeTW+xxvlBuHHpj5bLaJASgYXNo6Bc9\nIQ/+wUOJRQKBgQDMaZOgdbloinzI5i5hre921iCWoMLrqwgJeodNc8ENGG84XMpd\nI5YK/2E17SVt5rCMruvb0eMbwKbArFeRgMFbKw81vXQVwUV38iZdboiccsMxURkX\n2Wq3W88IqVF8lM9a6kcNfa/Q9EPu09DQ50LvviBonnvsOurDU152MVJxZQKBgQCE\np0uxG3LMGt+Sd4SUXP/+YljK6rYUcpQKZiBfvrni7WOwbMGtTOyln8stnsT8rQd0\nHdH8ybEqXqGHqVGl9ZNlWu0XZsr+wfAqITvPZXkF6lpE8S+HnMcAGdSTtjV426Zp\ne3NEEO52K/+HeVPzOiRLkceAIh+HADQygXILZTfdaQKBgHF635UxudHHhG9sj7aC\nI2h1qJCQ/CU22ROJOuM3f9sPVi3RpgI4EBvoY1vsvNBLHOVF90WiJQna3mok5EOS\ntUo79YrkWRPqZb4BVWQqaa+r16NcbSO/+xCWsDIJ7lnehnRWXLsWbRcv99x+RaZu\nPIKIg4uojNxuIH2UlzxxZYJx\n-----END PRIVATE KEY-----" }
+fn pem_ec_sec1() -> Text { "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIBh1p8gOv39XczDm8ilSFNT+nD4sb3qh8NSFrTXcxSMJoAoGCCqGSM49\nAwEHoUQDQgAEnnhp30jelmW8cufHlEDd0JoH6BMjE8cg6Y9hFycGYJNfjm5q+Gfp\nuWzkqv4l41kGNkTJyKksAZH/8iJuJuezgA==\n-----END EC PRIVATE KEY-----" }
+fn pem_rsa_pkcs1() -> Text { "-----BEGIN RSA PRIVATE KEY-----\nMIIEpQIBAAKCAQEA6IkTpJ/ZZLHC4+pPQedscrCp9Y42dCIYD6jdTHzpv7m7vGVh\nxUz/ifGq4LzbIexo1OyF23lSADfTc7sGwFzhCBugEkxOWeyUKNXxgKMbTNhHceQL\nQd0YtnORngq1vzC+UG8huCFayTGUWoCJc0dIB4mr5/DBFgCRcLIxYXyA3vfl6P19\nVoyS8UReLfajoiMiTlmXobGs/ZmgwDXgUrtAg+55AM+A6HiVQp43zjiYtULh/Zsf\n/RAhXPdcnT7ykJpmD0NLW+fHpBvlQ8hz5r5IdabS5wCkJ3JkZXbjFTr2pC/uZZxP\nptC/46cZxfY4v3SQJ4qyjyH3Gr3gVD7uPSMzoQIDAQABAoIBABG70nmtjyC0xc4n\n4l9+TLD6dBu7+r8kkn0vPaFFrXXnrj+R48DuPFbCzWtSO8v8gYord5HjULOfjkq3\nKq6k5qx9ntmGZDtLZYkvt7k9tylHHTu8Tnd5axcO/T32RyILj5gGwaWPNaM+WrgE\nMXdPKlkY0LlhjPgmlvDnRgjPO+zFCdORg82IBiS+aErV9yj1bO7R4IBGQT9io/6U\n82DFczok3DPWm4kO2TlYkYH0jonNyJSumoAi40nyUjAnRtSHQFPnBeSDct51b79z\nUO9ZHZZRK0uB9vdSHe7affOIFo3HPFWcsdobFB/bQbqzi5mF/7PTp8uvG22c4/Xn\nOJaswXkCgYEA+lYsHObUDDfBohr8wMkhlM3A6LN6SG4lkzfsKKD44L80XJgJmLtI\ngtndp5o3j32i9my6GdP1w/BoFKq9UxKdSNhZH7qjhxQDDX5JgURziNidJZwe6tAE\nCp6ANtq8JkyvXT2ZUjE1wJEVorKB7/xdvrIpjKNSngH1ETS//xvCOhsCgYEA7cvP\nDYIRDUry2r4kTAHZmzeDt7uSYoesbVrBeR3/OV+3OZG1PbtbL2PYfaJun2CVqAiS\nZCnZ9YGUf6af/2MK5ll4eLB2LC6Ovekxe5BCgVu+gU+HjTnfYZ2OPoNUMarmYzgl\nByZ5LhcU6wqUOvrwpbmjWCaq0nPWjtoVMJhy5PMCgYEAqOM2A5GfAVckZW77kjyf\nUTq2qMdc+jyFURrrUkW3Yjjc5JMV9lpzgwPkzEv4q+/A36teqkobhkNMlJTUAZWP\nUzPSfNt3s4vGu3W1tWYu4+Xvrw3ytcv8zgU8zsUnJleZ/7etFoxojS/Uft0bWILT\n4/FioqUU+dCsOx1xYnShxn0CgYEAhbnCk48cdcQ7NEYPdWro67/ZY96o4J35mnma\nKblzyNkJ2ecV7ERLcCgPG//Xg+s13gwL/yYF+2lGkE6s1VrmS0nvVLevjQMVpLjZ\n6enjbImiZWfLC+GKvIN09bS3CUNZUlzFffLl3MSAL/mACHcME7aEpFMCZ11bQHRl\nzDE/E38CgYEAg5Zjj24+n+0LPI71NK+bgIpVrN5LecnB4kyvwKgyLuusyIhWdyDJ\npbJ0W9A7eZ5FfSZBxcGvSzYHvcScXvLtFytuvC1WAa3AE1LrGdDeqwAOccx8DeDi\n1n4Gbh7QhPzTYnPrdWHEVzdIxJExV+FOlwGswV30gappqwT2Jaz/BNo=\n-----END RSA PRIVATE KEY-----" }
 
 fn main() {
-    print(f"p256 {pkcs8_alg_name(&der_of(&pem_p256())[..])}");
-    print(f"ed25519 {pkcs8_alg_name(&der_of(&pem_ed25519())[..])}");
-    print(f"rsa {pkcs8_alg_name(&der_of(&pem_rsa())[..])}");
+    print(f"p256_pkcs8 {key_type_of(&pem_p256_pkcs8())}");
+    print(f"ed25519_pkcs8 {key_type_of(&pem_ed25519_pkcs8())}");
+    print(f"rsa_pkcs8 {key_type_of(&pem_rsa_pkcs8())}");
+    print(f"ec_sec1 {key_type_of(&pem_ec_sec1())}");
+    print(f"rsa_pkcs1 {key_type_of(&pem_rsa_pkcs1())}");
+    print(f"garbage {key_type_of(&\"no markers here\")}");
 }
