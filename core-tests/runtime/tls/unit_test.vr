@@ -66,17 +66,17 @@ fn test_tls_slot_lifecycle_set_then_get_round_trips() {
     // broken at the foundation.
     let slot = 200;
     tls_slot_clear(slot);  // ensure clean slate
-    tls_slot_set(slot, 0xCAFE_F00D);
+    tls_slot_set(slot, 0xCAFE_F00D as *const Byte);
     let v = tls_slot_get(slot);
     tls_slot_clear(slot);  // cleanup
-    assert(v == 0xCAFE_F00D, "TLS slot round-trip dropped the value");
+    assert(v as Int == 0xCAFE_F00D, "TLS slot round-trip dropped the value");
 }
 
 @test
 fn test_tls_slot_has_after_set_is_true() {
     let slot = 201;
     tls_slot_clear(slot);
-    tls_slot_set(slot, 42);
+    tls_slot_set(slot, 42 as *const Byte);
     let has = tls_slot_has(slot);
     tls_slot_clear(slot);
     assert(has, "tls_slot_has should be true after set");
@@ -85,7 +85,7 @@ fn test_tls_slot_has_after_set_is_true() {
 @test
 fn test_tls_slot_has_after_clear_is_false() {
     let slot = 202;
-    tls_slot_set(slot, 42);
+    tls_slot_set(slot, 42 as *const Byte);
     tls_slot_clear(slot);
     let has = tls_slot_has(slot);
     assert(!has, "tls_slot_has should be false after clear");
@@ -104,11 +104,11 @@ fn test_tls_slot_clear_is_idempotent() {
 fn test_tls_slot_overwrite_keeps_latest() {
     let slot = 204;
     tls_slot_clear(slot);
-    tls_slot_set(slot, 100);
-    tls_slot_set(slot, 200);
+    tls_slot_set(slot, 100 as *const Byte);
+    tls_slot_set(slot, 200 as *const Byte);
     let v = tls_slot_get(slot);
     tls_slot_clear(slot);
-    assert(v == 200, "second set should overwrite first");
+    assert(v as Int == 200, "second set should overwrite first");
 }
 
 // =============================================================================
@@ -121,14 +121,14 @@ fn test_tls_slot_isolation_two_slots() {
     let s2 = 211;
     tls_slot_clear(s1);
     tls_slot_clear(s2);
-    tls_slot_set(s1, 0xDEAD);
-    tls_slot_set(s2, 0xBEEF);
+    tls_slot_set(s1, 0xDEAD as *const Byte);
+    tls_slot_set(s2, 0xBEEF as *const Byte);
     let v1 = tls_slot_get(s1);
     let v2 = tls_slot_get(s2);
     tls_slot_clear(s1);
     tls_slot_clear(s2);
-    assert(v1 == 0xDEAD, "slot 1 leaked into slot 2");
-    assert(v2 == 0xBEEF, "slot 2 leaked into slot 1");
+    assert(v1 as Int == 0xDEAD, "slot 1 leaked into slot 2");
+    assert(v2 as Int == 0xBEEF, "slot 2 leaked into slot 1");
 }
 
 @test
@@ -137,8 +137,8 @@ fn test_tls_slot_clear_does_not_affect_other_slots() {
     let s2 = 221;
     tls_slot_clear(s1);
     tls_slot_clear(s2);
-    tls_slot_set(s1, 0xAA);
-    tls_slot_set(s2, 0xBB);
+    tls_slot_set(s1, 0xAA as *const Byte);
+    tls_slot_set(s2, 0xBB as *const Byte);
     tls_slot_clear(s1);
     let has1 = tls_slot_has(s1);
     let has2 = tls_slot_has(s2);
