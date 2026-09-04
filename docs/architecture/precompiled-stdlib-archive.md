@@ -849,6 +849,44 @@ known-broken `core/` change sits in the tree. It downgrades the failure to a
 warning that states plainly that the embedded stdlib does not correspond to
 `core/`.
 
+### `VERUM_NO_AUTO_PRECOMPILE=1` — do not bake from this build
+
+`crates/verum_compiler/build.rs:350` honours it (alongside `DOCS_RS`), and
+it was undocumented until T1140 — which cost three hour-long bakes in one
+session to somebody who did not know it was there.
+
+Set it when the caller **cannot use a fresh archive anyway**: a release CI
+lane that ships a pinned one, a downstream `cargo install` where spawning a
+nested cargo deadlocks on the package-cache lock, or an IDE analyzer whose
+background `cargo check` re-runs this script for typechecking it will throw
+away. Do NOT put it in `.cargo/config.toml`'s `[env]`: that reaches every
+cargo invocation in the workspace including real builds, and the archive
+then never refreshes. Scope it to the one caller — for rust-analyzer, its
+own `cargo.extraEnv`.
+
+The bake itself is **not** careless and does not need gating for its own
+sake. `build.rs:391` compares a blake3 over the curated `core/` list against
+a stored checksum and skips entirely when the content matches; it runs only
+when `core/` genuinely changed. Two properties make it expensive anyway, and
+both are worth knowing before blaming the trigger:
+
+* **The archive is per-target-root.** `precompile_dir` is derived from the
+  active target root (`build.rs:339-341`), and this repo *mandates*
+  session-private `CARGO_TARGET_DIR`s. So N sessions editing `core/` pay N
+  full bakes for one change, and nothing shares the result. That is the
+  real cost centre, not the trigger.
+* **A killed build loses its in-flight bake.** The checksum is written at
+  the end; a build killed under memory pressure part-way through leaves the
+  work unbanked and the next build repeats it. Measured 2026-09-04: a
+  completed ~60-minute bake was discarded with its cargo and immediately
+  re-run.
+
+The `cargo:rerun-if-changed` lines must stay OUTSIDE the flag's branch —
+see the comment at `build.rs:354`, which records a build that completed
+under this flag, recorded a truncated dependency set as its fingerprint,
+and made the next unflagged build replay cached output in 5.58s while
+believing it had verified something.
+
 ## Cross-compile — no separate cache, no per-target files
 
 The multi-variant archive **eliminates** the need for a per-target
