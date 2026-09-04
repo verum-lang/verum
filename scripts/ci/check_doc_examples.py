@@ -108,10 +108,12 @@ MOUNT = re.compile(r"^\s*(?:public\s+)?mount\s+(core(?:\.[A-Za-z_][A-Za-z0-9_]*)
 # page had already been "corrected" on the strength of the file map
 # before the compiler was asked.
 CORE = REPO / "core"
-# The four that remain are each documented AS absent on their own page
-# (a `:::caution`, a `:::danger`, or an "illustrative name" comment), so
-# the pole is true: a sixth means a page started lying again.
-MOUNT_BASELINE = 4
+# The five that remain are each documented AS absent on their own page
+# (a `:::caution`, a `:::danger`, an "illustrative name" comment) — and
+# one, `core.zzz.nothing` on reference/diagnostics.md, is a deliberate
+# counter-example showing what `error<E402>` looks like. So the pole is
+# true: a sixth means a page started lying again.
+MOUNT_BASELINE = 5
 MOUNT_CONTROLS = [("core.sys.common.pread", True), ("core.collections.List", True),
                   ("core.io.mmap", False), ("core.zzz.nothing", False)]
 
