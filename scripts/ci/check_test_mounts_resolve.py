@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """Ratchet on `mount` statements in core-tests that name something core/ never declares.
 
+WHAT THIS CANNOT SEE.  It checks names that ARE mounted.  A file that
+never mounts a module at all has no statement to check, and every use of
+those names is an `unbound variable` the compiler catches and this gate
+does not.  Measured 2026-09-04: core-tests/base/env/integration_test.vr
+mounted `core.prelude.*` and `core.collections.list.List` and used seven
+names from `core.base.env` — 15 errors, invisible here.  Closing that
+would mean resolving every free identifier, which is name resolution,
+not a grep.
+
 WHY.  Five conformance tests were found broken this way in one afternoon
 (2026-09-04): the stdlib was reshaped and the test kept the old spelling.
 

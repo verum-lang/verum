@@ -9,6 +9,7 @@
 
 mount core.prelude.*;
 mount core.collections.list.List;
+mount core.base.env.{args_count, home_dir, remove_var, set_var, temp_dir, var, var_opt};
 
 // -----------------------------------------------------------------------------
 // §1  Standard env vars exist on POSIX-like systems.
