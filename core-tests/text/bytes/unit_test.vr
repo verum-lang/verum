@@ -143,8 +143,8 @@ fn bytesview_reslice_feed_pattern() {
 fn bytesview_reslice_of_reslice() {
     let s: Text = "hello world, this is a heap string";
     let b = s.as_bytes();
-    let mid = &b[6..17];  // "world, this"
-    let inner = &mid[0..5]; // "world"
+    let mid = b[6..17];  // "world, this"
+    let inner = mid[0..5]; // "world"
     assert_eq(inner.len(), 5);
     assert_eq(inner[0] as Int, 119); // 'w'
     assert_eq(inner[4] as Int, 100); // 'd'
