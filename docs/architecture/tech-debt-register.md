@@ -1090,7 +1090,16 @@ ONCE and the cost is that nobody ever pays for the root.
 
 WHY THIS IS NOT MERELY A COMPILE ERROR: the E100 is how the defect became visible, not what it is. A runtime that fails to initialise on macOS falls through its abort into a state the code declares impossible. T1085's cost was previously framed as "five sites pay a local tax", which reads as workarounds being cheap; this site is not a tax, it is a missing abort.
 
-NO PORTABLE ROUTE AROUND IT: `core/sys/mod.vr:273` does re-export `exit`, but from `.linux.syscall`, and this is the macOS branch. The repair is a `safe_exit` wrapper outside the extern block plus the call site — the same shape as the opendir/readdir/closedir wrappers — and is held by the session working T1085. The file stays in `core_compile_known_failures.txt` until that lands, deliberately: a gate going red on a file everyone expects repaired within the hour teaches people to ignore the gate. | P1 | `core/sys/init.vr:623`, `core/sys/darwin/libsystem.vr:197` vs `:279`; T1085 | open |
+NO PORTABLE ROUTE AROUND IT: `core/sys/mod.vr:273` does re-export `exit`, but from `.linux.syscall`, and this is the macOS branch. The repair is a `safe_exit` wrapper outside the extern block plus the call site — the same shape as the opendir/readdir/closedir wrappers — and is held by the session working T1085. The file stays in `core_compile_known_failures.txt` until that lands, deliberately: a gate going red on a file everyone expects repaired within the hour teaches people to ignore the gate.
+
+**THE WHOLE POPULATION, COUNTED: 28 WRAPPED, 10 RAW.** Cross-module calls into `libsystem` from outside `core/sys/darwin/` split cleanly: **28 go through a `safe_` wrapper and 10 name the extern symbol directly.** The wrapped ones work — `core/io/process.vr` calls `safe_waitpid` and `safe_close` and compiles with **0 errors**, which is the positive control the class needed. The raw ones do not, where the symbol is declared inside the block:
+
+    core/shell/resources.vr   close, flock      8 errors, `unbound variable: …libsystem.close`
+    core/sys/init.vr          exit x3           the abort path above
+    core/mem/segment.vr       (mmap family)     6 errors, `unbound variable: mmap`
+    core/mem/allocator.vr     errno x2          `errno` is declared OUTSIDE the block and resolves
+
+So the rule is not "a raw extern name cannot be called" — it is "a name declared INSIDE `extern { }` cannot", and `errno` being raw and fine is what separates the two. `mem/segment.vr` and `mem/allocator.vr` are the allocator's page path, which makes this class more than a CLI concern. | P1 | `core/sys/init.vr:623`, `core/sys/darwin/libsystem.vr:197` vs `:279`; T1085 | open |
 
     healthy `let r = &x`      E312=1 -> 0
     healthy `takes(&mk())`    E312=1 -> 0
