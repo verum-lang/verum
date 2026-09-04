@@ -1,0 +1,66 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: types, newtype, field-access, tuple-index, name-collision
+// @timeout: 20000
+// @expected-stdout-begin
+// rec-0 8
+// rec-1 4
+// tuple-0 8
+// tuple-1 4
+// unique-rec 8
+// unique-tuple 8
+// @expected-stdout-end
+// @description: A user type keeps its own shape when its name collides
+//   with a stdlib newtype.
+//
+//   T1108. `newtype_names` is codegen's "this name is a transparent
+//   wrapper" fast cache, keyed on the SIMPLE name and populated from
+//   the archive as well as from source. A user type whose name matched
+//   a stdlib newtype inherited the flag, and the consumers then treated
+//   the user's value as transparent: the access lowered to an identity
+//   `Mov` and returned the RECEIVER'S ADDRESS. The number differed on
+//   every run, and `verum check` reported nothing at all.
+//
+//   EVERY NAME HERE IS A MEASURED CARRIER, and choosing them by
+//   measurement rather than from the task's list is the point.
+//   `LocalDhePool`, `SqliteAdapter` and `WriteCap` are all stdlib
+//   newtypes, all three were named in the task as failing, and all
+//   three behave CORRECTLY in every shape tried on the pre-fix binary.
+//   A spec built on them would have passed before the fix and proved
+//   nothing. The two that actually break:
+//
+//       NtStatus  2-field record        36238431057   (want 8)
+//       Handle    2-element tuple `.0`  30098299601   (want 8)
+//
+//   TWO CONSUMERS, ONE SET. `compile_field_access` and
+//   `compile_tuple_index` read `newtype_names` independently, so the
+//   record lines and the tuple lines fail through different code for
+//   the same reason. Repairing either alone leaves the other red,
+//   which is why both are here rather than one standing in for both.
+//
+//   THE NON-ZERO INDICES ARE THE DISCRIMINATOR. `rec-1` and `tuple-1`
+//   were already CORRECT before the fix, because both arms guard on the
+//   index being 0. They are here so that a repair which fixes index 0
+//   by breaking every other index cannot pass.
+
+type NtStatus is { magic: Int, other: Int };
+type Handle is (Int, Int);
+type ZzqUniqueName is { magic: Int, other: Int };
+type ZzqUniqueTuple is (Int, Int);
+
+fn main() {
+    let a = NtStatus { magic: 7, other: 3 };
+    print(f"rec-0 {a.magic + 1}");
+    print(f"rec-1 {a.other + 1}");
+
+    let b = Handle(7, 3);
+    print(f"tuple-0 {b.0 + 1}");
+    print(f"tuple-1 {b.1 + 1}");
+
+    let c = ZzqUniqueName { magic: 7, other: 3 };
+    print(f"unique-rec {c.magic + 1}");
+
+    let d = ZzqUniqueTuple(7, 3);
+    print(f"unique-tuple {d.0 + 1}");
+}

@@ -6199,8 +6199,37 @@ impl VbcCodegen {
             }
         }
 
-        // Handle built-in functions
-        if let Some(result) = self.try_compile_builtin(&func_name, args, type_args)? {
+        // Handle built-in functions.
+        //
+        // T1120: a MODULE-LOCAL DECLARATION OUTRANKS AN AMBIENT BUILTIN.
+        // `docs/architecture/name-resolution.md` §3.2 puts a local
+        // declaration at rank 4 and an ambient name at rank 6, and this
+        // call site inverted that for every builtin the table carries:
+        // `try_compile_builtin` answered `Some` for `min`/`max`/`abs`
+        // and returned, so a unit's own `fn min` never ran — silently,
+        // with the wrong value and no diagnostic.
+        //
+        // The test below is not new machinery. `unit_declared_fns` is
+        // already consulted ~500 lines further down in this same
+        // function, where it can no longer be reached for these names.
+        // Moving the question ahead of the builtin is the whole fix.
+        //
+        // IT CANNOT AFFECT THE STDLIB. The set is populated only in the
+        // user phase — `codegen/mod.rs` inserts under
+        // `!prefer_existing_functions`, and the stdlib bake runs with
+        // that flag TRUE (mod.rs:8350 names the two phases). So while
+        // compiling `core/`, `unit_declared_fns` is empty and every
+        // bare `min` still reaches the builtin, which is what
+        // `core/math/elementary.vr:640`'s `max(lo, min(x, hi))` needs.
+        //
+        // Qualified names are excluded: `a.b()` and `a::b()` are not
+        // bare-name resolution and must not consult a bare-name set.
+        let unit_declares_this_name = !func_name.contains('.')
+            && !func_name.contains("::")
+            && self.ctx.unit_declared_fns.contains(&func_name);
+        if !unit_declares_this_name
+            && let Some(result) = self.try_compile_builtin(&func_name, args, type_args)?
+        {
             return Ok(result);
         }
 
@@ -6209,7 +6238,14 @@ impl VbcCodegen {
         // as literal `f"..."`. Only matches the single-segment `format` name
         // with a `Text` literal as first argument; anything else falls
         // through to the normal function-lookup path.
-        if func_name == "format"
+        //
+        // Guarded by the same rank test as the builtin table above: this
+        // intercepts a NAME, so a unit that declares `fn format` itself
+        // outranks it (T1120, name-resolution.md §3.2). Fixing the
+        // builtin arm and leaving its exact copy four lines below would
+        // repair one of two instances of one defect.
+        if !unit_declares_this_name
+            && func_name == "format"
             && let Some(result) = self.try_compile_format_call(args)?
         {
             return Ok(result);
@@ -22612,19 +22648,34 @@ impl VbcCodegen {
             );
         }
 
-        // Newtype field .0 access: the value IS the single field, emit Mov.
-        // e.g. FileDesc(Int).0 → just copy the register (no heap indirection).
-        if field_idx == 0
-            && let Some(ref type_name) = base_type
-            && self.ctx.newtype_names.contains(type_name)
-        {
-            self.ctx.emit(Instruction::Mov {
-                dst: result,
-                src: base_reg,
-            });
-            self.ctx.free_temp(base_reg);
-            return Ok(Some(result));
-        }
+        // T1108 — THE NEWTYPE `.0` ARM THAT USED TO SIT HERE IS GONE,
+        // and it could never do what its comment claimed.
+        //
+        //     // Newtype field .0 access: the value IS the single field.
+        //     if field_idx == 0
+        //         && let Some(ref type_name) = base_type
+        //         && self.ctx.newtype_names.contains(type_name)
+        //     { emit Mov; return }
+        //
+        // `.0` parses as `ExprKind::TupleIndex` (fast_parser/expr.rs:2679),
+        // which `compile_expr` routes to `compile_tuple_index` — where the
+        // same identity logic already lives (:22731). So this function
+        // never sees a `.0`, and the arm could only ever fire on a NAMED
+        // field whose resolved index happened to be 0.
+        //
+        // Both of its guards were wrong for that case:
+        //   * `field_idx == 0` is the index of ANY first field, not the
+        //     positional `.0`;
+        //   * `newtype_names` is keyed on the BARE NAME, so a user record
+        //     called `NtStatus` matched because CORE declares a newtype
+        //     of that name — the user's own declaration, in the same
+        //     file, was never consulted.
+        //
+        // Measured: `type NtStatus is { magic: Int }; v.magic + 1` printed
+        // the RECORD'S ADDRESS plus one, differing on every run, and
+        // `verum check` reported nothing. Adding a second field did not
+        // help, because `magic` is still index 0 — which is what refuted
+        // the transparent-wrapper theory this defect was filed under.
 
         {
             let fname = field.to_string();

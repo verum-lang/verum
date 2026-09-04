@@ -13970,6 +13970,48 @@ impl VbcCodegen {
         type_decl: &verum_ast::decl::TypeDecl,
     ) -> CodegenResult<()> {
         let type_name = type_decl.name.name.to_string();
+
+        // T1108 — A UNIT'S OWN DECLARATION OWNS ITS BARE NAME.
+        //
+        // `newtype_names` is the codegen-local "this name is a
+        // transparent wrapper" fast cache, keyed on the SIMPLE name. It
+        // is populated from the archive (:24562) as well as from source,
+        // so a user type whose name collides with a stdlib newtype
+        // inherited the flag and every consumer of the set then treated
+        // the user's value as transparent. Five consumers read it, and
+        // two were measured wrong before this: `v.magic` on a record
+        // named `NtStatus`, and `t.0` on a two-element tuple named
+        // `Handle`, both returned the RECEIVER'S ADDRESS.
+        //
+        // Fixing each consumer would have fixed two of five. The name is
+        // the authority, so the repair belongs here: a declaration that
+        // is NOT a transparent wrapper takes its own name back.
+        //
+        // USER PHASE ONLY, mirroring `unit_declared_fns`: during the
+        // stdlib bake `prefer_existing_functions` is true and the
+        // first-wins/ownership discipline at :24562 stays in charge —
+        // otherwise a core record could evict a core newtype's entry
+        // depending on compile order.
+        if !self.ctx.prefer_existing_functions {
+            // The three transparent forms, each mirroring the arm below
+            // that inserts into the set — Newtype (:15098), a
+            // single-element Tuple (:15210), and Quotient (:15492,
+            // "Q is the carrier at runtime"). Listing Quotient here is
+            // not redundant even though its insert runs after this
+            // removal and would win on ordering: relying on the order
+            // of two statements 15 000 lines apart is how the next
+            // reader breaks it.
+            let declares_transparent = match &type_decl.body {
+                verum_ast::decl::TypeDeclBody::Newtype(_) => true,
+                verum_ast::decl::TypeDeclBody::Tuple(elems) => elems.len() == 1,
+                verum_ast::decl::TypeDeclBody::Quotient { .. } => true,
+                _ => false,
+            };
+            if !declares_transparent {
+                self.ctx.newtype_names.remove(&type_name);
+            }
+        }
+
         // Record the ORDERED generic-parameter names — pattern-bind
         // payload typing maps variant payload templates to param
         // POSITIONS (see ctx.type_generic_params doc).

@@ -1,0 +1,49 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: name-resolution, builtins, shadowing
+// @timeout: 20000
+// @expected-stdout-begin
+// mine 99
+// builtin 2
+// mine-again 99
+// @expected-stdout-end
+// @description: A unit's own `fn min` outranks the ambient builtin.
+//
+//   T1120. `docs/architecture/name-resolution.md` §3.2 ranks a
+//   module-local declaration 4 and an ambient name 6, so a local
+//   declaration must win. It did not: `compile_call` asked
+//   `try_compile_builtin` first (expressions.rs:6203) and returned,
+//   while the test that consults `unit_declared_fns` sat 528 lines
+//   below in the same function, unreachable for any name the builtin
+//   table carries. `min(1, 2)` printed 1 — the builtin's answer — and
+//   the user's body never ran. Silently, with no diagnostic.
+//
+//   BOTH POLES LIVE IN THIS ONE FILE, deliberately:
+//
+//     `min` IS declared here      -> must print the USER's 99
+//     `max` is NOT declared here  -> must print the BUILTIN's 2
+//
+//   The second is not decoration. A "fix" that simply stopped
+//   consulting the builtin table would satisfy the first line and
+//   break every program in the language; without the `max` line the
+//   spec could not tell that repair from this one.
+//
+//   The third line calls `min` again after `max` has forced a builtin
+//   lookup in between, because the resolution state is per-call and a
+//   fix that memoised the wrong answer would still pass two lines.
+//
+//   99 is chosen because it is not the answer for ANY argument order:
+//   min(1,2), max(1,2), and either argument alone are all in {1, 2},
+//   so a wrong path cannot coincidentally produce it.
+
+fn min(a: Int, b: Int) -> Int {
+    // Deliberately not a minimum. The point is whose body runs.
+    99
+}
+
+fn main() {
+    print(f"mine {min(1, 2)}");
+    print(f"builtin {max(1, 2)}");
+    print(f"mine-again {min(5, 7)}");
+}
