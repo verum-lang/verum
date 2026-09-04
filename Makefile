@@ -33,6 +33,9 @@ check-markers: ## Gate: landed-markers fence (docs/architecture/landed-markers.t
 check-vr-syntax: ## Gate: no Rust-style `::` in .vr sources (grammar/verum.ebnf uses `.`)
 	python3 vcs/scripts/check_no_double_colon.py --check
 
+check-test-mounts: ## Gate: core-tests mounts name something core/ declares
+	python3 scripts/ci/check_test_mounts_resolve.py
+
 check-str-alias: ## Gate (T0663): no Rust `&str` in core/ .vr code — Verum has only `Text`
 	python3 vcs/scripts/check_no_str_alias.py --gate
 
