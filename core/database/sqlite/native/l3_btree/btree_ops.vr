@@ -215,7 +215,7 @@ public fn btree_insert_at_cursor(
     // Ripple: as long as the outcome carries a RippleHint, ascend
     // and re-plan.  Foundation: walk up the cursor path; the full
     // implementation also re-plans at each parent.
-    let mut ripple = outcome.ripple;
+    let mut ripple: Maybe<RippleHint> = outcome.ripple;
     let mut depth_guard: Int = 0;
     while depth_guard < 64 {
         let hint = match ripple {

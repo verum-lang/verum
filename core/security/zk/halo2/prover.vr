@@ -124,7 +124,7 @@ public fn prove<F: fn(&mut SynthesizeContext) -> Result<(), CircuitError>>(
     public_inputs: &List<List<Byte>>,    // one Fp value per Instance column
     synthesize:   F,
 ) -> Result<Halo2Proof, ProverError> {
-    let result = @intrinsic(
+    let result: ProveResult = @intrinsic(
         "verum.crypto.halo2_prove",
         pk, public_inputs, synthesize
     );
@@ -145,7 +145,7 @@ public fn prove_with_aux<F: fn(&mut SynthesizeContext) -> Result<(), CircuitErro
     aux:          &List<Byte>,        // backend-defined auxiliary blob
     synthesize:   F,
 ) -> Result<Halo2Proof, ProverError> {
-    let result = @intrinsic(
+    let result: ProveResult = @intrinsic(
         "verum.crypto.halo2_prove_with_aux",
         pk, public_inputs, aux, synthesize
     );

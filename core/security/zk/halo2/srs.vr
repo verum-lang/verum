@@ -97,7 +97,7 @@ public type UniversalSrs is {
 /// distributed-trust guarantee. Production runs `setup_with_entropy`
 /// across N participants and chain-anchors each contribution.
 public fn setup(params: SrsParams) -> Result<UniversalSrs, SrsError> {
-    let result = @intrinsic("verum.crypto.halo2_srs_setup", params);
+    let result: SrsSetupResult = @intrinsic("verum.crypto.halo2_srs_setup", params);
     match result {
         SrsSetupResult.Ok(srs) => Ok(srs),
         SrsSetupResult.Err(why) => Err(SrsError.SetupFailed(why)),
@@ -119,7 +119,7 @@ public fn setup_with_entropy(
     if contributions.len() != params.participants.len() {
         return Err(SrsError.SetupFailed(f"|contributions| ≠ |participants|"));
     }
-    let result = @intrinsic(
+    let result: SrsSetupResult = @intrinsic(
         "verum.crypto.halo2_srs_setup_mpc",
         params, contributions
     );
