@@ -17,7 +17,7 @@
 mount core.prelude.*;
 mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
 mount core.intrinsics.runtime.mem_raw.{
-    memcpy, memmove, memset, memzero, memcmp,
+    memcpy_addr, memmove_addr, memset_addr, memzero, memcmp_addr,
     strlen, strcmp,
     load_byte, store_byte, load_i64, store_i64, load_i32, store_i32,
 };
@@ -101,7 +101,7 @@ fn test_store_load_i32_round_trip() {
 @test
 fn test_memset_fills_every_byte() {
     let p = cbgr_allocate(8, 8);
-    memset(p, 66, 8); // 'B'
+    memset_addr(p, 66, 8); // 'B'
     let mut i = 0;
     while i < 8 {
         assert_eq(load_byte(p + i), 66);
@@ -113,14 +113,14 @@ fn test_memset_fills_every_byte() {
 @test
 fn test_memset_returns_dst() {
     let p = cbgr_allocate(8, 8);
-    assert_eq(memset(p, 1, 8), p);
+    assert_eq(memset_addr(p, 1, 8), p);
     cbgr_deallocate(p);
 }
 
 @test
 fn test_memzero_zeroes() {
     let p = cbgr_allocate(8, 8);
-    memset(p, 255, 8);
+    memset_addr(p, 255, 8);
     memzero(p, 8);
     let mut i = 0;
     while i < 8 {
@@ -143,7 +143,7 @@ fn test_memcpy_copies_bytes() {
         store_byte(src + i, 10 + i);
         i = i + 1;
     }
-    memcpy(dst, src, 8);
+    memcpy_addr(dst, src, 8);
     let mut j = 0;
     while j < 8 {
         assert_eq(load_byte(dst + j), 10 + j);
@@ -157,8 +157,8 @@ fn test_memcpy_copies_bytes() {
 fn test_memcpy_zero_count_is_noop() {
     let src = cbgr_allocate(8, 8);
     let dst = cbgr_allocate(8, 8);
-    memset(dst, 7, 8);
-    memcpy(dst, src, 0);
+    memset_addr(dst, 7, 8);
+    memcpy_addr(dst, src, 0);
     assert_eq(load_byte(dst), 7);
     cbgr_deallocate(src);
     cbgr_deallocate(dst);
@@ -172,9 +172,9 @@ fn test_memcpy_zero_count_is_noop() {
 fn test_memcmp_equal_is_zero() {
     let a = cbgr_allocate(8, 8);
     let b = cbgr_allocate(8, 8);
-    memset(a, 5, 8);
-    memset(b, 5, 8);
-    assert_eq(memcmp(a, b, 8), 0);
+    memset_addr(a, 5, 8);
+    memset_addr(b, 5, 8);
+    assert_eq(memcmp_addr(a, b, 8), 0);
     cbgr_deallocate(a);
     cbgr_deallocate(b);
 }
@@ -183,9 +183,9 @@ fn test_memcmp_equal_is_zero() {
 fn test_memcmp_less_is_negative() {
     let a = cbgr_allocate(8, 8);
     let b = cbgr_allocate(8, 8);
-    memset(a, 1, 8);
-    memset(b, 2, 8);
-    assert(memcmp(a, b, 8) < 0);
+    memset_addr(a, 1, 8);
+    memset_addr(b, 2, 8);
+    assert(memcmp_addr(a, b, 8) < 0);
     cbgr_deallocate(a);
     cbgr_deallocate(b);
 }
@@ -194,9 +194,9 @@ fn test_memcmp_less_is_negative() {
 fn test_memcmp_greater_is_positive() {
     let a = cbgr_allocate(8, 8);
     let b = cbgr_allocate(8, 8);
-    memset(a, 9, 8);
-    memset(b, 3, 8);
-    assert(memcmp(a, b, 8) > 0);
+    memset_addr(a, 9, 8);
+    memset_addr(b, 3, 8);
+    assert(memcmp_addr(a, b, 8) > 0);
     cbgr_deallocate(a);
     cbgr_deallocate(b);
 }

@@ -5,7 +5,7 @@
 // Laws of the raw-memory operations over live cbgr allocations:
 //   * memcpy establishes memcmp == 0 (copy ⇒ equality)
 //   * memmove handles overlap in BOTH directions like a correct shift
-//   * memset(v) ⇒ every byte reads v % 256
+//   * memset_addr(v) ⇒ every byte reads v % 256
 //   * strlen = index of first NUL, invariant under content past the NUL
 //   * store_i32 / load_i32 preserve exactly the low 32 bits
 //
@@ -16,7 +16,7 @@
 mount core.prelude.*;
 mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
 mount core.intrinsics.runtime.mem_raw.{
-    memcpy, memmove, memset, memcmp,
+    memcpy_addr, memmove_addr, memset_addr, memcmp_addr,
     strlen,
     load_byte, store_byte, load_i32, store_i32, load_i64, store_i64,
 };
@@ -40,8 +40,8 @@ fn law_memcpy_establishes_memcmp_zero() {
     let dst = cbgr_allocate(32, 8);
     fill_pattern(src, 32, 3);
     fill_pattern(dst, 32, 200); // distinct prior content
-    memcpy(dst, src, 32);
-    assert_eq(memcmp(dst, src, 32), 0);
+    memcpy_addr(dst, src, 32);
+    assert_eq(memcmp_addr(dst, src, 32), 0);
     cbgr_deallocate(src);
     cbgr_deallocate(dst);
 }
@@ -55,10 +55,10 @@ fn law_memcmp_detects_single_byte_difference_at_every_offset() {
         fill_pattern(a, 16, 0);
         fill_pattern(b, 16, 0);
         store_byte(b + off, 250);
-        assert(memcmp(a, b, 16) != 0);
+        assert(memcmp_addr(a, b, 16) != 0);
         // Bytes BEFORE the difference don't affect the equal prefix.
         if off > 0 {
-            assert_eq(memcmp(a, b, off), 0);
+            assert_eq(memcmp_addr(a, b, off), 0);
         }
         off = off + 1;
     }
@@ -75,7 +75,7 @@ fn law_memmove_overlapping_shift_forward() {
     // [0,1,2,3,4,5,6,7] --move [0..6)→+2--> [0,1,0,1,2,3,4,5]
     let p = cbgr_allocate(8, 8);
     fill_pattern(p, 8, 0);
-    memmove(p + 2, p, 6);
+    memmove_addr(p + 2, p, 6);
     assert_eq(load_byte(p), 0);
     assert_eq(load_byte(p + 1), 1);
     let mut i = 0;
@@ -91,7 +91,7 @@ fn law_memmove_overlapping_shift_backward() {
     // [0,1,2,3,4,5,6,7] --move [2..8)→0--> [2,3,4,5,6,7,6,7]
     let p = cbgr_allocate(8, 8);
     fill_pattern(p, 8, 0);
-    memmove(p, p + 2, 6);
+    memmove_addr(p, p + 2, 6);
     let mut i = 0;
     while i < 6 {
         assert_eq(load_byte(p + i), 2 + i);
@@ -106,7 +106,7 @@ fn law_memmove_overlapping_shift_backward() {
 fn law_memmove_same_address_is_identity() {
     let p = cbgr_allocate(8, 8);
     fill_pattern(p, 8, 40);
-    memmove(p, p, 8);
+    memmove_addr(p, p, 8);
     let mut i = 0;
     while i < 8 {
         assert_eq(load_byte(p + i), (40 + i) % 256);
@@ -121,9 +121,9 @@ fn law_memmove_disjoint_equals_memcpy() {
     let d1 = cbgr_allocate(16, 8);
     let d2 = cbgr_allocate(16, 8);
     fill_pattern(src, 16, 9);
-    memcpy(d1, src, 16);
-    memmove(d2, src, 16);
-    assert_eq(memcmp(d1, d2, 16), 0);
+    memcpy_addr(d1, src, 16);
+    memmove_addr(d2, src, 16);
+    assert_eq(memcmp_addr(d1, d2, 16), 0);
     cbgr_deallocate(src);
     cbgr_deallocate(d1);
     cbgr_deallocate(d2);
@@ -137,7 +137,7 @@ fn law_memmove_disjoint_equals_memcpy() {
 fn law_memset_writes_value_mod_256() {
     let p = cbgr_allocate(8, 8);
     // 300 % 256 == 44 — the documented wrapping contract.
-    memset(p, 300, 8);
+    memset_addr(p, 300, 8);
     let mut i = 0;
     while i < 8 {
         assert_eq(load_byte(p + i), 44);

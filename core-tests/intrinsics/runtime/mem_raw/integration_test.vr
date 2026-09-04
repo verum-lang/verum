@@ -11,7 +11,7 @@
 mount core.prelude.*;
 mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
 mount core.intrinsics.runtime.mem_raw.{
-    memcpy, memcmp, strlen, load_byte, store_byte, store_i64,
+    memcpy_addr, memcmp_addr, strlen, load_byte, store_byte, store_i64,
 };
 mount core.intrinsics.runtime.text.{text_as_bytes, text_byte_len};
 mount core.intrinsics.platform.{target_is_little_endian};
@@ -55,7 +55,7 @@ fn integration_two_c_strings_from_same_text_are_memcmp_equal() {
     let t = "verum";
     let a = to_c_string(&t);
     let b = to_c_string(&t);
-    assert_eq(memcmp(a, b, text_byte_len(&t) + 1), 0);
+    assert_eq(memcmp_addr(a, b, text_byte_len(&t) + 1), 0);
     cbgr_deallocate(a);
     cbgr_deallocate(b);
 }
@@ -102,7 +102,7 @@ fn integration_copy_then_mutate_source_leaves_copy_intact() {
         store_byte(src + i, i + 1);
         i = i + 1;
     }
-    memcpy(dst, src, 8);
+    memcpy_addr(dst, src, 8);
     // Mutating the source afterwards must not affect the copy.
     store_byte(src, 99);
     assert_eq(load_byte(dst), 1);

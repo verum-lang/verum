@@ -17,7 +17,7 @@
 mount core.prelude.*;
 mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
 mount core.intrinsics.runtime.mem_raw.{
-    memset, load_byte, store_byte,
+    memset_addr, load_byte, store_byte,
 };
 
 // Byte-granular addressing: p+1 addresses the NEXT BYTE, not the next
@@ -26,7 +26,7 @@ mount core.intrinsics.runtime.mem_raw.{
 @test
 fn regression_int_address_arithmetic_is_byte_granular() {
     let p = cbgr_allocate(16, 8);
-    memset(p, 0, 16);
+    memset_addr(p, 0, 16);
     store_byte(p + 1, 77);
     assert_eq(load_byte(p), 0);
     assert_eq(load_byte(p + 1), 77);
