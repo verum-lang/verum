@@ -74,6 +74,10 @@ TOKEN_RE = re.compile(
     re.IGNORECASE,
 )
 GREEN_CLAIMS = {"stable", "complete", "regression-only"}
+# S5 — a row's own statement of how many `@ignore` pins it has.
+PIN_CLAIM = re.compile(r"(\d+)\s+@ignore")
+PIN_HISTORICAL = re.compile(r"prior prose kept|ORIGINAL DETAIL|was:|formerly", re.I)
+PIN_BASELINE = 32
 # Explicit numeric green claims, most-specific first.
 #
 # The third pattern used to demand a LITERAL `0 failed`, which blinded
@@ -193,6 +197,7 @@ def main() -> int:
     args = ap.parse_args()
 
     rows = parse_rows(INVENTORY)
+    raw_lines = INVENTORY.read_text().splitlines()
     findings: list[str] = []
 
     # S1 — unique module rows.
@@ -230,6 +235,8 @@ def main() -> int:
             f"*_test.vr but INVENTORY.md has no `{d}` row"
         )
 
+    pin_mismatches: list[str] = []
+
     # S4 — every row carries a recognized status token.
     for lineno, module, token, _cnt in rows:
         if token is None:
@@ -238,6 +245,50 @@ def main() -> int:
                 f"**stable**/**complete**/**partial**/**regression-only** — "
                 f"an unclaimed row is unverifiable and reads as green"
             )
+
+    # S5 — a row that states an `@ignore` pin count must match the files.
+    #
+    # Measured 2026-09-04: of 42 rows stating a count, 32 disagree, and 20
+    # of those claim MORE pins than exist. That direction is how a row
+    # goes green-while-red: `collections/count_min` said "4 @ignore'd
+    # construction-gated pins" over a file carrying 2, and the two that
+    # lost their pin are exactly the two the liveness layer then caught
+    # failing. The row did not drift away from the code; someone
+    # un-pinned two tests and left the count and the status behind.
+    #
+    # OWN FILES ONLY. `core-tests/net/h3/` has ten subdirectories and each
+    # has its OWN row, so counting recursively charges a parent with its
+    # children's pins — that reading turned `net/h3` into a false
+    # positive at 2-vs-5.
+    #
+    # A count inside a historical segment ("prior prose kept:", "ORIGINAL
+    # DETAIL") is a record, not a claim, and is skipped.
+    for lineno, module, _token, _cnt in rows:
+        line = raw_lines[lineno - 1] if lineno - 1 < len(raw_lines) else ""
+        m = PIN_CLAIM.search(line)
+        if m is None or PIN_HISTORICAL.search(line[: m.start()]):
+            continue
+        d = CORE_TESTS / module
+        if not d.is_dir():
+            continue
+        actual = sum(
+            len(re.findall(r"^\s*@ignore", f.read_text(errors="ignore"), re.M))
+            for f in d.glob("*.vr")
+        )
+        claimed = int(m.group(1))
+        if claimed != actual:
+            pin_mismatches.append(
+                f"S5 pin count `{module}` (line {lineno}) states {claimed} "
+                f"@ignore pin(s), the module's own files carry {actual}"
+            )
+    if len(pin_mismatches) > PIN_BASELINE:
+        findings.extend(pin_mismatches)
+    elif pin_mismatches:
+        print(
+            f"check-inventory: {len(pin_mismatches)} pin-count mismatch(es), "
+            f"baseline {PIN_BASELINE} — not failing; lower the baseline as they "
+            f"are fixed"
+        )
 
     if not args.structural_only:
         if args.results is None:
