@@ -296,7 +296,7 @@ async fn update_timestamp<R: TufRepository>(
     state: &mut TrustedState,
     repo:  &R,
 ) -> Result<(), TufClientError> {
-    let bytes = repo.fetch_metadata(&RoleName.Timestamp, Maybe.None).await
+    let bytes: List<Byte> = repo.fetch_metadata(&RoleName.Timestamp, Maybe.None).await
         .map_err(|e| Repo(e))?;
     let (new_ts, signed_payload, signatures) = parse_timestamp(bytes.as_slice())?;
     verify_role_signatures(
@@ -335,7 +335,7 @@ async fn update_snapshot<R: TufRepository>(
             reason: "timestamp lacks snapshot.json spec".to_text(),
         })?
         .clone();
-    let bytes = repo.fetch_metadata(&RoleName.Snapshot, Maybe.Some(snap_spec.version)).await
+    let bytes: List<Byte> = repo.fetch_metadata(&RoleName.Snapshot, Maybe.Some(snap_spec.version)).await
         .map_err(|e| Repo(e))?;
 
     // Length + hash check vs timestamp's claim.
@@ -414,7 +414,7 @@ async fn update_targets<R: TufRepository>(
         })?
         .clone();
 
-    let bytes = repo.fetch_metadata(
+    let bytes: List<Byte> = repo.fetch_metadata(
         &role_name_from_text(role_name),
         Maybe.Some(metafile.version),
     ).await.map_err(|e| Repo(e))?;
@@ -551,7 +551,7 @@ public async fn download_target<R: TufRepository>(
             Maybe.None    => target_file.hashes.iter().next().map(|(_, h)| h.clone()),
         }
     } else { Maybe.None };
-    let bytes = repo.fetch_target(target_path, hash_prefix.as_ref()).await
+    let bytes: List<Byte> = repo.fetch_target(target_path, hash_prefix.as_ref()).await
         .map_err(|e| Repo(e))?;
     if bytes.len() != target_file.length {
         return Result.Err(LengthMismatch {
