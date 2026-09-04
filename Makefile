@@ -84,7 +84,7 @@ check-doc-anchors: ## Gate: a documentation link must point at a heading that ex
 	python3 scripts/ci/check_doc_anchors.py --self-test
 	python3 scripts/ci/check_doc_anchors.py --check
 
-check-doc-error-codes: ## Gate: an error code cited in the documentation must exist in the registry
+check-doc-error-codes: ## Gate: a cited error code must exist in the registry AND be emitted by something
 	python3 scripts/ci/check_doc_error_codes_exist.py --self-test
 	python3 scripts/ci/check_doc_error_codes_exist.py --check
 

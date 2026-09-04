@@ -89,6 +89,34 @@ def citations(text: str) -> list[tuple[int, str]]:
     return out
 
 
+# SECOND QUESTION, same corpus: a code can be real and still never
+# reach a reader. `E203: module not found` is registered, documented in
+# the E2xx table, and emitted by nothing — a `mount` at a module that
+# does not exist answers `error<E402>`, which the Type table filed under
+# "`Send` bound not satisfied". Three of the four E2xx module codes are
+# like that; their conditions were folded into E401/E402 and the module
+# namespace was left standing.
+#
+# The test is a string search for the quoted code outside the registry,
+# which is how every emit site names one. Controls run first: E100 and
+# E400 must be found (they are emitted constantly), E203 and E202 must
+# not. A run where the controls disagree is a broken instrument, not a
+# finding.
+EMIT_BASELINE = 14
+EMIT_CONTROLS = [("E100", True), ("E400", True), ("E203", False), ("E202", False)]
+
+
+def emitted_codes(registry_path: Path) -> set[str]:
+    """Codes named as a string literal anywhere in crates/ but the registry."""
+    blob = []
+    for f in sorted((REPO / "crates").rglob("*.rs")):
+        if f == registry_path:
+            continue
+        blob.append(f.read_text(errors="ignore"))
+    text = "\n".join(blob)
+    return {c for c in re.findall(r'"([EW]\d{3,4})"', text)}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--docs", type=Path, default=DOCS)
@@ -170,6 +198,25 @@ def main() -> int:
 
     print(f"check-doc-error-codes: {cited} citations over {pages} pages, "
           f"{len(real)} codes in the registry, {len(bad)} unknown")
+
+    # Second question: cited AND registered, but nothing emits it.
+    emitted = emitted_codes(args.registry)
+    for code, want in EMIT_CONTROLS:
+        if (code in emitted) != want:
+            print(f"emit-control FAILED: {code} should "
+                  f"{'be' if want else 'not be'} found at an emit site — "
+                  "the instrument is wrong, not the documentation",
+                  file=sys.stderr)
+            return 1
+    cited_codes = {c for _, c in
+                   ((l, c) for src in sorted(docs_root.rglob("*.md"))
+                    for l, c in citations(src.read_text(errors="ignore")))}
+    dead = sorted(c for c in cited_codes if c in real and c not in emitted)
+    print(f"check-doc-error-codes-emitted: {len(dead)} cited code(s) that "
+          f"nothing emits (baseline {EMIT_BASELINE})")
+    for c in dead:
+        print(f"    {c}")
+
     if bad:
         for b in sorted(set(bad)):
             print(b, file=sys.stderr)
@@ -177,6 +224,14 @@ def main() -> int:
               "code is real, add it there; if the page means to say a code "
               "does NOT exist, add the (code, page) pair to ALLOWED.",
               file=sys.stderr)
+        return 1
+    if len(dead) != EMIT_BASELINE:
+        direction = "above" if len(dead) > EMIT_BASELINE else "below"
+        print(f"\n{len(dead)} cited-but-unemitted code(s), {direction} the "
+              f"baseline of {EMIT_BASELINE}. A code the documentation names "
+              "and the compiler never produces sends a reader to a page for a "
+              "message they cannot have seen. Adjust EMIT_BASELINE in a commit "
+              "that says which code changed and why.", file=sys.stderr)
         return 1
     return 0
 
