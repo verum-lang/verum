@@ -1085,7 +1085,7 @@ fn os_mmap(size: Int) -> Result<&unsafe Byte, AllocError> {
         );
 
         if (result as Int) == -1 {
-            return Result.Err(AllocError.MmapFailed { code: sys.linux.errno.get_errno() });
+            return Result.Err(AllocError.MmapFailed { code: sys.linux.tls.get_errno() });
         }
 
         // Advise kernel about huge pages
@@ -1139,7 +1139,7 @@ fn os_munmap(ptr: &unsafe Byte, size: Int) -> Result<(), AllocError> {
     @cfg(target_os = "linux") {
         let result = munmap(ptr, size);
         if result != 0 {
-            return Result.Err(AllocError.MunmapFailed { code: sys.linux.errno.get_errno() });
+            return Result.Err(AllocError.MunmapFailed { code: sys.linux.tls.get_errno() });
         }
         return Result.Ok(());
     }

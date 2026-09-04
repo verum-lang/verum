@@ -820,7 +820,7 @@ fn os_alloc_segment() -> Result<&unsafe Byte, SegmentError> {
         );
 
         if (raw as Int) == -1 {
-            return Result.Err(SegmentError.MmapFailed { code: sys.linux.errno.get_errno() });
+            return Result.Err(SegmentError.MmapFailed { code: sys.linux.tls.get_errno() });
         }
 
         // Trim to the SEGMENT_SIZE-aligned sub-region.
