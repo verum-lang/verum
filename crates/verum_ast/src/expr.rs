@@ -1121,7 +1121,10 @@ pub enum ExprKind {
     /// Cost: 0ns for Singleton (field access), ~3ns for Request, ~8ns for Transient.
     ///
     /// Grammar: inject_expr = 'inject' , type_path ;
-    /// Spec: docs/detailed/16-context-system.md Section 1A
+    /// Spec: context-system §1A — the production is `inject_expr` in
+    /// grammar/verum.ebnf; worked example in docs/by-example/16-context-system/.
+    /// (The path cited here previously, docs/detailed/16-context-system.md,
+    /// does not exist in this tree and never did.)
     Inject {
         /// The type to inject
         type_path: crate::ty::Path,

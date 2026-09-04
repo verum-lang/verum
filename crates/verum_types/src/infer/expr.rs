@@ -13140,10 +13140,13 @@ impl TypeChecker {
         // Infer the inner expression type (for compile-time validation)
         let _ = self.synth_expr(inner)?;
         // typeof() returns a structural record { name: Text, ... }
-        // Spec: docs/improvements.md Section 13.2 — reflection on
-        // the runtime type yields an info record whose canonical
-        // field is `name`. Other fields (`size`, `alignment`) can
-        // be added later without breaking field access.
+        // Spec: typeof-reflection — stated here because nothing else
+        // states it. Reflection on the runtime type yields an info
+        // record whose canonical field is `name`; other fields
+        // (`size`, `alignment`) can be added later without breaking
+        // field access. The production is `typeof_expr` in
+        // grammar/verum.ebnf. The path cited here previously,
+        // docs/improvements.md, does not exist in this tree.
         let mut fields: indexmap::IndexMap<verum_common::Text, Type> =
             indexmap::IndexMap::new();
         fields.insert(verum_common::Text::from("name"), Type::text());
