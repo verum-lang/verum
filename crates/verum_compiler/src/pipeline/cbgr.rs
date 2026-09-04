@@ -117,6 +117,10 @@ impl<'s> CompilationPipeline<'s> {
             .collect();
 
         let stats_mu = std::sync::Mutex::new(TierStatistics::new());
+        // T1102 step 1: count only, behind a switch, no behaviour change.
+        let measure_diags = std::env::var_os("VERUM_CBGR_DIAGNOSTICS").is_some();
+        let diag_tally: std::sync::Mutex<std::collections::BTreeMap<String, usize>> =
+            std::sync::Mutex::new(std::collections::BTreeMap::new());
         let analyse_one = |func: &verum_ast::decl::FunctionDecl| {
             let cfg = self.build_function_cfg(func);
             let function_id = FunctionId(Self::hash_function_name(&func.name.name));
@@ -135,6 +139,67 @@ impl<'s> CompilationPipeline<'s> {
             }
             // Merge statistics under a single short-held Mutex.
             stats_mu.lock().unwrap().merge(&result.stats);
+            // T1102: the analysis has just produced `result.violations`
+            // and the ownership/concurrency sub-results. A complete
+            // converter for them exists —
+            // verum_cbgr::diagnostics::generate_diagnostics — and has
+            // never had a production caller, so every finding reaching
+            // this point has been dropped. Count them first; deciding
+            // severity without knowing the volume is how a widening fix
+            // breaks every build in the tree at once.
+            if measure_diags {
+                for d in verum_cbgr::diagnostics::generate_diagnostics(&result) {
+                    let code = d.code().unwrap_or("(uncoded)").to_string();
+                    // T1102 step 2: the TALLY says how many and of which
+                    // code; it cannot say whether a finding is real.
+                    // `VERUM_CBGR_DIAGNOSTICS_SHOW` prints the message
+                    // itself so the four E312 in one stdlib module can be
+                    // read rather than counted. Kept separate from the
+                    // count switch because the volume differs by two
+                    // orders of magnitude — W1009 alone is 74 lines for
+                    // one file.
+                    if std::env::var_os("VERUM_CBGR_DIAGNOSTICS_SHOW").is_some() {
+                        eprintln!(
+                            "[T1102] {} in {}: {}",
+                            code,
+                            func.name.name,
+                            d.message()
+                        );
+                    }
+                    *diag_tally.lock().unwrap().entry(code).or_insert(0) += 1;
+                }
+                // T1102 step 3: the message alone is NOT a discriminator.
+                // Measured on v31, three independently healthy programs
+                // and one genuine use-after-free all produced the exact
+                // same line — "E312 dangling reference detected" — so the
+                // converter's eight-kind table collapses to one kind in
+                // practice and nothing in the rendered text says which
+                // reference or where.
+                //
+                // The analysis DOES know: `LifetimeViolation` carries a
+                // `message` naming the lifetime and the block ("Lifetime
+                // L not live at block B"), and
+                // `lifetime_violation_diagnostic` drops it in favour of
+                // the generic `kind_msg`. Print the raw fields, because
+                // the discarded reason is the one that identifies the
+                // referent — and print `span`, since a `None` there is
+                // why the rendered diagnostic points nowhere.
+                if std::env::var_os("VERUM_CBGR_DIAGNOSTICS_RAW").is_some()
+                    && let Some(lt) = result.lifetime.as_ref()
+                {
+                    for v in &lt.violations {
+                        eprintln!(
+                            "[T1102-raw] {}: {:?} ref={:?} at={:?} span={} :: {}",
+                            func.name.name,
+                            v.kind,
+                            v.ref_id,
+                            v.location,
+                            if v.span.is_some() { "yes" } else { "NONE" },
+                            v.message
+                        );
+                    }
+                }
+            }
             // Cache for codegen phase. `cache_tier_analysis` is `&self`
             // with internal RwLock — safe under concurrent writes.
             self.session.cache_tier_analysis(function_id, result);
@@ -150,6 +215,20 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         let global_stats = stats_mu.into_inner().unwrap();
+
+        if measure_diags {
+            let tally = diag_tally.into_inner().unwrap();
+            let total: usize = tally.values().sum();
+            let per_code = tally
+                .iter()
+                .map(|(c, n)| format!("{c}={n}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            eprintln!(
+                "[T1102] cbgr diagnostics that would be emitted: {total} over {} functions   {per_code}",
+                funcs.len()
+            );
+        }
 
         let elapsed = start.elapsed();
 
