@@ -370,7 +370,6 @@ core/security/webauthn/authenticate.vr
 core/security/webauthn/cose_key.vr
 core/security/webauthn/register.vr
 core/security/x509/chain.vr
-core/security/x509/credential.vr
 core/security/x509/crl_client.vr
 core/security/x509/ocsp_client.vr
 core/security/x509/path_validation.vr
