@@ -108,14 +108,22 @@ def run(argv: list[str]) -> int:
 
     counts = {"ok": 0, "elision": 0, "table": 0, "fragment": 0, "DEFECT": 0}
     defects: list[str] = []
+    todo = [(md, i, b) for md in sorted(DOCS.rglob("*.md"))
+            for i, b in enumerate(BLOCK.findall(md.read_text()))]
+    # A run that prints nothing for forty minutes cannot be told from a
+    # run that has hung, and I killed one to find out which it was.
+    print(f"check-doc-blocks-parse: {len(todo)} blocks, up to two checks each",
+          flush=True)
     with tempfile.TemporaryDirectory() as tmp:
-        for md in sorted(DOCS.rglob("*.md")):
-            for i, body in enumerate(BLOCK.findall(md.read_text())):
-                tag = f"{md.stem}_{i}"
-                k = classify(binary, body.strip(), tmp, tag)
-                counts[k] += 1
-                if k == "DEFECT":
-                    defects.append(f"{md.relative_to(DOCS)} block {i}")
+        for n, (md, i, body) in enumerate(todo, 1):
+            tag = f"{md.stem}_{i}"
+            k = classify(binary, body.strip(), tmp, tag)
+            counts[k] += 1
+            if k == "DEFECT":
+                defects.append(f"{md.relative_to(DOCS)} block {i}")
+            if n % 100 == 0:
+                print(f"  {n}/{len(todo)}  {counts['DEFECT']} defect(s) so far",
+                      flush=True)
 
     total = sum(counts.values())
     print(f"check-doc-blocks-parse: {total} block(s) — "
