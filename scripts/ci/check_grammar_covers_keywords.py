@@ -70,6 +70,10 @@ def terminals() -> set[str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--docs", type=Path, default=None,
+                    help="also require every keyword to be NAMED on this page "
+                         "(the keyword reference); 14 were missing when this was added, "
+                         "`using` and `link` among them")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
 
@@ -106,11 +110,43 @@ def main() -> int:
         f"\ncheck-grammar-covers-keywords: {len(missing)} of {len(kws)} lexer "
         f"keywords are absent from grammar/verum.ebnf"
     )
-    if missing and args.check:
-        print(
-            "The grammar is the only source of truth for Verum syntax; a "
-            "keyword it omits reads to a contributor as invalid syntax."
-        )
+
+    # Same question, second target. A keyword reference that omits a
+    # keyword is the documentation form of the defect this gate exists
+    # for: `using` — the word the whole context system turns on — was
+    # absent from the page that calls itself the full list, along with
+    # `link`, `layer`, `volatile` and the ten tactic names.
+    #
+    # A WORD-SCAN, not a code-fence scan: the page lists most keywords
+    # inside plain fences and a few in prose, and a fence-only reader
+    # reported 57 absent when the true answer was 14. The question here
+    # is only "is the word on the page at all", which is the weakest
+    # claim worth gating and the one with no false positives.
+    doc_missing: list[str] = []
+    if args.docs is not None:
+        if not args.docs.is_file():
+            print(f"--docs {args.docs}: not a file — NOT CHECKED")
+        else:
+            words = set(re.findall(r"\b([a-z_][a-z_0-9]*)\b", args.docs.read_text()))
+            doc_missing = sorted(kws - words)
+            for m in doc_missing:
+                print(f"  {m}  — not named on {args.docs.name}")
+            print(
+                f"check-keywords-documented: {len(doc_missing)} of {len(kws)} "
+                f"lexer keywords are not named on {args.docs.name}"
+            )
+
+    if args.check and (missing or doc_missing):
+        if missing:
+            print(
+                "The grammar is the only source of truth for Verum syntax; a "
+                "keyword it omits reads to a contributor as invalid syntax."
+            )
+        if doc_missing:
+            print(
+                "A keyword absent from the keyword reference is a word a "
+                "reader cannot look up and will not use."
+            )
         return 1
     return 0
 

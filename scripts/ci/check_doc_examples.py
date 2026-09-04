@@ -74,6 +74,30 @@ BASELINE = REPO / "scripts" / "ci" / "doc_examples_known_failures.txt"
 
 BLOCK = re.compile(r"^```verum\n(.*?)^```", re.M | re.S)
 
+# Second check, over EVERY block rather than the self-contained ones:
+# a `mount core.a.b;` must name a module that exists or a symbol that
+# module exports. Compiling cannot ask this — 54 of ~2800 blocks have an
+# `fn main` — and it is the class that produced `mount core.io.mmap`,
+# a section of the file-IO cookbook written against a module `core/io/`
+# has never contained.
+#
+# THE INSTRUMENT TOOK FOUR TRIES AND EACH WRONG ONE LOOKED CLEAN. Naming
+# only the module says 18, because `mount M.symbol;` is legal grammar
+# (`mount_item = path`). Falling back to "is the PARENT a module" says
+# 0 — it excuses everything, `core.io.mmap` included, which is how a
+# green answer hid the one case already found by hand. Missing the bare
+# re-export form (`public mount .list.List;`, not the braced one) says
+# 12, blaming `core.collections.List`. Hence the controls below, which
+# run on every invocation: two that must resolve, two that must not.
+MOUNT = re.compile(r"^\s*(?:public\s+)?mount\s+(core(?:\.[A-Za-z_][A-Za-z0-9_]*)+)", re.M)
+CORE = REPO / "core"
+# The four that remain are each documented AS absent on their own page
+# (a `:::caution`, a `:::danger`, or an "illustrative name" comment), so
+# the pole is true: a sixth means a page started lying again.
+MOUNT_BASELINE = 4
+MOUNT_CONTROLS = [("core.sys.common.pread", True), ("core.collections.List", True),
+                  ("core.io.mmap", False), ("core.zzz.nothing", False)]
+
 # Blocks the documentation deliberately shows as NOT compiling.
 MUST_FAIL = re.compile(
     r"//\s*(COMPILE ERROR|ERROR|error<E\d+>|does not compile|WRONG|BAD|✗|refused)",
@@ -115,6 +139,70 @@ def blocks():
                 continue
             line = text[: m.start()].count("\n") + 1
             yield d.relative_to(DOCS.parent), line, body
+
+
+def core_modules() -> dict[str, list[Path]]:
+    mods: dict[str, list[Path]] = {}
+    for f in sorted(CORE.rglob("*.vr")):
+        parts = list(f.relative_to(REPO).with_suffix("").parts)
+        if parts[-1] == "mod":
+            parts = parts[:-1]
+        mods.setdefault(".".join(parts), []).append(f)
+        for i in range(1, len(parts)):
+            mods.setdefault(".".join(parts[:i]), [])
+    return mods
+
+
+_EXPORTS: dict[str, set[str]] = {}
+_DECL = (r"^\s*public\s+(?:async\s+)?fn\s+([a-z_]\w*)", r"^\s*public\s+type\s+(\w+)",
+         r"^\s*public\s+(?:const|static)\s+(\w+)", r"^\s*public\s+context\s+(\w+)")
+
+
+def exports(mods, mod: str) -> set[str]:
+    if mod in _EXPORTS:
+        return _EXPORTS[mod]
+    out: set[str] = set()
+    for f in mods.get(mod, []):
+        src = f.read_text(errors="ignore")
+        for pat in _DECL:
+            out |= set(re.findall(pat, src, re.M))
+        for grp in re.findall(r"^\s*public\s+mount\s+[\w.]*\.\{([^}]*)\}", src, re.M):
+            out |= {x.strip().split(" as ")[-1] for x in grp.split(",") if x.strip()}
+        for one in re.findall(r"^\s*public\s+mount\s+([\w.]+)\s*;", src, re.M):
+            out.add(one.rsplit(".", 1)[-1])
+    _EXPORTS[mod] = out
+    return out
+
+
+def mount_resolves(mods, path: str) -> bool:
+    if path in mods:
+        return True
+    parent, _, leaf = path.rpartition(".")
+    return parent in mods and leaf in exports(mods, parent)
+
+
+def check_mounts() -> tuple[int, list[str]]:
+    """(broken count, lines). Runs its own controls first."""
+    mods = core_modules()
+    for path, want in MOUNT_CONTROLS:
+        if mount_resolves(mods, path) != want:
+            raise SystemExit(
+                f"mount-control FAILED: {path} should "
+                f"{'resolve' if want else 'not resolve'} — the instrument is wrong, "
+                "not the documentation"
+            )
+    broken: dict[str, set[str]] = defaultdict(set)
+    for d in sorted(DOCS.rglob("*.md")):
+        for m in BLOCK.finditer(d.read_text(errors="ignore")):
+            for mm in MOUNT.finditer(m.group(1)):
+                if not mount_resolves(mods, mm.group(1)):
+                    broken[mm.group(1)].add(str(d.relative_to(DOCS.parent)))
+    lines = []
+    for k in sorted(broken):
+        parent, _, leaf = k.rpartition(".")
+        why = "no such module" if parent not in mods else f"{parent} does not export `{leaf}`"
+        lines.append(f"  {k}  — {why}\n      {', '.join(sorted(broken[k]))}")
+    return len(broken), lines
 
 
 def classify(body: str, errs: list[str]) -> str:
@@ -159,8 +247,20 @@ def main() -> int:
         if not MUST_FAIL.search("// COMPILE ERROR: nope"):
             print("self-test FAIL: marker not recognised")
             ok = False
+        try:
+            check_mounts()          # raises if its own controls disagree
+        except SystemExit as e:
+            print(f"self-test FAIL: {e}")
+            ok = False
         print("self-test: ok" if ok else "self-test: FAILED")
         return 0 if ok else 1
+
+    n_mounts, mount_lines = check_mounts()
+    if n_mounts:
+        print(f"--- {n_mounts} unresolvable `mount core.*` in doc blocks ---")
+        for line in mount_lines:
+            print(line)
+        print()
 
     binary = verum_binary()
     buckets: Counter[str] = Counter()
@@ -246,7 +346,15 @@ def main() -> int:
             for k in gone:
                 print(f"    {k}")
             return 1
-        print("ratchet: no new untrustworthy example")
+        if n_mounts > MOUNT_BASELINE:
+            print(f"\n[fail] {n_mounts} unresolvable doc mounts, baseline {MOUNT_BASELINE}")
+            return 1
+        if n_mounts < MOUNT_BASELINE:
+            print(f"\n[fail] {n_mounts} unresolvable doc mounts — below the "
+                  f"baseline of {MOUNT_BASELINE}; lower MOUNT_BASELINE")
+            return 1
+        print("ratchet: no new untrustworthy example, "
+              f"{n_mounts} known unresolvable mount(s)")
         return 0
 
     return 1 if (n_real and args.check) else 0

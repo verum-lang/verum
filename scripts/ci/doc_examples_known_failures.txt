@@ -1,5 +1,1 @@
-docs/cookbook/cli-tool.md#6586ba22
-docs/cookbook/cli-tool.md#cd8d351a
-docs/cookbook/nursery.md#10178f35
 docs/language/copatterns.md#c8080340
-docs/stdlib/net/weft/overview.md#3cda22c5

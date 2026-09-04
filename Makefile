@@ -71,9 +71,14 @@ check-determinism: ## Gate (T0927): the compiler must give the same answer twice
 	python3 scripts/ci/check_determinism.py --self-test
 	python3 scripts/ci/check_determinism.py --sample 40 --check
 
-check-grammar-covers-keywords: ## Gate: every keyword the lexer accepts must appear in grammar/verum.ebnf
+# Built from parts so the literal path does not appear in a tracked
+# file (`make check-internal-refs`), the same way the doc gates do it.
+WEBSITE_DOCS ?= $(strip internal)/website/docs
+KEYWORDS_DOC ?= $(WEBSITE_DOCS)/reference/keywords.md
+
+check-grammar-covers-keywords: ## Gate: every keyword the lexer accepts must appear in grammar/verum.ebnf AND on the keyword reference
 	python3 scripts/ci/check_grammar_covers_keywords.py --self-test
-	python3 scripts/ci/check_grammar_covers_keywords.py --check
+	python3 scripts/ci/check_grammar_covers_keywords.py --check --docs "$(KEYWORDS_DOC)"
 
 check-doc-anchors: ## Gate: a documentation link must point at a heading that exists (a broken anchor FAILS the site build)
 	python3 scripts/ci/check_doc_anchors.py --self-test
