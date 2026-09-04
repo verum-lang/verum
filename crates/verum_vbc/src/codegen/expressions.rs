@@ -15161,6 +15161,52 @@ impl VbcCodegen {
             && args.is_empty()
             && self.ctx.generic_type_params.contains(&type_name)
         {
+            // Prefer the witness channel over the literal.  A named type
+            // param with a known position loads its runtime type witness
+            // and dispatches `{ConcreteType}.default` statically; with NO
+            // witness LoadT yields nil and the dispatcher's nil-receiver
+            // fallback reproduces the historical identity.  Strictly
+            // better, never worse — the same argument the Phase 0 site
+            // above already makes, which this site never adopted.
+            //
+            // The literal-only form rested on a premise that is false:
+            // primitives are NOT "the only T that can satisfy
+            // `where T: Default`".  `Text` satisfies it and was handed an
+            // Int 0, which reached callers as a raw NaN-boxed payload.
+            if let Some(idx) = self
+                .ctx
+                .generic_type_params_ordered
+                .iter()
+                .position(|p| p == &type_name)
+            {
+                if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
+                    eprintln!(
+                        "[tpcall] site2 witness: type={} method={} idx={}",
+                        type_name, method_name, idx
+                    );
+                }
+                let recv = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadT {
+                    dst: recv,
+                    type_ref: crate::types::TypeRef::Generic(
+                        crate::types::TypeParamId(idx as u16),
+                    ),
+                });
+                crate::codegen::bare_method::record("<witness>", method_name.as_str());
+                let method_id = self.ctx.intern_string_raw(method_name.as_str());
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CallM {
+                    dst: result,
+                    receiver: recv,
+                    method_id,
+                    args: crate::instruction::RegRange {
+                        start: Reg(0),
+                        count: 0,
+                    },
+                });
+                self.ctx.free_temp(recv);
+                return Ok(Some(Some(result)));
+            }
             let result = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::LoadI {
                 dst: result,
