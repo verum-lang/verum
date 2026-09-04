@@ -266,7 +266,7 @@ fn try_source(
                     // string literals, so we build the candidate explicitly.
                     match &f.long {
                         Maybe.Some(l) => {
-                            let upper = l.to_uppercase();
+                            let upper: Text = l.to_uppercase();
                             let normalised = upper.replace("-", "_");
                             let mut candidate = prefix.clone();
                             candidate.push_str(&normalised);

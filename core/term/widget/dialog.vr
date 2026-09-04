@@ -205,7 +205,7 @@ implement StatefulWidget for Dialog {
         buf.set_style(dialog_rect, self.style);
 
         // Draw border with optional title
-        let border_block = match self.title {
+        let border_block: Block = match self.title {
             Maybe.Some(ref t) => {
                 Block.new()
                     .title(t.clone())

@@ -373,7 +373,7 @@ public fn check_usage(bindings: List<TrackedBinding>, usage: &UsageMap) -> List<
     let mut violations: List<QttViolation> = List.new();
     let mut i: Int = 0;
     while i < bindings.len() {
-        let b = bindings[i].clone();
+        let b: TrackedBinding = bindings[i].clone();
         let observed = usage_of(usage, b.name.clone());
         let declared = normalize_quantity(b.declared.clone());
         match declared {

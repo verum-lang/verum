@@ -119,7 +119,6 @@ core/async/stream.vr
 core/base/iterator.vr
 core/base/memory.vr
 core/base/primitives.vr
-core/cli/config.vr
 core/cli/parser.vr
 core/cli/repl.vr
 core/cli/runtime.vr
@@ -303,7 +302,6 @@ core/net/tls13/mod.vr
 core/net/tls13/session/client.vr
 core/net/tls13/session/server.vr
 core/net/unix.vr
-core/net/weft/arena_pool.vr
 core/net/weft/h3.vr
 core/net/weft/handler.vr
 core/net/weft/health.vr
@@ -401,7 +399,6 @@ core/term/raw/termios.vr
 core/term/raw/wincon.vr
 core/term/render/diff.vr
 core/term/style/color.vr
-core/term/widget/dialog.vr
 core/term/widget/input.vr
 core/term/widget/menu.vr
 core/term/widget/mod.vr
@@ -412,7 +409,6 @@ core/theory_interop/bridges/mod.vr
 core/theory_interop/core.vr
 core/theory_interop/protocol.vr
 core/tracing/tracer.vr
-core/types/qtt.vr
 core/verify/attempt.vr
 core/verify/kernel_soundness/theorem.vr
 core/verify/kernel_v0/judgment.vr

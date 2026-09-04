@@ -272,7 +272,7 @@ implement Drop for ArenaLease {
         // Generation bump — all ThinRefs into this arena invalidate.
         arena.reset();
         // Return to pool if warm pool has room, otherwise destroy.
-        let cfg = self.pool.config.clone();
+        let cfg: ArenaPoolConfig = self.pool.config.clone();
         let mut free = self.pool.free.lock().unwrap_or_else(|p| p.into_inner());
         if free.len() < cfg.warm_count {
             free.push(arena);
