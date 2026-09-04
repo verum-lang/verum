@@ -646,7 +646,7 @@ fn encode_text_range(
     }
     let lower_bytes: Maybe<List<Byte>> = match &r.lower {
         Maybe.Some(t) => {
-            let raw = t.as_bytes();
+            let raw: &[Byte] = t.as_bytes();
             let mut owned: List<Byte> = List.with_capacity(raw.len() as Int);
             let mut i: Int = 0;
             while i < (raw.len() as Int) {
@@ -659,7 +659,7 @@ fn encode_text_range(
     };
     let upper_bytes: Maybe<List<Byte>> = match &r.upper {
         Maybe.Some(t) => {
-            let raw = t.as_bytes();
+            let raw: &[Byte] = t.as_bytes();
             let mut owned: List<Byte> = List.with_capacity(raw.len() as Int);
             let mut i: Int = 0;
             while i < (raw.len() as Int) {

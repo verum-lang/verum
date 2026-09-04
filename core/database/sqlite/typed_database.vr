@@ -98,7 +98,7 @@ implement<C: CanRead> Database<SqlitePool, C> {
     /// in-memory database is sub-microsecond; per-call pool
     /// acquire dominates.
     public fn query_rows(&self, sql: &Text) -> Result<List<List<SqliteValue>>, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -113,7 +113,7 @@ implement<C: CanRead> Database<SqlitePool, C> {
     /// First-row-only convenience. Returns `Result.Ok(Maybe.None)` when the
     /// query produced no rows.
     public fn query_first(&self, sql: &Text) -> Result<Maybe<List<SqliteValue>>, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -147,7 +147,7 @@ implement<C: CanWrite> Database<SqlitePool, C> {
     /// need them use the loom `Database.changes()` accessor via
     /// `SqliteConnection.inner_mut`).
     public fn execute_simple(&self, sql: &Text) -> Result<(), DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -181,7 +181,7 @@ implement<C: CanTx> Database<SqlitePool, C> {
     /// The default for query-heavy paths that may or may not
     /// write.
     public fn begin(&self) -> Result<SqliteTxScope<SqlitePool>, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -198,7 +198,7 @@ implement<C: CanTx> Database<SqlitePool, C> {
     /// contention. Recommended for mutating paths so a busy-
     /// timeout kicks in at BEGIN, not mid-statement.
     public fn begin_immediate(&self) -> Result<SqliteTxScope<SqlitePool>, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -215,7 +215,7 @@ implement<C: CanTx> Database<SqlitePool, C> {
     /// duration. Use sparingly; intended for batch-write paths
     /// that absolutely cannot tolerate concurrent writers.
     public fn begin_exclusive(&self) -> Result<SqliteTxScope<SqlitePool>, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -313,7 +313,7 @@ implement<C: CanDdl> Database<SqlitePool, C> {
     /// cannot accidentally drop a table because `CanDdl` is not in
     /// scope on it.
     public fn execute_ddl(&self, sql: &Text) -> Result<(), DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -336,7 +336,7 @@ implement<C: CanUnsafe> Database<SqlitePool, C> {
     /// `@unsafe` + `@audit(reason)` annotations the spec §8.9
     /// requires at the call site, every invocation is auditable.
     public fn execute_raw_unsafe(&self, sql: &Text) -> Result<(), DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };

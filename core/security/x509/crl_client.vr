@@ -245,7 +245,7 @@ public async fn fetch_crl<C: HttpClient>(
         headers,
         body: Maybe.None,
     };
-    let resp = client.send(&req).await
+    let resp: Response = client.send(&req).await
         .map_err(|e| CrlFetchError.Network(e))?;
     if !resp.status.is_success() {
         return Result.Err(CrlFetchError.HttpStatus(resp.status));
@@ -454,7 +454,7 @@ async fn try_one_url<C: HttpClient>(
     }
 
     // Lookup serial.
-    let serial = cert.tbs.serial_number_bytes.as_slice();
+    let serial = cert.tbs.serial_number.as_slice();
     match find_revoked(&crl, serial) {
         Maybe.Some(entry) => {
             let reason = extract_reason_code(entry);

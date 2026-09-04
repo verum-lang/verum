@@ -159,7 +159,6 @@ core/database/postgres/notify.vr
 core/database/postgres/pipeline.vr
 core/database/postgres/row.vr
 core/database/postgres/typed_database.vr
-core/database/postgres/wire/typed.vr
 core/database/sqlite/mod.vr
 core/database/sqlite/native/bind_blob_v2/engine.vr
 core/database/sqlite/native/bind_clear_api/engine.vr
@@ -223,7 +222,6 @@ core/database/sqlite/native/vtab_in/registry.vr
 core/database/sqlite/native/vtabs/fts5/dml.vr
 core/database/sqlite/native/vtabs/fts5/functions.vr
 core/database/sqlite/native/vtabs/fts5/query.vr
-core/database/sqlite/typed_database.vr
 core/intrinsics/lowlevel/aarch64.vr
 core/intrinsics/mod.vr
 core/io/file.vr
@@ -335,7 +333,6 @@ core/security/tuf/repository.vr
 core/security/webauthn/attestation.vr
 core/security/webauthn/authenticate.vr
 core/security/webauthn/register.vr
-core/security/x509/crl_client.vr
 core/security/x509/ocsp_client.vr
 core/security/x509/path_validation.vr
 core/security/x509/verifier.vr
