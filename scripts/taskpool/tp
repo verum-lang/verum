@@ -355,6 +355,29 @@ cmd_accept() {
   # Nearly half the pool was filed with an empty or TBD acceptance and there
   # was no way to supply one afterwards, so "what would close this?" could
   # only ever be answered in prose that no reader was pointed at.
+  # A MULTI-LINE ACCEPTANCE IS REFUSED, NOT SILENTLY DROPPED.
+  #
+  # `awk -v new="$new"` cannot carry a newline: awk parses the -v value
+  # as a string literal and a raw newline ends it. Passing a heredoc
+  # here printed `awk: newline in string ...` on stderr, then
+  # "T1061: acceptance set", and left the field at TBD. The tool
+  # reported success and changed nothing, which is the worst of the
+  # three possible outcomes.
+  #
+  # One line is not a limitation worth fixing with a rewrite: an
+  # acceptance that needs paragraphs is a task that needs splitting.
+  # But it has to SAY so.
+  # NOT `*"$(printf '\n')"*` — command substitution STRIPS the trailing
+  # newline, so that pattern is `**`, matches everything, and refused a
+  # one-line value too. Caught by the positive pole: the negative fired
+  # correctly and the positive fired as well, which is a guard that is
+  # true on a larger set than intended.
+  case "$new" in
+    *'
+'*)
+      die "accept: acceptance must be ONE line — awk cannot carry a newline through -v, so a multi-line value is silently dropped. Shorten it, or split the task."
+      ;;
+  esac
   tmp="$file.accept.$$"
   awk -v new="$new" '
     /^## Acceptance/ { print; print ""; print new; skip=1; next }
