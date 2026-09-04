@@ -6,7 +6,7 @@
 // API that bridges Verum's async surface to the runtime.  Three
 // classes of API live here:
 //
-//   1. `Executor`             — opaque handle + introspection
+//   1. `ExecutorHandle`             — opaque handle + introspection
 //   2. `future_poll_sync`     — synchronous one-shot Future driver
 //   3. `IntrinsicsYieldNow`   — yields once, then Ready(())
 //
@@ -17,7 +17,7 @@
 // =============================================================================
 
 mount core.async.intrinsics.{
-    Executor, IntrinsicsYieldNow, yield_now, future_poll_sync,
+    ExecutorHandle, IntrinsicsYieldNow, yield_now, future_poll_sync,
 };
 mount core.async.poll.{Poll};
 mount core.async.future.{Future, ready, ReadyFuture};
@@ -25,20 +25,20 @@ mount core.async.waker.{Context, noop_waker};
 mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
-// Section 1: Executor handle — construction + introspection
+// Section 1: ExecutorHandle handle — construction + introspection
 // =============================================================================
 
 @test
 fn test_intrinsics_executor_record_literal_construction() {
-    // `Executor` is a public record with a single Int handle field.
+    // `ExecutorHandle` is a public record with a single Int handle field.
     // Construction must succeed even when no runtime is live.
-    let e: Executor = Executor { handle: 0 };
+    let e: ExecutorHandle = ExecutorHandle { handle: 0 };
     assert_eq(e.handle, 0);
 }
 
 @test
 fn test_intrinsics_executor_handle_round_trip() {
-    let e: Executor = Executor { handle: 0x4242 };
+    let e: ExecutorHandle = ExecutorHandle { handle: 0x4242 };
     assert_eq(e.handle, 0x4242);
 }
 
@@ -46,16 +46,16 @@ fn test_intrinsics_executor_handle_round_trip() {
 fn test_intrinsics_executor_in_async_context_outside_runtime_is_false() {
     // Tests run *outside* any executor; the introspection helper
     // must report that fact without panicking.
-    let inside = Executor.in_async_context();
+    let inside = ExecutorHandle.in_async_context();
     assert_eq(inside, false);
 }
 
 @test
 fn test_intrinsics_executor_current_outside_runtime_is_none() {
-    // The flip side: Executor.current() returns Maybe.None outside an
+    // The flip side: ExecutorHandle.current() returns Maybe.None outside an
     // executor.  Maintaining this invariant means callers can safely
     // probe for an executor without crashing.
-    match Executor.current() {
+    match ExecutorHandle.current() {
         Maybe.Some(_) => assert(false),
         Maybe.None => assert(true),
     }

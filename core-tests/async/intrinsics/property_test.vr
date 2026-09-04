@@ -4,7 +4,7 @@
 //
 // Algebraic invariants for `core.async.intrinsics`.
 //
-//   §A — Executor.current() and Executor.in_async_context() always
+//   §A — ExecutorHandle.current() and ExecutorHandle.in_async_context() always
 //        agree (Maybe.None ⇔ false, Some ⇔ true).
 //   §B — future_poll_sync on a ReadyFuture is *idempotent* across
 //        repeated polls of separate ReadyFuture instances of the
@@ -14,7 +14,7 @@
 // =============================================================================
 
 mount core.async.intrinsics.{
-    Executor, IntrinsicsYieldNow, yield_now, future_poll_sync,
+    ExecutorHandle, IntrinsicsYieldNow, yield_now, future_poll_sync,
 };
 mount core.async.poll.{Poll};
 mount core.async.future.{ready, ReadyFuture};
@@ -23,13 +23,13 @@ mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
 // =============================================================================
-// §A — Executor introspection coherence
+// §A — ExecutorHandle introspection coherence
 // =============================================================================
 
 @test
 fn property_intrinsics_executor_current_in_async_context_coherent() {
-    let in_ctx = Executor.in_async_context();
-    let cur    = Executor.current();
+    let in_ctx = ExecutorHandle.in_async_context();
+    let cur    = ExecutorHandle.current();
     match cur {
         Maybe.Some(_) => assert_eq(in_ctx, true),
         Maybe.None    => assert_eq(in_ctx, false),
