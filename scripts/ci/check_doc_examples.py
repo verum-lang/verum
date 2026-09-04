@@ -188,7 +188,12 @@ _EXPORTS: dict[str, set[str]] = {}
 # `pub type AttestationType`. Reading only `public` made a legal
 # `mount …attestation.AttestationType` read as phantom.
 _VIS = r"^\s*(?:pub|public)\s+"
-_DECL = (_VIS + r"(?:async\s+)?fn\s+([a-z_]\w*)", _VIS + r"type\s+(\w+)",
+# `unsafe`, `meta` and `async` all sit between the visibility and `fn`:
+#   public unsafe fn cbgr_allocate(…) -> Int;
+#   public meta fn target_is_little_endian() -> Bool { … }
+# Reading only `async` reported 163 mounted names as absent.
+_MODS = r"(?:(?:async|unsafe|meta|const)\s+)*"
+_DECL = (_VIS + _MODS + r"fn\s+([a-z_]\w*)", _VIS + r"type\s+(\w+)",
          _VIS + r"(?:const|static)\s+(\w+)", _VIS + r"context\s+(\w+)")
 
 
@@ -204,6 +209,18 @@ def exports(mods, mod: str) -> set[str]:
             out |= {x.strip().split(" as ")[-1] for x in grp.split(",") if x.strip()}
         for one in re.findall(r"^\s*(?:pub|public)\s+mount\s+([\w.]+)\s*;", src, re.M):
             out.add(one.rsplit(".", 1)[-1])
+        # A sum type's VARIANTS are mountable names too — `Some`, `None`,
+        # `Ok`, `Err`, `Less`/`Equal`/`Greater` are the ones core-tests
+        # mounts most, and reading only declarations reported 1448 of
+        # them as absent.
+        for body in re.findall(r"^\s*(?:pub|public)\s+type\s+\w+(?:<[^>]*>)?\s+is\b(.*?);",
+                               src, re.M | re.S):
+            if "{" in body.split("|")[0] and "|" not in body:
+                continue                       # a record, not a sum
+            for part in body.split("|"):
+                mv = re.match(r"\s*(?://[^\n]*\n\s*)*([A-Z][A-Za-z0-9_]*)", part)
+                if mv:
+                    out.add(mv.group(1))
     _EXPORTS[mod] = out
     return out
 

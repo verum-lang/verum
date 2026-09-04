@@ -8,12 +8,12 @@
 //        nested Future chains)
 //   §B — IntrinsicsYieldNow inside a manual poll-loop, modelling the
 //        two-step cooperative-yield contract
-//   §C — Executor.current's "is None outside runtime" plus a Maybe
+//   §C — ExecutorHandle.current's "is None outside runtime" plus a Maybe
 //        chain conversion
 // =============================================================================
 
 mount core.async.intrinsics.{
-    Executor, IntrinsicsYieldNow, yield_now, future_poll_sync,
+    ExecutorHandle, IntrinsicsYieldNow, yield_now, future_poll_sync,
 };
 mount core.async.poll.{Poll};
 mount core.async.future.{ready, ReadyFuture};
@@ -66,12 +66,12 @@ fn integration_intrinsics_yield_now_manual_poll_loop_completes() {
 }
 
 // =============================================================================
-// §C — Executor.current → Maybe round-trip into the user-facing chain
+// §C — ExecutorHandle.current → Maybe round-trip into the user-facing chain
 // =============================================================================
 
 @test
 fn integration_intrinsics_executor_current_maybe_chain() {
-    let exec_handle: Maybe<Int> = match Executor.current() {
+    let exec_handle: Maybe<Int> = match ExecutorHandle.current() {
         Maybe.Some(e) => Maybe.Some(e.handle),
         Maybe.None    => Maybe.None,
     };
