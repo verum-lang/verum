@@ -620,7 +620,7 @@ module darwin_entry {
         match super.verum_init() {
             Result.Ok(()) => {}
             Result.Err(_) => {
-                sys.darwin.libsystem.exit(1);
+                sys.darwin.libsystem.safe_exit(1);
                 unreachable()
             }
         }

@@ -827,6 +827,18 @@ public type DIR is {
 };
 
 /// dirent structure
+///
+/// `@repr(C)` IS LOAD-BEARING, not documentation. `readdir` returns a
+/// pointer into C's own buffer, and codegen gives a reference-to-T the
+/// struct-pointer arm WITH A LAYOUT INDEX only when T is in
+/// `repr_c_types` (codegen/mod.rs:13688) — otherwise it takes the
+/// plain pointer arm, which is opaque and layout-free. Without the
+/// attribute `(*entry).d_namlen`
+/// reads through Verum's record layout over a C address, and the
+/// garbage length feeds `d_name[..name_len]`: the measured SIGSEGV in
+/// `ReadDir.next` (T0916). `opendir` is unaffected because `DIR` is
+/// opaque and never dereferenced.
+@repr(C)
 public type Dirent is {
     d_ino: UInt64,
     d_seekoff: UInt64,
@@ -1792,6 +1804,23 @@ public fn safe_chdir(path: &[Byte]) -> Result<(), OSError> {
     } else {
         Result.Ok(())
     }
+}
+
+/// Terminate the process. C: `void exit(int status);`.
+///
+/// EXISTS BECAUSE THE ABORT PATH DID NOT. `core/sys/init.vr` calls
+/// this on the failure path of `verum_init()`, and `exit` is declared
+/// inside the `@ffi(...) extern { }` block above — a name that does
+/// not resolve through a cross-module mount (T1085). With the call
+/// unbound, the failure path fell through to `unreachable()`: a
+/// runtime that cannot initialise could not abort.
+///
+/// This is one of FORTY names in that block which callers cannot
+/// reach. The other thirty-nine deliberately do NOT have wrappers —
+/// see T1085. This one is here because a missing abort on a
+/// supported platform cannot wait for the root fix.
+public fn safe_exit(status: Int32) -> ! {
+    unsafe { exit(status) }
 }
 
 // =============================================================================
