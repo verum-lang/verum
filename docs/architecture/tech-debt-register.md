@@ -977,6 +977,31 @@ FIX SITE: `register_module_metadata` should build a descriptor per
 needs inventing. `wrapper_fn` looks like a half-built shortcut and is
 not: its only write anywhere is `None` in the constructor.
 
+DO NOT "JUST BUILD THE DESCRIPTOR", and here is the reason rather than
+the instruction. `register_ffi_extern_function`
+(verum_vbc/src/codegen/mod.rs:10690) assigns `FunctionId(u32::MAX)` and
+says why in a comment: an extern function DELIBERATELY has no function
+id, because callers detect it through `ffi_function_map` and emit
+`FfiExtended` against the FFI SYMBOL id, never `Call`. Appending a
+FunctionDescriptor to `module.functions` gives it an id, and a
+cross-module caller resolving through the archive then emits a `Call`
+to an id with no bytecode — trading `E100: unbound variable` for
+`Function 2147483647 not found`, which is strictly worse and far harder
+to attribute afterwards.
+
+I reached that plan through three earlier reads that each looked
+finished — the consumer said "translate CType", the producer said
+"build it upstream where the names survive", the marker question said
+"`bytecode_length > 0` already exists" — and only opening the registrar
+refuted it. The registrar was the LAST call in the very loop being
+read, with a name that said what it did.
+
+So the fix has two halves and neither is a descriptor: the archive must
+carry the module's FFI SYMBOLS (name, library, signature) so a consumer
+can rebuild the equivalent of `ffi_function_map`, and name resolution
+must bind such a name with a marker that steers the call site to
+`FfiExtended`.
+
 WORKAROUND IN PLACE (83c1c5d12): three `safe_*` wrappers outside the
 block, so `read_dir` works on macOS. Five sites now pay this tax
 locally, which is the argument for the root: the workaround is cheap
