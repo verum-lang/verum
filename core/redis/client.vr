@@ -74,8 +74,7 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount sync.semaphore.Semaphore;
 mount sync.rwlock.RwLock;
-mount net.tcp.{TcpStream, tcp_connect};
-mount time.system_time.epoch_millis;
+mount net.tcp.{TcpStream};
 
 mount core.redis.protocol.{
     RespValue, RespError,
@@ -372,7 +371,7 @@ async fn discard(client: &RedisClient, _conn: RedisConnection) {
 // =============================================================================
 
 async fn open_connection(config: &RedisConfig) -> Result<RedisConnection, RedisError> {
-    let stream = tcp_connect(&config.address)
+    let stream = TcpStream.connect(&config.address)
         .with_timeout_ms(config.connect_timeout_ms)
         .await
         .map_err(|e| RedisError.Network(f"tcp connect: {e}"))?;
@@ -484,7 +483,7 @@ async fn read_one_frame(conn: &mut RedisConnection) -> Result<RespValue, RedisEr
         match decode(&cur) {
             Result.Ok((v, after)) => {
                 let mut tail: List<Byte> = List.new();
-                let mut i: Int = after.offset;
+                let mut i: Int = after.pos;
                 while i < conn.rx_buffer.len() {
                     tail.push(conn.rx_buffer[i]);
                     i = i + 1;
