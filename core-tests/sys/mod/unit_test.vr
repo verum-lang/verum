@@ -176,14 +176,32 @@ fn test_umbrella_init_error_variant_reachable() {
 // Section 6: Re-exported MapFlags - structural shape
 // =============================================================================
 
+// `MapFlags` is a RECORD (core/sys/common.vr:347) with four Bool fields
+// — shared / is_private / anonymous / fixed — not a variant type.  The
+// old spelling `MapFlags.Private` assumed variants and could never
+// compile, so this section proved nothing about the re-export it names.
 @test
-fn test_umbrella_map_flags_private_variant() {
-    let _f: MapFlags = MapFlags.Private;
+fn test_umbrella_map_flags_private_field() {
+    let f: MapFlags = MapFlags {
+        shared: false,
+        is_private: true,
+        anonymous: false,
+        fixed: false,
+    };
+    assert(f.is_private);
+    assert(!f.shared);
 }
 
 @test
-fn test_umbrella_map_flags_anon_variant() {
-    let _f: MapFlags = MapFlags.Anon;
+fn test_umbrella_map_flags_anon_field() {
+    let f: MapFlags = MapFlags {
+        shared: false,
+        is_private: false,
+        anonymous: true,
+        fixed: false,
+    };
+    assert(f.anonymous);
+    assert(!f.fixed);
 }
 
 fn main() {}
