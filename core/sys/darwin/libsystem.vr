@@ -488,7 +488,13 @@ extern {
     public fn opendir(name: &Byte) -> &unsafe DIR;
 
     /// Read directory entry
-    public fn readdir(dirp: &DIR) -> &Dirent;
+    // `&unsafe`, not `&`: C returns a RAW pointer into its own
+    // directory buffer, and a plain `&Dirent` is a Verum reference —
+    // dereferencing one over a C address reads the wrong bytes.
+    // `opendir` two lines up already declares `&unsafe DIR`; this was
+    // the only extern in the file returning a bare `&` to a RECORD
+    // type (the others return `&Byte`). T0916.
+    public fn readdir(dirp: &DIR) -> &unsafe Dirent;
 
     /// Close directory. C: `int closedir(DIR *dirp);`.
     public fn closedir(dirp: &DIR) -> Int32;
@@ -1832,7 +1838,7 @@ public fn safe_opendir(name: &Byte) -> &unsafe DIR {
 ///
 /// Returns null at end of stream AND on error. As in C, the two are
 /// told apart by clearing `errno` before the call.
-public fn safe_readdir(dirp: &DIR) -> &Dirent {
+public fn safe_readdir(dirp: &DIR) -> &unsafe Dirent {
     unsafe { readdir(dirp) }
 }
 
