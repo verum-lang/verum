@@ -822,10 +822,15 @@ mod tests {
 
     #[test]
     fn test_diagnostic_codes() {
-        assert_eq!(codes::USE_AFTER_FREE, "E1001");
-        assert_eq!(codes::DOUBLE_FREE, "E1002");
+        // 817eda0a4 (T0947) moved these onto the error-code registry:
+        // E1001/E1002 already meant "stage mismatch in a quote expression"
+        // and "cross-stage function call", so a CBGR diagnostic reading
+        // E1001 named someone else's error. The memory codes are E31x now.
+        // MEMORY_LEAK stayed W1003 — the W namespace had no collision.
+        assert_eq!(codes::USE_AFTER_FREE, "E315");
+        assert_eq!(codes::DOUBLE_FREE, "E316");
         assert_eq!(codes::MEMORY_LEAK, "W1003");
-        assert_eq!(codes::DATA_RACE, "E1004");
+        assert_eq!(codes::DATA_RACE, "E317");
     }
 
     #[test]
