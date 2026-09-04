@@ -2835,10 +2835,17 @@ implement<T> List<T> {
     public fn product(&self) -> T
     where T: Mul + One
     {
+        // Indexing, not `unsafe { &*self.ptr.offset(i) }`. The pointer
+        // form returns uninitialised memory here — a different value on
+        // every run — while the IDENTICAL form in `sum` directly above
+        // is correct. Three probes ruled out the generic machinery:
+        // `gen_mul<T: Mul + One>` = 24, the same with `Add + Default` =
+        // 10, and a generic multiply-fold over `&List<T>` using `xs[i]`
+        // = 24. What is left is the deref under `*`, and `self[i]` is
+        // the form the passing probe used. (A67)
         let mut acc: T = 1;
         for i in range(0, self.len) {
-            let item: &T = unsafe { &*self.ptr.offset(i) };
-            acc = acc * *item;
+            acc = acc * self[i];
         }
         acc
     }
