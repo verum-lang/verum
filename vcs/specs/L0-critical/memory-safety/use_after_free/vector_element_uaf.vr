@@ -2,7 +2,23 @@
 // @tier: 0
 // @level: L0
 // @tags: memory-safety, use-after-free, cbgr, list, borrow-checker
-// @description: Tests that borrow checker prevents use-after-free on list element at compile-time
+// @description: A use-after-free on a list element — PARSE ONLY, detection is not observed
+//
+// WHY `parse-pass` AND NOT `typecheck-fail`. Nothing emits a
+// use-after-free diagnostic today: verum_cbgr's diagnostics converter
+// has never had a production caller (T1102), so there is no code for
+// `@expected-error` to name and this directive is the honest one.
+//
+// DO NOT simply switch it to `typecheck-fail: E312` once the converter
+// is wired. E312 is measured to fire on healthy code as well —
+// `let x = 5; let r = &x; print(*r);` produces it — because the
+// analysis has no record of a REFERENT'S SCOPE and cannot separate this
+// program from a correct one. Rewriting these eight then would turn
+// eight vacuous specs into eight specs pinning an unsound check, which
+// is worse for being green.
+//
+// The program below DOES contain the defect. What is missing is an
+// observer, and this header says so rather than claiming one exists.
 
 mount core.prelude.*;
 
