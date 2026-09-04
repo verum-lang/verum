@@ -143,20 +143,32 @@ def main() -> int:
         for site, err in sorted(real.items()):
             print(f"  {site}\n      {err}")
 
+    # The ratchet tracks STALE examples only. A block that announces its
+    # own failure, or that is an abridged fragment, is expected not to
+    # compile — putting those in the baseline made an edit to one report
+    # as "newly failing", which is how a deliberate `// COMPILE ERROR`
+    # block ended up in the failure list. `frag` is excluded for the same
+    # reason: its companions live elsewhere on the page.
+    #
+    # This is a narrowing, so it is worth saying what survives it: 6 of
+    # the 33 failing examples are stale. The check still has a true pole,
+    # and a page that goes out of date lands in it.
+    tracked = dict(real)
+
     if write:
-        BASELINE.write_text("".join(f"{s}\n" for s in sorted(failures)))
-        print(f"[write] baseline: {len(failures)} known-failing example(s)")
+        BASELINE.write_text("".join(f"{s}\n" for s in sorted(tracked)))
+        print(f"[write] baseline: {len(tracked)} stale example(s)")
         return 0
 
     known = set()
     if BASELINE.is_file():
         known = {l.strip() for l in BASELINE.read_text().split("\n") if l.strip()}
-    new = sorted(set(failures) - known)
-    fixed = sorted(known - set(failures))
+    new = sorted(set(tracked) - known)
+    fixed = sorted(known - set(tracked))
     if new:
         print(f"\n[fail] {len(new)} doc example(s) newly fail to compile:")
         for s in new:
-            print(f"    {s}\n        {failures[s]}")
+            print(f"    {s}\n        {tracked[s]}")
         return 1
     if fixed:
         print(f"\n[fail] {len(fixed)} known-failing example(s) now COMPILE — lower the baseline")
