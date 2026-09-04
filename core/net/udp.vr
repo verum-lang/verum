@@ -438,11 +438,11 @@ implement UdpSocket {
             while pi < addr_n { sa[pi] = addr_bytes[pi]; pi = pi + 1; }
 
             @cfg(any(target_os = "linux", target_os = "windows"))
-            let result = connect(self.fd, &sa[0] as &unsafe Byte,
+            let result: Result<(), OSError> = connect(self.fd, &sa[0] as &unsafe Byte,
                                  addr_n as Int);
 
             @cfg(target_os = "macos")
-            let result = sys_connect(self.fd, &sa[0] as &unsafe Byte,
+            let result: Result<(), OSError> = sys_connect(self.fd, &sa[0] as &unsafe Byte,
                                      addr_n as Int);
 
             match result {

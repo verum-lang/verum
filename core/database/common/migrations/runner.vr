@@ -211,7 +211,7 @@ implement MigrationRunner {
                     if let Maybe.Some(entry) = journal.lookup(m.version) {
                         store.upsert_entry(&entry).await?;
                     }
-                    let exec_res = store.execute_sql(sql).await;
+                    let exec_res: Result<(), DbError> = store.execute_sql(sql).await;
                     match exec_res {
                         Result.Ok(_) => {
                             journal.record_applied(m, clock_ns);

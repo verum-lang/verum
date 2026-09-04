@@ -293,7 +293,6 @@ core/net/tls13/handshake/ticket_issuer.vr
 core/net/tls13/mod.vr
 core/net/tls13/session/client.vr
 core/net/tls13/session/server.vr
-core/net/udp.vr
 core/net/unix.vr
 core/net/weft/connection.vr
 core/net/weft/h3.vr
