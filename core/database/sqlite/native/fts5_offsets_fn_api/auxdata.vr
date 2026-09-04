@@ -73,25 +73,17 @@ fn int_to_text(n: Int) -> Text {
 }
 
 fn i64_to_text(n: Int64) -> Text {
-    // Positive-only; matches FTS5 (column/term/off/size are all non-negative).
-    if n == 0_i64 { return "0".clone(); }
-    let mut digits = List.new();
-    let mut x = n;
-    let zero = 0 as Int64;
-    let ten = 10 as Int64;
-    while x > zero {
-        let d = (x % ten) as Int;
-        digits.push(d);
-        x = x / ten;
-    }
-    let mut out = Text.new();
-    let mut i = (digits.len() as Int) - 1;
-    while i >= 0 {
-        let d = digits.get(i as Int);
-        out = out.append_byte((0x30 + d) as Int);
-        i = i - 1;
-    }
-    out
+    // T1061: this was eighteen lines that built the digits with
+    // `.append_byte(0x30 + d)` — a method declared NOWHERE in core/, so
+    // every call died. Three modules each carried their own copy under
+    // two spellings, which is why no single failure looked like a
+    // shared one.
+    //
+    // A format literal renders a sized integer directly. Measured on
+    // v28: 1234567890123, 0 and -42 all correct — and the old loop was
+    // `while x > zero`, so it returned "" for EVERY negative n. The
+    // literal handles the sign too.
+    f"{n}"
 }
 
 // Number of items the SQL `offsets()` call would emit (4 ints per hit).

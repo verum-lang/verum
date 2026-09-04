@@ -74,23 +74,17 @@ public fn snapshot_text(r: &FreelistCountReading) -> Text {
 }
 
 fn int64_decimal(n: Int64) -> Text {
-    let zero = 0 as Int64;
-    if n == zero { return "0".clone(); }
-    let ten = 10 as Int64;
-    let mut x = n;
-    let mut digits: List<Int> = List.new();
-    while x > zero {
-        digits.push((x % ten) as Int);
-        x = x / ten;
-    }
-    let mut out = Text.new();
-    let mut i = (digits.len() as Int) - 1;
-    while i >= 0 {
-        let d = digits.get(i as Int);
-        out = out.append_byte(0x30 + d);
-        i = i - 1;
-    }
-    out
+    // T1061: this was eighteen lines that built the digits with
+    // `.append_byte(0x30 + d)` — a method declared NOWHERE in core/, so
+    // every call died. Three modules each carried their own copy under
+    // two spellings, which is why no single failure looked like a
+    // shared one.
+    //
+    // A format literal renders a sized integer directly. Measured on
+    // v28: 1234567890123, 0 and -42 all correct — and the old loop was
+    // `while x > zero`, so it returned "" for EVERY negative n. The
+    // literal handles the sign too.
+    f"{n}"
 }
 
 fn int_decimal(n: Int) -> Text {
