@@ -905,3 +905,79 @@ own — `scripts/ci/check_silent_acceptance.py`, a ratchet carrying one
 row per instance plus a positive control — so the fifth instance is
 caught without anyone having to think of it first.
 
+| A57 | **A NAME DECLARED INSIDE `@ffi(...) extern { }` IS EXPORTED AND CALLABLE-REGISTERED NOWHERE** (2026-09-04, T1085) — `core/io/fs.vr` mounts six names from `core/sys/darwin/libsystem.vr` in ONE statement. `errno`, `DIR` and `Dirent` resolve; `opendir`, `readdir` and `closedir` give `error<E100>: unbound variable`. The first three are declared OUTSIDE the FFI block (:1109, :819, :824), the last three inside it (:39-649, 117 declarations). Same file, same statement, same platform — the cleanest positive/negative pair in the tree. |
+
+THE CHAIN, every link located in source:
+
+    core_compiler.rs:205        adds the name to the module's EXPORT set
+                                (only if `public` — which is why someone
+                                wrote `public` on exactly those three)
+    vbc/codegen/mod.rs:12870    puts it in `module.ffi_symbols`,
+                                NOT in `module.functions`
+    archive_metadata.rs         reads `module.types` and
+                                `module.functions`; never `ffi_symbols`
+    -> `meta.functions`         has no entry
+    path_resolution.rs:815      `ctx.env.lookup(name)` -> None
+    -> E100
+
+**Two registries that disagree and nothing compares them.** A name is
+exported and callable-registered nowhere; the failure is silent at every
+layer and surfaces only at a use site in another file.
+
+SIZED: 12 live instances in 3 files, and all three are already in
+`scripts/ci/core_compile_known_failures.txt` —
+
+    core/mem/allocator.vr    mmap_ffi, munmap, mprotect, madvise
+    core/mem/segment.vr      mmap_ffi, munmap, mprotect, madvise
+    core/sys/fs_watch.vr     kqueue, kevent, open, close
+
+The first two are the ALLOCATOR's page path. A known-failures baseline is
+where a finding goes to stop being a finding.
+
+THE FIRST COUNT WAS 29 AND KEYED ON THE WRONG THING: every `public fn`
+inside any extern block anywhere, then a grep for mounts of those NAMES.
+That counts `fs.vr` mounting `read`/`open`/`write`/`close`, which it does
+under `@cfg(target_os = "linux")` from `core.sys.linux.syscall` where
+they are ordinary functions. Resolving the MODULE from the mount path
+first: 29 -> 12.
+
+FIX SITE: `register_module_metadata` should build a descriptor per
+`ffi_symbols` entry — `FfiSymbol` already carries `signature`, so nothing
+needs inventing. `wrapper_fn` looks like a half-built shortcut and is
+not: its only write anywhere is `None` in the constructor.
+
+WORKAROUND IN PLACE (83c1c5d12): three `safe_*` wrappers outside the
+block, so `read_dir` works on macOS. Five sites now pay this tax
+locally, which is the argument for the root: the workaround is cheap
+ONCE and the cost is that nobody ever pays for the root.
+
+| A58 | **THE CBGR DANGLING CHECK HAD NO TRUE POSITIVES — its entire output was false** (2026-09-04, T1102, 6ada2105a) — `E312 dangling reference detected` came out of three independently healthy programs AND one genuine use-after-free, identical down to the raw fields (`ref=RefId(1) at=BlockId(0) span=NONE`). One unsound constraint produced all of it: the successor-edge rule demanded a lifetime be live at the PREDECESSOR of the block that DEFINES it, so every `&` in a function with more than one basic block qualified. |
+
+    healthy `let r = &x`      E312=1 -> 0
+    healthy `takes(&mk())`    E312=1 -> 0
+    GENUINE use-after-free    E312=1 -> 0
+    core/collections/list.vr  E312=4 -> 0
+
+**Fixing the false positive emptied the check, and that is the finding.**
+It reads as a regression and is not one: before, the analysis answered
+"dangling" to every question, which catches the true case the way a
+stopped clock is right twice a day. What it buys is that wiring the
+converter was IMPOSSIBLE (it would reject the standard library — four
+sites in `list.vr` alone) and is now merely USELESS. A blocker became a
+gap, pinned by `crates/verum_cbgr/tests/lifetime_successor_edge_tests.rs`
+in ci.yml's gating tier.
+
+**An output that is entirely false positives looks exactly like a working
+detector until you ask it a question you know the answer to.** A
+true-positive column proves nothing alone; the healthy programs have to
+be in the same table.
+
+WHAT REMAINS is the task's original substance and it needs new INPUT, not
+a better constraint. Rejecting `let r: &Int = { let v: Int = 5; &v };`
+requires knowing where `v`'s storage ends. The CFG carries
+DefSite/UseeSite for REFERENCES only, and `compute_liveness`'s backward
+propagation is an empty stub (`lifetime_analysis.rs:723-738`, body is two
+comment lines). `escape_analysis.rs` is the lead: it is block-aware, has
+a production consumer, and its `EscapeKind::ReturnEscape` names this
+shape — the question to measure first is whether it computes escape from
+the INNER BLOCK or only from the function.
