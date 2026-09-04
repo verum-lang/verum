@@ -112,7 +112,7 @@ fn regression_copy_reader_to_writer() {
 fn regression_read_all_collects_full_stream() {
     let src_data: List<Byte> = [7, 8, 9];
     let mut src = BufferCursor.new(src_data);
-    let collected = read_all(&mut src).unwrap();
+    let collected: List<Byte> = read_all(&mut src).unwrap();
     assert_eq(collected.len(), 3);
     assert_eq(collected[0], 7 as Byte);
     assert_eq(collected[2], 9 as Byte);
