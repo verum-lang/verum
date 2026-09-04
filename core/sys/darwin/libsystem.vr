@@ -1789,6 +1789,61 @@ public fn safe_chdir(path: &[Byte]) -> Result<(), OSError> {
 }
 
 // =============================================================================
+// Directory Streams — reachable wrappers
+// =============================================================================
+//
+// THESE ADD NO CHECKING, and the `safe_` prefix should not be read as
+// promising any. They exist because a name declared inside the
+// `@ffi("libSystem.B.dylib") extern { … }` block above (:39-649, 117
+// declarations) does not resolve through a cross-module `mount`.
+// `core/io/fs.vr` mounted `opendir` / `readdir` / `closedir` from here
+// directly and got, at check time,
+//
+//     error<E100>: unbound variable: sys_opendir
+//     error<E100>: unbound variable: sys_readdir
+//     error<E100>: unbound variable: sys_closedir
+//
+// and at run time the unresolved-callee sentinel
+// `Function 2147483647 not found`, so `read_dir` has never worked on
+// macOS (T0916).
+//
+// The rule is NOT the naming convention. `errno` (below) is mounted by
+// fs.vr without a `safe_` prefix and resolves, because it is a real
+// function declared outside the FFI block; and `DIR` / `Dirent` (:819,
+// :824) are mounted by the same statement and resolve for the same
+// reason. What makes a libsystem name reachable is being declared
+// outside `extern { }`, which is what these three wrappers provide.
+//
+// Callers keep their own null checks and path packing. Taking `&[Byte]`
+// and returning `Result` would be the better shape (rule 7 of
+// docs/architecture/ffi-byte-buffer-contract.md), but no wrapper in
+// this file returns a reference or a `Result<&…>`, so the signature
+// that can be VERIFIED today is the one that matches the extern.
+
+/// Open a directory stream. C: `DIR *opendir(const char *name);`.
+///
+/// Returns a null handle on failure; `errno()` carries the reason.
+/// `name` must already be NUL-terminated — see `copy_path_nul`.
+public fn safe_opendir(name: &Byte) -> &unsafe DIR {
+    unsafe { opendir(name) }
+}
+
+/// Read the next directory entry. C: `struct dirent *readdir(DIR *dirp);`.
+///
+/// Returns null at end of stream AND on error. As in C, the two are
+/// told apart by clearing `errno` before the call.
+public fn safe_readdir(dirp: &DIR) -> &Dirent {
+    unsafe { readdir(dirp) }
+}
+
+/// Close a directory stream. C: `int closedir(DIR *dirp);`.
+///
+/// Returns 0 on success, -1 on failure.
+public fn safe_closedir(dirp: &DIR) -> Int32 {
+    unsafe { closedir(dirp) }
+}
+
+// =============================================================================
 // Environment Variable Safe Wrappers
 // =============================================================================
 

@@ -245,7 +245,6 @@ core/database/sqlite/typed_database.vr
 core/intrinsics/lowlevel/aarch64.vr
 core/intrinsics/mod.vr
 core/io/file.vr
-core/io/fs.vr
 core/io/path.vr
 core/io/stdio.vr
 core/mac/poly1305.vr

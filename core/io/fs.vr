@@ -106,9 +106,12 @@ mount sys.darwin.libsystem.{
     safe_chmod as sys_chmod,
     safe_getcwd as sys_getcwd,
     safe_chdir as sys_chdir,
-    opendir as sys_opendir,
-    readdir as sys_readdir,
-    closedir as sys_closedir,
+    // The wrappers, not the extern declarations: a name inside
+    // libsystem's `@ffi(...) extern { }` block does not resolve
+    // through a cross-module mount (T0916).
+    safe_opendir as sys_opendir,
+    safe_readdir as sys_readdir,
+    safe_closedir as sys_closedir,
     errno,
     Stat,
     Dirent,
@@ -605,7 +608,11 @@ implement Iterator for ReadDir {
         }
 
         loop {
-            let entry = unsafe { sys_readdir(self.dir_handle) };
+            // The record stores the handle as `Int` so one shape serves
+            // both platforms (Linux keeps an fd here); cast back at the
+            // boundary. Before T0916 this line did not typecheck either —
+            // `E100: unbound variable` fired first and hid it.
+            let entry = unsafe { sys_readdir(self.dir_handle as &DIR) };
             if entry.is_null() {
                 self.finished = true;
                 return Maybe.None;
@@ -646,7 +653,7 @@ implement Iterator for ReadDir {
 implement Drop for ReadDir {
     fn drop(&mut self) {
         if !self.dir_handle.is_null() {
-            unsafe { sys_closedir(self.dir_handle) };
+            unsafe { sys_closedir(self.dir_handle as &DIR) };
         }
     }
 }
