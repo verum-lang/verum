@@ -184,7 +184,24 @@ def method_decl_count(name: str, repo: Path) -> int:
     return rg(rf"\bfn\s+{re.escape(name)}\s*\(", repo)
 
 
-_IMPL = re.compile(r"^\s*(?:public\s+)?implement\s+(.+?)\s*\{")
+# `implement` heads come in four shapes and a pattern that sees only the
+# first is blind to most of core/:
+#
+#     implement Text {                                    inherent
+#     implement Debug for Error {                          protocol
+#     implement<E> ResultContextError<E> {                 GENERIC inherent
+#     implement<T, E, F> FromResidual<…> for Result<T, E>  GENERIC, and the
+#                                                          brace is on the
+#                                                          NEXT line
+#
+# The third is why `Error.message` was misfiled: `fn message` sits in
+# `implement<E> ResultContextError<E>`, a pattern demanding a space after
+# `implement` did not match the head, and the attribution silently fell
+# back to whatever block was above. This file's own docstring already
+# warned that a type-declaration pattern "was blind to `type Foo<T> is`";
+# the same blind spot, one construct over, reproduced by the person who
+# wrote the warning.
+_IMPL = re.compile(r"^\s*(?:public\s+)?implement\s*(?:<[^>]*>)?\s+(.+?)\s*\{?\s*$")
 
 
 def method_decls_on_type(method: str, ty: str, repo: Path) -> int:
@@ -280,10 +297,26 @@ def main() -> int:
         print(f"PROBE-FAILED: `Maybe.ends_with_char` counted {control_n}, expected 0.")
         print("The pair probe matches regardless of owner; refusing to classify.")
         return 2
+    # A GENERIC control, for the same reason the type side needed one:
+    # the non-generic pole passed while `implement<E> Foo<E>` matched
+    # nothing, and every method of every generic impl block in core/ was
+    # attributed to whatever block happened to precede it. That is most
+    # of the collection and wrapper API.
+    #
+    # `ResultContextError.message` — core/base/result.vr:783, inside
+    # `implement<E> ResultContextError<E>` opened at :776 — is the pair
+    # that exposed it.
+    control_gp = method_decls_on_type("message", "ResultContextError", repo)
+    if control_gp < 1:
+        print(f"PROBE-FAILED: `ResultContextError.message` counted {control_gp}, expected >=1.")
+        print("The pair probe does not see `implement<E> Foo<E>` heads;")
+        print("every generic impl block in core/ would be misattributed.")
+        return 2
     print(
         f"controls OK  (Text={control}  Maybe<T>={control_g}  "
         f"fn ends_with_char(={control_m}  "
-        f"Text.ends_with_char={control_p}  Maybe.ends_with_char={control_n})\n"
+        f"Text.ends_with_char={control_p}  Maybe.ends_with_char={control_n}  "
+        f"ResultContextError.message={control_gp})\n"
     )
 
     text = Path(args[0]).read_text(encoding="utf-8", errors="replace")
