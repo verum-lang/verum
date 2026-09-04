@@ -677,6 +677,23 @@ jobs:
       # has a release binary. Self-test first, and for the same reason —
       # a comparison that always reports "equal" is indistinguishable
       # from a clean tree.
+      - name: Documentation gates that need a compiler
+        # These three exist as Makefile targets and CI ran NONE of them:
+        # `gates-source` is deliberately source-only, and no other job
+        # invoked them. Measured 2026-09-04 — `check-doc-examples` has
+        # been in the tree for weeks without executing once in CI.
+        # This job already has a release binary, which is what they need.
+        env:
+          VERUM_BIN: target/release/verum
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/check_doc_examples.py --self-test
+          python3 scripts/ci/check_doc_examples.py --ratchet
+          python3 scripts/ci/check_homepage_examples.py --self-test
+          python3 scripts/ci/check_homepage_examples.py --check
+          python3 scripts/ci/check_doc_indented_blocks.py --selftest
+          python3 scripts/ci/check_doc_indented_blocks.py
+
       - name: File location does not change the verdict
         run: |
           scripts/ci/check_path_does_not_change_verdict.sh --selftest ./target/release/verum
