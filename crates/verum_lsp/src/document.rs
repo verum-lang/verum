@@ -263,6 +263,15 @@ pub struct DocumentState {
     pub symbols: HashMap<String, SymbolInfo>,
     /// Type information for expressions (maps byte offset to type)
     pub type_info: HashMap<usize, Type>,
+    /// Wall time of the most recent lex+parse, in microseconds.
+    ///
+    /// Measured, not estimated: `verum/getProfile` reports this figure
+    /// directly, and a profile panel must never show a number that was
+    /// derived from document size instead of a clock (T1137).
+    pub last_parse_us: u64,
+    /// Wall time of the most recent type-check pass, in microseconds.
+    /// Measured on the same terms as `last_parse_us`.
+    pub last_type_check_us: u64,
 }
 
 // Implement Debug manually since Type doesn't implement Debug
@@ -294,6 +303,8 @@ impl DocumentState {
             file_id,
             symbols: HashMap::new(),
             type_info: HashMap::new(),
+            last_parse_us: 0,
+            last_type_check_us: 0,
         };
         state.reparse();
         state
@@ -360,7 +371,11 @@ impl DocumentState {
         let lexer = Lexer::new(&self.text, self.file_id);
         let parser = VerumParser::new();
 
-        match parser.parse_module(lexer, self.file_id) {
+        let parse_started = std::time::Instant::now();
+        let parse_result = parser.parse_module(lexer, self.file_id);
+        self.last_parse_us = parse_started.elapsed().as_micros() as u64;
+
+        match parse_result {
             Ok(module) => {
                 // Parsing succeeded
                 self.module = Some(module.clone());
@@ -369,11 +384,18 @@ impl DocumentState {
                 self.build_symbol_table(&module);
 
                 // Perform type checking
+                let type_check_started = std::time::Instant::now();
                 self.run_type_checker(&module);
+                self.last_type_check_us = type_check_started.elapsed().as_micros() as u64;
             }
             Err(parse_errors) => {
                 // Parsing failed
                 self.module = None;
+
+                // No type-check ran this round. Leaving the previous
+                // round's figure in place would report a stale duration
+                // as if it were current (T1137).
+                self.last_type_check_us = 0;
 
                 // Convert parse errors to diagnostics
                 for error in parse_errors {

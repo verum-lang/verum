@@ -397,6 +397,12 @@ impl DocumentCache {
                 file_id: doc.file_id,
                 symbols: std::collections::HashMap::new(), // Built on demand
                 type_info: std::collections::HashMap::new(), // Built on demand
+                // This view reconstructs a DocumentState from a cache
+                // entry rather than parsing, so no clock ran for it.
+                // Zero here means "not measured", which is what the
+                // profile handler must report (T1137).
+                last_parse_us: 0,
+                last_type_check_us: 0,
             }
         })
     }

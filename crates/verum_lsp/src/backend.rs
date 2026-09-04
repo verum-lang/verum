@@ -2297,35 +2297,35 @@ impl Backend {
         };
 
         // Collect real profile data from document analysis
+        // Every figure in the payload below is either read from a clock
+        // that ran, or read from analysis that ran, or reported as zero
+        // because the LSP does not perform that phase at all. Nothing is
+        // inferred from document size or from a function's NAME (T1137).
         let profile_data = self.documents.with_document(&uri, |doc| {
             let mut hot_spots = Vec::new();
-            let mut total_verification_time = 0u64;
-            let mut total_type_check_time = 0u64;
+            let mut total_cbgr_overhead_ns = 0u64;
 
             // Analyze symbols for profiling data
             for (name, info) in &doc.symbols {
                 if info.kind == VerumSymbolKind::Function {
-                    // Estimate verification time based on function complexity
                     let (start_line, _) = verum_common::span_utils::offset_to_line_col(
                         info.def_span.start as usize,
                         &doc.text,
                     );
 
-                    // Get CBGR cost info
-                    let cbgr_cost = info.cbgr_cost.as_ref();
-                    let tier = cbgr_cost.map(|c| c.tier).unwrap_or(0);
-                    let deref_cost_ns = cbgr_cost.map(|c| c.deref_cost_ns).unwrap_or(15);
-
-                    // Estimate times based on function characteristics
-                    let has_refinement = name.contains("verify") || name.contains("check");
-                    let verification_time = if has_refinement { 5000 } else { 100 };
-                    total_verification_time += verification_time;
-
-                    let type_check_time = 50u64; // Base time per function
-                    total_type_check_time += type_check_time;
+                    // A function CBGR analysis did not reach contributes
+                    // nothing. Defaulting it to tier 0 at the canonical
+                    // 15ns would list an unanalysed function as a hot
+                    // spot carrying a cost nobody measured (T1137).
+                    let Some(cbgr_cost) = info.cbgr_cost.as_ref() else {
+                        continue;
+                    };
+                    let tier = cbgr_cost.tier;
+                    let deref_cost_ns = cbgr_cost.deref_cost_ns;
 
                     // Add to hot spots if it has CBGR overhead
                     if tier == 0 && deref_cost_ns > 0 {
+                        total_cbgr_overhead_ns += deref_cost_ns;
                         hot_spots.push(serde_json::json!({
                             "functionName": name,
                             "file": uri_str.replace("file://", ""),
@@ -2339,13 +2339,17 @@ impl Backend {
                 }
             }
 
-            // Estimate parse time based on document size
-            let parse_time = (doc.text.len() / 100) as u64;
+            // Measured on the clock during the document's last reparse.
+            let parse_time = doc.last_parse_us;
+            let type_check_time = doc.last_type_check_us;
 
-            // Estimate codegen time
-            let codegen_time = doc.symbols.len() as u64 * 20;
+            // The LSP performs neither verification nor codegen. Zero is
+            // the honest report; a formula over symbol count would be a
+            // number the user could not act on.
+            let verification_time = 0u64;
+            let codegen_time = 0u64;
 
-            let total = parse_time + total_type_check_time + total_verification_time + codegen_time;
+            let total = parse_time + type_check_time + verification_time + codegen_time;
 
             // Generate recommendations based on analysis
             let mut recommendations = Vec::new();
@@ -2372,14 +2376,20 @@ impl Backend {
                 "compilationMetrics": {
                     "total": total,
                     "parsing": parse_time,
-                    "typeChecking": total_type_check_time,
-                    "verification": total_verification_time,
-                    "codegen": codegen_time
+                    "typeChecking": type_check_time,
+                    "verification": verification_time,
+                    "codegen": codegen_time,
+                    "unit": "microseconds"
                 },
+                // The LSP never executes the program, so no runtime
+                // figure can be measured here. cbgrOverhead is the one
+                // real quantity: the summed per-dereference cost that
+                // CBGR analysis assigned to tier-0 functions, in ns.
                 "runtimeMetrics": {
-                    "total": 1000,
-                    "businessLogic": 900,
-                    "cbgrOverhead": 100
+                    "total": 0,
+                    "businessLogic": 0,
+                    "cbgrOverhead": total_cbgr_overhead_ns,
+                    "measured": false
                 },
                 "hotSpots": hot_spots,
                 "recommendations": recommendations
@@ -2394,12 +2404,14 @@ impl Backend {
                     "parsing": 0,
                     "typeChecking": 0,
                     "verification": 0,
-                    "codegen": 0
+                    "codegen": 0,
+                    "unit": "microseconds"
                 },
                 "runtimeMetrics": {
                     "total": 0,
                     "businessLogic": 0,
-                    "cbgrOverhead": 0
+                    "cbgrOverhead": 0,
+                    "measured": false
                 },
                 "hotSpots": [],
                 "recommendations": []
