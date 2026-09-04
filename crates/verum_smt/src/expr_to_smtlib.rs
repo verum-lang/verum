@@ -1412,7 +1412,6 @@ fn fold_let_bindings(
     Some(folded)
 }
 
-/// Substitute every binding seen so far into `e`.
 /// Node count of an expression, abandoned once it passes `cap`.
 ///
 /// TERM SIZE IS THE QUANTITY THAT BLOWS UP (T1081).  `fold_let_bindings`
@@ -1422,11 +1421,13 @@ fn fold_let_bindings(
 /// 256 whether the term they build has forty nodes or a million.
 /// Measured — a chain of `let a_i = a_{i-1} + a_{i-1}`:
 ///
-///     bindings   peak RSS      wall
-///       8          534 MB      0.32 s
-///      12          534 MB      0.34 s
-///      16          855 MB      0.48 s
-///      20         6028 MB      6.30 s
+/// ```text
+/// bindings   peak RSS      wall
+///   8          534 MB      0.32 s
+///  12          534 MB      0.34 s
+///  16          855 MB      0.48 s
+///  20         6028 MB      6.30 s
+/// ```
 ///
 /// Doubling per binding, exactly as the substitution predicts, and
 /// `core/database/sqlite/native/builtins/math_fns.vr` — 343 lines —
@@ -1469,6 +1470,7 @@ fn charge_term_size(e: &Expr, size_budget: &mut usize) -> Option<()> {
     Some(())
 }
 
+/// Substitute every binding seen so far into `e`.
 fn apply_bindings(e: &Expr, bs: &[(String, Expr)]) -> Expr {
     let mut out = e.clone();
     for (bound, replacement) in bs {
