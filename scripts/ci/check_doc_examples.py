@@ -90,15 +90,23 @@ BLOCK = re.compile(r"^```verum\n(.*?)^```", re.M | re.S)
 # 12, blaming `core.collections.List`. Hence the controls below, which
 # run on every invocation: two that must resolve, two that must not.
 MOUNT = re.compile(r"^\s*(?:public\s+)?mount\s+(core(?:\.[A-Za-z_][A-Za-z0-9_]*)+)", re.M)
-# Modules the compiler SYNTHESISES — no file under core/, and mounting
-# them compiles. `core.prelude` is the one that matters: 531 files under
-# core-tests/ mount it, `mount core.prelude.{Bool, Int, Maybe, List,
-# Text};` type-checks clean, and an arbitrary absent module in the same
-# position answers `error<E402>`. A file-tree map cannot see it, so
-# without this list the gate reports a legal mount as phantom — it did,
-# and a documentation page was "corrected" on the strength of it before
-# the compiler was asked.
-SYNTHESISED_MODULES = {"core.prelude"}
+# A MODULE IS DECLARED, NOT DISCOVERED. `core/mod.vr:534` carries
+# `public module prelude { … }`, and `core/net/mod.vr:194` and
+# `core/sync/mod.vr:159` carry their own — 2315 `public module`
+# statements across core/, nine of them with an inline body. A map built
+# from the file tree sees none of that, so it calls a legal mount
+# phantom.
+#
+# Measured against the compiler, which is the authority here:
+#     mount core.prelude.*;            clean
+#     mount core.sync.prelude.*;       clean
+#     mount core.time.mod.*;           clean   <- explicit mod spelling
+#     mount core.zzz_control_absent.*; error<E402>
+#
+# 531 files under core-tests/ mount `core.prelude`. That number was the
+# tell: 531 files do not make one mistake together — and a documentation
+# page had already been "corrected" on the strength of the file map
+# before the compiler was asked.
 CORE = REPO / "core"
 # The four that remain are each documented AS absent on their own page
 # (a `:::caution`, a `:::danger`, or an "illustrative name" comment), so
@@ -150,21 +158,36 @@ def blocks():
             yield d.relative_to(DOCS.parent), line, body
 
 
+MODULE_DECL = re.compile(r"^\s*(?:pub|public)\s+module\s+([a-z_][a-z0-9_]*)\s*[;{]", re.M)
+
+
 def core_modules() -> dict[str, list[Path]]:
     mods: dict[str, list[Path]] = {}
     for f in sorted(CORE.rglob("*.vr")):
         parts = list(f.relative_to(REPO).with_suffix("").parts)
         if parts[-1] == "mod":
             parts = parts[:-1]
-        mods.setdefault(".".join(parts), []).append(f)
+        own = ".".join(parts)
+        mods.setdefault(own, []).append(f)
         for i in range(1, len(parts)):
             mods.setdefault(".".join(parts[:i]), [])
+        # A module can be DECLARED inside a file rather than being one.
+        # `core/mod.vr` declares `prelude`; `core/net/mod.vr` and
+        # `core/sync/mod.vr` declare theirs. Without this the map misses
+        # them and every mount of one reads as phantom.
+        for name in MODULE_DECL.findall(f.read_text(errors="ignore")):
+            mods.setdefault(f"{own}.{name}", [])
     return mods
 
 
 _EXPORTS: dict[str, set[str]] = {}
-_DECL = (r"^\s*public\s+(?:async\s+)?fn\s+([a-z_]\w*)", r"^\s*public\s+type\s+(\w+)",
-         r"^\s*public\s+(?:const|static)\s+(\w+)", r"^\s*public\s+context\s+(\w+)")
+# `pub` and `public` are BOTH legal visibility spellings — the grammar
+# accepts either, and `core/security/webauthn/attestation.vr` writes
+# `pub type AttestationType`. Reading only `public` made a legal
+# `mount …attestation.AttestationType` read as phantom.
+_VIS = r"^\s*(?:pub|public)\s+"
+_DECL = (_VIS + r"(?:async\s+)?fn\s+([a-z_]\w*)", _VIS + r"type\s+(\w+)",
+         _VIS + r"(?:const|static)\s+(\w+)", _VIS + r"context\s+(\w+)")
 
 
 def exports(mods, mod: str) -> set[str]:
@@ -175,16 +198,19 @@ def exports(mods, mod: str) -> set[str]:
         src = f.read_text(errors="ignore")
         for pat in _DECL:
             out |= set(re.findall(pat, src, re.M))
-        for grp in re.findall(r"^\s*public\s+mount\s+[\w.]*\.\{([^}]*)\}", src, re.M):
+        for grp in re.findall(r"^\s*(?:pub|public)\s+mount\s+[\w.]*\.\{([^}]*)\}", src, re.M):
             out |= {x.strip().split(" as ")[-1] for x in grp.split(",") if x.strip()}
-        for one in re.findall(r"^\s*public\s+mount\s+([\w.]+)\s*;", src, re.M):
+        for one in re.findall(r"^\s*(?:pub|public)\s+mount\s+([\w.]+)\s*;", src, re.M):
             out.add(one.rsplit(".", 1)[-1])
     _EXPORTS[mod] = out
     return out
 
 
 def mount_resolves(mods, path: str) -> bool:
-    if path in SYNTHESISED_MODULES or path in mods:
+    if path in mods:
+        return True
+    # `core.time.mod` names the mod file the map folded away.
+    if path.endswith(".mod") and path[: -len(".mod")] in mods:
         return True
     parent, _, leaf = path.rpartition(".")
     return parent in mods and leaf in exports(mods, parent)
