@@ -611,7 +611,21 @@ Re-measured on a binary built the same day, with `mem/capability/unit_test.vr` a
     math/autodiff/unit_test.vr     aug31 29  ->  sep04  0    STALE — not a defect at all
     logic/separation/unit_test.vr  aug31  5  ->  sep04  0    STALE — not a defect at all
 
-Two of five were the calendar, not the archive. The six original files survive this because their baked side was independently reproduced on a fresh binary by another session before any of them was recorded — which is the only reason the headline stands. The lesson generalises past this row: **the age of the compiler is an input to every baked-vs-source comparison**, and a stale binary reports the tree's PAST as the archive's fault. | P2 | `crates/verum_types/src/infer/modules.rs:16115,16335`; `crates/verum_types/src/infer/patterns.rs:788,1196`; `core-tests/sys/signal/property_test.vr:171`; `core/sys/signal.vr:152` | the same code binds the same way whether the enum is local or mounted |
+Two of five were the calendar, not the archive. The six original files survive this because their baked side was independently reproduced on a fresh binary by another session before any of them was recorded — which is the only reason the headline stands. The lesson generalises past this row: **the age of the compiler is an input to every baked-vs-source comparison**, and a stale binary reports the tree's PAST as the archive's fault.
+
+**RE-MEASURED ON A NAMED, IMMUTABLE SNAPSHOT — and the instrument is now part of the record.** A peer's live target directory is a MOVING target (v32, v33, v34 all pass through the same path), so "measured on their binary" states nothing. Everything below was measured on `verum_v32`, sha256 `1452fdec87f1d17e`, built 13:06 on 2026-09-04, copied out and never rewritten. Error-line counts, which include the trailing `compilation failed with N` line:
+
+    mem/capability/unit_test.vr        17 -> 0
+    mem/capability/regression_test.vr   9 -> 0
+    meta/span/integration_test.vr      16 -> 0
+    meta/token/unit_test.vr            51 -> 0
+    meta/token/property_test.vr        11 -> 0
+    meta/token/regression_test.vr       3 -> 0
+    meta/contexts/unit_test.vr         16 -> 0   (new)
+    meta/contexts/property_test.vr     18 -> 0   (new)
+    meta/attribute/unit_test.vr         3 -> 0   (new)
+
+NINE files. `math/autodiff` and `logic/separation` read 0 on this snapshot too, confirming they were the calendar and not the archive. The absent-method control still fires under the source-driven stdlib on this binary, so the zeros are resolutions that succeeded rather than checks that were skipped. | P2 | `crates/verum_types/src/infer/modules.rs:16115,16335`; `crates/verum_types/src/infer/patterns.rs:788,1196`; `core-tests/sys/signal/property_test.vr:171`; `core/sys/signal.vr:152` | the same code binds the same way whether the enum is local or mounted |
 
 | A-COG | ~~**A stdlib free function mounted by a NON-ENTRY cog module never resolves.**~~ **CLOSED 2026-09-04 (T1126)**. `src/reader.vr` mounts `core.encoding.json` and calls `stringify`; unless `src/main.vr` ALSO mounts it, the call compiles to a stub and dies at run time (`[lenient] stage-5 … stub never resolved`) while `verum check` reports zero errors. Builtin-type METHODS from the same module work, which is why most cog code never meets it. Carrier: the name harvester feeding `wanted` matched five `ItemKind` variants and ended in `_ => {}`, swallowing `ItemKind::Module`. | P0 | T1126 | a cog whose sibling module mounts a stdlib module the entry file never names runs correctly; spec `vcs/specs/L2-standard/modules/stdlib_mount_in_sibling_resolves.vr` |
 | A-SLICE | **`&record.field` coerces to an EMPTY slice for a slice-taking stdlib function.** `Text.from_utf8(&r.body)` on a 10-byte `List<Byte>` field returns `Ok("")`; `&r.body[..]`, a clone, and a user function taking `&List<Byte>` all read it correctly. Returns `Ok`, not `Err` — the caller gets a well-formed answer about no data. Affects every stdlib function with a `&[T]` parameter, and a struct field is the ordinary place to keep bytes. | P0 | T1130 | the boundary table in the task reproduces all-correct; a spec covering field / let-bound ref / local / param / clone |
