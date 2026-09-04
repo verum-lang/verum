@@ -70,7 +70,42 @@ impl<'s> CompilationPipeline<'s> {
         if !self.input_belongs_to_a_cog() {
             return Ok(());
         }
-        self.check_project()?;
+        // T1119 — THE CHECK RUNS IN A THROWAWAY SESSION, and that is
+        // the whole difference between this and the two attempts that
+        // were reverted.
+        //
+        // `check_project` compiles the project into whatever session it
+        // is given, REGISTERING every function it finds. Run against
+        // `self.session`, those registrations survive into the run
+        // path's own compilation, where the key is already taken by a
+        // sentinel FunctionId — so the real body never claims it and
+        // the interpreter dies on the stub:
+        //
+        //     Panic: [lenient] stage-5 qualified cross-module fn stub
+        //            never resolved (func_id=4269801471)
+        //
+        // Measured on a two-line cog: `module okcog.lib; public fn
+        // answer() -> Int { 42 }` plus a `mount` of it. The unresolved
+        // stub is the USER's `answer`, not anything from the stdlib —
+        // which is why the panic's own advice ("check for [lenient]
+        // SKIP warnings", "the producing stdlib module failed
+        // precompile") sends the reader nowhere: there are none, and
+        // there is no stdlib module involved.
+        //
+        // THE DIAGNOSTICS ARE THE POINT, so they are carried across
+        // explicitly. A probe session that swallowed them would restore
+        // the very defect this pre-pass exists to fix, by a quieter
+        // route. `diagnostics()` and `emit_diagnostics()` move the
+        // findings; nothing moves the symbol tables.
+        let mut probe_session =
+            crate::session::Session::new(self.session.options().clone());
+        let outcome = {
+            let mut probe =
+                crate::pipeline::CompilationPipeline::new(&mut probe_session);
+            probe.check_project()
+        };
+        self.session.emit_diagnostics(probe_session.diagnostics());
+        outcome?;
         Ok(())
     }
 
@@ -576,11 +611,27 @@ impl<'s> CompilationPipeline<'s> {
         // that EXECUTES. The same pre-pass, for the same reason: ask the
         // traversal that already walks every module rather than write a
         // third one.
-        // NOT here — see `ensure_project_type_checked`. Calling it before
-        // this path's own pipeline leaves state the interpreter cannot use:
-        // a correct cog then dies with `[lenient] stage-5 qualified
-        // cross-module fn stub never resolved`. Measured: v13 prints 42,
-        // v14 panics on the same source.
+        // T1119 — THE PRE-PASS IS HERE NOW, and what changed is not the
+        // argument for it but the way it runs.
+        //
+        // It was excluded because calling it left state the interpreter
+        // could not use: a correct cog died with `[lenient] stage-5
+        // qualified cross-module fn stub never resolved` (v13 printed
+        // 42, v14 panicked on the same source). That observation was
+        // RIGHT. I once argued the panic belonged to T1126 and would go
+        // away once that landed; T1126 landed, and the panic did not.
+        //
+        // The cause is that `check_project` REGISTERS what it compiles,
+        // and it was running against this very session — so the run
+        // path's own compilation found every cross-module key already
+        // held by a sentinel. `ensure_project_type_checked` now runs it
+        // in a throwaway session and carries only the diagnostics back.
+        //
+        // The control that decides this is the HAPPY PATH, not the
+        // defective one: a correct cog must still print 42. Counting
+        // errors on the broken cog went green for the wrong reason
+        // twice.
+        self.ensure_project_type_checked()?;
 
         // STDLIB-LOAD-COST-1 — source first, stdlib second.  See
         // `run_check_only` for the measurement; the ordering is what makes
