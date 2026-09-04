@@ -63,6 +63,7 @@ from __future__ import annotations
 import re
 import sys
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -77,6 +78,10 @@ KNOWN = REPO / "scripts" / "ci" / "type_name_collisions_known.txt"
 # one of them would have passed silently.  None of the 28 collides today,
 # which is exactly why the omission survived: fixing it changes no count.
 DECL = re.compile(r"^\s*(?:(?:public|pub)\s+)?type\s+(?:(?:affine|linear)\s+)?([A-Za-z_]\w*)")
+
+
+# Colliding names that carry an `implement` block — measured 2026-09-04.
+RISKY_BASELINE = 68
 
 
 def declares_a_type(line: str) -> str | None:
@@ -142,12 +147,28 @@ def strip_noise(text: str) -> list[str]:
     return out
 
 
+@lru_cache(maxsize=1)
+def corpus() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Every `core/` file read ONCE, noise stripped, as (path, lines).
+
+    Both extractors want the same 2558 files.  Reading them twice took
+    the gate past two minutes, which is how a correct gate gets disabled
+    for being slow — a cost this file has no reason to pay twice.
+    """
+    return tuple(
+        (
+            str(path.relative_to(REPO)),
+            tuple(strip_noise(path.read_text(errors="replace"))),
+        )
+        for path in sorted(CORE.rglob("*.vr"))
+    )
+
+
 def collisions() -> dict[str, list[str]]:
     """`{type name: [repo-relative paths]}` for names declared in >1 file."""
     where: dict[str, set[str]] = defaultdict(set)
-    for path in sorted(CORE.rglob("*.vr")):
-        rel = str(path.relative_to(REPO))
-        for line in strip_noise(path.read_text(errors="replace")):
+    for rel, lines in corpus():
+        for line in lines:
             name = declares_a_type(line)
             if name:
                 where[name].add(rel)
@@ -167,6 +188,52 @@ def read_known() -> set[str]:
         if ln.strip() and not ln.startswith("#")
     }
 
+
+IMPL_HEAD = re.compile(r"^implement(?:<[^>]*>)?\s+(.*?)\s*\{")
+
+
+def impl_target(line: str) -> str | None:
+    """The TYPE an `implement` block attaches methods to, or None.
+
+    Both forms attach to the same place and both matter here:
+
+        implement AeadKind { ... }                    -> AeadKind
+        implement<T> Future for SelectReadyFuture<T>  -> SelectReadyFuture
+
+    Reading the FIRST identifier is wrong for the second form — it
+    yields the protocol.  That error cost a control: `ReadyFuture`,
+    whose archive symptom is an associated-type mismatch, fell out of
+    the subset entirely while three other controls landed and made the
+    count look right.
+    """
+    m = IMPL_HEAD.match(line)
+    if not m:
+        return None
+    head = m.group(1)
+    if " for " in head:
+        head = head.split(" for ", 1)[1]
+    t = re.match(r"\s*([A-Z][A-Za-z0-9_]*)", head)
+    return t.group(1) if t else None
+
+
+def carries_methods() -> set[str]:
+    """Every type name that some `implement` block attaches methods to."""
+    names: set[str] = set()
+    for _rel, lines in corpus():
+        for line in lines:
+            t = impl_target(line)
+            if t:
+                names.add(t)
+    return names
+
+
+IMPL_SELF_TEST_CASES = [
+    ("implement AeadKind {", "AeadKind"),
+    ("implement<T> Future for SelectReadyFuture<T> {", "SelectReadyFuture"),
+    ("implement Display for PathError {", "PathError"),
+    ("implement<T: Clone> Foo<T> {", "Foo"),
+    ("type Point is { x: Float };", None),
+]
 
 SELF_TEST_CASES = [
     # (source line, the name it declares — or None)
@@ -203,10 +270,23 @@ def self_test() -> int:
         if got != want:
             bad += 1
             print(f"FAIL {src!r} -> {got!r}, expected {want!r}", file=sys.stderr)
+    # The second extractor ships with its control for the same reason.
+    # Reading the FIRST identifier after `implement` yields the PROTOCOL
+    # in the `implement P for T` form; that error dropped `ReadyFuture`
+    # out of the risky subset while three other controls still landed,
+    # so the count looked right and was not.
+    for src, want in IMPL_SELF_TEST_CASES:
+        got = impl_target(src)
+        if got != want:
+            bad += 1
+            print(f"FAIL impl {src!r} -> {got!r}, expected {want!r}", file=sys.stderr)
     if bad:
         print(f"self-test: {bad} of {len(SELF_TEST_CASES)} case(s) FAILED", file=sys.stderr)
         return 1
-    print(f"[ok] self-test: {len(SELF_TEST_CASES)} extractor case(s) hold")
+    print(
+        f"[ok] self-test: {len(SELF_TEST_CASES)} type case(s) + "
+        f"{len(IMPL_SELF_TEST_CASES)} implement case(s) hold"
+    )
     return 0
 
 
@@ -273,9 +353,44 @@ def main() -> int:
         )
         return 1
 
+    # SECOND RATCHET — the subset that can actually LOSE something.
+    #
+    # A collision is only harmful when one of the colliding names has
+    # methods to lose.  archive_metadata.rs keys a method descriptor
+    # under the BARE `{Type}.{method}` and the insert is first-wins, so
+    # the second declarer's methods never enter the archive at all.
+    # Measured 2026-09-04: six core-tests files, 67 diagnostics, every
+    # one of them clean against a source-driven stdlib.  Register A55.
+    #
+    # The total above cannot see this subset move.  Swap one benign
+    # collision for one that carries an `implement` block and the count
+    # is unchanged while the exposure grows — exactly the drift a
+    # coverage ratchet legitimises instead of catching.
+    risky = sorted(n for n in coll if n in carries_methods())
+    risky_decls = sum(len(coll[n]) for n in risky)
+    if len(risky) > RISKY_BASELINE:
+        print(
+            f"\n[fail] {len(risky)} colliding type name(s) carry an "
+            f"`implement` block (baseline {RISKY_BASELINE})."
+        )
+        print("    These are the ones whose methods the archive can drop:")
+        for name in risky[:20]:
+            print(f"    {name}  in  {', '.join(coll[name])}")
+        if len(risky) > 20:
+            print(f"    \u2026 and {len(risky) - 20} more")
+        print(
+            "\nRename one side, or re-record the baseline in a commit that\n"
+            "says why one more method-bearing collision is acceptable."
+        )
+        return 1
+
     print(
         f"[ok] type-name ratchet holds: {len(coll)} colliding name(s), "
         f"{len(pairs)} declaration(s), none new"
+    )
+    print(
+        f"[ok] method-bearing subset holds: {len(risky)} name(s), "
+        f"{risky_decls} declaration(s) (baseline {RISKY_BASELINE})"
     )
     return 0
 
