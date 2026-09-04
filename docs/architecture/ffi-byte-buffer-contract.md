@@ -17,7 +17,7 @@ patterns below → `sent=4`, `recv=4`, payload bytes `112,105,110,103`
 
 ---
 
-## 0. TL;DR — the five rules
+## 0. TL;DR — the seven rules
 
 1. A byte buffer destined for a C `void*` MUST be a **packed `[Byte; N]`**
    (annotated), never a bare `[0_u8; N]`.
@@ -31,6 +31,15 @@ patterns below → `sent=4`, `recv=4`, payload bytes `112,105,110,103`
    sin_family@1 }`, Linux/Windows `{ sin_family@0 (LE 16-bit) }`.
    `serialize_socket_addr` / `deserialize_socket_addr` must agree with the
    target's kernel on every field offset.
+6. **A reference to a SCALAR or a RECORD is never a C pointer.** `&val`
+   on an `Int32` local is the address of a NaN-boxed register slot;
+   `&rec` on a record is the address of its `ObjectHeader`. Serialise
+   into a packed `[Byte; N]` and pass `&buf[..]`.
+7. **An FFI wrapper takes `&[Byte]` / `&mut [Byte]`, never `&unsafe
+   Byte`.** Taking the raw pointer forces every CALLER to produce it,
+   and the call site is the one position where `.as_ptr()` returns the
+   object header (rule 3). Take the slice and produce the pointer
+   inside.
 
 ---
 
@@ -102,6 +111,42 @@ transmute(buf)` and handed `recvfrom` the fat-ref struct bits, so the
 datagram was written into the descriptor, not the buffer (recv silently
 returned a zero-payload). Fixed to `buf.as_mut_ptr()` — matching the
 already-correct `safe_getsockname`. (`core/sys/darwin/libsystem.vr`.)
+
+## 4b. Scalars and records are not buffers (T1135)
+
+> **`&scalar as &unsafe Byte` and `&record as &unsafe Byte` both hand C
+> a heap address that is not the data.** A scalar local lives in a
+> NaN-boxed register slot — eight tagged bytes where the callee reads
+> four clean ones. A record's address is its `ObjectHeader`.
+
+Measured 2026-09-04. `safe_setsockopt` took `optval: &unsafe Byte`, so
+each of its four callers produced the pointer itself, and all four
+produced the wrong one in three different shapes:
+
+```verum
+safe_setsockopt(fd, level, optname, &val as &unsafe Byte, 4)          // scalar
+safe_setsockopt(fd, SOL_SOCKET, optname, timeval.as_ptr() as ..., 16) // raw array (rule 3)
+safe_setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq as ..., 8)   // record
+```
+
+`core/sys/linux/syscall.vr` mirrors all four. The consequence is not a
+crash: on both platforms `SO_NOSIGPIPE`, `SO_KEEPALIVE`, `SO_BROADCAST`,
+`SO_SNDBUF`, `SO_RCVBUF`, socket timeouts and IPv4 multicast join/leave
+wrote header bytes into the option and reported success.
+
+**Only the scalar form fails loudly**, because the marshaller has no
+conversion for a boxed register slot and refuses it — `unsupported
+conversion from Unknown to Ptr`. The array and record forms produce a
+pointer, so they are accepted. The loud failure is the lucky one, and
+an acceptance that checks "no FFI error" cannot see the other two.
+
+**So the acceptance for any SET across this boundary is a GET.** Set the
+option, read it back, compare. A write that lands in the wrong bytes
+reports success on every channel except the read.
+
+The repair is rule 7: the wrapper takes `&[Byte]` and calls `.as_ptr()`
+itself. `safe_getsockopt` already had that shape; the asymmetry between
+get and set was the defect.
 
 ## 5. sockaddr layout is per-platform
 
