@@ -91,6 +91,44 @@ modules = [
 # what would have to change for the entry to go away.  Adding one is a
 # decision, and its diff is where that decision gets reviewed.
 [exceptions]
+"random.deterministic -> math.constants" = """
+Box-Muller needs `PI`; `core/random/deterministic.vr` is a numerical
+sampler and a normal deviate cannot be produced without it.
+
+Paired with the `math.elementary` exception below — same module, same
+reason, and both are narrower than they were: the `Vector` dependency
+that used to sit alongside them is GONE, moved to `core/math/
+random_vec.vr` at ring 3, so what remains is scalar transcendentals and
+two constants.
+
+Why not the three alternatives:
+
+* Move `random.deterministic` UP.  `math.tensor` and `math.simple`
+  (ring 2) mount it, so raising it makes those edges upward instead —
+  the violation moves, it does not go.
+* Move `math.elementary` / `math.constants` DOWN.  Measured: exactly
+  ONE module at ring <= 1.5 mounts `math.*`, and it is this one.  A
+  foundation reshaped for a single consumer is the widening the law
+  forbids, wearing the other hat.
+* Split the scalar generators out too.  That is most of the file —
+  `normal_01`, `exponential`, `gamma`, everything transcendental — and
+  leaves `random.deterministic` holding only `uniform_01`, which is
+  what `random.secure` already is.
+
+This edge was INVISIBLE until 2026-09-04: the file MOVED, its relative
+imports moved with it, and `mount super.constants` came to name
+`core/random/constants` — absent, silent, read as nil (row A38).  T1143
+made them absolute and the gate went red on a dependency the module has
+always had.
+"""
+
+"random.deterministic -> math.elementary" = """
+`sqrt`, `log`, `cos`, `sin`, `exp`, `abs`, `floor` — Box-Muller for
+`normal_01`, inverse-CDF for `exponential`, and the rest of the
+distribution family.  See the `math.constants` entry above for why the
+three ways of removing the edge are each worse than declaring it.
+"""
+
 "base.memory -> mem" = """
 `core/base/memory.vr` is the CBGR reference model — validity, generations,
 capability bits — and it calls the allocator: `cbgr_alloc`,
@@ -323,7 +361,7 @@ modules = [
     # `async.channel`, `stack_model` mounts `action.articulation`. They
     # sit in `math/` by topic and belong to the runtime layer by
     # dependency.
-    "math.distributed", "math.stack_model",
+    "math.distributed", "math.random_vec", "math.stack_model",
     # A COORDINATE VOCABULARY — `Ordinal`, `MsfsCoord` and their
     # constructors (467 lines) — mounting only `action.articulation`.
     # `math.frameworks.registry` names those coordinates and

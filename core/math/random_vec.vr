@@ -1,0 +1,121 @@
+// Vector-valued sampling.
+//
+// These live here rather than in `core/random/deterministic.vr` because
+// they need `Vector` from `core.math.linalg`. `random` is ring 1.5 and
+// `math` is ring 2, so the dependency would be an upward edge — the one
+// thing the ring law forbids. Ring 3 is above both, which is where
+// `math.distributed` and `math.stack_model` already sit for the same
+// reason.
+//
+// The scalar generators stay where they are: they need no `Vector`, and
+// a byte-primitive module is the right home for them.
+
+mount core.math.linalg.{Vector};
+mount core.random.deterministic.{RandomKey, uniform_01, uniform, normal_01, normal, exponential};
+mount core.math.elementary.{log, exp};
+
+// Sample n uniform values in [0, 1)
+public fn uniform_vec(key: RandomKey, n: USize) -> Vector<Float> {
+    let keys = key.split_n(n);
+    let mut v = Vector.zeros(n);
+    for i in 0..n {
+        v.set(i, uniform_01(keys[i]));
+    }
+    v
+}
+
+// Sample n uniform values in [low, high)
+public fn uniform_range_vec(key: RandomKey, n: USize, low: Float, high: Float) -> Vector<Float> {
+    let keys = key.split_n(n);
+    let mut v = Vector.zeros(n);
+    for i in 0..n {
+        v.set(i, uniform(keys[i], low, high));
+    }
+    v
+}
+
+// Sample n values from standard normal distribution
+public fn normal_vec(key: RandomKey, n: USize) -> Vector<Float> {
+    let keys = key.split_n(n);
+    let mut v = Vector.zeros(n);
+    for i in 0..n {
+        v.set(i, normal_01(keys[i]));
+    }
+    v
+}
+
+// Sample n values from normal distribution
+public fn normal_vec_params(key: RandomKey, n: USize, mean: Float, std: Float) -> Vector<Float> {
+    let keys = key.split_n(n);
+    let mut v = Vector.zeros(n);
+    for i in 0..n {
+        v.set(i, normal(keys[i], mean, std));
+    }
+    v
+}
+
+// Sample n values from exponential distribution
+public fn exponential_vec(key: RandomKey, n: USize, rate: Float) -> Vector<Float> {
+    let keys = key.split_n(n);
+    let mut v = Vector.zeros(n);
+    for i in 0..n {
+        v.set(i, exponential(keys[i], rate));
+    }
+    v
+}
+
+// Sample from categorical distribution given probabilities
+// Returns index in [0, probs.len())
+public fn categorical(key: RandomKey, probs: &Vector<Float>) -> USize {
+    let u = uniform_01(key);
+    let mut cumsum = 0.0;
+
+    for i in 0..probs.len() {
+        cumsum = cumsum + probs.get(i);
+        if u < cumsum {
+            return i;
+        }
+    }
+
+    // Edge case: return last index
+    probs.len() - 1
+}
+
+// Sample from categorical distribution given log-probabilities (numerically stable)
+public fn categorical_logits(key: RandomKey, logits: &Vector<Float>) -> USize {
+    // Gumbel-max trick: argmax(logits + gumbel_noise)
+    let n = logits.len();
+    let keys = key.split_n(n);
+
+    let mut max_val = -1e300;
+    let mut max_idx = 0;
+
+    for i in 0..n {
+        let u = uniform_01(keys[i]);
+        let ln_u: Float = log(u + 1e-300);
+        let ln_neg_ln_u: Float = log((-1.0 * ln_u) + 1e-300);
+        let gumbel = -1.0 * ln_neg_ln_u;
+        let val = logits.get(i) + gumbel;
+        if val > max_val {
+            max_val = val;
+            max_idx = i;
+        }
+    }
+
+    max_idx
+}
+
+// Sample from multinomial distribution
+// Returns counts for each category
+public fn multinomial(key: RandomKey, probs: &Vector<Float>, n: USize) -> Vector<Float> {
+    let k = probs.len();
+    let mut counts = Vector.zeros(k);
+    let keys = key.split_n(n);
+
+    for i in 0..n {
+        let idx = categorical(keys[i], probs);
+        counts.set(idx, counts.get(idx) + 1.0);
+    }
+
+    counts
+}
