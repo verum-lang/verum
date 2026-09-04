@@ -8567,6 +8567,29 @@ impl TypeChecker {
                 // The actual type checking will happen later if needed
                 let _ = self.register_function_signature(func);
             }
+            // A NAME DECLARED IN `@ffi(...) extern { }` IS A FUNCTION
+            // SIGNATURE TOO (T1085). Two sibling walks in this file
+            // already say so — the module-items pass at ~line 512 and
+            // the one at ~333 — and this one did not, so a mounted
+            // extern name reached its call site unbound:
+            //
+            //     mount lib.{getpid};        resolves, no E401
+            //     unsafe { getpid() }        error<E100>: unbound variable
+            //
+            // Measured with `VERUM_TRACE_TASK21`: at the mount gate the
+            // extern and a plain sibling are INDISTINGUISHABLE —
+            // `export_hit=true raw_kind=Some(Function)` for both — and
+            // only the extern falls through to the one-hop descriptor
+            // search, which answers `candidates=0` because it searches
+            // stdlib metadata a user module was never in.
+            //
+            // Being in the module surface is not being bound (T1088);
+            // the surface said yes and nothing defined the name.
+            if let ItemKind::ExternBlock(extern_block) = &item.kind {
+                for func in &extern_block.functions {
+                    let _ = self.register_function_signature(func);
+                }
+            }
         }
 
         self.current_module_path = saved_module_path_pre;
