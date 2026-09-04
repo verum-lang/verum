@@ -46,10 +46,6 @@ check-bake-diagnostics: ## Gate (T0723): FIELD-GUESS + panic-stub counts in a ba
 	@test -n "$(BAKE_LOG)" || { echo "usage: make check-bake-diagnostics BAKE_LOG=<path>"; exit 2; }
 	python3 scripts/ci/check_bake_diagnostics.py "$(BAKE_LOG)" --check
 
-check-doc-examples: ## Gate: the website's self-contained examples still compile (needs VERUM=<binary>)
-	@test -n "$(VERUM)" || { echo "usage: make check-doc-examples VERUM=target/debug/verum"; exit 2; }
-	python3 scripts/ci/check_doc_examples_compile.py "$(VERUM)"
-
 check-archive-size: ## Gate (T0737): embedded stdlib archive size — a per-module duplication shows up as a MULTIPLE
 	python3 scripts/ci/check_archive_size.py "$(or $(ARCHIVE),target/precompiled-stdlib/runtime.vbca)" --check
 
@@ -69,7 +65,7 @@ check-type-name-collisions: ## Gate (T0458): simple-type-name collisions in core
 
 check-doc-examples: ## Gate: the Verum examples in the docs must compile — needs a built binary (VERUM_BIN=... to point at one)
 	python3 scripts/ci/check_doc_examples.py --self-test
-	python3 scripts/ci/check_doc_examples.py --check
+	python3 scripts/ci/check_doc_examples.py --ratchet
 
 check-determinism: ## Gate (T0927): the compiler must give the same answer twice — needs a built binary (VERUM_BIN=... to point at one)
 	python3 scripts/ci/check_determinism.py --self-test

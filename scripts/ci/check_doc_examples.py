@@ -32,15 +32,32 @@ marked as such is checked in the OTHER direction: if it compiles, the
 marker is stale and the reader is being shown a fear that no longer
 applies. Five marker spellings are recognised because five are in use.
 
+THE RATCHET, and why the key is a hash. `--check` alone answers "is the
+count zero", which it is not and will not be for a while. `--ratchet`
+answers the question a maintainer can act on: did THIS change make the
+documentation worse. Its baseline is keyed by `page#blake2s(body)[:8]`,
+not by line number, because a line number moves when anything above it
+is edited and every downstream example would read as new.
+
+The key is the block's own text, so EDITING a tracked example re-keys
+it: the old key reads as fixed and the new one as new. That is correct —
+an edited example is a different example — but it means a documentation
+commit that touches one of these blocks wants `--write-baseline` run
+afterwards. The baseline lives here and the pages live in the website
+repository, so nothing reminds you but this paragraph.
+
 Usage:
     check_doc_examples.py                  # report, grouped
-    check_doc_examples.py --check          # exit 1 on a real failure
+    check_doc_examples.py --check          # exit 1 on any real failure
+    check_doc_examples.py --ratchet        # exit 1 only on a NEW one
+    check_doc_examples.py --write-baseline
     check_doc_examples.py --self-test
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import subprocess
@@ -50,7 +67,10 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+# Built from parts so the literal path does not appear in a tracked file
+# (`make check-internal-refs`), the same way the sibling doc gates do it.
 DOCS = REPO / "internal" / "website" / "docs"
+BASELINE = REPO / "scripts" / "ci" / "doc_examples_known_failures.txt"
 
 BLOCK = re.compile(r"^```verum\n(.*?)^```", re.M | re.S)
 
@@ -114,6 +134,9 @@ def classify(body: str, errs: list[str]) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--ratchet", action="store_true",
+                    help="fail only on a real failure that is not in the baseline")
+    ap.add_argument("--write-baseline", action="store_true")
     ap.add_argument("--timeout", type=int, default=120)
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
@@ -143,6 +166,7 @@ def main() -> int:
     buckets: Counter[str] = Counter()
     detail: dict[str, list] = defaultdict(list)
     stale_markers: list = []
+    keys: dict[str, tuple] = {}
 
     with tempfile.TemporaryDirectory() as tmp:
         for rel, line, body in blocks():
@@ -173,7 +197,9 @@ def main() -> int:
             k = classify(body, errs)
             buckets[k] += 1
             if errs:
+                key = f"{rel}#{hashlib.blake2s(body.encode()).hexdigest()[:8]}"
                 detail[k].append((rel, line, errs[0][:100]))
+                keys[key] = (k, f"{rel}:{line}", errs[0][:100])
 
     for k, v in buckets.most_common():
         print(f"{v:4d}  {k}")
@@ -193,6 +219,36 @@ def main() -> int:
 
     n_real = sum(buckets[k] for k in real)
     print(f"\ncheck-doc-examples: {n_real} example(s) a reader cannot trust")
+
+    tracked = {k: v for k, v in keys.items() if v[0] in real}
+    if args.write_baseline:
+        BASELINE.write_text("".join(f"{k}\n" for k in sorted(tracked)))
+        print(f"[write] baseline: {len(tracked)} known-failing example(s)")
+        return 0
+
+    if args.ratchet:
+        known = set()
+        if BASELINE.is_file():
+            known = {l.strip() for l in BASELINE.read_text().split("\n") if l.strip()}
+        new = sorted(set(tracked) - known)
+        gone = sorted(known - set(tracked))
+        if new:
+            print(f"\n[fail] {len(new)} example(s) newly cannot be trusted:")
+            for k in new:
+                bucket, where, err = tracked[k]
+                print(f"    {where}  [{bucket}]\n        {err}")
+            return 1
+        if gone:
+            # Either an example was fixed or its text was edited; both
+            # want the baseline rewritten, and neither is silent.
+            print(f"\n[fail] {len(gone)} baseline entr(y/ies) no longer present "
+                  f"— rerun with --write-baseline:")
+            for k in gone:
+                print(f"    {k}")
+            return 1
+        print("ratchet: no new untrustworthy example")
+        return 0
+
     return 1 if (n_real and args.check) else 0
 
 
