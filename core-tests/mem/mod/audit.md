@@ -120,8 +120,7 @@ in this directory):
 | `unit_test.vr` | `test_use_after_free_error_message_contains_type_name`                  | `.message()` → `self.type_name` |
 | `unit_test.vr` | `test_use_after_free_error_eq_distinct_on_type_name`                    | `.eq()` → `self.type_name == other.type_name` |
 
-**Fundamental fix surface** (multi-day VBC codegen work — see
-`memory/use_after_free_error_field_shift_2026-05-27.md`):
+**Fundamental fix surface** (multi-day VBC codegen work):
 
 1. `compile_function` in `core/mem/mod.vr` context must propagate the
    enclosing receiver-type binding (`UseAfterFreeError` for the impl

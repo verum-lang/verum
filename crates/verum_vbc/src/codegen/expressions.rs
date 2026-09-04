@@ -11544,9 +11544,12 @@ impl VbcCodegen {
         // body or auto-stub at runtime. At Tier-0 generic-erasure there
         // is no runtime witness for T, so the safe primitive identity is
         // hard-coded: `default → 0`, `zero → 0`, `one → 1`.
-        // Cross-ref: memory/callg_emission_fix_blueprint_2026-05-19.md
-        // documents the fundamental monomorphisation fix that closes the
-        // non-primitive-T cases properly.
+        // T0622 landed the witness channel used just below: a named
+        // fn/impl type param with a known position takes the LoadT
+        // {Generic} + CallM form and resolves to the concrete type when
+        // a CallG witness is delivered.  An associated-type projection
+        // (`Self.Item`) has no witness index and still falls to the
+        // literal — that is the remaining non-primitive-T gap.
         let task17_primitive_identity = match method.name.as_str() {
             "default" | "zero" => Some(0i64),
             "one" => Some(1i64),

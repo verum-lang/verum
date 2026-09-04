@@ -12,7 +12,7 @@
 /// The measurement body becomes active once the Phase 7 AES-NI
 /// lowering lands and the `Aes128Gcm` type is addressable from a
 /// bench module without colliding with the `AeadKind` variant of
-/// the same name (tracked in memory/feedback_explicit_mount_glob_shadow.md).
+/// the same name (gated by `sqlite_native_naming_hygiene.rs`).
 ///
 /// Until then this file exists as a §11 target declaration so the
 /// vbench scheduler can see the benchmark and honor the expected-

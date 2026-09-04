@@ -16,8 +16,9 @@
 //! accidentally shadow — types and variant constructors that carry critical
 //! "stdlib protocol" meaning.
 //!
-//! Spec: see `sqlite-native spec` and
-//! `memory/feedback_explicit_mount_glob_shadow.md` for prior incidents.
+//! Spec: see `sqlite-native spec`.  Prior incidents: a bench or module
+//! that mounts a type whose simple name collides with a variant of the
+//! same name silently binds the variant — this test is the gate.
 
 use std::fs;
 use std::path::{Path, PathBuf};

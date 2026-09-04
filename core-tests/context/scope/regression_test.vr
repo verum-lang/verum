@@ -54,7 +54,8 @@ fn regression_bare_transient_collision_workaround_via_qualification() {
 // type-tracking for the resulting value drops the `Scope` association
 // in some compile paths — method dispatch then picks a `.name()` from
 // another type. Same class as the broader `T.method()` dispatch hazard
-// pinned in MEMORY task #17/#26 (memory/callg_emission_fix_blueprint).
+// carried by the Phase 0 generic-identity intercept in
+// `crates/verum_vbc/src/codegen/expressions.rs` (T0622).
 //
 // Worse: `Singleton.can_depend_on(Scope.Request)` returned `true`
 // instead of `false` — the dispatch picked an "always-true" method

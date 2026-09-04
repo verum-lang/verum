@@ -7,8 +7,8 @@
 //   §A — Generic `InterruptCell<T>` constructor properly substitutes
 //        T at the use site. The constructor goes through
 //        `UnsafeCell.new(value)` internally, and a regression class
-//        of generic-arg substitution defects (tracked under task #26
-//        in `MEMORY.md`) could break the construction.
+//        of generic-arg substitution defects could break the
+//        construction.
 // =============================================================================
 
 mount core.prelude.*;

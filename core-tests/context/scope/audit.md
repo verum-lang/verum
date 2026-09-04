@@ -92,8 +92,8 @@ Pinned in `regression_qualified_singleton_name_returns_singleton` and
 `regression_qualified_singleton_can_depend_on_only_singleton`.
 
 **Upstream fix:** the same task #17/#39 mount-scope-aware lookup,
-plus the broader `T.method()` method-resolution fix
-(memory/callg_emission_fix_blueprint_2026-05-19.md). When the bare
+plus the broader `T.method()` method-resolution fix (the generic
+witness channel landed under T0622). When the bare
 variant value reaches method dispatch, the type-context required for
 correct method resolution must be preserved through the value
 construction. Today it is dropped.
