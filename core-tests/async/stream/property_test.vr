@@ -110,7 +110,7 @@ fn property_stream_repeat_n_size_hint_at_construction_matches_n() {
 fn property_stream_empty_poll_next_returns_ready_none() {
     let mut s: StreamEmpty<Int> = stream_empty();
     let mut cx = noop_context();
-    let result = s.poll_next(&mut cx);
+    let result: Poll<Maybe<Int>> = s.poll_next(&mut cx);
     match result {
         Poll.Ready(Maybe.None) => assert(true),
         _ => panic("stream_empty must yield Poll.Ready(Maybe.None) on first poll"),
@@ -123,7 +123,7 @@ fn property_stream_empty_repeated_polls_stay_none() {
     let mut cx = noop_context();
     let mut i = 0;
     while i < 5 {
-        let result = s.poll_next(&mut cx);
+        let result: Poll<Maybe<Int>> = s.poll_next(&mut cx);
         match result {
             Poll.Ready(Maybe.None) => {}
             _ => panic("stream_empty must remain Poll.Ready(Maybe.None) on repeated polls"),
@@ -234,7 +234,7 @@ fn property_stream_from_fn_follows_generator_termination() {
         Poll.Ready(Maybe.Some(v)) => assert_eq(v, 30),
         _ => panic("third poll must yield Maybe.Some(30)"),
     }
-    let p4 = s.poll_next(&mut cx);
+    let p4: Poll<Maybe<Int>> = s.poll_next(&mut cx);
     match p4 {
         Poll.Ready(Maybe.None) => assert(true),
         _ => panic("fourth poll must yield Maybe.None when generator exhausts"),
