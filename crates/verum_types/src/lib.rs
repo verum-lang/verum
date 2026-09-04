@@ -2223,6 +2223,32 @@ impl TypeError {
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
+                // T1142: `verum_diagnostics::recovery` knows how to turn
+                // this exact pair into a concrete Verum fix and had ZERO
+                // production callers — the advice was written, tested,
+                // and never offered to anyone. Both types are in hand
+                // here, which is why this is the site.
+                //
+                // ONLY actions carrying a `code_change` are surfaced.
+                // The module also returns a generic hint keyed on the
+                // context word alone ("Consider changing the variable's
+                // type annotation", recovery.rs:388) which fires for
+                // every mismatch regardless of the types; appending that
+                // to every E400 would add a content-free line to every
+                // type error in the language. It stays available to an
+                // IDE reading the module directly. Pinned by
+                // verum_diagnostics/tests/type_mismatch_advice_tests.rs.
+                for action in verum_diagnostics::recovery::ErrorRecovery::new()
+                    .suggest_fixes_for_type_mismatch(
+                        &expected.to_string(),
+                        &actual.to_string(),
+                        "assignment",
+                    )
+                    .iter()
+                    .filter(|a| a.code_change.is_some())
+                {
+                    builder = builder.help(action.description.clone());
+                }
                 builder.build()
             }
 
