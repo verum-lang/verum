@@ -173,6 +173,7 @@ theorem set_trigger<T: Eq>(s: Set<T>, t: Set<T>)
 {
     // Membership tests trigger quantifier
     proof by smt
+}
 
 /// Function injectivity trigger
 @trigger(f(x), f(y))
