@@ -14,9 +14,11 @@
 //!
 //! The contracts ARE enforced, by the SMT path, and the mode decides:
 //!
+//! ```text
 //!     verum check f.vr             0 errors  (SMT skipped by design)
 //!     verum check --verify f.vr    1 error
 //!     verum verify f.vr            "1 proved, 1 failed"
+//! ```
 //!
 //! on `pure fn f(n: Int) -> Int requires n >= 0 { n }` called as
 //! `f(-1)`. So there is no gap in enforcement — there was a gap between

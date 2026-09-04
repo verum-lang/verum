@@ -16011,12 +16011,14 @@ impl TypeChecker {
     /// generic, parameter position — by five controls, two of them
     /// measured by another session:
     ///
+    /// ```text
     ///     param of an ARCHIVE generic record      E103
     ///     param of a PROJECT generic record       works
     ///     param of an archive NON-generic record  works
     ///     LOCAL BINDING of the same archive value works
     ///     all three mount forms                   identical, so the
     ///                                             mount form is not it
+    /// ```
     ///
     /// Substitution reuses `substitute_variant_args_positionally`'s
     /// staging by construction: the record is wrapped as a one-case

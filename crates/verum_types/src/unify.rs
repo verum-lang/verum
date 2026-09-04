@@ -178,6 +178,7 @@ pub struct Unifier {
 /// through a bounded parameter had no result type. Measured 2026-09-03,
 /// two files differing in one thing:
 ///
+/// ```text
 ///     fn via_bound<U, F: fn(Int) -> List<U>>(f: F) -> Int {
 ///         let inner = f(1);           // error<E404>: `inner` is `_`
 ///         inner.len()
@@ -186,6 +187,7 @@ pub struct Unifier {
 ///         let inner = f(1);           // clean
 ///         inner.len()
 ///     }
+/// ```
 ///
 /// `bind_var` permits the call — a bounded parameter may take a function
 /// shape, because the bound promised one — but the table recorded only

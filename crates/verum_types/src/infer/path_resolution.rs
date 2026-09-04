@@ -1965,10 +1965,12 @@ impl TypeChecker {
 /// Measured 2026-09-03, parameter position, one value of difference between
 /// subject and control:
 ///
+/// ```text
 ///     fn f(x: Blorbulator<Int>)  ->  error<E101>: type not found   REFUSED
 ///     fn f(x: Box<Int>)          ->  0 errors                      ACCEPTED
 ///     fn f(x: HashMap<Text,Int>) ->  0 errors                      ACCEPTED
 ///     fn f(x: Arc<Int>)          ->  0 errors                      ACCEPTED
+/// ```
 ///
 /// `Box`, `HashMap` and `Arc` are three of the SEVENTY-FOUR names on
 /// `is_wellknown_type_name`'s list that `core/` declares nowhere — and three

@@ -1912,11 +1912,13 @@ impl PropertyCollector {
     /// The distinction is load-bearing and I got it wrong first: with
     /// every `let` counted as local,
     ///
+    /// ```text
     ///     pure fn sneaky(out: &mut List<Int>) -> Int {
     ///         let alias = out;
     ///         alias.push(1);
     ///         0
     ///     }
+    /// ```
     ///
     /// checked CLEAN — a function that mutates the caller's list,
     /// declared pure and accepted. Binding a parameter to a new name is

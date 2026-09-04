@@ -66,9 +66,11 @@ pub struct CoreMetadata {
     /// stdlib's five `public static` declarations crossed a module
     /// boundary, and the three mount forms disagreed about it:
     ///
+    /// ```text
     ///     mount core.mem.epoch.{GLOBAL_EPOCH};   error<E401> cannot find
     ///     mount core.mem.epoch.*;                accepted…
     ///     let e = GLOBAL_EPOCH;                  …then error<E100> unbound
+    /// ```
     ///
     /// — the braced form validates each named item against the module
     /// surface and told the truth; the glob form does not validate and

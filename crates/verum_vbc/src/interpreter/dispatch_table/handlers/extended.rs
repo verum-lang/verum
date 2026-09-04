@@ -57,11 +57,13 @@ fn expected_field_count(variant: &VariantDescriptor) -> u32 {
 /// not new here — the module validator already states it, in
 /// `validate.rs`:
 ///
+/// ```text
 ///     Built-in primitives (<16) and well-known semantic types
 ///     (LIST/MAP/MAYBE/RESULT/etc., 512-1023) have implicit
 ///     interpreter-known layouts and are not required to live in the
 ///     per-module TypeDescriptor table — only user-defined types must
 ///     be in the table.
+/// ```
 ///
 /// This function asked only `is_builtin()`, so it applied a STRICTER
 /// rule than the validator that decides what a well-formed module
@@ -69,8 +71,10 @@ fn expected_field_count(variant: &VariantDescriptor) -> u32 {
 /// Measured 2026-09-03: every program that mounted anything real from
 /// `core.mem` died at startup with
 ///
+/// ```text
 ///     LayoutMismatch { type_id: TypeId(515), tag: 0,
 ///                      got_field_count: 0, reason: "unknown type_id" }
+/// ```
 ///
 /// 515 is `MAYBE`, and `tag 0 / 0 fields` is `Maybe.None` — built by
 /// `core/mem/heap.vr:1380`, `static mut CURRENT_HEAP: Maybe<LocalHeap>

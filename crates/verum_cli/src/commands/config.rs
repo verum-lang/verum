@@ -204,9 +204,11 @@ fn edit_distance(a: &str, b: &str) -> usize {
 /// values, inconsistent combinations, and TYPOS". Measured 2026-09-03,
 /// it delivered the first and not the third:
 ///
+/// ```text
 ///     profile = "zzq_not_a_profile"   REFUSED  (unknown variant)
 ///     [zzq_nonsense]                  accepted
 ///     [runtime] kindd = "full"        accepted
+/// ```
 ///
 /// An unknown table is the shape a typo takes — `[runtim]`, `[verifiy]`
 /// — and it is silently ignored, so the setting the author wrote simply
