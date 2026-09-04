@@ -711,6 +711,8 @@ Worth stating rather than quietly fixing: this row spends several paragraphs war
 
 25 is an UPPER bound and known to be one: `collections/deque.vr` sits in it reporting a clean `[_]`, and annotating it took the file from 1 error to 54. So the second half of the test — annotate, then revert on any growth in `&` — still has to run per file. What the read-only pass buys is skipping eight files outright and bounding the mechanical work at 25 rather than 47.
 
+RE-MEASURED after the day's repairs, same pass, same control: **24 clean / 8 A55-blocked / 15 worth trying**. Ten of the 25 were cleared, the A55 count did not move (as it should not — those files were never work), and the remaining 15 is what is actually left of this class. Between the two runs the split is also a check on the classification itself: a file that moved from "worth trying" to "clean" confirms the read-only test admitted it correctly, and none moved INTO the A55 bucket.
+
 **AND THE DEFECT REACHES `core/` ITSELF, AS "FIELD NOT FOUND".** Two files in the known-failures backlog fail with a field error whose cause is this row, not a rename:
 
     walker.vr          field 'kind' not found on 'Finding'
