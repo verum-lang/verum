@@ -17,13 +17,19 @@ in T1061's strict sweep — 560 diagnostics over 131 types and 152 methods
            about DISPATCH, not about metadata, and no bake fix can move
            it.
 
-    ABSENT  the method is declared NOWHERE in core/. The call names
-           something that was never written (T1061's `append_byte`
-           class). Nothing about the archive is implicated.
+    ABSENT-NAME  the method name is declared NOWHERE in core/. The call
+           names something that was never written (T1061's
+           `append_byte` class). Nothing about the archive is
+           implicated.
 
-    UNEXPLAINED  none of the above. This is the interesting bucket and
-           it is the reason the tool prints it separately rather than
-           folding it into the largest neighbour.
+    ABSENT-ON-TYPE  the NAME exists under core/, but never inside an
+           `implement` block that owns the receiver's type. Also
+           absent, and for the same reason — the method was not written
+           FOR THIS TYPE — but invisible to a name-keyed probe.
+
+    UNEXPLAINED  none of the above: the (type, method) pair genuinely
+           exists and the checker still did not find it. The only
+           bucket a resolution fix could move.
 
 USAGE
     classify_no_method.py <diagnostics-file> [--repo DIR]
@@ -41,6 +47,18 @@ TWO TRAPS THIS TOOL IS BUILT AGAINST, both paid for today:
     pattern below is checked against a known-present control
     (`Text`, which must come back as exactly 1) before any row is
     printed; if the control fails the tool refuses to classify.
+
+  * A THIRD, PAID FOR BY THIS TOOL ITSELF (2026-09-04, same day it was
+    written). The buckets ask "was this method written for this type",
+    and the probe answered "does this method NAME appear under core/".
+    `Text.append` — `append` declared eighteen times, on other types,
+    never on `Text` — came back present, and 81 of 107 diagnostics were
+    filed as a fourth uncharacterised cause. Keying on the pair instead
+    moved them to ABSENT-ON-TYPE and left a residue of THREE. A census
+    answers about what it keys on; the fix is `method_decls_on_type`,
+    and it carries both control poles (a pair that must be found, and
+    the same method on a type that must NOT be) because a pair probe
+    returning zero for everything reads exactly like "all absent".
 """
 
 import re
@@ -166,6 +184,48 @@ def method_decl_count(name: str, repo: Path) -> int:
     return rg(rf"\bfn\s+{re.escape(name)}\s*\(", repo)
 
 
+_IMPL = re.compile(r"^\s*(?:public\s+)?implement\s+(.+?)\s*\{")
+
+
+def method_decls_on_type(method: str, ty: str, repo: Path) -> int:
+    """How many declarations of `method` sit in an `implement` block that
+    OWNS `ty`.
+
+    THIS IS THE QUESTION THE BUCKETS ASK, and `method_decl_count` is not
+    it. That one counts the method NAME anywhere under core/, so
+    `Text.append` — where `append` is declared eighteen times, on other
+    types, and never on `Text` — came back md=18 and was filed as
+    UNEXPLAINED. A census answers about what it keys on, and keying on
+    the name alone made 26 plainly-absent pairs look like a fourth,
+    uncharacterised cause. Measured: of ten sampled UNEXPLAINED pairs,
+    NINE had no declaration on the receiver's own type at all.
+
+    `implement Proto for Ty` owns `Ty`, not `Proto` — the right-hand
+    side is the receiver. `implement Ty` owns `Ty`.
+
+    Generic arguments are stripped from both sides: `implement List<T>`
+    owns the receiver a diagnostic prints as `List<Int>`.
+    """
+    want = ty.split("<")[0].strip()
+    pat = re.compile(rf"\bfn\s+{re.escape(method)}\s*\(")
+    n = 0
+    for f in (repo / "core").rglob("*.vr"):
+        try:
+            lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        owner = None
+        for line in lines:
+            m = _IMPL.match(line)
+            if m:
+                head = m.group(1)
+                # `Proto for Ty` -> Ty; plain `Ty` -> Ty.
+                owner = head.split(" for ")[-1].split("<")[0].strip()
+            elif pat.search(line) and owner == want:
+                n += 1
+    return n
+
+
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if not args:
@@ -194,7 +254,37 @@ def main() -> int:
     if control_m < 1:
         print(f"PROBE-FAILED: `fn ends_with_char(` counted {control_m}, expected >=1.")
         return 2
-    print(f"controls OK  (Text={control}  Maybe<T>={control_g}  fn ends_with_char(={control_m})\n")
+    # THE PAIR PROBE NEEDS ITS OWN CONTROL, AND BOTH POLES.
+    #
+    # The three controls above test the NAME probes. The pair probe walks
+    # `implement` blocks and could plausibly return 0 for everything —
+    # one wrong regex, one missed `public implement` spelling — and zero
+    # everywhere reads as "every method is absent from its own type",
+    # which is exactly the conclusion this bucket exists to draw. A probe
+    # that cannot come back positive proves nothing when it comes back
+    # negative.
+    #
+    # TRUE pole:  Text.ends_with_char is declared inside `implement Text`
+    #             (core/text/text.vr:869, block opened at :278).
+    # FALSE pole: the same method on a type that does not have it. Without
+    #             this half, a probe that answers >=1 for everything would
+    #             pass the true pole and make the ABSENT-ON-TYPE bucket
+    #             silently empty.
+    control_p = method_decls_on_type("ends_with_char", "Text", repo)
+    if control_p < 1:
+        print(f"PROBE-FAILED: `Text.ends_with_char` counted {control_p}, expected >=1.")
+        print("The pair probe does not see `implement Text`; refusing to classify.")
+        return 2
+    control_n = method_decls_on_type("ends_with_char", "Maybe", repo)
+    if control_n != 0:
+        print(f"PROBE-FAILED: `Maybe.ends_with_char` counted {control_n}, expected 0.")
+        print("The pair probe matches regardless of owner; refusing to classify.")
+        return 2
+    print(
+        f"controls OK  (Text={control}  Maybe<T>={control_g}  "
+        f"fn ends_with_char(={control_m}  "
+        f"Text.ends_with_char={control_p}  Maybe.ends_with_char={control_n})\n"
+    )
 
     text = Path(args[0]).read_text(encoding="utf-8", errors="replace")
     pairs = DIAG.findall(text)
@@ -205,6 +295,7 @@ def main() -> int:
 
     tcache: dict[str, int] = {}
     mcache: dict[str, int] = {}
+    pcache: dict[tuple[str, str], int] = {}
     buckets: Counter[str] = Counter()
     rows: list[tuple[str, str, str, int, int]] = []
 
@@ -216,16 +307,33 @@ def main() -> int:
             mcache[method] = method_decl_count(method, repo)
         td, md = tcache[base], mcache[method]
 
+        # The PAIR probe, not the name probe. Cached on (method, type)
+        # because it walks core/ once per distinct pair.
+        key = (method, base)
+        if key not in pcache:
+            pcache[key] = method_decls_on_type(method, base, repo)
+        pmd = pcache[key]
+
         if method in INTERCEPTED:
             b = "INTERCEPT"
         elif td > 1:
             b = "LEG1-dup-type"
         elif md == 0:
-            b = "ABSENT"
+            # The name appears nowhere under core/ — nothing was written.
+            b = "ABSENT-NAME"
+        elif pmd == 0:
+            # The name exists, but never on THIS type. Also absent, and
+            # the bucket that used to hide inside UNEXPLAINED: keying on
+            # the name alone made `Text.append` (18 declarations, none on
+            # Text) read as a fourth uncharacterised cause.
+            b = "ABSENT-ON-TYPE"
         else:
+            # The pair EXISTS and the checker still did not find it.
+            # This is the genuinely puzzling residue, and it is the only
+            # bucket a resolution fix could move.
             b = "UNEXPLAINED"
         buckets[b] += 1
-        rows.append((b, ty, method, td, md))
+        rows.append((b, ty, method, td, pmd))
 
     # LEG TWO, counted separately and never folded into leg one: a
     # method-key fix cannot move a wrong-SHAPE diagnostic, so mixing the
@@ -254,9 +362,10 @@ def main() -> int:
         print("(An absence — read it only if the input contained such")
         print(" diagnostics at all.)")
         print()
-    print("UNEXPLAINED is the bucket to read — it is neither a duplicate")
-    print("type, nor an intercepted name, nor a method that was never")
-    print("written, so it is a fourth cause nobody has characterised.")
+    print("UNEXPLAINED is the bucket to read: the (type, method) pair")
+    print("EXISTS in core/ and the checker still did not find it. Every")
+    print("other bucket names a method that was not written — for any")
+    print("type, or for this one — and no resolution fix can move those.")
     print()
     seen = set()
     for b, ty, method, td, md in rows:
