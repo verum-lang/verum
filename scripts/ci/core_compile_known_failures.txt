@@ -183,7 +183,6 @@ core/database/sqlite/native/get_table_api/engine.vr
 core/database/sqlite/native/hash_api/table.vr
 core/database/sqlite/native/hooks_api/mod.vr
 core/database/sqlite/native/integrity_walker_api/walker.vr
-core/database/sqlite/native/l0_vfs/locking.vr
 core/database/sqlite/native/l0_vfs/posix_vfs.vr
 core/database/sqlite/native/l1_pager/mod.vr
 core/database/sqlite/native/l1_pager/recovery.vr
