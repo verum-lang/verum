@@ -31,10 +31,16 @@ patterns below → `sent=4`, `recv=4`, payload bytes `112,105,110,103`
    sin_family@1 }`, Linux/Windows `{ sin_family@0 (LE 16-bit) }`.
    `serialize_socket_addr` / `deserialize_socket_addr` must agree with the
    target's kernel on every field offset.
-6. **A reference to a SCALAR or a RECORD is never a C pointer.** `&val`
-   on an `Int32` local is the address of a NaN-boxed register slot;
-   `&rec` on a record is the address of its `ObjectHeader`. Serialise
-   into a packed `[Byte; N]` and pass `&buf[..]`.
+6. **When C READS THE BYTES, a reference to a scalar or a record is
+   never the right pointer.** `&val` on an `Int32` local is the address
+   of a NaN-boxed register slot; `&rec` on a record is the address of
+   its `ObjectHeader`. Serialise into a packed `[Byte; N]` and pass
+   `&buf[..]`. The qualifier is load-bearing: when C only CARRIES the
+   pointer and hands it back (`pthread_create`'s `void* arg`,
+   `CreateThread`'s parameter), the object address is exactly right and
+   the round trip works — those sites are correct and must not be
+   "fixed". Ask what the callee DOES with the pointer, not what its
+   type says.
 7. **An FFI wrapper takes `&[Byte]` / `&mut [Byte]`, never `&unsafe
    Byte`.** Taking the raw pointer forces every CALLER to produce it,
    and the call site is the one position where `.as_ptr()` returns the
