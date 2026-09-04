@@ -53,12 +53,30 @@ TWO TRAPS THIS TOOL IS BUILT AGAINST, both paid for today:
     and the probe answered "does this method NAME appear under core/".
     `Text.append` — `append` declared eighteen times, on other types,
     never on `Text` — came back present, and 81 of 107 diagnostics were
-    filed as a fourth uncharacterised cause. Keying on the pair instead
-    moved them to ABSENT-ON-TYPE and left a residue of THREE. A census
-    answers about what it keys on; the fix is `method_decls_on_type`,
-    and it carries both control poles (a pair that must be found, and
-    the same method on a type that must NOT be) because a pair probe
-    returning zero for everything reads exactly like "all absent".
+    filed as a fourth uncharacterised cause. A census answers about what
+    it keys on; the fix is `method_decls_on_type`, and it carries both
+    control poles (a pair that must be found, and the same method on a
+    type that must NOT be) because a pair probe returning zero for
+    everything reads exactly like "all absent".
+
+  * A FOURTH, one hour after the third, in the fix for the third. The
+    new pair probe demanded whitespace after `implement`, so
+    `implement<E> Foo<E>` did not match its own head and every method
+    inside a GENERIC impl block was credited to whatever block sat
+    above it. `Error.message` was the survivor that exposed it — the
+    tool called it UNEXPLAINED, and by hand it is `fn message` inside
+    `implement<E> ResultContextError<E>`, attributed 270 lines wrong.
+    The type side of this file already had a generic control, for
+    exactly this reason, written by the same hand; the pair side
+    shipped without one. A control for a shape you have been burned by
+    is not optional because the burn was on a neighbouring construct.
+
+RESIDUE, after all four: of 107 diagnostics, ONE is a name-resolution
+defect — `Formatter.debug_list`, its type declared in
+core/base/protocols.vr and its `implement Formatter` block in
+core/text/format.vr, a different module. Everything else is a method
+that was never written for that type, or a Rust-side dispatch
+intercept. The tool's job was to make that sentence sayable.
 """
 
 import re
