@@ -77,7 +77,7 @@ GREEN_CLAIMS = {"stable", "complete", "regression-only"}
 # S5 — a row's own statement of how many `@ignore` pins it has.
 PIN_CLAIM = re.compile(r"(\d+)\s+@ignore")
 PIN_HISTORICAL = re.compile(r"prior prose kept|ORIGINAL DETAIL|was:|formerly", re.I)
-PIN_BASELINE = 32
+PIN_BASELINE = 25
 # Explicit numeric green claims, most-specific first.
 #
 # The third pattern used to demand a LITERAL `0 failed`, which blinded
