@@ -118,10 +118,7 @@ core/async/stream.vr
 core/base/data.vr
 core/base/iterator.vr
 core/base/memory.vr
-core/cache/adapters/redis.vr
-core/cli/example.vr
 core/cli/parser.vr
-core/cli/plugin.vr
 core/cli/repl.vr
 core/cli/runtime.vr
 core/cli/smt_verify.vr
@@ -146,7 +143,6 @@ core/database/common/copy_metrics.vr
 core/database/common/db_handle.vr
 core/database/common/migrations/runner.vr
 core/database/common/pool_impl.vr
-core/database/common/retry_run.vr
 core/database/mysql/async_binlog.vr
 core/database/mysql/async_binlog_consumer.vr
 core/database/mysql/async_connection.vr
@@ -165,7 +161,6 @@ core/database/postgres/async_pool.vr
 core/database/postgres/async_replication.vr
 core/database/postgres/async_transaction.vr
 core/database/postgres/async_typed_database.vr
-core/database/postgres/connection.vr
 core/database/postgres/migrations/store.vr
 core/database/postgres/mod.vr
 core/database/postgres/notify.vr
@@ -184,9 +179,6 @@ core/database/sqlite/native/builtins/numeric_fns.vr
 core/database/sqlite/native/client_data/registry.vr
 core/database/sqlite/native/concat_ws_fn/fn_.vr
 core/database/sqlite/native/context_api/auxdata.vr
-core/database/sqlite/native/datetime/format.vr
-core/database/sqlite/native/datetime/iso.vr
-core/database/sqlite/native/datetime/modifier.vr
 core/database/sqlite/native/encryption/cipher.vr
 core/database/sqlite/native/exec/engine.vr
 core/database/sqlite/native/fts5/query/ast.vr
@@ -197,7 +189,6 @@ core/database/sqlite/native/hooks_api/mod.vr
 core/database/sqlite/native/integrity_walker_api/walker.vr
 core/database/sqlite/native/l0_vfs/posix_vfs.vr
 core/database/sqlite/native/l1_pager/mod.vr
-core/database/sqlite/native/l1_pager/pager.vr
 core/database/sqlite/native/l1_pager/recovery.vr
 core/database/sqlite/native/l1_pager/wal_page_arena.vr
 core/database/sqlite/native/l1_pager/wal_reader.vr
@@ -245,7 +236,6 @@ core/database/sqlite/typed_database.vr
 core/intrinsics/lowlevel/aarch64.vr
 core/intrinsics/mod.vr
 core/io/file.vr
-core/io/path.vr
 core/io/stdio.vr
 core/mac/poly1305.vr
 core/math/agent.vr
@@ -282,13 +272,10 @@ core/math/ssm.vr
 core/math/syn_mod.vr
 core/math/tensor.vr
 core/mem/allocator.vr
-core/mem/fat_ref.vr
 core/mem/hazard.vr
 core/mem/heap.vr
 core/mem/mod.vr
 core/mem/segment.vr
-core/mem/thin_ref.vr
-core/meta/framework_hygiene.vr
 core/meta/quote.vr
 core/meta/reflection.vr
 core/meta/token.vr
@@ -305,7 +292,6 @@ core/net/quic/mod.vr
 core/net/quic/multipath.vr
 core/net/quic/recovery/cc/bbr.vr
 core/net/quic/recovery/loss_detection.vr
-core/net/quic/transport/abstraction.vr
 core/net/quic/transport/listener.vr
 core/net/quic/transport/pump.vr
 core/net/tls13/handshake/client_sm.vr
@@ -354,7 +340,6 @@ core/security/ecc/vrf.vr
 core/security/ecc/x25519.vr
 core/security/hpke/mod.vr
 core/security/oidc.vr
-core/security/permission.vr
 core/security/provenance.vr
 core/security/sigstore/fulcio.vr
 core/security/sigstore/rekor.vr
@@ -363,12 +348,9 @@ core/security/sigstore/verify.vr
 core/security/transparency_log.vr
 core/security/tuf/client.vr
 core/security/tuf/repository.vr
-core/security/tuf/role_verify.vr
 core/security/webauthn/attestation.vr
 core/security/webauthn/authenticate.vr
-core/security/webauthn/cose_key.vr
 core/security/webauthn/register.vr
-core/security/x509/chain.vr
 core/security/x509/crl_client.vr
 core/security/x509/ocsp_client.vr
 core/security/x509/path_validation.vr
@@ -389,7 +371,6 @@ core/shell/transducer.vr
 core/shell/watch.vr
 core/storage/s3/client.vr
 core/sync/barrier.vr
-core/sync/condvar.vr
 core/sys/darwin/io.vr
 core/sys/darwin/mod.vr
 core/sys/darwin/thread.vr
@@ -416,7 +397,6 @@ core/sys/windows/winsock2.vr
 core/term/app/app.vr
 core/term/app/prompt.vr
 core/term/event/source.vr
-core/term/layout/shortcuts.vr
 core/term/mod.vr
 core/term/raw/mod.vr
 core/term/raw/screen.vr

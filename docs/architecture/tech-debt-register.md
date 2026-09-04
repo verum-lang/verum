@@ -546,6 +546,20 @@ while closing T0272/T0555/T0165/T0463/T0523/T0424/T0438/T0485).**
 | A55 | **READ THIS FIRST — TWO WAYS TO MEASURE THIS ROW WRONG.** (1) A compiler carries the archive it was built with, so a binary even a few days old compares its PAST against today's `core/`; between 2026-08-31 and 2026-09-04 that gap was 48 commits over 269 files and it turned two candidates into phantoms. Name the instrument in anything you record, and prefer an immutable snapshot to a live target directory. (2) Under a source-driven stdlib, "zero errors" is only readable next to a probe that MUST still error — otherwise a module that failed to load reads as a module that resolved. Both traps are worked through in full further down this row.
 | A56 | **A PRELUDE-PROVIDED `Clone` DOES NOT BIND `Self` TO THE IMPLEMENTING TYPE — and it is invisible today because the archive predates it.** `implement Clone for Pair { fn clone(&self) -> Pair { … } }` draws `error<E427>: `clone` does not match the signature `Clone` declares: returns `Pair`, but the protocol declares `Self`` — but ONLY when `Clone` arrives through the prelude. Adding `mount core.base.protocols.{Clone};` to the SAME nine-line file makes it compile. That one line is the whole reproduction and its own control.
 | A58 | **AN EXPLICIT TYPE ARGUMENT IS NOT PROPAGATED INTO A PARAMETER TYPE FOR A METADATA-LOADED GENERIC.** `Thread.spawn<Int>(task_forty_two)` — `core/runtime/thread.vr:292` declares `public fn spawn<T: Send>(f: fn() -> T) -> ThreadJoinHandle<T>` — draws `error<E400>: Type mismatch: expected 'T', found 'Int'` at the ARGUMENT. The explicit `<Int>` is written and ignored.
+| A59 | **THE `core/` KNOWN-FAILURES BACKLOG, MEASURED RATHER THAN CITED: 345 files, and the histogram is not what a first sample said.** `scripts/ci/core_compile_known_failures.txt` freezes the set of stdlib files that do not pass `verum check`. Every one was put to snapshot `verum_v32` (sha256 `1452fdec87f1d17e`), with a healthy `core/` file as a control (0 errors, so the runner is not reporting failure indiscriminately). Error codes across all 345:
+
+    E400  type mismatch                412
+    E404  ambiguous / not determined    347
+    E100                                155
+    E401  cannot find X in module       107
+    E0319 unproved theorem               72
+    E103 35 · E412 32 · E409 28 · E405 28 · E310 26 · E402 18
+
+**MY FIRST SAMPLE WAS WRONG AND THE WAY IT WAS WRONG IS THE POINT.** I took `head -12` of the list, saw E0319 at 46 of 61 error lines, and concluded that unproved theorems dominate the backlog. The list is sorted, so the first twelve are all `core/action/*` — the theorem-heavy corner of the library. Sorted order is not random order, and `head` is not a sample. Across all 345, E0319 is 72 of roughly 1200 coded errors: real, but sixth.
+
+WHAT ACTUALLY DOMINATES is the same pair being fixed by hand in `core-tests` all day — E400 and E404 together are 759 of them, and E404 is the class whose own message names the remedy ("add a type annotation"). That makes the largest single lever in the backlog mechanical rather than theoretical.
+
+**20 FILES IN THE LIST ALREADY PASS** and were removed, 345 -> 325. A stale known-failures line hides two things at once: work someone finished, and new breakage that can hide behind an old name. | P2 | `scripts/ci/core_compile_known_failures.txt`; measured 2026-09-04 | open |
 
 CONTROL, and it is decisive: the same shape declared LOCALLY compiles clean — `fn take<T>(f: fn() -> T) -> T` called as `take<Int>(forty_two)` with a bare fn argument, 0 errors on the same binary and the same run. So explicit instantiation itself works; it fails for generics that arrive through metadata. That is the SAME boundary as T0689 (an unbound method reference loses its receiver only for metadata-loaded types), which makes two independent defects sharing one frontier — worth treating as one investigation into what the descriptor path drops.
 
