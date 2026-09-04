@@ -1114,7 +1114,17 @@ So the rule is not "a raw extern name cannot be called" — it is "a name declar
 
 Verified independently here on `verum_v32`: thread.vr 18 unbound, process_native 20, time 11, tls 7 — matching name for name. So processes, threads, time, TLS, mmap and file-watching are all unreachable through these paths on macOS, with the abort path above sitting on top. The priority stays P1 rather than moving to P0 only because "18 diagnostics in thread.vr" and "threading does not work" are different claims and only the first is measured.
 
-METHOD NOTE, and it is the sixth instance today: **where a full run exists, read the run — do not re-derive its subject from source text.** Both hand-greps understated this by an order of magnitude, and both looked thorough. | P1 | `core/sys/init.vr:623`, `core/sys/darwin/libsystem.vr:197` vs `:279`; T1085 | open |
+METHOD NOTE, and it is the sixth instance today: **where a full run exists, read the run — do not re-derive its subject from source text.** Both hand-greps understated this by an order of magnitude, and both looked thorough.
+
+MINE UNDERSTATED IT FOR A REASON WORTH NAMING: the grep was `libsystem\.[a-z_]*(` **outside** `core/sys/darwin/`, which by construction cannot see the siblings INSIDE that directory mounting `super.libsystem`. Same directory is not the same module, so those are cross-module mounts too. The split on exactly that line:
+
+    INSIDE a platform dir (my grep excluded these)   5 files, 41 diagnostics
+        18 darwin/thread.vr · 11 darwin/time.vr · 7 darwin/tls.vr · 4 darwin/io.vr · 1 windows/winsock2.vr
+    OUTSIDE                                          8 files, 34 diagnostics
+        20 sys/process_native.vr · 4 fs_watch · 4 mem/segment · 2 shell/resources · 1 each: term/raw/screen,
+        sys/init, net/unix, mem/allocator
+
+So the bounded repair list is **13 files / 75 diagnostics**, not the 8 I reported, and the after-number needs TWO greps: mine for the outside set plus `super.libsystem` for the siblings. An exclusion written to keep a grep clean removed half the population, and the grep still looked complete. | P1 | `core/sys/init.vr:623`, `core/sys/darwin/libsystem.vr:197` vs `:279`; T1085 | open |
 
     healthy `let r = &x`      E312=1 -> 0
     healthy `takes(&mk())`    E312=1 -> 0
