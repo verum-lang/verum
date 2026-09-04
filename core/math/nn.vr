@@ -172,7 +172,7 @@ implement Parameter {
     // Suitable for layers followed by ReLU activation.
     // Variance = 2 / fan_in
     public fn kaiming_uniform(&mut self, fan_in: USize) using [Random, ComputeDevice] {
-        let bound = sqrt(6.0 / fan_in as Float);
+        let bound: Float = sqrt(6.0 / fan_in as Float);
         self.data = rand_uniform(self.data.shape(), -bound, bound);
     }
 
@@ -182,7 +182,7 @@ implement Parameter {
     // Suitable for layers with linear/tanh activation.
     // Variance = 2 / (fan_in + fan_out)
     public fn xavier_uniform(&mut self, fan_in: USize, fan_out: USize) using [Random, ComputeDevice] {
-        let bound = sqrt(6.0 / (fan_in + fan_out) as Float);
+        let bound: Float = sqrt(6.0 / (fan_in + fan_out) as Float);
         self.data = rand_uniform(self.data.shape(), -bound, bound);
     }
 

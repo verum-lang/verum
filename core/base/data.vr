@@ -528,7 +528,7 @@ implement Data {
             Data.Float(f) => if f.is_finite() { f.to_text() } else { "null".to_text() },
             Data.Text(ref s) => Data.escape_json_string(s),
             Data.Array(ref arr) => {
-                let items = arr.iter()
+                let items: Text = arr.iter()
                     .map(|item| item.to_json())
                     .collect<List<Text>>()
                     .join(", ");

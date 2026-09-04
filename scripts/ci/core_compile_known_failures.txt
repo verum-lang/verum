@@ -114,7 +114,6 @@ core/archive/tar.vr
 core/async/executor.vr
 core/async/select.vr
 core/async/stream.vr
-core/base/data.vr
 core/base/iterator.vr
 core/base/memory.vr
 core/cli/parser.vr
@@ -254,7 +253,6 @@ core/math/integers.vr
 core/math/kan_extension.vr
 core/math/linalg.vr
 core/math/meta_cls.vr
-core/math/nn.vr
 core/math/quantum_logic.vr
 core/math/rag.vr
 core/math/s_definable/class_s_s.vr
