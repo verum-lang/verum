@@ -142,7 +142,9 @@ public type RefinementPredicate is
 /// then `.sum()` panicked with
 /// "method 'RefinementPredicate.sum' not found on Range". Same
 /// architectural class as the SIZE_CLASSES / Char.from_digit
-/// cross-module collisions logged in MEMORY.md.
+/// cross-module collisions: a bare `{Type}.{method}` archive key is
+/// first-wins across modules, so the resolved body can belong to a
+/// different type of the same name.
 public fn int_range(lo: Int, hi: Int) -> RefinementPredicate {
     RpIntRange { lo: lo, hi: hi }
 }

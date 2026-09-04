@@ -1806,8 +1806,10 @@ implement Char {
     /// load (`Char.from_digit` registered under bare key first-wins on
     /// the cross-module name), making hex digits 10..=35 render as
     /// 'A'..='Z' instead of 'a'..='z'.  Aligning the offset here is
-    /// the workaround until mount-scope-aware lookup lands (#39 in
-    /// MEMORY.md); the canonical body in `core/text/char.vr` is
+    /// the workaround until mount-scope-aware lookup lands: the
+    /// archive keys a method descriptor under its BARE `{Type}.{method}`
+    /// name first-wins, so a same-named body in another module can win
+    /// the lookup.  The canonical body in `core/text/char.vr` is
     /// `'a' as Int + digit - 10`, identical arithmetic to `87 + digit`.
     public fn from_digit(digit: Int, radix: Int) -> Maybe<Char> {
         assert(radix >= 2 && radix <= 36, "radix must be 2..=36");

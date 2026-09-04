@@ -38,9 +38,9 @@ module core.database.sqlite.native.vtabs.json_each;
 // NOTE: do NOT `mount core.*` here. It pulls in
 // `core.encoding.json.JsonValue`, which collides with the local
 // `builtins.json_fns.JsonValue` and the variant-constructor lookup
-// resolves to the wrong variant set (see
-// memory/feedback_explicit_mount_glob_shadow.md). Use targeted
-// mounts instead.
+// resolves to the wrong variant set — a glob mount shadows the
+// local type with the one it pulls in, and the variant lookup
+// follows the shadow. Use targeted mounts instead.
 mount base.{Text, Maybe, Result, Ok, Err};
 mount collections.List;
 mount base.{Bool, Int, Int64, Float64, Byte};

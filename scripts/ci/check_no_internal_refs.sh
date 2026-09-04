@@ -59,3 +59,37 @@ if [ "$n_dangling" -gt "$SPEC_BASELINE" ]; then
   echo "A new unresolvable Spec: citation. Cite a LOGICAL spec name (CLAUDE.md), not a path." >&2
   exit 1
 fi
+
+# -----------------------------------------------------------------------------
+# A third face of the same rule: a citation to a MACHINE-LOCAL memory file.
+#
+# Sessions keep working notes in a gitignored, per-machine directory. Fourteen
+# tracked files had come to cite it — `memory/<slug>.md`, or `MEMORY.md`, or a
+# task number that only means something inside it. The `internal/` check above
+# cannot see them: the path never contains "internal/".
+#
+# It is the worse half of the two. An `internal/` reference at least names a
+# directory the reader can be told about; `memory/callg_emission_fix_blueprint
+# _2026-05-19.md` names a file that exists on exactly one machine, and the
+# reader cannot even discover that it is unreachable — it reads like a repo
+# path. One of them was load-bearing: the comment it replaced was the only
+# statement of why a compiler intercept hard-codes an identity.
+#
+# BASELINE IS ZERO, deliberately. A ratchet at today's count would make the
+# gate certify the fourteen it was written because of. They are fixed in the
+# same commit that adds this; the gate only has to keep them from coming back.
+#
+# Excludes this file (it must name the pattern to forbid it) and .gitignore.
+# `memory/` alone is not enough of a key: `core-tests/base/memory/audit.md` is
+# a legitimate repo path, and an earlier draft of this check flagged it. The
+# slug shape (a date, or a known private prefix) is what separates them.
+mem_refs=$(git grep -nE '(^|[^A-Za-z0-9_./-])(MEMORY\.md|memory/[a-z0-9_]+_[0-9]{4}-[0-9]{2}-[0-9]{2}\.md|memory/(feedback|callg|task)[a-z0-9_]*\.md)' \
+  -- ':!.gitignore' ':!scripts/ci/check_no_internal_refs.sh' \
+  || true)
+if [ -n "$mem_refs" ]; then
+  echo "FORBIDDEN machine-local memory references in tracked files:" >&2
+  echo "$mem_refs" >&2
+  echo "Fix: state the requirement in place, or cite a task ID / a source file." >&2
+  exit 1
+fi
+echo "check-memory-refs: OK (baseline 0)"
