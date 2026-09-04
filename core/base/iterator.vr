@@ -474,18 +474,15 @@ public type Iterator is protocol {
     // =========================================================================
 
     /// Sum all elements.
-    /// Task #17/#26 workaround — literal `0` substitution for the
-    /// generic-erased Self.Item.zero() default-body accumulator.
     fn sum(self) -> Self.Item
     where Self.Item: Add<Output = Self.Item> + Zero {
-        self.fold(0, |a, b| a + b)
+        self.fold(Self.Item.zero(), |a, b| a + b)
     }
 
     /// Product of all elements.
-    /// Task #17/#26 workaround — literal `1` substitution.
     fn product(self) -> Self.Item
     where Self.Item: Mul<Output = Self.Item> + One {
-        self.fold(1, |a, b| a * b)
+        self.fold(Self.Item.one(), |a, b| a * b)
     }
 
     /// Sum elements by extracting a numeric key from each item.
@@ -496,16 +493,14 @@ public type Iterator is protocol {
     /// ```verum
     /// let total_age = people.iter().sum_by(|p| p.age);
     /// ```
-    // Task #17/#26 workaround — literal `0` / `1` substitution.
     fn sum_by<B: Add<Output = B> + Zero, F: fn(&Self.Item) -> B>(self, f: F) -> B {
-        self.fold(0, |acc, item| acc + f(&item))
+        self.fold(B.zero(), |acc, item| acc + f(&item))
     }
 
     /// Multiply elements by extracting a numeric key from each item.
     /// Equivalent to `.map(f).product()` but reads more naturally.
-    /// Task #17/#26 workaround — literal `1` substitution.
     fn product_by<B: Mul<Output = B> + One, F: fn(&Self.Item) -> B>(self, f: F) -> B {
-        self.fold(1, |acc, item| acc * f(&item))
+        self.fold(B.one(), |acc, item| acc * f(&item))
     }
 
     // =========================================================================

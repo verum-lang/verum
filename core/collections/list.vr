@@ -259,14 +259,14 @@ implement<T> List<T> {
     // Create list from array/slice.
     // Enables List.from([1, 2, 3]) syntax.
     //
-    // Uses index-based iteration instead of `for item in array` because
-    // the codegen for `for X in <[T; N]>` over a fixed-size array
-    // currently silently no-ops (pre-fix: List.from([1,2,3]).len() == 0
-    // instead of 3) and additionally panics the compiler under some
-    // unrelated shapes (`for item in arr` triggers "bug in the Verum
-    // compiler" on a stack-only Int array).  Index-based iteration is
-    // immune to both because `array.len()` and `array[i]` lower through
-    // the well-supported runtime intercepts for `[T; N]`.
+    // Index-based iteration, which is equivalent here to `for item in
+    // array`.  It was once the only form that worked: `for X in [T; N]`
+    // used to lower to a silent no-op (`List.from([1,2,3]).len() == 0`)
+    // and to panic the compiler on a stack-only Int array.  Both are
+    // fixed — measured 2026-09-04 in the monomorphic shape, in a generic
+    // `[T; _]` parameter, and in this exact body (for + clone + push),
+    // all three returning the right length.  Kept as-is because it is
+    // correct and hot; the loop form is now equally available.
     public fn from(array: [T; _]) -> List<T>
     where T: Clone
     {
@@ -2815,8 +2815,7 @@ implement<T> List<T> {
     public fn sum(&self) -> T
     where T: Add + Default
     {
-        // Task #17 workaround — literal `0` substitution.
-        let mut acc: T = 0;
+        let mut acc: T = T.default();
         for i in range(0, self.len) {
             let item: &T = unsafe { &*self.ptr.offset(i) };
             acc = acc + *item;
@@ -2836,8 +2835,7 @@ implement<T> List<T> {
     public fn product(&self) -> T
     where T: Mul + One
     {
-        // Task #26 workaround — literal `1` substitution.
-        let mut acc: T = 1;
+        let mut acc: T = T.one();
         for i in range(0, self.len) {
             let item: &T = unsafe { &*self.ptr.offset(i) };
             acc = acc * *item;
