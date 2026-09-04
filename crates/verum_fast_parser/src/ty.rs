@@ -649,10 +649,30 @@ impl<'a> RecursiveParser<'a> {
         // Check for: (Ident | result) Colon ... pattern
         // This distinguishes sigma types from regular path types
         // Note: `result` is a keyword used in sigma types like `-> result: Int where result > 0`
+        // A keyword-like token is admitted as a CANDIDATE here, not as a
+        // decision. `parse_sigma_type` consumes the name with
+        // `consume_ident_or_keyword`, whose accept set is the narrow
+        // contextual one, and the caller wraps the whole attempt in
+        // `optional()` — so a word this guard lets through but the
+        // consumer refuses simply backtracks and reports the ordinary
+        // error. Deciding here instead would duplicate the consumer's
+        // list in a second place, and the two would drift.
+        //
+        // T1091: before this, the guard accepted only `Ident` and
+        // `result`, which made the tuple-slot label the strictest name
+        // position in the language: `{ stage: Int }` parsed and
+        // `A(stage: Int)` did not, for the same word. grammar/verum.ebnf
+        // (tuple_slot) records the measured table and names the
+        // mechanism — these words are lexer TOKENS, not identifiers,
+        // and positions differ only in how many insist on `Ident`.
         let is_name = matches!(
             self.stream.peek().map(|t| &t.kind),
             Some(TokenKind::Ident(_)) | Some(TokenKind::Result)
-        );
+        ) || self
+            .stream
+            .peek()
+            .map(|t| t.kind.is_keyword_like())
+            .unwrap_or(false);
         let is_colon = matches!(
             self.stream.peek_nth(1).map(|t| &t.kind),
             Some(TokenKind::Colon)
@@ -674,12 +694,17 @@ impl<'a> RecursiveParser<'a> {
 
         // Parse: name : Type where expr
         // Note: name can be an identifier or the `result` keyword
-        let name = if self.stream.check(&TokenKind::Result) {
-            self.stream.advance();
-            Text::from("result")
-        } else {
-            self.consume_ident()?
-        };
+        // `consume_ident_or_keyword` is what a RECORD FIELD uses
+        // (decl.rs, parse_record_field). Using it here makes the two
+        // name positions agree exactly — no wider, no narrower — which
+        // is what the asymmetry recorded in grammar/verum.ebnf asks for:
+        // a word usable as `{ w: Int }` is now equally usable as
+        // `A(w: Int)`, and the fully reserved words (`in`, `private`,
+        // `move`) stay refused in BOTH, because the consumer refuses
+        // them in both. It also subsumes the `result` special case that
+        // stood here: the consumer already maps TokenKind::Result to
+        // "result". (T1091)
+        let name = self.consume_ident_or_keyword()?;
         let name_span = self.stream.current_span();
 
         self.stream.expect(TokenKind::Colon)?;

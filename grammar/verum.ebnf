@@ -821,9 +821,12 @@ variant_data    = '{' , field_list , '}'
 tuple_payload   = [ tuple_slot , { ',' , tuple_slot } ] ;
 tuple_slot      = [ identifier , ':' ] , type_expr ;
 
-(* A LABEL HERE MUST BE A PLAIN IDENTIFIER, and this is the STRICTEST
-   name position in the language.  Measured 2026-09-03 across four
-   positions, with `other` as the control that passes all four:
+(* A LABEL HERE ACCEPTS WHAT A RECORD FIELD ACCEPTS.  Until T1091 it
+   required a plain identifier and was the STRICTEST name position in
+   the language; the table below records the asymmetry as it was
+   measured 2026-09-03, and the paragraph after it records the repair.
+   Measured across four positions, with `other` as the control that
+   passes all four:
 
      word      { w: Int }   fn f(w:)   let w =   A(w: Int)
      ------------------------------------------------------
@@ -856,6 +859,19 @@ tuple_slot      = [ identifier , ':' ] , type_expr ;
    identifiers; what differs is how many positions insist on an `Ident`.
    The diagnostic is "expected type" pointing at the LABEL, so an author
    looks at the type and finds nothing wrong with it.
+
+   REPAIRED 2026-09-04 (T1091).  The first class — `stage` `gen` `set`
+   `field` `layer`, and with them `ref` and `with` — now labels a tuple
+   slot exactly as it labels a record field.  A labelled slot is parsed
+   as a sigma type, and that path insisted on `Ident` in two places
+   while `parse_record_field` had always used `consume_ident_or_keyword`;
+   both now use the record field's own function, so the two positions
+   agree by construction rather than by coincidence.  The third class
+   (`in` `private` `move`) is unchanged and still refused everywhere:
+   the repair matched the record-field position, it did not widen past
+   it.  Pinned by
+   `crates/verum_fast_parser/tests/tuple_slot_label_tests.rs`, which
+   carries the must-stay-refused pole alongside the true one.
                                                                         *)
 (* `expression` here covers paren-wrapped range expressions for n-cells:  *)
 (*   `(a..b)` parses as `Paren(Range(a, b))` — picked up by the parser    *)
