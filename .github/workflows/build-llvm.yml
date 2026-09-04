@@ -214,15 +214,32 @@ jobs:
         shell: bash
         run: |
           rm -rf share/man share/doc
-          # Keep headers, libs, and llvm-config. Drop everything else under bin/
-          # except the binaries Verum's build.rs actually references
-          # (patterns cover the .exe suffix on Windows).
+          # Keep headers, libs, and the binaries Verum actually invokes.
+          # The keep-list is BUILT FROM ${REQUIRED_LLVM_TOOLS} rather than
+          # written out again: the two drifted apart, and the drift is what
+          # the CI assert has been catching. `REQUIRED_LLVM_TOOLS` named
+          # llc/opt/llvm-link from 2026-08-22 while this list did not, so
+          # every rebuild dutifully produced them and this step deleted
+          # them — 122 tools installed, 35 shipped, and the three the
+          # compiler shells out to at Phase 7.5 among the 87 dropped.
+          # (Patterns cover the .exe suffix on Windows.)
+          keep=()
+          for tool in ${REQUIRED_LLVM_TOOLS}; do
+            keep+=( ! -name "${tool}" ! -name "${tool}.exe" )
+          done
           find bin -maxdepth 1 -type f \
-            ! -name 'llvm-config*' \
+            "${keep[@]}" \
             ! -name 'lld*' \
             ! -name 'clang*' \
             ! -name 'mlir-tblgen*' \
             -delete 2>/dev/null || true
+          # Fail loudly here rather than in a downstream job: a missing
+          # tool at this point means the keep-list and the requirement
+          # disagree again, and the archive is already wrong.
+          for tool in ${REQUIRED_LLVM_TOOLS}; do
+            [[ -f "bin/${tool}" || -f "bin/${tool}.exe" ]] || {
+              echo "::error::trim dropped required tool '${tool}'"; exit 1; }
+          done
 
       - name: Package archive
         working-directory: llvm
