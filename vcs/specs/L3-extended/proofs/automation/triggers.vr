@@ -1,9 +1,40 @@
-// @test: verify-pass
+// @test: typecheck-pass
 // @tier: 3
 // @level: L3
 // @tags: proofs, automation, triggers
 // @timeout: 20000
-// @description: Tests quantifier instantiation triggers for SMT reasoning
+// @description: The shape instantiation triggers would take, pinned
+//   until `@trigger` exists. Typechecks; does not prove.
+//
+// THIS SPEC WAS `verify-pass` AND COULD NOT PASS BY CONSTRUCTION.
+//
+// Every declaration below opens with `@trigger(...)`. The compiler
+// answers, thirty-six times:
+//
+//     warning<W0400>: unknown attribute `@trigger`
+//
+// and `grammar/verum.ebnf` does not mention `trigger` at all. So the
+// subject of this file — guiding quantifier instantiation — is not a
+// thing the language can express yet, and the twenty-five goals here
+// were being put to the solver with nothing attached. They were
+// counted as prover debt in the L3 corpus; the prover was never told
+// anything.
+//
+// IT WAS ALSO UNPARSEABLE UNTIL 2026-09-04. `set_trigger`'s body was
+// missing its closing brace, so the file contributed ZERO unproved
+// goals to that debt figure rather than twenty-five: an unparseable
+// spec is a silent zero. Fixing one character made the debt honest and
+// larger.
+//
+// WHY IT STAYS. The bodies are a written specification of what
+// triggers should look like in Verum — lemma shape, where the pattern
+// sits, what a multi-pattern reads like — and that is worth keeping in
+// a form the parser checks. `typecheck-pass` is what this file can
+// actually promise today.
+//
+// It becomes `verify-pass` when `@trigger` is a grammar production the
+// compiler honours, and the goals below are the acceptance for that
+// work.
 
 /// ============================================================
 /// TRIGGERS
