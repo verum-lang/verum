@@ -19,6 +19,13 @@ A new failure fails the run; a failure that disappears asks for the
 baseline to be lowered in the same commit that earned it — a silently
 improving number is how a gate stops measuring.
 
+THE BASELINE AND THE PAGES LIVE IN DIFFERENT REPOSITORIES, and that is
+worth knowing before the first surprise: the docs are the website repo,
+this baseline is here. Editing a block changes its key by design — it is
+a different example — so a doc commit that touches a `verum` block with
+a `fn main` wants `--write-baseline` run here afterwards, or the next run
+reports the edited block as newly failing and the old one as fixed.
+
 Usage:
     check_doc_examples_compile.py <verum-binary>            # ratchet
     check_doc_examples_compile.py <verum-binary> --list     # enumerate
