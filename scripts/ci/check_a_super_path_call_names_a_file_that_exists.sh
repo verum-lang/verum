@@ -92,7 +92,15 @@ def check_text(path, text):
             # not a path and cannot name a missing file. Without this
             # the gate reports fifty of them and buries the one finding
             # it exists for.
-            if len(segs) < 2:
+            #
+            # EXCEPT in the brace-mount form, where ONE segment IS the
+            # module: `mount super.elementary.{sqrt, log};`. Skipping
+            # those hid a real finding — core/random/deterministic.vr
+            # mounts a module that does not exist at :45 and calls into
+            # it at :559, and only the call was reported.
+            brace_mount = (code.lstrip().startswith("mount")
+                           and code[m.end():].lstrip().startswith(".{"))
+            if len(segs) < 2 and not brace_mount:
                 continue
             base = module_of(path)[:-climbs]
             if not base:
