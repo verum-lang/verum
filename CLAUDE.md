@@ -98,7 +98,16 @@ Verum does NOT use Rust-style `!` suffix anywhere:
 **Rule**: All compile-time constructs use `@` prefix: `@derive(...)`, `@const`, `@cfg`, `@sql_query(...)`.
 
 ### Reserved Keywords (v5.1)
-Only 3 reserved: `let`, `fn`, `is`
+Three are reserved as CORE vocabulary: `let`, `fn`, `is`.
+
+That is NOT the list of names the lexer refuses as an identifier.
+Measured (A69): at least fourteen are refused with
+`error<E071>: '<name>' is a reserved keyword` — the three above, the
+control-flow words (`match`, `for`, `while`, `if`, `else`, `return`,
+`break`, `loop`), and `view`, `checked` and others from
+`lexer_only_reserved` in `grammar/verum.ebnf`. Before naming a binding
+after a short English word, check that list; `let view = …` and
+`for match in …` both fail, and both reached the documentation.
 
 ### Type Definition Syntax
 ```verum
