@@ -3994,7 +3994,16 @@ impl<'a> RecursiveParser<'a> {
         capabilities.push(self.parse_capability_name()?);
 
         // Parse additional capabilities separated by ','
-        // Note: '|' within a capability is handled in parse_capability_name
+        //
+        // NOT the union form.  `capability_item = capability_name |
+        // capability_or_expr` in the grammar, and `capability_or_expr`
+        // is `A | B | C` — one slot satisfied by any of them, which the
+        // language docs distinguish from the comma list.  Nothing here
+        // implements it: `parse_capability_name` consumes one identifier
+        // and returns, so `with [Read | Execute]` stops at the `|` and
+        // reports an unclosed `]`.  `Capability` has no union variant to
+        // parse into, and the meaning of the slot is a subtyping
+        // question, not a parsing one.  Register row A78.
         while self.stream.consume(&TokenKind::Comma).is_some() {
             if !self.tick() || self.is_aborted() {
                 break;
