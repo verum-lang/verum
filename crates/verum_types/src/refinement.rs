@@ -2515,6 +2515,114 @@ impl RefinementChecker {
         }
 
         // Check for literal true/false
+        // Negation folds through: `!it.is_empty()` is a Unary over the
+        // MethodCall arm below, and without this the whole predicate
+        // reduced to Unknown — which PERMITS. Measured: with the method
+        // arm in place, `contains` / `starts_with` / the compound form
+        // all began refusing, while `!it.is_empty()` on `D("")` still
+        // admitted, because nothing reduced the `!`.
+        if let ExprKind::Unary { op, expr: inner } = &expr.kind
+            && matches!(op, verum_ast::expr::UnOp::Not)
+        {
+            return match self.try_syntactic_eval(inner) {
+                Maybe::Some(VerificationResult::Valid) => {
+                    Maybe::Some(VerificationResult::Invalid {
+                        counterexample: verum_common::Maybe::None,
+                    })
+                }
+                Maybe::Some(VerificationResult::Invalid { .. }) => {
+                    Maybe::Some(VerificationResult::Valid)
+                }
+                other => other,
+            };
+        }
+
+        // **REFINEMENT-TEXT-PREDICATES-1 (T1173)** — fold the BOOLEAN
+        // text predicates over a literal receiver.
+        //
+        // The evaluator folded `len()` and nothing else, so a refinement
+        // that CALLS ANY OTHER METHOD reduced to Unknown — and Unknown is
+        // silently permissive: `check_refinement_with_evidence` only
+        // raises E500 when this syntactic pass CONFIRMS the violation
+        // (infer/expr.rs:2309). Measured:
+        //
+        //     { it.len() > 7 }        D("nocolon")   E500, refused
+        //     { it.contains(&":") }   D("nocolon")   PASSED
+        //     { !it.is_empty() }      D("")          PASSED
+        //
+        // and the hole is contagious: `contains(…) && len(…) > 7` admits
+        // a value violating BOTH halves, because the And arm needs both
+        // sides to reduce.
+        //
+        // An unenforced refinement is worse than none — it states a
+        // guarantee downstream code may rely on. The registry was about
+        // to adopt `{ it.contains(&":") }` for `Digest`.
+        if let ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } = &expr.kind
+            && args.len() <= 1
+            && let ExprKind::Literal(Literal {
+                kind: verum_ast::literal::LiteralKind::Text(s),
+                ..
+            }) = &receiver.kind
+        {
+            let hay = s.as_str();
+            let arg_text = |i: usize| -> Option<&str> {
+                match args.get(i).map(|a| &a.kind) {
+                    Some(ExprKind::Literal(Literal {
+                        kind: verum_ast::literal::LiteralKind::Text(a),
+                        ..
+                    })) => Some(a.as_str()),
+                    // `contains(&":")` — the argument is a REFERENCE to
+                    // the literal, so the text sits one Unary deep.
+                    //
+                    // The exclusion is written as the three operators
+                    // that CHANGE the value (`!`, `-`, `~`) rather than
+                    // as a list of the ten that do not. Verum has three
+                    // reference tiers, each with a mut form, plus two
+                    // ownership forms; an allow-list of those would
+                    // silently drop a new tier's spelling back to
+                    // Unknown, and Unknown PERMITS — the exact failure
+                    // this whole arm exists to close.
+                    Some(ExprKind::Unary { op, expr: inner })
+                        if !matches!(
+                            op,
+                            verum_ast::expr::UnOp::Not
+                                | verum_ast::expr::UnOp::Neg
+                                | verum_ast::expr::UnOp::BitNot
+                        ) =>
+                    {
+                        match &inner.kind {
+                            ExprKind::Literal(Literal {
+                                kind: verum_ast::literal::LiteralKind::Text(a),
+                                ..
+                            }) => Some(a.as_str()),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                }
+            };
+            let verdict = match (method.name.as_str(), args.len()) {
+                ("is_empty", 0) => Some(hay.is_empty()),
+                ("contains", 1) => arg_text(0).map(|n| hay.contains(n)),
+                ("starts_with", 1) => arg_text(0).map(|n| hay.starts_with(n)),
+                ("ends_with", 1) => arg_text(0).map(|n| hay.ends_with(n)),
+                _ => None,
+            };
+            if let Some(v) = verdict {
+                return Maybe::Some(if v {
+                    VerificationResult::Valid
+                } else {
+                    VerificationResult::Invalid {
+                        counterexample: verum_common::Maybe::None,
+                    }
+                });
+            }
+        }
         if let ExprKind::Literal(Literal {
             kind: verum_ast::literal::LiteralKind::Bool(b),
             ..
