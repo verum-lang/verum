@@ -936,133 +936,13 @@ impl<'a> RecursiveParser<'a> {
             (generic_clause, meta_clause)
         };
 
-        // Contract clauses: requires EXPR, ensures EXPR (repeatable)
-        // Also supports: where ensures EXPR (postcondition syntax from grammar)
-        // Also support contract literals: contract#"requires ..." / contract#"ensures ..."
-        // Note: We use parse_expr_no_struct to prevent the { from the function body
-        // being consumed as a struct literal in the contract expression
+        // Contract clauses: `requires`, `ensures`, `where ensures`,
+        // `decreases`, `@ghost …` and contract literals, in any order.
+        // ONE door — see `parse_function_contract_clauses`.
         let mut requires = Vec::new();
         let mut ensures = Vec::new();
-        // T1026: the termination measure is an ASSERTION BY THE AUTHOR and
-        // has to reach the AST for anything to check it. It used to be
-        // parsed into `let _expr` and dropped, so `decreases n` on a
-        // function whose recursion grows `n` verified clean under every
-        // instrument — the checkers were not failing to check it, they
-        // never received it.
         let mut decreases = Vec::new();
-
-        loop {
-            // Safety: prevent infinite loop
-            if !self.tick() || self.is_aborted() {
-                break;
-            }
-
-            // Handle @ghost prefix on contract clauses
-            if self.stream.check(&TokenKind::At) {
-                if let Some(TokenKind::Ident(name)) = self.stream.peek_nth_kind(1) {
-                    if name.as_str() == "ghost" {
-                        match self.stream.peek_nth_kind(2) {
-                            // @ghost ensures/requires/invariant/decreases: skip @ghost prefix
-                            Some(&TokenKind::Ensures)
-                            | Some(&TokenKind::Requires)
-                            | Some(&TokenKind::Invariant)
-                            | Some(&TokenKind::Decreases) => {
-                                self.stream.advance(); // consume @
-                                self.stream.advance(); // consume ghost
-                                // Fall through to normal contract clause parsing
-                            }
-                            // @ghost(old_arr: Type = expr): ghost parameter clause
-                            // Skip the entire @ghost(...) construct
-                            Some(&TokenKind::LParen) => {
-                                self.stream.advance(); // consume @
-                                self.stream.advance(); // consume ghost
-                                self.stream.advance(); // consume (
-                                // Skip everything until matching )
-                                let mut depth = 1u32;
-                                while depth > 0 {
-                                    match self.stream.peek_kind() {
-                                        None => break,
-                                        Some(TokenKind::LParen) => {
-                                            depth += 1;
-                                            self.stream.advance();
-                                        }
-                                        Some(TokenKind::RParen) => {
-                                            depth -= 1;
-                                            self.stream.advance();
-                                        }
-                                        _ => {
-                                            self.stream.advance();
-                                        }
-                                    }
-                                }
-                                continue; // Continue to next contract clause
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-
-            match self.stream.peek_kind() {
-                Some(TokenKind::Requires) => {
-                    self.stream.advance();
-                    requires.extend(self.parse_contract_expr_list()?);
-                }
-                Some(TokenKind::Ensures) => {
-                    self.stream.advance();
-                    ensures.extend(self.parse_contract_expr_list()?);
-                }
-                Some(TokenKind::Decreases) => {
-                    self.stream.advance();
-                    // Parse decreases expression(s) - supports comma-separated for lexicographic ordering
-                    // e.g., `decreases m, n` means lexicographic ordering on (m, n)
-                    decreases.push(self.parse_expr_no_struct()?);
-                    // Consume additional comma-separated decreases expressions
-                    while self.stream.check(&TokenKind::Comma) {
-                        // Look ahead: if comma is followed by `ident :` it's a parameter, not another decreases expr
-                        let is_param = matches!(
-                            (self.stream.peek_nth_kind(1), self.stream.peek_nth_kind(2)),
-                            (Some(&TokenKind::Ident(_)), Some(&TokenKind::Colon))
-                        );
-                        if is_param {
-                            break;
-                        }
-                        self.stream.advance(); // consume comma
-                        decreases.push(self.parse_expr_no_struct()?);
-                    }
-                }
-                // GRAMMAR: ensures_clause = 'where' , ensures_item , { ',' , ensures_item } ;
-                // Handle `where ensures EXPR` postcondition syntax
-                Some(TokenKind::Where)
-                    if self.stream.peek_nth(1).map(|t| &t.kind) == Some(&TokenKind::Ensures) =>
-                {
-                    self.stream.advance(); // consume 'where'
-                    // Now parse one or more ensures items (separated by comma)
-                    loop {
-                        if self.stream.consume(&TokenKind::Ensures).is_some() {
-                            let expr = self.parse_expr_no_struct()?;
-                            ensures.push(expr);
-                            // Check for comma to continue
-                            if self.stream.consume(&TokenKind::Comma).is_none() {
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                Some(TokenKind::ContractLiteral(_)) => {
-                    // Parse contract literal and add to the function
-                    // Contract literals are treated as-is without further parsing
-                    let expr = self.parse_expr_no_struct()?;
-                    // Contract literals can be added to both requires and ensures
-                    // The actual contract content will be processed later
-                    // For now, we just store them as contract expressions
-                    requires.push(expr);
-                }
-                _ => break,
-            }
-        }
+        self.parse_function_contract_clauses(&mut requires, &mut ensures, &mut decreases)?;
 
         // Function body: { ... } or = expr;
         // Extern functions may have a body (exported) or just a declaration (imported)
@@ -1783,6 +1663,148 @@ impl<'a> RecursiveParser<'a> {
         }))
     }
 
+    /// Every `function_contract_clause` a signature may carry, in any order.
+    ///
+    /// `grammar/verum.ebnf`'s `function_def` has `{ function_contract_clause }`
+    /// — zero or more, any order, and NO separate production for a method.
+    /// Three parsers implemented it and produced three different vocabularies.
+    /// Measured 2026-09-05, one clause set written in each position (parse
+    /// errors):
+    ///
+    /// ```text
+    ///   clause                    free  impl  proto
+    ///   requires + ensures           0     0      0
+    ///   requires + where ensures     0     2      0
+    ///   decreases                    0     2      1
+    ///   @ghost ensures               0     2      1
+    ///   contract#"…"                 0     2      0
+    /// ```
+    ///
+    /// So `decreases n` — the TERMINATION MEASURE — was simply unavailable on
+    /// a method, and `where ensures` worked there only as the FIRST clause.
+    /// This is the free function's loop, moved verbatim and called by all
+    /// three, so a clause added here reaches every signature position.
+    fn parse_function_contract_clauses(
+        &mut self,
+        requires: &mut Vec<Expr>,
+        ensures: &mut Vec<Expr>,
+        decreases: &mut Vec<Expr>,
+    ) -> ParseResult<()> {
+        loop {
+            // Safety: prevent infinite loop
+            if !self.tick() || self.is_aborted() {
+                break;
+            }
+
+            // Handle @ghost prefix on contract clauses
+            if self.stream.check(&TokenKind::At) {
+                if let Some(TokenKind::Ident(name)) = self.stream.peek_nth_kind(1) {
+                    if name.as_str() == "ghost" {
+                        match self.stream.peek_nth_kind(2) {
+                            // @ghost ensures/requires/invariant/decreases: skip @ghost prefix
+                            Some(&TokenKind::Ensures)
+                            | Some(&TokenKind::Requires)
+                            | Some(&TokenKind::Invariant)
+                            | Some(&TokenKind::Decreases) => {
+                                self.stream.advance(); // consume @
+                                self.stream.advance(); // consume ghost
+                                // Fall through to normal contract clause parsing
+                            }
+                            // @ghost(old_arr: Type = expr): ghost parameter clause
+                            // Skip the entire @ghost(...) construct
+                            Some(&TokenKind::LParen) => {
+                                self.stream.advance(); // consume @
+                                self.stream.advance(); // consume ghost
+                                self.stream.advance(); // consume (
+                                // Skip everything until matching )
+                                let mut depth = 1u32;
+                                while depth > 0 {
+                                    match self.stream.peek_kind() {
+                                        None => break,
+                                        Some(TokenKind::LParen) => {
+                                            depth += 1;
+                                            self.stream.advance();
+                                        }
+                                        Some(TokenKind::RParen) => {
+                                            depth -= 1;
+                                            self.stream.advance();
+                                        }
+                                        _ => {
+                                            self.stream.advance();
+                                        }
+                                    }
+                                }
+                                continue; // Continue to next contract clause
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            match self.stream.peek_kind() {
+                Some(TokenKind::Requires) => {
+                    self.stream.advance();
+                    requires.extend(self.parse_contract_expr_list()?);
+                }
+                Some(TokenKind::Ensures) => {
+                    self.stream.advance();
+                    ensures.extend(self.parse_contract_expr_list()?);
+                }
+                Some(TokenKind::Decreases) => {
+                    self.stream.advance();
+                    // Parse decreases expression(s) - supports comma-separated for lexicographic ordering
+                    // e.g., `decreases m, n` means lexicographic ordering on (m, n)
+                    decreases.push(self.parse_expr_no_struct()?);
+                    // Consume additional comma-separated decreases expressions
+                    while self.stream.check(&TokenKind::Comma) {
+                        // Look ahead: if comma is followed by `ident :` it's a parameter, not another decreases expr
+                        let is_param = matches!(
+                            (self.stream.peek_nth_kind(1), self.stream.peek_nth_kind(2)),
+                            (Some(&TokenKind::Ident(_)), Some(&TokenKind::Colon))
+                        );
+                        if is_param {
+                            break;
+                        }
+                        self.stream.advance(); // consume comma
+                        decreases.push(self.parse_expr_no_struct()?);
+                    }
+                }
+                // GRAMMAR: ensures_clause = 'where' , ensures_item , { ',' , ensures_item } ;
+                // Handle `where ensures EXPR` postcondition syntax
+                Some(TokenKind::Where)
+                    if self.stream.peek_nth(1).map(|t| &t.kind) == Some(&TokenKind::Ensures) =>
+                {
+                    self.stream.advance(); // consume 'where'
+                    // Now parse one or more ensures items (separated by comma)
+                    loop {
+                        if self.stream.consume(&TokenKind::Ensures).is_some() {
+                            let expr = self.parse_expr_no_struct()?;
+                            ensures.push(expr);
+                            // Check for comma to continue
+                            if self.stream.consume(&TokenKind::Comma).is_none() {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                Some(TokenKind::ContractLiteral(_)) => {
+                    // Parse contract literal and add to the function
+                    // Contract literals are treated as-is without further parsing
+                    let expr = self.parse_expr_no_struct()?;
+                    // Contract literals can be added to both requires and ensures
+                    // The actual contract content will be processed later
+                    // For now, we just store them as contract expressions
+                    requires.push(expr);
+                }
+                _ => break,
+            }
+        }
+        Ok(())
+    }
+
     /// The `using [Ctx]` clause of a function signature, in EITHER position.
     ///
     /// The grammar's `function_def` puts `[ context_clause ]` after the
@@ -2452,6 +2474,38 @@ impl<'a> RecursiveParser<'a> {
                 let body_span = self.stream.make_span(start_pos);
 
                 // Convert the body to a base type
+                let mut return_tuple_refined: Option<Type> = None;
+                // **REFINED-NEWTYPE-KEEPS-ITS-KIND-1, `where` half
+                // (T1170)** — a ONE-element tuple keeps its Tuple body,
+                // refining its ELEMENT, so the constructor survives.
+                //
+                // This is the THIRD parse site for the same feature. The
+                // inline form `(Text) { p }` is at ~3355 and a second
+                // `where` shape at ~2589; both were fixed before this one
+                // and `where |t| p` STILL failed at the original E412 —
+                // which is exactly what a per-parse-site pole is for. A
+                // single "refinement works" pole would have gone green on
+                // the inline form and shipped two thirds of a fix.
+                let one_element_tuple: Option<verum_common::List<Type>> =
+                    if let TypeDeclBody::Tuple(types) = &body {
+                        if types.len() == 1 {
+                            let elem = types[0].clone();
+                            let elem_span = elem.span;
+                            let mut one: verum_common::List<Type> = verum_common::List::new();
+                            one.push(Type::new(
+                                TypeKind::Refined {
+                                    base: Box::new(elem),
+                                    predicate: Box::new(predicate.clone()),
+                                },
+                                elem_span,
+                            ));
+                            Some(one)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
                 let base_type = match &body {
                     TypeDeclBody::Tuple(types) => {
                         let tuple_types: Vec<_> = types.iter().cloned().collect();
@@ -2478,6 +2532,40 @@ impl<'a> RecursiveParser<'a> {
                                 fields: fields.clone(),
                                 row_var: Maybe::None,
                             },
+                            body_span,
+                        )
+                    }
+                    // **REFINED-NEWTYPE-KEEPS-ITS-KIND-1, `where` half
+                    // (T1170)** — a one-element tuple keeps its Tuple
+                    // body here too, refining its ELEMENT.
+                    //
+                    // The inline form `(Text) { … }` and this `where`
+                    // form are parsed at two different sites, and only
+                    // the first was fixed at first. The acceptance kept
+                    // them as separate poles precisely so a green
+                    // `inline` could not stand in for a red `where` —
+                    // and it did stay red, at the same E412, while
+                    // inline had already moved on to a type error.
+                    TypeDeclBody::Tuple(types) if types.len() == 1 => {
+                        // `types` is borrowed from the matched body here,
+                        // so the element is CLONED rather than moved —
+                        // the inline site owns its list and can `remove`.
+                        let elem = types[0].clone();
+                        let elem_span = elem.span;
+                        // The predicate is used again by the alias path
+                        // below, so this arm takes a CLONE of it.
+                        return_tuple_refined = Some(Type::new(
+                            TypeKind::Refined {
+                                base: Box::new(elem),
+                                predicate: Box::new(predicate.clone()),
+                            },
+                            elem_span,
+                        ));
+                        Type::new(
+                            TypeKind::Path(verum_ast::Path::from_ident(verum_ast::Ident::new(
+                                Text::from("_refined_base"),
+                                body_span,
+                            ))),
                             body_span,
                         )
                     }
@@ -2522,8 +2610,19 @@ impl<'a> RecursiveParser<'a> {
                     body_span,
                 );
 
-                // Return as an alias to the refined type
-                (TypeDeclBody::Alias(refined_type), Maybe::None)
+                // A one-element tuple keeps its Tuple body so the
+                // constructor survives; everything else stays an alias.
+                if let Some(refined_elem) = return_tuple_refined {
+                    let mut one: verum_common::List<Type> = verum_common::List::new();
+                    one.push(refined_elem);
+                    (TypeDeclBody::Tuple(one), Maybe::None)
+                } else {
+                    if let Some(one) = one_element_tuple {
+                    (TypeDeclBody::Tuple(one), Maybe::None)
+                } else {
+                    (TypeDeclBody::Alias(refined_type), Maybe::None)
+                }
+                }
             }
         } else {
             (body, Maybe::None)
@@ -3329,6 +3428,32 @@ impl<'a> RecursiveParser<'a> {
                     let predicate = self.parse_refinement_predicate()?;
 
                     // Create the base tuple type
+                    // A ONE-element tuple refines its ELEMENT, not the
+                    // tuple: `type Tag is (Text) { … }` must yield
+                    // `Tuple([Refined{Text}])`, so the body stays a Tuple
+                    // (which is what registers the constructor) and the
+                    // element carries the predicate.
+                    //
+                    // Wrapping the whole tuple instead produced
+                    // `Tuple([Refined{Tuple([Text])}])` — a double nesting
+                    // whose symptom was exact and immediate:
+                    // "Type mismatch: expected 'Text', found '(Text)'".
+                    let mut types: Vec<Type> = types.into_iter().collect();
+                    let refined_len = types.len();
+                    if refined_len == 1 {
+                        let elem = types.remove(0);
+                        let elem_span = elem.span;
+                        return Ok(TypeDeclBody::Tuple(
+                            std::iter::once(Type::new(
+                                TypeKind::Refined {
+                                    base: Box::new(elem),
+                                    predicate: Box::new(predicate),
+                                },
+                                elem_span,
+                            ))
+                            .collect(),
+                        ));
+                    }
                     let base_type =
                         Type::new(TypeKind::Tuple(types.into_iter().collect()), tuple_span);
 
@@ -4609,53 +4734,14 @@ impl<'a> RecursiveParser<'a> {
                 (Maybe::None, Maybe::None)
             };
 
-            // Contract clauses for protocol methods: requires EXPR, ensures EXPR (repeatable)
-            // This allows protocol methods to specify contracts that implementations must satisfy
+            // Contract clauses, through the SAME door the free function and
+            // the impl method use — this loop was a THIRD vocabulary: it knew
+            // `where ensures` and contract literals but not `decreases` or
+            // `@ghost`. See `parse_function_contract_clauses`.
             let mut requires = Vec::new();
             let mut ensures = Vec::new();
-
-            loop {
-                // Safety: prevent infinite loop
-                if !self.tick() || self.is_aborted() {
-                    break;
-                }
-
-                match self.stream.peek_kind() {
-                    Some(TokenKind::Requires) => {
-                        self.stream.advance();
-                        requires.extend(self.parse_contract_expr_list()?);
-                    }
-                    Some(TokenKind::Ensures) => {
-                        self.stream.advance();
-                        ensures.extend(self.parse_contract_expr_list()?);
-                    }
-                    // Handle `where ensures EXPR` postcondition syntax
-                    Some(TokenKind::Where)
-                        if self.stream.peek_nth(1).map(|t| &t.kind)
-                            == Some(&TokenKind::Ensures) =>
-                    {
-                        self.stream.advance(); // consume 'where'
-                        // Parse one or more ensures items (separated by comma)
-                        loop {
-                            if self.stream.consume(&TokenKind::Ensures).is_some() {
-                                let expr = self.parse_expr_no_struct()?;
-                                ensures.push(expr);
-                                // Check for comma to continue
-                                if self.stream.consume(&TokenKind::Comma).is_none() {
-                                    break;
-                                }
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-                    Some(TokenKind::ContractLiteral(_)) => {
-                        let expr = self.parse_expr_no_struct()?;
-                        requires.push(expr);
-                    }
-                    _ => break,
-                }
-            }
+            let mut decreases = Vec::new();
+            self.parse_function_contract_clauses(&mut requires, &mut ensures, &mut decreases)?;
 
             // Default implementation
             let default_impl = if self.stream.check(&TokenKind::LBrace) {
@@ -4673,7 +4759,7 @@ impl<'a> RecursiveParser<'a> {
 
             let span = self.stream.make_span(start_pos);
             let decl = FunctionDecl {
-                decreases: Default::default(),
+                decreases: decreases.into_iter().collect(),
                 visibility: Visibility::Private,
                 is_async,
                 is_meta,
@@ -5316,25 +5402,15 @@ impl<'a> RecursiveParser<'a> {
                 (Maybe::None, Maybe::None)
             };
 
-            // Contract clauses: requires EXPR, ensures EXPR (repeatable)
+            // Contract clauses, through the SAME door the free function
+            // uses — this loop had only `requires` and `ensures`, so
+            // `decreases`, `@ghost …`, a contract literal, and `where
+            // ensures` in any position but the first were all refused on a
+            // method. See `parse_function_contract_clauses`.
             let mut requires = Vec::new();
             let mut ensures = Vec::new();
-            loop {
-                if !self.tick() || self.is_aborted() {
-                    break;
-                }
-                match self.stream.peek_kind() {
-                    Some(TokenKind::Requires) => {
-                        self.stream.advance();
-                        requires.extend(self.parse_contract_expr_list()?);
-                    }
-                    Some(TokenKind::Ensures) => {
-                        self.stream.advance();
-                        ensures.extend(self.parse_contract_expr_list()?);
-                    }
-                    _ => break,
-                }
-            }
+            let mut decreases = Vec::new();
+            self.parse_function_contract_clauses(&mut requires, &mut ensures, &mut decreases)?;
 
             // Parse function body or semicolon for bodiless functions (intrinsics)
             let body = if self.stream.check(&TokenKind::LBrace) {
@@ -5360,7 +5436,7 @@ impl<'a> RecursiveParser<'a> {
 
             let span = self.stream.make_span(start_pos);
             let decl = FunctionDecl {
-                decreases: Default::default(),
+                decreases: decreases.into_iter().collect(),
                 visibility: vis.clone(),
                 is_async,
                 is_meta,
