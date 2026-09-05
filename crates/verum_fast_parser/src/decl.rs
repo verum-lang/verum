@@ -2474,7 +2474,6 @@ impl<'a> RecursiveParser<'a> {
                 let body_span = self.stream.make_span(start_pos);
 
                 // Convert the body to a base type
-                let mut return_tuple_refined: Option<Type> = None;
                 // **REFINED-NEWTYPE-KEEPS-ITS-KIND-1, `where` half
                 // (T1170)** — a ONE-element tuple keeps its Tuple body,
                 // refining its ELEMENT, so the constructor survives.
@@ -2535,40 +2534,6 @@ impl<'a> RecursiveParser<'a> {
                             body_span,
                         )
                     }
-                    // **REFINED-NEWTYPE-KEEPS-ITS-KIND-1, `where` half
-                    // (T1170)** — a one-element tuple keeps its Tuple
-                    // body here too, refining its ELEMENT.
-                    //
-                    // The inline form `(Text) { … }` and this `where`
-                    // form are parsed at two different sites, and only
-                    // the first was fixed at first. The acceptance kept
-                    // them as separate poles precisely so a green
-                    // `inline` could not stand in for a red `where` —
-                    // and it did stay red, at the same E412, while
-                    // inline had already moved on to a type error.
-                    TypeDeclBody::Tuple(types) if types.len() == 1 => {
-                        // `types` is borrowed from the matched body here,
-                        // so the element is CLONED rather than moved —
-                        // the inline site owns its list and can `remove`.
-                        let elem = types[0].clone();
-                        let elem_span = elem.span;
-                        // The predicate is used again by the alias path
-                        // below, so this arm takes a CLONE of it.
-                        return_tuple_refined = Some(Type::new(
-                            TypeKind::Refined {
-                                base: Box::new(elem),
-                                predicate: Box::new(predicate.clone()),
-                            },
-                            elem_span,
-                        ));
-                        Type::new(
-                            TypeKind::Path(verum_ast::Path::from_ident(verum_ast::Ident::new(
-                                Text::from("_refined_base"),
-                                body_span,
-                            ))),
-                            body_span,
-                        )
-                    }
                     TypeDeclBody::Inductive(_) => {
                         // Inductive types with value refinements
                         Type::new(
@@ -2612,16 +2577,10 @@ impl<'a> RecursiveParser<'a> {
 
                 // A one-element tuple keeps its Tuple body so the
                 // constructor survives; everything else stays an alias.
-                if let Some(refined_elem) = return_tuple_refined {
-                    let mut one: verum_common::List<Type> = verum_common::List::new();
-                    one.push(refined_elem);
-                    (TypeDeclBody::Tuple(one), Maybe::None)
-                } else {
-                    if let Some(one) = one_element_tuple {
+                if let Some(one) = one_element_tuple {
                     (TypeDeclBody::Tuple(one), Maybe::None)
                 } else {
                     (TypeDeclBody::Alias(refined_type), Maybe::None)
-                }
                 }
             }
         } else {
