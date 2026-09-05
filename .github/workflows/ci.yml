@@ -385,6 +385,8 @@ jobs:
           python3 scripts/ci/check_doc_anchors.py
           python3 scripts/ci/check_doc_error_codes_exist.py
           python3 scripts/ci/check_grammar_docs_match.py
+          python3 scripts/ci/check_by_example_compiles.py --self-test
+          python3 scripts/ci/check_by_example_compiles.py
 
       # A dotted path that resolves to nothing is SILENT (register row
       # A38): the module compiles, the callee is never entered, the
