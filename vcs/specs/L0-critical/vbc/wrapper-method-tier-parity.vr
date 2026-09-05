@@ -1,0 +1,55 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: aot, codegen, dispatch, deref, wrapper, shared, heap, regression
+// @timeout: 20000
+// @expected-exit: 0
+// @expected-stdout-begin
+// plain=git:u
+// heap=git:u
+// shared=git:u
+// count=1
+// @expected-stdout-end
+//
+// Regression guard for T1186: a method reached THROUGH a wrapper must
+// give the SAME answer in both tiers. The interpreter has walked one
+// `deref` hop for a long time — that is what makes `Shared<T>`,
+// `Heap<T>`, `Mutex` guards and the 25 other `deref` declarations in
+// core/ transparent to method calls — and AOT had no counterpart. The
+// same three-line program answered three different wrong things under
+// AOT, chosen by which wrapper was used: an abort for `Shared<T>`, a
+// silent 0 for `Shared<dyn P>`, an address for `Heap<T>`.
+//
+// This is a `differential` test on purpose. The defect is a
+// DISAGREEMENT between tiers, so pinning AOT against a fixed string
+// would still pass if both tiers broke the same way.
+//
+// The `count` line is the false pole and belongs here: `strong_count`
+// is the WRAPPER's own method, and the hop must not steal a call the
+// wrapper can answer itself. That direction was fixed in Tier 0 by
+// T1183 (a hop that unwrapped the caller's variable permanently), so
+// both halves of the rule are pinned by one file.
+
+mount core.base.memory.{Shared, Heap};
+
+type Source is protocol {
+    fn describe(&self) -> Text;
+};
+
+type GitSource is { url: Text };
+
+implement Source for GitSource {
+    fn describe(&self) -> Text { f"git:{self.url}" }
+}
+
+fn main() {
+    let direct = GitSource { url: "u" };
+    print(f"plain={direct.describe()}");
+
+    let boxed = Heap.new(GitSource { url: "u" });
+    print(f"heap={boxed.describe()}");
+
+    let shared: Shared<GitSource> = Shared.new(GitSource { url: "u" });
+    print(f"shared={shared.describe()}");
+    print(f"count={shared.strong_count()}");
+}

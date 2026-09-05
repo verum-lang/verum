@@ -20552,13 +20552,85 @@ fn lower_call_method<'ctx>(
                         ctx.function_name().as_str()
                     );
                 }
+                // **STATIC-DEREF-HOP-1 (T1186)** — unwrap by the
+                // receiver's STATIC type before dispatching.
+                //
+                // The runtime hop inside the switch keys on the type id
+                // read from the object header, and that works for
+                // `Heap<T>` but not for `Shared<T>`: the trace shows
+                // `type_name=Some("Shared") obj_type=Some("Shared")`
+                // while the value's runtime id matches no arm, so the
+                // switch falls through to its abort. The static name is
+                // right there and needs no header at all.
+                //
+                // Gate: only when the receiver's own type does NOT
+                // declare the method. A wrapper that answers for itself
+                // (`Shared.strong_count`) keeps its own body — same
+                // precedence Tier 0 settled in T1183.
+                let mut sw_receiver = receiver;
+                // Taken as an OWNED string: `receiver_type_name` borrows
+                // `ctx` immutably and this block calls `set_register`,
+                // so reading through it here would extend that borrow
+                // across a mutation. The tracked object type carries the
+                // same name (the trace prints them together:
+                // `type_name=Some("Shared") obj_type=Some("Shared")`).
+                let recv_tn: Option<String> =
+                    ctx.get_obj_register_type(receiver.0).map(|s| s.to_string());
+                if let Some(tn) = recv_tn.as_deref() {
+                    let owns = ctx
+                        .get_module()
+                        .get_function(&format!("{}.{}", tn, bare_method_early))
+                        .is_some_and(|f| f.count_basic_blocks() > 0);
+                    let deref_name = format!("{}.deref", tn);
+                    let deref_fn = ctx
+                        .get_module()
+                        .get_function(&deref_name)
+                        .filter(|f| f.count_basic_blocks() > 0 && f.count_params() == 1);
+                    if !owns && let Some(df) = deref_fn {
+                        let recv_val = ctx.get_register(receiver.0)?;
+                        let recv_i64 = as_i64(ctx, recv_val, "shop_recv")?;
+                        let self_arg: BasicMetadataValueEnum = match df.get_nth_param(0) {
+                            Some(p) if p.get_type().is_pointer_type() => ctx
+                                .builder()
+                                .build_int_to_ptr(
+                                    recv_i64,
+                                    ctx.types().ptr_type(),
+                                    "shop_self_ptr",
+                                )
+                                .or_llvm_err()?
+                                .into(),
+                            _ => recv_i64.into(),
+                        };
+                        let inner = ctx
+                            .builder()
+                            .build_call(df, &[self_arg], "shop_inner")
+                            .or_llvm_err()?
+                            .try_as_basic_value()
+                            .basic()
+                            .unwrap_or_else(|| ctx.types().i64_type().const_zero().into());
+                        // `dst` doubles as the scratch register: it is
+                        // dead until the switch below writes it, and
+                        // writing the CALLER's receiver register instead
+                        // would unwrap their variable permanently —
+                        // the exact defect T1183 fixed in Tier 0.
+                        ctx.set_register(dst.0, inner);
+                        sw_receiver = dst;
+                        if std::env::var_os("VERUM_AOT_TRACE_CALLM").is_some() {
+                            eprintln!(
+                                "[callm]   STATIC-DEREF-HOP via {} for method={:?}",
+                                deref_name, method_name_str
+                            );
+                        }
+                    }
+                }
                 return build_runtime_type_switch(
                     ctx,
-                    receiver,
+                    sw_receiver,
                     *args,
                     dst,
                     &entries,
                     method_name_str.as_str(),
+                    0,
                 );
             }
             // No candidate anywhere in the module. This used to degrade
@@ -34889,6 +34961,11 @@ fn build_runtime_type_switch<'ctx>(
     dst: Reg,
     entries: &[(u32, String)],
     method_name: &str,
+    // DEREF-HOP-AOT-1 (T1186): 0 for the outer switch, 1 for the one
+    // built behind a `deref` hop. The hop is taken at most ONCE — a
+    // wrapper around a wrapper is not unwrapped here, matching the
+    // interpreter, whose comment says the same ("ONE hop").
+    hop_depth: u32,
 ) -> Result<()> {
     let i64_type = ctx.types().i64_type();
     let ptr_type = ctx.types().ptr_type();
@@ -35008,10 +35085,121 @@ fn build_runtime_type_switch<'ctx>(
          by value tag; refusing to fabricate a result here.",
         method_name
     );
-    ctx.builder().position_at_end(default_bb);
-    emit_runtime_abort(ctx, &abort_msg, "rts_unresolved_msg")?;
-    ctx.builder().build_unreachable().or_llvm_err()?;
     let mut incoming: Vec<(BasicValueEnum<'ctx>, _)> = Vec::new();
+
+    // **DEREF-HOP-AOT-1 (T1186)** — before aborting, walk ONE `deref`.
+    //
+    // Tier 0 has done this for a long time: if the receiver's type
+    // declares `deref` taking just a receiver, call it and re-dispatch
+    // the original method on what comes back. That is what makes
+    // `Shared<T>` and `Heap<T>` transparent to method calls. AOT had no
+    // counterpart, so the same program answered three different wrong
+    // things depending on the wrapper — an abort for `Shared<T>`, a
+    // silent 0 for `Shared<dyn P>`, an address for `Heap<T>` — while
+    // the interpreter answered correctly for all three.
+    //
+    // The hop is built as a SECOND switch on the same runtime type id,
+    // over the types that declare `deref` but NOT this method (a type
+    // declaring both already has an arm above and must keep it — the
+    // wrapper's OWN method wins over the wrapped value's, which is the
+    // direction T1183 fixed in Tier 0).
+    let hop_entries: Vec<(u32, String)> = if hop_depth == 0 {
+        let mut v: Vec<(u32, String)> = Vec::new();
+        let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        let have_arm: std::collections::HashSet<u32> =
+            entries.iter().map(|(t, _)| *t).collect();
+        if let Some(vbc) = ctx.vbc_module() {
+            let names: Vec<(u32, String)> = vbc
+                .types
+                .iter()
+                .filter_map(|td| {
+                    let n = vbc.get_string(td.name).unwrap_or("");
+                    (!n.is_empty()).then(|| (td.id.0, n.to_string()))
+                })
+                .collect();
+            for (tid, tname) in names {
+                if have_arm.contains(&tid) || !seen.insert(tid) {
+                    continue;
+                }
+                let deref_name = format!("{}.deref", tname);
+                if let Some(f) = ctx.get_module().get_function(&deref_name) {
+                    if f.count_basic_blocks() > 0 && f.count_params() == 1 {
+                        v.push((tid, deref_name));
+                    }
+                }
+            }
+        }
+        v
+    } else {
+        Vec::new()
+    };
+
+    ctx.builder().position_at_end(default_bb);
+    if hop_entries.is_empty() {
+        emit_runtime_abort(ctx, &abort_msg, "rts_unresolved_msg")?;
+        ctx.builder().build_unreachable().or_llvm_err()?;
+    } else {
+        if std::env::var_os("VERUM_AOT_TRACE_CALLM").is_some() {
+            eprintln!(
+                "[callm]   DEREF-HOP: {} wrapper type(s) for method={:?}",
+                hop_entries.len(),
+                method_name
+            );
+        }
+        let hop_default_bb = llvm_cx.append_basic_block(current_fn, "rts_hop_default");
+        let mut hop_cases = Vec::new();
+        let mut hop_blocks = Vec::new();
+        for (tid, dname) in &hop_entries {
+            let bb = llvm_cx.append_basic_block(current_fn, &format!("rts_hop_{}", tid));
+            hop_cases.push((i64_type.const_int(*tid as u64, false), bb));
+            hop_blocks.push((bb, dname.clone()));
+        }
+        ctx.builder()
+            .build_switch(type_id_val, hop_default_bb, &hop_cases)
+            .or_llvm_err()?;
+
+        // A receiver that is neither a candidate nor a wrapper: the
+        // original abort, unchanged. The hop widens what resolves; it
+        // must not turn a loud failure into a quiet one.
+        ctx.builder().position_at_end(hop_default_bb);
+        emit_runtime_abort(ctx, &abort_msg, "rts_unresolved_msg")?;
+        ctx.builder().build_unreachable().or_llvm_err()?;
+
+        for (bb, dname) in &hop_blocks {
+            ctx.builder().position_at_end(*bb);
+            let deref_fn = ctx.get_module().get_function(dname).or_missing_fn(dname)?;
+            let self_arg: BasicMetadataValueEnum = match deref_fn.get_nth_param(0) {
+                Some(p) if p.get_type().is_pointer_type() => ctx
+                    .builder()
+                    .build_int_to_ptr(recv_i64, ptr_type, "rts_hop_self_ptr")
+                    .or_llvm_err()?
+                    .into(),
+                _ => recv_i64.into(),
+            };
+            let inner = ctx
+                .builder()
+                .build_call(deref_fn, &[self_arg], "rts_hop_inner")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .unwrap_or_else(|| i64_type.const_zero().into());
+            // Re-dispatch on the unwrapped value. `dst` doubles as the
+            // scratch register for it: the recursive switch reads its
+            // receiver from a register and writes its result to one, and
+            // `dst` is dead until this call completes.
+            ctx.set_register(dst.0, inner);
+            build_runtime_type_switch(ctx, dst, args, dst, entries, method_name, hop_depth + 1)?;
+            let hop_val = ctx.get_register(dst.0)?;
+            let end_bb = ctx
+                .builder()
+                .get_insert_block()
+                .expect("recursive switch leaves the builder in its merge block");
+            ctx.builder()
+                .build_unconditional_branch(merge_bb)
+                .or_llvm_err()?;
+            incoming.push((hop_val, end_bb));
+        }
+    }
 
     // RTS-SCALAR-GUARD: implausible-pointer receivers cannot be
     // dispatched either — same abort, not a fabricated zero.
@@ -35159,6 +35347,47 @@ fn build_runtime_type_switch<'ctx>(
         phi.add_incoming(&[(&(*val), *bb)]);
     }
     ctx.set_register(dst.0, phi.as_basic_value());
+
+    // **RTS-MARK-RETURN-1 (T1186)** — NaN-box-mark the result per the
+    // callee's DECLARED return type, exactly as the `dyn:` path has
+    // done since T0371.
+    //
+    // Selection was already correct here; the result register was left
+    // UNMARKED, so a `-> Text` method dispatched through this switch
+    // handed `print` a bare i64 and rendered the handle as an ADDRESS.
+    // That is why the deref hop above looked inert on its first
+    // measurement: the IR showed `Heap.deref` feeding
+    // `GitSource.describe`, so the call WAS reaching the right body —
+    // and the program still printed 4450418752. An Int-returning method
+    // through the same hop printed 42 in both tiers, which is what
+    // separated "not dispatched" from "dispatched, then mis-rendered".
+    //
+    // SELF/GENERIC GUARD, same reasoning as T0371: a `-> Self` method
+    // (`clone`) has no single static return representation — the
+    // primitive-default arms return the RAW receiver — so marking it as
+    // a heap handle would render a cloned scalar as a bogus pointer.
+    if let Some((self_tid, first_fname)) = entries.first() {
+        let ret_type = ctx.vbc_module().and_then(|vbc| {
+            vbc.find_function_by_name(first_fname.as_str())
+                .and_then(|fid| vbc.get_function(fid))
+                .map(|fd| fd.return_type.clone())
+        });
+        if let Some(ret_type) = ret_type {
+            let mut probe: &TypeRef = &ret_type;
+            while let TypeRef::Reference { inner, .. } = probe {
+                probe = &**inner;
+            }
+            let returns_self = match probe {
+                TypeRef::Generic(_) => true,
+                TypeRef::Concrete(rtid) => rtid.0 == *self_tid,
+                TypeRef::Instantiated { base, .. } => base.0 == *self_tid,
+                _ => false,
+            };
+            if !returns_self {
+                mark_register_from_return_type(ctx, dst.0, &ret_type);
+            }
+        }
+    }
     Ok(())
 }
 
