@@ -44,6 +44,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -52,7 +53,13 @@ REPO = Path(__file__).resolve().parents[2]
 AUTHORITY = REPO / "grammar" / "verum.ebnf"
 # Built from parts so the literal path does not appear in a tracked file
 # (`make check-internal-refs`).
-DOCS = REPO / "internal" / "website" / "docs"
+# The website is a SEPARATE repository (verum-lang/website). This gate
+# reads it from a sibling checkout, which is what exists on a developer
+# machine; a CI job must check the website out and point
+# VERUM_DOCS_DIR at it, or the gate has nothing to measure and says so.
+# See A81 in docs/architecture/tech-debt-register.md.
+DOCS = Path(os.environ["VERUM_DOCS_DIR"]) if os.environ.get("VERUM_DOCS_DIR") \
+    else REPO.parent / "website" / "docs"
 
 BLOCK = re.compile(r"^```ebnf\n(.*?)^```", re.M | re.S)
 # The page that presents itself as THE grammar; it must be a subset of

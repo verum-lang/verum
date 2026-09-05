@@ -69,7 +69,13 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 # Built from parts so the literal path does not appear in a tracked file
 # (`make check-internal-refs`), the same way the sibling doc gates do it.
-DOCS = REPO / "internal" / "website" / "docs"
+# The website is a SEPARATE repository (verum-lang/website). This gate
+# reads it from a sibling checkout, which is what exists on a developer
+# machine; a CI job must check the website out and point
+# VERUM_DOCS_DIR at it, or the gate has nothing to measure and says so.
+# See A81 in docs/architecture/tech-debt-register.md.
+DOCS = Path(os.environ["VERUM_DOCS_DIR"]) if os.environ.get("VERUM_DOCS_DIR") \
+    else REPO.parent / "website" / "docs"
 BASELINE = REPO / "scripts" / "ci" / "doc_examples_known_failures.txt"
 
 BLOCK = re.compile(r"^```verum\n(.*?)^```", re.M | re.S)

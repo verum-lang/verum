@@ -636,6 +636,19 @@ jobs:
         with:
           submodules: recursive
 
+      # The documentation gates below read the website, which is a separate
+      # public repository. Without this step they walk a path that does not
+      # exist in a checkout and measure nothing — four of them said
+      # "SKIPPED — NOT CHECKED" and one reported its empty result as a clean
+      # one. See A81. `continue-on-error` so a website outage cannot block a
+      # compiler PR; the gates skip loudly if the tree is missing.
+      - name: Check out the website (documentation under test)
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: verum-lang/website
+          path: .website
+
       - name: Install Rust toolchain
         run: rustup toolchain install
 
@@ -687,6 +700,7 @@ jobs:
         # This job already has a release binary, which is what they need.
         env:
           VERUM_BIN: target/release/verum
+          VERUM_DOCS_DIR: .website/docs
         run: |
           set -euo pipefail
           python3 scripts/ci/check_doc_examples.py --self-test

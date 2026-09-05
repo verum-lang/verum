@@ -41,7 +41,13 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 # Built from parts so the literal path stays out of a tracked file
 # (`make check-internal-refs`), the same way the sibling doc gates do.
-HOMEPAGE = REPO / "internal" / "website" / "src" / "pages" / "index.tsx"
+# The website is a SEPARATE repository (verum-lang/website). Read from a
+# sibling checkout by default; a CI job sets VERUM_DOCS_DIR to the tree
+# it checked out. Without either, this gate has nothing to measure and
+# says so. See A81 in docs/architecture/tech-debt-register.md.
+HOMEPAGE = (Path(os.environ["VERUM_DOCS_DIR"]).parent / "src" / "pages" / "index.tsx"
+            if os.environ.get("VERUM_DOCS_DIR")
+            else REPO.parent / "website" / "src" / "pages" / "index.tsx")
 
 # Deliberate elisions: `path#hash-of-block`.
 BASELINE = {

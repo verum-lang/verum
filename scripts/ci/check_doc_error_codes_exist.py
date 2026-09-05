@@ -42,6 +42,7 @@ exemption cannot silently widen to another file.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -49,7 +50,13 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 # Public-file hygiene: this path is the symlink the working checkout
 # has; CI has no website tree and takes the SKIPPED branch below.
-DOCS = REPO / "internal" / "website" / "docs"
+# The website is a SEPARATE repository (verum-lang/website). This gate
+# reads it from a sibling checkout, which is what exists on a developer
+# machine; a CI job must check the website out and point
+# VERUM_DOCS_DIR at it, or the gate has nothing to measure and says so.
+# See A81 in docs/architecture/tech-debt-register.md.
+DOCS = Path(os.environ["VERUM_DOCS_DIR"]) if os.environ.get("VERUM_DOCS_DIR") \
+    else REPO.parent / "website" / "docs"
 REGISTRY = REPO / "crates" / "verum_error" / "src" / "registry.rs"
 
 CODE = re.compile(r"\b([EW]\d{3,4})\b")
