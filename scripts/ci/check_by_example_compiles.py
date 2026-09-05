@@ -30,7 +30,9 @@ REPO = Path(__file__).resolve().parents[2]
 # while `verum audit --bundle` read them and printed the errors
 # with no source location attached.
 EXAMPLE_DIRS = [REPO / "docs" / "by-example",
-                REPO / "crates" / "verum_cli" / "examples"]
+                REPO / "examples",
+                REPO / "crates" / "verum_cli" / "examples",
+                REPO / "crates" / "verum_compiler" / "examples"]
 
 
 def binary() -> str:

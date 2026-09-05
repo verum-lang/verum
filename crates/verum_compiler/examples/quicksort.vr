@@ -19,6 +19,6 @@ fn quicksort(arr: List<Int>) -> List<Int> {
         let sorted_left = quicksort(left);
         let sorted_right = quicksort(right);
 
-        sorted_left.append([pivot]).append(sorted_right)
+        sorted_left.concat([pivot]).concat(sorted_right)
     }
 }

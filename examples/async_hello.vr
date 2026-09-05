@@ -21,7 +21,7 @@ async fn run() -> Int {
     x + y
 }
 
-fn main() {
+async fn main() {
     let result = run().await;
     print(f"async add chain → {result}");
 }

@@ -19,7 +19,7 @@ fn main() {
 // Binary tree type
 type Tree<T> is
     | Empty
-    | Node(T, Tree<T>, Tree<T>)
+    | Node(T, Tree<T>, Tree<T>);
 
 fn search<T>(tree: Tree<T>, target: T) -> Bool {
     match tree {
