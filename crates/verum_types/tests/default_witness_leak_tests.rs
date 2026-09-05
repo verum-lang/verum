@@ -138,3 +138,56 @@ fn a_deref_of_a_mut_variant_receiver_is_fine_alone() {
         errors(&src)
     );
 }
+
+/// SHARPENED 2026-09-06: the deref is not required, and neither is the match.
+/// `T.default()` in one method plus `let r = self;` in the NEXT is enough —
+/// eleven lines — and the message names `self`'s own type with an unresolved
+/// payload:
+///
+/// ```text
+///   error<E404>: Ambiguous type for `r`:
+///     the inferred type `&mut None(Unit) or Some(_)` is not fully determined
+/// ```
+///
+/// Four controls, each one variable: `let x = 1;` in place of `let r = self;`
+/// is clean; `T.zero()` in place of `T.default()` is clean; the second method
+/// alone is clean; and an explicit annotation (`let old: M<T> = *self;`) does
+/// NOT rescue it — which says the ambiguity is settled independently of what
+/// the author wrote down.
+#[test]
+fn a_let_bound_self_after_a_default_call_is_ambiguous_today() {
+    let leaking = format!(
+        "{DECL}implement<T> M<T> {{\n\
+         {}\n    public fn take(&mut self) -> Int {{\n        let r = self;\n        1\n    }}\n}}\n",
+        call_method("T.default()", "Default")
+    );
+    assert!(
+        !errors(&leaking).is_empty(),
+        "documented behaviour: `let r = self;` after a sibling `T.default()` is \
+         ambiguous. If this now passes, the leak is fixed — delete this test and \
+         the `None => 0` literal in core/base/maybe.vr"
+    );
+
+    // The controls, each differing in ONE thing.
+    let let_int = format!(
+        "{DECL}implement<T> M<T> {{\n\
+         {}\n    public fn take(&mut self) -> Int {{\n        let x = 1;\n        x\n    }}\n}}\n",
+        call_method("T.default()", "Default")
+    );
+    let with_zero = format!(
+        "{DECL}implement<T> M<T> {{\n\
+         {}\n    public fn take(&mut self) -> Int {{\n        let r = self;\n        1\n    }}\n}}\n",
+        call_method("T.zero()", "Zero")
+    );
+    let alone = format!(
+        "{DECL}implement<T> M<T> {{\n    public fn take(&mut self) -> Int {{\n        \
+         let r = self;\n        1\n    }}\n}}\n"
+    );
+    for (what, src) in [("let x = 1", &let_int), ("T.zero()", &with_zero), ("alone", &alone)] {
+        assert!(
+            errors(src).is_empty(),
+            "control `{what}` must be clean — it is what makes the repro specific: {:?}",
+            errors(src)
+        );
+    }
+}
