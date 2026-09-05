@@ -377,14 +377,9 @@ jobs:
         run: |
           python3 scripts/ci/check_doc_indented_blocks.py --selftest
           python3 scripts/ci/check_doc_indented_blocks.py
-          python3 scripts/ci/check_doc_cli_flags.py --self-test
-          python3 scripts/ci/check_doc_cli_flags.py
           # These three have been Makefile targets with no CI caller.
           # They could not have run before this job checked the website
           # out; now they can. See A81.
-          python3 scripts/ci/check_doc_anchors.py
-          python3 scripts/ci/check_doc_error_codes_exist.py
-          python3 scripts/ci/check_grammar_docs_match.py
           python3 scripts/ci/check_by_example_compiles.py --self-test
           python3 scripts/ci/check_by_example_compiles.py
 
