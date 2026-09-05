@@ -403,6 +403,14 @@ fn ffi_extended_body(
             let offset_lo = read_u8(state)? as u16;
             let offset_hi = read_u8(state)? as u16;
             let field_offset = (offset_hi << 8) | offset_lo;
+            // **FIELDADDR-HEADERLESS-1 (T1159)** — the emitter now says
+            // whether the receiver is a record behind a RAW POINTER (no
+            // ObjectHeader) rather than a heap object. This tier does
+            // not need the hint — its live-extent index answers the same
+            // question more precisely, and that test stays below — but
+            // the byte MUST be consumed or every instruction after this
+            // one decodes at the wrong offset.
+            let _headerless_hint = read_u8(state)?;
 
             let obj_val = state.get_reg(obj_reg);
 

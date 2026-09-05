@@ -4827,6 +4827,11 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, ptr_reg.0);
                     operands.push((off & 0xFF) as u8);
                     operands.push(((off >> 8) & 0xFF) as u8);
+                    // headerless:u8 — this arm is reached only through
+                    // `record_pointer_base`, i.e. a record BEHIND A RAW
+                    // POINTER, so the receiver never carries an
+                    // ObjectHeader. See FIELDADDR-HEADERLESS-1.
+                    operands.push(1u8);
                     self.ctx.emit(Instruction::FfiExtended {
                         sub_op: crate::instruction::SystemSubOpcode::StructFieldAddr.to_byte(),
                         operands,
@@ -25555,12 +25560,30 @@ impl VbcCodegen {
 
         let dst = self.ctx.alloc_temp();
 
-        // Encode operands: dst, recv_reg, offset_lo:u8, offset_hi:u8
+        // Encode operands: dst, recv_reg, offset_lo:u8, offset_hi:u8,
+        // headerless:u8
+        //
+        // **FIELDADDR-HEADERLESS-1 (T1159)** — the fifth byte says
+        // whether the receiver is a RECORD BEHIND A RAW POINTER rather
+        // than a heap object. Only this site knows: `ptr_base` is
+        // `Some` for exactly that shape, and it used to be computed and
+        // thrown away.
+        //
+        // It matters because a heap object carries a 24-byte
+        // ObjectHeader and a `cbgr_alloc` block does NOT — its field
+        // slots start at the user pointer. The interpreter discovers
+        // this at runtime from its live-extent index
+        // (`bridge_extent_room`); AOT has no such index and hardcoded
+        // `24 + field_offset`, so `&(*self.ptr).strong_count` on a
+        // `Shared` landed 24 bytes past the count and read 0. Carrying
+        // the fact in the instruction is what lets both tiers agree
+        // without AOT needing a runtime table.
         let mut operands = Vec::<u8>::with_capacity(6);
         Self::write_reg(&mut operands, dst.0);
         Self::write_reg(&mut operands, recv_reg.0);
         operands.push((field_offset & 0xFF) as u8);
         operands.push(((field_offset >> 8) & 0xFF) as u8);
+        operands.push(u8::from(ptr_base.is_some()));
 
         self.ctx.emit(Instruction::FfiExtended {
             sub_op: crate::instruction::SystemSubOpcode::StructFieldAddr.to_byte(),

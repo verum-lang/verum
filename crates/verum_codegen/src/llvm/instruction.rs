@@ -34022,7 +34022,28 @@ fn lower_ffi_extended<'ctx>(
             // OBJECT_HEADER_SIZE = 24 (matches verum_vbc::interpreter::heap::OBJECT_HEADER_SIZE).
             // We hardcode here rather than introduce a Rust-side cross-crate
             // constant import because the layout is part of the ABI contract.
-            let total_offset = 24u64 + field_offset;
+            //
+            // **FIELDADDR-HEADERLESS-1 (T1159)** — but a `cbgr_alloc`
+            // block is HEADERLESS: its field slots start at the user
+            // pointer, so the 24-byte skip lands past the field. The
+            // SAFETY note below claims receivers are "proven to live in
+            // the heap (registered struct types)", and that premise is
+            // false for a record reached through `&unsafe T`.
+            //
+            // Measured: `Shared.strong_count` reads
+            // `&(*self.ptr).strong_count`, `self.ptr` names a
+            // `cbgr_alloc` block, and the emitted IR was
+            // `getelementptr i8, ptr %sf_obj, i64 24` — 24 bytes past a
+            // 24-byte payload. The count read 0 under AOT while the
+            // interpreter read 1.
+            //
+            // The interpreter answers this from its live-extent index
+            // (`bridge_extent_room`); AOT has no such table, so the
+            // EMITTER now carries the fact in a fifth operand byte — it
+            // is the only place that knows, and it knew all along
+            // (`record_pointer_base` computed it and threw it away).
+            let headerless = operands.len() > 4 && operands[4] != 0;
+            let total_offset = if headerless { field_offset } else { 24u64 + field_offset };
             let i8_ty = ctx.llvm_context().i8_type();
             let i64_ty = ctx.types().i64_type();
             let offset_const = i64_ty.const_int(total_offset, false);
