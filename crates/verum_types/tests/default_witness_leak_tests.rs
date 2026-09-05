@@ -246,3 +246,60 @@ fn any_later_let_mentioning_the_impl_parameter_is_ambiguous_today() {
         );
     }
 }
+
+/// REDUCED AGAIN 2026-09-06, and this one corrects the framing above: no
+/// `implement` block, no variant type, no `self`. FOUR LINES, a free
+/// function:
+///
+/// ```text
+///   fn d<T>() -> Int
+///   where T: Default {
+///       let x = T.default();   // error<E404>: Ambiguous type for `x`
+///       1
+///   }
+/// ```
+///
+/// Three controls, one variable each: `T.zero()` is clean, `T.one()` is
+/// clean, and `let x: T = T.default();` is clean — an annotation pins it.
+///
+/// So the statement is simply: `Default.default()` does not tie its result to
+/// `T`, and any binding that does not otherwise pin it is ambiguous. The
+/// impl-block and cross-method appearances are downstream of that — in
+/// `Maybe.unwrap_or_default` the `None` arm is pinned by the `Some(v) => v`
+/// arm, which is why the error surfaces in a SIBLING method instead of at the
+/// call.
+///
+/// This also re-supports the reading in the register that was downgraded when
+/// the template-pin trap stayed silent: `default` is the only built-in
+/// protocol method with no parameter, so nothing binds Self. The support now
+/// comes from this repro rather than from that trap.
+#[test]
+fn a_let_bound_default_call_is_ambiguous_in_a_free_function_today() {
+    let leaking = "fn d<T>() -> Int\nwhere T: Default {\n    let x = T.default();\n    1\n}\n";
+    assert!(
+        !errors(leaking).is_empty(),
+        "documented behaviour: `let x = T.default();` with nothing to pin it is \
+         ambiguous. If this now passes, the leak is fixed — delete this test and \
+         the `None => 0` literal in core/base/maybe.vr"
+    );
+
+    // `T.zero()` and `T.one()` are CLI controls, not harness ones: `Zero` and
+    // `One` are declared in `core/base/protocols.vr` and this harness has no
+    // stdlib, so they do not resolve here. Measured through `verum check`,
+    // both are clean in the identical position — which is the control that
+    // makes the repro specific to `Default`.
+    //
+    // That asymmetry is not incidental: `Default` IS built in (registered in
+    // `protocol.rs`), `Zero` and `One` are not. The harness can only see the
+    // built-in one, and the built-in one is the one that leaks.
+    for (what, src) in [
+        ("annotated", "fn d<T>() -> Int\nwhere T: Default {\n    let x: T = T.default();\n    1\n}\n"),
+    ] {
+        assert!(
+            errors(src).is_empty(),
+            "control `{what}` must be clean — it is what makes the repro specific \
+             to `Default` and to the absence of a pin: {:?}",
+            errors(src)
+        );
+    }
+}
