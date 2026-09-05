@@ -12097,8 +12097,19 @@ impl TypeChecker {
             // `cofix` was unusable, and the minimal one-line definition
             // above was refused.
             if !has_allow_unbounded && !has_tailrec && !func.is_cofix {
+                // A method's recursion is only DECIDABLE by a name-based walk
+                // in an INHERENT impl. In a protocol impl `self.name(…)` very
+                // often forwards to the inherent method of the same name —
+                // `core/math/agent.vr` and `core/math/guardrails.vr` both do
+                // — and the walk cannot tell that from recursion. Measured
+                // 2026-09-06: treating protocol impls the same way made two
+                // core files newly red for forwarding, not for recursion.
                 let term_result = if self.in_impl_block {
-                    self.termination_checker.check_method(func)
+                    if self.in_inherent_impl {
+                        self.termination_checker.check_method(func)
+                    } else {
+                        Ok(())
+                    }
                 } else {
                     self.termination_checker.check_function(func)
                 };

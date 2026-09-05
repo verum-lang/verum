@@ -1071,6 +1071,15 @@ pub struct TypeChecker {
     /// When true, functions being type-checked are from implement blocks
     /// and should NOT be registered as standalone functions in the environment.
     in_impl_block: bool,
+    /// `true` only inside an INHERENT `implement T { … }` block.
+    ///
+    /// In a PROTOCOL impl, `self.name(…)` very often forwards to the
+    /// inherent method of the same name — `core/math/agent.vr` writes
+    /// `implement … ExecutableTool for CallableTool { fn schema(&self) …
+    /// { self.schema() } }` — and a name-based walk cannot tell that from
+    /// recursion. The termination check only claims the inherent case,
+    /// where `self.name(…)` unambiguously means this method.
+    in_inherent_impl: bool,
     /// Set of type names currently being registered.
     /// Prevents infinite recursion when registering mutually recursive types.
     types_being_registered: std::collections::HashSet<Text>,

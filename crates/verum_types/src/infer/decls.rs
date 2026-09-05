@@ -7751,6 +7751,8 @@ impl TypeChecker {
                 // Method signatures were already registered in register_impl_block (Pass 3 of pipeline)
                 let prev_in_impl = self.in_impl_block;
                 self.in_impl_block = true;
+                let prev_inherent = self.in_inherent_impl;
+                self.in_inherent_impl = true;
                 for item in &impl_decl.items {
                     // Skip impl items gated by @cfg that don't match the current platform
                     if !self.cfg_evaluator.should_include(&item.attributes) {
@@ -7763,6 +7765,7 @@ impl TypeChecker {
                     }
                 }
                 self.in_impl_block = prev_in_impl;
+                self.in_inherent_impl = prev_inherent;
 
                 // Restore previous self type
                 self.set_current_self_type(previous_self_type);
@@ -8032,6 +8035,8 @@ impl TypeChecker {
                 // extend<I: Iterator<Item>>(&mut self, iter: I).
 
                 // Type-check method bodies
+                let prev_inherent = self.in_inherent_impl;
+                self.in_inherent_impl = false;
                 let prev_in_impl = self.in_impl_block;
                 self.in_impl_block = true;
                 for item in &impl_decl.items {
@@ -8050,6 +8055,7 @@ impl TypeChecker {
                     }
                 }
                 self.in_impl_block = prev_in_impl;
+                self.in_inherent_impl = prev_inherent;
 
                 // Restore previous self type
                 self.set_current_self_type(previous_self_type);

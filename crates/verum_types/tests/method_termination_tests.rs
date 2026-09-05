@@ -185,3 +185,30 @@ fn a_bare_call_to_a_same_named_free_function_is_not_recursion() {
         termination_errors(src)
     );
 }
+
+/// A PROTOCOL impl forwarding to the inherent method of the same name is not
+/// recursion, and a name-based walk cannot tell the two apart.
+/// `core/math/agent.vr` writes exactly this:
+///
+/// ```text
+///   implement … ExecutableTool for CallableTool {
+///       fn schema(&self) -> FunctionSchema { self.schema() }
+///   }
+/// ```
+///
+/// where the inner `self.schema()` is `CallableTool`'s own. The check claims
+/// only the INHERENT case, where `self.name(…)` unambiguously means this
+/// method.
+#[test]
+fn a_protocol_impl_forwarding_to_an_inherent_method_is_not_recursion() {
+    let src = "type P is protocol { fn name(&self) -> Int; };\n\n\
+               type R is { };\n\n\
+               implement R {\n    fn name(&self) -> Int { 1 }\n}\n\n\
+               implement P for R {\n    fn name(&self) -> Int { self.name() }\n}\n";
+    assert!(
+        termination_errors(src).is_empty(),
+        "a protocol impl forwarding to the inherent method of the same name is \
+         not recursion: {:?}",
+        termination_errors(src)
+    );
+}
