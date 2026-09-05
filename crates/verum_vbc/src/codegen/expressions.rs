@@ -7268,6 +7268,33 @@ impl VbcCodegen {
             return self.compile_imported_intrinsic_call(&intrinsic_info, args);
         }
 
+        // **FLAT-RECORD-RW-1 (T1160)** — `ptr_read` / `ptr_write` over a
+        // MULTI-FIELD record must carry the payload size and the type to
+        // rebuild, and only the CALL SITE knows them.
+        //
+        // The stdlib wrappers compile once, with the width baked in:
+        //
+        //     fn 'core.intrinsics.memory.ptr_read' (id=1281, 3 instrs):
+        //       0: MemExtended { sub_op: 26, operands: [1, 0, 8] }
+        //
+        // no type argument reaches that body. Meanwhile the store side
+        // (`bridge_flat_store`) has always copied a record's payload flat,
+        // so the bytes DO land — measured: `R { a: 41, b: 7 }` written and
+        // read back gave `0x7ff9…0029`, i.e. Int(41), the first slot,
+        // after which `GetF` faulted on a non-object receiver.
+        //
+        // Emitting the sub-op HERE, where the argument's type is known,
+        // supplies both facts. Deliberately narrow, for the reason the
+        // ptr-arith arm above states about the rolled-back T0108 attempt:
+        // it fires ONLY when the pointee is a record of MORE THAN ONE
+        // field, which is exactly the shape that is broken today. A
+        // single-field record and every scalar keep their current
+        // emission byte-for-byte, so no call site that works today
+        // changes route.
+        if let Some(dest) = self.try_compile_flat_record_rw(&func_name, args)? {
+            return Ok(Some(dest));
+        }
+
         // Handle type constructors with sentinel IDs.  These are
         // registered by `compile_type_decl` at `FunctionId(u32::MAX / 2)`
         // and have no compiled body — their semantics are encoded by
@@ -32742,6 +32769,110 @@ impl VbcCodegen {
     ///
     /// This handles the case where intrinsic functions declared with `@intrinsic("name")`
     /// are called through normal import syntax rather than `@intrinsic("name", args...)`.
+    /// **FLAT-RECORD-RW-1 (T1160)** — emit `ptr_read` / `ptr_write` for a
+    /// MULTI-FIELD record here, where the pointee type is known, instead
+    /// of calling the stdlib wrapper whose baked width is 8.
+    ///
+    /// Returns `None` for every other shape, so the existing emission is
+    /// untouched wherever it works today.
+    ///
+    /// The pointee is read off the POINTER argument (`&unsafe T`,
+    /// `*mut T`, `*const T`); the record's payload is `fields * 8` — the
+    /// same model `T.size` compiles to, and the same one
+    /// `cbgr_alloc(T.size)` already asks for at every call site.
+    fn try_compile_flat_record_rw(
+        &mut self,
+        func_name: &str,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        let leaf = Self::call_leaf_name(func_name);
+        let is_read = leaf == "ptr_read";
+        let is_write = leaf == "ptr_write";
+        if !(is_read || is_write) {
+            return Ok(None);
+        }
+        if (is_read && args.len() != 1) || (is_write && args.len() != 2) {
+            return Ok(None);
+        }
+        // Pointee type name, with the reference/pointer spelling stripped.
+        let Some(ptr_expr) = args.first() else {
+            return Ok(None);
+        };
+        let Some(ptr_ty) = self.infer_expr_type_name(ptr_expr) else {
+            return Ok(None);
+        };
+        let pointee = ptr_ty
+            .trim_start_matches('&')
+            .trim_start_matches("unsafe ")
+            .trim_start_matches("checked ")
+            .trim_start_matches("mut ")
+            .trim_start_matches("*mut ")
+            .trim_start_matches("*const ")
+            .split('<')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if pointee.is_empty() {
+            return Ok(None);
+        }
+        // ONLY multi-field records. A single-field record and every
+        // scalar keep the wrapper path byte-for-byte: for them the
+        // baked 8-byte width IS the whole payload, so today's emission
+        // is already correct and rerouting it is how the rolled-back
+        // T0108 attempt broke working sites.
+        let Some(field_count) = self.type_field_count(&pointee) else {
+            return Ok(None);
+        };
+        if field_count < 2 {
+            return Ok(None);
+        }
+        let size = (field_count as usize) * 8;
+        if size > u8::MAX as usize {
+            return Ok(None); // width is one operand byte; fall back
+        }
+        let Some(type_id) = self.type_name_to_id.get(&pointee).copied() else {
+            return Ok(None);
+        };
+
+        let ptr_reg = match self.compile_expr(ptr_expr)? {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+        let dest = self.ctx.alloc_temp();
+        let mut ops = Vec::<u8>::new();
+        if is_read {
+            // dst, ptr, size, type_id(u32 LE)
+            Self::write_reg(&mut ops, dest.0);
+            Self::write_reg(&mut ops, ptr_reg.0);
+            ops.push(size as u8);
+            ops.extend_from_slice(&type_id.0.to_le_bytes());
+            self.ctx.emit(Instruction::MemExtended {
+                sub_op: 0x1a,
+                operands: ops,
+            });
+        } else {
+            let Some(val_expr) = args.iter().nth(1) else {
+                return Ok(None);
+            };
+            let val_reg = match self.compile_expr(val_expr)? {
+                Some(r) => r,
+                None => return Ok(None),
+            };
+            // ptr, value, size, type_id(u32 LE)
+            Self::write_reg(&mut ops, ptr_reg.0);
+            Self::write_reg(&mut ops, val_reg.0);
+            ops.push(size as u8);
+            ops.extend_from_slice(&type_id.0.to_le_bytes());
+            self.ctx.emit(Instruction::MemExtended {
+                sub_op: 0x1b,
+                operands: ops,
+            });
+            self.ctx.emit(Instruction::LoadUnit { dst: dest });
+        }
+        Ok(Some(dest))
+    }
+
     fn compile_imported_intrinsic_call(
         &mut self,
         info: &IntrinsicInfo,

@@ -495,6 +495,62 @@ pub(in super::super) fn handle_deref(
 /// occupies its field slots — never a NaN box, which is a tag into
 /// interpreter-private storage.
 ///
+/// Rebuild an object from a FLAT payload at `addr` — the twin of
+/// [`bridge_flat_store`] (T1160).
+///
+/// The store side has understood records since it was written: its
+/// non-scalar arm `copy_nonoverlapping`s the payload out of the object
+/// and into byte-addressable memory. Nothing read it back. `ptr_read`
+/// carries a one-byte width and returns `Value::from_i64`, so a record
+/// round-tripped through raw memory came back as the FIRST 8 BYTES of
+/// its payload, tagged as an Int:
+///
+///     type R is { a: Int, b: Int };   R { a: 41, b: 7 }
+///     ptr_write(tp, r); ptr_read(tp)  ->  0x7ff9…0029 = Int(41)
+///
+/// and the next `GetF` on that Int faulted. The store's own error text
+/// already named the gap — "not recoverable by the matching read".
+///
+/// `size` is the payload's byte length (the caller's `T.size`, a
+/// multiple of the 8-byte slot); `type_id` is the record type to
+/// rebuild. Bounded by the extent's remaining room exactly like the
+/// store, so a short extent reports instead of reading past its end.
+pub(super) fn bridge_flat_load(
+    state: &mut InterpreterState,
+    addr: *const u8,
+    room: usize,
+    size: usize,
+    type_id: crate::types::TypeId,
+    op: &'static str,
+) -> InterpreterResult<Value> {
+    if size == 0 || size % std::mem::size_of::<Value>() != 0 {
+        return Err(InterpreterError::InvalidOperand {
+            message: format!(
+                "{op}: flat load of {size} byte(s) is not a whole number of \
+                 {}-byte value slots",
+                std::mem::size_of::<Value>()
+            ),
+        });
+    }
+    if room < size {
+        return Err(InterpreterError::InvalidOperand {
+            message: format!(
+                "{op}: {size}-byte flat load from an allocation with only \
+                 {room} byte(s) left reads past its end"
+            ),
+        });
+    }
+    let obj = state.heap.alloc(type_id, size)?;
+    // SAFETY: `alloc` returned an object whose data section is `size`
+    // bytes; the room check above proves `size` readable bytes at `addr`.
+    unsafe {
+        let dst = (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE);
+        std::ptr::copy_nonoverlapping(addr, dst, size);
+    }
+    state.record_allocation();
+    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+}
+
 /// The copy is bounded on BOTH ends: by the object header's own
 /// data-section `size` and by the room left in the extent.
 pub(super) fn bridge_flat_store(

@@ -27170,6 +27170,76 @@ fn lower_mem_extended<'ctx>(
             let ptr_reg = op_reg(operands, 1);
             let size_bytes = operands[2];
             let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "raw_read_ptr")?;
+            // **FLAT-RECORD-RW-1 (T1160)** — a width other than 1/2/4/8 is
+            // a MULTI-FIELD RECORD read: allocate an object and memcpy the
+            // flat payload back into it, the Tier-1 twin of the
+            // interpreter's `bridge_flat_load`. Without this arm
+            // `lower_deref_raw` hard-errors with "Invalid deref size: 24"
+            // and the STDLIB itself fails to build — `Shared.new`'s
+            // `ptr_write(typed_ptr, inner)` writes a 3-field record.
+            if !matches!(size_bytes, 1 | 2 | 4 | 8) {
+                let field_count = (size_bytes as u32) / 8;
+                let runtime = super::runtime::RuntimeLowering::new(ctx.llvm_context());
+                let obj_ptr =
+                    runtime.lower_new_object(ctx.builder(), ctx.get_module(), field_count)?;
+                let i64_type = ctx.types().i64_type();
+                // STAMP THE HEADER — type_id (u32 @0) + total size (u32
+                // @12), the same unconditional stamp the `New` arm
+                // applies. Without it the rebuilt object carries a zeroed
+                // type id and by-name field dispatch cannot place it:
+                // measured as `PANIC: field 's' not found on receiver's
+                // runtime type (FIELD-ACCESS-BYNAME-1)` on a 3-field
+                // record whose field names are ambiguous across the
+                // stdlib. A 2-field record whose names happen to be
+                // unique passed WITHOUT the stamp — which is exactly the
+                // kind of accident that makes an unstamped header look
+                // fine until a name collides.
+                if operands.len() >= 7 {
+                    let tid = u32::from_le_bytes([
+                        operands[3],
+                        operands[4],
+                        operands[5],
+                        operands[6],
+                    ]);
+                    let i32_type = ctx.types().context().i32_type();
+                    ctx.builder()
+                        .build_store(obj_ptr, i32_type.const_int(tid as u64, false))
+                        .or_llvm_err()?;
+                    let size_slot = unsafe {
+                        ctx.builder()
+                            .build_in_bounds_gep(
+                                ctx.types().i8_type(),
+                                obj_ptr,
+                                &[i64_type.const_int(12, false)],
+                                "flat_hdr_size",
+                            )
+                            .or_llvm_err()?
+                    };
+                    let total = super::runtime::RuntimeLowering::OBJECT_HEADER_SIZE
+                        + (field_count as u64) * 8;
+                    ctx.builder()
+                        .build_store(size_slot, i32_type.const_int(total, false))
+                        .or_llvm_err()?;
+                }
+                let hdr = i64_type.const_int(
+                    super::runtime::RuntimeLowering::OBJECT_HEADER_SIZE as u64,
+                    false,
+                );
+                let data_ptr = unsafe {
+                    ctx.builder()
+                        .build_in_bounds_gep(ctx.types().i8_type(), obj_ptr, &[hdr], "flat_dst")
+                        .or_llvm_err()?
+                };
+                let n = i64_type.const_int(size_bytes as u64, false);
+                let mut ffi = FfiLowering::new(ctx.llvm_context());
+                ffi.lower_memcpy(ctx.builder(), ctx.get_module(), data_ptr, ptr, n)?;
+                let as_int = ctx
+                    .builder()
+                    .build_ptr_to_int(obj_ptr, i64_type, "flat_obj")
+                    .or_llvm_err()?;
+                ctx.set_register(dst_reg, as_int.into());
+                return Ok(());
+            }
             let mut ffi = FfiLowering::new(ctx.llvm_context());
             let value = ffi.lower_deref_raw(ctx.builder(), ptr, size_bytes)?;
             ctx.set_register(dst_reg, value.into());
@@ -27185,6 +27255,29 @@ fn lower_mem_extended<'ctx>(
             let value_reg = op_reg(operands, 1);
             let size_bytes = operands[2];
             let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "raw_write_ptr")?;
+            // Twin of the 0x1A record arm (T1160): copy the record's
+            // PAYLOAD out flat, mirroring the interpreter's
+            // `bridge_flat_store`, rather than storing 8 bytes of one
+            // field. Source is the object's data section, so the skip of
+            // OBJECT_HEADER_SIZE is what makes the two tiers lay down the
+            // same bytes.
+            if !matches!(size_bytes, 1 | 2 | 4 | 8) {
+                let src_obj = as_ptr(ctx, ctx.get_register(value_reg)?, "flat_src_obj")?;
+                let i64_type = ctx.types().i64_type();
+                let hdr = i64_type.const_int(
+                    super::runtime::RuntimeLowering::OBJECT_HEADER_SIZE as u64,
+                    false,
+                );
+                let src = unsafe {
+                    ctx.builder()
+                        .build_in_bounds_gep(ctx.types().i8_type(), src_obj, &[hdr], "flat_src")
+                        .or_llvm_err()?
+                };
+                let n = i64_type.const_int(size_bytes as u64, false);
+                let mut ffi = FfiLowering::new(ctx.llvm_context());
+                ffi.lower_memcpy(ctx.builder(), ctx.get_module(), ptr, src, n)?;
+                return Ok(());
+            }
             let value = as_i64(ctx, ctx.get_register(value_reg)?, "raw_write_val")?;
             let mut ffi = FfiLowering::new(ctx.llvm_context());
             ffi.lower_deref_mut_raw(ctx.builder(), ptr, value, size_bytes)?;

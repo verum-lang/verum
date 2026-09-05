@@ -853,6 +853,19 @@ fn mem_extended_body(
             let dst = read_reg(state)?;
             let ptr_reg = read_reg(state)?;
             let size = read_u8(state)?;
+            // **FLAT-RECORD-RW-1 (T1160)** — a width other than 1/2/4/8
+            // is a MULTI-FIELD RECORD read, and the emission that
+            // produced it (`try_compile_flat_record_rw`) appended the
+            // type id so the payload can be rebuilt into an object.
+            // Reading the extra operand is gated on the width, so every
+            // existing 8-byte instruction — including all baked stdlib
+            // bytecode — decodes exactly as before.
+            let record_type_id: Option<crate::types::TypeId> =
+                if matches!(size, 1 | 2 | 4 | 8) {
+                    None
+                } else {
+                    Some(crate::types::TypeId(read_u32(state)?))
+                };
             let val = state.get_reg(ptr_reg);
             let ptr: *mut u8 = if val.is_fat_ref() {
                 val.as_fat_ref().ptr()
@@ -884,6 +897,24 @@ fn mem_extended_body(
             }
             // SAFETY: null-checked; caller supplies a pointer valid for
             // `size`-byte reads (raw-pointer contract, mirrors DerefRaw).
+            // A record read rebuilds the object from the flat payload the
+            // store side laid down — the twin the tree was missing
+            // (T1160). Bounded by the extent's room, exactly like
+            // `bridge_flat_store`.
+            if let Some(tid) = record_type_id {
+                let room = super::cbgr::bridge_extent_room(state, ptr as usize)
+                    .unwrap_or(size as usize);
+                let v = super::cbgr::bridge_flat_load(
+                    state,
+                    ptr as *const u8,
+                    room,
+                    size as usize,
+                    tid,
+                    "ptr_read",
+                )?;
+                state.set_reg(dst, v);
+                return Ok(DispatchResult::Continue);
+            }
             let value = unsafe {
                 match size {
                     1 => *ptr as i64,
@@ -904,6 +935,14 @@ fn mem_extended_body(
             let ptr_reg = read_reg(state)?;
             let value_reg = read_reg(state)?;
             let size = read_u8(state)?;
+            // Symmetric with 0x1A (T1160): a non-1/2/4/8 width means the
+            // emission appended a type id. The write side does not need
+            // it — `bridge_flat_store` takes the shape from the VALUE's
+            // own header — but the operand must be CONSUMED or every
+            // instruction after this one decodes at the wrong offset.
+            if !matches!(size, 1 | 2 | 4 | 8) {
+                let _record_type_id = read_u32(state)?;
+            }
             let val = state.get_reg(ptr_reg);
             let ptr: *mut u8 = if val.is_fat_ref() {
                 val.as_fat_ref().ptr()
