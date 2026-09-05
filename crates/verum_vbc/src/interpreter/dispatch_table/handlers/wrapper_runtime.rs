@@ -46,11 +46,9 @@
 //! (HEAP-INTORAW-1 / SHARED-STRONGCOUNT-1).
 
 use super::super::super::error::InterpreterResult;
-use super::super::super::heap;
 use super::super::super::state::InterpreterState;
 use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
 use crate::instruction::Reg;
-use crate::types::TypeId;
 use crate::value::Value;
 
 /// Strip a qualified function name down to `<Type>.<method>` when the
@@ -91,26 +89,6 @@ fn is_cbgr_data_ptr(state: &InterpreterState, v: &Value) -> bool {
         .contains(&data_ptr.wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize))
 }
 
-/// Returns the refcount-slot pointer when `v` is a `TypeId::SHARED`
-/// object (the runtime repr of `Shared<T>`), else `None`.
-fn shared_refcount_ptr(v: &Value) -> Option<*mut Value> {
-    if !v.is_ptr() || v.is_nil() {
-        return None;
-    }
-    let ptr = v.as_ptr::<u8>();
-    if ptr.is_null()
-        || !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
-    {
-        return None;
-    }
-    // SAFETY: alignment verified; every heap object begins with an
-    // ObjectHeader.
-    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-    if header.type_id != TypeId::SHARED {
-        return None;
-    }
-    Some(unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value })
-}
 
 /// Name-only predicate for the intercept-verdict cache (calls.rs):
 /// does this qualified name even LOOK like a `Heap.*` / `Shared.*`
@@ -144,57 +122,15 @@ pub(in super::super) fn try_intercept_wrapper_call(
         }
         return Ok(None);
     }
-    if let Some(method) = method_of(func_name, "Shared") {
-        if arg_count == 1 {
-            let v = arg_value(state, caller_base, args_start_reg, 0);
-            // `VERUM_SHARED_NATIVE=1` disables the `Shared` interception so
-            // the COMPILED `core/base/memory.vr` bodies run. Without this
-            // half the switch is a HALF measurement: `Shared.new` runs the
-            // real constructor while `get` / `strong_count` are still
-            // answered from the interpreter's private
-            // `[refcount][value]` layout, and the mixture reads as a
-            // defect in the stdlib bodies.
-            if let Some(rc_ptr) = shared_refcount_ptr(&v)
-                && crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::SharedIntercept)
-            {
-                match method {
-                    "strong_count" => {
-                        // SAFETY: rc_ptr derives from a validated SHARED
-                        // object; slot 0 is the refcount Value.
-                        let rc = unsafe { (*rc_ptr).as_i64() };
-                        return Ok(Some(Value::from_i64(rc)));
-                    }
-                    "weak_count" => return Ok(Some(Value::from_i64(0))),
-                    "is_unique" => {
-                        let rc = unsafe { (*rc_ptr).as_i64() };
-                        return Ok(Some(Value::from_bool(rc == 1)));
-                    }
-                    // Statically-resolved `Shared.clone` — bump the
-                    // strong count and return the same pointer (the
-                    // CallM twin lives in method_dispatch.rs; a call
-                    // site that pre-resolved to `Call Shared.clone`
-                    // otherwise reaches the compiled body, which
-                    // reads the nonexistent SharedInner layout and
-                    // leaves the count untouched).
-                    "clone" => {
-                        let rc = unsafe { (*rc_ptr).as_i64() };
-                        // SAFETY: same validated SHARED object.
-                        unsafe { *rc_ptr = Value::from_i64(rc + 1) };
-                        return Ok(Some(v));
-                    }
-                    // `borrow` / `borrow_mut` — inner value lives at
-                    // slot 1 (single-threaded Tier 0: no borrow
-                    // tracking, mirrors the CallM twin).
-                    "borrow" | "borrow_mut" => {
-                        // SAFETY: slot 1 of the validated SHARED object.
-                        let inner = unsafe { *rc_ptr.add(1) };
-                        return Ok(Some(inner));
-                    }
-                    _ => {}
-                }
-            }
-        }
-        return Ok(None);
-    }
+    // The `Shared` interception is GONE (T1159). The interpreter used to
+    // substitute a private `[ObjectHeader][refcount][value]` object for
+    // `Shared<T>` and answer `strong_count` / `weak_count` / `is_unique`
+    // / `clone` from it. The stdlib declares
+    // `Shared { ptr, generation, epoch }` over `SharedInner`, AOT always
+    // ran those bodies, and every tier disagreement traced back to the
+    // substitution rather than to the bodies.
+    //
+    // `Heap`'s arms above stay: `into_raw` / `from_raw` are about CBGR
+    // cell provenance, not about standing in for a stdlib type.
     Ok(None)
 }

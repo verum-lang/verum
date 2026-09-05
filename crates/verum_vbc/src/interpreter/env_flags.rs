@@ -28,15 +28,6 @@ pub(crate) enum Flag {
     DebugFs,
     /// `VERUM_DISABLE_UNIT_DYN_DISPATCH`
     DisableUnitDynDispatch,
-    /// `VERUM_SHARED_NATIVE`
-    SharedNative,
-    /// `VERUM_SHARED_INTERCEPT` — restore the interpreter's private
-    /// `Shared` object (T1159).  The interception is now OFF by
-    /// default: the stdlib's own `core/base/memory.vr` bodies run in
-    /// both tiers.  This flag brings the old behaviour back for a
-    /// side-by-side comparison, and is the twin of `SharedNative`,
-    /// which used to be the way to reach the compiled bodies.
-    SharedIntercept,
     /// `VERUM_SUFFIX_COMPAT_LEGACY`
     SuffixCompatLegacy,
     /// `VERUM_TRACE_ASPTR`
@@ -100,7 +91,7 @@ pub(crate) enum Flag {
 }
 
 impl Flag {
-    const COUNT: usize = 36;
+    const COUNT: usize = 35;
 
     fn name(self) -> &'static str {
         match self {
@@ -108,8 +99,6 @@ impl Flag {
             Flag::CbgrLegacyIntRefs => "VERUM_CBGR_LEGACY_INT_REFS",
             Flag::DebugFs => "VERUM_DEBUG_FS",
             Flag::DisableUnitDynDispatch => "VERUM_DISABLE_UNIT_DYN_DISPATCH",
-            Flag::SharedNative => "VERUM_SHARED_NATIVE",
-            Flag::SharedIntercept => "VERUM_SHARED_INTERCEPT",
             Flag::SuffixCompatLegacy => "VERUM_SUFFIX_COMPAT_LEGACY",
             Flag::TraceAsptr => "VERUM_TRACE_ASPTR",
             Flag::TraceCallmEq => "VERUM_TRACE_CALLM_EQ",
@@ -149,7 +138,6 @@ impl Flag {
             Flag::CbgrLegacyIntRefs => 1,
             Flag::DebugFs => 2,
             Flag::DisableUnitDynDispatch => 3,
-            Flag::SharedNative => 4,
             Flag::SuffixCompatLegacy => 5,
             Flag::TraceAsptr => 6,
             Flag::TraceCallmEq => 7,
@@ -180,7 +168,6 @@ impl Flag {
             Flag::TraceStaticCall => 32,
             Flag::TraceTcp => 33,
             Flag::TrapSelfref => 34,
-            Flag::SharedIntercept => 35,
         }
     }
 }
