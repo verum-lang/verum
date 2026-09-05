@@ -117,10 +117,47 @@ impl<'a> RecursiveParser<'a> {
             | Some(TokenKind::Ensures)
             | Some(TokenKind::Throws)
             | Some(TokenKind::Decreases) => true,
+            // `theorem t() -> Int{> 0}: true { … }` — in a THEOREM the
+            // statement follows the return type, so a `:` after the group
+            // also means the signature continues and the group was a
+            // refinement. A function signature has no `:` in this position,
+            // so the arm cannot fire there. Added with
+            // `parse_theorem_return_type` (A85): without it, giving the
+            // theorem a signature context would have turned a REAL refinement
+            // into a body — which is what that fix's own negative control
+            // asks about.
+            Some(TokenKind::Colon) => true,
             // Anything else (EOF, the next item, the `}` closing an
             // impl/protocol block): the group was the body.
             _ => false,
         }
+    }
+
+    /// Return type of a THEOREM: a declaration return type, but `:`
+    /// introduces the PROPOSITION rather than a sigma type.
+    ///
+    /// `theorem_tail` (`grammar/verum.ebnf`) makes `[ '->' , type_expr ]`
+    /// optional and INDEPENDENT of the statement, so a theorem may carry a
+    /// return type, no statement, and a proof body. The theorem parser used
+    /// `parse_type_no_sigma`, which is not a SIGNATURE context — so the body
+    /// brace was read as a refinement on the return type. Measured
+    /// 2026-09-05: `theorem t() { proof by simp }` parses with no statement
+    /// at all, and `theorem t() -> Int { proof by simp }` gave
+    /// `unexpected keyword 'by'` — the `by` inside what the parser had taken
+    /// for a refinement predicate. Adding a statement rescued it
+    /// (`theorem t() -> Int: true { … }`), which is what placed the defect on
+    /// the return type rather than on theorems or on proof bodies. See A85.
+    ///
+    /// `brace_group_is_refinement` already answers this correctly: a group is
+    /// a refinement exactly when the signature CONTINUES after it, and after
+    /// a theorem's proof body nothing does.
+    pub fn parse_theorem_return_type(&mut self) -> ParseResult<Type> {
+        // LOOKAHEAD ON. The signature-context branch lives behind
+        // `use_lookahead`, and passing `false` here (copied from
+        // `parse_type_no_sigma`) left `signature_ctx` inert — measured: the
+        // return-type-only case still failed while the other three passed.
+        // Sigma stays OFF: a theorem's `:` introduces the proposition.
+        self.parse_type_impl_ctx(true, true, false, true)
     }
 
     /// Return type of a DECLARATION: same as
@@ -1245,6 +1282,24 @@ impl<'a> RecursiveParser<'a> {
         // `core/math/hott.vr`. Rejecting the trailing comma here would
         // force the stdlib into a one-line style or introduce a pointless
         // stylistic exception.
+        // `Path<T>` WITHOUT endpoints is overwhelmingly a user's generic
+        // type, not a malformed cubical path: `Path(id): Path<UserId>` is the
+        // conventional name for a routing extractor, and a reader who writes
+        // it gets `unexpected token in expression: operator `<`` with no
+        // mention of cubical paths, endpoints, or that the name is taken.
+        // Measured 2026-09-05: `Path<Int>` is refused in every position —
+        // return type, parameter, `let` annotation — while `type Path<T> is
+        // (T);` PARSES, so the definition looks accepted and every use fails.
+        // Say what collided. `Path` is the only capitalised name the grammar
+        // claims for a type expression, so this diagnostic covers the whole
+        // family. See A70.
+        if !self.stream.check(&TokenKind::LParen) {
+            return Err(ParseError::invalid_type_syntax(
+                "`Path` is reserved for cubical paths, which take two endpoints: `Path<A>(a, b)`",
+                self.stream.current_span(),
+                "if you meant an ordinary generic type, rename it: `RoutePath<T>`, `FsPath<T>`. The BARE name `Path` is free (that is `core.io.path.Path`); only `Path<…>` is claimed.",
+            ));
+        }
         self.stream.expect(TokenKind::LParen)?;
         let lhs = self.parse_expr_no_struct()?;
         self.stream.expect(TokenKind::Comma)?;

@@ -318,6 +318,19 @@ pub struct RecursiveParser<'a> {
     recursion_depth: usize,
     /// When true, `$ident` splice expressions are allowed (inside meta rule bodies).
     pub in_meta_body: bool,
+    /// When true, a `;` ENDS the construct being parsed and must not be taken
+    /// as a tactic-sequence separator.
+    ///
+    /// A `calc` step is terminated by `;`, and its justification is a tactic:
+    /// `calc { a = a by x; = a by y; }`. `parse_tactic_seq` treats `;` as a
+    /// sequence separator unless the token after it is on a stop list of
+    /// proof-step and item keywords — a calc relation (`=`, `==`, `<`, …) is
+    /// on no such list, so the tactic parser swallowed the step terminator and
+    /// then demanded a tactic where the next relation stood. Measured
+    /// 2026-09-05: a ONE-step trailing-`by` chain parses and every longer one
+    /// gives `E018: expected tactic expression`, while the brace-justified
+    /// spelling `calc { a == { by x } a == { by y } a }` chains fine. See A75.
+    pub semicolon_ends_construct: bool,
     /// Script-mode flag (P1.2): when set, [`Self::parse_module`] accepts
     /// top-level statements alongside items and synthesises a single
     /// `__verum_script_main` `FunctionDecl` carrying every collected
@@ -362,6 +375,7 @@ impl<'a> RecursiveParser<'a> {
             comprehension_depth: 0,
             recursion_depth: 0,
             in_meta_body: false,
+            semicolon_ends_construct: false,
             script_mode: false,
             recovered_clean_boundary: false,
         }

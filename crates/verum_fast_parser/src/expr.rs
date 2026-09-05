@@ -6021,6 +6021,29 @@ impl<'a> RecursiveParser<'a> {
             // Numeric literal - likely body
             Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_)) => true,
 
+            // A token that CANNOT be a field name is a body start, not member
+            // access. `self` was the omission that mattered: `forall i in
+            // 0..10. self[i] == 1` read the `.` as field access, took `.self`
+            // and `[i]` as postfix, then met `==` at the domain parser's
+            // minimum precedence and stopped — leaving the caller to expect a
+            // `.` or `=>` and report `unexpected operator '=='`. Measured
+            // 2026-09-05 with three controls: `self[0] == 1` in a refinement
+            // with NO quantifier parses, `xs[i] == 1` for a PARAMETER inside a
+            // quantifier parses, and `(self)[i]` parses — the parenthesis
+            // takes the `.(` arm above, which is what named the cause. See A84.
+            //
+            // The rest are on the same footing: a prefix operator, a string or
+            // char literal, and `Self` are none of them spellable after a `.`
+            // as a member.
+            Some(TokenKind::SelfValue)
+            | Some(TokenKind::SelfType)
+            | Some(TokenKind::Minus)
+            | Some(TokenKind::Star)
+            | Some(TokenKind::Ampersand)
+            | Some(TokenKind::Tilde)
+            | Some(TokenKind::Text(_))
+            | Some(TokenKind::Char(_)) => true,
+
             // Other - not a separator (or invalid)
             _ => false,
         }

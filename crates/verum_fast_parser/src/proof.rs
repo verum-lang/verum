@@ -184,10 +184,13 @@ impl<'a> RecursiveParser<'a> {
         };
 
         // Check for optional return type: -> Type
-        // Use parse_type_no_sigma to prevent `-> Bool: n` from being parsed as sigma type
-        // In theorem/lemma, the `:` after the type introduces the proposition, not a sigma constraint
+        //
+        // A SIGNATURE return type: a following `{ … }` is the PROOF BODY,
+        // not a refinement, unless the signature continues after it. The `:`
+        // after the type still introduces the PROPOSITION here, never a sigma
+        // type. See `parse_theorem_return_type` and A85.
         let return_type = if self.stream.consume(&TokenKind::RArrow).is_some() {
-            Maybe::Some(self.parse_type_no_sigma()?)
+            Maybe::Some(self.parse_theorem_return_type()?)
         } else {
             Maybe::None
         };
@@ -2385,7 +2388,34 @@ impl<'a> RecursiveParser<'a> {
         // This allows `a + b` to be parsed as the start, with `==` being the calc relation
         let start = self.parse_expr_bp(7)?;
 
-        // Parse steps
+        // Parse steps.
+        //
+        // Within a chain a `;` TERMINATES a step; it is not a tactic-sequence
+        // separator. The flag is scoped to the step loop and restored on EVERY
+        // exit — the loop below leaves through several `?`, and a leaked flag
+        // would silently change how tactic sequences parse in whatever the
+        // caller does next. See A75 and `semicolon_ends_construct`.
+        let prev_semi_scope = self.semicolon_ends_construct;
+        self.semicolon_ends_construct = true;
+        let steps_result = self.parse_calc_steps();
+        self.semicolon_ends_construct = prev_semi_scope;
+        let steps = steps_result?;
+
+        self.stream.expect(TokenKind::RBrace)?;
+
+        let span = self.stream.make_span(start_pos);
+        Ok(CalculationChain {
+            start: Heap::new(start),
+            steps: steps.into_iter().collect(),
+            span,
+        })
+    }
+
+    /// The `{ calc_step }` of a chain: one or more
+    /// `relation , justification , expression`, each optionally terminated by
+    /// `;`. Split out so `parse_calc_chain` can restore
+    /// `semicolon_ends_construct` on the error paths too.
+    fn parse_calc_steps(&mut self) -> ParseResult<Vec<CalculationStep>> {
         let mut steps = Vec::new();
         while !self.stream.check(&TokenKind::RBrace) && !self.stream.at_end() {
             let step_start = self.stream.position();
@@ -2433,15 +2463,7 @@ impl<'a> RecursiveParser<'a> {
             // Optional semicolon
             self.stream.consume(&TokenKind::Semicolon);
         }
-
-        self.stream.expect(TokenKind::RBrace)?;
-
-        let span = self.stream.make_span(start_pos);
-        Ok(CalculationChain {
-            start: Heap::new(start),
-            steps: steps.into_iter().collect(),
-            span,
-        })
+        Ok(steps)
     }
 
     /// Parse a calculation relation.
@@ -2590,6 +2612,14 @@ impl<'a> RecursiveParser<'a> {
         let mut tactics = vec![self.parse_tactic_primary()?];
 
         while self.stream.check(&TokenKind::Semicolon) {
+            // The ENCLOSING construct owns this `;`. A `calc` step ends at
+            // one, and the token after it is a calc relation (`=`, `==`,
+            // `<`, …) — on no stop list below, so without this the tactic
+            // parser ate the step terminator and then demanded a tactic
+            // where the next relation stood (A75).
+            if self.semicolon_ends_construct {
+                break;
+            }
             // Check if what follows the semicolon is a proof step keyword - if so, don't consume it
             // as the semicolon belongs to the proof step, not the tactic sequence
             let next_after_semi = self.stream.peek_nth_kind(1);
