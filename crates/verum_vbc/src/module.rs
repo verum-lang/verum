@@ -1479,6 +1479,54 @@ impl VbcModule {
             if !name.starts_with("core.") {
                 continue;
             }
+            // **BAND-REAL-DECL-WINS-1 (T1163)** — a REAL declaration
+            // outranks a synthesized intrinsic wrapper of the same leaf
+            // name.
+            //
+            // The lookup below is by BARE LEAF into a global registry, so
+            // two unrelated things can answer to one name:
+            //
+            //     intrinsic  cbgr_dealloc          3 params
+            //                                      (ptr, size, align)
+            //     stdlib     cbgr_dealloc(ptr: &unsafe Byte)   ONE param
+            //                core/mem/allocator.vr:1279
+            //
+            // Four `cbgr_dealloc(self.ptr as &unsafe Byte)` sites in
+            // core/base/memory.vr were bound to a THREE-parameter
+            // wrapper — measured with `VERUM_TRACE_ARITY_FALLBACK=1`:
+            // "call passes 1, definition takes 3", four times. The
+            // mangled name keeps the CALLER's module, so it even reads as
+            // though `core.base.memory` declared it. It does not.
+            //
+            // This site's own comment already names the hazard — a
+            // registration that "could silently capture OTHER modules'
+            // re-export spellings … the loud-to-wrong inversion this leg
+            // must never introduce". A bare-leaf lookup IS that
+            // inversion, arriving before the mangling that guards
+            // against it.
+            //
+            // Exact dotted-suffix match, so `dealloc` cannot claim
+            // `cbgr_dealloc`, and only functions WITH A BODY count — a
+            // forward declaration is not an implementation.
+            {
+                let bare = name.rsplit('.').next().unwrap_or(name.as_str());
+                let dotted_leaf = format!(".{bare}");
+                let real_decl = self.functions.iter().enumerate().find_map(|(i, f)| {
+                    let fname = self.get_string(f.name).unwrap_or("");
+                    (fname.ends_with(dotted_leaf.as_str()) && f.instructions.is_some())
+                        .then_some(FunctionId(i as u32))
+                });
+                if let Some(real) = real_decl {
+                    if trace {
+                        eprintln!(
+                            "[band-wrapper] {name}: real declaration outranks the intrinsic"
+                        );
+                    }
+                    self.resolved_band_map.insert(band_id, real);
+                    bound += 1;
+                    continue;
+                }
+            }
             let mangled = mangle(&name);
             let fid = if let Some(&fid) = synthesized_by_name.get(&mangled) {
                 fid
