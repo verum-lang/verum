@@ -505,8 +505,10 @@ pub(in super::super) fn handle_deref(
 /// round-tripped through raw memory came back as the FIRST 8 BYTES of
 /// its payload, tagged as an Int:
 ///
-///     type R is { a: Int, b: Int };   R { a: 41, b: 7 }
-///     ptr_write(tp, r); ptr_read(tp)  ->  0x7ff9…0029 = Int(41)
+/// ```text
+/// type R is { a: Int, b: Int };   R { a: 41, b: 7 }
+/// ptr_write(tp, r); ptr_read(tp)  ->  0x7ff9…0029 = Int(41)
+/// ```
 ///
 /// and the next `GetF` on that Int faulted. The store's own error text
 /// already named the gap — "not recoverable by the matching read".

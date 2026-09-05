@@ -379,6 +379,12 @@ jobs:
           python3 scripts/ci/check_doc_indented_blocks.py
           python3 scripts/ci/check_doc_cli_flags.py --self-test
           python3 scripts/ci/check_doc_cli_flags.py
+          # These three have been Makefile targets with no CI caller.
+          # They could not have run before this job checked the website
+          # out; now they can. See A81.
+          python3 scripts/ci/check_doc_anchors.py
+          python3 scripts/ci/check_doc_error_codes_exist.py
+          python3 scripts/ci/check_grammar_docs_match.py
 
       # A dotted path that resolves to nothing is SILENT (register row
       # A38): the module compiles, the callee is never entered, the
@@ -711,6 +717,12 @@ jobs:
           python3 scripts/ci/check_doc_indented_blocks.py
           python3 scripts/ci/check_doc_cli_flags.py --self-test
           python3 scripts/ci/check_doc_cli_flags.py
+          # These three have been Makefile targets with no CI caller.
+          # They could not have run before this job checked the website
+          # out; now they can. See A81.
+          python3 scripts/ci/check_doc_anchors.py
+          python3 scripts/ci/check_doc_error_codes_exist.py
+          python3 scripts/ci/check_grammar_docs_match.py
 
       - name: File location does not change the verdict
         run: |
