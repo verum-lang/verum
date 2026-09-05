@@ -77,7 +77,16 @@ TABLE_GLYPH = re.compile(r"->|≡|⇒|→")
 # is stated because it is not what the run printed; the eleven were
 # found by intersecting the run's defect list with `git log --since` on
 # the documentation tree, not from memory.
-BASELINE = 161
+# 213 -> 161 -> 17, measured on 2795 blocks (the estate shrank from
+# 2843 because ~48 blocks were API catalogues that became tables —
+# a listing of method names is not a compilation unit, and fencing
+# one as ```verum was the single largest class).
+#
+# The 17 that remain are sixteen files with one defect each, which
+# is what a ratchet is for: the classes are gone, the residue is
+# individual. Every earlier baseline was a full-run count with the
+# arithmetic stated; this one is the run's own number, unadjusted.
+BASELINE = 17
 
 
 def verum_binary() -> str:
