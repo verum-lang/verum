@@ -1,0 +1,42 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: dispatch, deref, wrapper, shared
+// @expected-stdout-begin
+// before=1
+// through=git
+// after=1
+// @expected-stdout-end
+// @description: A method reached THROUGH a wrapper's `deref` must not
+//   leave the wrapper peeled. Regression for T1183: the interpreter's
+//   deref last resort published the unwrapped value by writing it into
+//   the receiver's register — which is the caller's VARIABLE — so one
+//   `s.describe()` cost every later `s.<wrapper-method>()`. The middle
+//   line here is the hop; the two `strong_count` lines around it are
+//   the same call on the same variable, and before the fix the second
+//   one panicked with "method 'strong_count' not found on receiver of
+//   runtime kind `Git`" while listing `Shared.strong_count` among its
+//   own candidates.
+//
+//   The two outer lines are what makes this a regression test rather
+//   than a feature test: `before` passed all along, so a spec that only
+//   asserted `through` and `after` could not tell a repaired hop from a
+//   hop that never ran.
+
+mount core.base.memory.{Shared};
+
+type Src is protocol { fn describe(&self) -> Text; };
+
+type Git is { url: Text };
+
+implement Src for Git {
+    fn describe(&self) -> Text { "git" }
+}
+
+fn main() {
+    let s: Shared<dyn Src> = Shared.new(Git { url: "a" });
+
+    print(f"before={s.strong_count()}");
+    print(f"through={s.describe()}");
+    print(f"after={s.strong_count()}");
+}

@@ -327,7 +327,18 @@ pub(in super::super) fn handle_call_method(
     let method_id = read_varint(state)? as u32;
     let args = read_reg_range(state)?;
 
-    let receiver = state.get_reg(receiver_reg);
+    // T1183: a Deref hop at the foot of this function rewound here after
+    // staging the unwrapped value. Take it INSTEAD of reading the
+    // register — the register belongs to the caller's variable, and
+    // writing the unwrapped value there (as this used to do) made the
+    // hop permanent: `s.describe()` left `s` holding a `Git`, so the
+    // next `s.strong_count()` looked for a `Shared` method on `Git`.
+    // One take, one read: a stale substitute cannot survive to an
+    // unrelated call.
+    let receiver = match state.pending_deref_receiver.take() {
+        Some(inner) => inner,
+        None => state.get_reg(receiver_reg),
+    };
 
     // #44-B: take the generic-witness sidecar staged by the preceding
     // `Extended/SetCallWitness` (if any). Attached to whichever callee
@@ -4589,7 +4600,14 @@ pub(in super::super) fn handle_call_method(
                 // returned a DIFFERENT value, so a chain of wrappers
                 // unwraps one layer per pass and a `deref` that answers
                 // itself stops immediately.
-                state.set_reg(receiver_reg, inner);
+                //
+                // Staged BESIDE the register, not written INTO it
+                // (T1183). The register is the caller's variable: a
+                // write there unwrapped the variable permanently, so
+                // one `s.describe()` through this hop cost every later
+                // `s.<wrapper-method>()`. The entry read above takes
+                // this and clears it.
+                state.pending_deref_receiver = Some(inner);
                 state.set_pc(instruction_pc);
                 return Ok(DispatchResult::Continue);
             }

@@ -422,6 +422,25 @@ pub struct InterpreterState {
     /// callee frame it pushes; builtin-intercept outcomes drop it.
     pub pending_call_witness: Option<Box<[crate::types::TypeRef]>>,
 
+    /// Deref-hop receiver substitute (T1183).
+    ///
+    /// The `Deref` last resort in `handle_call_method` unwraps ONE
+    /// wrapper layer and re-runs the same instruction against the
+    /// inner value. It used to publish that inner value by WRITING it
+    /// into the receiver's register — which is the register of the
+    /// VARIABLE, so the substitution outlived the call and the
+    /// variable stopped being a wrapper:
+    ///
+    ///     let s: Shared<dyn Src> = Shared.new(Git { url: "a" });
+    ///     s.strong_count()   // 1
+    ///     s.describe()       // "git", via the deref hop
+    ///     s.strong_count()   // PANIC: no `strong_count` on `Git`
+    ///
+    /// This carries the substitute beside the register instead. The
+    /// re-run takes it at entry and clears it, so exactly one read
+    /// sees the unwrapped value and the register is never touched.
+    pub pending_deref_receiver: Option<Value>,
+
     /// Heap allocator.
     pub heap: Heap,
 
@@ -2579,6 +2598,7 @@ impl InterpreterState {
             registers: RegisterFile::new(),
             call_stack: CallStack::with_max_depth(config.max_stack_depth),
             pending_call_witness: None,
+            pending_deref_receiver: None,
             heap: Heap::with_threshold(config.max_heap_size),
             stats: ExecutionStats::default(),
             config,
