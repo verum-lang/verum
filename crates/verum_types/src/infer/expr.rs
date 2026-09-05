@@ -10357,8 +10357,28 @@ impl TypeChecker {
         }
 
         // If no indexing support found, check if it's a Named/Generic/Unknown type
-        // that may implement Index via protocol implementations
-        match &arr_result.ty {
+        // that may implement Index via protocol implementations.
+        //
+        // Decide on the POINTEE, not the reference. A reference is indexable
+        // exactly when the thing it points at is, and this match read the
+        // OUTER type: `Type::Reference{..}` matches none of the lenient arms,
+        // so every reference whose pointee needed the leniency fell to the
+        // error. Measured 2026-09-05, one variable at a time:
+        //
+        //     type M is List<List<Float>>;
+        //     fn f(m: &M) -> Float { m[0][0] }   Cannot index non-indexable type
+        //     fn f(m: M)  -> Float { m[0][0] }   ok   (by value)
+        //     fn f(m: &List<List<Float>>) …      ok   (reference, no alias)
+        //
+        // — so it was neither references nor aliases nor indexing, but a
+        // reference whose pointee is a NAMED type the protocol lookup cannot
+        // resolve. `&checked M` and `&unsafe M` failed identically. Five
+        // occurrences in `crates/verum_cli/examples/cbgr_references.vr`, the
+        // shipped example whose subject is the three reference tiers.
+        //
+        // The diagnostic still names the type the user WROTE.
+        let indexed_ty = inner_ty.unwrap_or(&arr_result.ty);
+        match indexed_ty {
             Type::Named { .. }
             | Type::Generic { .. }
             | Type::Unknown

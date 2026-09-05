@@ -508,9 +508,14 @@ impl TerminationChecker {
         // Only method calls like `self.add(y)` would be actual recursion.
         // So for methods, also check that there are actual method-call-style recursive calls.
         let is_recursive = if is_method {
-            // For methods, check if the body contains self-recursive method calls
-            // (MethodCall with receiver=self and method=func_name)
-            self.has_self_recursive_method_call(body, func_name)
+            // ONE walker answers both questions — IS this recursive, and
+            // WHICH calls recurse. A second, narrower walk used to answer the
+            // first: it covered SIX expression kinds where
+            // `find_recursive_calls_impl` covers seventy-three, so a self-call
+            // inside a `while`, a `for` or a `try` set no flag and the whole
+            // check was skipped. It has been deleted — two walks answering one
+            // question is how they drift.
+            !self.find_recursive_calls_in_body(body, func_name).is_empty()
         } else {
             calls.contains(func_name)
         };
@@ -525,153 +530,24 @@ impl TerminationChecker {
         Ok(())
     }
 
-    /// Check if a function body contains `self.func_name(...)` method calls (true recursion for methods)
-    fn has_self_recursive_method_call(
+    /// Every recursive call in a function BODY — the block and expression
+    /// forms both, so callers do not each unwrap `FunctionBody`.
+    fn find_recursive_calls_in_body(
         &self,
         body: &verum_ast::decl::FunctionBody,
         func_name: &Text,
-    ) -> bool {
+    ) -> List<RecursiveCall> {
+        let mut calls = List::new();
+        let bindings = Map::new();
         match body {
             verum_ast::decl::FunctionBody::Block(block) => {
-                for stmt in &block.stmts {
-                    match &stmt.kind {
-                        verum_ast::stmt::StmtKind::Expr { expr, .. } => {
-                            if self.expr_has_self_method_call(expr, func_name) {
-                                return true;
-                            }
-                        }
-                        verum_ast::stmt::StmtKind::Let {
-                            value: Some(init), ..
-                        } => {
-                            if self.expr_has_self_method_call(init, func_name) {
-                                return true;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                if let Some(expr) = &block.expr {
-                    if self.expr_has_self_method_call(expr, func_name) {
-                        return true;
-                    }
-                }
-                false
+                self.find_recursive_calls_in_block(block, func_name, &mut calls, &bindings);
             }
-            verum_ast::decl::FunctionBody::Expr(e) => self.expr_has_self_method_call(e, func_name),
-        }
-    }
-
-    /// Check if an expression contains `self.func_name(...)` method calls
-    fn expr_has_self_method_call(&self, expr: &Expr, func_name: &Text) -> bool {
-        match &expr.kind {
-            ExprKind::MethodCall {
-                receiver,
-                method,
-                args,
-                ..
-            } => {
-                // Check if this is self.func_name(...)
-                let is_self_call = matches!(&receiver.kind, ExprKind::Path(p) if p.as_ident().is_some_and(|i| i.name.as_str() == "self"))
-                    && method.name.as_str() == func_name.as_str();
-                if is_self_call {
-                    return true;
-                }
-                // Also check receiver and args recursively
-                if self.expr_has_self_method_call(receiver, func_name) {
-                    return true;
-                }
-                for arg in args {
-                    if self.expr_has_self_method_call(arg, func_name) {
-                        return true;
-                    }
-                }
-                false
-            }
-            ExprKind::Call { func, args, .. } => {
-                if self.expr_has_self_method_call(func, func_name) {
-                    return true;
-                }
-                for arg in args {
-                    if self.expr_has_self_method_call(arg, func_name) {
-                        return true;
-                    }
-                }
-                false
-            }
-            ExprKind::If {
-                condition,
-                then_branch,
-                else_branch,
-            } => {
-                match &**condition {
-                    verum_ast::expr::IfCondition { conditions, .. } => {
-                        for cond in conditions {
-                            match cond {
-                                verum_ast::expr::ConditionKind::Expr(e) => {
-                                    if self.expr_has_self_method_call(e, func_name) {
-                                        return true;
-                                    }
-                                }
-                                verum_ast::expr::ConditionKind::Let { value, .. } => {
-                                    if self.expr_has_self_method_call(value, func_name) {
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if self.block_has_self_method_call(then_branch, func_name) {
-                    return true;
-                }
-                if let Some(e) = else_branch {
-                    if self.expr_has_self_method_call(e, func_name) {
-                        return true;
-                    }
-                }
-                false
-            }
-            ExprKind::Match { expr, arms } => {
-                if self.expr_has_self_method_call(expr, func_name) {
-                    return true;
-                }
-                for arm in arms {
-                    if self.expr_has_self_method_call(&arm.body, func_name) {
-                        return true;
-                    }
-                }
-                false
-            }
-            ExprKind::Block(block) => self.block_has_self_method_call(block, func_name),
-            _ => false,
-        }
-    }
-
-    /// Check if a block contains self-recursive method calls
-    fn block_has_self_method_call(&self, block: &verum_ast::expr::Block, func_name: &Text) -> bool {
-        for stmt in &block.stmts {
-            match &stmt.kind {
-                verum_ast::stmt::StmtKind::Expr { expr: e, .. } => {
-                    if self.expr_has_self_method_call(e, func_name) {
-                        return true;
-                    }
-                }
-                verum_ast::stmt::StmtKind::Let {
-                    value: Some(init), ..
-                } => {
-                    if self.expr_has_self_method_call(init, func_name) {
-                        return true;
-                    }
-                }
-                _ => {}
+            verum_ast::decl::FunctionBody::Expr(expr) => {
+                self.find_recursive_calls_impl(expr, func_name, &mut calls, &bindings);
             }
         }
-        if let Some(e) = &block.expr {
-            if self.expr_has_self_method_call(e, func_name) {
-                return true;
-            }
-        }
-        false
+        calls
     }
 
     /// Check that a recursive function terminates
@@ -746,37 +622,17 @@ impl TerminationChecker {
             return Ok(());
         }
 
-        // Analyze each statement
-        for stmt in &block.stmts {
-            match &stmt.kind {
-                verum_ast::stmt::StmtKind::Expr { expr, has_semi: _ } => {
-                    let rec_calls = self.find_recursive_calls(expr, func_name);
-                    for call in &rec_calls {
-                        self.check_call_decreases(decl, params, call)?;
-                    }
-                }
-                verum_ast::stmt::StmtKind::Let {
-                    pattern: _,
-                    ty: _,
-                    value,
-                } => {
-                    if let Some(init) = value {
-                        let rec_calls = self.find_recursive_calls(init, func_name);
-                        for call in &rec_calls {
-                            self.check_call_decreases(decl, params, call)?;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Check final expression if any
-        if let Some(expr) = &block.expr {
-            let rec_calls = self.find_recursive_calls(expr, func_name);
-            for call in &rec_calls {
-                self.check_call_decreases(decl, params, call)?;
-            }
+        // Every recursive call in the block, through the SAME walk the
+        // `is_recursive` gate uses. This loop used to hand-walk exactly two
+        // statement kinds — `Expr` and `Let` — so a `return self.m(n + 1);`,
+        // a call inside a `while`, and everything else the block walker
+        // reaches were collected by the gate and then never CHECKED. Three
+        // narrowing walks over one question is how they disagree.
+        let mut rec_calls = List::new();
+        let bindings = Map::new();
+        self.find_recursive_calls_in_block(block, func_name, &mut rec_calls, &bindings);
+        for call in &rec_calls {
+            self.check_call_decreases(decl, params, call)?;
         }
 
         Ok(())
@@ -1802,7 +1658,44 @@ impl TerminationChecker {
                 self.find_recursive_calls_impl(expr, func_name, calls, match_bindings);
             }
             // Method calls: obj.method(args)
-            ExprKind::MethodCall { receiver, args, .. } => {
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
+                // A METHOD recurses through `self.name(...)`, and this arm
+                // recorded nothing — it only descended into the receiver and
+                // the arguments, so `find_recursive_calls` came back EMPTY for
+                // every method and each per-call check was unreachable.
+                // Measured 2026-09-05:
+                //
+                //     implement R { fn m(&self, n: Int) -> Int
+                //                       { self.m(n + 1) } }
+                //
+                // type-checked CLEAN, while the identical free function is
+                // refused `error<E321>: potential stack overflow: unbounded
+                // recursion`. Termination checking was not weak on methods; it
+                // never reached one — a declared `decreases` that provably
+                // INCREASES verified clean there too.
+                //
+                // The receiver is `self` as its OWN path segment
+                // (`PathSegment::SelfValue`), never `Name("self")`.
+                let is_self_receiver = matches!(
+                    &receiver.kind,
+                    ExprKind::Path(p)
+                        if matches!(p.segments.as_slice(),
+                                    [PathSegment::SelfValue])
+                            || p.as_ident().is_some_and(|i| i.name.as_str() == "self")
+                );
+                if is_self_receiver && method.name.as_str() == func_name.as_str() {
+                    calls.push(RecursiveCall {
+                        args: args.iter().cloned().collect(),
+                        span: expr.span,
+                        match_bindings: match_bindings.clone(),
+                    });
+                }
+
                 self.find_recursive_calls_impl(receiver, func_name, calls, match_bindings);
                 for arg in args {
                     self.find_recursive_calls_impl(arg, func_name, calls, match_bindings);

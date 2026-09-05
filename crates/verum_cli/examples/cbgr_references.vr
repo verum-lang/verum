@@ -10,7 +10,7 @@ link core.time.instant.Instant;
 type Matrix is List<List<Float>>;
 
 // Function using managed reference (&T) - default, safe, ~15ns overhead
-fn sum_matrix(matrix: &List<List<Float>>) -> Float {
+fn sum_matrix(matrix: &Matrix) -> Float {
     let mut sum = 0.0;
     for row in matrix {
         for value in row {
@@ -22,7 +22,7 @@ fn sum_matrix(matrix: &List<List<Float>>) -> Float {
 
 // Function using checked reference (&checked T) - statically verified, 0ns overhead
 // The 'where' clause provides the static proof required
-fn get_element(matrix: &checked List<List<Float>>, row: Int, col: Int) -> Float
+fn get_element(matrix: &checked Matrix, row: Int, col: Int) -> Float
     where meta row < len(matrix) && col < len(matrix[0])  // Static proof required
 {
     matrix[row][col]  // No bounds check needed at runtime
@@ -31,9 +31,9 @@ fn get_element(matrix: &checked List<List<Float>>, row: Int, col: Int) -> Float
 // Function using unsafe reference (&unsafe T) - zero cost, manual safety
 // Note: 'unsafe' modifier is applied to the function
 unsafe fn fast_matrix_multiply(
-    a: &unsafe List<List<Float>>,
-    b: &unsafe List<List<Float>>,
-    result: &unsafe mut List<List<Float>>
+    a: &unsafe Matrix,
+    b: &unsafe Matrix,
+    result: &unsafe mut Matrix
 ) {
     // SAFETY: Caller must ensure matrices have compatible dimensions
     let n = len(a);
