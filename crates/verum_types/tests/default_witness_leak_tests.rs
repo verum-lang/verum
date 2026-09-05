@@ -191,3 +191,58 @@ fn a_let_bound_self_after_a_default_call_is_ambiguous_today() {
         );
     }
 }
+
+/// FULLY CHARACTERISED 2026-09-06. It is neither `self` nor the variant type:
+/// it is `T` ITSELF. After a method in the block calls `T.default()`, any
+/// LATER `let` in that block whose type MENTIONS the impl's parameter `T` is
+/// reported ambiguous.
+///
+/// The two controls that settle it are the last two here: a CONCRETE payload
+/// (`M<Int>`) is clean, and a DIFFERENT generic type that merely mentions `T`
+/// (`List<T>`) fails. So the impl's rigid `T` is consumed by the `Default`
+/// discharge and not restored for the next method — a statement about the
+/// impl block's type-parameter scope, not about deref, variants, or
+/// `unwrap_or_default`.
+#[test]
+fn any_later_let_mentioning_the_impl_parameter_is_ambiguous_today() {
+    let block = |second: &str| {
+        format!(
+            "{DECL}implement<T> M<T> {{\n{}\n{second}}}\n",
+            call_method("T.default()", "Default")
+        )
+    };
+
+    // Mentions `T` — all ambiguous today.
+    for second in [
+        "    public fn f(&mut self) -> Int {\n        let r = self;\n        1\n    }\n",
+        "    public fn f(&mut self) -> Int {\n        let r: M<T> = None;\n        1\n    }\n",
+        "    public fn f(&mut self, m: M<T>) -> Int {\n        let r = m;\n        1\n    }\n",
+        // `let r: List<T> = List.new();` belongs to the CLI, not here: this
+        // harness has no stdlib, so `List` does not resolve and the case is
+        // clean for a reason that is not the language. Measured through
+        // `verum check`, it gives `Ambiguous type for r: List<_>` — the same
+        // defect, and the control that shows the trigger is `T` itself rather
+        // than the variant type.
+    ] {
+        assert!(
+            !errors(&block(second)).is_empty(),
+            "documented behaviour: a later `let` mentioning `T` is ambiguous. \
+             If this now passes the leak is fixed — see the header.\n{second}"
+        );
+    }
+
+    // Does NOT mention `T`, or is not a `let` — clean, and this is what makes
+    // the characterisation specific rather than a blanket "the block is broken".
+    for (what, second) in [
+        ("concrete payload",
+         "    public fn f(&mut self) -> Int {\n        let r: M<Int> = None;\n        1\n    }\n"),
+        ("no let at all",
+         "    public fn f(&mut self) -> M<T> {\n        None\n    }\n"),
+    ] {
+        assert!(
+            errors(&block(second)).is_empty(),
+            "control `{what}` must be clean: {:?}",
+            errors(&block(second))
+        );
+    }
+}
