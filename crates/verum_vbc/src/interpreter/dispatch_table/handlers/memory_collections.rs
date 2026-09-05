@@ -2508,7 +2508,40 @@ pub(crate) fn value_copy(
         return Ok(value);
     }
 
-    if type_id == TypeId::SHARED {
+    // **SHARED-COPY-LAYOUT-1 (T1161)** — this arm assumes the
+    // INTERCEPTION's object shape, so it must stand down with the rest
+    // of the interception.
+    //
+    //     interception   [ObjectHeader][refcount@slot0][value@slot1]
+    //     stdlib body    Shared { ptr@slot0, generation@slot1,
+    //                             epoch@slot2 }
+    //
+    // Both carry `TypeId::SHARED` (520) — `Shared.new`'s compiled body
+    // emits `New { type_id: 520, field_count: 3 }` — so keying on the
+    // type id alone cannot tell them apart. Applied to a natively
+    // constructed `Shared`, "increment slot 0" INCREMENTS THE POINTER:
+    //
+    //     let s = Shared.new(41);
+    //     print(s.strong_count());   // 1
+    //     let a = s;                 // a plain binding, compiled to
+    //                                // the Clone opcode -> value_copy
+    //     print(s.strong_count());   // 0
+    //
+    // and the FIELDADDR trace shows `self.ptr` going 0x…a0 -> 0x…a1
+    // across that binding. Every later read follows a pointer one byte
+    // off. No clone method is involved: `let a = s;` alone does it,
+    // while `let a = s.strong_count();` does not.
+    //
+    // This is the FOURTH interception site for `Shared`; the other
+    // three (wrapper_runtime's arms, `Shared.new`, the C0-carrier
+    // block) already consult the switch, and its own comment calls a
+    // half-gated switch "a HALF measurement" that "reads as a defect in
+    // the stdlib bodies". This one was the missing half.
+    if type_id == TypeId::SHARED
+        && !crate::interpreter::env_flags::is_set(
+            crate::interpreter::env_flags::Flag::SharedNative,
+        )
+    {
         let rc_ptr = unsafe { src_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
         // SAFETY: slot 0 of a validated SHARED object is the refcount.
         unsafe {
