@@ -49,7 +49,7 @@ and explicit coercion rules police flow across boundaries.
 ```verum
 public type Layer is
     | Fibrant    // HoTT / cubical; UIP does NOT hold
-    | Strict     // UIP holds, decidable equality
+    | Strict;    // UIP holds, decidable equality
 ```
 
 Universes are stratified into a fibrant layer supporting path types
@@ -59,7 +59,7 @@ proofs. `mix(Strict, _) = Strict` (strictness contagion).
 ### 2.2 Quantitative type theory (`core/types/qtt.vr`)
 
 ```verum
-public type Quantity is Zero | One | Many | AtMost { n }
+public type Quantity is Zero | One | Many | AtMost { n: Int };
 ```
 
 Every binding carries a usage quantity — `Zero` (erased), `One`
@@ -85,17 +85,17 @@ cubical normaliser.
 
 ### 2.5 CBGR three-tier references
 
-```verum
-&T           // tier 0: generation-counter-checked (≈ 15 ns)
-&checked T   // tier 1: compiler-proven safe   (0 ns)
-&unsafe T    // tier 2: manual proof obligation (0 ns)
-```
+| tier | spelling | cost | meaning |
+|---|---|---|---|
+| 0 | `&T` | ≈ 15 ns | generation-counter-checked |
+| 1 | `&checked T` | 0 ns | compiler-proven safe |
+| 2 | `&unsafe T` | 0 ns | manual proof obligation |
 
 ### 2.6 Protocol axioms (`ProtocolItemKind::Axiom`)
 
 ```verum
 type Group is protocol {
-    axiom assoc(a, b, c) ensures (a · b) · c == a · (b · c);
+    axiom assoc(a: T, b: T, c: T) ensures (a * b) * c == a * (b * c);
 };
 ```
 
