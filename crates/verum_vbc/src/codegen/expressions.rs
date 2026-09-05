@@ -5636,11 +5636,40 @@ impl VbcCodegen {
                 let inner_type = self
                     .infer_expr_type_name(inner)
                     .or_else(|| self.extract_expr_type_name(inner));
-                let is_heap_deref = inner_type.as_ref().is_some_and(|t| {
-                    t.starts_with("Heap<")
-                        || t.starts_with("Shared<")
-                        || self.is_allocating_wrapper(t)
-                });
+                // `Shared<` came OFF this list once T1160 made the
+                // compiled body work (6bbf6cd08). Two gates decide the
+                // same behaviour and this one runs FIRST — a removal
+                // from the exclusion list below is inert while this test
+                // still matches, which is how the first attempt at this
+                // change measured as no-op.
+                //
+                // Why it is correct NOW and was not before: `*s` used to
+                // lower to a bare `Deref`, and the handler answers that
+                // from the INTERCEPTION's layout
+                // `[ObjectHeader][refcount][value]`. The stdlib's shape
+                // is `Shared { ptr, generation, epoch }`, so on the
+                // native path the bare deref read field 1 —
+                // `*s` printed 1 (the generation) where the payload is
+                // 41. Meanwhile the compiled body reached through a
+                // METHOD is right in both modes:
+                //
+                //     s.get()   native 41, intercepted 41
+                //
+                // `get` and `deref` have byte-identical bodies
+                // (`&(*self.ptr).value`, core/base/memory.vr:800 / 856),
+                // so routing `*s` to `Shared.deref` gives the deref
+                // operator the answer the method already gives. Before
+                // T1160 that route panicked — `Shared.*` was
+                // unreachable — which is why this edit was reverted the
+                // first time rather than kept.
+                //
+                // `Heap<` stays: its `is_heap_deref` branch exists so
+                // `&*value` reaches the original CBGR allocation through
+                // `cbgr_deref_source`, a stated reason this entry never
+                // had.
+                let is_heap_deref = inner_type
+                    .as_ref()
+                    .is_some_and(|t| t.starts_with("Heap<") || self.is_allocating_wrapper(t));
                 // Typed-primitive deref dispatch (#26 codegen tail).
                 //
 
@@ -5742,9 +5771,14 @@ impl VbcCodegen {
                             .unwrap_or(ty_name)
                             .trim()
                             .to_string();
+                        // `Shared` removed alongside the `is_heap_deref`
+                        // test above (T1159): BOTH gates decide this, and
+                        // leaving either one in place keeps `*s` on the
+                        // bare-Deref route that reads the interception's
+                        // layout. See the comment at `is_heap_deref` for
+                        // why this became correct only after T1160.
                         if base.is_empty()
                             || base == "Heap"
-                            || base == "Shared"
                             || base == "Int"
                             || base == "Float"
                             || base == "Bool"

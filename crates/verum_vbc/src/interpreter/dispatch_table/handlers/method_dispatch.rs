@@ -4564,6 +4564,52 @@ pub(in super::super) fn handle_call_method(
     // compiles them (`define internal fastcc i64 @Shared.new`, 334
     // lines, allocating 48 bytes for `SharedInner`) and the archive
     // carries them for Tier 0.
+    // Leg 2 (T1159): the method name is ALREADY qualified and the
+    // receiver is an object — `*s` on a `Shared<T>` emits
+    // `CallM "Shared.deref"` with the wrapper as receiver. Every route
+    // above dispatches on the BARE name against the receiver's runtime
+    // type, so a qualified name that names a real archive function
+    // still arrives here.
+    //
+    // The panic's own candidate list is NOT evidence the function is
+    // missing: it is built with `.take(8)` over `module.functions` in
+    // registration order, so it shows eight arbitrary `.deref` entries
+    // and stops. `Shared.deref` IS compiled — dumping the module shows
+    // `fn 'Shared.deref' (id=10594, 5 instrs)` reading field 0 then the
+    // value slot at offset 16 — it simply fell past every dispatch arm.
+    if !receiver.is_small_string()
+        && method_name.contains('.')
+        && let Some(fid) = state.module.find_function_by_name(&method_name)
+        && state
+            .module
+            .functions
+            .get(fid.0 as usize)
+            .is_some_and(|f| f.params.len() == args.count as usize + 1)
+    {
+        let caller_base = state.reg_base();
+        let mut argv: Vec<Value> = Vec::with_capacity(args.count as usize + 1);
+        argv.push(dispatch_receiver);
+        for i in 0..args.count {
+            argv.push(
+                state
+                    .registers
+                    .get(caller_base, Reg(args.start.0 + i as u16)),
+            );
+        }
+        if crate::interpreter::env_flags::is_set(
+            crate::interpreter::env_flags::Flag::TraceStaticCall,
+        ) {
+            eprintln!(
+                "[static-call] DISPATCH-QUALIFIED {} argc={}",
+                method_name,
+                argv.len()
+            );
+        }
+        let result = super::super::call_function_sync(state, fid, &argv)?;
+        state.set_reg(dst, result);
+        return Ok(DispatchResult::Continue);
+    }
+
     if receiver.is_small_string() {
         let tname = receiver.as_small_string().as_str().to_string();
         let qualified = format!("{tname}.{bare}");
