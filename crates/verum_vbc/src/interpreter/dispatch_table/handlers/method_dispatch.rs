@@ -1091,6 +1091,57 @@ pub(in super::super) fn handle_call_method(
     // inspect the type prefix (e.g., "Stats.add") and skip builtin dispatch
     // when the prefix refers to a user-defined type. The builtin handlers
     // internally strip the prefix to match the bare method name.
+    // **CLONE-CONCRETE-BODY-1 (T1162)** — a type that DECLARES its own
+    // `clone` must get it, before the universal value-copy route stands
+    // in for it.
+    //
+    // `dispatch_primitive_method` answers `clone` for every heap shape
+    // through the value-copy contract, which is right for containers,
+    // records and primitives — most types. It is wrong for a type whose
+    // clone has SEMANTICS: `Shared.clone` increments the strong count
+    // and builds a new wrapper, and a value copy does neither, so
+    // `let a = s.clone()` left the count at 1.
+    //
+    // Placed HERE, and the placement is measured rather than reasoned:
+    // the same narrowing applied at the generic `clone` stub further
+    // down was byte-for-byte INERT (acceptance unchanged at 3/2, both
+    // true poles still red), because `s.clone()` never reaches that
+    // stub — the primitive dispatch on the next line answers it first.
+    // Reading the emitted dispatch is what found the right line.
+    //
+    // Narrow by construction: it fires only when the module holds a
+    // function named exactly `<Type>.clone` taking one parameter. A
+    // generic `T.clone()` with no concrete body — the case the stub
+    // exists for — has no such entry and keeps its route.
+    // `Shared` is the one type whose object the INTERCEPTION owns by
+    // default, and its two shapes are incompatible:
+    //
+    //     interception   [ObjectHeader][refcount@slot0][value@slot1]
+    //     stdlib body    Shared { ptr, generation, epoch }
+    //                    -> SharedInner { strong@0, weak@8, value@16 }
+    //
+    // `Shared.clone` reads through `self.ptr` at those offsets, so
+    // routing an INTERCEPTED object into it faults — measured: the
+    // default path stopped after its first line. Same collision the
+    // deref route hit (T1159) and the copy path hit (T1161); the gate
+    // is the same one the other four interception sites use, and it
+    // goes when they go.
+    let shared_owned_by_interception = method_name == "Shared.clone"
+        && !crate::interpreter::env_flags::is_set(
+            crate::interpreter::env_flags::Flag::SharedNative,
+        );
+    if method_name.ends_with(".clone") && args.count == 0 && !shared_owned_by_interception {
+        let concrete = state.module.functions.iter().enumerate().find_map(|(i, f)| {
+            let name = state.module.strings.get(f.name).unwrap_or("");
+            (name == method_name.as_str() && f.params.len() == 1).then_some(FunctionId(i as u32))
+        });
+        if let Some(fid) = concrete {
+            let result = super::super::call_function_sync(state, fid, &[dispatch_receiver])?;
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
+        }
+    }
+
     if let Some(result) = dispatch_primitive_method(state, &dispatch_receiver, &method_name, &args)?
     {
         state.set_reg(dst, result);
