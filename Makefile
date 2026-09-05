@@ -74,6 +74,10 @@ check-homepage-examples: ## Gate: the Verum samples on the marketing homepage mu
 	python3 scripts/ci/check_homepage_examples.py --self-test
 	python3 scripts/ci/check_homepage_examples.py --check
 
+check-register-shas: ## Gate: a commit the debt register cites must be reachable from main
+	python3 scripts/ci/check_register_shas_are_reachable.py --self-test
+	python3 scripts/ci/check_register_shas_are_reachable.py --check
+
 check-doc-blocks-parse: ## Gate: every ```verum block must parse, per tree — needs a build (slow)
 	python3 scripts/ci/check_doc_blocks_parse.py --self-test
 	VERUM_DOCS_DIR=vcs        python3 scripts/ci/check_doc_blocks_parse.py --check
@@ -145,7 +149,7 @@ check-grammar-docs-match: ## Gate: EBNF shown in the documentation must match gr
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
 
-gates-source: check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+gates-source: check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication ## Every gate that needs only the SOURCE TREE — no build, no artefacts check-register-shas
 
 	@echo "gates-source: all source-only gates green"
 
