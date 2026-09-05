@@ -14325,11 +14325,18 @@ fn lower_call<'ctx>(
     if std::env::var_os("VERUM_TRACE_ARITY_FALLBACK").is_some() {
         let pc = llvm_fn.count_params() as usize;
         if pc != arg_vals.len() {
+            // `decl=` separates a PLACEHOLDER from a real definition:
+            // `get_or_declare_function` can return a declaration whose
+            // type was guessed, and `count_params()` then describes the
+            // guess, not the function the emitted call will name. That is
+            // the open question in T1153 — this probe reports 168
+            // disagreements while LLVM's own verifier accepts the module.
             eprintln!(
-                "[arity-direct] '{}': call passes {}, definition takes {}",
+                "[arity-direct] '{}': call passes {}, definition takes {} decl={}",
                 llvm_fn.get_name().to_string_lossy(),
                 arg_vals.len(),
-                pc
+                pc,
+                llvm_fn.count_basic_blocks() == 0
             );
         }
     }

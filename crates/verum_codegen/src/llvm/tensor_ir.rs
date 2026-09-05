@@ -3870,7 +3870,19 @@ impl<'ctx> TensorIR<'ctx> {
             "verum_gpu_can_access_peer",
             "verum_gpu_get_device_property",
             "verum_gpu_get_memory_info",
-            "verum_gpu_graph_exec_update",
+            // `verum_gpu_graph_exec_update` MOVED to the `void_2` group
+            // below (T1153): every call site emits it through
+            // `call_tensor_runtime_void` (instruction.rs:10288, 39453),
+            // so declaring it `i64(i64, i64)` here produced a function
+            // the module could not even PARSE —
+            //
+            //     define internal void @verum_gpu_graph_exec_update(
+            //         i64 %0, i64 %1) { ret i64 0 }
+            //
+            // void in the header, `ret i64 0` in the body. Its two
+            // neighbours in the emitted IR (`verum_gpu_graph_destroy`,
+            // `verum_gpu_graph_exec_destroy`) return `ret void`
+            // correctly, which is what made the odd one out visible.
         ] {
             self.emit_gpu_stub_body(module, name, i64_2, false)?;
         }
@@ -3890,6 +3902,7 @@ impl<'ctx> TensorIR<'ctx> {
             "verum_gpu_stream_add_callback",
             "verum_gpu_graph_begin_capture",
             "verum_gpu_graph_end_capture",
+            "verum_gpu_graph_exec_update",
             "verum_gpu_graph_launch",
         ] {
             self.emit_gpu_stub_body(module, name, void_2, true)?;
