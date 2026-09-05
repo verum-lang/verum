@@ -242,12 +242,31 @@ the workspace `Cargo.toml` is authoritative.
 ## Performance Targets
 
 ```
-CBGR check:        < 15ns       (measured ~0.93ns — production_targets bench)
+CBGR check:        < 15ns       (measured 1.2–1.7ns, 2026-09-05)
 Type inference:    < 100ms / 10K LOC
-Compilation:       > 50K LOC/sec (measured ~1.4M LOC/sec parse — gated by tests/compilation_speed_contract.rs)
+Compilation:       > 50K LOC/sec (measured 370–490K LOC/sec parse, 2026-09-05)
 Runtime:           1x native C — parity is the bar, not the ceiling (>1x sought via whole-program opt)
 Memory overhead:   < 5%
 ```
+
+Every figure above is a TARGET; the measured numbers are dated because a
+number in a comment is the memory of a measurement, not a measurement. Both
+were re-run on 2026-09-05 and both had drifted from what the tree claimed:
+
+* parse — `cargo bench -p verum_fast_parser --bench production_targets`:
+  820 LOC 448K/s, 4100 LOC 489K/s, 8200 LOC 370K/s. The tree had carried
+  **~1.4M LOC/sec** since 2026-04, roughly 3x high at every size. The lex
+  figure IS ~2.5M/s, which is the shape of a lex/parse conflation.
+* CBGR — `cargo bench -p verum_cbgr --bench production_targets` (a DIFFERENT
+  bench of the same name): 1.61ns valid, 1.69ns generation+epoch, 1.20ns
+  invalid, 1.25ns per check in a 100-check batch. The tree had carried
+  **~0.93ns**.
+
+The machine was loaded (average 20–80) during both runs, so these are floors
+rather than clean numbers — stated rather than hidden. Re-measure before
+quoting either anywhere a reader will act on it. The gate
+(`crates/verum_compiler/tests/compilation_speed_contract.rs`) checks the
+50K floor, not the measured figure, and passes with room. See A83.
 
 ## Code Standards
 

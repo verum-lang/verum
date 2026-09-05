@@ -108,7 +108,10 @@ type_param_name = uppercase_letter , { ident_continue } ;
  * This production is left naming the three the specification calls
  * CORE; it is not the list of what the lexer refuses.
  *)
-reserved_keyword = 'let' | 'fn' | 'is' ;
+reserved_keyword = 'let' | 'fn' | 'is' ;  (* CORE vocabulary ONLY — NOT the list
+    the lexer refuses as an identifier. Measured: at least fourteen names are,
+    including every control-flow word. The complete set is `keyword` below;
+    the ones with no production of their own are `lexer_only_reserved`. *)
 
 (* Primary keywords *)
 primary_keyword = 'type' | 'where' | 'using' ;

@@ -39,7 +39,22 @@ use verum_lexer::Lexer;
 
 /// `verum fast_parser::Parser` end-to-end parse speed. Published
 /// target in the language README / pipeline docs is 50 K LOC/sec.
-/// Actual measured on `main` (2026-04) on macOS arm64: ~1.4 M LOC/sec.
+///
+/// This comment used to say `~1.4 M LOC/sec (2026-04, macOS arm64)`, and
+/// CLAUDE.md and the marketing homepage repeated it. Re-measured 2026-09-05
+/// with the repository's own bench on the same generator this test uses
+/// (`cargo bench -p verum_fast_parser --bench production_targets`):
+/// 820 LOC **448 K/s**, 4100 LOC **489 K/s**, 8200 LOC **370 K/s** — about
+/// three times below the cited figure at every size. Lex-only IS ~2.5 M/s,
+/// which is the shape of a lex/parse conflation and the first thing to
+/// check if the old number resurfaces. The machine was loaded during that
+/// run, so those are a FLOOR; the criterion intervals were tight enough
+/// (1.70–1.97 ms on the 820-LOC case) that noise alone does not span a 3x
+/// gap. See A83.
+///
+/// The FLOOR below is the contract and is unaffected: it passes with room.
+/// A number in a comment is the memory of a measurement — date it, name the
+/// bench that produced it, or leave it out.
 const PARSE_FLOOR_LOC_PER_SEC: f64 = 50_000.0;
 
 /// Lex-only throughput. Lexing is the cheapest front-end pass and
