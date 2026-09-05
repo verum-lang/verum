@@ -1529,6 +1529,23 @@ impl VbcCodegen {
                 .primitive_name()
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| "Unknown".to_string()),
+            // **REFINEMENT-IS-TRANSPARENT-TO-THE-NAME-1 (T1178)** — a
+            // refinement CONSTRAINS a type; it does not replace it. The
+            // name of `Text { p }` is `Text`.
+            //
+            // Without this arm the match fell to the "Unknown" default,
+            // and `newtype_inner_type` recorded a refined newtype's inner
+            // type as literally "Unknown". Field access then produced a
+            // value of type Unknown and dispatch went looking for
+            // `Unknown.starts_with`, offering `Deque`/`List` candidates —
+            // while the runtime receiver was a perfectly good
+            // `Text<small>`. The VALUE was right; only the name was lost.
+            //
+            // Measured on the registry: with `Digest` and `PackageName`
+            // refined it ran three sections and died at the first
+            // `starts_with`, with ZERO predicate violations — so nothing
+            // was rejected, the type had simply evaporated.
+            verum_ast::ty::TypeKind::Refined { base, .. } => self.type_to_simple_name(base),
             verum_ast::ty::TypeKind::Tuple(_) => "Tuple".to_string(),
             verum_ast::ty::TypeKind::Array { .. } => "Array".to_string(),
             verum_ast::ty::TypeKind::Reference { inner, .. } => {
