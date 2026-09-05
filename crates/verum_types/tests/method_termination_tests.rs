@@ -44,6 +44,18 @@
 //! WHAT THESE TESTS PIN: that a method and a free function get the SAME
 //! verdict on the same recursion. Not the wording of the diagnostic, and not
 //! today's leniency about what counts as decreasing.
+//!
+//! AND WHAT THEY DO NOT CATCH, recorded because it is the more useful half:
+//! the first revision of the fix lost a distinction the narrow gate made —
+//! inside an `implement` block a bare `name(…)` is the imported FREE
+//! function, not this method. `core/base/primitives.vr` writes
+//! `public fn signum(self) -> Int { signum(self) }`, forwarding to the
+//! intrinsic, and it went from 2 errors to 189 while every test here, 120
+//! parser suites, 151 `verum_types` suites and the 44-program example gate
+//! stayed GREEN. It was found by running a sample of `core/` through a
+//! worktree build of the previous commit and diffing the verdicts. A suite
+//! measures its own samples; the corpus a change actually alters has to be
+//! measured separately.
 
 use verum_fast_parser::Parser;
 use verum_types::infer::TypeChecker;
@@ -157,5 +169,19 @@ fn a_self_call_in_a_return_statement_is_checked_like_a_free_one() {
         "fn m(n: Int) -> Int { return m(n + 1); }\n",
         "type R is { };\n\nimplement R {\n    fn m(&self, n: Int) -> Int \
          { return self.m(n + 1); }\n}\n",
+    );
+}
+
+/// The distinction the narrow gate made and the general walker does not: in
+/// an `implement` block a bare `name(…)` is the imported FREE function.
+/// `core/base/primitives.vr` forwards to intrinsics exactly this way.
+#[test]
+fn a_bare_call_to_a_same_named_free_function_is_not_recursion() {
+    let src = "fn helper(n: Int) -> Int { n }\n\ntype R is { };\n\n\
+               implement R {\n    fn helper(&self, n: Int) -> Int { helper(n) }\n}\n";
+    assert!(
+        termination_errors(src).is_empty(),
+        "a method forwarding to a same-named free function is not recursive: {:?}",
+        termination_errors(src)
     );
 }

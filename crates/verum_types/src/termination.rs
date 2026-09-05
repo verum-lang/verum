@@ -515,7 +515,9 @@ impl TerminationChecker {
             // inside a `while`, a `for` or a `try` set no flag and the whole
             // check was skipped. It has been deleted — two walks answering one
             // question is how they drift.
-            !self.find_recursive_calls_in_body(body, func_name).is_empty()
+            self.find_recursive_calls_in_body(body, func_name)
+                .iter()
+                .any(|c| c.via_self)
         } else {
             calls.contains(func_name)
         };
@@ -524,7 +526,7 @@ impl TerminationChecker {
             self.recursive_functions.insert(func_name.clone());
 
             // Check structural recursion or decreasing clause
-            self.check_recursive_function(decl, &params, body)?;
+            self.check_recursive_function(decl, &params, body, is_method)?;
         }
 
         Ok(())
@@ -556,6 +558,7 @@ impl TerminationChecker {
         decl: &FunctionDecl,
         params: &List<ParamInfo>,
         body: &verum_ast::decl::FunctionBody,
+        is_method: bool,
     ) -> Result<()> {
         let func_name = &decl.name.name;
 
@@ -563,7 +566,7 @@ impl TerminationChecker {
         let body_expr = match body {
             verum_ast::decl::FunctionBody::Block(block) => {
                 // For block bodies, analyze all statements
-                self.check_block_termination(decl, params, block)?;
+                self.check_block_termination(decl, params, block, is_method)?;
                 return Ok(());
             }
             verum_ast::decl::FunctionBody::Expr(expr) => expr,
@@ -577,8 +580,10 @@ impl TerminationChecker {
             return Ok(());
         }
 
-        // Check each recursive call has a decreasing argument
-        for call in &rec_calls {
+        // Check each recursive call has a decreasing argument. In a METHOD a
+        // bare `name(…)` is the imported free function, not this method — see
+        // `RecursiveCall::via_self`.
+        for call in rec_calls.iter().filter(|c| !is_method || c.via_self) {
             self.check_call_decreases(decl, params, call)?;
         }
 
@@ -591,6 +596,7 @@ impl TerminationChecker {
         decl: &FunctionDecl,
         params: &List<ParamInfo>,
         block: &verum_ast::expr::Block,
+        is_method: bool,
     ) -> Result<()> {
         let func_name = &decl.name.name;
 
@@ -631,7 +637,7 @@ impl TerminationChecker {
         let mut rec_calls = List::new();
         let bindings = Map::new();
         self.find_recursive_calls_in_block(block, func_name, &mut rec_calls, &bindings);
-        for call in &rec_calls {
+        for call in rec_calls.iter().filter(|c| !is_method || c.via_self) {
             self.check_call_decreases(decl, params, call)?;
         }
 
@@ -1483,6 +1489,7 @@ impl TerminationChecker {
                     && path_to_text(path) == *func_name
                 {
                     calls.push(RecursiveCall {
+                        via_self: false,
                         args: args.iter().cloned().collect(),
                         span: expr.span,
                         match_bindings: match_bindings.clone(),
@@ -1690,6 +1697,7 @@ impl TerminationChecker {
                 );
                 if is_self_receiver && method.name.as_str() == func_name.as_str() {
                     calls.push(RecursiveCall {
+                        via_self: true,
                         args: args.iter().cloned().collect(),
                         span: expr.span,
                         match_bindings: match_bindings.clone(),
@@ -2413,6 +2421,18 @@ struct ParamInfo {
 /// A recursive call site
 #[derive(Debug, Clone)]
 struct RecursiveCall {
+    /// `true` when the call was written `self.name(…)`, `false` for a bare
+    /// `name(…)`.
+    ///
+    /// Inside an `implement` block a bare call is the imported FREE
+    /// function, not the method being defined —
+    /// `core/base/primitives.vr` writes
+    /// `public fn signum(self) -> Int { signum(self) }`, forwarding to the
+    /// intrinsic. Counting that as recursion took one stdlib file from two
+    /// errors to 189. Caught only by comparing against a worktree build of
+    /// the previous commit; the test suites and the example gate were all
+    /// green.
+    via_self: bool,
     args: List<Expr>,
     span: Span,
     /// Variable bindings from enclosing match arms: binding_name -> matched_parameter

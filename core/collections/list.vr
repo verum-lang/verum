@@ -1102,6 +1102,14 @@ implement<T> List<T> {
     }
 
     // Introsort: quicksort with depth limit, falling back to heapsort.
+    //
+    // TERMINATES for two independent reasons, neither of which a syntactic
+    // walk can see: each recursive call takes a STRICTLY SMALLER partition
+    // (`lo..i` or `i+1..hi` with `lo <= i < hi`), and `depth` counts down to
+    // the heapsort fallback. The identical shape written as a FREE function
+    // is refused by the same rule — measured 2026-09-05 on both sides of
+    // T1174 — so this is not a method-specific gap.
+    @allow(unbounded_recursion)
     fn introsort_loop(&mut self, lo: Int, hi: Int, depth_limit: Int, compare: fn(&T, &T) -> Ordering) {
         let mut lo = lo;
         let mut hi = hi;
