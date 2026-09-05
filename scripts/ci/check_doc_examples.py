@@ -310,6 +310,10 @@ def main() -> int:
     ap.add_argument("--write-baseline", action="store_true")
     ap.add_argument("--timeout", type=int, default=120)
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--docs", type=Path, default=DOCS,
+                    help="documentation tree (default: the website checkout)")
+    ap.add_argument("--require-docs", action="store_true",
+                    help="fail instead of skipping when the tree is absent")
     args = ap.parse_args()
 
     if args.self_test:
@@ -337,6 +341,24 @@ def main() -> int:
             ok = False
         print("self-test: ok" if ok else "self-test: FAILED")
         return 0 if ok else 1
+
+
+    docs_root = args.docs
+    if not docs_root.is_dir():
+        # NOT a pass — the same branch `check_doc_anchors` documents
+        # (T0971). `internal/` is gitignored and the website is a
+        # separate repository, so this is what CI takes on every run.
+        # Measured 2026-09-05: with the tree absent this gate printed
+        # "check-doc-examples: 0 example(s) a reader cannot trust" and
+        # returned 0 — a zero that reads exactly like a clean estate.
+        # Its three siblings already said SKIPPED; this one did not.
+        print(
+            "check-doc-examples: SKIPPED — NOT CHECKED "
+            f"(no documentation tree at {docs_root}; pass --docs PATH, "
+            "or --require-docs to make this a failure)",
+            file=sys.stderr,
+        )
+        return 1 if args.require_docs else 0
 
     n_mounts, mount_lines = check_mounts()
     if n_mounts:
