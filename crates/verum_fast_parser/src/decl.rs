@@ -786,18 +786,11 @@ impl<'a> RecursiveParser<'a> {
         // Example: fn parse(input: Text) throws(ParseError | ValidationError) -> AST
         let throws_clause = self.parse_throws_clause()?;
 
-        // Pre-return-type `using [Ctx]` — the alternate ordering
-        // `fn foo() using [Ctx] -> Int { … }` appears throughout the
-        // L0/vbc/context VCS specs. The canonical spelling (below)
-        // puts `using` after the return type; accepting the pre-
-        // return position too keeps both stylistic conventions valid
-        // without forcing the stdlib or tests to pick a side.
-        let mut contexts: Vec<ContextRequirement> = Vec::new();
-        if self.stream.check(&TokenKind::Using) && !contexts.is_empty() {
-            // Already populated — skip (defensive; contexts starts empty).
-        } else if self.stream.consume(&TokenKind::Using).is_some() {
-            contexts = self.parse_using_contexts()?;
-        }
+        // Context requirements, PRE-return position — the alternate
+        // ordering `fn foo() using [Ctx] -> Int { … }` that runs through
+        // the L0/vbc/context VCS specs. Same door as the impl-method and
+        // protocol-method parsers: see `parse_optional_context_clause`.
+        let mut contexts: Vec<ContextRequirement> = self.parse_optional_context_clause(Vec::new())?;
 
         // Return type: -> Type
         // Use parse_type_with_lookahead to support refinements like `-> Int{>= 0}`
@@ -833,18 +826,11 @@ impl<'a> RecursiveParser<'a> {
             Maybe::None
         };
 
-        // Context requirements AFTER return type (CANONICAL FORM)
-        // Context requirements: `using [Ctx1, Ctx2]` or `using Ctx` after return type (canonical form)
-        // Format: fn foo() -> Type using [Context1, Context2]
-        // Format: fn foo() using [Context] -- when return type is unit
-        // Supports both: [Database, Logger] and using Database / using [...]
-        if contexts.is_empty() {
-            if self.stream.check(&TokenKind::LBracket) {
-                contexts = self.parse_context_requirements()?;
-            } else if self.stream.consume(&TokenKind::Using).is_some() {
-                contexts = self.parse_using_contexts()?;
-            }
-        }
+        // Context requirements, CANONICAL post-return position:
+        // `fn foo() -> Type using [Ctx1, Ctx2]`, `-> Type [Database, Logger]`
+        // or `-> Type using Database`. A no-op when the pre-return call
+        // above already consumed one — the grammar allows at most one.
+        contexts = self.parse_optional_context_clause(contexts)?;
 
         // M205: Check for duplicate using clause
         // Grammar: function_def = ... , [ context_clause ] , ... ; (at most one)
@@ -1795,6 +1781,45 @@ impl<'a> RecursiveParser<'a> {
             error_types: error_types.into_iter().collect(),
             span,
         }))
+    }
+
+    /// The `using [Ctx]` clause of a function signature, in EITHER position.
+    ///
+    /// The grammar's `function_def` puts `[ context_clause ]` after the
+    /// return type, and the pre-return spelling
+    /// `fn f() using [Database] -> Int` is the alternate ordering that runs
+    /// through the L0/vbc/context VCS specs. Three parsers implement this
+    /// one production — free function, `implement` method, protocol method
+    /// — and only the free function accepted both orders. Measured
+    /// 2026-09-05 with the same six signatures, identical but for where
+    /// they live:
+    ///
+    /// ```text
+    ///   free/pre      ok        impl/pre      E056     protocol/pre   E018
+    ///   free/post     ok        impl/post     ok       protocol/post  ok
+    /// ```
+    ///
+    /// A method could therefore be written one way in a free function and
+    /// had to be rewritten to move into an `implement` block. One door for
+    /// the clause, called by all three, so the orders cannot diverge again.
+    ///
+    /// Call it TWICE: once before `->` and once after, passing what the
+    /// first call returned. The second call is a no-op when the first
+    /// consumed a clause, which is also the M205 "at most one" rule.
+    fn parse_optional_context_clause(
+        &mut self,
+        already: Vec<ContextRequirement>,
+    ) -> ParseResult<Vec<ContextRequirement>> {
+        if !already.is_empty() {
+            return Ok(already);
+        }
+        if self.stream.check(&TokenKind::LBracket) {
+            self.parse_context_requirements()
+        } else if self.stream.consume(&TokenKind::Using).is_some() {
+            self.parse_using_contexts()
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     /// Parse context requirements: [IO, Database]
@@ -4531,6 +4556,11 @@ impl<'a> RecursiveParser<'a> {
             // Parse throws clause: throws(ErrorType | OtherError)
             let throws_clause = self.parse_throws_clause()?;
 
+            // Context requirements, PRE-return position — the same
+            // production the free function and the impl method parse; see
+            // `parse_optional_context_clause`.
+            let contexts = self.parse_optional_context_clause(Vec::new())?;
+
             // Use parse_type_with_lookahead to support refinements but avoid consuming body {
             let return_type = if self.stream.consume(&TokenKind::RArrow).is_some() {
                 Maybe::Some(self.parse_return_type()?)
@@ -4538,14 +4568,8 @@ impl<'a> RecursiveParser<'a> {
                 Maybe::None
             };
 
-            // Parse context requirements for protocol methods
-            let contexts = if self.stream.check(&TokenKind::LBracket) {
-                self.parse_context_requirements()?
-            } else if self.stream.consume(&TokenKind::Using).is_some() {
-                self.parse_using_contexts()?
-            } else {
-                Vec::new()
-            };
+            // Context requirements, CANONICAL post-return position.
+            let contexts = self.parse_optional_context_clause(contexts)?;
 
             // Parse where clause (if present) for protocol methods with constraints
             // Supports both: where type T: Protocol and where T: Protocol
@@ -5233,6 +5257,14 @@ impl<'a> RecursiveParser<'a> {
             // Parse throws clause: throws(ErrorType | OtherError)
             let throws_clause = self.parse_throws_clause()?;
 
+            // Context requirements, PRE-return position:
+            // `fn f() using [Database] -> Int`. See
+            // `parse_optional_context_clause` — the free-function parser
+            // accepted this and the impl-method parser did not, so the same
+            // signature parsed outside an `implement` block and was refused
+            // inside it (E056).
+            let contexts = self.parse_optional_context_clause(Vec::new())?;
+
             // Use parse_type_with_lookahead to support refinements but avoid consuming body {
             let return_type = if self.stream.consume(&TokenKind::RArrow).is_some() {
                 Maybe::Some(self.parse_return_type()?)
@@ -5240,15 +5272,11 @@ impl<'a> RecursiveParser<'a> {
                 Maybe::None
             };
 
-            // Context requirements (canonical syntax per grammar: after return type)
-            // GRAMMAR: fn foo() -> Int using [IO] or fn foo() -> Int [IO]
-            let contexts = if self.stream.check(&TokenKind::LBracket) {
-                self.parse_context_requirements()?
-            } else if self.stream.consume(&TokenKind::Using).is_some() {
-                self.parse_using_contexts()?
-            } else {
-                Vec::new()
-            };
+            // Context requirements, CANONICAL post-return position:
+            // `fn f() -> Int using [IO]` or `fn f() -> Int [IO]`. A no-op
+            // when the pre-return call above already consumed one, which is
+            // the grammar's "at most one context_clause".
+            let contexts = self.parse_optional_context_clause(contexts)?;
 
             // Parse where clause (if present)
             // Supports both: where type T: Protocol and where T: Protocol
