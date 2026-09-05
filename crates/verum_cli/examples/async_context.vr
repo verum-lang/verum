@@ -2,14 +2,13 @@
 // Demonstrates Verum's 2-level dependency injection and async programming
 
 // Import standard library modules using dots (not slashes)
-link std.io.stdio.println;
-link std.async.future.Future;
-link std.async.stream.Stream;
-link std.async.task.{spawn, join_all};
-link std.time.duration.sleep;
+link core.io.stdio.println;
+link core.async.future.Future;
+link core.async.stream.Stream;
+link core.async.task.{spawn, join_all};
+link core.time.duration.sleep;
 link core.base.result.Result;
-link core.base.list.List;
-link std.di.{Injectable, Scope, get_injectable};
+link core.collections.list.List;
 
 // Define contexts for dependency injection
 // Note: Using 'context' keyword as per Verum grammar
@@ -58,37 +57,37 @@ type UserService is {
 // Implementation block for UserService
 implement UserService {
     // Constructor function
-    fn new() using [Database, Logger] -> UserService {
+    fn new() -> UserService using [Database, Logger] {
         UserService {
-            db: get_injectable!(Database),
-            logger: get_injectable!(Logger),
+            db: inject Database,
+            logger: inject Logger,
         }
     }
 
     // Async method that uses injected dependencies
     // Note: 'async' keyword is MANDATORY for async functions
-    async fn get_user(self, id: Int) -> Result<User, Error> {
-        self.logger.info(f"Fetching user {id}");
+    async fn get_user(self, id: Int) -> Result<User, Error> using [Database, Logger] {
+        Logger.info(f"Fetching user {id}");
 
         let sql = "SELECT * FROM users WHERE id = ?";
         // Using 'await' keyword explicitly (no implicit async)
-        let rows = await self.db.query(sql)?;
+        let rows = Database.query(sql).await?;
 
         if rows.is_empty() {
-            self.logger.error(f"User {id} not found");
+            Logger.error(f"User {id} not found");
             return Result.Err(Error.NotFound);
         }
 
         Result.Ok(User.from_row(rows[0]))
     }
 
-    async fn create_user(self, name: Text, email: Text) -> Result<Int, Error> {
-        self.logger.info(f"Creating user: {name}");
+    async fn create_user(self, name: Text, email: Text) -> Result<Int, Error> using [Database, Logger] {
+        Logger.info(f"Creating user: {name}");
 
         let sql = "INSERT INTO users (name, email) VALUES (?, ?)";
-        let user_id = await self.db.execute(sql)?;
+        let user_id = Database.execute(sql).await?;
 
-        self.logger.info(f"User created with ID: {user_id}");
+        Logger.info(f"User created with ID: {user_id}");
         Result.Ok(user_id)
     }
 }
@@ -96,8 +95,6 @@ implement UserService {
 // Example of async stream processing with contexts
 // 'using' keyword for context clause (NOT 'with')
 async fn process_data_stream() using [Net, Logger] {
-    let logger = get_injectable!(Logger);
-    let network = get_injectable!(Net);
 
     // Stream data from multiple sources concurrently
     let urls = [
@@ -109,23 +106,23 @@ async fn process_data_stream() using [Net, Logger] {
     // Launch parallel fetches
     let futures = urls.map(|url| {
         async {
-            logger.debug(f"Fetching from {url}");
-            await network.fetch(url)
+            Logger.debug(f"Fetching from {url}");
+            Net.fetch(url).await
         }
     });
 
     // Wait for all to complete
-    let results = await join_all(futures);
+    let results: List<Result<Text, Error>> = join_all(futures).await;
 
     // Process results
     for (i, result) in results.enumerate() {
         match result {
             Ok(data) => {
-                logger.info(f"Source {i}: received {len(data)} bytes");
+                Logger.info(f"Source {i}: received {len(data)} bytes");
                 // Process data...
             }
             Err(e) => {
-                logger.error(f"Source {i} failed: {e:?}");
+                Logger.error(f"Source {i} failed: {e:?}");
             }
         }
     }
@@ -133,7 +130,7 @@ async fn process_data_stream() using [Net, Logger] {
 
 // Async generator function (returns a stream)
 // Uses 'stream' keyword for async iteration
-async fn fibonacci_stream(limit: Int) -> Stream<Int> {
+async fn* fibonacci_stream(limit: Int) -> Int {
     let mut a = 0;
     let mut b = 1;
 
@@ -144,7 +141,7 @@ async fn fibonacci_stream(limit: Int) -> Stream<Int> {
         b = temp;
 
         // Simulate async work
-        await sleep(100);
+        sleep(100).await;
     }
 }
 
@@ -153,7 +150,7 @@ async fn consume_fibonacci() {
     let stream = fibonacci_stream(10);
 
     // Async iteration over stream
-    await for value in stream {
+    for await value in stream {
         print(f"Fibonacci: {value}");
     }
 }
@@ -166,47 +163,32 @@ type RestartPolicy is
 
 // Example of structured concurrency with supervision
 async fn supervised_task() using [Logger] {
-    let logger = get_injectable!(Logger);
 
-    // Create a supervision tree
-    // Note: This is pseudo-code for supervision concept
-    supervise {
-        // Child task 1 - will be restarted on failure
-        spawn async {
-            logger.info(f"Task 1 starting");
-            await do_work_1();
-        }.with_restart_policy(RestartPolicy.MaxRetries(3));
-
-        // Child task 2 - critical, failure stops all
-        spawn async {
-            logger.info(f"Task 2 starting");
-            await do_work_2();
-        }.as_critical();
-
-        // Child task 3 - optional, failures ignored
-        spawn async {
-            logger.info(f"Task 3 starting");
-            await do_work_3();
-        }.as_optional();
-    }
+    // Supervision is a METHOD on a supervisor, not a block form:
+    // `supervisor.supervise(factory, spec)` — see
+    // `core/runtime/supervisor.vr`. Each child is a future factory plus
+    // a ChildSpec carrying its restart policy.
+    let supervisor = inject Supervisor;
+    supervisor.supervise(|| do_work_1(), ChildSpec.temporary()).await?;
+    supervisor.supervise(|| do_work_2(), ChildSpec.permanent()).await?;
+    supervisor.supervise(|| do_work_3(), ChildSpec.temporary()).await?
 }
 
 // Context inheritance example
 async fn parent_task() using [Database, Logger] {
-    let logger = get_injectable!(Logger);
-    logger.info(f"Parent task started");
+    Logger.info(f"Parent task started");
 
     // Spawn child task - contexts are automatically inherited
     let child_handle = spawn async {
         // Child has access to parent's contexts
-        let logger = get_injectable!(Logger);  // Same instance as parent
-        logger.info(f"Child task started with inherited context");
+        let logger = inject Logger;  // Same instance as parent
+        Logger.info(f"Child task started with inherited context");
 
-        await do_child_work();
+        do_child_work().await;
     };
 
     // Wait for child
-    await child_handle;
+    child_handle.await;
 }
 
 // Cancellation token type
@@ -224,19 +206,19 @@ async fn cancelable_operation() -> Result<Text, Error> {
     let operation = async {
         for i in 0..100 {
             // Check for cancellation
-            if cancel_token.is_canceled() {
+            if cancel_token.is_cancelled() {
                 return Result.Err(Error.Canceled);
             }
 
-            await do_step(i);
+            do_step(i).await;
         }
         Result.Ok("Completed")
     };
 
     // Race with timeout using select
     select {
-        result = operation => result,
-        _ = sleep(5000) => {
+        result = operation.await => result,
+        _ = sleep(5000).await => {
             cancel_token.cancel();
             Result.Err(Error.Timeout)
         }
@@ -258,26 +240,26 @@ async fn main() using [Database, Logger, Net] {
     let user_service = UserService.new();
 
     // Create a user
-    match await user_service.create_user("Alice", "alice@example.com") {
+    match user_service.create_user("Alice", "alice@example.com").await {
         Ok(id) => print(f"Created user with ID: {id}"),
         Err(e) => print(f"Failed to create user: {e:?}"),
     }
 
     // Process data streams
     print(f"\n=== Processing Data Streams ===");
-    await process_data_stream();
+    process_data_stream().await;
 
     // Consume async generator
     print(f"\n=== Fibonacci Stream ===");
-    await consume_fibonacci();
+    consume_fibonacci().await;
 
     // Run supervised tasks
     print(f"\n=== Supervised Tasks ===");
-    await supervised_task();
+    supervised_task().await;
 
     // Demonstrate cancellation
     print(f"\n=== Cancelable Operation ===");
-    match await cancelable_operation() {
+    match cancelable_operation().await {
         Ok(result) => print(f"Operation result: {result}"),
         Err(Error.Timeout) => print(f"Operation timed out"),
         Err(Error.Canceled) => print(f"Operation was canceled"),
@@ -289,23 +271,23 @@ async fn main() using [Database, Logger, Net] {
 
 // Helper async functions
 async fn do_work_1() {
-    await sleep(1000);
+    sleep(1000).await;
 }
 
 async fn do_work_2() {
-    await sleep(2000);
+    sleep(2000).await;
 }
 
 async fn do_work_3() {
-    await sleep(500);
+    sleep(500).await;
 }
 
 async fn do_child_work() {
-    await sleep(1500);
+    sleep(1500).await;
 }
 
 async fn do_step(i: Int) {
-    await sleep(50);
+    sleep(50).await;
 }
 
 // Mock implementations for demo purposes

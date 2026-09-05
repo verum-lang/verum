@@ -2,34 +2,34 @@
 // Demonstrates compile-time and runtime safety with refinement types
 
 // Import standard library functions
-link std.io.stdio.println;
-link std.pure.math.sqrt;
+link core.io.stdio.println;
+link core.math.elementary.sqrt;
 link core.base.result.Result;
 
 // Define refinement types using the 'is' syntax for domain constraints
 // Note: Verum uses 'is' for ALL type definitions (no struct/enum keywords)
 
 // Positive integer - must be greater than 0
-type Positive is Int { value > 0 };
+type Positive is Int { self > 0 };
 
 // Percentage - float between 0 and 100
-type Percentage is Float { value >= 0.0 && value <= 100.0 };
+type Percentage is Float { self >= 0.0 && self <= 100.0 };
 
 // Non-empty text string
-type NonEmptyText is Text { len(value) > 0 };
+type NonEmptyText is Text { len(self) > 0 };
 
 // Valid email must contain @ and .
 type ValidEmail is Text {
-    contains(value, "@") && contains(value, ".")
+    contains(self, "@") && contains(self, ".")
 };
 
 // Age must be between 0 and 150
-type Age is Int { value >= 0 && value <= 150 };
+type Age is Int { self >= 0 && self <= 150 };
 
 // Bank account with invariants using the 'is' syntax
 type BankAccount is {
-    balance: Float { value >= 0.0 },  // Balance can't be negative
-    account_number: Text { len(value) == 10 },  // Account number must be 10 chars
+    balance: Float { self >= 0.0 },  // Balance can't be negative
+    account_number: Text { len(self) == 10 },  // Account number must be 10 chars
     owner: NonEmptyText,
 };
 
@@ -52,7 +52,7 @@ fn apply_discount(price: Positive, discount: Percentage) -> Float {
 
 // Create a bank account with validation
 fn create_account(
-    initial_balance: Float { value >= 0.0 },
+    initial_balance: Float { self >= 0.0 },
     account_number: Text,
     owner: Text
 ) -> Result<BankAccount, Text> {

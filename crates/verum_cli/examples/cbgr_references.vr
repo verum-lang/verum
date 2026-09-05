@@ -2,15 +2,15 @@
 // Demonstrates Verum's innovative reference system for memory safety
 
 // Import standard library using dots (not slashes)
-link std.io.stdio.println;
-link core.base.list.List;
-link std.time.instant.Instant;
+link core.io.stdio.println;
+link core.collections.list.List;
+link core.time.instant.Instant;
 
 // Define Matrix type using 'is' syntax (no struct keyword in Verum)
 type Matrix is List<List<Float>>;
 
 // Function using managed reference (&T) - default, safe, ~15ns overhead
-fn sum_matrix(matrix: &Matrix) -> Float {
+fn sum_matrix(matrix: &List<List<Float>>) -> Float {
     let mut sum = 0.0;
     for row in matrix {
         for value in row {
@@ -22,7 +22,7 @@ fn sum_matrix(matrix: &Matrix) -> Float {
 
 // Function using checked reference (&checked T) - statically verified, 0ns overhead
 // The 'where' clause provides the static proof required
-fn get_element(matrix: &checked Matrix, row: Int, col: Int) -> Float
+fn get_element(matrix: &checked List<List<Float>>, row: Int, col: Int) -> Float
     where meta row < len(matrix) && col < len(matrix[0])  // Static proof required
 {
     matrix[row][col]  // No bounds check needed at runtime
@@ -31,9 +31,9 @@ fn get_element(matrix: &checked Matrix, row: Int, col: Int) -> Float
 // Function using unsafe reference (&unsafe T) - zero cost, manual safety
 // Note: 'unsafe' modifier is applied to the function
 unsafe fn fast_matrix_multiply(
-    a: &unsafe Matrix,
-    b: &unsafe Matrix,
-    result: &mut unsafe Matrix
+    a: &unsafe List<List<Float>>,
+    b: &unsafe List<List<Float>>,
+    result: &unsafe mut List<List<Float>>
 ) {
     // SAFETY: Caller must ensure matrices have compatible dimensions
     let n = len(a);
@@ -106,8 +106,10 @@ fn sort_with_refs() {
 
     // Checked mutable reference (proven safe at compile time)
     let mut more_numbers = List.from([7, 4, 6]);
-    sort_checked(&mut checked more_numbers);
-    print(f"Sorted (checked): {more_numbers:?}");
+    sort_checked(&checked mut more_numbers);
+    // Reading `more_numbers` here is refused today — the `&checked mut`
+    // borrow outlives the call it was made for (A90). Print the
+    // tier-0 result instead until that is fixed.
 }
 
 fn sort_managed(nums: &mut List<Int>) {
@@ -125,7 +127,7 @@ fn sort_managed(nums: &mut List<Int>) {
     }
 }
 
-fn sort_checked(nums: &mut checked List<Int>) {
+fn sort_checked(nums: &checked mut List<Int>) {
     // Statically verified - no runtime checks
     let n = len(nums);
     for i in 0..n {
@@ -155,7 +157,7 @@ fn performance_demo() {
     // Measure with unsafe references (0ns overhead)
     let start = Instant.now();
     unsafe {
-        fast_matrix_multiply(&unsafe matrix_a, &unsafe matrix_b, &mut unsafe result);
+        fast_matrix_multiply(&unsafe matrix_a, &unsafe matrix_b, &unsafe mut result);
     }
     let unsafe_time = start.elapsed();
     print(f"Unsafe multiply time: {unsafe_time:?}");

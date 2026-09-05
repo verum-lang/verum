@@ -77,16 +77,19 @@ TABLE_GLYPH = re.compile(r"->|≡|⇒|→")
 # is stated because it is not what the run printed; the eleven were
 # found by intersecting the run's defect list with `git log --since` on
 # the documentation tree, not from memory.
-# 213 -> 161 -> 17, measured on 2795 blocks (the estate shrank from
-# 2843 because ~48 blocks were API catalogues that became tables —
-# a listing of method names is not a compilation unit, and fencing
-# one as ```verum was the single largest class).
+# ZERO, measured 2026-09-05: 2790 blocks — 1631 ok, 406 table, 383
+# elision, 354 fragment, 13 mixed, 3 counter-example, 0 DEFECT.
 #
-# The 17 that remain are sixteen files with one defect each, which
-# is what a ratchet is for: the classes are gone, the residue is
-# individual. Every earlier baseline was a full-run count with the
-# arithmetic stated; this one is the run's own number, unadjusted.
-BASELINE = 17
+# The path was 213 -> 161 -> 17 -> 0 over one session. The estate lost
+# 55 blocks along the way, and that is the largest single finding: they
+# were API catalogues, tactic notation and grammar illustrations fenced
+# as ```verum. A listing of method names is not a compilation unit, and
+# measuring one as if it were produced a third of the defect count.
+#
+# A ratchet was right while classes remained. It is wrong now: a zero
+# baseline means the next `verum` block that does not parse fails the
+# build, which is the whole point of having counted.
+BASELINE = 0
 
 
 def verum_binary() -> str:

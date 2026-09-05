@@ -22,7 +22,15 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO / "docs" / "by-example"
+# Two corpora, same rule: a program shipped as an example must
+# compile. `docs/by-example` is the tutorial series CLAUDE.md cites
+# for syntax; `crates/verum_cli/examples` ships with the CLI and was
+# measured at 83 errors across three of its five files on
+# 2026-09-05 — nothing referenced them and nothing checked them,
+# while `verum audit --bundle` read them and printed the errors
+# with no source location attached.
+EXAMPLE_DIRS = [REPO / "docs" / "by-example",
+                REPO / "crates" / "verum_cli" / "examples"]
 
 
 def binary() -> str:
@@ -72,14 +80,15 @@ def main() -> int:
     if not Path(bin_path).exists():
         print(f"check-by-example: no verum binary at {bin_path}, skipped")
         return 0
-    if not EXAMPLES.is_dir():
+    missing = [d for d in EXAMPLE_DIRS if not d.is_dir()]
+    if missing:
         # NOT a pass. This directory is tracked, so its absence means the
         # checkout is wrong, not that there is nothing to check.
-        print(f"check-by-example: FAILED — no examples at {EXAMPLES}", file=sys.stderr)
+        print(f"check-by-example: FAILED — no examples at {missing}", file=sys.stderr)
         return 1
 
     timeout = 200
-    files = sorted(EXAMPLES.rglob("*.vr"))
+    files = sorted(f for d in EXAMPLE_DIRS for f in d.rglob("*.vr"))
     if not files:
         print("check-by-example: FAILED — the directory holds no .vr files",
               file=sys.stderr)

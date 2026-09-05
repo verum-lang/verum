@@ -2,8 +2,8 @@
 // Demonstrates functions, recursion, and iteration with correct syntax
 
 // Import standard library functions using dots (not slashes)
-link std.io.stdio.println;
-link std.collections.map.Map;
+link core.io.stdio.println;
+link core.collections.map.Map;
 
 // Recursive implementation
 fn fibonacci_recursive(n: Int) -> Int {

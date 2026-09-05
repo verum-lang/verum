@@ -3,7 +3,7 @@
 
 // Import the println function from standard library
 // Note: using dots (.) not slashes (/) for module paths
-link std.io.stdio.println;
+link core.io.stdio.println;
 
 fn main() {
     // Basic print usage
