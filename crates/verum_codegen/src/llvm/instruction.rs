@@ -20493,6 +20493,56 @@ fn lower_call_method<'ctx>(
                     }
                 }
             }
+            // **CLONE-VALUE-COPY-FALLBACK-1 (T1168)** — `clone` on a type
+            // that DECLARES no `clone` is a VALUE COPY, not a dispatch
+            // failure.
+            //
+            // Records, containers and primitives get `clone` by copying;
+            // only types with a real `<Type>.clone` body dispatch to a
+            // method. The switch below is built from declared methods
+            // only, so a record fell to its panicking `default`:
+            //
+            //     type Rec is { a: Int };
+            //     let d = r.clone();
+            //     PANIC: no runtime candidate for method 'Rec.clone'
+            //
+            // — while the INTERPRETER copies, which is the semantics
+            // docs/architecture/value-copy-contract.md pins and which
+            // T1162 (2bda0b54e) deliberately preserved when it made a
+            // declared clone win over the copy route at Tier 0. AOT had
+            // the mirror defect: the method route and no copy.
+            //
+            // The `Clone` OPCODE already lowers a record copy correctly
+            // (instruction.rs:4939 — `verum_internal_memcpy` over the
+            // allocation size), so this routes the method form to the
+            // same behaviour rather than inventing one.
+            //
+            // Narrow: only `clone`, only zero-argument, and only when
+            // the receiver's own type has no arm in the switch — a type
+            // that DOES declare `clone` keeps dispatching to it.
+            if bare_method_early == "clone" && args.count == 0 {
+                let recv_ty = ctx.get_obj_register_type(receiver.0).map(str::to_string);
+                let has_own_arm = recv_ty.as_deref().is_some_and(|tn| {
+                    entries.iter().any(|(_, fname)| fname == &format!("{tn}.clone"))
+                });
+                if !has_own_arm {
+                    if std::env::var_os("VERUM_AOT_TRACE_CALLM").is_some() {
+                        eprintln!(
+                            "[callm]   clone on {:?} has no declared body -> value copy",
+                            recv_ty
+                        );
+                    }
+                    let value = ctx.get_register(receiver.0)?;
+                    ctx.set_register(dst.0, value);
+                    if let Some(size) = ctx.get_obj_alloc_size(receiver.0) {
+                        ctx.set_obj_alloc_size(dst.0, size);
+                    }
+                    if let Some(tn) = recv_ty {
+                        ctx.set_obj_register_type(dst.0, tn);
+                    }
+                    return Ok(());
+                }
+            }
             if !entries.is_empty() {
                 if std::env::var_os("VERUM_AOT_TRACE_CALLM").is_some() {
                     eprintln!(
@@ -34935,12 +34985,27 @@ fn build_runtime_type_switch<'ctx>(
     // only sound behaviours are "dispatch correctly" or "fail loudly".
     // The message names the method so the failing call is identifiable
     // from the abort alone.
+    // The message must not name a cause it has not established (T1168).
+    // It used to say "the receiver's static type was lost at compile
+    // time", and that was FALSE for the commonest way to reach here: a
+    // `.clone()` on a record, where the trace shows
+    // `type_name=Some("Rec") obj_type=Some("Rec")` — the type is known
+    // at both levels, and what is absent is a DECLARED `Rec.clone`,
+    // because records clone by copying. Believing the old text cost a
+    // build and a wrong hypothesis before the trace settled it.
+    //
+    // What this abort actually knows is: the switch had arms, none
+    // matched the receiver's runtime type id, and no fallback applied.
+    // It states that, and lists the two ordinary explanations without
+    // asserting either.
     let abort_msg = format!(
         "AOT dispatch fault: no runtime candidate for method '{}' — the \
-         receiver's static type was lost at compile time and its value \
-         carries no matchable type header (compiler defect: type-carry). \
-         Tier 0 dispatches this call by value tag; refusing to fabricate \
-         a result here.",
+         receiver's runtime type id matched none of the arms built from \
+         declared implementations. Either no type declares this method \
+         (in which case the call needs a value-semantics fallback, as \
+         `clone` has), or the receiver's value carries a type id the \
+         compiler did not emit an arm for. Tier 0 dispatches this call \
+         by value tag; refusing to fabricate a result here.",
         method_name
     );
     ctx.builder().position_at_end(default_bb);
