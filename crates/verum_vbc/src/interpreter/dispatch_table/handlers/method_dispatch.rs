@@ -367,7 +367,7 @@ pub(in super::super) fn handle_call_method(
     // a `"Shared.foo"` name to `"AtomicInt.foo"` (or whatever
     // the inner type is) so the qualified-lookup walker finds
     // the user-compiled body on the inner type.
-    let method_name = state
+    let mut method_name = state
         .module
         .strings
         .get(StringId(method_id))
@@ -621,7 +621,7 @@ pub(in super::super) fn handle_call_method(
     // Only that pair gets the second hop: broader fixed-point peeling
     // changes observable &mut write-back semantics (the monad
     // left-identity regressions the first two drafts introduced).
-    let dispatch_receiver = if is_cbgr_ref(&receiver) {
+    let mut dispatch_receiver = if is_cbgr_ref(&receiver) {
         let slot_val = {
             let (abs_index, _) = decode_cbgr_ref(receiver);
             state.registers.get_absolute(abs_index)
@@ -1113,6 +1113,21 @@ pub(in super::super) fn handle_call_method(
     // function named exactly `<Type>.clone` taking one parameter. A
     // generic `T.clone()` with no concrete body — the case the stub
     // exists for — has no such entry and keeps its route.
+    // `Shared` is the one type whose object the INTERCEPTION owns by
+    // default, and its two shapes are incompatible:
+    //
+    //     interception   [ObjectHeader][refcount@slot0][value@slot1]
+    //     stdlib body    Shared { ptr, generation, epoch }
+    //                    -> SharedInner { strong@0, weak@8, value@16 }
+    //
+    // `Shared.clone` reads through `self.ptr` at those offsets, so
+    // routing an INTERCEPTED object into it faults — measured: the
+    // default path stopped after its first line. Same collision the
+    // deref route hit (T1159) and the copy path hit (T1161); the gate
+    // is the same one the other four interception sites use, and it
+    // goes when they go.
+    // The `Shared.clone` exception is RETIRED with the rest of the
+    // interception (T1159) — nothing owns `Shared` but its own body now.
     if method_name.ends_with(".clone") && args.count == 0 {
         let concrete = state.module.functions.iter().enumerate().find_map(|(i, f)| {
             let name = state.module.strings.get(f.name).unwrap_or("");
@@ -1446,6 +1461,362 @@ pub(in super::super) fn handle_call_method(
         // `SharedInner.strong_count`, the first word behind `self.ptr`.
         // The flow point above is what exposed it: `heapcell=false
         // tid=520` — and 520 IS `TypeId::SHARED`, so the arm fires.
+        // The `Shared` arm here is RETIRED (T1159): the interpreter no
+        // longer substitutes its own `[ObjectHeader][refcount][value]`
+        // object for `Shared<T>`.
+        //
+        // The CONDITION is falsified rather than the block cut, because
+        // the `else if is_heap_cbgr_cell` branch below is this `if`'s
+        // SIBLING — HEAP-CARRIER-PEEL-1, which peels a `Heap<T>` cell and
+        // re-dispatches the method on the value inside. Cutting the block
+        // by brace-matching takes that ELSE with it, which is exactly the
+        // regression T1165 chased through five readings before bisecting
+        // its own binaries and finding the cause was that deletion.
+        if false && !is_heap_cbgr_cell && header.type_id == TypeId::SHARED
+        {
+            // Shared layout: [ObjectHeader][refcount: i64][value: Value]
+            let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+
+            // Strip type prefix if present (e.g., "Shared.borrow" -> "borrow").
+            // Support both "." (new convention) and "::" (legacy) for backwards compatibility.
+            //
+
+            // Owned `String` rather than borrowed `&str` so the
+            // auto-deref arm below can re-qualify `method_name` to
+            // the inner type without running into the borrow
+            // checker — `base_method` would otherwise hold an
+            // immutable reference into `method_name` for the entire
+            // match scope.
+            let base_method: String = if let Some(idx) = method_name.rfind('.') {
+                method_name[idx + 1..].to_string()
+            } else if let Some(idx) = method_name.rfind("::") {
+                method_name[idx + 2..].to_string()
+            } else {
+                method_name.clone()
+            };
+
+            match base_method.as_str() {
+                // T0384 minors — every arm below is the SHARED-STRONGCOUNT-1
+                // repr-coupled class: the COMPILED stdlib bodies read
+                // `self.ptr`/`self.generation` of the SOURCE SharedInner
+                // layout, which the interp repr `[refcount][value]` does not
+                // carry, so the interp answers from ITS OWN repr.
+                "get_mut" => {
+                    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceStaticmut) {
+                        eprintln!("[shared-trace] get_mut arm HIT");
+                    }
+                    // Same `&mut T` contract as borrow_mut (memory.vr's
+                    // exclusive-access accessor) — pre-fix the auto-deref
+                    // arm forwarded it to the INNER value and SIGSEGV'd.
+                    let inner = unsafe { *data_ptr.add(1) };
+                    state.set_reg(dst, inner);
+                    return Ok(DispatchResult::Continue);
+                }
+                "make_unique" => {
+                    // refcount==1: already unique — hand back the receiver.
+                    // Shared: allocate a FRESH cell around a copy of the
+                    // inner value (the interp's value-copy semantics match
+                    // clone-on-write for NaN-boxed payloads).
+                    let refcount = unsafe { (*data_ptr).as_i64() };
+                    if refcount <= 1 {
+                        state.set_reg(dst, receiver);
+                        return Ok(DispatchResult::Continue);
+                    }
+                    let inner = unsafe { *data_ptr.add(1) };
+                    let obj = state
+                        .heap
+                        .alloc(TypeId::SHARED, 2 * std::mem::size_of::<Value>())?;
+                    state.record_allocation();
+                    let fresh = unsafe {
+                        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE)
+                            as *mut Value
+                    };
+                    // SAFETY: freshly allocated 2-Value cell.
+                    unsafe {
+                        *fresh = Value::from_i64(1);
+                        *fresh.add(1) = inner;
+                    }
+                    // The receiver's strong count drops by one (this handle
+                    // now owns the fresh cell).
+                    unsafe { *data_ptr = Value::from_i64(refcount - 1) };
+                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
+                    return Ok(DispatchResult::Continue);
+                }
+                "try_unwrap" => {
+                    // refcount==1 -> Ok(inner); else Err(receiver) — the
+                    // canonical Result builders stamp TypeId::RESULT so
+                    // downstream match/format read the honest variant.
+                    let refcount = unsafe { (*data_ptr).as_i64() };
+                    let result = if refcount <= 1 {
+                        let inner = unsafe { *data_ptr.add(1) };
+                        make_result_variant(
+                            state,
+                            verum_common::well_known_types::result_success_tag(),
+                            inner,
+                        )?
+                    } else {
+                        make_result_variant(
+                            state,
+                            verum_common::well_known_types::result_error_tag(),
+                            receiver,
+                        )?
+                    };
+                    state.set_reg(dst, result);
+                    return Ok(DispatchResult::Continue);
+                }
+                "downgrade" => {
+                    // Interp weak model (documented at weak_count: the repr
+                    // tracks NO weak references): the weak carrier IS the
+                    // cell pointer; upgrade answers from the strong count.
+                    state.set_reg(dst, receiver);
+                    return Ok(DispatchResult::Continue);
+                }
+                "upgrade" => {
+                    let refcount = unsafe { (*data_ptr).as_i64() };
+                    let result = if refcount > 0 {
+                        make_some_value(state, receiver)?
+                    } else {
+                        make_none_value(state)?
+                    };
+                    state.set_reg(dst, result);
+                    return Ok(DispatchResult::Continue);
+                }
+                "borrow" | "borrow_mut" | "get" => {
+                    // Return the inner value (or a reference to it)
+                    // In VBC, we simplify by returning the value itself since
+                    // we're single-threaded and don't need actual borrow checking.
+                    // `get` carries the same `&T` contract as `borrow`
+                    // (memory.vr documents it as the Deref-equivalent
+                    // accessor); pre-fix it fell into the auto-deref arm,
+                    // which forwarded a `Shared<Int>.get()` to the INNER
+                    // Int and panicked "method 'get' not found".
+                    let inner = unsafe { *data_ptr.add(1) };
+                    state.set_reg(dst, inner);
+                    return Ok(DispatchResult::Continue);
+                }
+                // **SHARED-PTREQ-1** — pointer identity over the interp
+                // repr. The COMPILED `Shared.ptr_eq` body compares
+                // `self.ptr`, a field of the SOURCE-level SharedInner
+                // layout that the interp repr `[refcount][value]` does
+                // not carry — here the Shared OBJECT ADDRESS is the
+                // identity (clone returns the same object, refcount
+                // bumped; distinct `new`s allocate distinct objects).
+                // Same repr-coupled class as SHARED-STRONGCOUNT-1
+                // below; pre-fix the auto-deref arm forwarded ptr_eq to
+                // the INNER value and dispatch panicked ("method
+                // 'Shared.ptr_eq' not found ... runtime kind Object").
+                "ptr_eq" if args.count >= 1 => {
+                    let caller_base = state.reg_base();
+                    let raw = state.registers.get(caller_base, Reg(args.start.0));
+                    // `&other` arrives as a CBGR register ref (locals),
+                    // a single-value FatRef (element refs), or the
+                    // Shared value itself (by-value pass) — peel to the
+                    // referent before comparing addresses.
+                    let other = if is_cbgr_ref(&raw) {
+                        let (abs_index, _) = decode_cbgr_ref(raw);
+                        state.registers.get_absolute(abs_index)
+                    } else if let Some(single) = fat_ref_single_referent(&raw) {
+                        single
+                    } else {
+                        raw
+                    };
+                    let same = other.is_ptr()
+                        && !other.is_nil()
+                        && std::ptr::eq(other.as_ptr::<u8>(), ptr);
+                    state.set_reg(dst, Value::from_bool(same));
+                    return Ok(DispatchResult::Continue);
+                }
+                "clone" => {
+                    // Increment refcount and return the same Shared pointer
+                    unsafe {
+                        let refcount = (*data_ptr).as_i64();
+                        *data_ptr = Value::from_i64(refcount + 1);
+                    }
+                    state.set_reg(dst, receiver);
+                    return Ok(DispatchResult::Continue);
+                }
+                // **SHARED-STRONGCOUNT-1** — refcount observers over the
+                // runtime Shared repr `[refcount:i64][value]`.  The
+                // COMPILED `Shared.strong_count` body reads
+                // `(*self.ptr).strong_count` against the source-level
+                // SharedInner layout, which the interp repr does not
+                // have — so these methods MUST be intercepted here
+                // (the pre-fix auto-deref arm below forwarded them to
+                // the inner T and dispatch failed with "method not
+                // found ... runtime kind Object").  The repr tracks no
+                // weak references: `weak_count` is 0 by construction.
+                // Pinned by `core-tests/mem/allocator/integration_test.vr §5`.
+                "strong_count" => {
+                    let refcount = unsafe { (*data_ptr).as_i64() };
+                    state.set_reg(dst, Value::from_i64(refcount));
+                    return Ok(DispatchResult::Continue);
+                }
+                "weak_count" => {
+                    state.set_reg(dst, Value::from_i64(0));
+                    return Ok(DispatchResult::Continue);
+                }
+                "is_unique" => {
+                    let refcount = unsafe { (*data_ptr).as_i64() };
+                    state.set_reg(dst, Value::from_bool(refcount == 1));
+                    return Ok(DispatchResult::Continue);
+                }
+                _ => {
+                    // Auto-deref: any other method on `Shared<T>` is
+                    // forwarded to the inner `T`. Covers
+                    // `Shared<AtomicInt>::load / store / fetch_add`,
+                    // `Shared<AtomicBool>::load / store`, and any
+                    // user-defined `impl T { … }` reached through a
+                    // `Shared<T>` carrier — without monomorphising
+                    // every `Shared<T>` permutation. Mirrors the
+                    // earlier CBGR-ref deref above.
+                    //
+
+                    // Concrete callers that depend on this:
+                    // `core/net/weft/dst.vr` wraps state in
+                    // `Shared<AtomicInt>` / `Shared<AtomicBool>`
+                    // (SeededRng, WeftSimulator, TestClock); pre-fix
+                    // every `.load()` / `.store()` / `.fetch_add()`
+                    // panicked with "method not found".
+                    let inner = unsafe { *data_ptr.add(1) };
+                    dispatch_receiver = inner;
+                    // `receiver` itself stays as the Shared pointer
+                    // for any code that explicitly checks Shared
+                    // identity. All builtin dispatchers below
+                    // operate on `dispatch_receiver`.
+                    //
+
+                    // Re-qualify method_name with the inner type's
+                    // name so the qualified-lookup walker at
+                    // ~line 1014 finds e.g. `"AtomicInt.load"`
+                    // instead of the original `"Shared.load"`. The
+                    // codegen emits the receiver-type-prefixed form
+                    // for `self.x.method()` calls, so without this
+                    // rewrite we'd hit the catch-all panic even
+                    // though the user-compiled body is registered
+                    // for the inner type.
+                    if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+                        let inner_ptr = dispatch_receiver.as_ptr::<u8>();
+                        if !inner_ptr.is_null()
+                            && (inner_ptr as usize)
+                                .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                        {
+                            // SAFETY: alignment verified; heap
+                            // objects begin with an ObjectHeader.
+                            let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
+                            if let Some(td) = state.module.get_type(inner_header.type_id)
+                                && let Some(inner_type_name) = state.module.strings.get(td.name)
+                                && !inner_type_name.is_empty()
+                            {
+                                method_name = format!("{}.{}", inner_type_name, base_method);
+                                // `bare_method_name` already equals
+                                // `base_method`, so no recompute
+                                // needed.
+                            }
+                        }
+                    }
+                }
+            }
+        } else if is_heap_cbgr_cell {
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
+                eprintln!("[callm-flow] C1a-heap-carrier method={}", method_name);
+            }
+            // HEAP-CARRIER-PEEL-1 (T0106 leg-2c), continued: any method
+            // reaching here was NOT one of the CBGR-specific accessors
+            // (into_inner / into_raw / generation / stored_generation /
+            // header_* / epoch* / capabilities / can_read / can_write) —
+            // those are tried unconditionally earlier via
+            // `dispatch_primitive_method` (line ~1000) and return before
+            // this point when matched.
+            //
+            // Owned `String` (not `&str`) for the same borrow-checker
+            // reason documented on the Shared arm above: it's read again
+            // after `method_name` is reassigned below.
+            let base_method: String = if let Some(idx) = method_name.rfind('.') {
+                method_name[idx + 1..].to_string()
+            } else if let Some(idx) = method_name.rfind("::") {
+                method_name[idx + 2..].to_string()
+            } else {
+                method_name.clone()
+            };
+
+            // HEAP-OWN-METHOD-GUARD-1: `Heap<T>` itself has a real,
+            // compiled method surface — `implement<T> Deref for Heap<T>`,
+            // `DerefMut`, `Drop`, `Clone`, `Debug`, `Eq`, `Ord`, … all live
+            // in core/base/memory.vr as genuine `Heap.<method>` bodies
+            // whose `self` IS the Heap<T> carrier, not the wrapped T.
+            // Peeling unconditionally (mirroring the Shared `_ =>` arm
+            // literally) broke exactly this: `boxed.a0` on a
+            // `Heap<MediumPayload>` compiles through `boxed.deref()`,
+            // which this block re-qualified to `MediumPayload.deref` —
+            // undefined (MediumPayload doesn't implement Deref) — instead
+            // of leaving `Heap.deref` for the pre-existing qualified-name
+            // fallback (`find_function_by_name`, unconditional on
+            // receiver type) that resolved it correctly before this fix
+            // (regression caught by
+            // core-tests/mem/allocator/integration_test.vr
+            // integration_heap_medium_size_class via a baseline-vs-fix
+            // full-suite diff). Shared<T> has the identical own-method
+            // surface but its `_ =>` arm never hit this trap in practice
+            // — Shared field access resolves through
+            // handle_get_field's independent auto-deref (§338) rather
+            // than a `CallM("deref")` round-trip — so the guard is
+            // Heap-specific here rather than a design Shared already
+            // needed.
+            //
+            // Gate: only skip the peel when `Heap.<method>` resolves to
+            // a function with a REAL body (bytecode_length > 0 or
+            // non-empty instructions) — a stub/descriptor-only entry
+            // must not block forwarding to the wrapped T.
+            let heap_owns_method = state
+                .module
+                .find_function_by_name(&format!("Heap.{}", base_method))
+                .and_then(|fid| state.module.get_function(fid))
+                .is_some_and(|f| {
+                    f.bytecode_length > 0
+                        || f.instructions.as_ref().is_some_and(|i| !i.is_empty())
+                });
+
+            if !heap_owns_method {
+                // Mirror the Shared<T> auto-deref immediately above: peel
+                // to the inner Value (no refcount slot here; unlike
+                // Shared, Heap is a unique owner with no clone/
+                // strong_count surface — `clone` is intercepted earlier,
+                // universally, by `dispatch_primitive_method`) and
+                // re-qualify `method_name` to `<InnerType>.<method>` so
+                // the qualified-lookup walkers below resolve the
+                // receiver's REAL concrete type instead of falling to
+                // the bare-suffix scan.
+                //
+                // Pre-fix: `Heap<dyn Speaker>.sound()` read
+                // `header.type_id` off the wrong bytes (see the
+                // out-of-bounds note above), found no protocol impl, and
+                // fell to the bare-suffix scan — which silently bound to
+                // whichever same-named method the function table
+                // iterated to last (observed: both `Heap<Dog>` and
+                // `Shared<Cat>` printed "meow").
+                let inner = unsafe { *(ptr as *const Value) };
+                dispatch_receiver = inner;
+                // `receiver` stays the Heap CBGR pointer, mirroring the
+                // Shared arm's identity-preservation comment above.
+                if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+                    let inner_ptr = dispatch_receiver.as_ptr::<u8>();
+                    if !inner_ptr.is_null()
+                        && (inner_ptr as usize)
+                            .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                    {
+                        // SAFETY: alignment verified; heap objects begin
+                        // with an ObjectHeader.
+                        let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
+                        if let Some(td) = state.module.get_type(inner_header.type_id)
+                            && let Some(inner_type_name) = state.module.strings.get(td.name)
+                            && !inner_type_name.is_empty()
+                        {
+                            method_name = format!("{}.{}", inner_type_name, base_method);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Extract type name from receiver (supports both SmallString and heap-allocated strings)
@@ -1492,6 +1863,34 @@ pub(in super::super) fn handle_call_method(
     // exits here and no flow point past this line ever fires, so the
     // question "where does an unresolved static call leave the chain"
     // cannot be answered at all.
+    // RETIRED with the rest of the `Shared` interception (T1159).
+    if false
+        && bare_method_name == "new"
+        && let Some(ref name) = receiver_type_name
+        && WKT::Shared.matches(name)
+    {
+        let caller_base = state.reg_base();
+        let value = if args.count > 0 {
+            state.registers.get(caller_base, Reg(args.start.0))
+        } else {
+            Value::unit()
+        };
+
+        // Allocate Shared object: [ObjectHeader][refcount: i64][value: Value]
+        // We store the inner value directly for simplicity
+        let obj = state
+            .heap
+            .alloc(TypeId::SHARED, 2 * std::mem::size_of::<Value>())?;
+        state.record_allocation();
+        let data_ptr =
+            unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+        unsafe {
+            *data_ptr = Value::from_i64(1); // refcount = 1
+            *data_ptr.add(1) = value; // inner value
+        }
+        state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
+        return Ok(DispatchResult::Continue);
+    }
 
     // Handle Heap.new(value) - CBGR allocation
     // Check for both bare receiver (receiver_type_name = "Heap") and qualified method name (dyn:Heap.new).
