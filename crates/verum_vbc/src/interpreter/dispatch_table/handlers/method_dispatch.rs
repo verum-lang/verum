@@ -4537,6 +4537,57 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
+    // **STATIC-CALL-ARCHIVE-1 (T1159)** — finish the arm that
+    // method_dispatch.rs:~1313 describes and does not build.
+    //
+    // For `TypeName.method(..)` the codegen emits
+    // `LOAD_K String("TypeName")` + `CALL_M "method"`, so the type
+    // lives ONLY in the receiver string and `method_name` is bare.
+    // Every route above gates on a pointer-ish receiver, so a static
+    // call falls all the way here and panics — even when the archive
+    // holds the body. The reassembly up there already proves it does:
+    //
+    //     VERUM_TRACE_STATIC_CALL=1
+    //     [static-call] recv_type=Shared bare=new
+    //                   qualified=Shared.new found=true
+    //
+    // and its comment says the calling arm "belongs after the existing
+    // fast paths". This is that position: the last step before the
+    // panic, so nothing that resolves today changes route — exactly
+    // the placement rule the deref-hop arm above follows.
+    //
+    // WHAT IT UNBLOCKS: `Shared` is intercepted in three places
+    // (wrapper_runtime, `Shared.new`, the C0-carrier block), all under
+    // `VERUM_SHARED_NATIVE`. With the switch on, the interceptions
+    // stand down and every `Shared.*` static call died HERE — which is
+    // why the compiled bodies looked absent. They are not: AOT
+    // compiles them (`define internal fastcc i64 @Shared.new`, 334
+    // lines, allocating 48 bytes for `SharedInner`) and the archive
+    // carries them for Tier 0.
+    if receiver.is_small_string() {
+        let tname = receiver.as_small_string().as_str().to_string();
+        let qualified = format!("{tname}.{bare}");
+        if let Some(fid) = state.module.find_function_by_name(&qualified) {
+            let caller_base = state.reg_base();
+            let mut argv: Vec<Value> = Vec::with_capacity(args.count as usize);
+            for i in 0..args.count {
+                argv.push(
+                    state
+                        .registers
+                        .get(caller_base, Reg(args.start.0 + i as u16)),
+                );
+            }
+            if crate::interpreter::env_flags::is_set(
+                crate::interpreter::env_flags::Flag::TraceStaticCall,
+            ) {
+                eprintln!("[static-call] DISPATCH {} argc={}", qualified, args.count);
+            }
+            let result = super::super::call_function_sync(state, fid, &argv)?;
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
+        }
+    }
+
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmFlow) {
         eprintln!("[callm-flow] Z-pre-panic method={}", method_name);
     }
