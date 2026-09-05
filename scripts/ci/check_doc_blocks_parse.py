@@ -45,7 +45,13 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 DOCS = REPO / "internal" / "website" / "docs"
-BLOCK = re.compile(r"^```verum\n(.*?)^```", re.M | re.S)
+# The fence may carry an INFO STRING — ```verum title="…" — and it is
+# still a Verum block. Measured 2026-09-05: adding a title to one
+# block took a file from 9 blocks to 8, so the block left the census
+# instead of being counted. The defect total would have fallen for
+# the wrong reason. `verumx` is a different language and must not
+# match, which is why the space is required.
+BLOCK = re.compile(r"^```verum(?:[ \t][^\n]*)?\n(.*?)^```", re.M | re.S)
 TABLE_GLYPH = re.compile(r"->|≡|⇒|→")
 # NOT SET. The full census has not been run — a stride sample of 46 of
 # `docs/language`'s 550 blocks classified 26 ok / 8 fragment / 6 elision
@@ -218,10 +224,15 @@ def run(argv: list[str]) -> int:
     by_dir = Counter(d.split("/")[0] if "/" in d else "(root)" for d in defects)
     for name, n in by_dir.most_common():
         print(f"  {n:>4}  {name}")
-    for d in defects[:20]:
+    # Print them ALL. A truncated list is a list you cannot work from,
+    # and the count at the top already says how many there are: measured
+    # 2026-09-05, the cap of 20 hid 174 of 194 references and I spent a
+    # separate run re-deriving what this line already knew.
+    limit = len(defects) if "--all" in sys.argv or len(defects) <= 200 else 200
+    for d in defects[:limit]:
         print(f"      {d}")
-    if len(defects) > 20:
-        print(f"      … and {len(defects) - 20} more block references")
+    if len(defects) > limit:
+        print(f"      … and {len(defects) - limit} more — pass --all")
     if "--check" in argv:
         if sub:
             print("--check needs the whole estate; a subtree cannot be "
