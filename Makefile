@@ -74,6 +74,10 @@ check-homepage-examples: ## Gate: the Verum samples on the marketing homepage mu
 	python3 scripts/ci/check_homepage_examples.py --self-test
 	python3 scripts/ci/check_homepage_examples.py --check
 
+check-doc-cli-flags: ## Gate: every CLI flag the docs show must exist in the binary — needs a build
+	python3 scripts/ci/check_doc_cli_flags.py --self-test
+	python3 scripts/ci/check_doc_cli_flags.py
+
 check-doc-indented-blocks: ## Gate: an indented block in a `///` comment is a Rust doctest — fence it
 	python3 scripts/ci/check_doc_indented_blocks.py --selftest
 	python3 scripts/ci/check_doc_indented_blocks.py

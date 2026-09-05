@@ -377,6 +377,8 @@ jobs:
         run: |
           python3 scripts/ci/check_doc_indented_blocks.py --selftest
           python3 scripts/ci/check_doc_indented_blocks.py
+          python3 scripts/ci/check_doc_cli_flags.py --self-test
+          python3 scripts/ci/check_doc_cli_flags.py
 
       # A dotted path that resolves to nothing is SILENT (register row
       # A38): the module compiles, the callee is never entered, the
@@ -693,6 +695,8 @@ jobs:
           python3 scripts/ci/check_homepage_examples.py --check
           python3 scripts/ci/check_doc_indented_blocks.py --selftest
           python3 scripts/ci/check_doc_indented_blocks.py
+          python3 scripts/ci/check_doc_cli_flags.py --self-test
+          python3 scripts/ci/check_doc_cli_flags.py
 
       - name: File location does not change the verdict
         run: |
