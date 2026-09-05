@@ -107,9 +107,7 @@ fn sort_with_refs() {
     // Checked mutable reference (proven safe at compile time)
     let mut more_numbers = List.from([7, 4, 6]);
     sort_checked(&checked mut more_numbers);
-    // Reading `more_numbers` here is refused today — the `&checked mut`
-    // borrow outlives the call it was made for (A90). Print the
-    // tier-0 result instead until that is fixed.
+    print(f"Sorted (checked): {more_numbers:?}");
 }
 
 fn sort_managed(nums: &mut List<Int>) {

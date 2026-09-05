@@ -12028,6 +12028,140 @@ with .to_float() or .to_int() (at {:?})",
     }
 
     /// Infer type for unary operation.
+    /// Register the borrow that a reference expression creates.
+    ///
+    /// ONE carrier for all four reference tiers. `&checked T` is `&T` with
+    /// the RUNTIME check elided — its STATIC discipline is identical, so it
+    /// must register exactly the same borrows. It did not. Both tier-1 arms
+    /// matched only `ExprKind::Path`, and neither knew that a borrow taken
+    /// as a call argument dies when the call returns (NLL-ARG-BORROW-1).
+    /// Measured 2026-09-05 over five borrow shapes written twice, once per
+    /// tier; three diverged:
+    ///
+    /// * `&checked x` passed to a function stayed borrowed, so a later
+    ///   `&mut x` was refused with E310 where `&x` compiles;
+    /// * `&checked mut s.a` and `&checked mut xs[0]` registered NOTHING, so
+    ///   tier 1 ACCEPTED a whole-value `&mut s` that tier 0 refuses.
+    ///
+    /// Two of those three point the UNSOUND way, and the third makes the
+    /// zero-cost tier unusable for the thing it exists for. Four copies of
+    /// one rule diverge; one copy cannot.
+    ///
+    /// Spec: L0-critical/reference_system/access_rules - Reference aliasing
+    fn track_reference_borrow(&mut self, expr: &Expr, mutable: bool, span: Span) -> Result<()> {
+        match &expr.kind {
+            ExprKind::Path(path) => {
+                if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
+                    let var_name = id.name.as_str();
+                    // NLL-ARG-BORROW-1: a borrow taken as a call argument
+                    // (`f(&x)`, incl. a generic-method arg synthesized here
+                    // rather than checked) is a TEMPORARY that ends when the
+                    // call returns.  Registering it persistently makes it
+                    // linger in the tracker and phantom-conflict with a later
+                    // `x.mut()` (e.g. `assert(a.is_disjoint(&b)); b.insert(2)`
+                    // -> spurious E310).  Mirror the check-mode path in
+                    // expr.rs: use the non-registering `_for_call` variant.
+                    match (mutable, self.in_call_arg_context) {
+                        (false, true) => {
+                            self.borrow_tracker.borrow_immut_for_call(var_name, span)?;
+                        }
+                        (false, false) => {
+                            self.borrow_tracker.borrow_immut(var_name, span)?;
+                        }
+                        (true, true) => {
+                            self.borrow_tracker.borrow_mut_for_call(var_name, span)?;
+                        }
+                        (true, false) => {
+                            self.borrow_tracker.borrow_mut(var_name, span)?;
+                        }
+                    }
+                }
+            }
+            ExprKind::Field {
+                expr: receiver,
+                field,
+            } => {
+                // Track field borrow: `&container.field` borrows
+                // container.field and also implicitly borrows container,
+                // which is what forbids a later `&mut container`.  Nested
+                // fields keep the full path: container.first.value ->
+                // "first.value".
+                if let Some((base_name, field_path)) =
+                    self.extract_field_path(receiver, field.name.as_str())
+                {
+                    if mutable {
+                        // There is no `borrow_field_mut_for_call`: a mutable
+                        // field borrow registers even in call-arg position.
+                        self.borrow_tracker
+                            .borrow_field_mut(base_name, field_path, span)?;
+                    } else if self.in_call_arg_context {
+                        // NLL-ARG-BORROW-1 second leg: a `&x.field` CALL
+                        // ARGUMENT is a temporary that dies at call return.
+                        self.borrow_tracker
+                            .borrow_field_immut_for_call(base_name, field_path, span)?;
+                    } else {
+                        self.borrow_tracker
+                            .borrow_field_immut(base_name, field_path, span)?;
+                    }
+                }
+            }
+            // Index expression: `&data[i]` borrows the element at index i.
+            // With constant indices, disjoint index borrows are allowed
+            // (borrow splitting).
+            // Spec: L0-critical/reference_system/access_rules/ref_splitting_fields
+            ExprKind::Index {
+                expr: collection,
+                index,
+            } => {
+                if let Some(collection_name) = self.extract_base_name(collection) {
+                    if let Some(idx) = self.try_extract_const_index(index) {
+                        // Negative indices fail at runtime; nothing to track.
+                        if idx >= 0 {
+                            // Constant index: track as "collection[idx]",
+                            // exactly like a field.
+                            let base = verum_common::Text::from(collection_name.as_str());
+                            let index_path = verum_common::Text::from(format!("[{}]", idx));
+                            if mutable {
+                                self.borrow_tracker.borrow_field_mut(base, index_path, span)?;
+                            } else if self.in_call_arg_context {
+                                // NLL-ARG-BORROW-1 second leg (see Field arm).
+                                self.borrow_tracker
+                                    .borrow_field_immut_for_call(base, index_path, span)?;
+                            } else {
+                                self.borrow_tracker
+                                    .borrow_field_immut(base, index_path, span)?;
+                            }
+                        }
+                    } else if self.in_call_arg_context {
+                        // Non-constant index in call-arg position:
+                        // `recv.method(&xs[i])` — the whole-collection borrow
+                        // is a call temporary (NLL-ARG-BORROW-1 second leg;
+                        // live failure: the bubble-sort idiom
+                        // `words[j].cmp(&words[i])` followed by `words[i] = t`
+                        // reported E310 with no live holder — 242 text/text
+                        // tests red on one phantom conflict).
+                        if mutable {
+                            self.borrow_tracker
+                                .borrow_mut_for_call(collection_name.as_str(), span)?;
+                        } else {
+                            self.borrow_tracker
+                                .borrow_immut_for_call(collection_name.as_str(), span)?;
+                        }
+                    } else if mutable {
+                        // Non-constant index: borrow the whole collection.
+                        self.borrow_tracker
+                            .borrow_mut(collection_name.as_str(), span)?;
+                    } else {
+                        self.borrow_tracker
+                            .borrow_immut(collection_name.as_str(), span)?;
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     pub(super) fn infer_unop(&mut self, op: UnOp, expr: &Expr, _span: Span) -> Result<InferResult> {
         use UnOp::*;
 
@@ -12224,96 +12358,7 @@ with .to_float() or .to_int() (at {:?})",
 
                 // Track immutable borrow for aliasing detection
                 // Spec: L0-critical/reference_system/access_rules - Reference aliasing
-                match &expr.kind {
-                    ExprKind::Path(path) => {
-                        if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
-                            let var_name = id.name.as_str();
-                            // NLL-ARG-BORROW-1: an immutable borrow taken as a call
-                            // argument (`f(&x)`, incl. a generic-method arg synthesized
-                            // here rather than checked) is a TEMPORARY that ends when the
-                            // call returns.  Registering it persistently makes it linger
-                            // in the tracker and phantom-conflict with a later `x.mut()`
-                            // (e.g. `assert(a.is_disjoint(&b)); b.insert(2)` -> spurious
-                            // E310).  Mirror the check-mode path in expr.rs: use the
-                            // non-registering `borrow_immut_for_call` in call-arg context.
-                            if self.in_call_arg_context {
-                                self.borrow_tracker.borrow_immut_for_call(var_name, _span)?;
-                            } else {
-                                self.borrow_tracker.borrow_immut(var_name, _span)?;
-                            }
-                        }
-                    }
-                    ExprKind::Field {
-                        expr: receiver,
-                        field,
-                    } => {
-                        // Track field borrow: &container.field borrows container.field
-                        // and also implicitly borrows container (prevents &mut container)
-                        // Use full path for nested fields: container.first.value -> "first.value"
-                        if let Some((base_name, field_path)) =
-                            self.extract_field_path(receiver, field.name.as_str())
-                        {
-                            // NLL-ARG-BORROW-1 second leg: a `&x.field` CALL
-                            // ARGUMENT is a temporary that dies at call return
-                            // — same rule the Path arm above already applies.
-                            if self.in_call_arg_context {
-                                self.borrow_tracker
-                                    .borrow_field_immut_for_call(base_name, field_path, _span)?;
-                            } else {
-                                self.borrow_tracker
-                                    .borrow_field_immut(base_name, field_path, _span)?;
-                            }
-                        }
-                    }
-                    // Index expression: &data[i] borrows the element at index i
-                    // With constant indices, we can allow disjoint index borrows (borrow splitting)
-                    // Spec: L0-critical/reference_system/access_rules/ref_splitting_fields
-                    ExprKind::Index {
-                        expr: collection,
-                        index,
-                    } => {
-                        if let Some(collection_name) = self.extract_base_name(collection) {
-                            // Try to get a constant index for fine-grained tracking
-                            if let Some(idx) = self.try_extract_const_index(index) {
-                                if idx >= 0 {
-                                    // Constant index: track as "collection[idx]" (like a field)
-                                    let index_path = verum_common::Text::from(format!("[{}]", idx));
-                                    // NLL-ARG-BORROW-1 second leg (see Field arm).
-                                    if self.in_call_arg_context {
-                                        self.borrow_tracker.borrow_field_immut_for_call(
-                                            verum_common::Text::from(collection_name.as_str()),
-                                            index_path,
-                                            _span,
-                                        )?;
-                                    } else {
-                                        self.borrow_tracker.borrow_field_immut(
-                                            verum_common::Text::from(collection_name.as_str()),
-                                            index_path,
-                                            _span,
-                                        )?;
-                                    }
-                                }
-                                // Negative indices will fail at runtime, but we still track the borrow
-                            } else if self.in_call_arg_context {
-                                // Non-constant index in call-arg position:
-                                // `recv.method(&xs[i])` — the whole-collection
-                                // borrow is a call temporary (NLL-ARG-BORROW-1
-                                // second leg; live failure: the bubble-sort
-                                // idiom `words[j].cmp(&words[i])` followed by
-                                // `words[i] = t` reported E310 with no live
-                                // holder — 242 text/text tests red on one
-                                // phantom conflict).
-                                self.borrow_tracker
-                                    .borrow_immut_for_call(collection_name.as_str(), _span)?;
-                            } else {
-                                // Non-constant index: borrow the whole collection
-                                self.borrow_tracker
-                                    .borrow_immut(collection_name.as_str(), _span)?;
-                            }
-                        }
-                    }
-                    _ => {}
-                }
+                self.track_reference_borrow(expr, false, _span)?;
 
                 // Auto-deref smart pointers: &Heap<T> -> &T, &Shared<T> -> &T
                 // STDLIB-AGNOSTIC: These are Verum memory types, not Rust types
@@ -12344,66 +12389,7 @@ with .to_float() or .to_int() (at {:?})",
                 // Track mutable borrow for aliasing detection
                 // Spec: L0-critical/reference_system/access_rules - Reference aliasing
                 // NLL: Use different behavior depending on context (call arg vs let binding)
-                match &expr.kind {
-                    ExprKind::Path(path) => {
-                        if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
-                            let var_name = id.name.as_str();
-                            if self.in_call_arg_context {
-                                // NLL: For call arguments, use temporary borrow that releases field borrows
-                                self.borrow_tracker.borrow_mut_for_call(var_name, _span)?;
-                            } else {
-                                // Normal: For let bindings, use strict borrow checking
-                                self.borrow_tracker.borrow_mut(var_name, _span)?;
-                            }
-                        }
-                    }
-                    ExprKind::Field {
-                        expr: receiver,
-                        field,
-                    } => {
-                        // Track field borrow: &mut container.field borrows container.field
-                        // and also implicitly borrows container (prevents &mut container)
-                        // Use full path for nested fields: container.first.value -> "first.value"
-                        if let Some((base_name, field_path)) =
-                            self.extract_field_path(receiver, field.name.as_str())
-                        {
-                            self.borrow_tracker
-                                .borrow_field_mut(base_name, field_path, _span)?;
-                        }
-                    }
-                    // Index expression: &mut data[i] borrows the element at index i mutably
-                    // With constant indices, we can allow disjoint index borrows (borrow splitting)
-                    // Spec: L0-critical/reference_system/access_rules/ref_splitting_fields
-                    ExprKind::Index {
-                        expr: collection,
-                        index,
-                    } => {
-                        if let Some(collection_name) = self.extract_base_name(collection) {
-                            // Try to get a constant index for fine-grained tracking
-                            if let Some(idx) = self.try_extract_const_index(index) {
-                                if idx >= 0 {
-                                    // Constant index: track as "collection[idx]" (like a field)
-                                    let index_path = verum_common::Text::from(format!("[{}]", idx));
-                                    self.borrow_tracker.borrow_field_mut(
-                                        verum_common::Text::from(collection_name.as_str()),
-                                        index_path,
-                                        _span,
-                                    )?;
-                                }
-                                // Negative indices will fail at runtime
-                            } else if self.in_call_arg_context {
-                                // Non-constant index in call context
-                                self.borrow_tracker
-                                    .borrow_mut_for_call(collection_name.as_str(), _span)?;
-                            } else {
-                                // Non-constant index: borrow the whole collection
-                                self.borrow_tracker
-                                    .borrow_mut(collection_name.as_str(), _span)?;
-                            }
-                        }
-                    }
-                    _ => {}
-                }
+                self.track_reference_borrow(expr, true, _span)?;
 
                 // Auto-deref smart pointers: &mut Heap<T> -> &mut T, &mut Shared<T> -> &mut T
                 // STDLIB-AGNOSTIC: These are Verum memory types, not Rust types
@@ -12637,15 +12623,7 @@ with .to_float() or .to_int() (at {:?})",
 
                 // Track immutable borrow for aliasing detection and escape analysis
                 // Same tracking as regular &T, needed for interprocedural escape detection
-                match &expr.kind {
-                    ExprKind::Path(path) => {
-                        if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
-                            let var_name = id.name.as_str();
-                            self.borrow_tracker.borrow_immut(var_name, _span)?;
-                        }
-                    }
-                    _ => {}
-                }
+                self.track_reference_borrow(expr, false, _span)?;
 
                 Ok(InferResult::new(Type::checked_reference(false, result.ty)))
             }
@@ -12655,16 +12633,13 @@ with .to_float() or .to_int() (at {:?})",
                 let result = self.synth_expr(expr)?;
                 self.in_call_arg_context = old_call_context;
 
-                // Track mutable borrow for aliasing detection and escape analysis
-                match &expr.kind {
-                    ExprKind::Path(path) => {
-                        if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
-                            let var_name = id.name.as_str();
-                            self.borrow_tracker.borrow_mut(var_name, _span)?;
-                        }
-                    }
-                    _ => {}
-                }
+                // Track mutable borrow for aliasing detection and escape
+                // analysis — the SAME carrier `RefMut` uses. Tier 1 is the
+                // COMPILER-PROVEN tier: it may not be stricter than the tier-0
+                // default it optimises into, nor looser. See
+                // `track_reference_borrow` for the three shapes that diverged
+                // while this arm kept its own copy of the rule.
+                self.track_reference_borrow(expr, true, _span)?;
 
                 Ok(InferResult::new(Type::checked_reference(true, result.ty)))
             }
