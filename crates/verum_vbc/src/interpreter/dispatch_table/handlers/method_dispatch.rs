@@ -1127,8 +1127,8 @@ pub(in super::super) fn handle_call_method(
     // is the same one the other four interception sites use, and it
     // goes when they go.
     let shared_owned_by_interception = method_name == "Shared.clone"
-        && !crate::interpreter::env_flags::is_set(
-            crate::interpreter::env_flags::Flag::SharedNative,
+        && crate::interpreter::env_flags::is_set(
+            crate::interpreter::env_flags::Flag::SharedIntercept,
         );
     if method_name.ends_with(".clone") && args.count == 0 && !shared_owned_by_interception {
         let concrete = state.module.functions.iter().enumerate().find_map(|(i, f)| {
@@ -1465,7 +1465,7 @@ pub(in super::super) fn handle_call_method(
         // tid=520` — and 520 IS `TypeId::SHARED`, so the arm fires.
         if !is_heap_cbgr_cell
             && header.type_id == TypeId::SHARED
-            && !crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::SharedNative)
+            && crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::SharedIntercept)
         {
             // Shared layout: [ObjectHeader][refcount: i64][value: Value]
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
@@ -1859,7 +1859,7 @@ pub(in super::super) fn handle_call_method(
     if bare_method_name == "new"
         && let Some(ref name) = receiver_type_name
         && WKT::Shared.matches(name)
-        && !crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::SharedNative)
+        && crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::SharedIntercept)
     {
         let caller_base = state.reg_base();
         let value = if args.count > 0 {

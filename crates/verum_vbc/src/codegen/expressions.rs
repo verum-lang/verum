@@ -5692,11 +5692,20 @@ impl VbcCodegen {
                 // until `Shared.clone` works on the compiled body —
                 // today it zeroes both slots (count 1 -> 0, value 41 ->
                 // 0). That is the one remaining step in T1159.
-                let is_heap_deref = inner_type.as_ref().is_some_and(|t| {
-                    t.starts_with("Heap<")
-                        || t.starts_with("Shared<")
-                        || self.is_allocating_wrapper(t)
-                });
+                // `Shared<` is OFF this list (T1159): `*s` now compiles
+                // to `CallM Shared.deref` + `Deref`, the same two-
+                // instruction shape every other `Deref`-implementing type
+                // gets, and the compiled body reads `value` at its real
+                // offset. This landed only once the interpreter stopped
+                // substituting its own object for `Shared` — the
+                // interception's data section is 16 bytes and the body
+                // reads offset 16, so while both existed the route
+                // faulted. BOTH gates come off together; removing only
+                // the exclusion list below is inert, because this test
+                // runs first and short-circuits.
+                let is_heap_deref = inner_type
+                    .as_ref()
+                    .is_some_and(|t| t.starts_with("Heap<") || self.is_allocating_wrapper(t));
                 // Typed-primitive deref dispatch (#26 codegen tail).
                 //
 
@@ -5805,9 +5814,11 @@ impl VbcCodegen {
                         // the compiled body is right and the
                         // interception's object is a different shape,
                         // and the default path is the interception.
+                        // `Shared` removed together with the
+                        // `is_heap_deref` test above — one route, two
+                        // gates (T1159).
                         if base.is_empty()
                             || base == "Heap"
-                            || base == "Shared"
                             || base == "Int"
                             || base == "Float"
                             || base == "Bool"

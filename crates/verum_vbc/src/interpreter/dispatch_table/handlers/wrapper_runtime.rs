@@ -155,7 +155,7 @@ pub(in super::super) fn try_intercept_wrapper_call(
             // `[refcount][value]` layout, and the mixture reads as a
             // defect in the stdlib bodies.
             if let Some(rc_ptr) = shared_refcount_ptr(&v)
-                && !crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::SharedNative)
+                && crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::SharedIntercept)
             {
                 match method {
                     "strong_count" => {

@@ -2537,16 +2537,58 @@ pub(crate) fn value_copy(
     // block) already consult the switch, and its own comment calls a
     // half-gated switch "a HALF measurement" that "reads as a defect in
     // the stdlib bodies". This one was the missing half.
-    if type_id == TypeId::SHARED
-        && !crate::interpreter::env_flags::is_set(
-            crate::interpreter::env_flags::Flag::SharedNative,
-        )
-    {
+    if type_id == TypeId::SHARED {
+        // TWO OBJECT SHAPES SHARE THIS TYPE ID, and the discriminator is
+        // STRUCTURAL rather than an environment flag:
+        //
+        //     interception   2 slots  [refcount][value]
+        //     stdlib body    3 slots  { ptr, generation, epoch }
+        //
+        // `Shared.new`'s compiled body emits
+        // `New { type_id: 520, field_count: 3 }`, so the slot count tells
+        // them apart with nothing to consult — and BOTH models work at
+        // once, which a flag cannot give.
+        //
+        // Either way the answer is the SAME carrier with one more owner:
+        // forking it would lose every later write through the other
+        // handle, which the contract test pins.
+        let slot = std::mem::size_of::<Value>();
         let rc_ptr = unsafe { src_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-        // SAFETY: slot 0 of a validated SHARED object is the refcount.
-        unsafe {
-            let refcount = (*rc_ptr).as_i64();
-            *rc_ptr = Value::from_i64(refcount + 1);
+        if data_size / slot <= 2 {
+            // Interception layout: slot 0 IS the refcount.
+            // SAFETY: slot 0 of a validated 2-slot SHARED object.
+            unsafe {
+                let refcount = (*rc_ptr).as_i64();
+                *rc_ptr = Value::from_i64(refcount + 1);
+            }
+            return Ok(value);
+        }
+        // Stdlib layout: slot 0 holds `self.ptr`, a raw address naming a
+        // `SharedInner { strong_count@0, weak_count@8, value@16 }` laid
+        // down flat by `ptr_write` (T1160). The strong count is that
+        // block's first slot.
+        //
+        // Reading slot 0 as an ADDRESS is the entire difference from the
+        // arm above, and getting it wrong is what T1161 was: incrementing
+        // slot 0 here increments the POINTER, and every later read then
+        // follows it one byte off.
+        let inner = unsafe { *rc_ptr };
+        let inner_addr = if inner.is_ptr() {
+            inner.as_ptr::<u8>() as usize
+        } else if inner.is_int() {
+            inner.as_i64() as usize
+        } else {
+            0
+        };
+        if inner_addr >= 0x1000 && inner_addr.is_multiple_of(slot) {
+            // SAFETY: the address came from `cbgr_alloc` via the compiled
+            // constructor and names a live block whose first slot is the
+            // strong count; alignment and a non-tiny address checked.
+            unsafe {
+                let strong = inner_addr as *mut Value;
+                let n = (*strong).as_i64();
+                *strong = Value::from_i64(n + 1);
+            }
         }
         return Ok(value);
     }
