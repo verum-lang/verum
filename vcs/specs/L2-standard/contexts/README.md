@@ -109,11 +109,11 @@ Dependency Rules:
 
 ```verum
 @injectable(Scope.Singleton)
-type DatabaseService is { ... }
+type DatabaseService is { }
 
 implement DatabaseService {
     @inject
-    fn new(config: ConfigService) -> Self { ... }
+    fn new(config: ConfigService) -> Self { todo() }
 }
 
 fn main() {
@@ -125,7 +125,7 @@ fn main() {
 
 ```verum
 context async Database {
-    async fn query(sql: Text) -> List<Row>
+    async fn query(sql: Text) -> List<Row>;
 }
 
 async fn fetch_users() using [Database] -> List<User> {
@@ -142,13 +142,13 @@ async fn main() {
 
 ```verum
 @injectable(Scope.Singleton)
-type UserService is { ... }
+type UserService is { }
 
 implement UserService {
     @inject
     fn new() using [Logger] -> Self {
         Logger.info("UserService initialized");
-        Self { ... }
+        Self { }
     }
 }
 ```

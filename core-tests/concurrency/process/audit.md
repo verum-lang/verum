@@ -16,7 +16,8 @@ binder semantics).
 
 `test_alpha_eq_restrict_different_free_name_distinct`:
 
-```verum
+```text
+// pi-calculus notation, not Verum source
 let p = (νx) free1⟨m⟩.0
 let q = (νy) free2⟨m⟩.0
 assert(!alpha_eq(&p, &q));   // FAILS — alpha_eq returns true

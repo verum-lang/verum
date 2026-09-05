@@ -38,9 +38,7 @@ the data needed to diagnose it. This is preferable to a single
   cases immediately.
 
 ```verum
-fn parse_positive(s: &Text) -> Result<Int, ParseError> {
-    ...
-}
+fn parse_positive(s: &Text) -> Result<Int, ParseError> { todo() }
 ```
 
 Returns `Result<Int, ParseError>`. Two construction sites:

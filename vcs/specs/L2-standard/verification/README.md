@@ -152,14 +152,10 @@ while condition {
 ### Type Invariants
 
 ```verum
-struct BoundedList<T> {
+type BoundedList<T> is {
     data: List<T>,
     max: Int,
-
-    invariant#"
-        data.len() <= max
-    "
-}
+} { self.data.len() <= self.max };
 ```
 
 ### Quantifiers

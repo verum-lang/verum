@@ -721,6 +721,26 @@ jobs:
           python3 scripts/ci/check_doc_error_codes_exist.py
           python3 scripts/ci/check_grammar_docs_match.py
 
+      # `check_doc_blocks_parse` has been in the tree for weeks as a
+      # Makefile target with NO CI caller and no `--check` flag on the one
+      # invocation it had, so it could not fail a build. It gates four trees
+      # now, each against its own counted baseline (see TREE_BASELINES): the
+      # website and the repo's `vcs/` and `core-tests/` are at ZERO, `docs/`
+      # carries the two design documents that propose syntax the language
+      # does not have. A tree nobody has counted FAILS rather than passing
+      # on a borrowed number. Slow — ~2900 blocks, two compiler runs each —
+      # so it is its own step and reports which tree tripped.
+      - name: Every ```verum block must parse, per tree
+        env:
+          VERUM_BIN: target/release/verum
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/check_doc_blocks_parse.py --self-test
+          VERUM_DOCS_DIR=.website/docs python3 scripts/ci/check_doc_blocks_parse.py --check
+          VERUM_DOCS_DIR=vcs           python3 scripts/ci/check_doc_blocks_parse.py --check
+          VERUM_DOCS_DIR=core-tests    python3 scripts/ci/check_doc_blocks_parse.py --check
+          VERUM_DOCS_DIR=docs          python3 scripts/ci/check_doc_blocks_parse.py --check
+
       - name: File location does not change the verdict
         run: |
           scripts/ci/check_path_does_not_change_verdict.sh --selftest ./target/release/verum

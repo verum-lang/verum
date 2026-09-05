@@ -129,6 +129,21 @@ P3 nice-to-have.
    * **A build must snapshot before it starts**: commit, or build inside a
      worktree that no other actor mutates. Bakes are long; anything that
      touches the tree mid-bake corrupts the result silently.
+   * **The machine-wide heavy lock serialises CONTENDING work, and a
+     cold build of a fresh private target is not contending.** Agreed
+     between sessions 2026-09-05 after a single
+     `cargo build -p verum_cli` in a new worktree held the lock for 45
+     minutes and three other sessions queued behind it. What the lock
+     protects is a shared resource — the shared `target/`, a bake, a
+     suite that competes for the whole machine. A first cold build into
+     a private `CARGO_TARGET_DIR` shares nothing but CPU, so it runs
+     OFF the lock; incremental builds and test suites take it.
+     The limit is the DURATION of one step, not the number of steps: an
+     earlier phrasing said "take the lock per cargo step rather than for
+     a whole chain", which does not help when the chain is one step that
+     runs for an hour. A holder that will exceed ~10 minutes should
+     either run off the lock in a private target or say so where the
+     other sessions can see it.
 6. **Task files are append-mostly**: fix typos freely in your own
    claimed task, but never rewrite another session's journal; never
    delete task files (the ID space depends on them).

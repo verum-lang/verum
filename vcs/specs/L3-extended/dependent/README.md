@@ -75,6 +75,11 @@ Pi types (dependent function types) allow the return type of a function to depen
 
 **Example:**
 ```verum
+// Type-level arithmetic in a return type is not yet supported: the
+// suite's own `pi_types/dependent_return_fail.vr` pins
+// `Cannot unify 'plus(M, N)' with 'M'` as the current answer, and
+// `List` takes one type argument today. `pi_types/length_tracking.vr`
+// shows what compiles now — a user-declared `SizedArray<T, N: meta Int>`.
 fn concat<T, M: meta Nat, N: meta Nat>(
     xs: List<T, M>,
     ys: List<T, N>
@@ -211,10 +216,11 @@ Type-level values can be used in types and are erased at runtime.
 
 Proofs marked with `#[erased]` have no runtime representation:
 ```verum
-type Refined<T, P: fn(T) -> Prop> is (
+type Refined<T, P: fn(T) -> Prop> is {
     value: T,
-    #[erased] proof: P(value),  // Erased at runtime
-);
+    @erased
+    proof: P(value),  // Erased at runtime
+};
 ```
 
 ### Linear Types

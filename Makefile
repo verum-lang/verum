@@ -74,8 +74,11 @@ check-homepage-examples: ## Gate: the Verum samples on the marketing homepage mu
 	python3 scripts/ci/check_homepage_examples.py --self-test
 	python3 scripts/ci/check_homepage_examples.py --check
 
-check-doc-blocks-parse: ## Gate: every ```verum block in the docs must parse — needs a build (slow: ~2800 blocks)
-	python3 scripts/ci/check_doc_blocks_parse.py
+check-doc-blocks-parse: ## Gate: every ```verum block must parse, per tree — needs a build (slow)
+	python3 scripts/ci/check_doc_blocks_parse.py --self-test
+	VERUM_DOCS_DIR=vcs        python3 scripts/ci/check_doc_blocks_parse.py --check
+	VERUM_DOCS_DIR=core-tests python3 scripts/ci/check_doc_blocks_parse.py --check
+	VERUM_DOCS_DIR=docs       python3 scripts/ci/check_doc_blocks_parse.py --check
 
 check-by-example: ## Gate: the 22 docs/by-example programs must compile — needs a build
 	python3 scripts/ci/check_by_example_compiles.py --self-test
@@ -83,7 +86,7 @@ check-by-example: ## Gate: the 22 docs/by-example programs must compile — need
 
 gates-docs: check-doc-examples check-homepage-examples check-doc-indented-blocks \
             check-doc-cli-flags check-doc-anchors check-doc-error-codes \
-            check-grammar-docs-match check-by-example ## Every documentation gate CI runs — needs a build
+            check-grammar-docs-match check-by-example check-doc-blocks-parse ## Every documentation gate CI runs — needs a build
 	@echo "gates-docs: all documentation gates green"
 
 check-doc-cli-flags: ## Gate: every CLI flag the docs show must exist in the binary — needs a build

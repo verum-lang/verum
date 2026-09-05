@@ -31,8 +31,8 @@ the call typechecks. If no, the caller must:
 The stdlib uses refinements heavily for division precondititions:
 
 ```verum
-public fn div_floor(a: Int, b: Int{!= 0}) -> Int { ... }
-public fn mod_euclidean(a: Int, b: Int{!= 0}) -> Int{>= 0} { ... }
+public fn div_floor(a: Int, b: Int{!= 0}) -> Int { todo() }
+public fn mod_euclidean(a: Int, b: Int{!= 0}) -> Int{>= 0} { todo() }
 ```
 
 A caller writing `div_floor(10, x)` where `x: Int` must prove `x != 0`

@@ -78,8 +78,8 @@ func main() {
 
 ```verum
 // Verum
-fn main() async {
-    let handles: List<_> = (0..10_000).map(|i| {
+async fn main() {
+    let handles: List<JoinHandle<()>> = (0..10_000).map(|i| {
         spawn async move {
             // work
         }
@@ -114,16 +114,20 @@ for v := range ch {
 
 ```verum
 // Verum
-let (tx, rx) = channel::<Int>.bounded(100);
+mount core.async.channel.bounded;
 
-spawn async {
-    for i in 0..1_000_000 {
-        tx.send(i).await;
+async fn main() {
+    let (tx, rx) = bounded<Int>(100);
+
+    spawn async {
+        for i in 0..1_000_000 {
+            tx.send(i).await;
+        }
+    };
+
+    while let Some(v) = rx.recv().await {
+        let _ = v;
     }
-};
-
-while let Some(v) = rx.recv().await {
-    let _ = v;
 }
 ```
 
@@ -159,12 +163,15 @@ json.Unmarshal(data, &user)
 
 ```verum
 // Verum
-#[derive(Deserialize)]
-struct User {
-    name: Text,
-    age: Int,
+mount core.encoding.json;
+
+@derive(Deserialize)
+type User is { name: Text, age: Int };
+
+fn parse_user(data: &Text) -> Result<JsonValue, JsonError> {
+    let user = json.parse(data)?;
+    Ok(user)
 }
-let user: User = Json.parse(data)?;
 ```
 
 **Expected:** Verum 2-4x faster (compile-time codegen, no reflection)

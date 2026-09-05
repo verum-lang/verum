@@ -67,8 +67,8 @@ manual wrapping today. Add functor + monad operations:
 
 ```verum
 implement<T: Clone, U: Clone> Provider<T> {
-    public fn map(self, f: fn(T) -> U) -> Provider<U> { ... }
-    public fn flat_map(self, f: fn(T) -> Provider<U>) -> Provider<U> { ... }
+    public fn map(self, f: fn(T) -> U) -> Provider<U> { todo() }
+    public fn flat_map(self, f: fn(T) -> Provider<U>) -> Provider<U> { todo() }
 }
 ```
 

@@ -47,8 +47,8 @@ pattern that the test suite expected.
 The stdlib defines:
 
 ```verum
-implement<T, E: Default> FromResidual<Maybe<Never>> for Result<T, E>
-implement<T, E> FromResidual<Result<Never, E>> for Maybe<T>
+implement<T, E: Default> FromResidual<Maybe<Never>> for Result<T, E> { }
+implement<T, E> FromResidual<Result<Never, E>> for Maybe<T> { }
 ```
 
 but the typechecker's `protocol::can_convert_residual(return_type,

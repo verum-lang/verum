@@ -102,14 +102,18 @@ Meta functions enable arbitrary compile-time computation.
 
 **Example:**
 ```verum
-meta fn factorial(n: u64) -> u64 {
+meta fn factorial(n: UInt64) -> UInt64 {
     if n <= 1 { 1 } else { n * factorial(n - 1) }
 }
 
-const FACT_10: u64 = factorial(10);  // 3628800
+const FACT_10: UInt64 = factorial(10);  // 3628800
 
-meta fn generate_getter(field: &str, ty: &str) -> TokenStream {
-    quote! {
+// `@quote` INTERPOLATION is not yet supported: `#(name)` inside a
+// quote appears only in this suite's `_fail` tests
+// (`compile_time/code_generation_fail.vr`), and the passing
+// `compile_time/code_generation.vr` uses `@derive` instead.
+meta fn generate_getter(field: &Text, ty: &Text) -> TokenStream {
+    @quote {
         fn #(field)(&self) -> &#(ty) {
             &self.#(field)
         }
@@ -198,9 +202,15 @@ Meta functions must be:
 
 The `quote!` macro creates TokenStream values:
 ```verum
-quote! {
-    fn #(ident)() -> #(return_type) {
-        #(body)
+// `@quote` INTERPOLATION is not yet supported: `#(name)` inside a
+// quote appears only in this suite's `_fail` tests
+// (`compile_time/code_generation_fail.vr`), and the passing
+// `compile_time/code_generation.vr` uses `@derive` instead.
+meta fn make_fn(ident: &Text, return_type: &Text, body: TokenStream) -> TokenStream {
+    @quote {
+        fn #(ident)() -> #(return_type) {
+            #(body)
+        }
     }
 }
 ```
@@ -230,8 +240,8 @@ meta fn fields<T>() -> List<FieldInfo> {
 
 ```verum
 const _: () = {
-    assert!(size_of::<Pointer>() == 8);
-    assert!(factorial(5) == 120);
+    assert(size_of<Pointer>() == 8);
+    assert(factorial(5) == 120);
 };
 ```
 

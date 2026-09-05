@@ -91,6 +91,34 @@ TABLE_GLYPH = re.compile(r"->|≡|⇒|→")
 # build, which is the whole point of having counted.
 BASELINE = 0
 
+# One gate, several trees. `VERUM_DOCS_DIR` already let this script measure
+# any markdown tree; what it could not do was GATE one, because a single
+# global baseline can only describe the tree it was counted on. Measured
+# 2026-09-05: the website is at 0, and so are `vcs/` and `core-tests/` once
+# their defects were worked down — but `docs/` carries 62, every one of them
+# inside two design documents that propose syntax the language does not have
+# (`msfs-diakrisis-machine-verification.md`, `verum-verification-architecture.md`).
+# Gating all four against one number would either let three trees rot or
+# demand that somebody rewrite another author's design document.
+#
+# The key is the tree's own directory name, so a run against a tree nobody
+# has counted FAILS `--check` rather than passing on a borrowed number.
+# Lower a row when the work lands; never raise one.
+TREE_BASELINES = {
+    "docs": 62,        # 47 + 15, both design documents; see A82
+    "vcs": 0,
+    "core-tests": 0,
+    "website": 0,      # the sibling checkout's `docs/`
+}
+
+
+def baseline_for(root: Path) -> int | None:
+    """The baseline this tree is held to, or None if nobody has counted it."""
+    name = root.name
+    if name == "docs" and root.parent.name == "website":
+        return TREE_BASELINES["website"]
+    return TREE_BASELINES.get(name)
+
 
 def verum_binary() -> str:
     return os.environ.get("VERUM_BIN") or str(REPO / "target" / "debug" / "verum")
@@ -260,22 +288,41 @@ def run(argv: list[str]) -> int:
         print(f"      … and {len(defects) - limit} more — pass --all")
     if "--check" in argv:
         if sub:
-            print("--check needs the whole estate; a subtree cannot be "
-                  "compared against a whole-estate baseline.", file=sys.stderr)
+            print("--check needs the whole tree; a subtree cannot be "
+                  "compared against a whole-tree baseline.", file=sys.stderr)
             return 1
-        if BASELINE is None:
-            print("--check needs a BASELINE somebody has counted; run without it "
-                  "to get the figure, then set it.", file=sys.stderr)
-            return 1
-        if counts["DEFECT"] > BASELINE:
-            print(f"{counts['DEFECT']} blocks the parser refuses, baseline {BASELINE}.",
+        limit = baseline_for(DOCS)
+        if limit is None:
+            print(f"--check has no baseline for the tree `{DOCS.name}`. Run "
+                  f"without --check to count it, then add the figure to "
+                  f"TREE_BASELINES — a borrowed number gates nothing.",
                   file=sys.stderr)
             return 1
+        if counts["DEFECT"] > limit:
+            print(f"{DOCS.name}: {counts['DEFECT']} blocks the parser refuses, "
+                  f"baseline {limit}.", file=sys.stderr)
+            return 1
+        if counts["DEFECT"] < limit:
+            print(f"{DOCS.name}: {counts['DEFECT']} defect(s), below the "
+                  f"baseline of {limit} — lower TREE_BASELINES to hold the gain.")
     return 0
 
 
 def self_test() -> int:
     """Both polarities on every classifier that runs without a binary."""
+    # The baseline lookup decides whether a tree is gated at all, so it is
+    # tested rather than trusted: an unknown tree must return None (so
+    # `--check` refuses instead of passing on a borrowed number), and the
+    # website's `docs` must not be read as the repository's own `docs`.
+    baseline_cases = [
+        (Path("/x/verum/docs"), TREE_BASELINES["docs"]),
+        (Path("/x/verum/vcs"), 0),
+        (Path("/x/verum/core-tests"), 0),
+        (Path("/x/website/docs"), 0),
+        (Path("/x/some-other-tree"), None),
+    ]
+    bad_baselines = [(r, baseline_for(r), w) for r, w in baseline_cases
+                     if baseline_for(r) != w]
     cases = [
         (is_elision, "fn f() { ... }", True),
         (is_elision, "fn f() { 1 }", False),
@@ -289,8 +336,12 @@ def self_test() -> int:
         if got != want:
             bad += 1
             print(f"  SELF-TEST FAIL: {fn.__name__}({arg[:24]!r}) = {got}, want {want}")
-    print(f"check-doc-blocks-parse --self-test: {len(cases) - bad}/{len(cases)} pass")
-    return 1 if bad else 0
+    for r, got, want in bad_baselines:
+        print(f"  SELF-TEST FAIL: baseline_for({r}) = {got}, want {want}")
+    print(f"check-doc-blocks-parse --self-test: {len(cases) - bad}/{len(cases)} "
+          f"classifier, "
+          f"{len(baseline_cases) - len(bad_baselines)}/{len(baseline_cases)} baseline")
+    return 1 if (bad or bad_baselines) else 0
 
 
 if __name__ == "__main__":

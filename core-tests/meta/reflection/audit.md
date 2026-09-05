@@ -35,7 +35,8 @@ FieldOffset/OwnershipInfo records with no Span dependencies).
 
 ### §3.1 `Visibility.keyword` for `In(path)` materialises a Text by interpolation
 
-```verum
+```text
+// one `match` arm quoted from the implementation, not a compilation unit
 In(path) => Some(f"public(in {path})"),
 ```
 

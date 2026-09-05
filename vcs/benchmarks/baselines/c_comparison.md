@@ -111,8 +111,10 @@ free(ptr);
 
 ```verum
 // Verum
-let ptr = Heap.alloc_zeroed::<[u8; 1024]>();
-drop(ptr);
+fn main() {
+    let ptr = Heap.new([0 as Byte; 1024]);
+    drop(ptr);
+}
 ```
 
 **Expected:**
@@ -200,12 +202,12 @@ _Static_assert(sizeof(struct Point) == 16, "");
 
 ```verum
 // Verum
-#[repr(C)]
-struct Point {
-    x: Float,
-    y: Float,
+@repr(C)
+type Point is { x: Float, y: Float };
+
+fn main() {
+    assert(size_of<Point>() == 16);
 }
-static_assert!(size_of::<Point>() == 16);
 ```
 
 ## Specific Benchmarks

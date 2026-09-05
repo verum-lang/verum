@@ -35,9 +35,7 @@ Expression-bodied function. Single-expression bodies don't need
 for one-liners. Both forms produce identical bytecode.
 
 ```verum
-fn greet(name: Text = "World", excited: Bool = false) -> Text {
-    ...
-}
+fn greet(name: Text = "World", excited: Bool = false) -> Text { todo() }
 ```
 
 Default parameter values. The compiler synthesises overloads for
