@@ -44,7 +44,13 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-DOCS = REPO / "internal" / "website" / "docs"
+# The website is a SEPARATE repository (verum-lang/website). Read from a
+# sibling checkout by default; a CI job sets VERUM_DOCS_DIR to the tree it
+# checked out. See A81 in docs/architecture/tech-debt-register.md. Any
+# markdown tree works, which is how `docs/architecture` gets measured
+# without a second script.
+DOCS = Path(os.environ["VERUM_DOCS_DIR"]) if os.environ.get("VERUM_DOCS_DIR") \
+    else REPO.parent / "website" / "docs"
 # The fence may carry an INFO STRING — ```verum title="…" — and it is
 # still a Verum block. Measured 2026-09-05: adding a title to one
 # block took a file from 9 blocks to 8, so the block left the census
@@ -64,7 +70,14 @@ TABLE_GLYPH = re.compile(r"->|≡|⇒|→")
 # 2 counter-example, 213 DEFECT. A ratchet, not zero: the 213 are
 # real and include parser defects (A65, A69, A70, A71) whose fix is
 # not a documentation edit.
-BASELINE = 213
+# 213 -> 161. The 213 was the first full count (2026-09-04). This one
+# is the third full run of 2026-09-05: it reported 181, and twenty of
+# those defects were in eleven files edited WHILE it ran — each of the
+# eleven re-measured at 0 afterwards, so 181 - 20 = 161. The subtraction
+# is stated because it is not what the run printed; the eleven were
+# found by intersecting the run's defect list with `git log --since` on
+# the documentation tree, not from memory.
+BASELINE = 161
 
 
 def verum_binary() -> str:
