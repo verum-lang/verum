@@ -145,12 +145,11 @@ fn main() {
 fn main() {
     let x: Int = "hello";  // ERROR: Type mismatch
 }
+```
 
 **`compile-fail` vs `typecheck-fail`.** `typecheck-fail` observes only what the TYPE CHECKER raises. Diagnostics from later phases — module resolution, const evaluation, codegen — never reach it, and a spec pinning one of those reports "typecheck unexpectedly succeeded", which reads as a MISSING COMPILER CHECK rather than a directive that cannot see the phase. `compile-fail` runs the full `verum build` and expects a non-zero exit, so `@expected-error: E204` (circular constant dependency) and its kin are pinnable. Use `typecheck-fail` when the diagnostic IS a type error — it is faster and runs in-process.
 
 **Which code to pin.** `crates/verum_error/src/registry.rs` is the code table, and it is now gated: a code the compiler emits but the registry does not list fails `cargo test -p verum_error`. Read the code off the registry, not off another spec — this line said E600 for a circular constant dependency for a while, which is the context system's "context not provided", and no spec caught it because nothing emitted either one. Note also that vtest matches the code EXACTLY (`directive.rs`, `ExpectedError::matches`), so a diagnostic that carries no code at all cannot be pinned by any spec, and a spec naming its concept will report "typecheck unexpectedly succeeded" — reading as a missing compiler check when the check is present and merely uncoded.
-
-```
 
 **Run with Expected Output**:
 ```verum

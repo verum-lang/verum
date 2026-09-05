@@ -150,13 +150,13 @@ Static methods for general time operations.
 
 ## Constants
 
-```verum
-NANOS_PER_MICRO: Int = 1_000
-NANOS_PER_MILLI: Int = 1_000_000
-NANOS_PER_SEC: Int = 1_000_000_000
-NANOS_PER_MIN: Int = 60_000_000_000
-NANOS_PER_HOUR: Int = 3_600_000_000_000
-```
+| constant | type | value |
+|---|---|---|
+| `NANOS_PER_MICRO` | `Int` | `1_000` |
+| `NANOS_PER_MILLI` | `Int` | `1_000_000` |
+| `NANOS_PER_SEC` | `Int` | `1_000_000_000` |
+| `NANOS_PER_MIN` | `Int` | `60_000_000_000` |
+| `NANOS_PER_HOUR` | `Int` | `3_600_000_000_000` |
 
 ## Known Limitations
 
