@@ -1,0 +1,32 @@
+// @test: run
+// @level: L1
+// @tier: 1
+// @tags: dispatch, clone, value-semantics, aot
+// @expected-stdout-begin
+// newtype=ok
+// record=1
+// @expected-stdout-end
+// @description: `.clone()` on a type that declares no `clone` is a VALUE
+//   COPY, in both tiers. Records, containers and primitives clone by
+//   copying; only a type with a real `<Type>.clone` body dispatches to a
+//   method.
+//
+//   Regression for T1168: the AOT lowering built its dispatch switch
+//   from DECLARED implementations only, so an ordinary two-field record
+//   fell to the switch's panicking default — "no runtime candidate for
+//   method 'Rec.clone'" — while the interpreter copied it happily. The
+//   tier is 1 because the interpreter never failed this; only AOT did.
+
+type Tag is (Text);
+
+type Rec is { a: Int };
+
+fn main() {
+    let t = Tag("x");
+    let _c = t.clone();
+    print(f"newtype=ok");
+
+    let r = Rec { a: 1 };
+    let d = r.clone();
+    print(f"record={d.a}");
+}

@@ -1,0 +1,40 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: dispatch, heap, wrapper, protocol
+// @expected-stdout-begin
+// L1=git
+// L2=git
+// @expected-stdout-end
+// @description: A method call on a `Heap<T>` reaches T's implementation,
+//   whether the wrapper is held directly or iterated out of a List.
+//   Regression for T1165: the heap-carrier arm that peels a `Heap<T>`
+//   CBGR cell and re-dispatches was deleted as collateral when a
+//   neighbouring `if` block was cut by brace-matching — it was that
+//   `if`'s `else`. The symptom was a panic naming `Heap.describe` while
+//   `Git.describe` sat in the panic's own candidate list, i.e. the
+//   implementation was present and unreachable.
+
+mount core.base.memory.{Heap};
+
+type Src is protocol { fn describe(&self) -> Text; };
+
+type Git is { url: Text };
+
+implement Src for Git {
+    fn describe(&self) -> Text { "git" }
+}
+
+fn main() {
+    let mut l1: List<Git> = List.new();
+    l1.push(Git { url: "a" });
+    for s in l1.iter() {
+        print(f"L1={s.describe()}");
+    }
+
+    let mut l2: List<Heap<Git>> = List.new();
+    l2.push(Heap.new(Git { url: "b" }));
+    for s in l2.iter() {
+        print(f"L2={s.describe()}");
+    }
+}
