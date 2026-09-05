@@ -527,6 +527,35 @@ fn ffi_extended_body(
                     field_offset
                 );
             }
+            // **FIELDADDR-TRACKED-1 (T1158)** — register the slot, the
+            // way the sibling opcode already does.
+            //
+            // `RefField` (handlers/cbgr.rs:1836) ends with
+            // `state.cbgr_mutable_ptrs.insert(field_ptr as usize)`, and
+            // that membership is what `handle_deref` consults to decide
+            // whether an address names a Value SLOT (read through it) or
+            // a heap object (identity, return the pointer). This opcode
+            // produced the same kind of address and told nobody, so a
+            // later `*f` fell to the identity arm (cbgr.rs:447) and the
+            // register kept a POINTER:
+            //
+            //     let f = unsafe { &(*p).b };  print(f"{*f}")
+            //     -> Variant(15622936) / Variant(750552) / `Low`
+            //
+            // — the formatter rendering the address as whatever object
+            // its bits happened to name, differently on each run, and
+            // once as a bare variant NAME that reads like a real value.
+            //
+            // Paired implementations are an oracle: two opcodes minting
+            // interior pointers, one registers and one does not. The
+            // registering one is right.
+            //
+            // Narrow by construction: this adds a slot that a Deref can
+            // read through. It cannot turn a heap-object address into a
+            // slot, because `cbgr_allocations` is tested FIRST in
+            // `handle_deref` — the sum-type `match *self` case (IpAddr
+            // and family) still reaches its identity arm.
+            state.cbgr_mutable_ptrs.insert(field_addr as usize);
             state.set_reg(dst, Value::from_ptr(field_addr));
             Ok(DispatchResult::Continue)
         }

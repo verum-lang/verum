@@ -5667,9 +5667,36 @@ impl VbcCodegen {
                 // `&*value` reaches the original CBGR allocation through
                 // `cbgr_deref_source`, a stated reason this entry never
                 // had.
-                let is_heap_deref = inner_type
-                    .as_ref()
-                    .is_some_and(|t| t.starts_with("Heap<") || self.is_allocating_wrapper(t));
+                // `Shared<` IS BACK ON THIS LIST, and the reason is
+                // measured rather than cautious (T1159). Routing `*s`
+                // through `Shared.deref` is correct for the COMPILED
+                // body — `VERUM_SHARED_NATIVE=1` gives `*s = 41` and
+                // `strong_count() = 1`, both right — but the DEFAULT
+                // path is the interception, which builds a different
+                // object:
+                //
+                //     interception   [ObjectHeader][refcount][value]
+                //                    2 slots, 16 bytes of data
+                //     stdlib body    Shared { ptr, generation, epoch }
+                //                    -> SharedInner {strong@0, weak@8,
+                //                       value@16}
+                //
+                // `Shared.deref` reads field offset 16. Against the
+                // interception's 16-byte object that is one byte past
+                // the end: SIGSEGV, measured, where the bare `Deref`
+                // opcode had been answering correctly from the
+                // interception's own layout.
+                //
+                // So the route change cannot land before the
+                // interception goes, and the interception cannot go
+                // until `Shared.clone` works on the compiled body —
+                // today it zeroes both slots (count 1 -> 0, value 41 ->
+                // 0). That is the one remaining step in T1159.
+                let is_heap_deref = inner_type.as_ref().is_some_and(|t| {
+                    t.starts_with("Heap<")
+                        || t.starts_with("Shared<")
+                        || self.is_allocating_wrapper(t)
+                });
                 // Typed-primitive deref dispatch (#26 codegen tail).
                 //
 
@@ -5771,14 +5798,16 @@ impl VbcCodegen {
                             .unwrap_or(ty_name)
                             .trim()
                             .to_string();
-                        // `Shared` removed alongside the `is_heap_deref`
-                        // test above (T1159): BOTH gates decide this, and
-                        // leaving either one in place keeps `*s` on the
-                        // bare-Deref route that reads the interception's
-                        // layout. See the comment at `is_heap_deref` for
-                        // why this became correct only after T1160.
+                        // `Shared` restored here together with the
+                        // `is_heap_deref` test above — BOTH gates decide
+                        // this route, so they move together or not at
+                        // all. See that comment for the measurement:
+                        // the compiled body is right and the
+                        // interception's object is a different shape,
+                        // and the default path is the interception.
                         if base.is_empty()
                             || base == "Heap"
+                            || base == "Shared"
                             || base == "Int"
                             || base == "Float"
                             || base == "Bool"
