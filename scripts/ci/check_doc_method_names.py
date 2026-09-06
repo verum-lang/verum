@@ -37,6 +37,28 @@ on type B) and that is the correct direction for a gate: a false
 negative costs a defect that some other instrument may catch, a false
 positive costs the gate its credibility.
 
+THAT UNDER-REPORT HAS NOW BEEN SEEN FIRING, and the instance is kept
+because "it under-reports" is a disclaimer while a measured case is
+evidence. `stdlib/collections.md` shipped
+
+    let union: Set<Int> = a.union(&b).copied().collect();
+
+through a green run of this gate. `copied` and `collect` both exist —
+on `Iterator`. `Set.union` returns `Set<T>` outright (it clones `self`
+and inserts the other side; `core/collections/set.vr:299`), `Set`
+implements neither method, and the line cannot compile. Three more lines
+on that page wrote `m.keys() // Iterator<&K>` where `MapKeys.next`
+returns `Maybe<K>` — an owned value, not a borrow.
+
+The class is worth naming: A PAGE TRANSPLANTED FROM ANOTHER LANGUAGE'S
+STANDARD LIBRARY keeps method names that exist somewhere in `core/`,
+because both libraries answer the same questions with the same
+vocabulary. Name-scope is exactly the wrong shape of check for it. What
+did catch it was reading `core/` for the RETURN TYPE by hand, and a
+receiver-aware version needs type resolution — the compiler's job, not a
+grep's. So this paragraph is the coverage statement: a green run of this
+gate does not claim the calls are valid, only that the names exist.
+
 THE FLOOR, measured rather than assumed. Two spans remain and both are
 `Database.transactional()`, which is neither a defect nor fixable here:
 `transformed_context` is real grammar (`grammar/verum.ebnf`), a parser
