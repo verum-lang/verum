@@ -100,6 +100,16 @@ FENCE = re.compile(r"^```(verum|vr|)\n(.*?)^```", re.M | re.S)
 CALL = re.compile(r"\b([a-z_]\w*)\.([a-z_]\w*)\(")
 # A page that writes `foo()` in prose has introduced the name.
 PROSE_NAME = re.compile(r"`([a-z_]\w*)\(")
+# A DENIAL is not a use. Correcting a page means WRITING the absent name
+# — "there is no `env.argv()`", "`body.next_chunk()` does not exist" —
+# and without this the sweep counts its own corrections, so a page that
+# was fixed keeps its finding forever and the number stops falling.
+# Measured: two such spans appeared the moment `stdlib/cli.md` and
+# `stdlib/async.md` were corrected, both inside comments I had just
+# written to say the name is absent.
+DENIAL = re.compile(
+    r"\b(no|not|does not|never|absent|missing|invalid|unknown|instead of|"
+    r"removed|renamed|deprecated|do not exist|does not exist)\b", re.I)
 TYPE_DECL = re.compile(r"^(?:public\s+|pub\s+)?type ([A-Z]\w*)", re.M)
 BIND = re.compile(r"\blet\s+(?:mut\s+)?([a-z_]\w*)\s*:\s*([A-Z]\w*)")
 
@@ -125,7 +135,7 @@ def core_names():
 
 
 def sweep(names):
-    rows, provable, scanned = [], [], 0
+    rows, provable, scanned, denials = [], [], 0, 0
     types = set()
     for f in CORE.rglob("*.vr"):
         types.update(TYPE_DECL.findall(f.read_text(encoding="utf-8", errors="replace")))
@@ -137,16 +147,23 @@ def sweep(names):
             local.update(DECL.findall(b))
         for b in blocks:
             binds = dict(BIND.findall(b))
-            for recv, meth in CALL.findall(b):
+            for m in CALL.finditer(b):
+                recv, meth = m.group(1), m.group(2)
                 scanned += 1
                 if meth in names or meth in local:
+                    continue
+                # A window either side, because the denial can precede
+                # or follow: "no `env.argv()`" and "`env.argv()` does
+                # not exist" are both denials.
+                if DENIAL.search(b[max(0, m.start() - 90):m.end() + 90]):
+                    denials += 1
                     continue
                 rel = str(p.relative_to(DOCS))
                 rows.append((meth, rel, recv))
                 t = binds.get(recv)
                 if t and t in types:
                     provable.append((rel, t, recv, meth))
-    return rows, provable, scanned
+    return rows, provable, scanned, denials
 
 
 def main() -> int:
@@ -176,15 +193,31 @@ def main() -> int:
         print("Controls failed — the index is wrong and every line below is "
               "suspect.", file=sys.stderr)
         return 2
+    # The denial filter needs both polarities: one that must be excluded
+    # and one that must NOT. An over-broad denial window would silently
+    # swallow real findings and the count would fall for the wrong
+    # reason — which is exactly the failure this list cannot detect from
+    # its own output.
+    denial_yes = "// `body.next_chunk()` does not exist — use body_bytes"
+    denial_no = "    let chunk = body.next_chunk();"
+    if not DENIAL.search(denial_yes):
+        print("  CONTROL FAIL: a denial was not recognised as one", file=sys.stderr)
+        bad += 1
+    if DENIAL.search(denial_no):
+        print("  CONTROL FAIL: a plain call was read as a denial", file=sys.stderr)
+        bad += 1
+    if bad:
+        return 2
     print(f"  controls: {len(CONTROLS_ABSENT)} absent + {len(CONTROLS_PRESENT)} "
-          "present, all as expected\n")
+          "present + 2 denial polarities, all as expected\n")
 
-    rows, provable, scanned = sweep(names)
+    rows, provable, scanned, denials = sweep(names)
     per = collections.Counter(m for m, _, _ in rows)
     pages = collections.defaultdict(set)
     for m, pg, _ in rows:
         pages[m].add(pg)
     print(f"lowercase-receiver calls scanned : {scanned}")
+    print(f"excluded as denials              : {denials}")
     print(f"names absent from core/          : {len(per)} distinct, "
           f"{sum(per.values())} span(s)\n")
 
