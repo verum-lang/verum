@@ -2312,6 +2312,32 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         // inserted BEFORE, directly into a `pub` field — which is why
         // this line could not simply be added.
         self.loadt_generic_regs.remove(&reg);
+        // **T1194, the verified-safe four.** Each is a per-value fact and
+        // each is set AFTER the store at EVERY site — checked per site,
+        // function-scoped and register-matched, not by a line window:
+        //
+        //   scalar_register_types   lower_get_field, store at :41671
+        //   maybe_inner_types       lower_get_field / lower_instruction /
+        //                           propagate_value_type_facts /
+        //                           mark_register_from_return_type
+        //   tuple_element_types     same three helpers
+        //   closure_return_types    lower_instruction, propagate…
+        //
+        // `mark_register_from_return_type` is the one that needed proving
+        // rather than assuming: it has fifteen call sites, and all
+        // fourteen real ones store the register before calling it (the
+        // fifteenth is its own recursion). A helper is a choke point for
+        // WHO writes a field, never for WHEN — that is the correction
+        // this row's own journal carries.
+        //
+        // `register_tiers` and `reference_registers` are deliberately NOT
+        // here: `Instruction::RefChecked` marks them BEFORE its store, so
+        // clearing them needs that arm reordered first, exactly as
+        // `loadt_generic_regs` did.
+        self.scalar_register_types.remove(&reg);
+        self.maybe_inner_types.remove(&reg);
+        self.tuple_element_types.remove(&reg);
+        self.closure_return_types.remove(&reg);
         self.list_registers.remove(&reg);
         // **STALE-GENERIC-ARGS-1 (T1167)** — the type ARGUMENTS are a
         // per-value fact like every other line here, and leaving them
