@@ -1942,8 +1942,21 @@ impl<'a> RecursiveParser<'a> {
 
                 // Parse the contents (could be patterns for variant OR expressions for active pattern type args)
                 // We need to lookahead after parsing to determine which it is.
-                let pos_before_args = self.stream.position();
-                let args = self.comma_separated_pattern_args()?;
+                // A86: the grammar's first list here is an
+                // `expression_list`.  A tagged literal (`rx#"^a$"`) is an
+                // expression form with no pattern spelling, so parsing
+                // this list as patterns refuses it before the
+                // pattern-to-expression conversion below is ever reached.
+                let mut expr_params: Option<Vec<verum_ast::Expr>> = None;
+                let args = if self.active_pattern_first_list_is_expressions() {
+                    // `expression_list` in the grammar — plain expressions, no
+                    // named-argument form, so the expression parser's entry
+                    // point is the faithful primitive here.
+                    expr_params = Some(self.comma_separated(|p| p.parse_expr_bp(0))?);
+                    Vec::new()
+                } else {
+                    self.comma_separated_pattern_args()?
+                };
 
                 // E078: Check if any parsed argument is a rest pattern (in variant context)
                 for arg in &args {
@@ -2005,8 +2018,12 @@ impl<'a> RecursiveParser<'a> {
                     //
 
                     // For now, we convert literal/identifier patterns to expressions.
-                    let params: List<verum_ast::Expr> =
-                        args.into_iter().map(|p| self.pattern_to_expr(p)).collect();
+                    let params: List<verum_ast::Expr> = match expr_params {
+                        // Parsed as expressions by the grammar's own rule.
+                        Some(exprs) => exprs.into_iter().collect(),
+                        // Variant-shaped list: the historical conversion.
+                        None => args.into_iter().map(|p| self.pattern_to_expr(p)).collect(),
+                    };
 
                     // Check if bindings parens are empty: `InRange(0, 100)()`
                     if self.stream.check(&TokenKind::RParen) {
@@ -2336,6 +2353,47 @@ impl<'a> RecursiveParser<'a> {
     /// should produce E075 (invalid active pattern arguments).
     ///
     /// Guard patterns are allowed in arguments: `Some(x if x > 0)`
+    /// A86 — does the list starting at the current token belong to an
+    /// ACTIVE pattern's first paren group (`Name(exprs)(bindings)`), or
+    /// to a variant pattern (`Name(patterns)`)?
+    ///
+    /// The grammar says the first list of an active pattern is an
+    /// `expression_list`, and parsing it as patterns is an admitted
+    /// simplification whose comment lists three ways out.  A backtrack
+    /// is not one of them in practice: a list that fails to parse as
+    /// patterns returns its error before any second-`(` check is
+    /// reached, so the discriminator has to run BEFORE the list is
+    /// parsed.  This is that discriminator — it only counts parens, so
+    /// it cannot itself fail on a form the pattern parser refuses.
+    ///
+    /// Called with the opening `(` already consumed, so the scan starts
+    /// at depth 1 and reports whether a `(` follows the matching `)`.
+    fn active_pattern_first_list_is_expressions(&self) -> bool {
+        let mut depth = 1usize;
+        let mut n = 0usize;
+        // A pattern's argument list is small; the bound keeps a
+        // malformed token stream from turning a lookahead into a walk
+        // to end-of-file.
+        while n < 4096 {
+            match self.stream.peek_nth_kind(n) {
+                Some(TokenKind::LParen) => depth += 1,
+                Some(TokenKind::RParen) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return matches!(
+                            self.stream.peek_nth_kind(n + 1),
+                            Some(TokenKind::LParen)
+                        );
+                    }
+                }
+                None => return false,
+                _ => {}
+            }
+            n += 1;
+        }
+        false
+    }
+
     fn comma_separated_pattern_args(&mut self) -> ParseResult<Vec<Pattern>> {
         let mut items = Vec::new();
 
