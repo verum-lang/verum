@@ -52,7 +52,7 @@ CORE = os.path.join(REPO, "core")
 
 # Every `(name, page)` pair the site carries today.  Lowering it is the work;
 # raising it means a doc started naming something the library does not have.
-BASELINE = 41
+BASELINE = 40
 
 BLOCK = re.compile(r"^```verum(?:[ \t][^\n]*)?\n(.*?)^```", re.M | re.S)
 DECL = re.compile(
@@ -93,7 +93,18 @@ BUILTIN = {
 }
 
 
+VARIANTS = re.compile(r"\btype\s+\w+(?:<[^>]*>)?\s+is\s+([^;{]*)")
+
+
 def core_declarations():
+    """Everything `core/` declares — INCLUDING sum-type variants.
+
+    The variant rule was written for doc blocks first and not applied here,
+    and the asymmetry invented a defect: `NetworkError` is declared at
+    `core/net/dns.vr:175` as `| NetworkError(Text)`, and a scan that only
+    looked for `type`/`fn`/`const` reported the library's own name as
+    missing from the library.
+    """
     out = set()
     for root, _, files in os.walk(CORE):
         for f in files:
@@ -101,10 +112,9 @@ def core_declarations():
                 text = io.open(os.path.join(root, f), encoding="utf-8",
                                errors="replace").read()
                 out |= set(DECL.findall(text))
+                for body in VARIANTS.findall(text):
+                    out |= set(re.findall(r"\b([A-Z]\w*)", body))
     return out
-
-
-VARIANTS = re.compile(r"\btype\s+\w+(?:<[^>]*>)?\s+is\s+([^;{]*)")
 
 
 def declared_in_blocks(blocks):
