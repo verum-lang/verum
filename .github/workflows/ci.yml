@@ -714,6 +714,11 @@ jobs:
           python3 scripts/ci/check_doc_indented_blocks.py
           python3 scripts/ci/check_doc_cli_flags.py --self-test
           python3 scripts/ci/check_doc_cli_flags.py
+          # Needs only VERUM_DOCS_DIR, not the binary — but it lives here
+          # rather than in `gates-source` because that job has no website
+          # checkout, and a gate whose INPUT is missing reports OK.
+          python3 scripts/ci/check_doc_method_names.py --self-test
+          python3 scripts/ci/check_doc_method_names.py
           # These three have been Makefile targets with no CI caller.
           # They could not have run before this job checked the website
           # out; now they can. See A81.

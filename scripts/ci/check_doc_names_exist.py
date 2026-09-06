@@ -232,10 +232,44 @@ def census():
     return declared, pairs
 
 
+# A SKIP IS A VERDICT ABOUT NOTHING. In CI these gates run with an
+# explicit flag, and a missing input there is not "nothing to check" —
+# it is the checkout step having failed, the docs directory having
+# moved, or the binary not having been built. Reporting OK in that
+# state is the shape `check_gate_verdict_carries_a_quantity` exists to
+# prevent, one level up: not a verdict without a number, but a verdict
+# without a subject. Six gates could do it; measured 2026-09-06.
+#
+# Locally, with no flag, skipping stays correct — a source-only clone
+# has no website beside it and should not fail for that.
+def _skip_or_fail(argv, what: str) -> int:
+    """Report a missing input, and decide whether that is fatal.
+
+    Returns the exit code AND says which of the two happened, because a
+    line reading "skipped" beside a non-zero exit is a verdict that
+    misdescribes itself.
+    """
+    import os as _os
+    import sys as _sys
+
+    fatal = any(a in argv for a in ("--check", "--ratchet")) or bool(
+        _os.environ.get("CI")
+    )
+    if fatal:
+        print(
+            f"{what} — REFUSING to report OK: this run was asked to CHECK, so a "
+            f"missing input is a failed checkout or an unbuilt binary, not "
+            f"'nothing to do'.",
+            file=_sys.stderr,
+        )
+        return 2
+    print(f"{what}, skipped (local run; pass --check to make this fatal)")
+    return 0
+
+
 def main(argv):
     if not os.path.isdir(DOCS):
-        print("check-doc-names-exist: docs not present, skipped")
-        return 0
+        return _skip_or_fail(argv, "check-doc-names-exist: docs not present")
     declared, pairs = census()
     by_name = collections.Counter(n for n, _ in pairs)
     print(f"check-doc-names-exist: {len(pairs)} (name, page) pair(s) name "
