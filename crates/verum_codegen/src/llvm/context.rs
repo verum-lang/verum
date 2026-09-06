@@ -1745,17 +1745,11 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Check if a map register (or any register in its Mov chain) has list values.
     pub fn is_map_list_value_chain(&self, reg: u16) -> bool {
-        if self.map_list_value_registers.contains(&reg) {
-            return true;
-        }
-        let mut current = reg;
-        while let Some(src) = self.map_copy_source.get(&current).copied() {
-            if self.map_list_value_registers.contains(&src) {
-                return true;
-            }
-            current = src;
-        }
-        false
+        self.map_list_value_registers.contains(&reg)
+            || self
+                .map_copy_chain(reg)
+                .iter()
+                .any(|src| self.map_list_value_registers.contains(src))
     }
 
     /// Mark a map register as having string/text values.
@@ -1771,17 +1765,11 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Check if a map register (or any register in its Mov chain) has string values.
     pub fn is_map_string_value_chain(&self, reg: u16) -> bool {
-        if self.map_string_value_registers.contains(&reg) {
-            return true;
-        }
-        let mut current = reg;
-        while let Some(src) = self.map_copy_source.get(&current).copied() {
-            if self.map_string_value_registers.contains(&src) {
-                return true;
-            }
-            current = src;
-        }
-        false
+        self.map_string_value_registers.contains(&reg)
+            || self
+                .map_copy_chain(reg)
+                .iter()
+                .any(|src| self.map_string_value_registers.contains(src))
     }
 
     /// Record that `dst` is a Mov copy of `src` for map registers.
@@ -1794,6 +1782,80 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.refmut_source.insert(dst, src);
     }
 
+    /// The registers reachable from `from` through `refmut_source`, nearest
+    /// first, **excluding `from` itself** and guaranteed finite.
+    ///
+    /// **T1194 CHAIN-CYCLE-1.** THIRTEEN hand-written `while let Some(src) =
+    /// …` walks over this map and `map_copy_source` had no visited set —
+    /// nine in `instruction.rs` and four here. (T1194's row said eleven; it
+    /// counted `map_copy_source`'s two MARK walks and missed its two QUERY
+    /// walks, `is_map_list_value_chain` and `is_map_string_value_chain`,
+    /// which loop over the same edges to answer rather than to write.) Every
+    /// one of them is a `loop { }` if the edge map ever contains a cycle, and
+    /// a compiler that hangs gives no diagnostic to read — the worst failure
+    /// shape in the file.
+    ///
+    /// A CYCLE IS REACHABLE ON PAPER, and the argument is not hypothetical
+    /// about the mechanism, only about whether the codegen happens to emit
+    /// it. `set_register` clears roughly ninety per-register facts and does
+    /// NOT clear these two maps, because they are the EDGES rather than facts
+    /// about a value. So the edges accumulate for the whole function while
+    /// VBC freely reuses register numbers — the exact premise T1167 and T1194
+    /// are both about. Two `RefMut`s that happen to reuse a number in the
+    /// other's direction close a loop.
+    ///
+    /// WHETHER IT HAPPENS IS A MEASUREMENT, NOT AN ARGUMENT, and the
+    /// measurement was taken: `VERUM_TRACE_REGCHAIN=1` prints the chain and
+    /// the repeated register whenever the guard fires, and across the whole
+    /// `docs/by-example` corpus — 21 programs compiled, 980k lines of build
+    /// output — it fired **ZERO times**.
+    ///
+    /// So this is INSURANCE, and says so rather than claiming to have fixed a
+    /// hang. What it buys is that the thirteen walks it replaced can no longer
+    /// become one if the edge maps ever do close a loop, and that the day one
+    /// does, the flag names the registers instead of the compiler simply
+    /// stopping. Keep the flag: the measurement is only true of today's
+    /// codegen, and the thing it measures is unbounded by construction.
+    pub fn refmut_chain(&self, from: u16) -> Vec<u16> {
+        Self::walk_register_chain(&self.refmut_source, from, "refmut_source")
+    }
+
+    /// The registers reachable from `from` through `map_copy_source`, nearest
+    /// first, excluding `from`. See [`Self::refmut_chain`] for why the guard
+    /// exists and how to observe it firing.
+    pub fn map_copy_chain(&self, from: u16) -> Vec<u16> {
+        Self::walk_register_chain(&self.map_copy_source, from, "map_copy_source")
+    }
+
+    /// Shared walker for the two register-edge maps.
+    ///
+    /// The visited set holds every register the walk has ENTERED, `from`
+    /// included, so a self-edge (`r -> r`) terminates as well as a longer
+    /// loop. A hop LIMIT was the other candidate and is worse: it turns an
+    /// unbounded hang into a silently truncated answer whose cutoff is a
+    /// number nobody can justify, whereas the visited set is exact — it
+    /// stops exactly when the walk would repeat work and never before.
+    fn walk_register_chain(edges: &HashMap<u16, u16>, from: u16, what: &str) -> Vec<u16> {
+        let mut chain = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(from);
+        let mut current = from;
+        while let Some(src) = edges.get(&current).copied() {
+            if !seen.insert(src) {
+                if std::env::var_os("VERUM_TRACE_REGCHAIN").is_some() {
+                    eprintln!(
+                        "[regchain] CYCLE in {what}: r{from} -> {chain:?} -> r{src} \
+                         (already visited); walk stopped"
+                    );
+                }
+                break;
+            }
+            chain.push(src);
+            current = src;
+        }
+        chain
+    }
+
     /// Get the original source register for a RefMut destination.
     pub fn get_refmut_source(&self, dst: u16) -> Option<u16> {
         self.refmut_source.get(&dst).copied()
@@ -1803,11 +1865,9 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     pub fn mark_map_list_value_chain(&mut self, reg: u16) {
         self.map_list_value_registers.insert(reg);
         self.reg_types.mark_map_list_values(reg);
-        let mut current = reg;
-        while let Some(src) = self.map_copy_source.get(&current).copied() {
+        for src in self.map_copy_chain(reg) {
             self.map_list_value_registers.insert(src);
             self.reg_types.mark_map_list_values(src);
-            current = src;
         }
     }
 
@@ -1815,11 +1875,9 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     pub fn mark_map_string_value_chain(&mut self, reg: u16) {
         self.map_string_value_registers.insert(reg);
         self.reg_types.mark_map_text_values(reg);
-        let mut current = reg;
-        while let Some(src) = self.map_copy_source.get(&current).copied() {
+        for src in self.map_copy_chain(reg) {
             self.map_string_value_registers.insert(src);
             self.reg_types.mark_map_text_values(src);
-            current = src;
         }
     }
 
@@ -2338,6 +2396,13 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.maybe_inner_types.remove(&reg);
         self.tuple_element_types.remove(&reg);
         self.closure_return_types.remove(&reg);
+        // **T1194, the last two** — held back from 80cc648ec because
+        // `Instruction::RefChecked` and `RefUnsafe` marked them BEFORE
+        // their stores. Both arms now mark at their single exit (four
+        // stores each, no early `return`), so the clear is additive here
+        // as it is for the four above.
+        self.register_tiers.remove(&reg);
+        self.reference_registers.remove(&reg);
         self.list_registers.remove(&reg);
         // **STALE-GENERIC-ARGS-1 (T1167)** — the type ARGUMENTS are a
         // per-value fact like every other line here, and leaving them

@@ -4611,10 +4611,8 @@ pub fn lower_instruction<'ctx>(
                 // could not text-mark the yielded element.
                 let type_args = vec![TypeRef::Concrete(TypeId::TEXT)];
                 ctx.set_generic_type_args(list.0, type_args.clone());
-                let mut current = list.0;
-                while let Some(src) = ctx.get_refmut_source(current) {
+                for src in ctx.refmut_chain(list.0) {
                     ctx.set_generic_type_args(src, type_args.clone());
-                    current = src;
                 }
             }
             // Track lists containing pass-through refs (Heap<T> values).
@@ -4638,18 +4636,14 @@ pub fn lower_instruction<'ctx>(
                 let type_args = vec![elem_type];
                 ctx.set_generic_type_args(list.0, type_args.clone());
                 // Backpropagate through RefMut chain
-                let mut current = list.0;
-                while let Some(src) = ctx.get_refmut_source(current) {
+                for src in ctx.refmut_chain(list.0) {
                     ctx.set_generic_type_args(src, type_args.clone());
-                    current = src;
                 }
             } else if ctx.is_map_register(val.0) {
                 let type_args = vec![TypeRef::Concrete(TypeId::MAP)];
                 ctx.set_generic_type_args(list.0, type_args.clone());
-                let mut current = list.0;
-                while let Some(src) = ctx.get_refmut_source(current) {
+                for src in ctx.refmut_chain(list.0) {
                     ctx.set_generic_type_args(src, type_args.clone());
-                    current = src;
                 }
             } else if ctx.is_float_register(val.0) || ctx.is_prescan_float_register(val.0) {
                 // A float-element list (e.g. a let-bound `[1.5, 2.5]` literal):
@@ -4666,10 +4660,8 @@ pub fn lower_instruction<'ctx>(
                 // already covered). FLOAT and F32 share the float register mark.
                 let type_args = vec![TypeRef::Concrete(TypeId::FLOAT)];
                 ctx.set_generic_type_args(list.0, type_args.clone());
-                let mut current = list.0;
-                while let Some(src) = ctx.get_refmut_source(current) {
+                for src in ctx.refmut_chain(list.0) {
                     ctx.set_generic_type_args(src, type_args.clone());
-                    current = src;
                 }
             } else if let Some(elem_tname) =
                 ctx.get_obj_register_type(val.0).map(|s| s.to_string())
@@ -4690,10 +4682,8 @@ pub fn lower_instruction<'ctx>(
                 if let Some(tid) = tid {
                     let type_args = vec![TypeRef::Concrete(tid)];
                     ctx.set_generic_type_args(list.0, type_args.clone());
-                    let mut current = list.0;
-                    while let Some(src) = ctx.get_refmut_source(current) {
+                    for src in ctx.refmut_chain(list.0) {
                         ctx.set_generic_type_args(src, type_args.clone());
-                        current = src;
                     }
                 }
             }
@@ -6183,9 +6173,17 @@ pub fn lower_instruction<'ctx>(
 
         // RefChecked: Explicitly Tier 1 (compiler-proven safe)
         Instruction::RefChecked { dst, src } => {
-            // RefChecked explicitly uses Tier 1 - caller has proven safety
-            ctx.set_register_tier(dst.0, RefTier::Tier1);
-            ctx.register_reference(dst.0, ReferenceInfo::local());
+            // **T1194 ORDER** — the tier and reference marks used to be
+            // set HERE, at the top, before any of this arm's four
+            // `set_register(dst)` exits. `set_register` now clears
+            // per-value facts, so a mark set first is a mark erased.
+            // They are applied at the arm's single exit instead: four
+            // stores, no early `return`, so one place after all of them
+            // suffices.
+            //
+            // Same reorder `loadt_generic_regs` needed (9a37f9278), and
+            // the reason those two fields were held back from the four
+            // cleared in 80cc648ec.
 
             if ctx.is_alloca_mode() {
                 // Same heap-type vs primitive logic as Ref/RefMut
@@ -6228,13 +6226,16 @@ pub fn lower_instruction<'ctx>(
             if ctx.is_inline_struct_register(src.0) {
                 ctx.mark_inline_struct_register(dst.0);
             }
+            // Marks AFTER every store — see the note at this arm's head.
+            ctx.set_register_tier(dst.0, RefTier::Tier1);
+            ctx.register_reference(dst.0, ReferenceInfo::local());
             Ok(())
         }
 
         // RefUnsafe: Explicitly Tier 2 (user-asserted safe)
         Instruction::RefUnsafe { dst, src } => {
-            // RefUnsafe explicitly uses Tier 2 - user asserted safety
-            ctx.set_register_tier(dst.0, RefTier::Tier2);
+            // **T1194 ORDER** — same reorder as `RefChecked`, same reason:
+            // the mark goes at the single exit, after all four stores.
 
             if ctx.is_alloca_mode() {
                 // Same heap-type vs primitive logic as Ref/RefMut
@@ -6281,6 +6282,8 @@ pub fn lower_instruction<'ctx>(
             if ctx.is_inline_struct_register(src.0) {
                 ctx.mark_inline_struct_register(dst.0);
             }
+            // Mark AFTER every store — see the note at this arm's head.
+            ctx.set_register_tier(dst.0, RefTier::Tier2);
             Ok(())
         }
 
@@ -17117,10 +17120,8 @@ fn lower_call_method<'ctx>(
                     // literal push (ONE element authority).
                     let type_args = vec![TypeRef::Concrete(TypeId::TEXT)];
                     ctx.set_generic_type_args(receiver.0, type_args.clone());
-                    let mut current = receiver.0;
-                    while let Some(src) = ctx.get_refmut_source(current) {
+                    for src in ctx.refmut_chain(receiver.0) {
                         ctx.set_generic_type_args(src, type_args.clone());
-                        current = src;
                     }
                 }
                 // Track nested collections: if pushed value is a list/map,
@@ -17139,18 +17140,14 @@ fn lower_call_method<'ctx>(
                     let type_args = vec![elem_type];
                     ctx.set_generic_type_args(receiver.0, type_args.clone());
                     // Backpropagate through RefMut chain to original variable
-                    let mut current = receiver.0;
-                    while let Some(src) = ctx.get_refmut_source(current) {
+                    for src in ctx.refmut_chain(receiver.0) {
                         ctx.set_generic_type_args(src, type_args.clone());
-                        current = src;
                     }
                 } else if ctx.is_map_register(args.start.0) {
                     let type_args = vec![TypeRef::Concrete(TypeId::MAP)];
                     ctx.set_generic_type_args(receiver.0, type_args.clone());
-                    let mut current = receiver.0;
-                    while let Some(src) = ctx.get_refmut_source(current) {
+                    for src in ctx.refmut_chain(receiver.0) {
                         ctx.set_generic_type_args(src, type_args.clone());
-                        current = src;
                     }
                 } else if let Some(elem_tname) =
                     ctx.get_obj_register_type(args.start.0).map(|s| s.to_string())
@@ -17177,10 +17174,8 @@ fn lower_call_method<'ctx>(
                     if let Some(tid) = tid {
                         let type_args = vec![TypeRef::Concrete(tid)];
                         ctx.set_generic_type_args(receiver.0, type_args.clone());
-                        let mut current = receiver.0;
-                        while let Some(src) = ctx.get_refmut_source(current) {
+                        for src in ctx.refmut_chain(receiver.0) {
                             ctx.set_generic_type_args(src, type_args.clone());
-                            current = src;
                         }
                     }
                 }
