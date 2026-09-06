@@ -135,7 +135,10 @@ interior of a type declaration is unchecked — a name that errors in a
 
 **Step 4 — rely on a protocol.** An `implement` block missing a
 required method type-checked and panicked at run time; the fix is on
-main (`cc915565d`) with T0812 still open in the pool.
+main (`cc915565d`). T0812 has since CLOSED, and the guard that was
+muted on it — `vcs/specs/L0-critical/protocols/implement_must_be_complete.vr` —
+was un-skipped on 2026-09-07 after re-measuring that it raises
+`error<E405>`, its own `@expected-error`.
 Stdlib protocol default methods are not inheritable through the
 archive, so a user type implementing `Iterator` cannot call `fold`
 (T0952, P0).
