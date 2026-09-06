@@ -1,0 +1,88 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, name-resolution, stdlib, shadowing, arity
+// @timeout: 15000
+// @expected-exit: 0
+//
+// A DECLARATION OUTRANKS A STDLIB NAMESAKE OF ANOTHER ARITY (T1191).
+//
+// 629 next door pins that a file's own declaration owns its name. This
+// pins the case that survived it: the unit's declaration was FOUND,
+// and lost anyway, because the probe that looked for it did not ask
+// for the arity the call site uses.
+//
+// `count` is the name that measured it. `core/` declares six free
+// functions called `count` — five of arity 0 and, in
+// `core.database.sqlite.native.eqp_node_emitter.node`, one of arity 1.
+// The bare-name slot's collision policy hands the key to the SMALLER
+// arity, so both arity-1 functions — the library's and the user's —
+// end up parked under `count#1`, and the bare slot holds an arity-0
+// stdlib namesake. An arity-blind probe read that entry, its own
+// arity filter rejected it, and resolution fell through to a global
+// scan over keys ending `.count`, which found exactly one candidate
+// of the right arity and bound it. A user's eight-line program ran
+// `t.nodes.len()` on a list of its own records: 0 in release, and in
+// debug a panic inside the length opcode.
+//
+// The four functions below are one program in four spellings, and the
+// interesting thing about them is which ones already worked:
+//
+//   count(&l)              THE DEFECT — an arity the stdlib also holds
+//   count_at_two(&l, 6)    an arity no stdlib `count` holds — worked
+//   count_unchanged(&l)    a name `core/` holds ONCE, at this arity —
+//                          worked, because equal arity means the bare
+//                          slot is simply last-wins
+//   zzq_absent(&l)         a name `core/` does not hold at all
+//
+// Three of the four passed before the fix. A spec that only carried
+// the failing one would not say what makes the case special, and the
+// three controls are what rule out "stdlib names shadow user names",
+// which is the wrong reading and was the first hypothesis: a sweep of
+// 52 plausible names found exactly one that misbinds.
+
+type A is { id: Int };
+
+pure fn count(xs: &List<A>) -> Int {
+    let mut acc = 0;
+    for a in xs.iter() { acc = acc + a.id; }
+    acc
+}
+
+pure fn count_at_two(xs: &List<A>, bump: Int) -> Int {
+    let mut acc = bump;
+    for a in xs.iter() { acc = acc + a.id; }
+    acc
+}
+
+pure fn count_unchanged(xs: &List<A>) -> Int {
+    let mut acc = 0;
+    for a in xs.iter() { acc = acc + a.id; }
+    acc
+}
+
+pure fn zzq_absent(xs: &List<A>) -> Int {
+    let mut acc = 0;
+    for a in xs.iter() { acc = acc + a.id; }
+    acc
+}
+
+fn main() {
+    let mut l: List<A> = List.new();
+    l.push(A { id: 7 });
+
+    // THE DEFECT. Before the fix this was 0, and no line of the body
+    // above can produce 0 for a list holding one element with id 7 —
+    // the number came from `t.nodes.len()` in a stdlib function that
+    // has never seen this program.
+    assert_eq(count(&l), 7);
+
+    // The three that already worked. They are here so a future change
+    // cannot buy the first back by losing one of them: each names the
+    // property that made it safe.
+    assert_eq(count_at_two(&l, 6), 13);   // an arity no stdlib `count` holds
+    assert_eq(count_unchanged(&l), 7);    // one stdlib namesake, same arity
+    assert_eq(zzq_absent(&l), 7);         // a name `core/` does not hold
+
+    print("declaration-outranks-namesake ok");
+}

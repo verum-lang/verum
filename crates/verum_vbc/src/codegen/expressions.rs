@@ -6864,8 +6864,37 @@ impl VbcCodegen {
                 // `lookup_function_in_scope` falls back to the bare table
                 // when no scope is active or the module has no scoped
                 // entry, so single-unit user compiles are unchanged.
+                //
+                // ARITY-AWARE (T1191). The probe must ask for the arity
+                // the CALL SITE uses. The bare slot is held by whichever
+                // same-name registration `register_function`'s collision
+                // policy left there, and that policy hands the bare key
+                // to the SMALLER arity — so a unit's own `fn count(xs)`
+                // is parked in `count#1` while bare `count` keeps a
+                // stdlib zero-argument namesake. An arity-blind probe
+                // reads that arity-0 entry, the filter below rejects it,
+                // and the ladder falls through to the global suffix
+                // scan, which found exactly one arity-1 `.count` key and
+                // bound it: a user program's own function silently ran
+                // `core.database.sqlite.native.eqp_node_emitter.node.count`.
+                //
+                // The registration trace is the whole story in eight
+                // lines (`VERUM_TRACE_FNREG=count`): five stdlib `count`s
+                // claim the bare key — four of arity 0, one of arity 1
+                // demoted to `count#1` — and then the user's own arity-1
+                // declaration arrives and is demoted to `count#1` too.
+                // The declaration was never missing; it was unreachable
+                // through an arity-blind key, and `unit_declared_fns`
+                // said so all along (the callbind trace prints
+                // `unit_declared=true` beside `arm=later-arm`).
+                //
+                // `lookup_function_with_arity_in_scope` keeps the same
+                // scope-first discipline and adds the `name#arity`
+                // probe. It can still return a wrong-arity primary when
+                // no alt-key exists; the filter below is what rejects
+                // that, and it is unchanged.
                 self.ctx
-                    .lookup_function_in_scope(&func_name)
+                    .lookup_function_with_arity_in_scope(&func_name, args.len())
                     .cloned()
                     .filter(|info| info.param_count == args.len() && is_free_fn(info))
                     .map(|info| (func_name.clone(), info))
