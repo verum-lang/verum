@@ -52,7 +52,7 @@ CORE = os.path.join(REPO, "core")
 
 # Every `(name, page)` pair the site carries today.  Lowering it is the work;
 # raising it means a doc started naming something the library does not have.
-BASELINE = 23
+BASELINE = 22
 
 BLOCK = re.compile(r"^```verum(?:[ \t][^\n]*)?\n(.*?)^```", re.M | re.S)
 DECL = re.compile(
@@ -84,9 +84,16 @@ RANGE_OP = re.compile(r"\.\.")
 # `ManualRuntime`, … are absent from `core/` — measured, not guessed", which
 # is this gate's own finding, written down before the gate existed.  Counting
 # it would punish the page for being explicit.  14 such admonitions exist.
+# The site marks unshipped work in a dozen phrasings, all of them explicit.
+# Collected from the admonition headers actually in use rather than guessed:
+# "Not shipped", "does not exist", "Not available", "not in the standard
+# library", "does not compile", "cannot be evaluated today", "No snapshot
+# helper", "not available", "describes a design".
 UNSHIPPED = re.compile(
-    r"^:::[a-z]+[^\n]*(?:not shipped|not implemented|does not exist|"
-    r"not yet|planned|describes a design)[^\n]*$", re.I | re.M)
+    r"^:::[a-z]+[^\n]*(?:not shipped|not implemented|not available|"
+    r"does not exist|does not compile|not in the standard library|"
+    r"cannot be evaluated|not yet|no snapshot|no linter|planned|"
+    r"describes a design)[^\n]*$", re.I | re.M)
 # The marker scopes to the SECTION, not to the admonition.  Measured on
 # `testing-tui.md`: its ":::caution Not shipped / None of this section
 # exists" closes after the prose and the illustrative blocks follow it, so
