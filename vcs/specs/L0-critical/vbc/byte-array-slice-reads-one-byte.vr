@@ -38,9 +38,9 @@
 // OWN FIRST WORD as a `type_id` and switches on it, so the CONTENT
 // chooses the branch:
 //
-//     first word              tier 0     tier 1 read of [0]
-//     6  (TypeId::U8)           6        0
-//     7  (TypeId::U16)          7        0
+//     first word              tier 0     tier 1 read of index 0
+//     6  (TypeId.U8)           6        0
+//     7  (TypeId.U16)          7        0
 //     99 (matches no case)     99        330712481891 = 0x4D00000063
 //
 // Three identical arrays, three different wrong answers, decided by
@@ -81,12 +81,12 @@ fn main() {
     // Byte 4 carries the payload so the low 32 bits stay exactly the
     // TypeId under test.
     let mut c: [Byte; 16] = [0 as Byte; 16];
-    c[0] = 6 as Byte;                 // TypeId::U8
+    c[0] = 6 as Byte;                 // TypeId.U8
     c[4] = 77 as Byte;
     print(f"tid6   [0]={at(&c[..], 0)} [4]={at(&c[..], 4)}");
 
     let mut d: [Byte; 16] = [0 as Byte; 16];
-    d[0] = 7 as Byte;                 // TypeId::U16
+    d[0] = 7 as Byte;                 // TypeId.U16
     d[4] = 77 as Byte;
     print(f"tid7   [0]={at(&d[..], 0)} [4]={at(&d[..], 4)}");
 
