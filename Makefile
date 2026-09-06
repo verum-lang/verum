@@ -110,8 +110,8 @@ check-doc-method-names: ## Gate: a method a doc example calls on a `core/` type 
 	python3 scripts/ci/check_doc_method_names.py --self-test
 	python3 scripts/ci/check_doc_method_names.py
 
-list-specs-muted-on-closed-tasks: ## LIST (local only — the task pool is gitignored): specs @skip'd on a task that has closed
-	python3 scripts/ci/list_specs_muted_on_closed_tasks.py
+list-tests-muted-on-closed-tasks: ## LIST (local only — the task pool is gitignored): specs @skip'd and core-tests @ignore'd on a task that has closed
+	python3 scripts/ci/list_tests_muted_on_closed_tasks.py
 
 list-doc-absent-methods: ## LIST (never a gate): doc methods called on a VARIABLE whose name is nowhere in core/
 	python3 scripts/ci/list_doc_absent_methods.py

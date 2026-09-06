@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
-"""A LOCAL LIST, and deliberately NOT a CI gate: `@skip` directives in
-`vcs/specs` whose stated reason is a task that has since closed.
+"""A LOCAL LIST, and deliberately NOT a CI gate: tests muted on a task
+that has since closed.
+
+TWO CORPORA, TWO DIRECTIVES, counted separately because they are not the
+same thing. `vcs/specs` mutes a whole FILE with a `@skip:` comment in
+its header; `core-tests` mutes ONE LAW with an `@ignore("reason")`
+attribute, and a file can carry twenty. Reporting a single number over
+both would hide which kind of coverage went quiet.
 
 WHY IT CANNOT BE A GATE, and this is the whole reason for the `list_`
 prefix. The task pool lives at `<main-checkout>/.taskpool/`, which is
@@ -13,8 +19,8 @@ absent directory and one of them printed "0 violations".
 So this refuses to run at all when the pool is missing, and it is
 invoked by hand.
 
-WHAT IT FOUND ON ITS FIRST RUN (2026-09-07). Nine specs carry a
-`@skip`; FIVE named a task that was already closed:
+WHAT IT FOUND ON ITS FIRST RUN (2026-09-07), in `vcs/specs`: FIVE
+specs muted on a task that was already closed —
 
     format_slot_calls_the_named_method            T0814
     implement_must_be_complete                    T0812
@@ -47,6 +53,20 @@ TWO KINDS OF SKIP IT DELIBERATELY DOES NOT ACCUSE, both measured:
 
 That second case is why the output says READ, not FIX: a closed task is
 evidence the reason MIGHT have expired, never proof that it has.
+
+AND THE SECOND CORPUS PAID THAT RULE BACK IMMEDIATELY. Of 152
+`@ignore("...")` pins in `core-tests`, only TEN name a task — and all
+ten name a CLOSED one. They are not stale bookkeeping: the pins' own
+text says "T0108, stride leg — STILL OPEN; the read/write leg of that
+task is fixed and its laws are live". A task was closed on half its
+acceptance, and the surviving half is recorded only in a test comment.
+Verified: `ptr_is_aligned(p)` still panics with "@intrinsic
+(\"ptr_is_aligned\") is not implemented in this build ... it has no
+registry entry".
+
+So the ten to read are not "unpin these", they are "here is what a
+closed task did not do". The 142 pins naming NO task are a different
+and larger question, tracked as T1145.
 """
 import os
 import re
@@ -56,7 +76,18 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SPECS = REPO / "vcs" / "specs"
+CORE_TESTS = REPO / "core-tests"
 SKIP = re.compile(r"^//\s*@skip:\s*(.+)$", re.M)
+# `core-tests` mutes with an ATTRIBUTE, not a directive comment, and the
+# distinction matters for the reader as much as for the regex: a `@skip`
+# comment sits in the file header and describes the FILE, while
+# `@ignore("...")` sits on one test and describes that ONE law. A file
+# can carry twenty of them.
+#
+# Counting the two together would also be wrong in a way that flatters:
+# `@ignore'd` appears 85 times in PROSE across these files, and a
+# line-counting sweep reports 613 where there are 153 pins.
+IGNORE = re.compile(r'@ignore\("([^"]*)"\)')
 TASK = re.compile(r"\bT\d{4}\b")
 
 
@@ -138,6 +169,34 @@ def main() -> int:
               "mechanically and will never appear above:")
         for rel, why in unnamed:
             print(f"   {rel:<62} {why}")
+
+    # ---- second corpus: core-tests' per-law @ignore attribute --------
+    ig_tot = ig_named = 0
+    ig_expired = []
+    for f in sorted(CORE_TESTS.rglob("*.vr")):
+        for m in IGNORE.finditer(f.read_text(encoding="utf-8", errors="replace")):
+            ig_tot += 1
+            ids = sorted(set(TASK.findall(m.group(1))))
+            if not ids:
+                continue
+            ig_named += 1
+            if all(states.get(i) in ("done", "dead") for i in ids):
+                ig_expired.append((str(f.relative_to(CORE_TESTS)),
+                                   ",".join(ids), m.group(1)[:56]))
+    print(f"\ncore-tests @ignore(\"...\") pins : {ig_tot}")
+    print(f"  naming a task id             : {ig_named}")
+    print(f"  whose task(s) are CLOSED     : {len(ig_expired)}")
+    if ig_expired:
+        print("\nTO READ — same rule, and these have already repaid it once: "
+              "every pin here named a CLOSED task, and the pins' own text says "
+              "the task was closed on HALF its acceptance. A pin can be the "
+              "only surviving record of what a closed task did not fix.")
+        seen = set()
+        for rel, ids, why in ig_expired:
+            if (rel, ids) in seen:
+                continue
+            seen.add((rel, ids))
+            print(f"   {rel:<52} {ids:<12} {why}")
     return 0
 
 
