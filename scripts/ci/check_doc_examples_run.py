@@ -123,29 +123,27 @@ except Exception:  # the sibling gate is optional; without it nothing is dropped
 # the task that owns it, so an entry with no owner is a defect nobody
 # has agreed to carry.
 KNOWN_FAILURES = {
-    "by-example/13-channels":
-        "T1205 (was T1202) — the FIELD-path peel through `Shared<T>` reads "
-        "the wrapper's own slots. Measured on 2026-09-06 19:43, "
-        "interpreter, after T1202's read-path fix (35cb24f9e) landed:\n"
-        "    sent 10 values\n"
-        "    Panic: field access out of bounds: field index 6 "
-        "(offset 48+8 = 56) exceeds object data size 24 type_id=520 "
-        "type='Shared' backtrace=[Receiver.recv@pc=15 <- drain@pc=21 <- "
-        "main@pc=140] -- declared fields (3): [ptr, generation, epoch]\n"
-        "Field 6 is `ChannelInner.notify_seq`, applied to the 3-field "
-        "wrapper. Not this corpus's fault.\n"
-        "RE-KEYED TWICE, and both re-keys are the reason this comment is "
-        "long. It first said the interpreter substitutes a CARRIER object "
-        "-- a theory of mine that the raw dump refuted (slot 0 is a "
-        "NaN-boxed `ptr`, not a `1`). It then still named `Sender.clone` "
-        "and a null dereference, which is where this failed BEFORE the "
-        "read-path fix; the send half now completes and the failure moved "
-        "to `Receiver.recv` with an honest bounds refusal. A baseline "
-        "keyed to a reason that has stopped applying is the exact "
-        "false-green this gate exists to prevent: the program still "
-        "fails, the count still matches, and the entry describes "
-        "something that no longer happens. Caught by the T1202 owner "
-        "reading my entry, not by me.",
+    # EMPTY, and the last entry's history is why this comment stays.
+    #
+    # `by-example/13-channels` was carried here from 2026-09-06 and was
+    # REPAIRED by T1205 (`b42177a17` — DropRef decremented the pointer,
+    # not the refcount). Verified 2026-09-07 on the interpreter: the
+    # chapter runs to `total = 520`, rc=0.
+    #
+    # It had been RE-KEYED TWICE before that, and both re-keys are the
+    # reason this gate reports REPAIRED at all. The entry first said the
+    # interpreter substitutes a CARRIER object — a theory the raw dump
+    # refuted. It then still named `Sender.clone` and a null dereference,
+    # which is where the chapter failed BEFORE T1202's read-path fix; by
+    # then the send half completed and the failure had moved to
+    # `Receiver.recv` with an honest bounds refusal. A baseline keyed to
+    # a reason that has stopped applying is the exact false-green this
+    # gate exists to prevent: the program still fails, the count still
+    # matches, and the entry describes something that no longer happens.
+    #
+    # So: an entry here must name the task that owns it (the self-test
+    # enforces that), and when the gate says REPAIRED, the entry goes —
+    # leaving it would mean a regression could not be seen.
 }
 
 TIMEOUT_RUN = 60
