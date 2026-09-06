@@ -1826,6 +1826,52 @@ pub(in super::super) fn handle_call_method(
                         }
                     }
                 }
+            } else {
+                // **HEAP-CELL-METHOD-REFUSAL-1 (T1189)** — the guard above
+                // decided to KEEP the carrier and let `Heap.<method>` run.
+                // That body was written against the DECLARED record
+                // (`Heap<T> { ptr, generation, epoch }`, core/base/memory.vr),
+                // but this receiver is the interpreter's SUBSTITUTED cell
+                // (32-byte AllocationHeader + one 8-byte Value), so the body
+                // reads `self.ptr` and gets the stored VALUE. What follows
+                // is decided by what that value happens to be:
+                //
+                //     { id: Int }   panic "field access out of bounds:
+                //                   field index 1 (offset 8+8)"   — index 1
+                //                   is `generation`, past the cell's one slot
+                //     { url: Text } SIGSEGV inside atomic_load_u32, because
+                //                   the value is then used as an address
+                //
+                // Refusing here costs nothing that works today. Measured,
+                // one probe per method on v88:
+                //
+                //     h.id            v=7   (never reaches CallM at all)
+                //     h.clone()       v=7   (intercepted earlier, universally)
+                //     h.into_inner()  v=7   (CBGR accessor, handled above)
+                //     h.generation()  v=348 (same)
+                //     h.deref()       already broken
+                //     h.as_ref()      already broken
+                //     h == g          already broken
+                //
+                // so only the three that are already wrong take this path.
+                //
+                // This is the INTERIM fix. The real one is to stop
+                // substituting `Heap.new` (T1189 note (b)) so the declared
+                // record is built and these bodies work. Until then, follow
+                // T1168's rule one layer down: never hand a body a
+                // representation it was not written for — fail, and say so.
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "`Heap.{}` cannot run on this receiver: the interpreter \
+                         substitutes its own CBGR cell for `Heap.new`, while the \
+                         stdlib body expects the declared record \
+                         `Heap<T> {{ ptr, generation, epoch }}`. Reading its \
+                         fields off the cell is out of bounds. Use the implicit \
+                         form (`value.field`, `value.method()`), which unwraps \
+                         the carrier, until T1189 removes the substitution.",
+                        base_method
+                    ),
+                });
             }
         }
     }
