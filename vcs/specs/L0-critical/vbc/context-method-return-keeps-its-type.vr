@@ -1,0 +1,79 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: aot, codegen, context, text, tier-parity, regression
+// @timeout: 60000
+// @expected-exit: 0
+// @expected-stdout-begin
+// via-context: row-42
+// returned: row-42
+// count: 7
+// @expected-stdout-end
+//
+// Regression guard for T1210: a `Text` returned by a CONTEXT method must
+// keep its type, so an f-string prints the TEXT and not its pointer.
+//
+// THE SHAPE, and the second line is what makes the site identifiable.
+// The SAME value is printed twice — once inside the function that got it
+// from the context, once after it is returned to `main`:
+//
+//     tier 0   via-context: row-42        returned: row-42
+//     tier 1   via-context: 4381999968    returned: row-42
+//
+// The value is intact. What differs is the PATH TO THE FORMAT. `main`'s
+// print works because `use_db`'s own declared return type is `Text` and
+// the `Call` arm stamps that; the first print fails because the value
+// came from a `CallM` on a `CtxGet` receiver, and `lower_ctx_get`
+// (`instruction.rs`) stores its result with `set_register` and stamps NO
+// type at all. An untyped receiver cannot resolve a method, an
+// unresolved method has no return type, and the `CallM` arm applies a
+// mark only when it has one — so the `Text` reaches `ToString` as a bare
+// i64 and prints as its address.
+//
+// `count: 7` IS THE CONTROL AND IT MUST NOT MOVE. An `Int` returned by a
+// context method prints correctly WITHOUT any mark, so it cannot show
+// this defect — which is exactly why it belongs here: a fix that stamps
+// the wrong type would read a scalar as a heap pointer and crash, and
+// this line is what says it did not. Its passing is not evidence that
+// the path is healthy; only the `Text` line can be.
+//
+// DIFFERENTIAL, because the interpreter is right here and always has
+// been (Tier 0 values self-describe through NaN-boxing, so no codegen
+// mark is involved). A tier-1-only assertion would pass the day someone
+// broke Tier 0 instead, and the two tiers AGREEING is the property.
+//
+// NOT T1206, measured rather than assumed: on the binary that fixed
+// T1206 and made `docs/by-example/04-result-error` agree between tiers,
+// this shape was unchanged. Same symptom — an address where text
+// belongs — three different causes. They converge at `ToString` by
+// construction, since an unmarked `Text` and an `Int` are the same i64
+// there.
+
+mount core.prelude.*;
+
+context Db {
+    fn fetch(id: Int) -> Text;
+    fn tally() -> Int;
+}
+
+type FakeDb is { prefix: Text };
+
+implement FakeDb {
+    public fn fetch(&self, id: Int) -> Text { f"{self.prefix}-{id}" }
+    public fn tally(&self) -> Int { 7 }
+}
+
+fn use_db() -> Text using [Db] {
+    let row = Db.fetch(42);
+    print(f"via-context: {row}");
+    row
+}
+
+fn main() {
+    let db = FakeDb { prefix: "row" };
+    provide Db = db;
+
+    let r = use_db();
+    print(f"returned: {r}");
+    print(f"count: {Db.tally()}");
+}
