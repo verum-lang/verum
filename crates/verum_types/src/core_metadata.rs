@@ -8,6 +8,17 @@
 use serde::{Deserialize, Serialize};
 use verum_common::{List, Maybe, OrderedMap, Text};
 
+/// Serde default for `is_public`: a descriptor deserialised from an
+/// archive baked before the field existed is treated as PUBLIC.
+///
+/// The stale-archive default has to be the permissive one.  `false`
+/// would hide the whole standard library from every program compiled
+/// against an older `.vbca` — a silent, total failure — where `true`
+/// only restores the behaviour those archives already had.
+fn visible_by_default() -> bool {
+    true
+}
+
 /// Metadata extracted from stdlib.vbc for type checking
 ///
 /// This struct contains all the type information needed to compile user code
@@ -279,6 +290,15 @@ pub struct TypeDescriptor {
     /// crashing.
     #[serde(default)]
     pub is_transparent_wrapper: bool,
+
+    /// Whether the declaration was written `public type T is …`.
+    ///
+    /// A private stdlib type must not reach a user program's type
+    /// namespace: without this flag every `type X is …` in `core/` —
+    /// 182 names with no public twin — resolves in any program that
+    /// merely names it.
+    #[serde(default = "visible_by_default")]
+    pub is_public: bool,
 }
 
 /// Source-span tag carried by [`TypeDescriptor`], [`FunctionDescriptor`],
@@ -736,6 +756,19 @@ pub struct FunctionDescriptor {
     /// #101 — declaration span; see [`TypeDescriptor::decl_span`].
     #[serde(default)]
     pub decl_span: Maybe<DeclSpan>,
+
+    /// Whether the declaration was written `public fn f(…)` /
+    /// `public const C: T = …`.
+    ///
+    /// Constants reach this descriptor lowered to zero-arg functions
+    /// (see [`FunctionDescriptor::is_const`]), and the eager
+    /// registration in `infer/env.rs` publishes every one of them under
+    /// its bare name.  Without this flag that registration has nothing
+    /// to filter on, and 302 private `core/` constants — `K` and
+    /// `H_INIT` from `core/hash/crypto/sha512.vr` among them — are
+    /// visible to a program that never mounts anything.
+    #[serde(default = "visible_by_default")]
+    pub is_public: bool,
 }
 
 /// Implementation descriptor (impl Protocol for Type)

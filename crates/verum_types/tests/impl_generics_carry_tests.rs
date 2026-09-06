@@ -23,6 +23,7 @@ use verum_types::core_metadata::FunctionDescriptor;
 
 fn carried_descriptor() -> FunctionDescriptor {
     FunctionDescriptor {
+        is_public: true,
         name: Text::from("Slice.iter"),
         module_path: Text::from("core.collections.slice"),
         // `Maybe::None` = the declaring file submodule is the same as

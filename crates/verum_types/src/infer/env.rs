@@ -694,6 +694,16 @@ impl TypeChecker {
             if !fd.is_const {
                 continue;
             }
+            // A PRIVATE constant is not the user's to see.  This loop
+            // publishes every entry under its BARE name, so without the
+            // check `core/hash/crypto/sha512.vr`'s `const K: [UInt64;
+            // 80]` — declared without `public` — answers to `K` in a
+            // program that mounts nothing, along with 301 other
+            // private-only names.  Functions already behave this way;
+            // constants and types were the two that did not.
+            if !fd.is_public {
+                continue;
+            }
             let const_type =
                 crate::infer::helpers::parse_descriptor_type_string(fd.return_type.as_str());
             // Bare-name registration so user code writing

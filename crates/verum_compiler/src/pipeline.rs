@@ -1563,6 +1563,12 @@ impl<'s> CompilationPipeline<'s> {
                 .map(|(p, _)| p)
                 .unwrap_or("");
             let type_desc = TypeDescriptor {
+                // The incremental cache (`CachedTypeInfo` /
+                // `CachedFunctionInfo`) records no visibility, so this
+                // path cannot filter and keeps the pre-A94 behaviour.
+                // Archive-driven loading — the surface user programs
+                // actually see — reads the real flag.
+                is_public: true,
                 name: Text::from(
                     cached_type
                         .path
@@ -1631,6 +1637,12 @@ impl<'s> CompilationPipeline<'s> {
         // Convert functions
         for cached_func in &cached.functions {
             let func_desc = FunctionDescriptor {
+                // The incremental cache (`CachedTypeInfo` /
+                // `CachedFunctionInfo`) records no visibility, so this
+                // path cannot filter and keeps the pre-A94 behaviour.
+                // Archive-driven loading — the surface user programs
+                // actually see — reads the real flag.
+                is_public: true,
                 name: Text::from(
                     cached_func
                         .path

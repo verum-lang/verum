@@ -793,6 +793,10 @@ fn register_module_metadata(
             .collect();
 
         let descriptor = TypeDescriptor {
+            is_public: matches!(
+                ty.visibility,
+                verum_vbc::types::Visibility::Public
+            ),
             name: type_name.clone(),
             module_path: module_path.clone(),
             // v2.12: the precise declaring file submodule rides in its own
@@ -1335,6 +1339,10 @@ fn register_module_metadata(
             .unwrap_or_else(|| module_path.clone());
 
         let descriptor = FunctionDescriptor {
+            is_public: matches!(
+                fn_desc.visibility,
+                verum_vbc::types::Visibility::Public
+            ),
             name: simple_name.clone(),
             module_path: module_path.clone(),
             origin_module_path: if fn_module_path.as_str() != module_path.as_str() {
@@ -1576,6 +1584,7 @@ fn register_module_metadata(
             continue;
         }
         let descriptor = TypeDescriptor {
+            is_public: true,
             name: parent_name.clone(),
             module_path: Text::from(""),
             origin_module_path: Maybe::None,

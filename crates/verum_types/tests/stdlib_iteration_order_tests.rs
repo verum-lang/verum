@@ -20,6 +20,7 @@ use verum_types::core_metadata::{
 
 fn variant_type_with_ok_err(name: &str) -> TypeDescriptor {
     TypeDescriptor {
+        is_public: true,
         name: name.into(),
         module_path: "test.module".into(),
         origin_module_path: Maybe::None,

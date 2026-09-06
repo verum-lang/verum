@@ -1377,6 +1377,19 @@ impl TypeChecker {
                 return;
             }
         };
+        // A PRIVATE stdlib type is not the user's to name.  Metadata
+        // keeps its descriptor — a public signature may still mention
+        // it, and dropping it would make that signature unresolvable —
+        // but naming it in user code must MISS exactly as an unknown
+        // type does.  Without this, `let x: AliasEntry = 0;` reports a
+        // type mismatch naming `AliasEntry` instead of `error<E101>:
+        // type not found`, for 182 private-only names.
+        if !type_desc.is_public {
+            if crate::ctor_trace_enabled() {
+                eprintln!("[ctor-trace] ensure-load PRIVATE name={}", name);
+            }
+            return;
+        }
         if crate::ctor_trace_enabled() {
             eprintln!(
                 "[ctor-trace] ensure-load HIT name={} kind_record={} in_ctx={}",

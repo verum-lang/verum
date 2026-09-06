@@ -230,6 +230,22 @@ fn write_core_metadata_alongside_archive(
         metadata.context_declarations = names;
         metadata.context_declaring_modules = declaring_modules;
         metadata.context_decl_nodes = decl_nodes;
+
+        // A94 — the archive cannot carry a constant's or a type's
+        // visibility (see `scan_private_declarations`), so the bake
+        // reads it off the source it already has in hand.
+        let (private, private_names, public_names) = scan_private_declarations(root);
+        let (priv_fns, priv_types) =
+            mark_private_declarations(&mut metadata, &private, &private_names, &public_names);
+        if verbose {
+            eprintln!(
+                "verum stdlib precompile: {} private declaration(s) in source; \
+                 marked {} function/const and {} type descriptor(s) non-public",
+                private.len(),
+                priv_fns,
+                priv_types,
+            );
+        }
         if verbose {
             eprintln!(
                 "verum stdlib precompile: extracted {} context decls ({} with full AST) from {}",
@@ -444,6 +460,187 @@ fn compute_source_blake3_for_root(root: &Path) -> [u8; 32] {
 
 /// Result names ordered via BTreeSet for deterministic output;
 /// AST nodes follow the same key ordering via `OrderedMap`.
+/// Source-truth visibility for constants and types (A94).
+///
+/// The VBC `FunctionDescriptor::visibility` field is never written —
+/// its `Default` is `Public` and nothing assigns it — so the archive
+/// cannot say whether `const K: [UInt64; 80]` was declared `public`.
+/// Functions escape that because `precompile.rs`'s source-scan injector
+/// filters on the AST visibility before a descriptor is ever built; a
+/// constant reaches metadata by a different route (lowered to a
+/// zero-arg function in codegen) and a type by a third, so neither had
+/// a filter and both were published to every user program.
+///
+/// The bake already holds the stdlib source root and already walks it
+/// once for context declarations, so the honest visibility is one walk
+/// away.  Returned as `(module_path, name)` pairs because the same name
+/// is public in one module and private in another —
+/// `CLOCK_MONOTONIC` is declared in three.
+fn scan_private_declarations(
+    root: &Path,
+) -> (
+    std::collections::BTreeSet<(String, String)>,
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
+) {
+    let mut private: std::collections::BTreeSet<(String, String)> =
+        std::collections::BTreeSet::new();
+    let mut private_names: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    let mut public_names: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    fn walk(
+        root: &Path,
+        dir: &Path,
+        out: &mut std::collections::BTreeSet<(String, String)>,
+        priv_names: &mut std::collections::BTreeSet<String>,
+        pub_names: &mut std::collections::BTreeSet<String>,
+    ) {
+        use verum_ast::decl::Visibility;
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_name().and_then(|n| n.to_str()) == Some("target") {
+                continue;
+            }
+            if path.is_dir() {
+                walk(root, &path, out, priv_names, pub_names);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("vr") {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let mut parser = verum_fast_parser::Parser::new(&content);
+            let module = match parser.parse_module() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let module_path = path
+                .strip_prefix(root)
+                .ok()
+                .map(|rel| {
+                    crate::stdlib_index::file_path_to_module_path(
+                        &rel.to_string_lossy().replace('\\', "/"),
+                    )
+                })
+                .unwrap_or_default();
+            for item in &module.items {
+                let (vis, name) = match &item.kind {
+                    verum_ast::ItemKind::Const(d) => (&d.visibility, d.name.name.as_str()),
+                    verum_ast::ItemKind::Type(d) => (&d.visibility, d.name.name.as_str()),
+                    _ => continue,
+                };
+                if matches!(vis, Visibility::Public) {
+                    pub_names.insert(name.to_string());
+                } else {
+                    out.insert((module_path.to_string(), name.to_string()));
+                    priv_names.insert(name.to_string());
+                }
+            }
+        }
+    }
+    walk(root, root, &mut private, &mut private_names, &mut public_names);
+    (private, private_names, public_names)
+}
+
+/// Stamp [`scan_private_declarations`]'s verdict onto the metadata.
+///
+/// A descriptor is published under several keys (bare and qualified)
+/// and each key holds its own clone, so the match is on the descriptor
+/// FIELDS rather than the key — every clone of one declaration carries
+/// the same `(module_path, name)` and all of them must agree.
+fn mark_private_declarations(
+    metadata: &mut verum_types::core_metadata::CoreMetadata,
+    private: &std::collections::BTreeSet<(String, String)>,
+    private_names: &std::collections::BTreeSet<String>,
+    public_names: &std::collections::BTreeSet<String>,
+) -> (usize, usize) {
+    // Name-only fallback, and it is SAFE precisely because of the
+    // condition: a name that carries no `public` declaration ANYWHERE in
+    // `core/` has no public meaning to shadow, so hiding every
+    // descriptor answering to it cannot take a public item away.
+    //
+    // It exists because the pair rule needs a declaring module and some
+    // descriptors carry none: `FormatArgs` (`core/base/panic.vr`) has an
+    // empty `origin_module_path` and a `module_path` of the archive
+    // ENTRY, so neither candidate pair matches the scan's
+    // `(core.base.panic, FormatArgs)`.  The pair rule stays because it
+    // is the one that can tell `K` apart — `core.hash.crypto.sha512.K`
+    // is private while `core.hash.crypto.sha256.K` is `public const`,
+    // and only the pair distinguishes them.
+    fn private_only(
+        name: &str,
+        private_names: &std::collections::BTreeSet<String>,
+        public_names: &std::collections::BTreeSet<String>,
+    ) -> bool {
+        private_names.contains(name) && !public_names.contains(name)
+    }
+
+    let mut consts = 0usize;
+    let mut types = 0usize;
+    // Which `(module, name)` pair a descriptor answers to — MEASURED,
+    // because two guesses about it were both wrong and each cost a bake.
+    //
+    // An archive ENTRY groups several source files, so `module_path` is
+    // the entry (`core.hash.crypto`) and never the declaring file
+    // (`core.hash.crypto.sha512`).  `origin_module_path` carries the file
+    // for SOME descriptors and is `None` for others — measured on the
+    // baked archive: `core.net.dns.RCODE_REFUSED` has it,
+    // `core.hash.crypto.sha512.K` does not.  What IS reliable is that a
+    // constant's `name` is itself fully qualified, so the last dot splits
+    // it into exactly the pair this scan produced.  That is also how
+    // `infer/env.rs` recovers the bare name it publishes.
+    fn candidate_keys(
+        name: &verum_common::Text,
+        module_path: &verum_common::Text,
+        origin: &verum_common::Maybe<verum_common::Text>,
+    ) -> Vec<(String, String)> {
+        let n = name.as_str();
+        let mut out = Vec::new();
+        if let Some((prefix, leaf)) = n.rsplit_once('.') {
+            out.push((prefix.to_string(), leaf.to_string()));
+        }
+        let declaring = match origin {
+            verum_common::Maybe::Some(o) if !o.as_str().is_empty() => o.as_str(),
+            _ => module_path.as_str(),
+        };
+        out.push((declaring.to_string(), n.to_string()));
+        out
+    }
+    for fd in metadata.functions.values_mut() {
+        if !fd.is_public {
+            continue;
+        }
+        let keys = candidate_keys(&fd.name, &fd.module_path, &fd.origin_module_path);
+        if keys.iter().any(|k| private.contains(k))
+            || keys.iter().any(|(_, leaf)| private_only(leaf, private_names, public_names))
+        {
+            fd.is_public = false;
+            consts += 1;
+        }
+    }
+    for td in metadata.types.values_mut() {
+        if !td.is_public {
+            continue;
+        }
+        let keys = candidate_keys(&td.name, &td.module_path, &td.origin_module_path);
+        if keys.iter().any(|k| private.contains(k))
+            || keys.iter().any(|(_, leaf)| private_only(leaf, private_names, public_names))
+        {
+            td.is_public = false;
+            types += 1;
+        }
+    }
+    (consts, types)
+}
+
 fn scan_context_declarations(
     root: &Path,
 ) -> (
@@ -3182,6 +3379,10 @@ fn inject_declared_module_free_fn_keys(
                     })
                     .collect();
                 let descriptor = FunctionDescriptor {
+                    // Unconditional: the `Visibility::Public` guard
+                    // above is what lets this loop reach a descriptor
+                    // at all.
+                    is_public: true,
                     name: Text::from(simple),
                     module_path: Text::from(source_module.as_str()),
                     // Source-scan injector: `source_module` is already the

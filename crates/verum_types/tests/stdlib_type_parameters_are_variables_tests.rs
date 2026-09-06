@@ -64,6 +64,7 @@ fn tuple_case(name: &str, payload: &[&str]) -> VariantCase {
 /// A variant descriptor as the precompiled archive delivers one.
 fn variant_descriptor(name: &str, params: &[&str], cases: List<VariantCase>) -> TypeDescriptor {
     TypeDescriptor {
+        is_public: true,
         name: name.into(),
         module_path: "test.module".into(),
         origin_module_path: Maybe::None,
