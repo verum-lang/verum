@@ -274,10 +274,11 @@ pub(in super::super) fn handle_get_field(
             crate::interpreter::env_flags::Flag::TraceDeref,
         ) {
             eprintln!(
-                "[getf-int] addr=0x{:x} field={} extent_room={:?} in={}",
+                "[getf-int] addr=0x{:x} field={} extent_room={:?} [{}] in={}",
                 addr,
                 field_idx,
                 room,
+                super::cbgr::bridge_extent_miss(state, addr),
                 state
                     .call_stack
                     .current_function_name(&state.module)

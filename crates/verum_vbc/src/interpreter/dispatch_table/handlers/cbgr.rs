@@ -463,6 +463,48 @@ pub(super) fn bridge_extent_room(
     Some(len - offset)
 }
 
+/// Why [`bridge_extent_room`] answered `None` — TRACE ONLY.
+///
+/// Its `None` covers two situations that need opposite fixes: the address
+/// belongs to no registered block at all (an allocator that never told the
+/// index about itself), or it belongs to one and has walked off the end (a
+/// stride or index computed wrong). A caller that reports only "not a live
+/// extent" cannot say which, and on T1196 that single word carried an
+/// entire investigation in the wrong direction.
+pub(super) fn bridge_extent_miss(state: &InterpreterState, addr: usize) -> String {
+    match state.cbgr_bridge_extents.range(..=addr).next_back() {
+        None => "no registered block at or below this address".to_string(),
+        Some((&user, &len)) => {
+            let offset = addr.wrapping_sub(user);
+            if offset < len {
+                format!("inside block base={:#x} len={} offset={}", user, len, offset)
+            } else if offset <= len.saturating_mul(4) {
+                // Close enough that the block plausibly IS this address's
+                // own, overrun by a wrong stride or index.
+                format!(
+                    "just past its block: base={:#x} len={} offset={}",
+                    user, len, offset
+                )
+            } else {
+                // NEAREST-BELOW IS NOT "BELONGS TO".  `range(..=addr)` finds
+                // whatever block happens to sit lowest in the address space,
+                // which for an unregistered address is an unrelated stranger.
+                // The first version of this message called that "walked off
+                // the end" and asserted a relationship the numbers deny — it
+                // reported a 24-byte block 200 MB below as this address's
+                // own, and read as a stride defect.
+                format!(
+                    "NO block contains it; nearest below is unrelated (base={:#x} len={} offset={} — {}x the block)",
+                    user,
+                    len,
+                    offset,
+                    offset / len.max(1)
+                )
+            }
+        }
+    }
+}
+
 /// The raw 8-byte pattern a scalar `Value` occupies in packed memory.
 ///
 /// Bridge allocations are byte-addressable storage shared with `memcpy` /
