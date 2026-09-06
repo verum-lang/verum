@@ -1015,7 +1015,9 @@ public type TimerEntry is {
 ///     so the pointer is single-threaded by construction.
 /// Both paths preserve the invariant that any `TaskEntry` whose
 /// `future_ptr` may cross threads carries a `Send` future.
-type TaskEntry is {
+/// PUBLIC BECAUSE A PUBLIC SIGNATURE NAMES IT — `public fn pop_local`
+/// returns `Maybe<Heap<TaskEntry>>`.
+public type TaskEntry is {
     id: Int,
     /// Boxed future (type-erased). See struct-level SAFETY contract.
     future_ptr: &unsafe Byte,

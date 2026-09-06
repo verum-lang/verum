@@ -130,7 +130,9 @@ public type GateConstraint is
 
 /// Pre-canonical 32-byte LE field element. Validation against the
 /// scalar-field modulus happens at prover binding time, not here.
-type Bytes32 is [Byte; 32];
+/// PUBLIC BECAUSE A PUBLIC SIGNATURE NAMES IT — `public fn constant(c:
+/// Bytes32)` one line below.
+public type Bytes32 is [Byte; 32];
 
 implement GateConstraint {
     public fn constant(c: Bytes32) -> GateConstraint { Constant(c) }

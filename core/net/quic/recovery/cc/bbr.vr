@@ -136,7 +136,9 @@ public type ProbeBwPhase is Up | Down | Cruise(UInt32);
 
 // =============================================================================
 
-type BandwidthFilter is {
+/// PUBLIC BECAUSE A PUBLIC SIGNATURE NAMES IT — `public fn new()` on this
+/// type returns it.
+public type BandwidthFilter is {
     /// Latest three accepted samples — the leading one is the
     /// current max.
     samples: List<(Float, Instant)>,
@@ -181,7 +183,9 @@ implement BandwidthFilter {
 // RTT filter — windowed min
 // =============================================================================
 
-type RttFilter is {
+/// PUBLIC BECAUSE A PUBLIC SIGNATURE NAMES IT — `public fn new()` on this
+/// type returns it.
+public type RttFilter is {
     min_rtt:          Duration,
     min_rtt_stamp:    Instant,
     min_rtt_valid:    Bool,

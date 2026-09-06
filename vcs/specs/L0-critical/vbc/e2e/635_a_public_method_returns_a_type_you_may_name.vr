@@ -1,0 +1,80 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, visibility, stdlib, protocol-default, transducer
+// @timeout: 15000
+// @expected-exit: 0
+//
+// A PUBLIC METHOD RETURNS A TYPE YOU MAY NAME (T1195).
+//
+// Visibility is a statement about a NAME; a signature is a statement
+// about a TYPE. When the two disagree — a public method returning a
+// type declared without `public` — the caller may CALL the method and
+// may not NAME what it gets back, so every method on the result is
+// unreachable and the diagnostic points at the wrong thing:
+//
+//     error<E400>: no method named `fold` found for type
+//                  `TransducedIter<ListIter<A>, &A>`
+//
+// `fold` is fine. `TransducedIter` was the private one, and
+// `Iterator.transduce` — a default method of the PUBLIC `Iterator`
+// protocol — returns it. `core/base/iterator.vr` declared it and
+// `StatefulTransducedIter` without `public`: the only two such
+// declarations in that file, against fifty-four public ones.
+//
+// WHY THIS IS A SPEC AND NOT ONLY A SOURCE GATE. There is a gate —
+// `scripts/ci/check_private_types_off_public_surface.py` — and it
+// catches the declaration. It cannot catch the BEHAVIOUR, because the
+// flag it guards is written by the stdlib BAKE: six consecutive
+// binaries spanning six hours all reported the same cached archive and
+// all behaved as if the change had never landed. A source gate and a
+// running spec fail at different times, and this class needs both.
+//
+// WHAT THE EXISTING TRANSDUCER SPEC COVERS, so this one is not a
+// duplicate: `vcs/specs/core/base/iterator_transducer_test.vr` tests
+// that the transducer TYPES exist, and its own trailing list names
+// `iter.transduce(xform)` as untested. The call chain below is exactly
+// the untested one, and it is the chain a real program wrote.
+//
+// THE THREE LINES ARE ONE SELECTOR CONSUMED THREE WAYS, which is the
+// property the transducer exists for: `find`, `count` and `any` over
+// one filter definition cannot drift, because there is only one.
+// `collect` resolved throughout the defect and `fold` did not, so a
+// spec that only collected would have stayed green.
+
+mount core.base.iterator.{Transducer};
+
+type A is { id: Int };
+
+fn main() {
+    let mut l: List<A> = List.new();
+    l.push(A { id: 7 });
+    l.push(A { id: 5 });
+
+    // The identity transducer: no filtering, so the three answers are
+    // about the CHAIN rather than about a predicate.
+    let listed: List<A> = l.iter().transduce(Transducer.map(|v| v)).collect();
+    assert_eq(listed.len(), 2);
+
+    // `fold` — the method that vanished. Two elements, 7 + 5.
+    let summed = l.iter().transduce(Transducer.map(|v| v)).fold(0, |acc, a| acc + a.id);
+    assert_eq(summed, 12);
+
+    // A counting accumulator over the same chain, which is how a health
+    // check asks the question without building the list.
+    let counted = l.iter().transduce(Transducer.map(|v| v)).fold(0, |n, _v| n + 1);
+    assert_eq(counted, 2);
+
+    // And the count agrees with the list it counts. That is the whole
+    // reason to share one selector, and it is a claim rather than a
+    // coincidence only if both halves run.
+    assert_eq(counted, listed.len());
+
+    // The type must also be NAMEABLE, not merely reachable: a return
+    // type a caller cannot write is a type a caller cannot store.
+    let held: TransducedIter<ListIter<A>, &A> =
+        l.iter().transduce(Transducer.map(|v| v));
+    assert_eq(held.fold(0, |n, _v| n + 1), 2);
+
+    print("public-method-returns-a-nameable-type ok");
+}

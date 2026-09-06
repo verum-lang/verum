@@ -4267,7 +4267,17 @@ public type StatefulTransducer<A, B, S> is {
 
 /// Stores the rank-2 transformation function and applies it lazily
 /// as elements are pulled from the iterator.
-type TransducedIter<I: Iterator, B> is {
+/// PUBLIC BECAUSE A PUBLIC SIGNATURE NAMES IT. `Iterator.transduce` is a
+/// default method on the public `Iterator` protocol and returns this type,
+/// so a program allowed to CALL `transduce` must be allowed to NAME what it
+/// gets back — otherwise every method on the result is unreachable and the
+/// diagnostic is `no method named 'fold' found`, which points at the method
+/// rather than at the visibility. Measured: `l.iter().transduce(x).fold(..)`
+/// failed while `.collect()` on the same receiver worked, because `collect`
+/// reaches the value through another path. A94 hid non-`public` stdlib
+/// declarations, correctly; this declaration was simply wrong about its own
+/// surface, and A94's own commit named the class (`FormatArgs`).
+public type TransducedIter<I: Iterator, B> is {
     source: I,
     transform: fn<R>(Reducer<B, R>) -> Reducer<I.Item, R>,
     buffer: List<B>,
@@ -4317,7 +4327,9 @@ implement<I: Iterator, B> Iterator for TransducedIter<I, B> {
 
 /// Like TransducedIter but with additional mutable state for
 /// transformations that need to track state across elements.
-type StatefulTransducedIter<I: Iterator, B, S> is {
+/// PUBLIC BECAUSE A PUBLIC SIGNATURE NAMES IT — `Iterator.transduce_stateful`
+/// returns it. Same rule as `TransducedIter` above.
+public type StatefulTransducedIter<I: Iterator, B, S> is {
     source: I,
     state: S,
     transform: fn<R>(Reducer<B, R>, &mut S) -> Reducer<I.Item, R>,

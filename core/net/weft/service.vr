@@ -148,7 +148,9 @@ implement<S: Service<Req, Resp>, Req, Resp> Permit<S, Req, Resp> {
 /// Future that pumps `Service.poll_ready` until it returns
 /// `Ready(Result.Ok(()))`, then resolves with a `Permit`. Internal
 /// driver for `ready()`.
-type PollReadyFuture<S: Service<Req, Resp>, Req, Resp> is {
+/// PUBLIC BECAUSE A PUBLIC SIGNATURE NAMES IT — the public `poll_ready`
+/// helper below returns `PollReadyFuture<S, Req, Resp>`.
+public type PollReadyFuture<S: Service<Req, Resp>, Req, Resp> is {
     /// `Maybe.Some(svc)` while still polling; `Maybe.None` once consumed.
     /// Encoding the lifecycle in `Maybe` makes "double poll
     /// after completion" a typed invariant.

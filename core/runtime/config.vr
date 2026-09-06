@@ -1064,7 +1064,9 @@ implement RuntimeTask {
 ///
 
 /// Generic over T — the return type of the future.
-type RuntimeTaskHandle<T> is {
+/// PUBLIC BECAUSE A PUBLIC SIGNATURE NAMES IT — `AsyncExecutor.spawn`, a
+/// method of a public protocol, returns `RuntimeTaskHandle<T>`.
+public type RuntimeTaskHandle<T> is {
     /// Pointer to the task's result slot
     result_ptr: Int,
     /// Atomic completion flag

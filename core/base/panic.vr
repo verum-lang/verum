@@ -542,7 +542,10 @@ public meta fn current_location() -> Location {
 /// or format macro expansion. The compiler lowers `panic(f"...")` into
 /// `panic_fmt(FormatArgs { pieces: &[...] })` with each piece already
 /// converted to Text.
-type FormatArgs is {
+/// PUBLIC BECAUSE A PUBLIC SIGNATURE NAMES IT — `public fn panic_fmt(args:
+/// FormatArgs)` at the top of this file. Named as the open residue in A94's
+/// own commit message; this is that residue closed.
+public type FormatArgs is {
     pieces: &[&Text],
 };
 

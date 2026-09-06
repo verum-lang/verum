@@ -453,7 +453,9 @@ implement StdoutCell {
 }
 
 /// Single-variant wrapper (see SpanBody in tracing/span.vr).
-type StdoutGate is
+/// PUBLIC BECAUSE A PUBLIC SIGNATURE NAMES IT — `public fn gate_clone`
+/// returns it.
+public type StdoutGate is
     | Gate(Shared<StdoutCell>);
 
 implement StdoutGate {
@@ -525,7 +527,9 @@ type LineCell is {
 
 /// Single-payload carrier record (the signal-registry idiom stores a
 /// single payload; multi-field tuple variants are unproven).
-type LineBuf is {
+/// PUBLIC BECAUSE A PUBLIC SIGNATURE NAMES IT — `public fn buf_appended`
+/// returns it.
+public type LineBuf is {
     count: Int,
     text: Text,
 };
