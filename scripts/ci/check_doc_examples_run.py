@@ -394,7 +394,17 @@ def main() -> int:
         return self_test()
 
     if not DOCS.is_dir():
-        print(f"docs directory not found: {DOCS} — set VERUM_DOCS_DIR", file=sys.stderr)
+        # A SKIP IS A VERDICT ABOUT NOTHING — see the sibling gates. Under
+        # --check / CI a missing docs tree is a failed checkout, not an
+        # empty finding, and reporting OK there is how this gate would go
+        # green while measuring nothing.
+        import os as _os
+        fatal = "--check" in sys.argv or bool(_os.environ.get("CI"))
+        msg = f"doc-examples-run: docs directory not found: {DOCS}"
+        if fatal:
+            print(msg + " — REFUSING to report OK under --check/CI.", file=sys.stderr)
+            return 2
+        print(msg + " (skipped; pass --check to make this fatal)")
         return 0
 
     binary = verum_binary()

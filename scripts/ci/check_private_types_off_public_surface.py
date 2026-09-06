@@ -199,8 +199,12 @@ def main(argv):
     if "--self-test" in argv:
         return 0 if self_test() else 1
     if not os.path.isdir(CORE):
-        print("check-private-types-off-public-surface: core/ not present, skipped")
-        return 0
+        # ALWAYS fatal: `core/` is IN this repository. Its absence is a
+        # broken checkout, never 'nothing to check', so there is no local
+        # mode in which skipping is the right answer.
+        print(f"private-types: core/ not found at {CORE} — the checkout is "
+              f"broken; refusing to report OK.", file=sys.stderr)
+        return 2
     private, public, hits = census(CORE)
     names = sorted({h[0] for h in hits})
     print(f"check-private-types-off-public-surface: {len(names)} private type(s) "
