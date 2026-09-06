@@ -17,10 +17,17 @@ WHAT IT DELIBERATELY DOES NOT COUNT.
   * lowercase calls — most are the reader's own helper, declared as such in
     the prose (`find_user`, `load_config`, `do_work`), and counting them
     drowns the signal;
-  * anything the PAGE declares, in any of its blocks.  A page is one
-    narrative: a type introduced in block 1 and used in block 4 is not a
-    defect, and block-scoped locality reported 101 names where page-scoped
-    reports 93;
+  * anything the DOCUMENTATION CORPUS declares, in any block of any page.
+    Scope was widened twice, and each widening was forced by a measured
+    false positive.  Block-scoped reported 101 names; page-scoped reported
+    93; corpus-scoped reports 81.  The last widening is the one that
+    matters: `Http` (8 pages) and `ConsoleLogger` (6) are reader-supplied
+    CONTEXTS, declared once in `cookbook/http-client.md` and
+    `tutorials/context-system.md` and used everywhere else by a convention
+    the first of those pages states outright — "`Http` below is a context
+    you declare and `provide`, the way every example on this site uses
+    it".  Counting them as defects would push the site toward duplicating
+    a declaration it deliberately factored out;
   * built-in and primitive names, which are not in `core/` because they are
     in the language.
 
@@ -45,7 +52,7 @@ CORE = os.path.join(REPO, "core")
 
 # Every `(name, page)` pair the site carries today.  Lowering it is the work;
 # raising it means a doc started naming something the library does not have.
-BASELINE = 121
+BASELINE = 95
 
 BLOCK = re.compile(r"^```verum(?:[ \t][^\n]*)?\n(.*?)^```", re.M | re.S)
 DECL = re.compile(
@@ -76,7 +83,7 @@ def core_declarations():
     return out
 
 
-def page_local(blocks):
+def declared_in_blocks(blocks):
     joined = " ".join(blocks)
     out = set(DECL.findall(joined))
     for group in MOUNTED.findall(joined):
@@ -88,7 +95,7 @@ def page_local(blocks):
 
 def census():
     declared = core_declarations()
-    pairs = []
+    pages = {}
     for root, _, files in os.walk(DOCS):
         for f in files:
             if not (f.endswith(".md") or f.endswith(".mdx")):
@@ -96,14 +103,21 @@ def census():
             path = os.path.join(root, f)
             text = io.open(path, encoding="utf-8", errors="replace").read()
             blocks = BLOCK.findall(text)
-            if not blocks:
+            if blocks:
+                pages[os.path.relpath(path, DOCS)] = blocks
+
+    # A name the corpus itself introduces is the reader's, not a defect.
+    from_docs = set()
+    for blocks in pages.values():
+        from_docs |= declared_in_blocks(blocks)
+
+    pairs = []
+    for rel, blocks in sorted(pages.items()):
+        used = set(RECEIVER.findall(" ".join(blocks)))
+        for name in sorted(used):
+            if name in declared or name in from_docs or name in BUILTIN:
                 continue
-            local = page_local(blocks)
-            rel = os.path.relpath(path, DOCS)
-            for name in sorted(set(RECEIVER.findall(" ".join(blocks)))):
-                if name in declared or name in local or name in BUILTIN:
-                    continue
-                pairs.append((name, rel))
+            pairs.append((name, rel))
     return declared, pairs
 
 
