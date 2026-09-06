@@ -102,8 +102,12 @@ check-examples-run: ## Gate: a shipped example that COMPILES must also RUN — n
 gates-docs: check-doc-examples check-examples-run check-homepage-examples check-doc-indented-blocks \
             check-doc-cli-flags check-doc-anchors check-doc-error-codes \
             check-grammar-docs-match check-by-example check-doc-blocks-parse \
-            check-doc-names-exist ## Every documentation gate CI runs — needs a build
+            check-doc-names-exist check-doc-method-names ## Every documentation gate CI runs — needs a build
 	@echo "gates-docs: all documentation gates green"
+
+check-doc-method-names: ## Gate: a method a doc example calls on a `core/` type must exist (the receiver gate checks only the RECEIVER)
+	python3 scripts/ci/check_doc_method_names.py --self-test
+	python3 scripts/ci/check_doc_method_names.py
 
 check-doc-cli-flags: ## Gate: every CLI flag the docs show must exist in the binary — needs a build
 	python3 scripts/ci/check_doc_cli_flags.py --self-test
@@ -161,7 +165,7 @@ check-grammar-docs-match: ## Gate: EBNF shown in the documentation must match gr
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
 
-gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication ## Every gate that needs only the SOURCE TREE — no build, no artefacts check-register-shas
+gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-type-param-name-rule ## Every gate that needs only the SOURCE TREE — no build, no artefacts check-register-shas
 
 	@echo "gates-source: all source-only gates green"
 
@@ -171,6 +175,10 @@ gates-source-report: ## Run EVERY source-only gate past the first failure and su
 check-phantom-mounts: ## Gate (T0780): mounts naming a symbol the module does not export. NEEDS a built verum; ~15 min, NOT in gates-source.
 	@test -n "$(VERUM)" || (echo "usage: make check-phantom-mounts VERUM=/path/to/verum" && false)
 	python3 scripts/ci/check_phantom_mounts.py $(VERUM)
+
+check-type-param-name-rule: ## Ratchet: places deciding "is this a type parameter" from a name's SPELLING (11; two thresholds that disagree — T1206)
+	python3 scripts/ci/check_type_param_name_rule_ratchet.py --self-test
+	python3 scripts/ci/check_type_param_name_rule_ratchet.py
 
 check-error-code-namespaces: ## Gate: one namespace for error codes — no code means two things.
 	python3 scripts/ci/check_error_code_namespaces.py

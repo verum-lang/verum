@@ -254,8 +254,11 @@ Regression guard:
   `Shared<T>` reaches through the wrapper — `handle_call_method` has a
   documented Deref last resort, and T1183 / T1186 fixed and extended it.
   `s.field` has no counterpart, so the two syntaxes disagree about what
-  a `Shared<T>` is: field 0 answers a slot of the CARRIER (a silent
-  wrong number) and field 1 dereferences null. Tracked as T1202, and it
+  a `Shared<T>` is: field 0 answers a slot of the WRAPPER itself (a
+  silent wrong number — the declared `Shared { ptr, generation, epoch }`,
+  NOT a substituted carrier; that reading was mine and was retracted
+  after the raw dump showed slot 0 holds a NaN-boxed `ptr`) and field 1
+  dereferences null. Tracked as T1202, and it
   is the same shape as this contract seen from the other side — this
   document is about a boundary erasing WHICH KIND of reference you
   hold, T1202 about a wrapper being transparent to one syntax and

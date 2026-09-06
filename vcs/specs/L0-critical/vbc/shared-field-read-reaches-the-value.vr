@@ -12,19 +12,29 @@
 // Regression guard for T0393: `s.field` on a `Shared<T>` must reach the
 // WRAPPED value, not the wrapper's own fields.
 //
-// TIER 1 ONLY, and that is deliberate rather than an omission. The two
-// tiers do not hold the same object for a `Shared` value:
+// TIER 1 ONLY, and that is deliberate rather than an omission: the
+// interpreter has its OWN defect in this same syntax, owned by T1202. A
+// `differential` spec here would fail on the interpreter for a reason
+// this file is not about — which is how a regression guard starts
+// reporting somebody else's defect and then gets muted.
 //
-//     AOT           `s` is the declared record — measured f0 = an
-//                   ADDRESS (`ptr`), f1 = 1 (`generation`)
-//     interpreter   `s` is a substituted carrier — measured slot 0 = 1,
-//                   which `ptr` cannot be
+// THIS HEADER PREVIOUSLY SAID SOMETHING FALSE and the retraction is
+// kept because the false version is the more tempting reading. It said
+// the two tiers hold DIFFERENT OBJECTS — that AOT has the declared
+// record while the interpreter substitutes a carrier — and offered as
+// evidence that the interpreter's slot 0 reads as `1`, which `ptr`
+// cannot be. The raw dump disproves it:
 //
-// So this defect has two causes and two fixes. T1202 owns the
-// interpreter's, and a `differential` spec here would fail on the
-// interpreter for a reason this file is not about — which is how a
-// regression guard starts reporting somebody else's defect and gets
-// muted.
+//     slot 0 = 0x7ff9000af6c525a0     Int-TAGGED, i.e. `ptr`
+//     slot 1 = 1                      `generation` — and this is the
+//                                     `1` I had attributed to slot 0,
+//                                     reached by an `.add(1)` peel
+//
+// Both tiers hold the same declared `Shared { ptr, generation, epoch }`.
+// I read a NaN-boxed address as a small integer, and built a two-object
+// theory on the unparsed tag. The two fixes are still separate, but
+// because the two PEELS are separately wrong — not because the two
+// tiers disagree about what a `Shared` IS.
 //
 // WHAT IT WOULD CATCH. Before the fix, `s.a` and `s.b` read fields 0 and
 // 1 of `Shared<T> { ptr, generation, epoch }`:

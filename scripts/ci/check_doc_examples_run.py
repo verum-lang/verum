@@ -124,10 +124,28 @@ except Exception:  # the sibling gate is optional; without it nothing is dropped
 # has agreed to carry.
 KNOWN_FAILURES = {
     "by-example/13-channels":
-        "T1202 — a field read through `Shared<T>` answers a slot of the "
-        "carrier; `Sender.clone` opens with `self.inner.sender_count`. "
-        "Predates 2026-09-06 08:43, interpreter-side, not this corpus's "
-        "fault.",
+        "T1205 (was T1202) — the FIELD-path peel through `Shared<T>` reads "
+        "the wrapper's own slots. Measured on 2026-09-06 19:43, "
+        "interpreter, after T1202's read-path fix (35cb24f9e) landed:\n"
+        "    sent 10 values\n"
+        "    Panic: field access out of bounds: field index 6 "
+        "(offset 48+8 = 56) exceeds object data size 24 type_id=520 "
+        "type='Shared' backtrace=[Receiver.recv@pc=15 <- drain@pc=21 <- "
+        "main@pc=140] -- declared fields (3): [ptr, generation, epoch]\n"
+        "Field 6 is `ChannelInner.notify_seq`, applied to the 3-field "
+        "wrapper. Not this corpus's fault.\n"
+        "RE-KEYED TWICE, and both re-keys are the reason this comment is "
+        "long. It first said the interpreter substitutes a CARRIER object "
+        "-- a theory of mine that the raw dump refuted (slot 0 is a "
+        "NaN-boxed `ptr`, not a `1`). It then still named `Sender.clone` "
+        "and a null dereference, which is where this failed BEFORE the "
+        "read-path fix; the send half now completes and the failure moved "
+        "to `Receiver.recv` with an honest bounds refusal. A baseline "
+        "keyed to a reason that has stopped applying is the exact "
+        "false-green this gate exists to prevent: the program still "
+        "fails, the count still matches, and the entry describes "
+        "something that no longer happens. Caught by the T1202 owner "
+        "reading my entry, not by me.",
 }
 
 TIMEOUT_RUN = 60
