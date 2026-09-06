@@ -2403,6 +2403,21 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         // as it is for the four above.
         self.register_tiers.remove(&reg);
         self.reference_registers.remove(&reg);
+        // **T1194, and it is LATENT rather than live — say which.**
+        // `custom_iter_type_names` survives a store, but its only readers
+        // both gate on `is_custom_iter_register`, which consults
+        // `reg_types` — cleared on the line above — so a stale name is
+        // currently unreachable. Cleared anyway because the invariant
+        // should be LOCAL: today it holds because a second producer
+        // (`vbc_lowering.rs`'s `register_type_hints` pass, which sets
+        // `RegisterType::CustomIterator` DIRECTLY and never writes this
+        // map) happens to run before the instruction walk rather than
+        // after. That is an ordering fact about two files, not a
+        // property of this one, and `IterNext` reads the name with
+        // `.unwrap_or_default()` — so the failure it would produce is an
+        // EMPTY or WRONG type name resolving `<T>.next` to the wrong
+        // method, silently.
+        self.custom_iter_type_names.remove(&reg);
         self.list_registers.remove(&reg);
         // **STALE-GENERIC-ARGS-1 (T1167)** — the type ARGUMENTS are a
         // per-value fact like every other line here, and leaving them
