@@ -562,6 +562,35 @@ pub(in super::super) fn handle_deref(
                             inner.is_ptr(),
                             dump,
                         );
+                        // WHAT DOES THE INTERPRETER ITSELF KNOW about the
+                        // address in slot 0?  For a `Shared` that slot is
+                        // `ptr`, an Int-tagged `cbgr_alloc` address, and the
+                        // whole open question on T1202 is what lives there.
+                        //
+                        // These three tables are the interpreter's OWN record
+                        // of every address it handed out — the same ones
+                        // `handle_deref`'s arms branch on above.  Asking them
+                        // is a measurement; reading bytes at a guessed offset
+                        // is not, and two such guesses have already been
+                        // reverted here.
+                        if slots > 0 {
+                            // SAFETY: `slots > 0`, so slot 0 is inside the
+                            // object's data area.
+                            let p0 = unsafe { *data };
+                            let addr = (p0.bits() & 0x0000_ffff_ffff_ffff) as usize;
+                            eprintln!(
+                                "[deref]   slot0 addr=0x{:x} in_cbgr_allocations={} \
+                                 bridge_extent_room={:?} in_mutable_ptrs={} \
+                                 header_addr_in_allocations={}",
+                                addr,
+                                state.cbgr_allocations.contains(&addr),
+                                bridge_extent_room(state, addr),
+                                state.cbgr_mutable_ptrs.contains(&addr),
+                                state.cbgr_allocations.contains(&addr.wrapping_sub(
+                                    verum_common::layout::ALLOCATION_HEADER_SIZE as usize,
+                                )),
+                            );
+                        }
                     }
                     state.set_reg(dst, inner);
                     return Ok(DispatchResult::Continue);
