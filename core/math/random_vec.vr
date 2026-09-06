@@ -10,6 +10,20 @@
 // The scalar generators stay where they are: they need no `Vector`, and
 // a byte-primitive module is the right home for them.
 
+// A66 MOVED THESE EIGHT FUNCTIONS HERE and gave the file no module
+// header, so `core/rings.toml` declared `math.random_vec` at ring 3
+// against a file that declared no module at all, and
+// `make check-arch-attestation` counted it as the one unattested
+// module in `core/`.  Its siblings at this ring — `math.distributed`,
+// `math.stack_model` — carry exactly this attestation; the ring is
+// already the one `rings.toml` names.
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
+module core.math.random_vec;
+
 mount core.math.linalg.{Vector};
 mount core.random.deterministic.{RandomKey, uniform_01, uniform, normal_01, normal, exponential};
 mount core.math.elementary.{log, exp};
