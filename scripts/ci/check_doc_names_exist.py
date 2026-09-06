@@ -52,7 +52,7 @@ CORE = os.path.join(REPO, "core")
 
 # Every `(name, page)` pair the site carries today.  Lowering it is the work;
 # raising it means a doc started naming something the library does not have.
-BASELINE = 21
+BASELINE = 22
 
 BLOCK = re.compile(r"^```verum(?:[ \t][^\n]*)?\n(.*?)^```", re.M | re.S)
 DECL = re.compile(
@@ -172,6 +172,34 @@ def declared_in_blocks(blocks):
     return out
 
 
+HOMEPAGE = os.path.join(os.path.dirname(DOCS), "src", "pages", "index.tsx")
+
+
+def homepage_samples():
+    """The marketing homepage's Verum samples, via the gate that owns them.
+
+    The owner asks for that page to be the site's best, and it sat outside
+    this census: it is `.tsx`, not `.md`.  Reusing
+    `check_homepage_examples.blocks` rather than grabbing template literals
+    matters — a crude grab returned `LANGUAGE` and `React` as undeclared
+    Verum receivers, which is TypeScript.
+    """
+    if not os.path.isfile(HOMEPAGE):
+        return []
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "homepage_gate",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "check_homepage_examples.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:
+        return []
+    src = io.open(HOMEPAGE, encoding="utf-8", errors="replace").read()
+    return [body for _, body in mod.blocks(src)]
+
+
 def census():
     declared = core_declarations()
     pages = {}
@@ -185,6 +213,9 @@ def census():
             blocks = BLOCK.findall(text)
             if blocks:
                 pages[os.path.relpath(path, DOCS)] = blocks
+    home = homepage_samples()
+    if home:
+        pages["src/pages/index.tsx"] = home
 
     # A name the corpus itself introduces is the reader's, not a defect.
     from_docs = set()
