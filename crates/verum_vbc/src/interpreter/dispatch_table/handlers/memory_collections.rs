@@ -396,7 +396,7 @@ pub(in super::super) fn handle_get_field(
     // drift). `ptr` may now point at the inner value; the variant check
     // below re-reads the header from the updated ptr. Shared<Heap<T>> still
     // falls through to the existing variant unwrap.
-    ptr = shared_carrier_inner(header, ptr)?;
+    ptr = shared_carrier_inner(state, header, ptr)?;
 
     // SAFETY: Re-read header — `ptr` may have advanced past Shared
     // auto-deref above; alignment was re-verified inside the Shared
@@ -561,6 +561,11 @@ pub(in super::super) fn handle_get_field(
 ///
 /// SAFETY: caller must have verified `ptr` alignment for `ObjectHeader`.
 fn shared_carrier_inner(
+    // DIAGNOSTIC ONLY.  `state` is read exclusively to name the enclosing
+    // function in the `VERUM_TRACE_DEREF` output (T1205); no arm below
+    // consults it, so this parameter changes no behaviour — which the
+    // unchanged 7/7 acceptance is the evidence for.
+    state: &InterpreterState,
     header: &heap::ObjectHeader,
     ptr: *mut u8,
 ) -> InterpreterResult<*mut u8> {
@@ -570,11 +575,30 @@ fn shared_carrier_inner(
     // traces share one flag so a single run shows both, which is the
     // only way to see them disagree.
     let trace = std::env::var("VERUM_TRACE_DEREF").is_ok();
+    // WHICH FUNCTION IS ASKING.  T1205's open question is what separates the
+    // `GetF`s `Shared.new` performs on the carrier it is building from a
+    // user's field read — both see a SHARED-stamped receiver, so the
+    // receiver cannot answer.  verum-35's structural hypothesis is that the
+    // ENCLOSING FUNCTION can: construction-time firings sit inside a method
+    // of `Shared`, a user read never does.  That is measurable here and is
+    // measured before anything is written, because the last four attempts on
+    // this defect each reached for a mechanism first.
+    let asking = if trace {
+        state
+            .call_stack
+            .current()
+            .and_then(|f| state.module.get_function(f.function))
+            .and_then(|d| state.module.get_string(d.name))
+            .unwrap_or("<unknown>")
+            .to_string()
+    } else {
+        String::new()
+    };
     if header.type_id != TypeId::SHARED {
         if trace {
             eprintln!(
-                "[getf-peel] declined: type_id={:?} is not SHARED",
-                header.type_id,
+                "[getf-peel] in={} declined: type_id={:?} is not SHARED",
+                asking, header.type_id,
             );
         }
         return Ok(ptr);
@@ -595,7 +619,7 @@ fn shared_carrier_inner(
             });
         }
         if trace {
-            eprintln!("[getf-peel] peeled to inner object {:p}", inner);
+            eprintln!("[getf-peel] in={} peeled to inner object {:p}", asking, inner);
         }
         return Ok(inner);
     }
@@ -603,8 +627,9 @@ fn shared_carrier_inner(
         // THE ARM THAT ANSWERS WITH THE CARRIER ITSELF.  A field read then
         // lands on slot 0 — the refcount — which is T1202's `1`.
         eprintln!(
-            "[getf-peel] SHARED but inner is not a pointer (tag={:?}) — \
-             returning the CARRIER, so the field read hits the refcount",
+            "[getf-peel] in={} SHARED but inner is not a pointer (tag={:?}) \
+             — returning the CARRIER, so the field read hits the refcount",
+            asking,
             unsafe { shared_cell_inner_value(ptr) }.tag(),
         );
     }
@@ -759,7 +784,7 @@ pub(in super::super) fn handle_set_field(
     // `&mut self` write through a Shared carrier landed in the cell (field 0
     // clobbered the refcount) instead of reaching the inner T. ONE authority
     // with the reader (handle_get_field) so the two sides cannot drift.
-    ptr = shared_carrier_inner(header, ptr)?;
+    ptr = shared_carrier_inner(state, header, ptr)?;
     // Re-read the header for the (possibly Shared-deref'd) inner object.
     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     if header.type_id.0 >= 0x8000 {
@@ -1663,7 +1688,7 @@ pub(in super::super) fn handle_array_len(
     // no longer SHARED, which after the loop above it never is.
     let ptr = {
         let carrier_header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-        shared_carrier_inner(carrier_header, ptr)?
+        shared_carrier_inner(state, carrier_header, ptr)?
     };
 
     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
