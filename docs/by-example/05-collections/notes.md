@@ -75,9 +75,14 @@ for (word, n) in &counts {
 ```
 
 `for (k, v) in &map` iterates by reference, destructuring each
-`(K, V)` entry into named bindings. Iteration order is
-insertion-order (Verum's `Map` preserves it; this is a documented
-contract, unlike Rust's `HashMap`).
+`(K, V)` entry into named bindings. **Iteration order is
+UNSPECIFIED.** `Map` is open-addressed with tombstones and `resize`
+moves entries, so the order you get is a function of hashes and of the
+insert history — measured: inserting `zebra, apple, mango, kiwi` and
+iterating gives `mango kiwi apple zebra`. Nothing in
+`core/collections/map.vr` promises otherwise. Sort the keys if you need
+an order, and do not compare a `Map`'s iteration against a literal in a
+test.
 
 ```verum
 let doubled: List<Int> = nums.iter().map(|n| n * 2).collect();
