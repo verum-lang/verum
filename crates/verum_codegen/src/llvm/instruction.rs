@@ -37838,35 +37838,6 @@ fn mark_register_from_return_type<'ctx>(
             // path and the loop deref'd the element value (fault addr ==
             // len). Recurse on the inner type.
             mark_register_from_return_type(ctx, reg, inner);
-
-            // **REF-RETURN-IS-A-SLOT-1 (T1188)** — that transparency
-            // holds for CONTAINERS, whose Tier-1 value already IS a
-            // pointer. It does not hold for a reference to a RECORD:
-            // there the callee returns the ADDRESS OF A SLOT, and the
-            // next field read applies the record layout to that address
-            // instead of to the object it points at —
-            //
-            //     let inner = shared.deref();   // -> &T, an address
-            //     inner.url                     // GetF at addr+24 -> empty
-            //
-            // `is_interior_list_ref` already means "this register holds
-            // a slot address whose content is a Value", and GetF already
-            // loads through it (the `&list[i]` path); the name says List
-            // for historical reasons, the property is about slots.
-            //
-            // Gated to references whose referent is a plain user type,
-            // so the container transparency above is untouched: a
-            // container return has already marked itself list/map/text/
-            // slice by the time control reaches here.
-            let referent_is_container = ctx.is_list_register(reg)
-                || ctx.is_map_register(reg)
-                || ctx.is_set_register(reg)
-                || ctx.is_deque_register(reg)
-                || ctx.is_text_register(reg)
-                || ctx.is_slice_register(reg);
-            if !referent_is_container {
-                ctx.mark_interior_list_ref(reg);
-            }
         }
         TypeRef::Concrete(tid) => {
             // User-defined struct type (e.g., Token, Span, Parser) — track for GetF
