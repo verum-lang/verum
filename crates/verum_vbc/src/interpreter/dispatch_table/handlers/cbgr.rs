@@ -196,43 +196,62 @@ fn shared_inner_cell(state: &InterpreterState, base_ptr: *mut u8) -> Option<*mut
     if header.type_id != TypeId::SHARED {
         return None;
     }
-    // **KNOWN WRONG, AND KEPT (T1202) — THE OBJECT IS NOW DESCRIBED.**
+    // **SHARED-IS-TWO-HOPS-1 (T1202).**  A `Shared<T>` is TWO objects and
+    // this used to read one hop into the first:
     //
-    // `VERUM_TRACE_DEREF=1` on `Shared.new(One { only: 9999 })`:
+    //     Shared { ptr, generation, epoch }      a heap object, ObjectHeader,
+    //                                            TypeId::SHARED, NaN-boxed
+    //     SharedInner { strong_count,            a BRIDGE EXTENT of 24 bytes,
+    //                   weak_count, value }      holding NaN-boxed Values
     //
-    //     arm=shared_peel size=24B slots=3
-    //       [0] raw=0x7ff9000af6c525a0  tag=Some(1)   an ADDRESS, Int-tagged
-    //       [1] raw=0x7ff9000000000001  tag=Some(1)   1
-    //       [2] raw=0x7ff9000000000002  tag=Some(1)   2
+    // `.add(1)` landed on `generation`, so a field read through a `Shared`
+    // answered `1` for a record holding 9999, and any field past the first
+    // walked off the end into a null.
     //
-    // The `0x7ff9` prefix on every word says these are NaN-boxed `Value`s,
-    // so `tag()` is a valid reader here and the block is NOT packed.  The
-    // payloads name the object: it is the ORDINARY STDLIB RECORD
-    // `Shared { ptr, generation, epoch }` (`core/base/memory.vr:597`) with
-    // `ptr` Int-tagged, `generation = 1`, `epoch = 2`.  Not a two-slot
-    // carrier, not `SharedInner`.
+    // MEASURED, not inferred (`VERUM_TRACE_DEREF=1`):
     //
-    // So `.add(1)` returns `generation`, which is why `s.field` answers `1`
-    // for a record holding 9999 — and why reading the LAST slot instead,
-    // which was built and measured, answered `2` (`epoch`) and fixed
-    // nothing.  It was reverted: one wrong answer becoming a different
-    // wrong answer is a perturbation, not a repair.
+    //     Shared slots  [0]=0x7ff9…c525a0 an Int-tagged ADDRESS
+    //                   [1]=0x7ff9…0001   generation
+    //                   [2]=0x7ff9…0002   epoch
+    //     slot0 addr    in_cbgr_allocations=false
+    //                   bridge_extent_room=Some(24)   <- a bridge extent
+    //     extent words  +0 =0x7ff9…0001   strong_count
+    //                   +8 =0x7ff9…0000   weak_count
+    //                   +16=0x7ff8…53120  value — tag 0x7ff8, a POINTER
     //
-    // THE GATE IS RIGHT AND THE BODY IS WRONG.  This record's `type_id` IS
-    // `TypeId::SHARED`, so accepting it is correct; treating it as the
-    // RETIRED `[refcount][value]` carrier (T1159, `method_dispatch.rs:1486`
-    // and `:1924`, both `if false &&`) is not.
+    // The extent's contents are NaN boxes because `bridge_flat_store`
+    // MEMCPYS a record's data section rather than encoding it; T0108's
+    // "never a NaN box" is about the SCALAR write arm, which is a different
+    // path.  Both statements are true.
     //
-    // THE REPAIR IS TWO HOPS: slot 0 (`ptr`, Int-tagged — which is also why
-    // `is_ptr()` says false and the caller's peel declines) to the
-    // `SharedInner` block, then its `value` field.  T0393 measured the same
-    // chain from the AOT side as `load(s+24)` then `load(ptr+16)`.
+    // THE OFFSET COMES FROM THE DECLARATION — `value` is `SharedInner`'s
+    // third field — and T0393 measured the AOT side reaching it at
+    // `load(ptr+16)`, the same place from a different tier.  THE BOUND comes
+    // from the interpreter's own extent index, so a short or absent block
+    // yields `None` rather than a read past the end.
     //
-    // NOT DONE HERE because the second hop needs a reader for the
-    // `cbgr_alloc` block, whose representation is unmeasured — and guessing
-    // it is how the first two attempts went wrong.
-    // SAFETY: the pointer stays within the Shared object's data area.
-    Some(unsafe { (base_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value).add(1) })
+    // DELIBERATELY ONLY THIS PEEL.  `memory_collections::shared_carrier_inner`
+    // holds the same knowledge and is NOT touched here: read in execution
+    // order, its firings all land during `Shared.new`, never between the
+    // `Deref` and the `GetF` of a field read.  An earlier attempt changed
+    // both, moved the construction path, and regressed `s.deref()` — so the
+    // two peels are fixed one at a time, each against its own measurement.
+    const VALUE_SLOT: usize = 2;
+    // Hop 1: the `ptr` field.  `cbgr_alloc` returns an INT-tagged address
+    // (T0108) — which is also why `is_ptr()` on this slot says false.
+    // SAFETY: SHARED type-id and alignment established above.
+    let carrier = unsafe { *(base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
+    let addr = (carrier.bits() & crate::value::PAYLOAD_MASK) as usize;
+    if addr == 0 || addr % std::mem::align_of::<Value>() != 0 {
+        return None;
+    }
+    // Hop 2: into the extent, bounded by the interpreter's own record of it.
+    let room = bridge_extent_room(state, addr)?;
+    if room < (VALUE_SLOT + 1) * std::mem::size_of::<Value>() {
+        return None;
+    }
+    // SAFETY: the extent proves the slot lies inside a live payload.
+    Some(unsafe { (addr as *mut Value).add(VALUE_SLOT) })
 }
 
 /// Width of one packed scalar slot in a bridge allocation, in bytes.
