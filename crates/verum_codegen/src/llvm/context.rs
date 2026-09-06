@@ -468,7 +468,29 @@ pub struct FunctionContext<'a, 'ctx> {
     /// register.  `GetVariantData` carries no tag of its own, so the dominating
     /// `IsVar` (which does) is what tells the extraction whether it is reading
     /// the Ok (tag 0) or Err (tag 1) arm of a `Result`.
-    variant_match_tags: HashMap<u16, u32>,
+    /// The tag a dominating `IsVar` tested on a register, paired with a
+    /// monotone SEQUENCE number.
+    ///
+    /// **T1206.** The sequence is not decoration. Several registers can
+    /// share one extraction provenance across DIFFERENT match arms —
+    /// each arm re-extracts the same `(source, field)` and `IsVar`s it
+    /// with that arm's tag — so a sibling lookup finds several
+    /// candidates and a `HashMap` hands back an arbitrary one. Measured:
+    /// the classifier read tag 0 (`Simple`) inside the `Pair` arm, which
+    /// was accidentally RIGHT for field 0 (both variants carry `Text`
+    /// there) and wrong for field 1, so half a tuple classified. The
+    /// most RECENTLY recorded tag is the arm being lowered, because a
+    /// match lowers as a linear chain.
+    variant_match_tags: HashMap<u16, (u32, u64)>,
+    /// Monotone counter for the above.
+    variant_match_seq: u64,
+    /// **T1206.** Which `(source register, field index)` a register was
+    /// extracted from by `GetVariantData`. Not a fact about the VALUE —
+    /// a fact about WHERE IT CAME FROM, which is what lets a nested
+    /// extraction find the tag `IsVar` recorded on a SIBLING extraction
+    /// of the same thing. Cleared by `set_register` like every other
+    /// per-register fact.
+    variant_extraction: HashMap<u16, (u16, u32)>,
 
     /// Registers where Ref passed through the value instead of creating a pointer.
     /// In VBC semantics, `&x` for primitives (Int, Float, Bool) is just `x` (value copy).
@@ -846,6 +868,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             variant_registers: std::collections::HashSet::new(),
             result_arm_types: HashMap::new(),
             variant_match_tags: HashMap::new(),
+            variant_match_seq: 0,
+            variant_extraction: HashMap::new(),
 
             closure_return_types: HashMap::new(),
             pending_closure_captures: Vec::new(),
@@ -955,6 +979,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             variant_registers: std::collections::HashSet::new(),
             result_arm_types: HashMap::new(),
             variant_match_tags: HashMap::new(),
+            variant_match_seq: 0,
+            variant_extraction: HashMap::new(),
 
             closure_return_types: HashMap::new(),
             pending_closure_captures: Vec::new(),
@@ -1337,12 +1363,114 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// following `GetVariantData` on the same register (which carries no tag)
     /// selects the matching `Result` arm.
     pub fn set_variant_match_tag(&mut self, reg: u16, tag: u32) {
-        self.variant_match_tags.insert(reg, tag);
+        self.variant_match_seq += 1;
+        let seq = self.variant_match_seq;
+        self.variant_match_tags.insert(reg, (tag, seq));
     }
 
     /// T0241 — the tag last tested against `reg` by `IsVar`, if any.
     pub fn get_variant_match_tag(&self, reg: u16) -> Option<u32> {
-        self.variant_match_tags.get(&reg).copied()
+        self.variant_match_tags.get(&reg).map(|(tag, _)| *tag)
+    }
+
+    /// The match tag recorded for `reg`, or for any register that currently
+    /// holds the **same LLVM value**.
+    ///
+    /// **T1206.** A nested `GetVariantData` reads the inner sum out of a
+    /// register that was written by a SECOND, identical extraction, while the
+    /// dominating `IsVar` tagged the FIRST one:
+    ///
+    /// ```text
+    /// 26: GetVariantData { dst: Reg(5), variant: Reg(0), field: 0 }
+    /// 27: IsVar          { value: Reg(5), tag: 1 }      <- tag lands on r5
+    /// 29: GetVariantData { dst: Reg(4), variant: Reg(0), field: 0 }
+    /// 30: GetVariantData { dst: Reg(5), variant: Reg(4), field: 0 }
+    ///                                             ^ r4 has no tag
+    /// ```
+    ///
+    /// Both registers hold the value produced by one `lower_get_variant_data`,
+    /// so they are the SAME `BasicValueEnum` — LLVM SSA identity, not a
+    /// heuristic about names or numbers. Asking the VALUE rather than the
+    /// register number is what makes this exact; an alias SET would have to be
+    /// maintained and invalidated, and a per-register alias fact outliving its
+    /// value is the T1167 / T1194 class this deliberately avoids.
+    ///
+    /// SOUNDNESS OF "MOST RECENT". A `match` lowers to a chain of
+    /// `IsVar`/`JmpNot`, and arm N's payload extraction sits between arm N's
+    /// `IsVar` and arm N+1's. Walking linearly, the last tag recorded for a
+    /// value is therefore the arm currently being lowered. That is a property
+    /// of the emitted layout, not a proof about all possible layouts, which is
+    /// why every caller treats a tag naming no payload-carrying variant as
+    /// "decline" rather than "pick something".
+    /// Record that `dst` was extracted from `(src, field)` by
+    /// `GetVariantData`. Call AFTER the `set_register(dst, ..)` that
+    /// stores the extracted value — `set_register` clears this map, so a
+    /// record written first is a record immediately erased. (T1194.)
+    pub fn set_variant_extraction(&mut self, dst: u16, src: u16, field: u32) {
+        self.variant_extraction.insert(dst, (src, field));
+    }
+
+    /// The match tag that applies to `reg`, found three ways, cheapest first.
+    ///
+    /// **T1206.** A nested `GetVariantData` reads the inner sum out of a
+    /// register written by a SECOND extraction, while the dominating
+    /// `IsVar` tagged the FIRST:
+    ///
+    /// ```text
+    /// 26: GetVariantData { dst: Reg(5), variant: Reg(0), field: 0 }
+    /// 27: IsVar          { value: Reg(5), tag: 1 }      <- tag lands on r5
+    /// 29: GetVariantData { dst: Reg(4), variant: Reg(0), field: 0 }
+    /// 30: GetVariantData { dst: Reg(5), variant: Reg(4), field: 0 }
+    ///                                             ^ r4 has no tag
+    /// ```
+    ///
+    /// 1. the tag recorded directly on `reg`;
+    /// 2. **PROVENANCE** — a register extracted from the same
+    ///    `(source, field)` that does have one. r5 and r4 are both
+    ///    `(r0, 0)`, so r4 finds r5's tag. Exact: two reads of one field
+    ///    of one register are the same value by construction, whatever
+    ///    the codegen chose to emit for each;
+    /// 3. LLVM SSA identity, kept because it is free and sound.
+    ///
+    /// RULE 3 ALONE WAS TRIED AND MEASURED INSUFFICIENT. Instr 26 and 29
+    /// are two separate `lower_get_variant_data` calls, so they emit two
+    /// distinct instructions and two distinct `BasicValueEnum`s; LLVM may
+    /// CSE them afterwards, but the codegen sees them as different values
+    /// while lowering, which is the only time this runs. The trace said
+    /// `tag=None` and that is what sent this to rule 2.
+    ///
+    /// SOUNDNESS OF "MOST RECENT". A `match` lowers to a chain of
+    /// `IsVar`/`JmpNot`, and arm N's payload extraction sits between arm
+    /// N's `IsVar` and arm N+1's. Walking linearly, the last tag recorded
+    /// is the arm being lowered. That is a property of the emitted layout,
+    /// not a proof about all layouts, which is why every caller treats a
+    /// tag naming no variant as "decline" rather than "pick something".
+    pub fn variant_match_tag_by_value(&self, reg: u16) -> Option<u32> {
+        if let Some((tag, _)) = self.variant_match_tags.get(&reg).copied() {
+            return Some(tag);
+        }
+        // Among provenance siblings, take the LATEST tag, not an arbitrary
+        // one: several arms of one `match` re-extract the same
+        // `(source, field)` and each tags its own copy, so `find_map` over a
+        // `HashMap` returns whichever the hash order happens to yield.
+        if let Some(origin) = self.variant_extraction.get(&reg).copied() {
+            if let Some((tag, _)) = self
+                .variant_extraction
+                .iter()
+                .filter(|(other, o)| **other != reg && **o == origin)
+                .filter_map(|(other, _)| self.variant_match_tags.get(other).copied())
+                .max_by_key(|(_, seq)| *seq)
+            {
+                return Some(tag);
+            }
+        }
+        let val = self.registers.get(&reg)?;
+        self.registers
+            .iter()
+            .filter(|(other, v)| *other != &reg && *v == val)
+            .filter_map(|(other, _)| self.variant_match_tags.get(other).copied())
+            .max_by_key(|(_, seq)| *seq)
+            .map(|(tag, _)| tag)
     }
 
     /// Mark a register as holding a variant value (heap-allocated variant or null).
@@ -2471,6 +2599,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         // reused slot never re-classifies a fresh value from a stale arm.
         self.result_arm_types.remove(&reg);
         self.variant_match_tags.remove(&reg);
+        self.variant_extraction.remove(&reg);
         self.heap_alloc_registers.remove(&reg);
         self.gen_registers.remove(&reg);
         self.map_list_value_registers.remove(&reg);

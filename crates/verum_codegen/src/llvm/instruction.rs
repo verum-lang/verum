@@ -5373,6 +5373,29 @@ pub fn lower_instruction<'ctx>(
             variant,
             field,
         } => {
+            // **T1206 — READ THE TAG BEFORE THE STORE.** `set_register(dst)`
+            // below clears every per-register fact for `dst`, and in a nested
+            // extraction `dst` is often the SAME register that holds the tag
+            // we need:
+            //
+            //   32: GetVariantData dst=r5 from=r0 f=0   provenance (r0,0)
+            //   33: IsVar          value=r5 tag=1       tag lands on r5
+            //   36: GetVariantData dst=r6 from=r0 f=0   provenance (r0,0)
+            //   37: GetVariantData dst=r5 from=r6 f=0   <- writing r5 ERASES
+            //                                              the tag it is about
+            //                                              to go looking for
+            //
+            // Measured: with the lookup after the store, field 1 of a tuple
+            // variant classified (only one variant has a field there, so
+            // unanimity applies and no tag is needed) while field 0 did not
+            // (three variants have a field 0 with three different types).
+            // `first=<address> second=beta` — a fix that half-works, and the
+            // half that worked was the half that never consulted the tag.
+            //
+            // This is T1194's own lesson arriving from the other side: that
+            // row was about a mark written BEFORE a store that erases it;
+            // this is a mark READ after one.
+            let pre_store_tag = ctx.variant_match_tag_by_value(variant.0);
             let variant_ptr = as_ptr(ctx, ctx.get_register(variant.0)?, "variant_ptr")?;
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             let value = runtime.lower_get_variant_data(ctx.builder(), variant_ptr, *field)?;
@@ -5400,6 +5423,24 @@ pub fn lower_instruction<'ctx>(
             // Match pattern bindings use GetVariantData (not AsVar) to extract payloads.
             // Without this, GetF on the extracted value can't look up field types
             // (e.g., Node.data → List), so list/map fields aren't tracked correctly.
+            // UNCONDITIONAL, and outside `field == 0` — a trace scoped to
+            // the branch it is meant to exonerate cannot report that the
+            // branch was never entered, and one scoped to field 0 cannot
+            // see the SECOND field of a tuple variant. Both mistakes were
+            // made here in turn.
+            if std::env::var_os("VERUM_TRACE_T1206").is_some() {
+                eprintln!(
+                    "[t1206] getvd dst=r{} from=r{} field={} obj_type={:?} \
+                     arm_types={} maybe_inner={:?} tag={:?}",
+                    dst.0,
+                    variant.0,
+                    *field,
+                    ctx.get_obj_register_type(variant.0),
+                    ctx.get_result_arm_types(variant.0).is_some(),
+                    ctx.get_maybe_inner_type(variant.0),
+                    pre_store_tag,
+                );
+            }
             if *field == 0 {
                 if let Some(inner_type) = ctx.get_maybe_inner_type(variant.0).map(|s| s.to_string())
                 {
@@ -5438,6 +5479,132 @@ pub fn lower_instruction<'ctx>(
                     }
                 }
             }
+            // **T1206 SUM-PAYLOAD-CLASSIFY** — one level below T0241, and
+            // OUTSIDE the `field == 0` guard above.
+            //
+            // T0241 classifies the payload of a `Result`/`Maybe`. When that
+            // payload is itself a USER SUM, its own payload is extracted by a
+            // SECOND `GetVariantData` whose source is neither — so nothing
+            // classified it and the register came out unmarked. A `Text` then
+            // reached `ToString` as an unmarked i64 and printed as its POINTER:
+            //
+            //     Err(PublishError.NotOurName(claimed, owner)) =>
+            //         print(f"refused, {claimed} does not own it — {owner} does")
+            //
+            //     tier 0   refused, upstream does not own it — local does
+            //     tier 1   refused, 4470809584 does not own it — 4470809632 does
+            //
+            // WHY NOT UNDER `field == 0`. That guard is right for `Maybe`/`Result`,
+            // whose payload is single. A TUPLE variant has one field per position
+            // — `NotOurName(Text, Text)` needs field 0 AND field 1 — and both
+            // addresses above are printed, so both miss.
+            //
+            // WHY `fields` AND NOT `payload`. `VariantDescriptor.payload:
+            // Option<TypeRef>` is documented "Payload type (None for unit
+            // variants)" and the production encoder sets it to `None`
+            // UNCONDITIONALLY (`vbc/codegen/mod.rs`); the only `payload: Some(..)`
+            // in the tree are in test fixtures. A first version of this read it
+            // and was therefore a silent no-op — the comment described an intent
+            // the encoder does not implement. The types live in `fields[i].type_ref`.
+            //
+            // WHY A SINGLE-LETTER ERROR TYPE HIDES THIS. `Result<Int, E>` is
+            // correct and `Result<Int, Foo>` is not, on thirteen measured names
+            // with a clean break at length 2: `unify.rs:1801` treats a
+            // one-character uppercase `Named` as an unconstrained TYPE PARAMETER,
+            // and that branch keeps the payload classified. The heuristic is not
+            // the defect, it is the accidental workaround — the ordinary concrete
+            // path is the broken one, so making that heuristic stricter would
+            // route the last working case into this bug.
+            if ctx.get_result_arm_types(variant.0).is_none()
+                && ctx.get_maybe_inner_type(variant.0).is_none()
+            {
+                let idx = *field as usize;
+                let per_variant: Vec<(u32, TypeRef)> = ctx
+                    .get_obj_register_type(variant.0)
+                    .map(|s| s.to_string())
+                    .and_then(|sum_name| {
+                        ctx.vbc_module().map(|m| {
+                            m.types
+                                .iter()
+                                .find(|td| {
+                                    m.get_type_name(td.id).as_deref() == Some(sum_name.as_str())
+                                })
+                                .map(|td| {
+                                    td.variants
+                                        .iter()
+                                        .filter_map(|v| {
+                                            v.fields
+                                                .get(idx)
+                                                .map(|f| (v.tag, f.type_ref.clone()))
+                                        })
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default()
+                        })
+                    })
+                    .unwrap_or_default();
+                if !per_variant.is_empty() {
+                    // **CACHE THE RESOLVED TAG ON THE SOURCE REGISTER.** A
+                    // TUPLE variant is read field by field, and the sibling
+                    // that CARRIES the tag is overwritten in between:
+                    //
+                    //   32: GetVariantData dst=r5 from=r0 f=0   provenance (r0,0)
+                    //   33: IsVar          value=r5 tag=1       tag lands on r5
+                    //   36: GetVariantData dst=r6 from=r0 f=0   provenance (r0,0)
+                    //   37: GetVariantData dst=r5 from=r6 f=0   finds r5's tag,
+                    //                                           then CLOBBERS r5
+                    //   39: GetVariantData dst=r7 from=r6 f=1   sibling gone
+                    //
+                    // Without this, `Pair(Text, Text)` classifies its first
+                    // field and not its second — `first=alpha second=<address>`,
+                    // which is a worse failure than none because it looks fixed.
+                    // Recording the tag on r6 the first time makes field 1 a
+                    // direct hit.
+                    if let Some(tag) = pre_store_tag {
+                        ctx.set_variant_match_tag(variant.0, tag);
+                    }
+                    // The tag is asked of the register, then of its extraction
+                    // PROVENANCE (a sibling read of the same source and field),
+                    // then of LLVM value identity. Failing all three, a sum
+                    // whose variants agree at this position needs no tag.
+                    let chosen = match pre_store_tag.or_else(|| ctx.variant_match_tag_by_value(variant.0)) {
+                        Some(tag) => per_variant
+                            .iter()
+                            .find(|(t, _)| *t == tag)
+                            .map(|(_, ty)| ty.clone()),
+                        None if per_variant.iter().all(|(_, ty)| *ty == per_variant[0].1) => {
+                            Some(per_variant[0].1.clone())
+                        }
+                        None => None,
+                    };
+                    if std::env::var_os("VERUM_TRACE_T1206").is_some() {
+                        eprintln!(
+                            "[t1206] classify dst=r{} from=r{} field={} sum={:?} \
+                             candidates={} tag={:?} chosen={}",
+                            dst.0,
+                            variant.0,
+                            idx,
+                            ctx.get_obj_register_type(variant.0),
+                            per_variant.len(),
+                            pre_store_tag,
+                            chosen.is_some(),
+                        );
+                    }
+                    // EVERY uncertainty ends in "do nothing", which is what this
+                    // arm did before the rule existed. Marking an Int payload as
+                    // Text would read a scalar as a heap pointer and crash —
+                    // strictly worse than an unformatted value.
+                    if let Some(ty) = chosen {
+                        mark_register_from_return_type(ctx, dst.0, &ty);
+                    }
+                }
+            }
+            // **T1206** — record WHERE this came from, after the store above
+            // (`set_register` clears this map, so a record written before it
+            // is a record immediately erased — T1194's whole lesson). A later
+            // nested extraction uses it to find the tag `IsVar` left on a
+            // SIBLING read of the same `(source, field)`.
+            ctx.set_variant_extraction(dst.0, variant.0, *field);
             // Mark variant data as pass-through for Deref: extracted variant fields
             // ARE the values themselves, not references to them. When a variant field
             // is Heap<T> (transparent wrapper), *field_val should be a no-op, not a

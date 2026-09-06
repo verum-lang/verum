@@ -9,6 +9,7 @@
 // first=alpha
 // second=beta
 // number=42
+// ratio=2.5
 // @expected-stdout-end
 //
 // Regression guard for T1206: a payload extracted from a USER SUM that
@@ -48,6 +49,16 @@
 //                     scalar as a heap pointer and crash, so a fix that
 //                     over-fires is worse than no fix, and this line is
 //                     what says it did not.
+//   `ratio`           the SECOND control, and the one an over-firing fix
+//                     damages most. A `Float` payload is the one kind the
+//                     arm already marks for itself — `is_variant_float_field`
+//                     bitcasts the i64 back to f64 before the store — so a
+//                     classifier that stamped `Text` over it would hand a
+//                     double to a heap-pointer reader. `Int` was chosen for
+//                     "cannot show the defect"; this one is chosen for
+//                     "suffers most if the fix is wrong", which is the
+//                     complementary question and was not asked until the
+//                     fix was already written.
 //
 // The sum deliberately has payload types that DISAGREE (Text, (Text,
 // Text), Int), so the classifier cannot fall back on "every variant
@@ -66,11 +77,13 @@ mount core.prelude.*;
 type Failure is
     | Simple(Text)
     | Pair(Text, Text)
-    | Numeric(Int);
+    | Numeric(Int)
+    | Fraction(Float);
 
 fn simple() -> Result<Int, Failure> { Err(Failure.Simple("hello")) }
 fn pair() -> Result<Int, Failure> { Err(Failure.Pair("alpha", "beta")) }
 fn numeric() -> Result<Int, Failure> { Err(Failure.Numeric(42)) }
+fn fraction() -> Result<Int, Failure> { Err(Failure.Fraction(2.5)) }
 
 fn main() {
     match simple() {
@@ -78,6 +91,7 @@ fn main() {
         Err(Failure.Simple(t)) => print(f"one={t}"),
         Err(Failure.Pair(a, b)) => print(f"unexpected pair {a} {b}"),
         Err(Failure.Numeric(n)) => print(f"unexpected numeric {n}"),
+        Err(Failure.Fraction(r)) => print(f"unexpected fraction {r}"),
     }
     match pair() {
         Ok(n) => print(f"unexpected ok {n}"),
@@ -87,11 +101,20 @@ fn main() {
             print(f"second={b}");
         }
         Err(Failure.Numeric(n)) => print(f"unexpected numeric {n}"),
+        Err(Failure.Fraction(r)) => print(f"unexpected fraction {r}"),
     }
     match numeric() {
         Ok(n) => print(f"unexpected ok {n}"),
         Err(Failure.Simple(t)) => print(f"unexpected simple {t}"),
         Err(Failure.Pair(a, b)) => print(f"unexpected pair {a} {b}"),
         Err(Failure.Numeric(n)) => print(f"number={n}"),
+        Err(Failure.Fraction(r)) => print(f"unexpected fraction {r}"),
+    }
+    match fraction() {
+        Ok(n) => print(f"unexpected ok {n}"),
+        Err(Failure.Simple(t)) => print(f"unexpected simple {t}"),
+        Err(Failure.Pair(a, b)) => print(f"unexpected pair {a} {b}"),
+        Err(Failure.Numeric(n)) => print(f"unexpected numeric {n}"),
+        Err(Failure.Fraction(r)) => print(f"ratio={r}"),
     }
 }
