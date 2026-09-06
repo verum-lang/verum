@@ -1,0 +1,99 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, map, set, collections, empty, intercept
+// @timeout: 15000
+// @expected-exit: 0
+//
+// A MAP THAT NEVER GREW STILL ANSWERS (T1198).
+//
+// `Map.new()` does not allocate a table. `core/collections/map.vr`
+// returns `{ entries: null_ptr(), len: 0, cap: 0, tombstones: 0 }`, and
+// `null_ptr` is an intrinsic whose codegen strategy is "load 0" — so
+// the entries slot holds an INTEGER, not a pointer. Every one of the
+// twenty-four Map/Set intercepts in the interpreter opened by taking
+// that slot as a pointer, which asserts in a debug build and yields
+// null in release:
+//
+//     panic: Expected pointer, got Some(1)
+//
+// (`Some(1)` there is the interpreter's NaN-box TAG, not a `Maybe`:
+// `Value.tag()` returns `Option<u8>` and TAG_INTEGER is 0x1. Decode
+// the tag before naming the value.)
+//
+// THE THREE CONTROLS ARE THE SPEC. Each one passed BEFORE the fix, and
+// together they say what the defect is not:
+//
+//   * `len()` on the same map answered 0 — so the map is not broken,
+//     only the readers that go through the table;
+//   * inserting and then REMOVING leaves the table allocated and every
+//     reader works — so the defect is not emptiness;
+//   * `let` and `let mut` behave identically — so it is not mutability.
+//
+// What is left is the state no test had: a map straight from `new()`,
+// which is what every program has on its first line, and what a node
+// serving a search request against an empty cache has in production.
+//
+// `all` is in the list deliberately. An empty collection satisfies a
+// universal claim — a guard written to "return the empty answer" that
+// answered `false` here would be a NEW wrong answer, and the vacuous
+// truth is the one an implementation gets wrong under pressure.
+
+type E is { v: Int };
+
+fn main() {
+    let m: Map<Text, E> = Map.new();
+
+    // The readers that walk the table. Each of these panicked.
+    assert_eq(m.contains_key("nothing"), false);
+    assert(m.get("nothing") is None);
+    assert_eq(m.any(|_k, _v| true), false);
+    assert_eq(m.all(|_k, _v| false), true);   // vacuously true, and it matters
+    assert_eq(m.len(), 0);                    // the one that always worked
+
+    // Iterating it is what the registry's search route does with an
+    // empty cache, and it is the shape that found this.
+    let mut n = 0;
+    for e in m.values() { n = n + e.v; }
+    assert_eq(n, 0);
+
+    let mut ks = 0;
+    for _k in m.keys() { ks = ks + 1; }
+    assert_eq(ks, 0);
+
+    let mut es = 0;
+    for _e in m.entries() { es = es + 1; }
+    assert_eq(es, 0);
+
+    // COUNTED BY ITERATING, NOT BY `.len()`, and that is not a style
+    // choice — `m.keys().len()` is a SECOND defect, filed separately
+    // (T1200) and unrelated to emptiness: it fails on a map with one
+    // entry too.  `Map.keys()` is declared `-> MapKeys<K, V>` and the
+    // interpreter's intercept answers with a `List`, so `.len()`
+    // dispatches by the STATIC type to the stdlib `MapKeys.len` body,
+    // which reads a field the List does not have.  Asserting it here
+    // would make this spec fail for a reason it is not about — the
+    // failure mode this whole file exists to prevent.
+
+    // A set has the same layout and the same intercepts.
+    let s: Set<Text> = Set.new();
+    assert_eq(s.len(), 0);
+    assert_eq(s.contains("nothing"), false);
+
+    // And the map must still WORK afterwards: a fix that answers the
+    // empty case by refusing to allocate would pass everything above.
+    let mut m2: Map<Text, E> = Map.new();
+    m2.insert("a", E { v: 7 });
+    assert_eq(m2.len(), 1);
+    let mut total = 0;
+    for e in m2.values() { total = total + e.v; }
+    assert_eq(total, 7);
+
+    // `get_or_insert` on a NEVER-GROWN map took the resize arm with a
+    // new capacity of zero and divided by zero on `hash % capacity`.
+    let mut m3: Map<Text, Int> = Map.new();
+    assert_eq(m3.get_or_insert("k", 5), 5);
+    assert_eq(m3.len(), 1);
+
+    print("a-map-that-never-grew-still-answers ok");
+}

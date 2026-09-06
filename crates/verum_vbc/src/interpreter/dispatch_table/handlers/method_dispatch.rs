@@ -5015,6 +5015,61 @@ fn func_id_parent_compatible_with_receiver(
 /// and the `reserve` intercept (which needs the current capacity to
 /// decide whether the migration actually needs to grow the buffer).
 #[inline]
+/// The entries array of a `Map` / `Set` header, tolerating the
+/// never-allocated state.
+///
+/// **MAP-NULL-ENTRIES-1 (T1198).** Slot 2 of the header is the entries
+/// array, and every reader below took it with `as_ptr`, which asserts.
+/// But a map that has never grown does not have one: `core/collections/
+/// map.vr`'s `Map.new()` builds `{ entries: null_ptr(), len: 0, cap: 0,
+/// tombstones: 0 }`, and `null_ptr` lowers to `LoadI 0` — an INTEGER,
+/// tag 1 — so the assert fires with "Expected pointer, got Some(1)".
+/// In release the same read yields a null pointer and the arms happen
+/// to survive, because every loop over the table is bounded by
+/// `capacity`, which is 0 in exactly that state.
+///
+/// Measured in six lines:
+///
+///     let m: Map<Text, E> = Map.new();
+///     for e in m.values() { }        -> panic
+///
+/// while inserting and then REMOVING first answers 0 correctly, because
+/// the insert allocated the table. So the arms are already right about
+/// an empty table; they could not survive READING the slot of a table
+/// that does not exist.
+///
+/// The file knew: `insert if is_set` carries a "Cap=0 guard … Required
+/// when `Set.new()` ran through the stdlib body (cap=0, null entries)"
+/// comment, and `remove if is_map` returns `None` on `capacity == 0`.
+/// One of twenty-four readers consulted capacity before dereferencing.
+///
+/// The `capacity == 0` assertion is kept, and it is the point: a slot
+/// that is not a pointer while the map claims to have a table is a
+/// corrupted map, and that must still be loud. Only the
+/// empty-by-construction case is admitted.
+///
+/// Returns the DATA pointer, past the object header, because the offset
+/// is exactly what must not happen on the empty case: `ptr::add` on a
+/// null pointer is undefined behaviour, and every call site applied it
+/// unconditionally. Doing the arithmetic here, only when there is an
+/// allocation to point into, removes that from twenty-four places at
+/// once.
+#[inline]
+fn map_entries_data(header_ptr: *const Value, capacity: usize) -> *mut Value {
+    let slot = unsafe { *header_ptr.add(2) };
+    if slot.is_ptr() {
+        let obj = slot.as_ptr::<u8>();
+        if !obj.is_null() {
+            return unsafe { obj.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+        }
+    }
+    debug_assert_eq!(
+        capacity, 0,
+        "map/set entries slot is not a pointer but capacity is {capacity}"
+    );
+    std::ptr::null_mut()
+}
+
 fn text_capacity_of(v: &Value, byte_len_fallback: i64) -> i64 {
     if v.is_small_string() {
         return v.as_small_string().len() as i64;
@@ -7262,9 +7317,7 @@ pub(super) fn dispatch_primitive_method(
                     if capacity == 0 {
                         return Ok(Some(Value::from_bool(false)));
                     }
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     let hash = value_hash(key);
                     let mut idx = hash % capacity;
                     let start = idx;
@@ -7293,9 +7346,7 @@ pub(super) fn dispatch_primitive_method(
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let mut capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let mut entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let mut entries_data = map_entries_data(header_ptr, capacity);
 
                     // Cap=0 guard — same bootstrap as Map.insert below.
                     // Required when `Set.new()` ran through the stdlib body
@@ -7413,9 +7464,7 @@ pub(super) fn dispatch_primitive_method(
                     if capacity == 0 {
                         return Ok(Some(Value::from_bool(false)));
                     }
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     let hash = value_hash(val);
                     let mut idx = hash % capacity;
                     let start = idx;
@@ -7546,9 +7595,7 @@ pub(super) fn dispatch_primitive_method(
                     } else {
                         // Backing already allocated (static-constructor intercept
                         // or a prior bootstrap): slot 2 is a real pointer.
-                        let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                        entries_data =
-                            unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                        entries_data = map_entries_data(header_ptr, capacity);
                     }
 
                     // Resize if load factor >= 75%
@@ -7670,9 +7717,7 @@ pub(super) fn dispatch_primitive_method(
                         let none = make_none_value(state)?;
                         return Ok(Some(none));
                     }
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     let hash = value_hash(key);
                     let mut idx = hash % capacity;
                     let start = idx;
@@ -7724,9 +7769,7 @@ pub(super) fn dispatch_primitive_method(
                     // Resize if load factor >= 75%
                     if count * 4 >= capacity * 3 {
                         let new_cap = capacity * 2;
-                        let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                        let entries_data =
-                            unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                        let entries_data = map_entries_data(header_ptr, capacity);
                         let new_entries = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
@@ -7791,9 +7834,7 @@ pub(super) fn dispatch_primitive_method(
                         let none_val = make_none_value(state)?;
                         return Ok(Some(none_val));
                     }
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     let hash = value_hash(key);
                     let mut idx = hash % capacity;
                     let start = idx;
@@ -7862,9 +7903,7 @@ pub(super) fn dispatch_primitive_method(
                     // Map.keys() -> List<K>
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     let mut keys = Vec::new();
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
@@ -7879,9 +7918,7 @@ pub(super) fn dispatch_primitive_method(
                     // Map.values() -> List<V>
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     let mut vals = Vec::new();
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
@@ -7896,9 +7933,7 @@ pub(super) fn dispatch_primitive_method(
                     // Map.entries() -> List<(K, V)>
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     let mut tuples = Vec::new();
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
@@ -7927,9 +7962,7 @@ pub(super) fn dispatch_primitive_method(
                     // Map.clear() - remove all entries
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     // Set count to 0
                     unsafe {
                         *header_ptr = Value::from_i64(0);
@@ -7957,13 +7990,18 @@ pub(super) fn dispatch_primitive_method(
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let mut capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let mut entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let mut entries_data = map_entries_data(header_ptr, capacity);
 
                     // Resize if load factor >= 75%
                     if count * 4 >= capacity * 3 {
-                        let new_cap = capacity * 2;
+                        // MAP-NULL-ENTRIES-1 (T1198): `capacity * 2` is 0 for a
+                        // map that has never grown, and `0 >= 0` makes this the
+                        // arm a fresh `Map.new()` takes. A zero-width table then
+                        // divides by zero on `hash % capacity`. `insert` already
+                        // bootstraps to 16 in that state and says so; this arm
+                        // did not, so `get_or_insert` on a fresh map was a
+                        // different failure of the same cause.
+                        let new_cap = if capacity == 0 { 16 } else { capacity * 2 };
                         let new_entries = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
@@ -8044,9 +8082,7 @@ pub(super) fn dispatch_primitive_method(
                     if capacity == 0 {
                         return Ok(Some(Value::from_bool(false)));
                     }
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     let hash = value_hash(val);
                     let mut idx = hash % capacity;
                     let start = idx;
@@ -8109,9 +8145,7 @@ pub(super) fn dispatch_primitive_method(
                     // Set.clear() - remove all elements
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     unsafe {
                         *header_ptr = Value::from_i64(0);
                     }
@@ -8834,9 +8868,7 @@ pub(super) fn dispatch_primitive_method(
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
@@ -8853,9 +8885,7 @@ pub(super) fn dispatch_primitive_method(
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0 + 1));
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
@@ -8871,9 +8901,7 @@ pub(super) fn dispatch_primitive_method(
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     let mut kept_keys = Vec::new();
                     let mut kept_vals = Vec::new();
                     for i in 0..capacity {
@@ -8933,9 +8961,7 @@ pub(super) fn dispatch_primitive_method(
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     let mut found = false;
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
@@ -8956,9 +8982,7 @@ pub(super) fn dispatch_primitive_method(
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     let mut all_match = true;
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
@@ -8979,9 +9003,7 @@ pub(super) fn dispatch_primitive_method(
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
@@ -9017,9 +9039,7 @@ pub(super) fn dispatch_primitive_method(
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
@@ -9047,9 +9067,7 @@ pub(super) fn dispatch_primitive_method(
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
@@ -9074,9 +9092,7 @@ pub(super) fn dispatch_primitive_method(
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     let mut keys = Vec::new();
                     let mut new_vals = Vec::new();
                     for i in 0..capacity {
@@ -9133,9 +9149,7 @@ pub(super) fn dispatch_primitive_method(
                     let target = state.registers.get(caller_base, Reg(args.start.0));
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let entries_data = map_entries_data(header_ptr, capacity);
                     let mut found = false;
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
