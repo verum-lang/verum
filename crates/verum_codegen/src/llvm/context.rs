@@ -156,7 +156,16 @@ pub struct FunctionContext<'a, 'ctx> {
     /// pointer — so a `CallM` on such a register must const-fold the
     /// erased-T identity (`default`/`zero` → 0, `one` → 1) instead of
     /// dispatching through a null receiver. Per-function state.
-    pub loadt_generic_regs: std::collections::HashSet<u16>,
+    /// Registers holding a `LoadT` of a GENERIC type reference (#44-B).
+    ///
+    /// **PRIVATE ON PURPOSE (T1194).** It was `pub`, and it was the only
+    /// one of ten per-register fields that was — which is exactly why it
+    /// was the only one whose write could PRECEDE `set_register`. A
+    /// private field has ONE choke point; a `pub` field has as many
+    /// orders as it has callers, and no clear-list audit can see them
+    /// all. See `mark_loadt_generic` for the ordering the setter
+    /// enforces.
+    loadt_generic_regs: std::collections::HashSet<u16>,
     /// LLVM function being built.
     function: FunctionValue<'ctx>,
 
@@ -1554,6 +1563,26 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.float_registers.contains(&reg)
     }
 
+    /// Mark `reg` as holding a `LoadT` of a generic type reference.
+    ///
+    /// **CALL THIS AFTER `set_register`, NEVER BEFORE (T1194).**
+    /// `set_register` clears the mark along with every other per-value
+    /// fact, so a mark set first is a mark immediately erased. The
+    /// `LoadT` arm used to `insert` directly into the field before
+    /// storing the value, which worked only because `set_register` did
+    /// NOT clear it — and that omission was the defect: any later
+    /// instruction reusing the register inherited the mark, and
+    /// `lower_call_method` then const-folded `default`/`zero`/`one` on a
+    /// receiver that was no longer a type reference.
+    pub fn mark_loadt_generic(&mut self, reg: u16) {
+        self.loadt_generic_regs.insert(reg);
+    }
+
+    /// True if `reg` holds a `LoadT` of a generic type reference.
+    pub fn is_loadt_generic(&self, reg: u16) -> bool {
+        self.loadt_generic_regs.contains(&reg)
+    }
+
     /// Mark a parameter register as a scalar `&T` reference (task #41).
     pub fn mark_ref_param_register(&mut self, reg: u16) {
         self.ref_param_registers.insert(reg);
@@ -2270,6 +2299,19 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.bool_registers.remove(&reg);
         self.float_registers.remove(&reg);
         self.ref_param_registers.remove(&reg);
+        // **LOADT-GENERIC-STALE-1 (T1194)** — a per-value fact like every
+        // other line here. `LoadT` marks a register as holding a generic
+        // TYPE REFERENCE, and `lower_call_method` reads that mark to
+        // const-fold a zero-arg `default`/`zero`/`one` instead of
+        // dispatching. VBC reuses register numbers, so a register that
+        // once held a `LoadT(Generic)` and is later reused for a real
+        // receiver would have that call answered with a constant.
+        //
+        // Clearing it here is only correct because the mark is now set
+        // AFTER the store, through `mark_loadt_generic`. It used to be
+        // inserted BEFORE, directly into a `pub` field — which is why
+        // this line could not simply be added.
+        self.loadt_generic_regs.remove(&reg);
         self.list_registers.remove(&reg);
         // **STALE-GENERIC-ARGS-1 (T1167)** — the type ARGUMENTS are a
         // per-value fact like every other line here, and leaving them

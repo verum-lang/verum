@@ -2899,8 +2899,11 @@ pub fn lower_instruction<'ctx>(
             // `ConstValue` emission) lowers to the integer constant —
             // it is a VALUE, not runtime type info.
             if let TypeRef::ConstValue(v) = type_ref {
-                ctx.loadt_generic_regs.remove(&dst.0);
                 let llvm_val = ctx.types().i64_type().const_int(*v as u64, true);
+                // `set_register` clears the generic mark (T1194); the
+                // explicit `remove` that used to stand here is now
+                // redundant and was, before that clear existed, the only
+                // thing keeping this arm honest.
                 ctx.set_register(dst.0, llvm_val.into());
                 return Ok(());
             }
@@ -2909,13 +2912,17 @@ pub fn lower_instruction<'ctx>(
             // native, no witness table) — track the register so CallM
             // const-folds the erased-T identity instead of dispatching
             // through the null receiver below.
-            if matches!(type_ref, TypeRef::Generic(_)) {
-                ctx.loadt_generic_regs.insert(dst.0);
-            } else {
-                ctx.loadt_generic_regs.remove(&dst.0);
-            }
             let llvm_val = ctx.types().ptr_type().const_null();
+            // ORDER IS THE SUBSTANCE (T1194): the mark must be applied
+            // AFTER the store, because `set_register` now clears it with
+            // every other per-value fact. It used to be inserted BEFORE,
+            // and that worked only because the clear was missing — which
+            // is what let a reused register keep a stale mark and have
+            // its `default`/`zero`/`one` const-folded.
             ctx.set_register(dst.0, llvm_val.into());
+            if matches!(type_ref, TypeRef::Generic(_)) {
+                ctx.mark_loadt_generic(dst.0);
+            }
             Ok(())
         }
 
@@ -15157,7 +15164,7 @@ fn lower_call_method<'ctx>(
     // (When AOT monomorphization is enabled, the specializer rewrites
     // the LoadT to a concrete type before lowering and this branch
     // never fires for the specialized bodies.)
-    if ctx.loadt_generic_regs.contains(&receiver.0) && args.count == 0 {
+    if ctx.is_loadt_generic(receiver.0) && args.count == 0 {
         let bare = method_name_str
             .rsplit('.')
             .next()

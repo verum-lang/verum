@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: gates-source check-private-types-off-public-surface check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-silent-acceptance check-name-census check-panic-surface check-early-return-tenants check-dup-emitters check-homepage-examples check-doc-indented-blocks check-examples-run
+.PHONY: gates-source check-private-types-off-public-surface check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-silent-acceptance check-name-census check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-homepage-examples check-doc-indented-blocks check-examples-run
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -161,7 +161,7 @@ check-grammar-docs-match: ## Gate: EBNF shown in the documentation must match gr
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
 
-gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication ## Every gate that needs only the SOURCE TREE — no build, no artefacts check-register-shas
+gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication ## Every gate that needs only the SOURCE TREE — no build, no artefacts check-register-shas
 
 	@echo "gates-source: all source-only gates green"
 
@@ -208,6 +208,10 @@ check-rings-census: ## Report the core/ inter-module dependency graph (never fai
 
 check-internal-refs: ## Gate: no references to the internal/ directory in tracked files
 	bash scripts/ci/check_no_internal_refs.sh
+
+check-per-register-privacy: ## Gate: no per-register fact in FunctionContext may be `pub` — source only
+	python3 scripts/ci/check_per_register_fields_private.py --self-test
+	python3 scripts/ci/check_per_register_fields_private.py
 
 check-panic-surface: ## Gate (T0424): no net increase of unwrap/expect in verum_codegen/src/llvm production code
 	python3 scripts/ci/check_panic_surface_ratchet.py
