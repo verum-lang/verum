@@ -1,0 +1,112 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: aot, codegen, iterator, register-reuse, generic-args, regression
+// @timeout: 20000
+// @expected-exit: 0
+// @expected-stdout-begin
+// before
+// ok=upstream
+// @expected-stdout-end
+//
+// Regression guard for T1167: a register that held a `List<Text>` and
+// is later reused for an iterator over a `List<Auth>` must not leak its
+// old type arguments into the loop element.
+//
+// `set_register` cleared every per-value mark EXCEPT `generic_type_args`.
+// VBC reuses register numbers, so r12 here first holds `&mut claimants`
+// (a `List<Text>`) and is then reused for `auths.iter()`. The stale
+// [Text] survived, `IterNew` propagated it to the iterator, and
+// `lower_iter_next` marked each element from `type_args.first()` — so an
+// `Auth` record was marked Text. `lower_get_field` then used Text's flat
+// {ptr,len,cap} layout and read field 1 at offset 8 instead of 24+8,
+// loading the ObjectHeader word ((size << 32) | type_id) and
+// dereferencing it. AOT faulted at 0x2800000018 — 0x28 being `Auth`'s
+// 40-byte size — while the interpreter answered correctly.
+//
+// EVERY LINE BELOW IS LOAD-BEARING; the fault needs all of them, which
+// is why four hand-built probes missed it and only cutting the original
+// down found the shape:
+//
+//   * the dead `if false { claimants.push(…) }` — forces the `RefMut`
+//     that puts a List<Text> in the register that is later reused
+//   * both `claimants.len()` branches — keep `claimants` live across
+//     them, so the allocator reuses that register for the second
+//     iterator
+//   * the SECOND loop — the first iterates through a register that
+//     never held a List<Text>
+//
+// The function is named `resolve_for_t1167` rather than `resolve` on
+// purpose: `core/` declares TWELVE public free functions called
+// `resolve`, five of them with two parameters like this one, and a
+// same-name-same-arity collision silently outranks the user's
+// declaration (T1191). This spec measured its own function — verified
+// by running it renamed and comparing — but a spec that could be
+// hijacked by an unrelated stdlib edit is not a spec.
+//
+// A `differential` test on purpose: the interpreter was always right,
+// so pinning AOT against a fixed string would pass even if both tiers
+// broke together.
+
+public type Role is
+    | Upstream
+    | Local;
+
+public type Auth is {
+    id: Text,
+    role: Role,
+};
+
+public type Resolved is {
+    name: Text,
+    who: Text,
+    role: Role,
+};
+
+public type ResErr is
+    | NoAuthority
+    | Ambiguous(List<Text>);
+
+public pure fn resolve_for_t1167(auths: &List<Auth>, name: &Text) -> Result<Resolved, ResErr> {
+    let mut claimants: List<Text> = List.new();
+
+    for a in auths.iter() {
+        if false {
+            claimants.push("literal");
+        }
+    }
+
+    if claimants.len() > 1 {
+        return Result.Err(ResErr.Ambiguous(List.new()));
+    }
+
+    if claimants.len() == 1 {
+        return Result.Ok(Resolved {
+            name: name.clone(),
+            who: "nobody",
+            role: Role.Local,
+        });
+    }
+
+    for b in auths.iter() {
+        if b.role is Upstream {
+            return Result.Ok(Resolved {
+                name: name.clone(),
+                who: b.id.clone(),
+                role: Role.Upstream,
+            });
+        }
+    }
+
+    Result.Err(ResErr.NoAuthority)
+}
+
+fn main() {
+    let mut xs: List<Auth> = List.new();
+    xs.push(Auth { id: "upstream", role: Role.Upstream });
+    print("before");
+    match resolve_for_t1167(&xs, &"serde") {
+        Ok(r) => print(f"ok={r.who}"),
+        Err(_) => print("err"),
+    }
+}

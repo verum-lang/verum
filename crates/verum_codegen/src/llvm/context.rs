@@ -2271,6 +2271,26 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.float_registers.remove(&reg);
         self.ref_param_registers.remove(&reg);
         self.list_registers.remove(&reg);
+        // **STALE-GENERIC-ARGS-1 (T1167)** — the type ARGUMENTS are a
+        // per-value fact like every other line here, and leaving them
+        // behind is what made the registry SIGBUS.
+        //
+        // VBC reuses register numbers. In the reproduction, r12 first
+        // held `&mut claimants` (a `List<Text>`, args [Text]) and was
+        // then reused for `auths.iter()` (a `List<Auth>`). The stale
+        // [Text] survived, `IterNew` propagated the iterable's args to
+        // the iterator, and `lower_iter_next` marked every element from
+        // `type_args.first()` — so an `Auth` record was marked Text.
+        // `lower_get_field` then used Text's flat {ptr,len,cap} layout
+        // and read field 1 at offset 8 instead of 24+8, loading the
+        // ObjectHeader word ((size << 32) | type_id) and dereferencing
+        // it: fault at 0x2800000018, where 0x28 is `Auth`'s size.
+        //
+        // All 17 readers of `get_generic_type_args` ask about the value
+        // CURRENTLY in the register (receiver / iterable / map / value)
+        // — none relies on the args outliving a rewrite, which is what
+        // makes clearing them here correct rather than merely narrower.
+        self.generic_type_args.remove(&reg);
         self.chan_registers.remove(&reg);
         self.range_registers.remove(&reg);
         self.flat_range_registers.remove(&reg);
