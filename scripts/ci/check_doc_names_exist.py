@@ -52,13 +52,22 @@ CORE = os.path.join(REPO, "core")
 
 # Every `(name, page)` pair the site carries today.  Lowering it is the work;
 # raising it means a doc started naming something the library does not have.
-BASELINE = 95
+BASELINE = 57
 
 BLOCK = re.compile(r"^```verum(?:[ \t][^\n]*)?\n(.*?)^```", re.M | re.S)
 DECL = re.compile(
     r"^\s*(?:public\s+|private\s+)?(?:async\s+|unsafe\s+|pure\s+|extern\s+)*"
     r"(?:fn|type|const|context|static|protocol)\s+(?:mut\s+)?([A-Za-z_]\w*)", re.M)
 RECEIVER = re.compile(r"\b([A-Z][A-Za-z0-9]{2,})\s*\.")
+# A comment inside a block is PROSE, and prose ends sentences with a period.
+# Measured: every `KiB.` on the site is "32 KiB." or "2.5-4.9 KiB." in a
+# comment or a bullet, and reading them as a receiver invented a defect.
+LINE_COMMENT = re.compile(r"//[^\n]*")
+BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+
+
+def code_only(text):
+    return LINE_COMMENT.sub("", BLOCK_COMMENT.sub("", text))
 MOUNTED = re.compile(r"\bmount\s+[\w.*]*\s*\{([^}]*)\}")
 GENERIC = re.compile(r"<([^<>]*)>")
 
@@ -113,7 +122,7 @@ def census():
 
     pairs = []
     for rel, blocks in sorted(pages.items()):
-        used = set(RECEIVER.findall(" ".join(blocks)))
+        used = set(RECEIVER.findall(code_only(" ".join(blocks))))
         for name in sorted(used):
             if name in declared or name in from_docs or name in BUILTIN:
                 continue
