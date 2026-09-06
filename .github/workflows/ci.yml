@@ -718,7 +718,7 @@ jobs:
           # rather than in `gates-source` because that job has no website
           # checkout, and a gate whose INPUT is missing reports OK.
           python3 scripts/ci/check_doc_method_names.py --self-test
-          python3 scripts/ci/check_doc_method_names.py
+          python3 scripts/ci/check_doc_method_names.py --check
           # These three have been Makefile targets with no CI caller.
           # They could not have run before this job checked the website
           # out; now they can. See A81.

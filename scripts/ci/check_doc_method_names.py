@@ -165,8 +165,23 @@ def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
     if not DOCS.is_dir():
-        print(f"docs directory not found: {DOCS} — set VERUM_DOCS_DIR", file=sys.stderr)
-        return 0
+        # A SKIP IS A VERDICT ABOUT NOTHING, and this gate shipped with the
+        # defect it was written beside: `return 0` here means a failed
+        # website checkout reads as a clean documentation tree. Fixed in
+        # the same commit that fixed it in five neighbours — including
+        # this one, which I had just written.
+        import os as _os
+        fatal = "--check" in sys.argv or bool(_os.environ.get("CI"))
+        print(
+            f"doc-method-names: docs directory not found: {DOCS} — set "
+            f"VERUM_DOCS_DIR" + (
+                ". REFUSING to report OK: a missing input under --check/CI is "
+                "a failed checkout, not an empty finding."
+                if fatal else " (skipped; pass --check to make this fatal)"
+            ),
+            file=sys.stderr if fatal else sys.stdout,
+        )
+        return 2 if fatal else 0
     core_fns, core_types = harvest_core()
     pages = sorted(DOCS.rglob("*.md")) + sorted(DOCS.rglob("*.mdx"))
     spans, denials, blocks, hits = scan(core_fns, core_types, pages)
