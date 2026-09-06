@@ -52,7 +52,7 @@ CORE = os.path.join(REPO, "core")
 
 # Every `(name, page)` pair the site carries today.  Lowering it is the work;
 # raising it means a doc started naming something the library does not have.
-BASELINE = 57
+BASELINE = 44
 
 BLOCK = re.compile(r"^```verum(?:[ \t][^\n]*)?\n(.*?)^```", re.M | re.S)
 DECL = re.compile(
@@ -64,10 +64,22 @@ RECEIVER = re.compile(r"\b([A-Z][A-Za-z0-9]{2,})\s*\.")
 # comment or a bullet, and reading them as a receiver invented a defect.
 LINE_COMMENT = re.compile(r"//[^\n]*")
 BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+# A STRING is data, not code.  `db.query("SELECT ...")` made the gate report
+# `SELECT` as an undeclared receiver: the regex saw the identifier, a space
+# and the first dot of the ellipsis.  Tagged literals (`sql#"""…"""`,
+# `rx#"…"`) carry the same trap and are stripped with them.
+TAGGED_STRING = re.compile(r"[a-z_]*#\"\"\".*?\"\"\"|[a-z_]*#\"[^\"]*\"", re.S)
+PLAIN_STRING = re.compile(r"\"[^\"\n]*\"")
+# `Base..Base` is a range, not a receiver.
+RANGE_OP = re.compile(r"\.\.")
 
 
 def code_only(text):
-    return LINE_COMMENT.sub("", BLOCK_COMMENT.sub("", text))
+    text = BLOCK_COMMENT.sub("", text)
+    text = LINE_COMMENT.sub("", text)
+    text = TAGGED_STRING.sub('""', text)
+    text = PLAIN_STRING.sub('""', text)
+    return RANGE_OP.sub(" ", text)
 MOUNTED = re.compile(r"\bmount\s+[\w.*]*\s*\{([^}]*)\}")
 GENERIC = re.compile(r"<([^<>]*)>")
 
@@ -92,9 +104,16 @@ def core_declarations():
     return out
 
 
+VARIANTS = re.compile(r"\btype\s+\w+(?:<[^>]*>)?\s+is\s+([^;{]*)")
+
+
 def declared_in_blocks(blocks):
     joined = " ".join(blocks)
     out = set(DECL.findall(joined))
+    # `type S1 is Base | Loop();` declares `Base` and `Loop` as surely as
+    # the type itself — a sum type's variants are names the page introduces.
+    for body in VARIANTS.findall(joined):
+        out |= set(re.findall(r"\b([A-Z]\w*)", body))
     for group in MOUNTED.findall(joined):
         out |= set(re.findall(r"([A-Za-z_]\w*)", group))
     for group in GENERIC.findall(joined):
