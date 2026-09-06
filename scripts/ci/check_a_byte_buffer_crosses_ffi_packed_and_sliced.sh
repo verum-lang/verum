@@ -158,7 +158,8 @@ for dirpath, dirs, names in os.walk(ROOT):
 
 print(f"scanned {files} .vr files under {ROOT}/")
 if not findings:
-    print("check-ffi-byte-buffers: OK")
+    print(f"check-ffi-byte-buffers: OK — {files} .vr file(s) scanned, "
+          f"0 packed/sliced mismatches")
     sys.exit(0)
 
 print(f"check-ffi-byte-buffers: {len(findings)} raw pointer(s) taken of an unpacked array\n")

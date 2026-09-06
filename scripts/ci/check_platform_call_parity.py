@@ -110,7 +110,20 @@ LIST_REEXPORT = re.compile(r"public\s+mount\s+\.?([a-z_]\w*)\.\{(.*?)\}\s*;", re
 # declared ANYWHERE in their platform tree, under any module.  Each needs a real binding
 # at the platform boundary — libSystem for darwin, kernel32 for windows — not a corrected
 # path.  Six of the seven are Windows, which nothing here can run.
-BASELINE = 7
+#
+# LOWERED TO 6, 2026-09-06, and the ratchet was STALE rather than newly
+# satisfied: the population is 6 at `ff22c394a`, the commit this session
+# started from, so whatever closed the seventh landed before today and
+# left the baseline behind.  The gate had been reporting "below baseline
+# — lower BASELINE" and failing on it, which is the ratchet doing its
+# job.
+#
+# The six remaining are the population the paragraph above triages, minus
+# the one already gone: `thread_yield` on darwin, and on windows
+# `GetCommandLineA`, `write_stderr`, `thread_join`, `thread_yield` and
+# `query_performance_counter_ns`.  Five of the six are Windows, which
+# nothing here can run.
+BASELINE = 6
 
 _declared: dict[Path, set[str]] = {}
 

@@ -52,7 +52,61 @@ BASELINE = "scripts/ci/ignored_tests_without_a_task.txt"
 # unrelated neighbouring test.
 LOOKBACK = 10
 IGNORE = re.compile(r'^\s*@ignore\b')
+# AN OWNER IS A TASK **OR** A REGISTER ROW.  `CLAUDE.md` names two
+# tracking systems as living truth — the task pool (`T####`) and
+# `docs/architecture/tech-debt-register.md` (`A##`) — and a disabled
+# test owned by a register row is as tracked as one owned by a task.
+#
+# Measured 2026-09-06: the two sites this gate reported as unowned both
+# say "A64 residue: …" and explain themselves at length.  Demanding a
+# `T####` from them would mean filing a task whose only content is a
+# pointer at the row that already holds the analysis — a second record
+# of one fact, which is the thing the register exists to avoid.
+#
+# The A-form is checked for EXISTENCE below rather than merely matched,
+# so it cannot become a way to satisfy the gate with a number nobody
+# has to write down.
 TASK = re.compile(r'\bT\d{4}\b')
+REGISTER_ROW = re.compile(r'\bA\d{1,3}\b')
+
+
+def _register_rows():
+    """The `A##` ids the debt register actually declares, as a set.
+
+    Read once.  A missing register file yields an empty set, so the gate
+    degrades to the `T####`-only rule it had before rather than passing
+    everything — an instrument that cannot find its own input must get
+    STRICTER, not laxer.
+    """
+    # A REPO-RELATIVE PATH, because `__file__` is not this script.
+    # The Python here runs from a heredoc (`python3 - <<'PY'`), so
+    # `__file__` is not the `.sh` path and walking up from it lands
+    # nowhere — the first version of this helper did exactly that,
+    # silently found no rows, and degraded to the `T####`-only rule.
+    # The wrapper `cd`s to the repo root at line 37, which is why a
+    # plain relative path is the reliable one here.
+    path = os.path.join("docs", "architecture", "tech-debt-register.md")
+    rows = set()
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                m = re.match(r"^\|\s*(A\d{1,3})\s*\|", line)
+                if m:
+                    rows.add(m.group(1))
+    except OSError:
+        return set()
+    return rows
+
+
+_ROWS = None
+
+
+def names_a_live_register_row(ctx: str) -> bool:
+    """True when `ctx` cites an `A##` row the register really has."""
+    global _ROWS
+    if _ROWS is None:
+        _ROWS = _register_rows()
+    return any(r in _ROWS for r in REGISTER_ROW.findall(ctx))
 
 
 def uncarried(text):
@@ -64,7 +118,7 @@ def uncarried(text):
         if not IGNORE.search(line.split("//", 1)[0]):
             continue
         ctx = " ".join(lines[max(0, i - LOOKBACK):i + 3])
-        if not TASK.search(ctx):
+        if not TASK.search(ctx) and not names_a_live_register_row(ctx):
             out.append(i + 1)
     return out
 
@@ -130,7 +184,8 @@ if gone:
     for g in gone[:5]:
         print(f"    gone: {g}")
 if not new:
-    print("check-ignored-tests: OK")
+    print(f"check-ignored-tests: OK — {len(now)} `@ignore` site(s) with no "
+          f"task named, none new against a baseline of {len(known)}")
     sys.exit(0)
 
 print(f"\ncheck-ignored-tests: {len(new)} NEW disabled test(s) name no task\n")

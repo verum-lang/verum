@@ -241,7 +241,8 @@ for dirpath, dirs, names in os.walk(ROOT):
 
 print(f"scanned {files} .vr files under {ROOT}/")
 if not findings:
-    print("check-super-paths: OK — every super-path call names a module that exists")
+    print(f"check-super-paths: OK — {files} .vr file(s) scanned, every "
+          f"super-path call names a module that exists")
     sys.exit(0)
 
 print(f"check-super-paths: {len(findings)} call(s) name a module that does not exist\n")
