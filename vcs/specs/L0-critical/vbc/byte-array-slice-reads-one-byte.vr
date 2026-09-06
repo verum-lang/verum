@@ -1,0 +1,97 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: aot, codegen, slice, byte-array, stride, regression
+// @timeout: 60000
+// @expected-exit: 0
+// @expected-stdout-begin
+// direct [1]=66
+// slice  [1]=66
+// ref    [1]=66
+// callee [1]=66
+// tid6   [0]=6 [4]=77
+// tid7   [0]=7 [4]=77
+// tid99  [0]=99 [4]=77
+// @expected-stdout-end
+//
+// T1213 — a REFERENCE to a packed `[Byte; N]` must index it one byte at
+// a time. Under AOT it indexes eight, and the two tiers disagree.
+//
+// WHAT FAILS TODAY, measured on the binary of 2026-09-06:
+//
+//     direct [1]=66          correct at both tiers
+//     slice  [1]=0           tier 1; reads bytes 8..15, past an 8-byte
+//                            array. Tier 0 says 66.
+//
+// The width was PREDICTED before the first run and matched to the bit:
+// fill `[Byte; 8]` with 1..8 and read index 0 through a reference and
+// you get 578437695752307201 == 0x0807060504030201 — all eight bytes,
+// little-endian, as one i64.
+//
+// SET AT LEAST TWO BYTES. With `arr[0]` set and everything after it
+// zero, an eight-byte read returns the CORRECT value and the probe
+// reports the defect fixed. That false pass cost a wrong conclusion
+// once already, which is why every case below carries a second
+// non-zero byte.
+//
+// THE SECOND HALF IS THE WORSE HALF. The classifier reads the array's
+// OWN FIRST WORD as a `type_id` and switches on it, so the CONTENT
+// chooses the branch:
+//
+//     first word              tier 0     tier 1 read of [0]
+//     6  (TypeId::U8)           6        0
+//     7  (TypeId::U16)          7        0
+//     99 (matches no case)     99        330712481891 = 0x4D00000063
+//
+// Three identical arrays, three different wrong answers, decided by
+// user data. `0x4D00000063` is bytes 99,0,0,0,77,0,0,0 — the 8-byte
+// read of the default arm. The 6 and 7 cases answer 0 because their
+// arms compute `data = src + OBJECT_HEADER_SIZE`, and `src` already
+// points AT the data, so the read lands 24 bytes past the start of a
+// 16-byte array — outside it. A byte buffer whose first four bytes came
+// from input therefore steers which memory the generated code reads.
+//
+// WHY THE CLASS IS QUIET: stride 8 is CORRECT for `[Int; N]`, so the
+// only observers are byte buffers — which is exactly what `core/` uses
+// for syscall scratch (`copy_path_nul(path_buf: &mut [Byte; 4096], …)`,
+// the SIGSEGV half of T1192) and nowhere else.
+//
+// This spec is `differential` on purpose: the interpreter is right in
+// every case, so the two tiers ARE the oracle and no expected value
+// here had to be invented.
+
+fn callee(b: &[Byte], i: Int) -> Int { b[i] as Int }
+
+fn at(b: &[Byte], i: Int) -> Int { b[i] as Int }
+
+fn main() {
+    // ---- the stride, four ways to reach it ------------------------
+    let mut arr: [Byte; 8] = [0 as Byte; 8];
+    arr[0] = 65 as Byte;
+    arr[1] = 66 as Byte;              // TWO bytes: see the note above
+
+    print(f"direct [1]={arr[1] as Int}");
+    let s = &arr[..];
+    print(f"slice  [1]={s[1] as Int}");
+    let r = &arr;
+    print(f"ref    [1]={r[1] as Int}");
+    print(f"callee [1]={callee(&arr[..], 1)}");
+
+    // ---- the branch chosen by CONTENT -----------------------------
+    // Byte 4 carries the payload so the low 32 bits stay exactly the
+    // TypeId under test.
+    let mut c: [Byte; 16] = [0 as Byte; 16];
+    c[0] = 6 as Byte;                 // TypeId::U8
+    c[4] = 77 as Byte;
+    print(f"tid6   [0]={at(&c[..], 0)} [4]={at(&c[..], 4)}");
+
+    let mut d: [Byte; 16] = [0 as Byte; 16];
+    d[0] = 7 as Byte;                 // TypeId::U16
+    d[4] = 77 as Byte;
+    print(f"tid7   [0]={at(&d[..], 0)} [4]={at(&d[..], 4)}");
+
+    let mut e: [Byte; 16] = [0 as Byte; 16];
+    e[0] = 99 as Byte;                // matches no case
+    e[4] = 77 as Byte;
+    print(f"tid99  [0]={at(&e[..], 0)} [4]={at(&e[..], 4)}");
+}
