@@ -261,13 +261,63 @@ pub(in super::super) fn handle_get_field(
     // The provenance index decides, exactly as on the write side: an
     // Int whose payload lies inside a LIVE bridge extent is that
     // block's address.
-    let obj_val = if !obj_val.is_ptr()
-        && obj_val.is_int()
-        && super::cbgr::bridge_extent_room(state, obj_val.as_i64() as usize).is_some()
-    {
-        Value::from_ptr(obj_val.as_i64() as *mut u8)
+    //
+    // TRACED IN BOTH POLARITIES (`VERUM_TRACE_DEREF=1`).  A rescue that
+    // reports only its refusals cannot be compared against the case that
+    // works, and the case that works is the whole evidence: two methods of
+    // one type walk the same array with the same expression, and one of
+    // them is recognised here while the other is not.
+    let obj_val = if !obj_val.is_ptr() && obj_val.is_int() {
+        let addr = obj_val.as_i64() as usize;
+        let room = super::cbgr::bridge_extent_room(state, addr);
+        if crate::interpreter::env_flags::is_set(
+            crate::interpreter::env_flags::Flag::TraceDeref,
+        ) {
+            eprintln!(
+                "[getf-int] addr=0x{:x} field={} extent_room={:?} in={}",
+                addr,
+                field_idx,
+                room,
+                state
+                    .call_stack
+                    .current_function_name(&state.module)
+                    .unwrap_or_default(),
+            );
+        }
+        if room.is_some() {
+            Value::from_ptr(addr as *mut u8)
+        } else {
+            obj_val
+        }
     } else {
         obj_val
+    };
+
+    // WHY THIS GetF REFUSED (`VERUM_TRACE_DEREF=1`).  `NullPointer` is
+    // one name for four different situations — a non-pointer receiver, a
+    // nil, a null address, and an Int-tagged bridge address the
+    // provenance index did not recognise — and the error text names none
+    // of them.  A whole investigation on T1196 read "null dereference" as
+    // "the field held zero"; it may equally be an address that is not in
+    // `cbgr_bridge_extents`, which is a different defect with a different
+    // fix.  The raw word beside the reason separates them.
+    let getf_trace = crate::interpreter::env_flags::is_set(
+        crate::interpreter::env_flags::Flag::TraceDeref,
+    );
+    let getf_refused = |why: &str, v: Value| {
+        if getf_trace {
+            eprintln!(
+                "[getf-null] {} field={} raw=0x{:016x} tag={:?} in={}",
+                why,
+                field_idx,
+                v.bits(),
+                v.tag(),
+                state
+                    .call_stack
+                    .current_function_name(&state.module)
+                    .unwrap_or_default(),
+            );
+        }
     };
 
     if !obj_val.is_ptr() {
@@ -275,14 +325,17 @@ pub(in super::super) fn handle_get_field(
             state.set_reg(dst, obj_val);
             return Ok(DispatchResult::Continue);
         }
+        getf_refused("receiver is not a pointer", obj_val);
         return Err(InterpreterError::NullPointer);
     }
     if obj_val.is_nil() {
+        getf_refused("receiver is nil", obj_val);
         return Err(InterpreterError::NullPointer);
     }
 
     let mut ptr = obj_val.as_ptr::<u8>();
     if ptr.is_null() {
+        getf_refused("receiver is a null pointer", obj_val);
         return Err(InterpreterError::NullPointer);
     }
 
