@@ -196,24 +196,41 @@ fn shared_inner_cell(state: &InterpreterState, base_ptr: *mut u8) -> Option<*mut
     if header.type_id != TypeId::SHARED {
         return None;
     }
-    // slot1 = the inner Value cell (skip the ObjectHeader and refcount slot0).
+    // **KNOWN WRONG, AND KEPT (T1202) — THE OBJECT IS NOW DESCRIBED.**
     //
-    // **KNOWN WRONG, AND KEPT (T1202).** This index is right only for the
-    // interpreter's own `[refcount][value]` cell, whose constructor was
-    // RETIRED (T1159, `method_dispatch.rs:1486` and `:1924`, both
-    // `if false &&`).  For what `Shared.new` builds today it returns a
-    // non-pointer, the peel then declines, and a field read lands on slot 0
-    // — which is why `s.field` answers `1` for a record holding 9999.
+    // `VERUM_TRACE_DEREF=1` on `Shared.new(One { only: 9999 })`:
     //
-    // A REPLACEMENT WAS TRIED AND MEASURED WRONG, which is why the number
-    // stands rather than being improved by guess: reading the LAST slot
-    // (`header.size / size_of::<Value>() - 1`) changed the answer from 1 to
-    // 2 and fixed nothing — so the object this accepts holds the wrapped
-    // value in NO position, and a third index would be a third guess.
-    // `s.deref()` returns the value correctly throughout, so it is reachable;
-    // what is not known is what this object is.  Diagnose with
-    // `VERUM_TRACE_DEREF=1`, which prints the arm taken and whether the inner
-    // slot is a pointer.
+    //     arm=shared_peel size=24B slots=3
+    //       [0] raw=0x7ff9000af6c525a0  tag=Some(1)   an ADDRESS, Int-tagged
+    //       [1] raw=0x7ff9000000000001  tag=Some(1)   1
+    //       [2] raw=0x7ff9000000000002  tag=Some(1)   2
+    //
+    // The `0x7ff9` prefix on every word says these are NaN-boxed `Value`s,
+    // so `tag()` is a valid reader here and the block is NOT packed.  The
+    // payloads name the object: it is the ORDINARY STDLIB RECORD
+    // `Shared { ptr, generation, epoch }` (`core/base/memory.vr:597`) with
+    // `ptr` Int-tagged, `generation = 1`, `epoch = 2`.  Not a two-slot
+    // carrier, not `SharedInner`.
+    //
+    // So `.add(1)` returns `generation`, which is why `s.field` answers `1`
+    // for a record holding 9999 — and why reading the LAST slot instead,
+    // which was built and measured, answered `2` (`epoch`) and fixed
+    // nothing.  It was reverted: one wrong answer becoming a different
+    // wrong answer is a perturbation, not a repair.
+    //
+    // THE GATE IS RIGHT AND THE BODY IS WRONG.  This record's `type_id` IS
+    // `TypeId::SHARED`, so accepting it is correct; treating it as the
+    // RETIRED `[refcount][value]` carrier (T1159, `method_dispatch.rs:1486`
+    // and `:1924`, both `if false &&`) is not.
+    //
+    // THE REPAIR IS TWO HOPS: slot 0 (`ptr`, Int-tagged — which is also why
+    // `is_ptr()` says false and the caller's peel declines) to the
+    // `SharedInner` block, then its `value` field.  T0393 measured the same
+    // chain from the AOT side as `load(s+24)` then `load(ptr+16)`.
+    //
+    // NOT DONE HERE because the second hop needs a reader for the
+    // `cbgr_alloc` block, whose representation is unmeasured — and guessing
+    // it is how the first two attempts went wrong.
     // SAFETY: the pointer stays within the Shared object's data area.
     Some(unsafe { (base_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value).add(1) })
 }
@@ -520,9 +537,19 @@ pub(in super::super) fn handle_deref(
                             // SAFETY: `i < slots`, and `slots` is the header's
                             // own count of Value-sized data slots.
                             let v = unsafe { *data.add(i) };
+                            // RAW BITS AS WELL AS THE TAG.  A tag is an
+                            // INTERPRETATION, and this block may not be
+                            // NaN-boxed at all: `cbgr_allocate` returns an
+                            // Int-tagged user pointer into PACKED bridge
+                            // storage, of which T0108 says "never a NaN box".
+                            // Reading packed scalars through `Value::tag()`
+                            // yields a confident answer about a frame that
+                            // does not apply, so the raw word is printed
+                            // beside it and the reader can tell them apart.
                             dump.push_str(&format!(
-                                " [{}]tag={:?}{}",
+                                " [{}]raw=0x{:016x} tag={:?}{}",
                                 i,
+                                v.bits(),
                                 v.tag(),
                                 if v.is_ptr() { "/ptr" } else { "" },
                             ));
