@@ -7078,9 +7078,59 @@ impl TypeChecker {
             // Delegate to the method call handler with the inner type.
             // This reuses all the existing method resolution logic (protocol methods,
             // inherent methods, borrow tracking, etc.)
-            let method_result = self.infer_method_call_with_recv_type(
+            // A95 — when `?.` was a NO-OP and the lookup then failed, say so.
+            //
+            // `?.` is optional chaining, resolved through the Maybe protocol
+            // above; on any other receiver the arm marked "no-op … handle it
+            // gracefully" passes the receiver through unchanged, and the
+            // method is looked up on it.  The author who meant try-then-call
+            // — `e?.m()` on a `Result` — then reads a diagnostic about the
+            // METHOD while the mistake was the OPERATOR.  Three spellings of
+            // that intent differ by one token pair: `e?.m()` fails, `e? .m()`
+            // and `(e?).m()` compile.
+            //
+            // The note rides in the existing `did_you_mean` channel, so this
+            // changes no verdict: 57 `?.`-after-a-paren sites in `vcs/` keep
+            // whatever answer they get today.  Turning the no-op into an
+            // error is the language decision the register row names, and it
+            // is not this.
+            //
+            // IT MUST BE A CANDIDATE, NOT A PARAGRAPH.  That channel renders
+            // as ``help: did you mean `{}`?`` (`lib.rs`), so a sentence put
+            // through it comes out wrapped in backticks and terminated by a
+            // question mark:
+            //
+            //     help: did you mean ``?.` is the optional-chaining operator
+            //     and resolves through `Maybe`; … `(expr?).method()``?
+            //
+            // — which is unreadable and is not what the channel promises.
+            // The suggestion is therefore the CORRECTED EXPRESSION, spelled
+            // with the method the author actually wrote, and it is the whole
+            // repair: `(e?).m()` compiles where `e?.m()` does not.  The
+            // explanation of WHY belongs where a reader can dwell on it, and
+            // A95's register row holds it.
+            let method_result = match self.infer_method_call_with_recv_type(
                 inner_ty, obj, method, type_args, args, expr.span,
-            )?;
+            ) {
+                Ok(result) => result,
+                Err(mut err) => {
+                    if maybe_resolution.is_none() {
+                        if let TypeError::MethodNotFound { did_you_mean, .. } = &mut err
+                        {
+                            if did_you_mean.is_none() {
+                                // `?.` resolved through nothing here, so the
+                                // author meant try-then-call.  Say so as the
+                                // spelling that works.
+                                *did_you_mean = Some(verum_common::Text::from(
+                                    format!("(expr?).{}(…)", method.name.as_str())
+                                        .as_str(),
+                                ));
+                            }
+                        }
+                    }
+                    return Err(err);
+                }
+            };
 
             // Wrap result in Maybe if it isn't already
             // Monadic flattening: if return type is already Maybe, don't double wrap
