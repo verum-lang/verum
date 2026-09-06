@@ -77,6 +77,26 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 SPECS = REPO / "vcs" / "specs"
 CORE_TESTS = REPO / "core-tests"
+# A third corpus with the same disease and a different symptom: prose
+# that names a task as the tracker for work it calls OPEN. A muted test
+# goes quiet; a stale citation sends a reader to a closed row and looks
+# authoritative doing it. `docs/architecture/tech-debt-register.md` is
+# the living-truth document and had six.
+DOCS = REPO / "docs"
+OPEN_CITE = re.compile(
+    r"\b(T\d{4})\b[^.\n]{0,70}?\b(is open|remains open|still open|is still|"
+    r"not yet fixed|unfixed)\b"
+    r"|\b(open|pending|blocked on|awaiting)\b[^.\n]{0,60}?\b(T\d{4})\b",
+    re.I)
+# A DENIAL is not a citation, and this instrument creates denials by
+# being used: writing "…(T0103) — T0103 done" into the register to
+# record a stale citation makes a NEW match on the next run. The
+# absent-method sweep learned the same thing today by counting its own
+# corrections. Also excluded: the taskpool doc's directory-tree diagram,
+# where `open/  T0123.md` is a PLACEHOLDER id, not a reference.
+CITE_DENIAL = re.compile(
+    r"\b(done|dead|closed|since closed|stale|re-measured|placeholder|"
+    r"available work|has since)\b", re.I)
 SKIP = re.compile(r"^//\s*@skip:\s*(.+)$", re.M)
 # `core-tests` mutes with an ATTRIBUTE, not a directive comment, and the
 # distinction matters for the reader as much as for the regex: a `@skip`
@@ -183,6 +203,46 @@ def main() -> int:
             if all(states.get(i) in ("done", "dead") for i in ids):
                 ig_expired.append((str(f.relative_to(CORE_TESTS)),
                                    ",".join(ids), m.group(1)[:56]))
+    # ---- third corpus: prose in docs/ citing a closed task as open ---
+    doc_rows, doc_denied, doc_seen = [], 0, set()
+    for f in sorted(DOCS.rglob("*.md")):
+        text = f.read_text(encoding="utf-8", errors="replace")
+        for m in OPEN_CITE.finditer(text):
+            t = m.group(1) or m.group(4)
+            if states.get(t) not in ("done", "dead"):
+                continue
+            # A NARROW window around the id itself, not around the
+            # match. A register row is one enormous line that can cite
+            # three tasks in three states — A5 calls T0393 open in the
+            # same sentence as "T0146 (DONE)" — so a wide window reads
+            # one task's closure as a denial of another's.
+            tpos = text.find(t, m.start(), m.end() + 8)
+            if tpos < 0:
+                tpos = m.start()
+            window = text[max(0, tpos - 40):tpos + len(t) + 40]
+            if CITE_DENIAL.search(window):
+                doc_denied += 1
+                continue
+            ln = text[:m.start()].count("\n") + 1
+            row = (str(f.relative_to(DOCS)), ln, t)
+            if row in doc_seen:      # one register line can match twice
+                continue
+            doc_seen.add(row)
+            doc_rows.append(row + (m.group(0).strip()[:56],))
+    print(f"\ndocs/ prose calling a CLOSED task open : {len(doc_rows)}")
+    print(f"  excluded as denials / placeholders   : {doc_denied}")
+    if doc_rows:
+        print("\nA QUOTATION IS NOT A CLAIM, and this list cannot tell them\n"
+              "apart: an annotation that QUOTES a pin's \"STILL OPEN\" text\n"
+              "matches exactly like the citation it is correcting. Read the\n"
+              "line before believing the row.\n"
+              "\nTO READ — and a closed task does NOT close the row. T0108 was\n"
+              "re-measured 2026-09-07 and its residue reproduces, so the row was\n"
+              "right and only the citation was stale. Each needs the ROW's own\n"
+              "measurement, never a status lookup:")
+        for rel, ln, t, why in doc_rows:
+            print(f"   {rel:<44}:{ln:<5} {t}  {why}")
+
     print(f"\ncore-tests @ignore(\"...\") pins : {ig_tot}")
     print(f"  naming a task id             : {ig_named}")
     print(f"  whose task(s) are CLOSED     : {len(ig_expired)}")
