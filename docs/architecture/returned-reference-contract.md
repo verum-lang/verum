@@ -218,6 +218,38 @@ Regression guard:
   feeding `copy_path_nul` is the FFI byte-buffer contract, not this one —
   a slice is not a slot address and giving it a load would be a third
   wrong answer. See `ffi-byte-buffer-contract.md`.
+* **The same offsets do NOT imply the same readers.** `Shared<T>` is two
+  hops — `Shared.ptr` then `SharedInner.value` at +16 — and both tiers
+  agree on those offsets, measured independently: AOT from the IR that
+  `Shared.deref` emits (`StructFieldAddr` operands `[…, 16, 0, 1]`), the
+  interpreter from `bridge_extent_room` returning 24 for a three-field
+  packed block. But the REPRESENTATIONS differ per hop and per tier:
+
+  | | interpreter | AOT |
+  |---|---|---|
+  | `Shared.ptr` slot | NaN-boxed Int carrying the address | raw address |
+  | `SharedInner` block | packed, 24 bytes, no tags | packed, no tags |
+
+  So a peel ported between tiers by copying its offsets inherits the
+  wrong reader. That is close to how the interpreter's two peels drifted:
+  `.add(1)` was frozen against a shape that moved, and reading the inner
+  block through `Value::tag()` cannot work at any index because the block
+  carries no tags at all. AOT's peel is correct partly by accident — it
+  reads raw at both levels because AOT stores raw at both levels — and it
+  bound-checks nothing, where the interpreter's `bridge_scalar_slot`
+  validates that the eight bytes lie inside a live extent.
+
+* **A `dyn` receiver is a different mechanism, not a fourth face.**
+  T1186 recorded one defect wearing four faces — plain, `Shared<T>`,
+  `Shared<dyn P>`, `Heap<T>`. Three were one defect and are now closed.
+  The fourth is not: `VERUM_AOT_TRACE_CALLM` prints NOTHING for
+  `describe` on a `Shared<dyn Source>`, so the call never reaches the
+  `CallM` path and neither the deref-hop nor the type-id switch is
+  involved — a `dyn` receiver dispatches through a vtable. Worth stating
+  because "same symptom, same cause" is the inference this whole
+  document exists to discourage, and it was made here by the row's own
+  author.
+
 * **Wrapper transparency on the FIELD path.** `s.method()` on a
   `Shared<T>` reaches through the wrapper — `handle_call_method` has a
   documented Deref last resort, and T1183 / T1186 fixed and extended it.

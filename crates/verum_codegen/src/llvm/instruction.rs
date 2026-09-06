@@ -5780,52 +5780,9 @@ pub fn lower_instruction<'ctx>(
             // `Deref` opcode cannot express both depths.
             if ctx
                 .get_obj_register_type(ref_reg.0)
-                .is_some_and(|t| t == "Shared" || t.starts_with("Shared<"))
+                .is_some_and(|t| is_shared_wrapper(t))
             {
-                let i64_type = ctx.types().i64_type();
-                let carrier = as_ptr(ctx, val, "shared_carrier")?;
-                let inner_slot = unsafe {
-                    ctx.builder()
-                        .build_in_bounds_gep(
-                            ctx.types().i8_type(),
-                            carrier,
-                            &[i64_type
-                                .const_int(RuntimeLowering::OBJECT_HEADER_SIZE, false)],
-                            "shared_ptr_slot",
-                        )
-                        .or_llvm_err()?
-                };
-                let inner = ctx
-                    .builder()
-                    .build_load(i64_type, inner_slot, "shared_inner")
-                    .or_llvm_err()?;
-                let inner_ptr = as_ptr(ctx, inner, "shared_inner_ptr")?;
-                // SharedInner { strong_count: u32, weak_count: u32,
-                // value: T } — `value` is slot 2, byte 16, and the block
-                // is headerless. PINNED: a change to that declaration
-                // must change this constant, and the spec beside this
-                // task fails if it does not.
-                let value_slot = unsafe {
-                    ctx.builder()
-                        .build_in_bounds_gep(
-                            ctx.types().i8_type(),
-                            inner_ptr,
-                            &[i64_type.const_int(SHARED_INNER_VALUE_OFFSET, false)],
-                            "shared_value_slot",
-                        )
-                        .or_llvm_err()?
-                };
-                let value = ctx
-                    .builder()
-                    .build_load(i64_type, value_slot, "shared_value")
-                    .or_llvm_err()?;
-                if std::env::var("VERUM_TRACE_SHAREDPEEL").is_ok() {
-                    eprintln!(
-                        "[sharedpeel] {} reg={} PEELED",
-                        ctx.function_name().as_str(),
-                        ref_reg.0
-                    );
-                }
+                let value = peel_shared_carrier(ctx, val, "deref")?;
                 ctx.set_register(dst.0, value);
                 return Ok(());
             }
@@ -10829,6 +10786,72 @@ fn restore_interior_element_mark(ctx: &mut FunctionContext<'_, '_>, dst: u16, ki
     if kind == ReturnedReference::InteriorElementValue {
         ctx.mark_interior_list_ref(dst);
     }
+}
+
+/// Peel a `Shared<T>` carrier to the wrapped value: `Shared.ptr` (field
+/// 0) then `SharedInner.value`.
+///
+/// **SHARED-CARRIER-PEEL-1 (T0393, T1186)** — ONE place that knows this
+/// layout, because two places knowing it is how the interpreter's two
+/// peels drifted apart with `.add(1)` frozen against a shape that moved.
+/// Both AOT readers call this: the `Deref` arm, and the static
+/// deref-hop in `CallM`.
+///
+/// The hops are not invented — they are what `Shared.deref`'s own body
+/// emits, dumped: `GetF field 0`, then `StructFieldAddr` with operands
+/// `[dst, obj, 16, 0, 1]` whose fifth byte is `FIELDADDR-HEADERLESS-1`
+/// (T1159): a `cbgr_alloc` block carries no ObjectHeader, so its slots
+/// start at the user pointer and the 24-byte skip must not be applied.
+fn peel_shared_carrier<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    carrier_val: BasicValueEnum<'ctx>,
+    what: &str,
+) -> Result<BasicValueEnum<'ctx>> {
+    let i64_type = ctx.types().i64_type();
+    let i8_type = ctx.types().i8_type();
+    let carrier = as_ptr(ctx, carrier_val, &format!("{}_carrier", what))?;
+    let inner_slot = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(
+                i8_type,
+                carrier,
+                &[i64_type.const_int(RuntimeLowering::OBJECT_HEADER_SIZE, false)],
+                &format!("{}_ptr_slot", what),
+            )
+            .or_llvm_err()?
+    };
+    let inner = ctx
+        .builder()
+        .build_load(i64_type, inner_slot, &format!("{}_inner", what))
+        .or_llvm_err()?;
+    let inner_ptr = as_ptr(ctx, inner, &format!("{}_inner_ptr", what))?;
+    let value_slot = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(
+                i8_type,
+                inner_ptr,
+                &[i64_type.const_int(SHARED_INNER_VALUE_OFFSET, false)],
+                &format!("{}_value_slot", what),
+            )
+            .or_llvm_err()?
+    };
+    let value = ctx
+        .builder()
+        .build_load(i64_type, value_slot, &format!("{}_value", what))
+        .or_llvm_err()?;
+    if std::env::var("VERUM_TRACE_SHAREDPEEL").is_ok() {
+        eprintln!(
+            "[sharedpeel] {} site={} PEELED",
+            ctx.function_name().as_str(),
+            what
+        );
+    }
+    Ok(value)
+}
+
+/// Is this static type name a `Shared` wrapper?
+fn is_shared_wrapper(type_name: &str) -> bool {
+    type_name == "Shared" || type_name.starts_with("Shared<")
 }
 
 /// Lower ArithExtended instruction to LLVM IR.
@@ -20823,7 +20846,49 @@ fn lower_call_method<'ctx>(
                         .get_module()
                         .get_function(&deref_name)
                         .filter(|f| f.count_basic_blocks() > 0 && f.count_params() == 1);
-                    if !owns && let Some(df) = deref_fn {
+                    // **SHARED-HOP-INLINE-1 (T1186)** — for a
+                    // `Shared` receiver, peel INLINE instead of calling
+                    // `Shared.deref`, because the call cannot be relied
+                    // on to exist.
+                    //
+                    // The gate below is `count_basic_blocks() > 0`, and
+                    // `VERUM_AOT_TRACE_CALLM` reports
+                    // `candidate="Shared.deref" blocks=0` in EVERY
+                    // program measured — including one where an explicit
+                    // `s.deref().x` answers correctly. So the LLVM
+                    // function is DECLARED and bodyless while the call
+                    // resolves through another route entirely, and this
+                    // liveness test is asking the wrong source. The
+                    // symptom was `a.describe()` on a `Shared<GitSource>`
+                    // aborting with "no runtime candidate" while the
+                    // interpreter answered `git:u`.
+                    //
+                    // An earlier reading of mine blamed the body being
+                    // absent from the module and was WRONG: `nm` counts
+                    // a declaration's symbol exactly as it counts a
+                    // definition, so it could not tell them apart.
+                    //
+                    // The inline peel needs no function, so it is
+                    // immune to however the module happens to be
+                    // populated — and it is the same carrier layout the
+                    // `Deref` arm uses, through the same helper, so the
+                    // two cannot drift.
+                    if !owns && is_shared_wrapper(tn) {
+                        let recv_val = ctx.get_register(receiver.0)?;
+                        let inner = peel_shared_carrier(ctx, recv_val, "callm_hop")?;
+                        // `dst` doubles as the scratch register, exactly
+                        // as the call path below does and for the same
+                        // reason: writing the CALLER's receiver register
+                        // would unwrap their variable permanently (T1183).
+                        ctx.set_register(dst.0, inner);
+                        sw_receiver = dst;
+                        if std::env::var_os("VERUM_AOT_TRACE_CALLM").is_some() {
+                            eprintln!(
+                                "[callm]   STATIC-DEREF-HOP inline-peel for method={:?}",
+                                method_name_str
+                            );
+                        }
+                    } else if !owns && let Some(df) = deref_fn {
                         let recv_val = ctx.get_register(receiver.0)?;
                         let recv_i64 = as_i64(ctx, recv_val, "shop_recv")?;
                         let self_arg: BasicMetadataValueEnum = match df.get_nth_param(0) {
