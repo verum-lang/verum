@@ -2,7 +2,7 @@
 // vcs/specs/stdlib/sys/linux/time_test.vr
 // =============================================================================
 // @test: run
-// @skip: bare cross-platform Stopwatch/Instant/Duration have no standalone declaration (only LinuxStopwatch/LinuxDuration/... exist, with divergent APIs — LinuxDuration has no ZERO); gated on T0442 (implement cross-platform time types) + T0440 (sleep_ms interpreter overflow). Un-skip when T0442 lands. Cannot be verified on a non-Linux host.
+// @skip: bare cross-platform Stopwatch/Instant/Duration have no standalone declaration (only LinuxStopwatch/LinuxDuration/... exist, with divergent APIs — LinuxDuration has no ZERO); gated on T0442 (implement cross-platform time types) + T0440 (sleep_ms interpreter overflow). T0442 is DEAD (cancelled 2026), not done — so this will never 'land' and the instruction to wait for it cannot be followed. Re-checked 2026-09-07: `Stopwatch` is still an alias to the Linux type in `core/sys/linux/time.vr:511`, and `Duration` still has no `ZERO`. The reason stands on its own; un-skip when the bare types exist, whoever makes them. Cannot be verified on a non-Linux host.
 // @tier: 0
 // @level: L0
 // @tags: stdlib, sys, linux, time, clock
