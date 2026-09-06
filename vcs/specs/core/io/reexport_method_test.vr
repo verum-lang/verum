@@ -5,10 +5,20 @@
 // @level: L0
 // @tier: 0
 // @tags: reexport, method, bug-reproduction
-// @description: Tests that methods are available on re-exported types
+// @description: Methods must resolve through a re-export.
 //
-// BUG: When types are re-exported via `public mount .path.Path`, the methods
-// from `implement Path { ... }` blocks are not resolved through the re-export.
+// WAS A BUG REPRODUCTION, IS NOW A REGRESSION GUARD. The header used to
+// read "BUG: when types are re-exported via `public mount .path.Path`,
+// the methods from `implement Path { … }` blocks are not resolved
+// through the re-export" — and the directive above it is
+// `@test: typecheck-pass`, so if that were still true this file would
+// be RED, not green.
+//
+// Measured 2026-09-07: `p.is_empty()` on a `Path` mounted from
+// `core.io` typechecks in 0.23s, rc=0. The prose outlived the condition
+// it described, and a reader arriving here would have concluded the
+// defect was live BECAUSE the file passes — the passing was the proof
+// it is not.
 // =============================================================================
 
 // Import Path from core.io (which re-exports from core.io.path)
@@ -18,8 +28,9 @@ mount core.base.maybe.{Maybe, Some, None};
 // Try to call a method on Path
 @test
 fn test_path_method() {
-    // This should work but currently fails with:
-    // "no method named `is_empty` found for type `Path`"
+    // The failure this once reproduced: "no method named `is_empty`
+    // found for type `Path`". It resolves now; the call below is the
+    // guard.
     let p = Path.new("test");
     let _empty = p.is_empty();
 }
