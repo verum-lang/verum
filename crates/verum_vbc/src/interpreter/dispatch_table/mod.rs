@@ -1312,6 +1312,32 @@ pub fn dispatch_loop_table_with_entry_depth(
         state.advance_pc(1);
         state.record_instruction();
 
+        // PER-INSTRUCTION WATCHPOINT (`VERUM_TRACE_DEREF=1`).  The carrier
+        // watch below reports a change at the next TRACED event, and the
+        // traced events are field reads — so a change that happens between
+        // two of them is attributed to whichever read comes after, which is
+        // not where it happened.  Checking every instruction removes the
+        // attribution error entirely: the report then names the function and
+        // the pc of the instruction that ran.
+        // Through the cache, NOT `env::var`.  This module's own docstring
+        // records why: per-instruction `getenv` takes the process-global
+        // environment lock and cost ~70% of the hot loop's wall time
+        // (T0852).  A diagnostic that reintroduces that is not free when
+        // switched off, which is the only condition under which it is
+        // acceptable to leave in the dispatch loop at all.
+        if crate::interpreter::env_flags::is_set(
+            crate::interpreter::env_flags::Flag::TraceDeref,
+        ) {
+            let fname = state
+                .call_stack
+                .current_function_name(&state.module)
+                .unwrap_or_default();
+            handlers::cbgr::shared_watch_check(&format!(
+                "{}@pc={} op={:#04x}",
+                fname, pc, opcode_byte
+            ));
+        }
+
         // Opt-in per-instruction trace (VERUM_TRACE_PC=<fn-name-substr>):
         // prints pc + opcode + classification of r1/r2/r3 for the matching
         // function, so a same-bytecode/different-result divergence between

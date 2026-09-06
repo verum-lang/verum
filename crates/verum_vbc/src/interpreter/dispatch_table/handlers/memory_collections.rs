@@ -574,7 +574,9 @@ fn shared_carrier_inner(
     // peeled in TWO places and neither knows the other exists; the two
     // traces share one flag so a single run shows both, which is the
     // only way to see them disagree.
-    let trace = std::env::var("VERUM_TRACE_DEREF").is_ok();
+    let trace = crate::interpreter::env_flags::is_set(
+        crate::interpreter::env_flags::Flag::TraceDeref,
+    );
     // WHICH FUNCTION IS ASKING.  T1205's open question is what separates the
     // `GetF`s `Shared.new` performs on the carrier it is building from a
     // user's field read — both see a SHARED-stamped receiver, so the
@@ -594,6 +596,24 @@ fn shared_carrier_inner(
     } else {
         String::new()
     };
+    if trace {
+        // EVERY traced event checks the watchpoint, including the ones about
+        // other objects — those are the only events in the interval where the
+        // carrier changes, so they are the ones that can name it.
+        super::cbgr::shared_watch_check(&format!("getf-peel/{}", asking));
+    }
+    if trace && header.type_id == TypeId::SHARED {
+        // IDENTIFY THE CARRIER, not just the arm.  A run builds several
+        // `Shared` objects over one extent; naming which object a peel saw
+        // is what separates "this slot changed" from "this is a different
+        // object", and the two need opposite fixes.
+        eprintln!(
+            "[getf-peel] in={} carrier {}",
+            asking,
+            super::cbgr::dump_object_slots_pub(ptr as *const u8),
+        );
+        super::cbgr::shared_watch_arm(ptr as *const u8);
+    }
     if header.type_id != TypeId::SHARED {
         if trace {
             eprintln!(
@@ -626,11 +646,22 @@ fn shared_carrier_inner(
     if trace {
         // THE ARM THAT ANSWERS WITH THE CARRIER ITSELF.  A field read then
         // lands on slot 0 — the refcount — which is T1202's `1`.
+        // WHY THE READ PATH DID NOT ALREADY PEEL THIS.  Reaching this arm at
+        // all means `Deref`'s two-hop peel declined for this same carrier —
+        // in a healthy run `GetF` never sees a SHARED type_id, because the
+        // `Deref` before it has handed over the inner object.  So the useful
+        // fact here is not this arm's own verdict but the OTHER path's
+        // refusal, which until now was invisible from here.
         eprintln!(
             "[getf-peel] in={} SHARED but inner is not a pointer (tag={:?}) \
-             — returning the CARRIER, so the field read hits the refcount",
+             — returning the CARRIER, so the field read hits the refcount; \
+             read-path peel says: {}",
             asking,
             unsafe { shared_cell_inner_value(ptr) }.tag(),
+            match super::cbgr::shared_inner_cell_result(state, ptr as *mut u8) {
+                Ok(slot) => format!("it would have peeled to {:p}", slot),
+                Err(why) => why.to_string(),
+            },
         );
     }
     Ok(ptr)

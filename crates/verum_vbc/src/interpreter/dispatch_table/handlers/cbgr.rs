@@ -173,10 +173,120 @@ pub(in super::super) fn handle_ref_mut(
 /// membership test excludes those cells — the same live-allocation guard the
 /// T0107 `handle_clone` SHARED arm uses.
 ///
-/// Shared layout: `[ObjectHeader][refcount:i64 @ slot0][inner:Value @ slot1]`.
+/// Shared layout, MEASURED 2026-09-06 and not the one this comment carried
+/// until T1202: the CARRIER object is `[ObjectHeader][ptr][generation][epoch]`
+/// — 24 bytes, three slots, the same for a one-field and an eight-field `T` —
+/// and `ptr` is an Int-tagged bridge address whose 24-byte extent holds
+/// `[strong_count][weak_count][value]`.  The value is TWO hops away, never
+/// one.
+///
+/// `shared_inner_cell_result` names WHICH rung of the ladder declined; the
+/// `Option` wrapper below is what every call site uses.  A bare `None` was
+/// read for a full session as "the peel is wrong", when the ladder was in
+/// fact refusing a FREED extent — a reason costs one `&'static str` and
+/// settles that question at the trace instead of at a rebuild.
 fn shared_inner_cell(state: &InterpreterState, base_ptr: *mut u8) -> Option<*mut Value> {
+    shared_inner_cell_result(state, base_ptr).ok()
+}
+
+/// Describe a heap object's data slots — the header's own recorded size and
+/// every slot's raw word beside its tag.
+///
+/// TRACE ONLY, and it belongs to BOTH arms.  Until now only the arm that
+/// SUCCEEDED described its object, so the one interesting failure in a
+/// 78-read run — the read that panics — printed no bytes at all, and the
+/// reason had to be inferred from the arm's name.  A description that exists
+/// only on the success path documents the case nobody needs documented.
+///
+/// RAW BITS AS WELL AS THE TAG: a tag is an INTERPRETATION, and a
+/// `cbgr_allocate` block is packed storage that was never NaN-boxed.
+pub(super) fn dump_object_slots_pub(base_ptr: *const u8) -> String {
+    dump_object_slots(base_ptr)
+}
+
+fn dump_object_slots(base_ptr: *const u8) -> String {
+    // SAFETY: callers establish alignment; every VBC heap object opens with
+    // an ObjectHeader, and `ref_or_stub` tolerates one that does not.
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr as *mut u8) };
+    let slots = header.size as usize / std::mem::size_of::<Value>();
+    let data = unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+    // THE OBJECT'S OWN ADDRESS FIRST.  Without it a dump cannot tell
+    // "this slot changed" from "this is a different object" — two readings
+    // that need opposite fixes, and the trace has been silent on which for
+    // its whole life.
+    let mut dump = format!("obj={:p} size={}B slots={}", base_ptr, header.size, slots);
+    for i in 0..slots.min(8) {
+        // SAFETY: `i < slots`, the header's own count of Value-sized slots.
+        let v = unsafe { *data.add(i) };
+        dump.push_str(&format!(
+            " [{}]raw=0x{:016x} tag={:?}{}",
+            i,
+            v.bits(),
+            v.tag(),
+            if v.is_ptr() { "/ptr" } else { "" },
+        ));
+    }
+    dump
+}
+
+thread_local! {
+    /// Every `Shared` carrier this run has observed: address -> slot-0 word.
+    ///
+    /// TRACE ONLY.  The single-slot version of this watched ONE carrier and
+    /// reported nothing, which I read as "no carrier changed" — it was silent
+    /// about the object it was not watching, and that object is the one that
+    /// changes.  A watchpoint's silence is evidence only over its own domain,
+    /// so the domain is now every carrier seen.
+    static SHARED_WATCH: std::cell::RefCell<std::collections::BTreeMap<usize, u64>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+/// Record (or re-record) a carrier's slot-0 word.
+pub(super) fn shared_watch_arm(base_ptr: *const u8) {
+    // SAFETY: the caller established this object and its data area.
+    let slot0 = unsafe { *(base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
+    SHARED_WATCH.with(|w| {
+        w.borrow_mut().insert(base_ptr as usize, slot0.bits());
+    });
+}
+
+/// Re-read every recorded carrier and report the ones that changed, naming
+/// where execution is now.
+pub(in crate::interpreter) fn shared_watch_check(site: &str) {
+    SHARED_WATCH.with(|w| {
+        let mut w = w.borrow_mut();
+        let mut changed: Vec<(usize, u64, u64)> = Vec::new();
+        for (&addr, &was) in w.iter() {
+            // SAFETY: the address was a live heap object when recorded, and
+            // this runs only under the trace flag.
+            let now = unsafe {
+                *((addr as *const u8).add(heap::OBJECT_HEADER_SIZE) as *const Value)
+            }
+            .bits();
+            if now != was {
+                changed.push((addr, was, now));
+            }
+        }
+        for (addr, was, now) in changed {
+            eprintln!(
+                "[watch] carrier {:#x} slot0 0x{:016x} -> 0x{:016x} (delta {}) at {}",
+                addr,
+                was,
+                now,
+                (now as i64).wrapping_sub(was as i64),
+                site,
+            );
+            w.insert(addr, now);
+        }
+    });
+}
+
+pub(super) fn shared_inner_cell_result(
+    state: &InterpreterState,
+    base_ptr: *mut u8,
+) -> Result<*mut Value, &'static str> {
     if base_ptr.is_null() {
-        return None;
+        return Err("base is null");
     }
     // A CBGR `Heap<T>` cell is not a Shared carrier; its data pointer is not
     // an ObjectHeader, so never read a SHARED type_id out of it.
@@ -185,16 +295,16 @@ fn shared_inner_cell(state: &InterpreterState, base_ptr: *mut u8) -> Option<*mut
             .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize),
     );
     if is_cbgr_cell {
-        return None;
+        return Err("base is a CBGR Heap cell, not a Shared carrier");
     }
     if !(base_ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
-        return None;
+        return Err("base is misaligned for an ObjectHeader");
     }
     // SAFETY: alignment verified; every VBC heap object begins with an
     // ObjectHeader.
     let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
     if header.type_id != TypeId::SHARED {
-        return None;
+        return Err("carrier type_id is not SHARED");
     }
     // **SHARED-IS-TWO-HOPS-1 (T1202).**  A `Shared<T>` is TWO objects and
     // this used to read one hop into the first:
@@ -237,21 +347,48 @@ fn shared_inner_cell(state: &InterpreterState, base_ptr: *mut u8) -> Option<*mut
     // both, moved the construction path, and regressed `s.deref()` — so the
     // two peels are fixed one at a time, each against its own measurement.
     const VALUE_SLOT: usize = 2;
+    Ok(unsafe { shared_extent_base(state, base_ptr)?.add(VALUE_SLOT) })
+}
+
+/// The base of a `Shared` carrier's `SharedInner` extent — slot 0 is
+/// `strong_count`, slot 1 `weak_count`, slot 2 the value.
+///
+/// ONE PLACE WHERE THE TWO HOPS LIVE.  The read leg wants slot 2 and the
+/// drop leg wants slot 0; before this they were separate code, and the drop
+/// leg was still writing to the CARRIER under the retired
+/// `[refcount:i64][value]` layout while the read leg had moved on.  A layout
+/// that two legs each know separately is a layout that rots in one of them,
+/// and it did: T1205's whole symptom was `ptr` decremented to `ptr - 1`.
+fn shared_extent_base(
+    state: &InterpreterState,
+    base_ptr: *mut u8,
+) -> Result<*mut Value, &'static str> {
     // Hop 1: the `ptr` field.  `cbgr_alloc` returns an INT-tagged address
     // (T0108) — which is also why `is_ptr()` on this slot says false.
-    // SAFETY: SHARED type-id and alignment established above.
+    // SAFETY: SHARED type-id and alignment established by the caller.
     let carrier = unsafe { *(base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
     let addr = (carrier.bits() & crate::value::PAYLOAD_MASK) as usize;
-    if addr == 0 || addr % std::mem::align_of::<Value>() != 0 {
-        return None;
+    if addr == 0 {
+        return Err("carrier slot holds address 0");
+    }
+    if addr % std::mem::align_of::<Value>() != 0 {
+        return Err("carrier slot address is misaligned for a Value");
     }
     // Hop 2: into the extent, bounded by the interpreter's own record of it.
-    let room = bridge_extent_room(state, addr)?;
-    if room < (VALUE_SLOT + 1) * std::mem::size_of::<Value>() {
-        return None;
+    //
+    // THIS RUNG DISTINGUISHES A WRONG PEEL FROM A DEAD EXTENT.  The index is
+    // the interpreter's record of what it handed out and what it took back;
+    // an address that WAS in it and is no longer means the block was freed
+    // while a carrier still pointed at it, which is a lifetime defect
+    // upstream and not a mis-indexed read here.
+    let Some(room) = bridge_extent_room(state, addr) else {
+        return Err("extent is not live (absent from cbgr_bridge_extents) — freed under a live carrier");
+    };
+    if room < 3 * std::mem::size_of::<Value>() {
+        return Err("extent is shorter than the three slots SharedInner declares");
     }
-    // SAFETY: the extent proves the slot lies inside a live payload.
-    Some(unsafe { (addr as *mut Value).add(VALUE_SLOT) })
+    // SAFETY: the extent proves three readable `Value` slots.
+    Ok(addr as *mut Value)
 }
 
 /// Width of one packed scalar slot in a bridge allocation, in bytes.
@@ -408,7 +545,9 @@ pub(in super::super) fn handle_deref(
     // summary of them, so a reader can see WHICH test decided rather than
     // re-deriving it.  Filter-free (`=1`) because the interesting runs are
     // small probes; a whole-programme run is expected to flood.
-    let trace_deref = std::env::var("VERUM_TRACE_DEREF").is_ok();
+    let trace_deref = crate::interpreter::env_flags::is_set(
+        crate::interpreter::env_flags::Flag::TraceDeref,
+    );
     if trace_deref {
         let kind = if ref_val.is_thin_ref() {
             "thin_ref"
@@ -546,37 +685,9 @@ pub(in super::super) fn handle_deref(
                         // guess until the object has a description, so this
                         // prints the header's own recorded size and EVERY
                         // slot, which is the thing nobody had.
-                        let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
-                        let slots = header.size as usize / std::mem::size_of::<Value>();
-                        let data = unsafe {
-                            base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                        };
-                        let mut dump = String::new();
-                        for i in 0..slots.min(8) {
-                            // SAFETY: `i < slots`, and `slots` is the header's
-                            // own count of Value-sized data slots.
-                            let v = unsafe { *data.add(i) };
-                            // RAW BITS AS WELL AS THE TAG.  A tag is an
-                            // INTERPRETATION, and this block may not be
-                            // NaN-boxed at all: `cbgr_allocate` returns an
-                            // Int-tagged user pointer into PACKED bridge
-                            // storage, of which T0108 says "never a NaN box".
-                            // Reading packed scalars through `Value::tag()`
-                            // yields a confident answer about a frame that
-                            // does not apply, so the raw word is printed
-                            // beside it and the reader can tell them apart.
-                            dump.push_str(&format!(
-                                " [{}]raw=0x{:016x} tag={:?}{}",
-                                i,
-                                v.bits(),
-                                v.tag(),
-                                if v.is_ptr() { "/ptr" } else { "" },
-                            ));
-                        }
+                        let dump = dump_object_slots(base_ptr);
                         eprintln!(
-                            "[deref]   arm=shared_peel size={}B slots={} chosen_tag={:?} chosen_is_ptr={}{}",
-                            header.size,
-                            slots,
+                            "[deref]   arm=shared_peel chosen_tag={:?} chosen_is_ptr={} {}",
                             inner.tag(),
                             inner.is_ptr(),
                             dump,
@@ -592,10 +703,12 @@ pub(in super::super) fn handle_deref(
                         // is a measurement; reading bytes at a guessed offset
                         // is not, and two such guesses have already been
                         // reverted here.
-                        if slots > 0 {
-                            // SAFETY: `slots > 0`, so slot 0 is inside the
-                            // object's data area.
-                            let p0 = unsafe { *data };
+        {
+                            // SAFETY: a SHARED carrier always has a data area;
+                            // `dump_object_slots` above printed it.
+                            let p0 = unsafe {
+                                *(base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value)
+                            };
                             let addr = (p0.bits() & 0x0000_ffff_ffff_ffff) as usize;
                             eprintln!(
                                 "[deref]   slot0 addr=0x{:x} in_cbgr_allocations={} \
@@ -615,7 +728,12 @@ pub(in super::super) fn handle_deref(
                     return Ok(DispatchResult::Continue);
                 }
                 if trace_deref {
-                    eprintln!("[deref]   arm=identity (shared_inner_cell declined)");
+                    shared_watch_check("deref/identity");
+                    eprintln!(
+                        "[deref]   arm=identity (shared_inner_cell declined: {}) {}",
+                        shared_inner_cell_result(state, base_ptr).unwrap_err(),
+                        dump_object_slots(base_ptr),
+                    );
                 }
                 // Regular heap object dereference: identity deref (return pointer as-is).
                 // Sum type variants and other heap objects should NOT be automatically unwrapped.
@@ -1214,17 +1332,42 @@ pub(in super::super) fn handle_drop_ref(
             // drop decrements the strong count that `clone` bumped.
             // DropRef is emitted once per user BINDING (not per alias
             // temp), so binding-granularity decrement mirrors the
-            // source-level `Drop for Shared` semantics over the runtime
-            // repr `[refcount:i64][value]`.  Saturates at zero — the
-            // repr keeps the allocation alive for the interpreter heap
-            // to reclaim, matching `into_inner`'s no-hard-free policy.
+            // source-level `Drop for Shared` semantics.  Saturates at
+            // zero — the repr keeps the allocation alive for the
+            // interpreter heap to reclaim, matching `into_inner`'s
+            // no-hard-free policy.
+            //
+            // **T1205 — THE COUNT IS TWO HOPS AWAY, and this leg wrote
+            // one.**  The comment here used to say the runtime repr is
+            // `[refcount:i64][value]`, and the code matched the comment:
+            // it decremented slot 0 of the CARRIER.  Measured 2026-09-06,
+            // that slot is `ptr`, an Int-tagged bridge address, and the
+            // counts live in the extent it addresses:
+            //
+            //     carrier  [ptr][generation][epoch]     24B heap object
+            //     extent   [strong][weak][value]        24B bridge block
+            //
+            // So the decrement wrote `ptr - 1` into `ptr`.  The symptom
+            // was `13-channels` panicking with `field index 6 … exceeds
+            // object data size 24 type_id=520 type='Shared'` seven
+            // hundred instructions later, when the read path refused a
+            // misaligned address and handed `GetF` the unpeeled carrier.
+            // Located by watching every carrier's slot 0 at every
+            // instruction: `core.async.channel.bounded@pc=203 op=0x77`,
+            // delta exactly -1.
+            //
+            // A DECLINED PEEL WRITES NOTHING.  The old code could not
+            // decline — it wrote wherever slot 0 was — which is why a
+            // stale layout stayed silent for as long as it did.
             if type_id == crate::types::TypeId::SHARED {
-                let data_ptr =
-                    unsafe { obj_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                let refcount = unsafe { (*data_ptr).as_i64() };
-                if refcount > 0 {
-                    unsafe {
-                        *data_ptr = Value::from_i64(refcount - 1);
+                if let Ok(extent) = shared_extent_base(state, obj_ptr) {
+                    // SAFETY: `shared_extent_base` bounded the extent
+                    // against the interpreter's own allocation index.
+                    let strong = unsafe { (*extent).as_i64() };
+                    if strong > 0 {
+                        unsafe {
+                            *extent = Value::from_i64(strong - 1);
+                        }
                     }
                 }
                 return Ok(DispatchResult::Continue);

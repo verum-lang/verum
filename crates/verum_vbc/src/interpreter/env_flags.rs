@@ -40,6 +40,8 @@ pub(crate) enum Flag {
     TraceCallmFlow,
     /// `VERUM_TRACE_CALLS`
     TraceCalls,
+    /// `VERUM_TRACE_DEREF`
+    TraceDeref,
     /// `VERUM_TRACE_DISPATCH`
     TraceDispatch,
     /// `VERUM_TRACE_DROPFN`
@@ -91,7 +93,7 @@ pub(crate) enum Flag {
 }
 
 impl Flag {
-    const COUNT: usize = 35;
+    const COUNT: usize = 36;
 
     fn name(self) -> &'static str {
         match self {
@@ -105,6 +107,7 @@ impl Flag {
             Flag::TraceCallmFail => "VERUM_TRACE_CALLM_FAIL",
             Flag::TraceCallmFlow => "VERUM_TRACE_CALLM_FLOW",
             Flag::TraceCalls => "VERUM_TRACE_CALLS",
+            Flag::TraceDeref => "VERUM_TRACE_DEREF",
             Flag::TraceDispatch => "VERUM_TRACE_DISPATCH",
             Flag::TraceDropfn => "VERUM_TRACE_DROPFN",
             Flag::TraceEncbuf => "VERUM_TRACE_ENCBUF",
@@ -144,30 +147,31 @@ impl Flag {
             Flag::TraceCallmFail => 8,
             Flag::TraceCallmFlow => 9,
             Flag::TraceCalls => 10,
-            Flag::TraceDispatch => 11,
-            Flag::TraceDropfn => 12,
-            Flag::TraceEncbuf => 13,
-            Flag::TraceEnvstub => 14,
-            Flag::TraceEqRuntime => 15,
-            Flag::TraceFatrefRoute => 16,
-            Flag::TraceFieldaddr => 17,
-            Flag::TraceGetf => 18,
-            Flag::TraceGvd => 19,
-            Flag::TraceHasher => 20,
-            Flag::TraceListrepr => 21,
-            Flag::TraceMatchtag => 22,
-            Flag::TracePc => 23,
-            Flag::TracePcDecode => 24,
-            Flag::TracePool => 25,
-            Flag::TraceProcess => 26,
-            Flag::TraceProtocolDispatch => 27,
-            Flag::TracePtrwrite => 28,
-            Flag::TracePushStr => 29,
-            Flag::TracePushStrX => 30,
-            Flag::TraceStaticmut => 31,
-            Flag::TraceStaticCall => 32,
-            Flag::TraceTcp => 33,
-            Flag::TrapSelfref => 34,
+            Flag::TraceDeref => 11,
+            Flag::TraceDispatch => 12,
+            Flag::TraceDropfn => 13,
+            Flag::TraceEncbuf => 14,
+            Flag::TraceEnvstub => 15,
+            Flag::TraceEqRuntime => 16,
+            Flag::TraceFatrefRoute => 17,
+            Flag::TraceFieldaddr => 18,
+            Flag::TraceGetf => 19,
+            Flag::TraceGvd => 20,
+            Flag::TraceHasher => 21,
+            Flag::TraceListrepr => 22,
+            Flag::TraceMatchtag => 23,
+            Flag::TracePc => 24,
+            Flag::TracePcDecode => 25,
+            Flag::TracePool => 26,
+            Flag::TraceProcess => 27,
+            Flag::TraceProtocolDispatch => 28,
+            Flag::TracePtrwrite => 29,
+            Flag::TracePushStr => 30,
+            Flag::TracePushStrX => 31,
+            Flag::TraceStaticmut => 32,
+            Flag::TraceStaticCall => 33,
+            Flag::TraceTcp => 34,
+            Flag::TrapSelfref => 35,
         }
     }
 }
