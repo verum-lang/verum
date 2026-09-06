@@ -1,0 +1,97 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: aot, codegen, variants, result, text, tier-parity, regression
+// @timeout: 60000
+// @expected-exit: 0
+// @expected-stdout-begin
+// one=hello
+// first=alpha
+// second=beta
+// number=42
+// @expected-stdout-end
+//
+// Regression guard for T1206: a payload extracted from a USER SUM that
+// is itself the payload of a `Result` must keep its declared type.
+//
+// WHAT WENT WRONG. `GetVariantData` classifies the payload of a
+// `Result`/`Maybe` (T0241). When that payload is another sum, its own
+// payload comes out of a SECOND, nested `GetVariantData` whose source is
+// neither — and nothing classified it. A `Text` therefore reached
+// `ToString` as an unmarked i64 and printed as its POINTER:
+//
+//     tier 0   one=hello
+//     tier 1   one=4301881552        (a different address every run)
+//
+// with rc=0 on both. `docs/by-example/04-result-error` shipped in that
+// state for at least three binaries, and the only reason it was ever
+// noticed is that an address CHANGES BETWEEN RUNS, so the by-example
+// blast radius kept reporting it as MOVED between binaries that could
+// not have affected it. Read as noise for three sessions; it was noise
+// in the comparison AND a defect in the program.
+//
+// THIS SPEC IS DIFFERENTIAL ON PURPOSE. The interpreter has always been
+// right here, so a tier-1-only assertion would pass the day someone
+// broke tier 0 instead. The two tiers agreeing IS the property.
+//
+// THREE THINGS IT PINS, and each was a separate failure:
+//
+//   `one`             the simple case — one payload-carrying variant, so
+//                     no match tag is needed to know the payload type.
+//   `first`/`second`  a TUPLE variant with TWO fields. The classifier
+//                     originally sat under `if *field == 0`, inherited
+//                     from the Maybe/Result neighbourhood where a payload
+//                     is single. `NotOurName(Text, Text)` in the registry
+//                     printed BOTH as addresses.
+//   `number`          the control that must NOT regress: an `Int` payload
+//                     in the same sum. Marking it as Text would read a
+//                     scalar as a heap pointer and crash, so a fix that
+//                     over-fires is worse than no fix, and this line is
+//                     what says it did not.
+//
+// The sum deliberately has payload types that DISAGREE (Text, (Text,
+// Text), Int), so the classifier cannot fall back on "every variant
+// agrees" — it must resolve the actual variant. A sum whose variants all
+// carried Text would pass without exercising that at all.
+//
+// AND THE ERROR TYPE'S NAME IS DELIBERATELY LONGER THAN ONE CHARACTER.
+// `Result<Int, E>` was measured CORRECT while `Result<Int, Failure>` was
+// wrong — thirteen names, a clean break at length 2 — because
+// `unify.rs:1801` treats a one-character uppercase name as an
+// unconstrained type parameter and that branch keeps the payload
+// classified. A spec written with `E` would pass on the broken compiler.
+
+mount core.prelude.*;
+
+type Failure is
+    | Simple(Text)
+    | Pair(Text, Text)
+    | Numeric(Int);
+
+fn simple() -> Result<Int, Failure> { Err(Failure.Simple("hello")) }
+fn pair() -> Result<Int, Failure> { Err(Failure.Pair("alpha", "beta")) }
+fn numeric() -> Result<Int, Failure> { Err(Failure.Numeric(42)) }
+
+fn main() {
+    match simple() {
+        Ok(n) => print(f"unexpected ok {n}"),
+        Err(Failure.Simple(t)) => print(f"one={t}"),
+        Err(Failure.Pair(a, b)) => print(f"unexpected pair {a} {b}"),
+        Err(Failure.Numeric(n)) => print(f"unexpected numeric {n}"),
+    }
+    match pair() {
+        Ok(n) => print(f"unexpected ok {n}"),
+        Err(Failure.Simple(t)) => print(f"unexpected simple {t}"),
+        Err(Failure.Pair(a, b)) => {
+            print(f"first={a}");
+            print(f"second={b}");
+        }
+        Err(Failure.Numeric(n)) => print(f"unexpected numeric {n}"),
+    }
+    match numeric() {
+        Ok(n) => print(f"unexpected ok {n}"),
+        Err(Failure.Simple(t)) => print(f"unexpected simple {t}"),
+        Err(Failure.Pair(a, b)) => print(f"unexpected pair {a} {b}"),
+        Err(Failure.Numeric(n)) => print(f"number={n}"),
+    }
+}
