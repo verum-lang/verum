@@ -5734,6 +5734,101 @@ pub fn lower_instruction<'ctx>(
 
         Instruction::Deref { dst, ref_reg } => {
             let val = ctx.get_register(ref_reg.0)?;
+
+            // **AOT-SHARED-CARRIER-PEEL-1 (T0393)** — `*s` on a
+            // `Shared<T>` must reach the wrapped value; without this it
+            // passed the `Shared` pointer through and the terminal
+            // `GetF` read the WRAPPER's own fields.
+            //
+            // Measured on a two-field record, which is the probe that
+            // names what is being read:
+            //
+            //     type Q is { a: Int, b: Int };
+            //     let s = Shared.new(Q { a: 1111, b: 2222 });
+            //     AOT   s.a = 4445323296     s.b = 1
+            //
+            // against `public type Shared<T> is { ptr, generation,
+            // epoch }` — an ADDRESS and a GENERATION, i.e. fields 0 and
+            // 1 of the wrapper. The July row for this task promised a
+            // SIGSEGV; there is none any more, which is worse: rc=0 and
+            // a plausible number.
+            //
+            // THE TWO HOPS ARE NOT INVENTED. They are what
+            // `Shared.deref`'s own body emits, dumped:
+            //
+            //     0: GetF { obj: Reg(0), field_idx: 0 }        self.ptr
+            //     1: FfiExtended { sub_op: 79,
+            //                      operands: [2, 1, 16, 0, 1] }
+            //
+            // field 0 for `ptr`, then StructFieldAddr at byte offset 16
+            // with the FIFTH OPERAND SET — `FIELDADDR-HEADERLESS-1`
+            // (T1159): a `cbgr_alloc` block carries no ObjectHeader, so
+            // its slots start at the user pointer and the 24-byte skip
+            // must not be applied. `s.deref().a` answers correctly in
+            // BOTH tiers on that path today, which is what makes these
+            // offsets measured rather than derived.
+            //
+            // WHY NOT SHARE THE INTERPRETER'S RULE: the two tiers do not
+            // hold the same object. Here `s` is the declared stdlib
+            // record (f0 = ptr); in the interpreter slot 0 reads 1,
+            // which `ptr` cannot be — it substitutes a carrier. Two
+            // objects, two peels; T1202 owns the other one.
+            //
+            // `Heap<T> { ptr: &unsafe T, … }` deliberately does NOT come
+            // here: its `ptr` IS the value pointer, one hop, which is
+            // why `Heap` never showed this symptom and why a shared
+            // `Deref` opcode cannot express both depths.
+            if ctx
+                .get_obj_register_type(ref_reg.0)
+                .is_some_and(|t| t == "Shared" || t.starts_with("Shared<"))
+            {
+                let i64_type = ctx.types().i64_type();
+                let carrier = as_ptr(ctx, val, "shared_carrier")?;
+                let inner_slot = unsafe {
+                    ctx.builder()
+                        .build_in_bounds_gep(
+                            ctx.types().i8_type(),
+                            carrier,
+                            &[i64_type
+                                .const_int(RuntimeLowering::OBJECT_HEADER_SIZE, false)],
+                            "shared_ptr_slot",
+                        )
+                        .or_llvm_err()?
+                };
+                let inner = ctx
+                    .builder()
+                    .build_load(i64_type, inner_slot, "shared_inner")
+                    .or_llvm_err()?;
+                let inner_ptr = as_ptr(ctx, inner, "shared_inner_ptr")?;
+                // SharedInner { strong_count: u32, weak_count: u32,
+                // value: T } — `value` is slot 2, byte 16, and the block
+                // is headerless. PINNED: a change to that declaration
+                // must change this constant, and the spec beside this
+                // task fails if it does not.
+                let value_slot = unsafe {
+                    ctx.builder()
+                        .build_in_bounds_gep(
+                            ctx.types().i8_type(),
+                            inner_ptr,
+                            &[i64_type.const_int(SHARED_INNER_VALUE_OFFSET, false)],
+                            "shared_value_slot",
+                        )
+                        .or_llvm_err()?
+                };
+                let value = ctx
+                    .builder()
+                    .build_load(i64_type, value_slot, "shared_value")
+                    .or_llvm_err()?;
+                if std::env::var("VERUM_TRACE_SHAREDPEEL").is_ok() {
+                    eprintln!(
+                        "[sharedpeel] {} reg={} PEELED",
+                        ctx.function_name().as_str(),
+                        ref_reg.0
+                    );
+                }
+                ctx.set_register(dst.0, value);
+                return Ok(());
+            }
             // A `List<Float>` element flows through the iterator chain as an i64
             // register *marked float* (mark_register_from_return_type stamps the
             // IterNext dst from the list's generic_type_args). `*x` must preserve
@@ -24644,6 +24739,19 @@ const CBGR_SUB_REF_FIELD: u8 = 0x0C;
 /// address, which is what an `unsafe { &(*ptr).field }` accessor emits.
 /// The second producer `returns_slot_address` must recognise.
 const FFI_SUB_STRUCT_FIELD_ADDR: u8 = 0x4F;
+
+/// Byte offset of `SharedInner<T>.value` from the start of the
+/// `cbgr_alloc` block that holds it — `{ strong_count: UInt32,
+/// weak_count: UInt32, value: T }`, so slot 2, and the block is
+/// HEADERLESS (`FIELDADDR-HEADERLESS-1`, T1159) so no header size is
+/// added. Taken from what `Shared.deref` itself emits, not computed
+/// here: its `StructFieldAddr` operands are `[dst, obj, 16, 0, 1]`.
+///
+/// This is a CONTRACT, not a magic number. If `core/base/memory.vr`
+/// changes `SharedInner`'s field order, this must change with it, and
+/// `vcs/specs/L0-critical/vbc/shared-field-read-reaches-the-value.vr`
+/// is what fails if it does not.
+const SHARED_INNER_VALUE_OFFSET: u64 = 16;
 
 /// `CbgrSubOpcode::RefListElement` — `&list[i]`. Its lowering arm LOADS
 /// the element and marks the register `interior_list_ref`, so a function

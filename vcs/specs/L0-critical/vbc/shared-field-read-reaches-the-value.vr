@@ -1,0 +1,75 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: aot, codegen, shared, wrapper, field-access, regression
+// @timeout: 30000
+// @expected-exit: 0
+// @expected-stdout-begin
+// a=1111
+// b=2222
+// @expected-stdout-end
+//
+// Regression guard for T0393: `s.field` on a `Shared<T>` must reach the
+// WRAPPED value, not the wrapper's own fields.
+//
+// TIER 1 ONLY, and that is deliberate rather than an omission. The two
+// tiers do not hold the same object for a `Shared` value:
+//
+//     AOT           `s` is the declared record — measured f0 = an
+//                   ADDRESS (`ptr`), f1 = 1 (`generation`)
+//     interpreter   `s` is a substituted carrier — measured slot 0 = 1,
+//                   which `ptr` cannot be
+//
+// So this defect has two causes and two fixes. T1202 owns the
+// interpreter's, and a `differential` spec here would fail on the
+// interpreter for a reason this file is not about — which is how a
+// regression guard starts reporting somebody else's defect and gets
+// muted.
+//
+// WHAT IT WOULD CATCH. Before the fix, `s.a` and `s.b` read fields 0 and
+// 1 of `Shared<T> { ptr, generation, epoch }`:
+//
+//     a = 4445323296     the pointer, printed as a decimal
+//     b = 1              the generation
+//
+// with **rc = 0**. The task's July acceptance said "no SIGSEGV", and by
+// September there was no SIGSEGV and also no correct answer — an
+// acceptance keyed on a symptom goes false-green the moment the defect
+// changes costume. Hence the expected output above names the VALUES.
+//
+// AND IT PINS A CONSTANT. `SHARED_INNER_VALUE_OFFSET = 16` in
+// `verum_codegen/src/llvm/instruction.rs` is the byte offset of
+// `SharedInner<T>.value` — `{ strong_count: UInt32, weak_count: UInt32,
+// value: T }`, slot 2, in a HEADERLESS `cbgr_alloc` block
+// (`FIELDADDR-HEADERLESS-1`, T1159). If `core/base/memory.vr` reorders
+// those fields and the constant is not moved with it, `a=` and `b=`
+// below stop matching. That is the whole point of asserting the field
+// VALUES rather than merely that the program survives.
+//
+// THE `s.deref()` CONTROL WAS REMOVED, and why is worth keeping. It was
+// here to say "if this fails, the fault is in the stdlib body and not in
+// this lowering" — and it failed, on the fixed binary AND on the one
+// before it. Isolated to a single line, and it is not this defect:
+//
+//     fn main()        -> deref=1111
+//     fn main() -> Int -> deref=0        both binaries
+//
+// Changing main's RETURN TYPE changes the value a `Shared` deref
+// produces. That is filed separately with the two-line repro. A spec
+// must fail for exactly one reason, and a control that measures a
+// second defect is a control that will be muted rather than read.
+
+mount core.prelude.*;
+mount core.base.memory.{Shared};
+
+type Q is { a: Int, b: Int };
+
+fn main() -> Int {
+    let s = Shared.new(Q { a: 1111, b: 2222 });
+
+    // The two field reads this task is about.
+    print(f"a={s.a}");
+    print(f"b={s.b}");
+
+    0
+}
