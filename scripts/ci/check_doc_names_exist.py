@@ -52,7 +52,7 @@ CORE = os.path.join(REPO, "core")
 
 # Every `(name, page)` pair the site carries today.  Lowering it is the work;
 # raising it means a doc started naming something the library does not have.
-BASELINE = 35
+BASELINE = 32
 
 BLOCK = re.compile(r"^```verum(?:[ \t][^\n]*)?\n(.*?)^```", re.M | re.S)
 DECL = re.compile(
@@ -72,6 +72,34 @@ TAGGED_STRING = re.compile(r"[a-z_]*#\"\"\".*?\"\"\"|[a-z_]*#\"[^\"]*\"", re.S)
 PLAIN_STRING = re.compile(r"\"[^\"\n]*\"")
 # `Base..Base` is a range, not a receiver.
 RANGE_OP = re.compile(r"\.\.")
+# A section the page MARKS as unshipped is honest documentation of a plan,
+# not rot.  `stdlib/term/guides/testing-tui.md` opens its third section with
+# ":::caution Not shipped / None of this section exists. `VirtualTerminal`,
+# `ManualRuntime`, … are absent from `core/` — measured, not guessed", which
+# is this gate's own finding, written down before the gate existed.  Counting
+# it would punish the page for being explicit.  14 such admonitions exist.
+UNSHIPPED = re.compile(
+    r"^:::[a-z]+[^\n]*(?:not shipped|not implemented|does not exist|"
+    r"not yet|planned|describes a design)[^\n]*$", re.I | re.M)
+# The marker scopes to the SECTION, not to the admonition.  Measured on
+# `testing-tui.md`: its ":::caution Not shipped / None of this section
+# exists" closes after the prose and the illustrative blocks follow it, so
+# cutting at the `:::` removed 475 characters and left every name behind.
+NEXT_HEADING = re.compile(r"^##\s", re.M)
+
+
+def drop_unshipped(text):
+    """Drop each marked section, from its marker to the next heading."""
+    out, pos = [], 0
+    for m in UNSHIPPED.finditer(text):
+        if m.start() < pos:
+            continue
+        nxt = NEXT_HEADING.search(text, m.end())
+        stop = nxt.start() if nxt else len(text)
+        out.append(text[pos:m.start()])
+        pos = stop
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def code_only(text):
@@ -139,7 +167,8 @@ def census():
             if not (f.endswith(".md") or f.endswith(".mdx")):
                 continue
             path = os.path.join(root, f)
-            text = io.open(path, encoding="utf-8", errors="replace").read()
+            text = drop_unshipped(
+                io.open(path, encoding="utf-8", errors="replace").read())
             blocks = BLOCK.findall(text)
             if blocks:
                 pages[os.path.relpath(path, DOCS)] = blocks
