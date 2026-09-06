@@ -34971,6 +34971,19 @@ fn build_runtime_type_switch<'ctx>(
     let ptr_type = ctx.types().ptr_type();
     let receiver_val = ctx.get_register(receiver.0)?;
 
+    // **RTS-KEEP-DBGLOC-1 (T1186)** — the caller set a debug location
+    // for this VBC instruction (vbc_lowering.rs sets one per
+    // instruction before `lower_instruction`), and the arm-filling loop
+    // below emits CALLS. LLVM's verifier requires an inlinable call in
+    // a function carrying debug info to have a `!dbg`, and this
+    // function's block juggling can leave the builder without one:
+    // measured on ONE identical program, `verum build heap.vr` went
+    // from 0 to 59425 "inlinable function call ... must have a !dbg
+    // location" complaints, and the emitted `rts_call`s went from
+    // 2-with-dbg to 2-without. Captured here and re-applied after every
+    // `position_at_end`.
+    let dbg_loc = ctx.builder().get_current_debug_location();
+
     // RTS-SCALAR-GUARD (task #22 leg 1b): runtime type dispatch reads
     // the type-id header THROUGH the receiver. Tier-0 checks the
     // NaN-box tag before dispatching; the AOT register model carries
@@ -35021,6 +35034,7 @@ fn build_runtime_type_switch<'ctx>(
 
     // Read type_id from the object header (first word at the pointer).
     ctx.builder().position_at_end(load_bb);
+    if let Some(l) = dbg_loc { ctx.builder().set_current_debug_location(l); }
     let recv_ptr = ctx
         .builder()
         .build_int_to_ptr(recv_i64, ptr_type, "rts_recv_ptr")
@@ -35135,6 +35149,7 @@ fn build_runtime_type_switch<'ctx>(
     };
 
     ctx.builder().position_at_end(default_bb);
+    if let Some(l) = dbg_loc { ctx.builder().set_current_debug_location(l); }
     if hop_entries.is_empty() {
         emit_runtime_abort(ctx, &abort_msg, "rts_unresolved_msg")?;
         ctx.builder().build_unreachable().or_llvm_err()?;
@@ -35162,11 +35177,13 @@ fn build_runtime_type_switch<'ctx>(
         // original abort, unchanged. The hop widens what resolves; it
         // must not turn a loud failure into a quiet one.
         ctx.builder().position_at_end(hop_default_bb);
+        if let Some(l) = dbg_loc { ctx.builder().set_current_debug_location(l); }
         emit_runtime_abort(ctx, &abort_msg, "rts_unresolved_msg")?;
         ctx.builder().build_unreachable().or_llvm_err()?;
 
         for (bb, dname) in &hop_blocks {
             ctx.builder().position_at_end(*bb);
+            if let Some(l) = dbg_loc { ctx.builder().set_current_debug_location(l); }
             let deref_fn = ctx.get_module().get_function(dname).or_missing_fn(dname)?;
             let self_arg: BasicMetadataValueEnum = match deref_fn.get_nth_param(0) {
                 Some(p) if p.get_type().is_pointer_type() => ctx
@@ -35204,11 +35221,13 @@ fn build_runtime_type_switch<'ctx>(
     // RTS-SCALAR-GUARD: implausible-pointer receivers cannot be
     // dispatched either — same abort, not a fabricated zero.
     ctx.builder().position_at_end(guard_default_bb);
+    if let Some(l) = dbg_loc { ctx.builder().set_current_debug_location(l); }
     emit_runtime_abort(ctx, &abort_msg, "rts_unresolved_msg")?;
     ctx.builder().build_unreachable().or_llvm_err()?;
 
     for (bb, fname) in &case_blocks {
         ctx.builder().position_at_end(*bb);
+        if let Some(l) = dbg_loc { ctx.builder().set_current_debug_location(l); }
         let target_fn = ctx.get_module().get_function(fname).or_missing_fn(fname)?;
         let pc = target_fn.count_params() as usize;
         let raw_args: Vec<BasicMetadataValueEnum> = if pc == arg_vals.len() {
@@ -35342,6 +35361,7 @@ fn build_runtime_type_switch<'ctx>(
     }
 
     ctx.builder().position_at_end(merge_bb);
+    if let Some(l) = dbg_loc { ctx.builder().set_current_debug_location(l); }
     let phi = ctx.builder().build_phi(i64_type, "rts_result").or_llvm_err()?;
     for (val, bb) in &incoming {
         phi.add_incoming(&[(&(*val), *bb)]);
@@ -37818,6 +37838,35 @@ fn mark_register_from_return_type<'ctx>(
             // path and the loop deref'd the element value (fault addr ==
             // len). Recurse on the inner type.
             mark_register_from_return_type(ctx, reg, inner);
+
+            // **REF-RETURN-IS-A-SLOT-1 (T1188)** — that transparency
+            // holds for CONTAINERS, whose Tier-1 value already IS a
+            // pointer. It does not hold for a reference to a RECORD:
+            // there the callee returns the ADDRESS OF A SLOT, and the
+            // next field read applies the record layout to that address
+            // instead of to the object it points at —
+            //
+            //     let inner = shared.deref();   // -> &T, an address
+            //     inner.url                     // GetF at addr+24 -> empty
+            //
+            // `is_interior_list_ref` already means "this register holds
+            // a slot address whose content is a Value", and GetF already
+            // loads through it (the `&list[i]` path); the name says List
+            // for historical reasons, the property is about slots.
+            //
+            // Gated to references whose referent is a plain user type,
+            // so the container transparency above is untouched: a
+            // container return has already marked itself list/map/text/
+            // slice by the time control reaches here.
+            let referent_is_container = ctx.is_list_register(reg)
+                || ctx.is_map_register(reg)
+                || ctx.is_set_register(reg)
+                || ctx.is_deque_register(reg)
+                || ctx.is_text_register(reg)
+                || ctx.is_slice_register(reg);
+            if !referent_is_container {
+                ctx.mark_interior_list_ref(reg);
+            }
         }
         TypeRef::Concrete(tid) => {
             // User-defined struct type (e.g., Token, Span, Parser) — track for GetF
