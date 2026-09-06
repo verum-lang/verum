@@ -5044,6 +5044,42 @@ impl VbcCodegen {
             Self::write_reg(&mut operands, arr_reg.0);
             Self::write_reg(&mut operands, start_reg.0);
             Self::write_reg(&mut operands, len_reg.0);
+            // **SLICE-STATIC-ELEM-1 (T1213)** — the element stride the
+            // DECLARATION already fixes, or 0 when unknown here.
+            //
+            // Without it Tier 1 classifies the source at runtime by
+            // reading its first word as a `type_id`, and for a packed
+            // `[Byte; N]` that word IS the array's own data: three
+            // arrays differing only in byte 0 took three different
+            // branches and gave three different wrong answers, two of
+            // them reading 24 bytes past a 16-byte array.
+            //
+            // Additive: readers taking only operands 0..3 are
+            // unaffected, and 1/2/4/8 fit the one-byte encoding.
+            //
+            // COVERAGE BOUNDARY, stated so it is not later read as
+            // "that case does not arise": the hint is only available
+            // for a BARE VARIABLE. `get_typed_array_elem_size` is keyed
+            // by NAME (`byte_array_vars` / `typed_array_vars` are sets
+            // of identifiers), so `self.buf[..]` and `xs[i][..]` have
+            // no key and get 0 — and 0 sends Tier 1 back to reading the
+            // array's first word as a type_id, i.e. back to the defect.
+            // Widening this match is not enough; the TRACKING would
+            // have to become place-based rather than name-based.
+            let elem_hint: u16 = match &arr_expr.kind {
+                ExprKind::Path(ep) if ep.segments.len() == 1 => {
+                    match &ep.segments[0] {
+                        PathSegment::Name(id) => self
+                            .ctx
+                            .get_typed_array_elem_size(&id.name)
+                            .map(|n| n as u16)
+                            .unwrap_or(0),
+                        _ => 0,
+                    }
+                }
+                _ => 0,
+            };
+            Self::write_reg(&mut operands, elem_hint);
             self.ctx.emit(Instruction::CbgrExtended {
                 sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
                 operands,
@@ -5100,6 +5136,12 @@ impl VbcCodegen {
             Self::write_reg(&mut operands, arr_reg.0);
             Self::write_reg(&mut operands, start_reg.0);
             Self::write_reg(&mut operands, len_reg.0);
+            // SLICE-STATIC-ELEM-1 (T1213): this arm's own guard is
+            // `get_typed_array_elem_size(..) == Some(1)`, so the stride
+            // is known to be one byte. Carried as a fifth operand so
+            // Tier 1 need not re-derive it by reading the array's own
+            // first word as a type_id.
+            Self::write_reg(&mut operands, 1);
             self.ctx.emit(Instruction::CbgrExtended {
                 sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
                 operands,

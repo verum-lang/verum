@@ -25529,6 +25529,53 @@ fn lower_cbgr_extended<'ctx>(
                     .build_ptr_to_int(len.into_pointer_value(), i64_ty, "len_i")
                     .or_llvm_err()?
             };
+            // **SLICE-STATIC-ELEM-1 (T1213)** — when the frontend knew
+            // the element stride, USE IT AND DO NOT PROBE.
+            //
+            // The classification below reads the source's first word as
+            // a `type_id`. For a packed `[Byte; N]` that word is the
+            // ARRAY'S OWN DATA, so the CONTENT chooses the branch.
+            // Measured: three `[Byte; 16]`s differing only in byte 0 —
+            // first word 6 (TypeId::U8), 7 (U16), 99 (no case) — took
+            // three different arms and gave three different wrong
+            // answers, and two of them computed `data = src + HDR` on a
+            // pointer that already pointed AT the data, reading 24
+            // bytes past a 16-byte array. Byte buffers hold input.
+            //
+            // `src` for such a local is the DATA pointer already, which
+            // is why `data = base_int` is right here and why handing
+            // this pointer to a classifier that expects an object base
+            // is not. The stride comes from the declaration
+            // (`get_typed_array_elem_size`, operand 4); 0 means the
+            // frontend did not know and the probe below still runs.
+            // `op_reg` answers 0 for an operand that is not there, and 0
+            // is not a valid stride — so an instruction from an older
+            // archive takes the probe below exactly as before.
+            let static_elem = op_reg(operands, 4);
+            if matches!(static_elem, 1 | 2 | 4 | 8) {
+                let elem_c = i64_ty.const_int(static_elem as u64, false);
+                let off = ctx
+                    .builder()
+                    .build_int_mul(start_i, elem_c, "rs_soff")
+                    .or_llvm_err()?;
+                let new_base = ctx
+                    .builder()
+                    .build_int_add(base_int, off, "rs_sbase")
+                    .or_llvm_err()?;
+                let fat_ref =
+                    emit_slice_fatref_alloc(ctx, new_base, len_i, elem_c, "fat_ref_static")?;
+                ctx.set_register(dst, fat_ref.into());
+                ctx.mark_slice_register(dst);
+                if std::env::var("VERUM_TRACE_SLICE_STRIDE").is_ok() {
+                    eprintln!(
+                        "[slice-stride] fn={} RefSlice STATIC elem={}",
+                        ctx.function_name(),
+                        static_elem
+                    );
+                }
+                return Ok(());
+            }
+
             // AOT-SLICE-ELEMSIZE-CARRY-1 (#48): runtime-classify the
             // SOURCE — the exact mirror of the interpreter's RefSlice
             // generic path. Pre-fix this arm computed
