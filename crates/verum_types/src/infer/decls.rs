@@ -3853,6 +3853,34 @@ impl TypeChecker {
                             // - default_impl: for protocol method default implementations
                             let has_default = method.body.is_some() || default_impl.is_some();
 
+                            // A96 — the same opt-in measurement as the
+                            // sibling registration path.  Three sites read
+                            // `default_impl`, each with its own copy of the
+                            // "CRITICAL FIX" comment, and instrumenting one
+                            // of them measured almost nothing: a protocol
+                            // written `public type P is protocol { … }`
+                            // flows through THIS one, and a deliberately
+                            // broken default body reported nothing at all.
+                            if std::env::var("VERUM_CHECK_PROTOCOL_DEFAULTS").is_ok() {
+                                let body = if method.body.is_some() {
+                                    method.body.clone()
+                                } else {
+                                    default_impl.clone()
+                                };
+                                if body.is_some() {
+                                    let mut with_body = method.clone();
+                                    with_body.body = body;
+                                    if let Err(e) = self.check_function(&with_body) {
+                                        eprintln!(
+                                            "[proto-default] {}::{} — {:?}",
+                                            type_decl.name.name.as_str(),
+                                            method_name.as_str(),
+                                            e,
+                                        );
+                                    }
+                                }
+                            }
+
                             let mut protocol_method = crate::protocol::ProtocolMethod::simple(
                                 method_name.clone(),
                                 method_ty,
