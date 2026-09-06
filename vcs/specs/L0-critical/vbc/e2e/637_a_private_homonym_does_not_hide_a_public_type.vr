@@ -1,0 +1,65 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, visibility, stdlib, name-collision, mount
+// @timeout: 15000
+// @expected-exit: 0
+//
+// A PRIVATE HOMONYM DOES NOT HIDE A PUBLIC TYPE (T1201).
+//
+// A94 made private stdlib declarations stop answering in user
+// programs, which is right. It reads the descriptor under the type's
+// SIMPLE name — and that slot is first-wins across the whole archive,
+// so a private declaration can own the simple name of a public type it
+// has nothing to do with. The rule then read the wrong descriptor and
+// refused the public type as if it were private.
+//
+// `core/net/quic/stats_prometheus.vr:231` declares a private
+// `type TextBuilder is { parts: List<Text> }`. The public one is
+// `core/text/builder.vr:77`. A program that mounts the public one BY
+// PATH got:
+//
+//     error<E400>: no method named `is_empty` found for type `TextBuilder`
+//     error<E400>: no method named `push` found for type `TextBuilder`
+//
+// on a type that declares both. `VERUM_TRACE_CTOR=1` says it in one
+// line — `ensure-load PRIVATE name=TextBuilder` — and the second line
+// explains why the mount looked ignored: the type is never loaded, so
+// there is nothing for the mount to point at.
+//
+// SO THE RULE IS ABOUT THE DECLARATION THE USER REACHES, NOT THE NAME.
+// "A private type is not the user's to name" must not become "a private
+// type's name hides a public homonym".
+//
+// WHY IT IS WORTH AN L0 SPEC RATHER THAN A UNIT TEST:
+// `make check-type-name-collisions` is GREEN at 132 colliding simple
+// names in `core/`, 68 of them method-bearing. The collision is known,
+// ratcheted and permitted. What must not be permitted is a program's
+// compilation depending on which homonym owns a hash-map slot — and
+// that dependency is invisible in the source of both files.
+//
+// The negative half of the rule is asserted too: a name with no public
+// declaration anywhere must still miss, which is the case A94 measured
+// and its 182 private-only names. A fix that recovered ANY homonym
+// would pass the first half and silently undo A94.
+
+mount core.text.builder.{TextBuilder};
+
+fn main() {
+    // The public `TextBuilder`, reached by an explicit mount, with the
+    // two methods the private homonym does NOT have.
+    let mut b = TextBuilder.new();
+    for word in ["the", "quick", "brown", "fox"].iter() {
+        if !b.is_empty() { b.push(&" "); }
+        b.push(word);
+    }
+    assert_eq(b.into_text(), "the quick brown fox");
+
+    // `is_empty` on a fresh builder — the method whose absence was the
+    // reported symptom, asserted in its own right so a fix that
+    // registered only SOME methods cannot pass.
+    let fresh = TextBuilder.new();
+    assert(fresh.is_empty());
+
+    print("private-homonym-does-not-hide-public ok");
+}

@@ -1384,12 +1384,64 @@ impl TypeChecker {
         // type does.  Without this, `let x: AliasEntry = 0;` reports a
         // type mismatch naming `AliasEntry` instead of `error<E101>:
         // type not found`, for 182 private-only names.
-        if !type_desc.is_public {
-            if crate::ctor_trace_enabled() {
-                eprintln!("[ctor-trace] ensure-load PRIVATE name={}", name);
+        //
+        // **PRIVATE-HOMONYM-DOES-NOT-HIDE-PUBLIC-1 (T1201).** The simple
+        // key is FIRST-WINS across the whole archive
+        // (`archive_metadata.rs`, `if !simple_slot_was_occupied`), so a
+        // private declaration can OWN the simple name of a public type
+        // it has nothing to do with.  The rule above then read the wrong
+        // descriptor and refused the public type as if it were private.
+        //
+        // Measured: `core/net/quic/stats_prometheus.vr:231` declares a
+        // private `type TextBuilder is { parts: List<Text> }`; the public
+        // `TextBuilder` is `core/text/builder.vr:77`.  A program that
+        // mounts the public one BY PATH got
+        //
+        //     error<E400>: no method named `is_empty` found for type
+        //                  `TextBuilder`
+        //
+        // because this function returned before registering any of its
+        // methods.  `check-type-name-collisions` is green at 132
+        // colliding simple names, 68 of them method-bearing, so the
+        // exposure is the collision list rather than this one pair.
+        //
+        // The rule is about the DECLARATION the user reaches, not about
+        // the name: when the simple slot holds a private descriptor,
+        // look for a PUBLIC one of the same simple name under a
+        // qualified key before giving up.  A name with no public
+        // declaration anywhere still misses, which is the case A94
+        // measured and the 182 private-only names it covers.
+        let type_desc = if type_desc.is_public {
+            type_desc
+        } else {
+            let suffix = format!(".{}", name.as_str());
+            match metadata
+                .types
+                .iter()
+                .filter(|(k, td)| td.is_public && k.as_str().ends_with(&suffix))
+                // Deterministic across bakes: the map's iteration order is
+                // not, and two public homonyms would otherwise pick a
+                // different winner per run (T0175's discipline).
+                .min_by_key(|(k, _)| k.as_str().to_string())
+            {
+                Some((key, public_td)) => {
+                    if crate::ctor_trace_enabled() {
+                        eprintln!(
+                            "[ctor-trace] ensure-load PRIVATE-SHADOW name={} \
+                             recovered public descriptor at '{}'",
+                            name, key
+                        );
+                    }
+                    public_td
+                }
+                None => {
+                    if crate::ctor_trace_enabled() {
+                        eprintln!("[ctor-trace] ensure-load PRIVATE name={}", name);
+                    }
+                    return;
+                }
             }
-            return;
-        }
+        };
         if crate::ctor_trace_enabled() {
             eprintln!(
                 "[ctor-trace] ensure-load HIT name={} kind_record={} in_ctx={}",
