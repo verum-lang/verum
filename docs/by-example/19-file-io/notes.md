@@ -32,15 +32,35 @@ for line in reader.lines() {
 
 ## Async file I/O
 
-`core.io` exports synchronous I/O. For async (running on the runtime,
-yielding to the executor at I/O boundaries), use
-`core.async.fs::File`. The async file API mirrors the sync one with
-`.await` at every read/write call.
+`core.io` exports synchronous I/O. For async, the type is `AsyncFile`
+and it lives in the SAME module — `core/io/file.vr:509` — not in a
+separate `core.async.fs`, which does not exist. Its surface is
+`open` / `open_with_options` / `create` / `read` / `read_to_end` /
+`read_to_string` / `write` / `write_all` / `seek` / `flush` /
+`sync_all`, each `async`, plus `get_ref` / `get_mut` / `into_inner` /
+`size`.
+
+Two shapes differ from the sync API rather than mirroring it:
+`AsyncFile.open` takes the path as `&Text`, not `&Path`; and
+`BufReader`'s async line reader is `next_line_async()`, which answers
+`IoResult<Maybe<Text>>` — `Maybe.None` is EOF, not a zero byte count.
 
 ## Errors
 
-`IoError` is the common error type — it's a `StreamError` aliased
-under that name to match the codebase's convention. The variants
-include `NotFound`, `PermissionDenied`, `WouldBlock`, `BrokenPipe`,
-plus `Other(message)` for anything the kernel didn't categorise.
-Match on the variant for recovery; pattern-match `Other(_)` last.
+`IoError` is the common error type — `core/io/mod.vr:56` aliases it to
+`StreamError`. **It is a RECORD, not a sum:**
+
+```verum
+public type StreamError is { kind: IoErrorKind, message: Maybe<Text> };
+```
+
+so you match on `err.kind`, not on the error itself, and the message is
+a separate `Maybe<Text>` field rather than a payload on a variant.
+`IoErrorKind` is the sum — `NotFound`, `PermissionDenied`,
+`ConnectionRefused`, `ConnectionReset`, `ConnectionAborted`,
+`NotConnected`, `AddrInUse`, `AddrNotAvailable`, `BrokenPipe`,
+`AlreadyExists`, `WouldBlock`, `InvalidInput`, `InvalidData`,
+`TimedOut`, `WriteZero`, `Interrupted`, `UnexpectedEof`, `OutOfMemory`,
+`Unsupported`, `Other` — and `Other` carries NO payload, so
+`Other(message)` does not typecheck. Put `Other` last in a match for
+readability, not because it binds anything.
