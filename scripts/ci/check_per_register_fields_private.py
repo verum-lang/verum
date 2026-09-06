@@ -73,28 +73,28 @@ def self_test() -> int:
               file=sys.stderr)
         bad += 1
     else:
-        print("  [ok] a `pub` per-register field IS reported")
+        print("  [ok] 1 `pub` per-register field reported from 1 declaration")
 
     negative = "    sticky_marks: HashMap<u16, String>,\n"
     if offenders(negative):
         print("  SELF-TEST FAIL: a private field was reported", file=sys.stderr)
         bad += 1
     else:
-        print("  [ok] a private per-register field is NOT reported")
+        print("  [ok] 0 reported from 1 private declaration")
 
     exempt = "    pub registers: HashMap<u16, BasicValueEnum<'ctx>>,\n"
     if offenders(exempt):
         print("  SELF-TEST FAIL: the storage itself was reported", file=sys.stderr)
         bad += 1
     else:
-        print("  [ok] the value storage is exempt by name")
+        print("  [ok] 0 reported from 1 exempt storage declaration")
 
     unrelated = "    pub struct_string_fields: HashMap<(u16, u32), bool>,\n"
     if offenders(unrelated):
         print("  SELF-TEST FAIL: a (reg, field) map was reported", file=sys.stderr)
         bad += 1
     else:
-        print("  [ok] a field keyed by more than a register is NOT a per-register fact")
+        print("  [ok] 0 reported from 1 (reg, field) keyed declaration")
     return 1 if bad else 0
 
 
@@ -104,7 +104,26 @@ def main() -> int:
     if not CONTEXT.is_file():
         print(f"context.rs not found at {CONTEXT}", file=sys.stderr)
         return 2
-    found = offenders(CONTEXT.read_text(encoding="utf-8"))
+    text = CONTEXT.read_text(encoding="utf-8")
+    # COUNT THE DENOMINATOR, not only the offenders. A verdict of "none"
+    # is reachable by scanning nothing — a moved file, a changed field
+    # spelling — and `[ok]` would read identically. `check_gate_verdict_
+    # carries_a_quantity` exists for exactly this and caught this gate on
+    # its first run.
+    scanned = len(re.findall(
+        r"^\s*(?:pub\s+)?[a-z_][a-z0-9_]*\s*:\s*(?:std::collections::)?"
+        r"(?:HashMap|HashSet|BTreeMap|BTreeSet)\s*<\s*u16\s*[,>]",
+        text, re.M))
+    if scanned == 0:
+        print(
+            "per-register-privacy: FAIL — scanned 0 per-register fields in "
+            f"{CONTEXT.name}. The file moved, or the declaration spelling "
+            "changed; either way this gate is measuring nothing and must not "
+            "report OK.",
+            file=sys.stderr,
+        )
+        return 2
+    found = offenders(text)
     if found:
         print(
             f"per-register-privacy: FAIL — {len(found)} per-register field(s) are "
@@ -122,7 +141,8 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    print("[ok] per-register-privacy: no per-register fact is `pub`")
+    print(f"[ok] per-register-privacy: 0 of {scanned} per-register field(s) "
+          f"are `pub` ({len(EXEMPT)} exempt by name)")
     return 0
 
 
