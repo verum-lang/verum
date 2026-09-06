@@ -564,7 +564,19 @@ fn shared_carrier_inner(
     header: &heap::ObjectHeader,
     ptr: *mut u8,
 ) -> InterpreterResult<*mut u8> {
+    // **VERUM_TRACE_DEREF=1** — the FIELD-path twin of the trace in
+    // `cbgr.rs::handle_deref`.  T0393 records that a `Shared` carrier is
+    // peeled in TWO places and neither knows the other exists; the two
+    // traces share one flag so a single run shows both, which is the
+    // only way to see them disagree.
+    let trace = std::env::var("VERUM_TRACE_DEREF").is_ok();
     if header.type_id != TypeId::SHARED {
+        if trace {
+            eprintln!(
+                "[getf-peel] declined: type_id={:?} is not SHARED",
+                header.type_id,
+            );
+        }
         return Ok(ptr);
     }
     // SAFETY: SHARED type-id established above; layout per the helper.
@@ -582,7 +594,19 @@ fn shared_carrier_inner(
                 ),
             });
         }
+        if trace {
+            eprintln!("[getf-peel] peeled to inner object {:p}", inner);
+        }
         return Ok(inner);
+    }
+    if trace {
+        // THE ARM THAT ANSWERS WITH THE CARRIER ITSELF.  A field read then
+        // lands on slot 0 — the refcount — which is T1202's `1`.
+        eprintln!(
+            "[getf-peel] SHARED but inner is not a pointer (tag={:?}) — \
+             returning the CARRIER, so the field read hits the refcount",
+            unsafe { shared_cell_inner_value(ptr) }.tag(),
+        );
     }
     Ok(ptr)
 }
@@ -640,6 +664,14 @@ fn peel_shared_value(mut val: Value) -> Value {
 /// `TypeId::SHARED`-stamped heap object; `Shared.new(...)` initializes
 /// slot1 as the inner Value.
 pub(super) unsafe fn shared_cell_inner_value(ptr: *const u8) -> Value {
+    // **KNOWN WRONG, AND KEPT (T1202)** — see the twin in
+    // `cbgr.rs::shared_inner_cell` for the full record.  Index 1 is right
+    // only for the interpreter's own `[refcount][value]` cell, whose
+    // constructor was retired (T1159).  Reading the LAST slot instead was
+    // tried and MEASURED: it changed the answer from 1 to 2 and fixed
+    // nothing, so the wrapped value sits in no position of this object and a
+    // third index would be a third guess.  `VERUM_TRACE_DEREF=1` prints what
+    // this receives.
     let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
     unsafe { *data_ptr.add(1) }
 }

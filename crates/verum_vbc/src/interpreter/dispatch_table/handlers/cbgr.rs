@@ -197,8 +197,24 @@ fn shared_inner_cell(state: &InterpreterState, base_ptr: *mut u8) -> Option<*mut
         return None;
     }
     // slot1 = the inner Value cell (skip the ObjectHeader and refcount slot0).
-    // SAFETY: `Shared.new(...)` initializes slot1; the pointer stays within
-    // the Shared object's data area.
+    //
+    // **KNOWN WRONG, AND KEPT (T1202).** This index is right only for the
+    // interpreter's own `[refcount][value]` cell, whose constructor was
+    // RETIRED (T1159, `method_dispatch.rs:1486` and `:1924`, both
+    // `if false &&`).  For what `Shared.new` builds today it returns a
+    // non-pointer, the peel then declines, and a field read lands on slot 0
+    // — which is why `s.field` answers `1` for a record holding 9999.
+    //
+    // A REPLACEMENT WAS TRIED AND MEASURED WRONG, which is why the number
+    // stands rather than being improved by guess: reading the LAST slot
+    // (`header.size / size_of::<Value>() - 1`) changed the answer from 1 to
+    // 2 and fixed nothing — so the object this accepts holds the wrapped
+    // value in NO position, and a third index would be a third guess.
+    // `s.deref()` returns the value correctly throughout, so it is reachable;
+    // what is not known is what this object is.  Diagnose with
+    // `VERUM_TRACE_DEREF=1`, which prints the arm taken and whether the inner
+    // slot is a pointer.
+    // SAFETY: the pointer stays within the Shared object's data area.
     Some(unsafe { (base_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value).add(1) })
 }
 
@@ -344,6 +360,59 @@ pub(in super::super) fn handle_deref(
         state.stats.cbgr_stats.tier0_derefs += 1;
     }
 
+    // **VERUM_TRACE_DEREF=1** — which ARM of this function answered, and
+    // what it was given.  This file had no trace at all, and it decides a
+    // question that has now cost two tasks: `Deref` fronts a CBGR
+    // reference, a bridge address, a heap object and a `Shared` carrier,
+    // and the arms are told apart by inspecting the value.  When the
+    // answer is wrong the only visible evidence is a wrong number far
+    // downstream — T1202's `s.a` reading 1 where the value holds 4242.
+    //
+    // It prints the discriminators the arms actually branch on, not a
+    // summary of them, so a reader can see WHICH test decided rather than
+    // re-deriving it.  Filter-free (`=1`) because the interesting runs are
+    // small probes; a whole-programme run is expected to flood.
+    let trace_deref = std::env::var("VERUM_TRACE_DEREF").is_ok();
+    if trace_deref {
+        let kind = if ref_val.is_thin_ref() {
+            "thin_ref"
+        } else if ref_val.is_fat_ref() {
+            "fat_ref"
+        } else if ref_val.is_ptr() && !ref_val.is_nil() {
+            "ptr"
+        } else if is_cbgr_ref(&ref_val) {
+            "cbgr_ref"
+        } else {
+            "other"
+        };
+        let tid = if ref_val.is_ptr() && !ref_val.is_nil() {
+            let bp = ref_val.as_ptr::<u8>();
+            if bp.is_null() {
+                None
+            } else if (bp as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
+                // SAFETY: alignment checked; every VBC heap object opens
+                // with an ObjectHeader.  `ref_or_stub` is the same reader
+                // `shared_inner_cell` uses two arms down.
+                Some(unsafe { heap::ObjectHeader::ref_or_stub(bp) }.type_id)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        eprintln!(
+            "[deref] kind={} tag={:?} type_id={:?} shared_cell={}",
+            kind,
+            ref_val.tag(),
+            tid,
+            if ref_val.is_ptr() && !ref_val.is_nil() {
+                shared_inner_cell(state, ref_val.as_ptr::<u8>()).is_some()
+            } else {
+                false
+            },
+        );
+    }
+
     // Handle ThinRef values (CBGR references stored in global table)
     if ref_val.is_thin_ref() {
         let thin_ref = ref_val.as_thin_ref();
@@ -432,8 +501,46 @@ pub(in super::super) fn handle_deref(
                     // SAFETY: `slot1` addresses the initialized inner Value
                     // cell of a live Shared carrier (guaranteed by the helper).
                     let inner = unsafe { *slot1 };
+                    if trace_deref {
+                        // DESCRIBE THE OBJECT, do not guess an index into it.
+                        // Three indices have been tried against this carrier
+                        // and all three were wrong (T1202): slot 1 gives the
+                        // refcount-shaped `1`, the last slot gives `2`, and
+                        // the wrapped value is in neither.  An index is a
+                        // guess until the object has a description, so this
+                        // prints the header's own recorded size and EVERY
+                        // slot, which is the thing nobody had.
+                        let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
+                        let slots = header.size as usize / std::mem::size_of::<Value>();
+                        let data = unsafe {
+                            base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                        };
+                        let mut dump = String::new();
+                        for i in 0..slots.min(8) {
+                            // SAFETY: `i < slots`, and `slots` is the header's
+                            // own count of Value-sized data slots.
+                            let v = unsafe { *data.add(i) };
+                            dump.push_str(&format!(
+                                " [{}]tag={:?}{}",
+                                i,
+                                v.tag(),
+                                if v.is_ptr() { "/ptr" } else { "" },
+                            ));
+                        }
+                        eprintln!(
+                            "[deref]   arm=shared_peel size={}B slots={} chosen_tag={:?} chosen_is_ptr={}{}",
+                            header.size,
+                            slots,
+                            inner.tag(),
+                            inner.is_ptr(),
+                            dump,
+                        );
+                    }
                     state.set_reg(dst, inner);
                     return Ok(DispatchResult::Continue);
+                }
+                if trace_deref {
+                    eprintln!("[deref]   arm=identity (shared_inner_cell declined)");
                 }
                 // Regular heap object dereference: identity deref (return pointer as-is).
                 // Sum type variants and other heap objects should NOT be automatically unwrapped.
