@@ -5,9 +5,21 @@ in `core.async.channel`:
 
 | Function | Capacity | Use case |
 |---|---|---|
-| `bounded::<T>(n)` | Fixed-size ring buffer | Backpressure on producer |
-| `unbounded::<T>()` | Grows dynamically | Producer never waits |
-| `oneshot::<T>()` | Exactly one send | Reply channels, RPC |
+| `bounded<T>(n)` | Fixed-size ring buffer | Backpressure on producer |
+| `bounded_channel<T>(n)` | same, longer name | both are exported |
+| `unbounded_channel<T>()` | Grows dynamically | Producer never waits |
+| `channel<T>()` | Grows dynamically | the short name for the same thing |
+| `oneshot<T>()` | Exactly one send | Reply channels, RPC |
+
+There is no turbofish in Verum: the type argument goes in angle
+brackets directly after the name, `bounded<T>(n)`, never
+`bounded::<T>(n)`. And there is no `unbounded` — the exported names are
+`unbounded_channel` and `channel`.
+
+`oneshot<T>()` is real and answers a DIFFERENT pair —
+`(OneshotSender<T>, OneshotReceiver<T>)`, not `(Sender<T>, Receiver<T>)`
+— so it is not a capacity-1 `bounded` and the two are not
+interchangeable.
 
 ## Backpressure for free
 
