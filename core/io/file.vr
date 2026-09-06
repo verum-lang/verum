@@ -57,9 +57,38 @@ mount sys.linux.syscall.{
     SEEK_SET, SEEK_CUR, SEEK_END,
 };
 
+// T1192: this block bound `safe_close` and NOTHING ELSE, while the
+// Linux block above binds ten symbols and this file calls NINE `sys_*`
+// functions. On macOS the other eight were unbound — `sys_open`,
+// `sys_read`, `sys_write`, `sys_lseek`, `sys_fstat`, `sys_fsync`,
+// `sys_ftruncate`, `sys_dup` had no binding at all.
+//
+// Tier 0 hid it: the interpreter resolves a bare call name at runtime
+// and found something. Tier 1 cannot, and said so —
+//     AOT dispatch fault: method 'as_raw' has no compiled candidate in
+//     this module — the static resolver could not name the call
+// — because `Result.Ok(fd) => fd.as_raw()` at :249 takes its receiver
+// from a call that never resolved. Where that refusal fires you get an
+// honest rc=134; where it does not, the unresolved path reaches
+// `copy_path_nul` with a slice whose pointer was never a pointer, and
+// the process dies with SIGSEGV. `internal/registry-next` died there
+// after 29 of 59 scenes.
+//
+// Every signature below is IDENTICAL to the Linux one it replaces,
+// checked pairwise; `Stat` on Darwin IS `DarwinStat`
+// (`libsystem.vr:764`), so `safe_fstat`'s `&mut DarwinStat` and Linux's
+// `&mut Stat` are the same parameter after this mount.
 @cfg(target_os = "macos")
 mount sys.darwin.libsystem.{
+    safe_open as sys_open,
     safe_close as sys_close,
+    safe_read as sys_read,
+    safe_write as sys_write,
+    safe_lseek as sys_lseek,
+    safe_fstat as sys_fstat,
+    safe_fsync as sys_fsync,
+    safe_ftruncate as sys_ftruncate,
+    safe_dup as sys_dup,
     Stat,
     O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_APPEND,
     SEEK_SET, SEEK_CUR, SEEK_END,
