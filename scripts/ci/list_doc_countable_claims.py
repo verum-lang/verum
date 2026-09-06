@@ -28,6 +28,23 @@ this list exists: a number on a documentation page has no reader who can
 check it, so nothing corrects it, and it ages silently while the prose
 around it stays true.
 
+WHERE THE STALENESS IS, measured rather than assumed — and it is not
+uniform, which changes how to read this list. Every wrong figure found
+on 2026-09-06 was a number ABOUT THE PROJECT AS A WHOLE, written by
+somebody summarising: the roadmap's CBGR nanoseconds, dispatch-table
+files, conformance rate and cache hit rate; the VBC opcode total on
+three pages; the audit gate catalog. The per-module status tables
+sampled at the same time were RIGHT — `stdlib/sys.md`'s "BarrierKind
+5-variant exhaustive" is exactly 5 (`core/intrinsics/lowlevel/mmio.vr`),
+and its neighbours checked out too.
+
+The difference looks like proximity. A number about a type somebody had
+open is written while looking at it and ages only when that type
+changes; a number about the whole system is written once from a
+measurement nobody repeats, and every part of the system moves under it.
+So read the SUMMARY pages first — a roadmap, a catalog, an overview —
+and treat a per-module table as likely fine unless its module changed.
+
 WHAT IT MATCHES. A digit-group followed by a countable noun. It is
 deliberately noisy about VERSIONS and DATES (filtered) and deliberately
 quiet about percentages with no noun, which are usually rates rather
@@ -66,7 +83,13 @@ def main() -> int:
     for p in pages:
         text = p.read_text(encoding="utf-8", errors="replace")
         # Prose only: a count inside a code block is usually sample output.
-        for lineno, line in enumerate(FENCE.sub("", text).splitlines(), 1):
+        # BLANK the fenced regions rather than DELETING them — deleting
+        # renumbers every line after the first block, so the report points
+        # at the wrong place. (It did, until 2026-09-06: `stdlib/sys.md:427`
+        # named a line 100+ lines from the claim, and the first thing I did
+        # with it was start checking the wrong row.)
+        blanked = FENCE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+        for lineno, line in enumerate(blanked.splitlines(), 1):
             if NOISE.search(line):
                 continue
             for m in CLAIM.finditer(line):
