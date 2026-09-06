@@ -213,6 +213,47 @@ through `NewByteArray` so every byte buffer is packed regardless of
 annotation — gated on a full conformance run (it narrows `List<Byte>`
 growable semantics).
 
+### What "RESOLVED" did NOT cover, measured 2026-09-06 (T1213)
+
+The COERCION was fixed; what the coerced value meant at Tier 1 was not.
+`&arr` and `&arr[..]` both produced a `RefSlice`, and AOT then indexed
+that slice EIGHT bytes at a time:
+
+    let mut arr: [Byte; 8] = [0 as Byte; 8];
+    arr[0] = 65 as Byte;  arr[1] = 66 as Byte;
+    arr[1]              tier 0: 66   tier 1: 66
+    (&arr[..])[1]       tier 0: 66   tier 1:  0
+
+Width predicted before the run and matched to the bit: `[Byte; 8]`
+filled 1..8 read `0x0807060504030201` at index 0.
+
+**The stride was being decided by the array's own CONTENT.** The AOT
+`RefSlice` arm classified its source by reading the source's first word
+as a `type_id` — and for a packed `[Byte; N]` that word is the DATA.
+Three arrays differing only in byte 0 took three arms and gave three
+different wrong answers; the `TypeId.U8` and `TypeId.U16` arms compute
+`data = src + OBJECT_HEADER_SIZE` on a pointer that already points at
+the data, reading 24 bytes past a 16-byte array. Byte buffers hold
+input, so the steering value is routinely external.
+
+Fixed in `92482af33`: `RefSlice` carries the declaration's stride as a
+fifth operand and AOT skips the runtime classification when it is
+present. Two gaps remain and are tracked on the debt register's
+A-DATASTRIDE row — the hint is keyed by variable NAME, so `self.buf[..]`
+still probes; and the WRITE side is a separate arm.
+
+THE LESSON FOR THIS DOCUMENT: "RESOLVED" was written about the
+representation the FRONTEND emits. The gate that guards this contract,
+`check_a_byte_buffer_crosses_ffi_packed_and_sliced.sh`, says in its own
+header "Tier 1 / AOT is not measured", and `core-tests/INVENTORY.md` had
+carried the symptom as `#48 slice-elemsize` since July. A resolution
+claimed at one tier should say which tier.
+
+Regression guard:
+`vcs/specs/L0-critical/vbc/byte-array-slice-reads-one-byte.vr`
+(differential, tiers 0 and 1; verified to fail six of its seven lines
+on the unfixed compiler).
+
 ## Related, non-fatal
 
 * A C OUT `socklen_t*` (`&mut UInt32`) passed *through a Verum `&mut`
