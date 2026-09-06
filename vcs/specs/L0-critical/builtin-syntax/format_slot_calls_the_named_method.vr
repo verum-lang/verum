@@ -3,10 +3,15 @@
 // @tier: 0
 // @tags: format, interpolation, methods, dispatch, wrong-value
 // @expected-stdout: 10 20 | 10 | 10 20 | 20 20 ok
-// @skip: T0814 is open — a method call inside a format substitution returns
-//        another method's value. This spec states the expectation and is the
-//        acceptance control for that task; the skip comes off in the commit
-//        that fixes the evaluation, not by editing the expected output.
+//
+// UNMUTED 2026-09-07. The skip directive here named T0814, which is
+// CLOSED. Re-measured with the directive removed: this file
+// prints `10 20 | 10 | 10 20 | 20 20 ok`, its exact `@expected-stdout`.
+//
+// A guard muted on a reason that has expired is a guard that
+// cannot report a regression, and the suite counts it as
+// skipped rather than as missing — the quietest way to lose
+// coverage.
 //
 // Pin (T0814) — a format substitution must call the method it names.
 //

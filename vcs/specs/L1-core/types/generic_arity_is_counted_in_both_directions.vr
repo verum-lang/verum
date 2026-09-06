@@ -3,13 +3,15 @@
 // @tier: 0
 // @tags: types, generics, arity, kinds
 // @expected-error: E407
-// @skip: T0922 — the `provided < expected` half is blocked on default type
-//   parameters. Turning it on refuses 194 uses of `Result<T>` across 31
-//   core/ files, where `Result<T, E>` takes two and the stdlib is written as
-//   if `E` defaulted; the grammar has no `= Type` on a type parameter. The
-//   remedy is the feature, not a looser check: once `type Result<T, E = Error>`
-//   is writable, flip `>` to `!=` in infer/types.rs and un-skip. The
-//   too-MANY half already holds and is pinned by the sibling unit test.
+//
+// UNMUTED 2026-09-07. The skip directive here named T0922, which is
+// CLOSED. Re-measured with the directive removed: this file
+// raises `error<E407>`, its exact `@expected-error`.
+//
+// A guard muted on a reason that has expired is a guard that
+// cannot report a regression, and the suite counts it as
+// skipped rather than as missing — the quietest way to lose
+// coverage.
 // @description: Writing brackets applies a type constructor, so the
 //   number of arguments must match the declaration — in BOTH directions.
 //
