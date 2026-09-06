@@ -1,0 +1,140 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: aot, codegen, reference, return, slot-address, regression
+// @timeout: 30000
+// @expected-exit: 0
+// @expected-stdout-begin
+// field=u
+// len=1
+// sum=7
+// onward=42
+// mutated=42
+// @expected-stdout-end
+//
+// Regression guard for T1188 / T1192: a `-> &T` accessor whose body is
+// `&self.field` hands the caller the ADDRESS of a record slot, and the
+// CALLER owes the load.
+//
+// The RefField arm yields that address on purpose — T1056 established
+// that returning the loaded value made `*guard` and `fn get(&self) ->
+// &Int` fault on the number itself. What was missing is the other half:
+// no caller loaded through it, so every consumer applied its own layout
+// to an address. One defect wearing four faces, chosen by whatever the
+// neighbouring bytes happened to be — measured against the interpreter,
+// which was right every time:
+//
+//     shared.deref().url            u      ->  (empty)
+//     bag.borrow().len()            1      ->  0
+//     for x in bag.borrow().iter()  7      ->  0
+//     path.as_str() -> as_bytes()   /tmp   ->  SIGSEGV at 0x0
+//
+// The last of those is T1192: `copy_path_nul` read a Text handle that
+// was really a stack address and dereferenced NULL, which is why the
+// registry died after 29 scenes.
+//
+// The fix asks ONE walk of both bodies — the callee's says whether a
+// slot address is handed back, the caller's says whether it is wanted as
+// an address here — and loads only when the caller wants contents.
+//
+// The last two lines are the poles that must NOT move: `onward` returns
+// the reference to its own caller and `mutated` writes through it, so
+// both need the address to survive. A fix that loaded unconditionally
+// passes the first three lines and breaks these two.
+//
+// THE THIRD SURVIVAL POLE IS MISSING ON PURPOSE, and the reason is worth
+// carrying: `*map.entry(k).or_insert_with(f) += 1` is the shape that
+// nearly shipped broken, but it cannot be a pole here because
+// `Map.entry` NULL-dereferences in the TIER-0 INTERPRETER (opcode 0x62,
+// `Null pointer dereference at Map.entry`), so a differential spec on it
+// would fail for a reason that is not this defect. Filed separately.
+//
+// `MapEntry.or_insert_with` returns `&mut V` by forwarding
+// `OccupiedEntry.get_mut`, and its body writes Reg(2) on BOTH match
+// arms:
+//
+//     6: Call { dst: Reg(5), ... }     entry.get_mut()   seed {5}
+//     7: Mov  { dst: 2, src: 5 }       Occupied arm      alias {2,5}
+//    17: Mov  { dst: 2, src: 6 }       Vacant arm — KILLED 2
+//    20: Ret  { value: 8 }             8 came from 2, never seen
+//
+// Two writes to one register on MUTUALLY EXCLUSIVE arms, read by a
+// LINEAR walk as consecutive. The walk answered "this value is dropped
+// here" about a value the function RETURNS, which would have made
+// `*e += 1` write to a stack temp instead of the map — no crash, no
+// diagnostic, a map that silently stops counting. That is a property of
+// reading VBC in program order without following branches, and the fix
+// is that this site's alias set never kills, so every wrong answer
+// degrades to "do not load".
+
+mount core.prelude.*;
+
+// A NOTE ON THE METHOD NAMES, so nobody tidies them: `lend_items`,
+// `nth_ref`, `only_field`, `forwarded`, `writable_n` and `lend_inner`
+// are deliberately names `core/` does not hold. The obvious spellings —
+// `get`, `at`, `slot`, `peek`, `borrow` — are all stdlib names, and a
+// user function can lose its bare-name slot to a stdlib namesake of a
+// different arity (T1191: `count(&l)` in a five-line program ran
+// `core.database.sqlite.native.eqp_node_emitter.node.count`). This spec
+// must be able to fail for exactly one reason.
+
+
+type Rec is { url: Text };
+type Bag is { items: List<Int> };
+type Inner is { v: Int };
+type Holder is { inner: Inner };
+type Cell is { n: Int };
+
+implement Bag {
+    fn lend_items(&self) -> &List<Int> { &self.items }
+}
+
+implement Inner {
+    fn only_field(&self) -> &Int { &self.v }
+}
+
+implement Holder {
+    // Forwards someone else's returned reference — the address must
+    // still be an address when it reaches `main`.
+    fn forwarded(&self) -> &Int { self.inner.only_field() }
+}
+
+implement Cell {
+    fn writable_n(&mut self) -> &mut Int { &mut self.n }
+}
+
+type Wrap is { inner: Rec };
+implement Wrap {
+    fn lend_inner(&self) -> &Rec { &self.inner }
+}
+
+fn main() -> Int {
+    // A field read through a returned reference.
+    let w = Wrap { inner: Rec { url: "u" } };
+    print(f"field={w.lend_inner().url}");
+
+    // A container method on a returned reference: the length site
+    // decides cell-vs-object by comparing the first word against
+    // 4294967295, so a slot address makes the branch data-dependent.
+    let mut l: List<Int> = List.new();
+    l.push(7);
+    let b = Bag { items: l };
+    print(f"len={b.lend_items().len()}");
+
+    // The same reference, ITERATED.
+    let mut total = 0;
+    for x in b.lend_items().iter() { total = total + x; }
+    print(f"sum={total}");
+
+    // The address must SURVIVE: returned onward, then dereferenced.
+    let h = Holder { inner: Inner { v: 42 } };
+    print(f"onward={*h.forwarded()}");
+
+    // The address must SURVIVE: written through.
+    let mut c = Cell { n: 1 };
+    let r = c.writable_n();
+    *r = 42;
+    print(f"mutated={c.n}");
+
+    0
+}

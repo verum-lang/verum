@@ -10608,6 +10608,134 @@ fn scope_tag_name(tag: u8) -> &'static str {
     }
 }
 
+/// One load through a returned slot address, when THIS function wants
+/// the value rather than the address.
+///
+/// **RETURNED-SLOT-ADDRESS-LOAD-1 (T1188/T1192)** — the caller's half of
+/// the RefField contract, and the mirror of the arm that creates the
+/// situation.
+///
+/// `fn as_str(&self) -> &Text { &self.inner }` lowers to a producer
+/// whose result reaches `Ret`, and that arm yields the slot ADDRESS on
+/// purpose (T1056: returning the loaded value made `*guard` and `fn
+/// get(&self) -> &Int` fault on the number itself). Correct — and it
+/// makes the CALLER the consumer that owes the load, which no caller
+/// performed. Every consumer instead applied its own layout to an
+/// address: a field read at `slot+24`, `List.len` at `slot+32`,
+/// `copy_path_nul` on a Text handle that was a stack address. One
+/// defect, four faces, chosen by whatever the neighbouring bytes were.
+///
+/// Measured on v94, every line the interpreter's answer against AOT's:
+///
+/// ```text
+/// shared.deref().url              u      ->  (empty)
+/// bag.lend_items().len()          1      ->  0
+/// for x in bag.lend_items().iter()  7    ->  0
+/// path.as_str() -> as_bytes()     /tmp   ->  SIGSEGV at 0x0
+/// ```
+///
+/// ONE walk answers both halves: the CALLEE's body says a slot address
+/// is handed back, and THIS function's body says whether it is wanted as
+/// an address here. `Dropped` — no `Deref`, no `DerefMut`, no `Ret` of
+/// it — is the only fate whose consumer wants contents, and the only
+/// fate that loads. A caller that returns the reference onward, derefs
+/// it, or writes through it keeps the address it needs, so `&mut`
+/// accessors and the T1056 shape are untouched.
+///
+/// The two walks are deliberately NOT symmetric in rigour, because their
+/// errors are not symmetric. The callee walk must be sound: a false
+/// "returns an address" emits a load through a value, which is a new
+/// wrong answer (seven of them, measured, before it was made backward).
+/// The caller walk may be imprecise: every way it can be wrong ends in
+/// "do not load", which is exactly what the compiler did before this
+/// existed.
+///
+/// Doing it at the CALL rather than at each consumer is deliberate: a
+/// consumer-side fix needs a per-register mark, and T1167 and T1194 are
+/// both the bill for per-register marks that outlived their value. A
+/// load has no such afterlife.
+fn load_returned_slot_address<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    callee_name: &str,
+    dst: u16,
+    value: BasicValueEnum<'ctx>,
+) -> Result<(BasicValueEnum<'ctx>, ReturnedReference)> {
+    let kind = ctx
+        .vbc_module()
+        .and_then(|vbc| {
+            ctx.func_name_index()
+                .and_then(|ix| ix.find_by_name(callee_name))
+                .and_then(|entry| vbc.functions.get(entry.index))
+                .and_then(|fd| fd.instructions.as_ref())
+        })
+        .map(|callee| returned_reference_kind(callee))
+        .unwrap_or(ReturnedReference::None);
+    let callee_hands_back_address = kind == ReturnedReference::SlotAddress;
+    // A caller whose own body cannot be read keeps today's behaviour.
+    let wanted_here = ctx
+        .vbc_module()
+        .and_then(|vbc| {
+            ctx.func_name_index()
+                .and_then(|ix| ix.find_by_name(ctx.function_name().as_str()))
+                .and_then(|entry| vbc.functions.get(entry.index))
+                .and_then(|fd| fd.instructions.as_ref())
+        })
+        .map(|here| slot_address_fate(here, dst, Aliasing::Conservative))
+        .unwrap_or(SlotAddressFate::DerefedHere);
+    let load = callee_hands_back_address && wanted_here == SlotAddressFate::Dropped;
+    if std::env::var("VERUM_TRACE_RETSLOT").is_ok() {
+        // BOTH verdicts, always. A trace that printed only the loads
+        // answers "how many did I change" and never "how many did I
+        // consider" — and the second number is the one that says whether
+        // the gate is looking at the call sites it was written for.
+        eprintln!(
+            "[retslot] {} -> {} dst={} kind={:?} fate_here={:?} load={}",
+            ctx.function_name().as_str(),
+            callee_name,
+            dst,
+            kind,
+            wanted_here,
+            load
+        );
+    }
+    if !load {
+        return Ok((value, kind));
+    }
+    let i64_type = ctx.types().i64_type();
+    let addr = as_ptr(ctx, value, "ret_slot_addr")?;
+    let loaded = ctx
+        .builder()
+        .build_load(i64_type, addr, "ret_slot_load")
+        .or_llvm_err()?;
+    Ok((loaded, kind))
+}
+
+/// Re-apply the `interior_list_ref` mark a returned pre-loaded element
+/// lost at the call boundary.
+///
+/// **INTERIOR-ELEMENT-MARK-RESTORE-1 (T1197)** — `RefListElement`'s arm
+/// loads the element and marks its register so the `Deref` arm passes
+/// the value through instead of loading again (DEREF-INTERIOR-1). A mark
+/// does not cross a call, so `fn nth_ref(&self,i) -> &Int {
+/// &self.items[i] }` returned the element VALUE to a caller whose
+/// register carried nothing, and `*r` loaded through 7 as if it were an
+/// address: rc=139 under AOT against the interpreter's 7.
+///
+/// This IS a per-register fact, which T1188's own fix deliberately
+/// avoided — so it is worth saying why it is the right answer here and
+/// not there. T1188 needed to change a VALUE, and a load has no
+/// afterlife. This needs to restore a CLASSIFICATION the callee already
+/// made and the boundary erased, and the mark it restores is an existing
+/// one that `set_register` already clears (it lives in `reg_types`,
+/// which `reg_types.clear(reg)` covers) — so the T1167 / T1194
+/// stale-fact hazard does not apply. It is called AFTER the return-type
+/// marks so it is not overwritten by them.
+fn restore_interior_element_mark(ctx: &mut FunctionContext<'_, '_>, dst: u16, kind: ReturnedReference) {
+    if kind == ReturnedReference::InteriorElementValue {
+        ctx.mark_interior_list_ref(dst);
+    }
+}
+
 /// Lower ArithExtended instruction to LLVM IR.
 ///
 /// Handles checked, wrapping, saturating arithmetic, bit-counting, and
@@ -14345,9 +14473,23 @@ fn lower_call<'ctx>(
         .build_call(llvm_fn, &arg_vals, "call_result")
         .or_llvm_err()?;
     if let Some(ret_val) = call_site.try_as_basic_value().basic() {
+        // THE SITE THAT MATTERS, and it is not the obvious one. A user
+        // method resolved statically is emitted as `Call { func_id }`,
+        // not `CallM` — dumped from the `bag.lend_items().len()` probe:
+        //
+        //     13: Call { dst: Reg(6), func_id: 39013, args: ... }
+        //     14: Len  { dst: Reg(8), arr: Reg(6), type_hint: 1 }
+        //
+        // so a load placed only at the CallM store never saw a single
+        // one of this task's poles. `core/` also has 38 free functions
+        // of the same shape (`key_id_to_text(k) -> &Text { &k.0 }`).
+        let (ret_val, ret_ref_kind) =
+            load_returned_slot_address(ctx, &func_name, dst.0, ret_val)?;
         ctx.set_register(dst.0, ret_val);
         // Track register types based on function return type
         mark_register_from_return_type(ctx, dst.0, &func_desc.return_type);
+        // After the return-type marks, so it is not overwritten by them.
+        restore_interior_element_mark(ctx, dst.0, ret_ref_kind);
         // task #39/#35: a generic fn returning a bare type param T (e.g.
         // `fn fma<T>(...) -> T`, `fn passthru<T>(x: T) -> T`) reuses the generic
         // descriptor at Tier-1, so `return_type` is Generic(T) and the mark above
@@ -21103,11 +21245,15 @@ fn lower_call_method<'ctx>(
                 ctx.set_register(dst.0, unwrapped.into());
             }
         } else {
+            let (normalized, ret_ref_kind) =
+                load_returned_slot_address(ctx, &func_name, dst.0, normalized)?;
             ctx.set_register(dst.0, normalized);
             // Track register types based on method return type
             if let Some(ref ret_type) = resolved_return_type {
                 mark_register_from_return_type(ctx, dst.0, ret_type);
             }
+            // After the return-type marks, so it is not overwritten.
+            restore_interior_element_mark(ctx, dst.0, ret_ref_kind);
             // MAYBE-EXTRACT-OBJ-TYPE-1 (#29): a payload extractor
             // (`Maybe/Result.unwrap` / `expect` …) returns the GENERIC
             // payload `T`, so `resolved_return_type` is a type variable that
@@ -24261,6 +24407,249 @@ fn emit_slice_elem_load<'ctx>(
     env.elem_width(ctx.builder(), fatref_ptr, "sl")
 }
 
+/// What becomes of a slot ADDRESS held in `seed` before this function
+/// ends?
+///
+/// **SLOT-ESCAPE-WALK-1 (T1188)** — extracted from the RefField arm
+/// below, where it decided `yield_slot_address`. Lifted out because the
+/// CALL SITE needs the same answer about a CALLEE: `fn as_str(&self) ->
+/// &Text { &self.inner }` compiles to a RETURNED slot address, and the
+/// caller is then the one that must load through it.
+///
+/// The walk is deliberately simple: `Mov` propagates the alias set, any
+/// other write to a register drops it, and the first instruction that
+/// consumes an aliased register as a reference names the fate. It is
+/// O(instructions), and a function with no seed answers without
+/// walking.
+///
+/// The fates are kept apart rather than collapsed to a bool because the
+/// two callers ask different questions of the same walk: RefField asks
+/// "does the address leave this instruction's own function", the call
+/// site asks "does the callee hand one back". Only `Returned` answers
+/// the second.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SlotAddressFate {
+    /// Nothing reads it as an address — every consumer wants the VALUE.
+    Dropped,
+    /// `Deref` consumes it here; that arm performs the load.
+    DerefedHere,
+    /// `DerefMut` writes THROUGH it here, so the address is the point.
+    StoredThrough,
+    /// `Ret` hands it to the caller, which becomes the consumer.
+    Returned,
+}
+
+/// How the forward walk treats a write to a register already in the
+/// alias set.
+///
+/// **BRANCH-BLIND-ALIAS-KILL-1 (T1188)** — the walk is linear over an
+/// instruction list that has branches in it, so two `Mov`s into the same
+/// register may be on MUTUALLY EXCLUSIVE arms and are seen as
+/// consecutive. Measured in `MapEntry.or_insert_with`:
+///
+/// ```text
+///  6: Call { dst: Reg(5), ... }        entry.get_mut()      seed {5}
+///  7: Mov  { dst: 2, src: 5 }          Occupied arm         alias {2,5}
+/// 17: Mov  { dst: 2, src: 6 }          Vacant arm — KILLED 2
+/// 20: Ret  { value: 8 }                8 came from 2, unseen
+/// ```
+///
+/// so the walk answered `Dropped` for a value the function RETURNS. The
+/// two readers need opposite treatments of that:
+///
+/// * `Killing` — what the RefField arm has always done. Kept for it
+///   bit-for-bit; changing that arm's verdict is a separate question
+///   with T1056's history attached to it.
+/// * `Conservative` — never remove. The alias set over-approximates, so
+///   every error ends in "this address is wanted here", which means "do
+///   not load", which is what the compiler did before this change. The
+///   call site uses this because its dangerous direction is the other
+///   one: loading through a `&mut` that the caller returns would hand
+///   back a value where an address was promised, and
+///   `*map.entry(k).or_insert_with(f) += 1` would stop writing to the
+///   map with nothing to see.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Aliasing {
+    Killing,
+    Conservative,
+}
+
+fn slot_address_fate(
+    instrs: &[verum_vbc::Instruction],
+    seed: u16,
+    aliasing: Aliasing,
+) -> SlotAddressFate {
+    let mut alias: std::collections::HashSet<u16> = std::collections::HashSet::new();
+    alias.insert(seed);
+    for ins in instrs.iter() {
+        match ins {
+            verum_vbc::Instruction::Mov { dst: d, src } if alias.contains(&src.0) => {
+                alias.insert(d.0);
+            }
+            verum_vbc::Instruction::Mov { dst: d, .. }
+                if aliasing == Aliasing::Killing =>
+            {
+                alias.remove(&d.0);
+            }
+            verum_vbc::Instruction::Deref { ref_reg, .. } if alias.contains(&ref_reg.0) => {
+                return SlotAddressFate::DerefedHere;
+            }
+            verum_vbc::Instruction::DerefMut { ref_reg, .. } if alias.contains(&ref_reg.0) => {
+                return SlotAddressFate::StoredThrough;
+            }
+            verum_vbc::Instruction::Ret { value } => {
+                if alias.contains(&value.0) {
+                    return SlotAddressFate::Returned;
+                }
+            }
+            _ => {}
+        }
+    }
+    SlotAddressFate::Dropped
+}
+
+/// What kind of reference into someone else's storage does this function
+/// hand back, if any?
+///
+/// **RETURNED-REFERENCE-KIND-1 (T1188/T1192/T1197)** — the callee-side
+/// question, answered from the BODY because the descriptor cannot answer
+/// it: an archive descriptor erases `&` from the return type exactly as
+/// it does from parameters (`Path.as_str` reads
+/// `ret=Concrete(TypeId(4))`), which is why the RefField arm reads
+/// bodies too.
+///
+/// THREE opcodes produce such a reference and they do NOT agree about
+/// what the register then holds — which is the whole reason this has to
+/// name the producer rather than answer yes/no:
+///
+/// ```text
+/// Path.as_str  -> &Text { &self.inner }
+///   0: CbgrExtended{sub_op:12}  1: Mov  2: Ret          RefField
+///     the register holds the slot ADDRESS
+///
+/// Shared.deref -> &T { unsafe { &(*self.ptr).value } }
+///   0: GetF  1: FfiExtended{sub_op:79}  2: Mov  3: Mov  4: Ret
+///     StructFieldAddr — also the slot ADDRESS
+///
+/// Bag.nth_ref  -> &Int { &self.items[i] }
+///   0: GetF  1: CbgrExtended{sub_op:11}  2: Mov  3: Ret
+///     RefListElement — its arm ALREADY LOADED the element, so the
+///     register holds the VALUE, and marks itself `interior_list_ref`
+///     so the `Deref` arm passes it through instead of loading again
+/// ```
+///
+/// The two kinds need OPPOSITE things from the caller, and getting
+/// either wrong is a SIGSEGV. A slot address needs one load that nobody
+/// was performing (T1188: `shared.deref().url` empty, `List.len` 0,
+/// `copy_path_nul` at 0x0). A pre-loaded element needs its mark back,
+/// because a mark does not cross a call: `let r = b.nth_ref(0); *r` had
+/// the caller's `Deref` load through the element VALUE 7 as if it were
+/// an address (T1197, rc=139 against the interpreter's 7).
+///
+/// THE WALK RUNS BACKWARD FROM `Ret`, and that is the correction that
+/// matters. Walking FORWARD from a producer and propagating an alias set
+/// answers the wrong question, because only `Mov` was killing aliases:
+///
+/// ```text
+/// fn 'Duration.cmp' (6 instrs):
+///   1: CbgrExtended{sub_op:12, dst=3}      &other.secs
+///   2: Mov  { dst: 4, src: 3 }             alias {3,4}
+///   3: CallM{ dst: 3, ... }                r3 is now an Ordering —
+///                                          but a CallM is not a Mov,
+///                                          so the alias SURVIVED
+///   5: Ret  { value: 2 }                   answered "returns an address"
+/// ```
+///
+/// That false positive was measured: seven loads, every one through a
+/// value that was not an address (Duration.gt / lt / partial_cmp, the
+/// three Instant kin, Set.get). It is the same class as T1167 — a
+/// per-register fact outliving its value — reproduced inside the walk
+/// that was supposed to be the alternative to per-register facts.
+///
+/// Backward, the question is "what LAST defined the returned register",
+/// which has one answer and needs no alias set. Anything the walk cannot
+/// read as a definition is a BARRIER and ends it with `None`, so an
+/// unrecognised instruction costs coverage and never correctness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReturnedReference {
+    /// Nothing that points into storage this function does not own.
+    None,
+    /// The ADDRESS of a slot; the caller owes one load to read it.
+    SlotAddress,
+    /// An interior element the producer ALREADY loaded; the caller owes
+    /// the `interior_list_ref` mark so its `Deref` does not load again.
+    InteriorElementValue,
+}
+
+fn returned_reference_kind(instrs: &[verum_vbc::Instruction]) -> ReturnedReference {
+    for (i, ins) in instrs.iter().enumerate() {
+        if let verum_vbc::Instruction::Ret { value } = ins {
+            let kind = returned_register_kind(instrs, i, value.0);
+            if kind != ReturnedReference::None {
+                return kind;
+            }
+        }
+    }
+    ReturnedReference::None
+}
+
+fn returned_register_kind(
+    instrs: &[verum_vbc::Instruction],
+    ret_idx: usize,
+    reg: u16,
+) -> ReturnedReference {
+    let mut r = reg;
+    for ins in instrs[..ret_idx].iter().rev() {
+        match ins {
+            verum_vbc::Instruction::Mov { dst, src } if dst.0 == r => r = src.0,
+            // A `Mov` into some other register cannot affect `r`.
+            verum_vbc::Instruction::Mov { .. } => {}
+            verum_vbc::Instruction::CbgrExtended { sub_op, operands }
+                if *sub_op == CBGR_SUB_REF_FIELD && operands.len() >= 3 =>
+            {
+                if op_reg(operands, 0) == r {
+                    return ReturnedReference::SlotAddress;
+                }
+            }
+            verum_vbc::Instruction::FfiExtended { sub_op, operands }
+                if *sub_op == FFI_SUB_STRUCT_FIELD_ADDR && operands.len() >= 3 =>
+            {
+                if op_reg(operands, 0) == r {
+                    return ReturnedReference::SlotAddress;
+                }
+            }
+            verum_vbc::Instruction::CbgrExtended { sub_op, operands }
+                if *sub_op == CBGR_SUB_REF_LIST_ELEMENT && operands.len() >= 3 =>
+            {
+                if op_reg(operands, 0) == r {
+                    return ReturnedReference::InteriorElementValue;
+                }
+            }
+            // Whether this wrote `r` cannot be read here, so assume it
+            // did: stopping answers "not a reference", which is what
+            // every caller did before this change existed.
+            _ => return ReturnedReference::None,
+        }
+    }
+    ReturnedReference::None
+}
+
+/// `CbgrSubOpcode::RefField` — `&record.field` by field index. Named
+/// here because two sites now agree about it: the lowering arm below and
+/// `returns_slot_address` above, which has to recognise the same opcode
+/// in a CALLEE's instruction list.
+const CBGR_SUB_REF_FIELD: u8 = 0x0C;
+
+/// `FfiSubOpcode::StructFieldAddr` — `&self.field` as a real heap
+/// address, which is what an `unsafe { &(*ptr).field }` accessor emits.
+/// The second producer `returns_slot_address` must recognise.
+const FFI_SUB_STRUCT_FIELD_ADDR: u8 = 0x4F;
+
+/// `CbgrSubOpcode::RefListElement` — `&list[i]`. Its lowering arm LOADS
+/// the element and marks the register `interior_list_ref`, so a function
+/// returning one hands back a VALUE, not an address.
+const CBGR_SUB_REF_LIST_ELEMENT: u8 = 0x0B;
+
 /// Lower CbgrExtended instruction to LLVM IR.
 fn lower_cbgr_extended<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -24269,7 +24658,7 @@ fn lower_cbgr_extended<'ctx>(
 ) -> Result<()> {
     let mut ffi = FfiLowering::new(ctx.llvm_context());
     match sub_op {
-        0x0B => {
+        CBGR_SUB_REF_LIST_ELEMENT => {
             // RefListElement — build a plain element pointer into a
             // List<T> backing buffer. Produces an i64-encoded `*mut
             // Value`; the existing DerefMut lowering for non-CBGR
@@ -24356,7 +24745,7 @@ fn lower_cbgr_extended<'ctx>(
             ctx.mark_interior_list_ref(dst);
             Ok(())
         }
-        0x0C => {
+        CBGR_SUB_REF_FIELD => {
             // **RefField** (task #17 close) — produce a heap-anchored
             // interior pointer to a record field by field-index.  Mirror
             // of the VBC interpreter's `CbgrSubOpcode::RefField` handler
@@ -24525,85 +24914,17 @@ fn lower_cbgr_extended<'ctx>(
                                 .and_then(|fd| fd.instructions.as_ref())
                         })
                         .map(|instrs| {
-                            // Registers aliasing `dst` through Mov, in
-                            // program order.  A `Ret` of any of them
-                            // means this slot address is what leaves.
-                            let mut alias: std::collections::HashSet<u16> =
-                                std::collections::HashSet::new();
-                            alias.insert(dst);
-                            for ins in instrs.iter() {
-                                match ins {
-                                    verum_vbc::Instruction::Mov { dst: d, src }
-                                        if alias.contains(&src.0) =>
-                                    {
-                                        alias.insert(d.0);
-                                    }
-                                    // A write that is NOT a Mov from an
-                                    // alias kills the alias: the
-                                    // register now holds something else.
-                                    verum_vbc::Instruction::Mov { dst: d, .. } => {
-                                        alias.remove(&d.0);
-                                    }
-                                    // REFFIELD-LOCAL-DEREF-1 (T1155): a
-                                    // `Deref` of an alias needs the
-                                    // ADDRESS, not the value.  The
-                                    // Deref arm below unconditionally
-                                    // emits `load i64` through whatever
-                                    // this register holds, so handing
-                                    // it the loaded VALUE makes it load
-                                    // a SECOND time with the field's
-                                    // contents as the pointer:
-                                    //
-                                    //   type Rec is { a: Int, b: Int };
-                                    //   let r = Rec { a: 7, b: 41 };
-                                    //   print(f"{*(&r.a)}")
-                                    //
-                                    //   %deref_load = load i64,
-                                    //       ptr inttoptr (i64 7 to ptr)
-                                    //
-                                    // Address 7 — the field's value used
-                                    // as its address.  SIGSEGV when the
-                                    // field holds a small number, a
-                                    // plausible-looking address when it
-                                    // holds a pointer (`*shared` printed
-                                    // 4413472768 instead of the payload),
-                                    // 0 when it holds 0.  One bug, four
-                                    // faces, decided only by the bytes.
-                                    //
-                                    // This is the same answer the `Ret`
-                                    // arm below already gives, to the
-                                    // same consumer: a raw
-                                    // `ptr_to_int(field_ptr)` that the
-                                    // Deref arm untags (a mask of the
-                                    // low bit, harmless on an 8-aligned
-                                    // field) and loads once.  The
-                                    // returned-reference path has been
-                                    // handing this exact shape to a
-                                    // caller's `Deref` since T1056; the
-                                    // gap was only that a Deref in the
-                                    // SAME function took the value path.
-                                    //
-                                    // Narrow by construction: the value
-                                    // path stays for every consumer that
-                                    // is not a Deref, so the
-                                    // REFFIELD-SCALAR-ADDR-1 regression
-                                    // (`d.as_nanos()` returning its own
-                                    // address) cannot recur — that site
-                                    // has no Deref on the alias.
-                                    verum_vbc::Instruction::Deref { ref_reg, .. }
-                                        if alias.contains(&ref_reg.0) =>
-                                    {
-                                        return true;
-                                    }
-                                    verum_vbc::Instruction::Ret { value } => {
-                                        if alias.contains(&value.0) {
-                                            return true;
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            false
+                            // Both address fates, exactly as before the
+                            // walk was split: consumed HERE by `Deref`
+                            // (T1155) or handed to the caller by `Ret`
+                            // (T1056).  `StoredThrough` is deliberately
+                            // NOT here — it is new information this arm
+                            // has never acted on, and reading it would
+                            // change a verdict this task did not measure.
+                            matches!(
+                                slot_address_fate(instrs, dst, Aliasing::Killing),
+                                SlotAddressFate::DerefedHere | SlotAddressFate::Returned
+                            )
                         })
                         .unwrap_or(false)
                 }
@@ -35210,7 +35531,7 @@ fn build_runtime_type_switch<'ctx>(
             let end_bb = ctx
                 .builder()
                 .get_insert_block()
-                .expect("recursive switch leaves the builder in its merge block");
+                .or_internal("recursive switch left no insert block")?;
             ctx.builder()
                 .build_unconditional_branch(merge_bb)
                 .or_llvm_err()?;
