@@ -719,6 +719,9 @@ jobs:
           # checkout, and a gate whose INPUT is missing reports OK.
           python3 scripts/ci/check_doc_method_names.py --self-test
           python3 scripts/ci/check_doc_method_names.py --check
+          # Same input requirement, same reason for living in this job.
+          python3 scripts/ci/check_doc_iterator_items.py --self-test
+          python3 scripts/ci/check_doc_iterator_items.py --check
           # These three have been Makefile targets with no CI caller.
           # They could not have run before this job checked the website
           # out; now they can. See A81.

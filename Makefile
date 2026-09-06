@@ -102,12 +102,17 @@ check-examples-run: ## Gate: a shipped example that COMPILES must also RUN — n
 gates-docs: check-doc-examples check-examples-run check-homepage-examples check-doc-indented-blocks \
             check-doc-cli-flags check-doc-anchors check-doc-error-codes \
             check-grammar-docs-match check-by-example check-doc-blocks-parse \
-            check-doc-names-exist check-doc-method-names ## Every documentation gate CI runs — needs a build
+            check-doc-names-exist check-doc-method-names \
+            check-doc-iterator-items ## Every documentation gate CI runs — needs a build
 	@echo "gates-docs: all documentation gates green"
 
 check-doc-method-names: ## Gate: a method a doc example calls on a `core/` type must exist (the receiver gate checks only the RECEIVER)
 	python3 scripts/ci/check_doc_method_names.py --self-test
 	python3 scripts/ci/check_doc_method_names.py
+
+check-doc-iterator-items: ## Gate: a doc line naming a core iterator type AND its item must agree with what `next` yields
+	python3 scripts/ci/check_doc_iterator_items.py --self-test
+	python3 scripts/ci/check_doc_iterator_items.py
 
 check-doc-cli-flags: ## Gate: every CLI flag the docs show must exist in the binary — needs a build
 	python3 scripts/ci/check_doc_cli_flags.py --self-test
