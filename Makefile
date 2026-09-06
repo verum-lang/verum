@@ -110,6 +110,9 @@ check-doc-method-names: ## Gate: a method a doc example calls on a `core/` type 
 	python3 scripts/ci/check_doc_method_names.py --self-test
 	python3 scripts/ci/check_doc_method_names.py
 
+list-doc-absent-methods: ## LIST (never a gate): doc methods called on a VARIABLE whose name is nowhere in core/
+	python3 scripts/ci/list_doc_absent_methods.py
+
 check-doc-iterator-items: ## Gate: a doc line naming a core iterator type AND its item must agree with what `next` yields
 	python3 scripts/ci/check_doc_iterator_items.py --self-test
 	python3 scripts/ci/check_doc_iterator_items.py
