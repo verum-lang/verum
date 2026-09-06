@@ -2088,6 +2088,48 @@ impl TypeChecker {
                             // - default_impl: for protocol method default implementations
                             let has_default = method.body.is_some() || default_impl.is_some();
 
+                            // A96 — MEASURE the default body, opt-in.
+                            //
+                            // A protocol's default method body is not
+                            // typechecked: `default_impl` is read for the
+                            // BOOLEAN above and never visited.  A file whose
+                            // only content is a protocol with `return
+                            // ZZQ_NEVER_DECLARED_NAME;` inside a default body
+                            // compiles with zero diagnostics, while the same
+                            // statement in a free function reports
+                            // `error<E100>: unbound variable`.  103 such
+                            // bodies sit in 16 `core/` files, one of them
+                            // carrying a construct (`self.fill_buf()?.…`)
+                            // that fails everywhere it IS checked (A95).
+                            //
+                            // The blast radius of switching this on is
+                            // unknown BY CONSTRUCTION — no diagnostic has
+                            // ever been emitted for any of them — so the
+                            // first step is a count, not an enforcement.
+                            // `VERUM_CHECK_PROTOCOL_DEFAULTS=1` runs the
+                            // check and PRINTS what it finds without
+                            // changing control flow; the errors it names are
+                            // the measurement this row asked for.
+                            if std::env::var("VERUM_CHECK_PROTOCOL_DEFAULTS").is_ok() {
+                                let body = if method.body.is_some() {
+                                    method.body.clone()
+                                } else {
+                                    default_impl.clone()
+                                };
+                                if body.is_some() {
+                                    let mut with_body = method.clone();
+                                    with_body.body = body;
+                                    if let Err(e) = self.check_function(&with_body) {
+                                        eprintln!(
+                                            "[proto-default] {}::{} — {:?}",
+                                            type_decl.name.name.as_str(),
+                                            method_name.as_str(),
+                                            e,
+                                        );
+                                    }
+                                }
+                            }
+
                             let mut protocol_method = crate::protocol::ProtocolMethod::simple(
                                 method_name.clone(),
                                 method_ty,
