@@ -15,7 +15,13 @@ text" alternative on the safe path.
 
 Slicing by byte offset is the explicit choice — it makes O(1) slicing
 possible and the panic-on-non-boundary contract makes the safety
-invariant visible. Char-indexed slicing is `text.chars().take(n).collect()`.
+invariant visible.
+
+> **The contract is not enforced today (T1215).** `core/text/text.vr`
+> asserts it, but the interpreter intercepts `slice` and CLAMPS instead:
+> `"aфb".slice(0, 2)` splits the two-byte `ф` and returns `"a"` with no
+> panic and no error. A caller asking for two bytes gets one. Do not
+> rely on the panic to catch a bad offset until that row closes. Char-indexed slicing is `text.chars().take(n).collect()`.
 
 ## TextBuilder — what to use instead of `+`
 
