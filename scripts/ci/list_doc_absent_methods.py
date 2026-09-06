@@ -70,7 +70,11 @@ DOCS = Path(os.environ.get("VERUM_DOCS_DIR") or (REPO.parent / "website" / "docs
 # `fn name(` or `fn name<` — the paren/angle is what keeps prose inside a
 # string literal from counting as a declaration. See the docstring.
 DECL = re.compile(r"\bfn ([a-z_]\w*)\s*[(<]")
-FENCE = re.compile(r"^```[a-z]*\n(.*?)^```", re.M | re.S)
+# Only fences that are Verum, or untagged. A ```text fence holding a
+# gate's own output reads `sys.fs_watch(r1.0)` as a method call on
+# `sys` — measured, on stdlib/overview.md, where those three lines are
+# MODULE NAMES WITH VERSIONS pasted from a dependency-cycle report.
+FENCE = re.compile(r"^```(verum|vr|)\n(.*?)^```", re.M | re.S)
 CALL = re.compile(r"\b([a-z_]\w*)\.([a-z_]\w*)\(")
 # A page that writes `foo()` in prose has introduced the name.
 PROSE_NAME = re.compile(r"`([a-z_]\w*)\(")
@@ -105,7 +109,7 @@ def sweep(names):
         types.update(TYPE_DECL.findall(f.read_text(encoding="utf-8", errors="replace")))
     for p in sorted(DOCS.rglob("*.md")) + sorted(DOCS.rglob("*.mdx")):
         text = p.read_text(encoding="utf-8", errors="replace")
-        blocks = FENCE.findall(text)
+        blocks = [b for _, b in FENCE.findall(text)]
         local = set(PROSE_NAME.findall(text))
         for b in blocks:
             local.update(DECL.findall(b))
