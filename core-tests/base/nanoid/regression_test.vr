@@ -29,7 +29,12 @@ mount core.collections.list.List;
 // nanoid.vr:138. Activates after next precompiled-stdlib refresh.
 // =============================================================================
 
-@ignore("`Text.from` does not exist; fixed in stdlib to use Text.new(). Activates on next precompiled-stdlib refresh.")
+// UNPINNED 2026-09-07. The reason was "`Text.from` does not exist;
+// fixed in stdlib to use Text.new(). Activates on next
+// precompiled-stdlib refresh." It has refreshed many times since.
+// Measured: `generate_with_alphabet("".as_bytes(), 21)` returns a
+// zero-length Text — the early-return short-circuit this pins — with
+// no panic.
 @test
 fn regression_pin_generate_with_alphabet_panic_stub() {
     // Smallest input that hits the early-return short-circuit at
@@ -51,13 +56,13 @@ fn regression_pin_generate_with_alphabet_panic_stub() {
 // `public unsafe fn`). Activates on next precompiled-stdlib refresh.
 // =============================================================================
 
-@ignore("Text.from_utf8_unchecked was private; visibility fix landed in this branch. Activates on next precompiled-stdlib refresh.")
+@ignore("RE-KEYED 2026-09-07 — the stated reason has stopped applying. It said `Text.from_utf8_unchecked was private; visibility fix landed`, and that is done: the sibling pin on `generate_with_alphabet` now passes and was lifted. What fails TODAY is different — `generate_len(8)` panics with `[lenient] stage-3 uniquely-named public free fn stub never resolved (func_id=4278189102); the producing stdlib module failed precompile OR the body lives in an archive that wasn't loaded`. A pin keyed to a reason that no longer holds is the false-green this suite exists to prevent: the test still fails, the count still matches, and the note describes something that stopped happening.")
 @test
 fn regression_pin_generate_len_panic_stub() {
     let _ = generate_len(8);
 }
 
-@ignore("Same Text.from_utf8_unchecked defect — `generate()` is the canonical user-facing entry.")
+@ignore("Same failure as the pin above, RE-KEYED 2026-09-07: not the `Text.from_utf8_unchecked` visibility defect any more but the stage-3 stub-resolution panic. `generate()` is the canonical user-facing entry, which is why it is pinned separately.")
 @test
 fn regression_pin_generate_default_panic_stub() {
     let _ = generate();
