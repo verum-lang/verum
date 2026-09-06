@@ -52,11 +52,17 @@ CORE = os.path.join(REPO, "core")
 
 # Every `(name, page)` pair the site carries today.  Lowering it is the work;
 # raising it means a doc started naming something the library does not have.
-BASELINE = 28
+BASELINE = 25
 
 BLOCK = re.compile(r"^```verum(?:[ \t][^\n]*)?\n(.*?)^```", re.M | re.S)
 DECL = re.compile(
-    r"^\s*(?:public\s+|private\s+)?(?:async\s+|unsafe\s+|pure\s+|extern\s+)*"
+    # `pub` is Verum, not a Rust leak: `visibility = ( 'public' | 'pub' )`
+    # at `grammar/verum.ebnf:497`.  Reading only `public` made the gate
+    # report `SerializeBuf` as undeclared while `tutorials/protocols.md`
+    # declares it two lines above the use, and nearly bought a 173-line
+    # rewrite of 33 pages that would have changed nothing.
+    r"^\s*(?:public\s+|pub(?:\(\w+\))?\s+|private\s+)?"
+    r"(?:async\s+|unsafe\s+|pure\s+|extern\s+)*"
     r"(?:fn|type|const|context|static|protocol)\s+(?:mut\s+)?([A-Za-z_]\w*)", re.M)
 RECEIVER = re.compile(r"\b([A-Z][A-Za-z0-9]{2,})\s*\.")
 # A comment inside a block is PROSE, and prose ends sentences with a period.
