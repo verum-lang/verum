@@ -218,6 +218,18 @@ Regression guard:
   feeding `copy_path_nul` is the FFI byte-buffer contract, not this one —
   a slice is not a slot address and giving it a load would be a third
   wrong answer. See `ffi-byte-buffer-contract.md`.
+* **Wrapper transparency on the FIELD path.** `s.method()` on a
+  `Shared<T>` reaches through the wrapper — `handle_call_method` has a
+  documented Deref last resort, and T1183 / T1186 fixed and extended it.
+  `s.field` has no counterpart, so the two syntaxes disagree about what
+  a `Shared<T>` is: field 0 answers a slot of the CARRIER (a silent
+  wrong number) and field 1 dereferences null. Tracked as T1202, and it
+  is the same shape as this contract seen from the other side — this
+  document is about a boundary erasing WHICH KIND of reference you
+  hold, T1202 about a wrapper being transparent to one syntax and
+  opaque to another. Both are two paths to one value, built at
+  different times and never reconciled.
+
 * **Transitive forwarding.** `fn hop(&self) -> &Int { self.inner.get() }`
   has no producer opcode of its own, so it answers `None` and its callers
   get nothing. It is invisible in practice because the natural way to

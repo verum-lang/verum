@@ -129,6 +129,13 @@ def sum_variants():
     the `WireType.EndGroup` control flipped to True the moment the docs
     were admitted, which is what caught it.
 
+    Stated as an asymmetry rather than a preference: widening to
+    doc-declared sums makes the instrument agree with any page confident
+    enough to declare its own version of a core type — which is exactly
+    what `stdlib/protobuf.md` demonstrated, where the page's own block
+    would have excused the fiction that had just been fixed in its table
+    three lines above.
+
     The cost of core-only scope is one known false positive:
     `tutorials/pattern-matching.md` builds a toy interpreter with its own
     `type Expr is … | Lambda { … }`, and `core/` has two unrelated `Expr`

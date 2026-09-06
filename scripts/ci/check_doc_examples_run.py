@@ -64,6 +64,16 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 DOCS = Path(os.environ.get("VERUM_DOCS_DIR") or (REPO.parent / "website" / "docs"))
 
+# Programs shipped as `.vr` FILES rather than as fenced blocks.
+# `check_by_example_compiles.py` already asks whether they compile; this
+# asks the next question of the same corpus, because compiling is not
+# running and this directory proved it: `13-channels` had been dying at
+# runtime since at least 2026-09-06 08:43 with nothing in the tree
+# reporting it. It surfaced only when a blast radius was pointed at the
+# corpus for an unrelated reason — the same way `18-text-processing` was
+# found to be calling a PRIVATE type's method.
+PROGRAM_DIRS = [REPO / "docs" / "by-example"]
+
 BLOCK = re.compile(r"^```verum\n(.*?)^```", re.M | re.S)
 
 # Blocks the documentation deliberately shows as NOT compiling or NOT
@@ -107,7 +117,18 @@ except Exception:  # the sibling gate is optional; without it nothing is dropped
     def _drop_unshipped(text):
         return text
 
-BASELINE = 0
+# KEYED, not counted. A bare number lets a NEW failure hide behind a
+# fixed one — the count stays at 1 and the gate stays green while the
+# corpus has silently swapped which program is broken. Each entry names
+# the task that owns it, so an entry with no owner is a defect nobody
+# has agreed to carry.
+KNOWN_FAILURES = {
+    "by-example/13-channels":
+        "T1202 — a field read through `Shared<T>` answers a slot of the "
+        "carrier; `Sender.clone` opens with `self.inner.sender_count`. "
+        "Predates 2026-09-06 08:43, interpreter-side, not this corpus's "
+        "fault.",
+}
 
 TIMEOUT_RUN = 60
 TIMEOUT_BUILD = 900
@@ -198,6 +219,15 @@ def controls(binary: Path, tmp: Path) -> None:
     print("controls: a clean program runs, a panicking program does not.  OK")
 
 
+def program_files():
+    """(path, source) for every shipped `.vr` program, in a stable order."""
+    for d in PROGRAM_DIRS:
+        if not d.is_dir():
+            continue
+        for f in sorted(d.rglob("main.vr")):
+            yield f, f.read_text(encoding="utf-8", errors="replace")
+
+
 def homepage_blocks():
     """The marketing homepage's samples, which live outside `docs/`.
 
@@ -222,11 +252,27 @@ def homepage_blocks():
 def blocks(funnel):
     """(page, body) for every self-contained example, in a stable order.
 
+    SHIPPED PROGRAMS COME FIRST so a `--limit` run still exercises the
+    named corpus rather than only the head of the docs tree.
+
     `funnel` is filled in as we go, because a count is a statement about
     its DENOMINATOR: "one broken example" means nothing until the reader
     can see it came from 22 and not from 220, and each narrowing step is
     a place this instrument could be silently measuring nothing.
     """
+    for path, body in program_files():
+        funnel["shipped .vr programs"] += 1
+        # NOT filtered by MUST_FAIL, elision or ENVIRONMENTAL. A shipped
+        # program is a CURATED corpus that is meant to run end to end,
+        # and every one of those filters was written for fenced blocks
+        # lifted out of prose. Applying them here reported
+        # `13-channels` as REPAIRED — its chapter is ABOUT channels, so
+        # it contains `.send(`, so the environmental filter skipped it,
+        # so the set difference declared a verdict about a program it
+        # had never run. Same class as the `--limit` bug one commit
+        # earlier: an instrument answering confidently about what it
+        # did not examine.
+        yield path, body
     for page in sorted(DOCS.rglob("*.md")) + sorted(DOCS.rglob("*.mdx")):
         text = page.read_text(encoding="utf-8", errors="replace")
         text = _drop_unshipped(text)
@@ -257,6 +303,17 @@ def blocks(funnel):
 
 
 def key(page: Path, body: str) -> str:
+    """A shipped program is keyed by its DIRECTORY, a block by its hash.
+
+    A `.vr` file is edited in place and keeps its identity; hashing it
+    would make every legitimate edit read as a new failure. A fenced
+    block has no identity but its content.
+    """
+    for d in PROGRAM_DIRS:
+        try:
+            return f"{d.name}/{page.relative_to(d).parts[0]}"
+        except (ValueError, IndexError):
+            pass
     try:
         rel = page.relative_to(DOCS)
     except ValueError:
@@ -264,13 +321,59 @@ def key(page: Path, body: str) -> str:
     return f"{rel}#{hashlib.blake2s(body.encode()).hexdigest()[:8]}"
 
 
+def verdict(seen, known):
+    """(new_failures, repaired) — the whole decision, in one pure function.
+
+    Extracted so `--self-test` can exercise BOTH polarities without a
+    binary and without a corpus. The polarities are not symmetric in how
+    they are noticed: a new failure is loud, and a REPAIRED entry is the
+    one that would otherwise rot in the list forever, silently widening
+    what the gate excuses.
+    """
+    return sorted(set(seen) - set(known)), sorted(set(known) - set(seen))
+
+
+def self_test() -> int:
+    cases = [
+        # (seen, known, expect_new, expect_repaired, what it pins)
+        ({"a"}, {"a"}, [], [], "a carried failure is not an alarm"),
+        ({"a", "b"}, {"a"}, ["b"], [], "a NEW failure is reported"),
+        (set(), {"a"}, [], ["a"], "a REPAIRED entry is reported"),
+        ({"b"}, {"a"}, ["b"], ["a"],
+         "a SWAP is reported BOTH ways — the case a bare count cannot see"),
+    ]
+    bad = 0
+    for seen, known, en, er in [(c[0], c[1], c[2], c[3]) for c in cases]:
+        gn, gr = verdict(seen, known)
+        if (gn, gr) != (en, er):
+            print(f"  SELF-TEST FAIL: seen={seen} known={known} "
+                  f"expected {(en, er)} got {(gn, gr)}", file=sys.stderr)
+            bad += 1
+    for c in cases:
+        print(f"  [ok] {c[4]}")
+    if bad:
+        return 1
+    # The known-failure list must name an owner for every entry: an entry
+    # with no task is a defect nobody agreed to carry.
+    for k, why in KNOWN_FAILURES.items():
+        if not re.search(r"\bT\d{4}\b|\bA\d{2}\b", why):
+            print(f"  SELF-TEST FAIL: {k} names no owning task", file=sys.stderr)
+            bad += 1
+    print(f"  [ok] all {len(KNOWN_FAILURES)} known failure(s) name an owner")
+    return 1 if bad else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--differential", action="store_true",
                     help="also build and run under AOT and compare the tiers")
+    ap.add_argument("--self-test", action="store_true",
+                    help="exercise the verdict in both polarities; no binary needed")
     ap.add_argument("--limit", type=int, default=0,
                     help="stop after N examples (for a quick look, not for a gate)")
     args = ap.parse_args()
+    if args.self_test:
+        return self_test()
 
     if not DOCS.is_dir():
         print(f"docs directory not found: {DOCS} — set VERUM_DOCS_DIR", file=sys.stderr)
@@ -287,10 +390,11 @@ def main() -> int:
         considered = compiled = 0
         broken = []
         diverged = []
+        shipped = {p for p, _ in program_files()}
         for i, (page, body) in enumerate(blocks(funnel)):
             if args.limit and i >= args.limit:
                 break
-            if ENVIRONMENTAL.search(body):
+            if page not in shipped and ENVIRONMENTAL.search(body):
                 funnel["  minus environmental"] += 1
                 continue
             considered += 1
@@ -321,7 +425,8 @@ def main() -> int:
                 diverged.append((key(page, body), out0.strip()[:120], out1.strip()[:120]))
 
         print()
-        for k in ("verum blocks", "with an fn main", "  minus shown-as-failing",
+        for k in ("shipped .vr programs", "verum blocks", "with an fn main",
+                  "  minus shown-as-failing",
                   "  minus elided", "  minus environmental"):
             print(f"{k:36s}: {funnel[k]}")
         print(f"{'self-contained examples considered':36s}: {considered}")
@@ -338,14 +443,31 @@ def main() -> int:
             print(f"\n  DIVERGE {k}\n          tier0: {a}\n          tier1: {b}")
 
         total = len(broken) + len(diverged)
-        print(f"\ntotal: {total}   baseline: {BASELINE}")
-        if total > BASELINE:
-            print("A page teaches something that no longer works.", file=sys.stderr)
-            return 1
-        if total < BASELINE:
-            print(f"Baseline is stale — lower BASELINE to {total}.", file=sys.stderr)
-            return 1
-        return 0
+        # SET DIFFERENCE, both directions. A count comparison cannot see
+        # a swap: one program repaired and another broken keeps the
+        # total at 1 and the gate green.
+        if args.limit:
+            print("\n--limit given: this run did not see the whole corpus, "
+                  "so no verdict. Use it to look, never to gate.")
+            return 0
+        seen = {k for k, _, _ in broken} | {k for k, _, _ in diverged}
+        known = set(KNOWN_FAILURES)
+        new_failures, repaired = verdict(seen, known)
+
+        print(f"\nknown failures carried : {len(known & seen)} of {len(known)}")
+        for k in sorted(known & seen):
+            print(f"   {k}\n      {KNOWN_FAILURES[k]}")
+        if new_failures:
+            print(f"\nNEW FAILURES ({len(new_failures)}) — an example stopped working:",
+                  file=sys.stderr)
+            for k in new_failures:
+                print(f"   {k}", file=sys.stderr)
+        if repaired:
+            print(f"\nREPAIRED ({len(repaired)}) — remove from KNOWN_FAILURES, "
+                  f"and close the task it names:", file=sys.stderr)
+            for k in repaired:
+                print(f"   {k}", file=sys.stderr)
+        return 1 if (new_failures or repaired) else 0
 
 
 if __name__ == "__main__":
