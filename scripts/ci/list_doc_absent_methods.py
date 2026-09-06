@@ -48,6 +48,28 @@ declared a false positive. The hit was inside a STRING LITERAL —
 already rejected it correctly. A looser grep is not a control for a
 stricter instrument; it is a different instrument with a worse answer.
 
+CALIBRATION AFTER ONE FULL SWEEP (2026-09-07), because "a nonzero
+count is normal" is useless without a sense of the ratio. Starting from
+110 distinct names / 129 spans, reading every one on a REFERENCE page
+(`stdlib/**`) and every cookbook:
+
+    ~69 names were real defects and are fixed        (list -> 41 / 50)
+    ~41 remain, and the ones checked are all reader-owned example
+        methods — `parsed.to_canonical()` on a tutorial's own SqlParser,
+        `m.widget()` on the reader's TUI model, `g.build_request()` on a
+        mutex-guarded type the page invents two lines earlier
+
+So on the pages that document the LIBRARY the hit rate was high, and
+what is left is concentrated in pages that document how to write YOUR
+code. That asymmetry is the useful reading: sort by page before
+despairing at the count, and treat `stdlib/**` findings as probably
+real and `tutorials/**` findings as probably not.
+
+Biggest single seam found: `stdlib/io.md` declared the async I/O
+protocols as `async fn` methods that do not exist, and THREE other
+pages had been written against that declaration. Fixing call sites
+without fixing the declaration would have left the seed.
+
 THE FLOOR, measured. Of the ~139 spans this reports, exactly TWO have a
 receiver whose type the block itself annotates with a core type
 (`let heap: BinaryHeap = …` then `heap.into_sorted_vec()`). Those two
