@@ -36953,38 +36953,34 @@ fn lower_set_element<'ctx>(
         return Ok(());
     }
 
-    // For list registers, load the backing pointer from LIST_PTR_OFFSET (field 0 = offset 24)
-    if is_list {
-        // SAFETY: GEP into the List object (NewG layout) to read the backing data pointer at LIST_PTR_OFFSET (24)
-        let backing_slot = unsafe {
-            ctx.builder()
-                .build_in_bounds_gep(
-                    i8_type,
-                    arr_ptr,
-                    &[i64_type.const_int(super::runtime::LIST_PTR_OFFSET, false)],
-                    "backing_slot",
-                )
-                .or_llvm_err()?
-        };
-        let backing_int = ctx
-            .builder()
-            .build_load(i64_type, backing_slot, "backing_int")
-            .or_llvm_err()?
-            .into_int_value();
-        let data_ptr = ctx
-            .builder()
-            .build_int_to_ptr(backing_int, ptr_type, "backing_ptr")
-            .or_llvm_err()?;
-        // GEP into the element array
-        // SAFETY: GEP into list data array to access an element; the index is validated against the list length before access
-        let elem_ptr = unsafe {
-            ctx.builder()
-                .build_in_bounds_gep(i64_type, data_ptr, &[index], "elem_ptr")
-                .or_llvm_err()?
-        };
-        ctx.builder().build_store(elem_ptr, val).or_llvm_err()?;
-        return Ok(());
-    }
+    // **SETE-LIST-JOINS-THE-AUTHORITY-1 (T1192)** — the list-marked
+    // branch used to hard-code the List OBJECT layout: read a backing
+    // pointer from `arr_ptr + LIST_PTR_OFFSET` (24) and GEP by `index`
+    // at an 8-byte stride.
+    //
+    // A `[T; N]` PARAMETER is marked `mark_list_register` regardless of
+    // element type (`vbc_lowering.rs`, CONV-AOT-BYTEARRAY-1), so a
+    // `&mut [Byte; 8]` arrived here and offset 24 was already PAST the
+    // array. The "backing pointer" was whatever followed it, and the
+    // store went through that:
+    //
+    //     fn wr(a: &mut [Byte; 8]) { a[2] = 9 as Byte; }   rc=139
+    //
+    // while READING the same parameter answered correctly — because
+    // GET_E's `is_list` arm computes its data pointer into `_data_ptr`
+    // and DISCARDS it, falling through to `emit_container_view`. The two
+    // sides were only claiming to mirror each other; this arm was the
+    // asymmetry, and its own bottom comment already called the tail
+    // "the write twin of GET_E's unmarked tail" while an early return
+    // kept the write from reaching it.
+    //
+    // `emit_container_view` classifies {cell | stamped Pack | unstamped
+    // List} and handles a real List through its unstamped-List arm —
+    // `{len@24, cap@32, ptr@40}`, Value stride — which is the same
+    // answer this branch computed by hand for the case it was written
+    // for. So the list case keeps its behaviour and the array case
+    // stops reading past its own end.
+    let _ = (is_list, i8_type, i64_type, ptr_type, val);
 
     // #47/#48 unification (write twin of GET_E's unmarked tail): ONE
     // 3-arm classification via emit_container_view; stride-honouring
