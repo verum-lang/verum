@@ -571,6 +571,89 @@ impl TypeChecker {
                         }
                     }
                 }
+                // ── T1234 pole B — THE EXPECTED TYPE IS THE ONLY JUDGE ──
+                // `fn take(f: fn(Int) -> Alpha)` called as `take(Wrap)`,
+                // where Alpha AND Beta both declare `Wrap` with a
+                // payload.  Nothing else can separate them: both are
+                // declared in the file being checked, so the horizon
+                // holds both; both take one argument, so arity holds
+                // both; and the synth path is handed no expected type at
+                // all, so it answered with whichever registration
+                // happened last.
+                //
+                // The first attempt here asked for a PARENT NAME and fed
+                // it to the resolver's #47 hint.  It never fired, and the
+                // trace said why: the expected return type arrives
+                // already EXPANDED —
+                //   `Variant({Wrap: Int, Other: Unit})`, not `Named(Alpha)`
+                // — and `expected_parent_head` reads only Named/Generic.
+                // That is the SAME defect as this task's other half, one
+                // level up: a head-extraction defeated by a type in
+                // expanded form.
+                //
+                // So do not ask for the parent at all.  The expected type
+                // already carries the answer: if it is a one-parameter
+                // function whose return is a Variant owning `name` with a
+                // payload, then the bare ctor used here IS a function of
+                // exactly that type.  Nothing is guessed and no registry
+                // order is consulted.
+                //
+                // AMBIENT LOSES TO EXPLICIT (name-resolution.md, and the
+                // rule T1034 states for the resolver): a name the author
+                // bound in a nested scope is theirs.  `lookup_in_root_only`
+                // is the canonical predicate for "module-level item rather
+                // than function-local binding"; when the two lookups
+                // disagree the binding is local and this arm stands down.
+                let locally_shadowed = {
+                    let any = self.ctx.env.lookup(name);
+                    let root = self.ctx.env.lookup_in_root_only(name);
+                    match (any, root) {
+                        (Some(a), Some(r)) => !std::ptr::eq(a, r),
+                        (Some(_), None) => true,
+                        _ => false,
+                    }
+                };
+                let ctor_registered = self
+                    .variant_constructor_parents
+                    .contains_key(&Text::from(name));
+                if let Type::Function { params, return_type, .. } =
+                    &resolved_expected
+                    && params.len() == 1
+                    && !locally_shadowed
+                    && ctor_registered
+                {
+                    let ret = self.expand_generic_to_variant(return_type);
+                    if let Type::Variant(vs) = &ret
+                        && let Some(payload) = vs.get(name)
+                        && !matches!(payload, Type::Unit)
+                        && let Some(param0) = params.first()
+                    {
+                        // Still UNIFY the payload against the expected
+                        // parameter: the expectation says the ctor is
+                        // usable at this type, and a genuine mismatch
+                        // must still be reported rather than waved
+                        // through by having named the right variant.
+                        let payload = payload.clone();
+                        let param0 = param0.clone();
+                        let taken = resolved_expected.clone();
+                        self.unifier.unify(&payload, &param0, expr.span)?;
+                        if crate::ctor_trace_enabled() {
+                            eprintln!(
+                                "[ctor-trace]   T1234 poleB: '{}' taken from the \
+                                 EXPECTED type => {:?}",
+                                name, taken
+                            );
+                        }
+                        return Ok(InferResult::new(taken));
+                    }
+                }
+                if crate::ctor_trace_enabled() {
+                    eprintln!(
+                        "[ctor-trace]   T1234 poleB: '{}' NOT taken \
+                         (locally_shadowed={} ctor_registered={} expected={:?})",
+                        name, locally_shadowed, ctor_registered, resolved_expected
+                    );
+                }
                 // Not a matching unit variant — fall through to synth_and_check
                 self.synth_and_check(expr, expected)
             }
