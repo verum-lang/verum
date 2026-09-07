@@ -159,10 +159,21 @@ def main() -> int:
         elsewhere = field_dropped_elsewhere(sources, field, body) if field else -1
         (deadcode if elsewhere > 0 else leaks).append((crate, name, field, elsewhere))
 
+    named = [r for r in leaks if r[2]]
+    unnamed = [r for r in leaks if not r[2]]
     print(f"STATE LEAK — nothing calls the method AND the field it drops is "
-          f"dropped nowhere else ({len(leaks)}):")
-    for crate, name, field, _ in sorted(leaks):
+          f"dropped nowhere else ({len(named)}):")
+    for crate, name, field, _ in sorted(named):
         print(f"   {crate:<14} {name:<30} field `{field}`")
+    print(f"\nUNCLASSIFIED — no caller, and the body drops no Rust field, so "
+          f"neither question applies ({len(unnamed)}). READ THESE: a `clear_`"
+          f" may EMIT code rather than drop state, and then its siblings are "
+          f"the question. `clear_exception_value` was the first, and it emits "
+          f"an LLVM store of zero into an alloca — measured, its whole family "
+          f"(`store_` / `load_` / `clear_exception_value`) has ZERO callers, "
+          f"so it is an unused feature and not a leak at all:")
+    for crate, name, _, _ in sorted(unnamed):
+        print(f"   {crate:<14} {name}")
     print(f"\nDEAD CODE — nothing calls the method, but the field IS dropped "
           f"elsewhere ({len(deadcode)}). Route that site through the method or "
           f"delete it; either way the method currently misleads:")
