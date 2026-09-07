@@ -7682,9 +7682,20 @@ impl VbcCodegen {
                     // itself is the function shape (`F` or `fn(...)
                     // -> ReduceResult<R>`) — not what a body-local
                     // variant constructor wants to consult.
-                    let saved = if matches!(arg.kind, ExprKind::Closure { .. })
-                        && let Some(Some(ret_name)) =
-                            func_info.param_closure_return_type_names.get(i)
+                    // T1241: a BARE PATH argument needs this context just as
+                    // much as a closure does. `take(Wrap)` where
+                    // `take(f: fn(Int) -> Alpha)` passes a constructor as a
+                    // function VALUE, and `Wrap` is owned by two sum types —
+                    // exactly the collision the channel below was built for.
+                    // The old guard asked about the argument's SYNTACTIC FORM
+                    // ("is it a closure?") while the mechanism is about the
+                    // PARAMETER's expected type, so the one shape that cannot
+                    // spell its own disambiguation was the one denied it.
+                    let saved = if matches!(
+                        arg.kind,
+                        ExprKind::Closure { .. } | ExprKind::Path(_)
+                    ) && let Some(Some(ret_name)) =
+                        func_info.param_closure_return_type_names.get(i)
                     {
                         Some(self.ctx.push_disambig_context(Some(ret_name.clone())))
                     } else {

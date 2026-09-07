@@ -2625,6 +2625,15 @@ impl CodegenContext {
         // The new override is unrelated to the surrounding function's
         // return type, so its inner generics don't apply here.
         self.current_return_type_inner = None;
+        // …and neither does the enclosing let-annotation's FULL spelling.
+        // T1228 added `current_return_type_full` beside the name; a
+        // disambiguation context that leaves it standing would let an
+        // outer `let xs: List<Int> = …` bind a return-only type parameter
+        // inside an argument that has nothing to do with it. Cleared for
+        // the same reason `_inner` is, and NOT restored by the caller —
+        // the field is already bounded to its initializer by
+        // `compile_let`, which is the only writer.
+        self.current_return_type_full = None;
         (prev_name, prev_inner)
     }
 
