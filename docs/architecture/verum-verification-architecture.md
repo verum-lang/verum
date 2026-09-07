@@ -993,7 +993,7 @@ are deterministically ordered for CI diff review.
 
 ```bash
 verum audit --framework-axioms             # list used axioms
-verum audit --framework-axioms --by-theorem  # which theorems depend on which
+verum audit --dependent-theorems <axiom>  # which theorems depend on it
 verum audit --coord                        # (Fw, ν, τ) per theorem
 ```
 
@@ -1450,7 +1450,7 @@ Separation logic assertions use `P * Q` notation; frame rule is a registered lem
 ### 8.9 Interactive mode
 
 ```bash
-verum repl --proof ./my_theorem.vr
+verum repl --preload ./my_theorem.vr
 ```
 
 Lean-like interactive prompt with live goal state, tactic history, undo stack. Integrates with LSP for Ctrl-hover goal display in editors.

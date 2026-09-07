@@ -192,7 +192,7 @@ verum audit --coord theorems/         # framework footprint
 verum audit --epsilon theorems/       # ε-distribution
 verum audit --round-trip theorems/    # 108.T round-trip per теорема
 verum audit --coherent theorems/      # operational coherence
-verum export --all-formats theorems/  # cross-validation
+verum export --to lean --output exports/lean/export.lean  # one per format
 ```
 
 ---
@@ -1398,11 +1398,11 @@ verum audit --round-trip theorems/msfs/10_ac_oc_duality/
 verum audit --coherent theorems/msfs/
 
 # 5. Cross-export validation
-verum export --format=lean theorems/msfs/ -o exports/lean/
-verum export --format=coq theorems/msfs/ -o exports/coq/
-verum export --format=agda theorems/msfs/ -o exports/agda/
-verum export --format=dedukti theorems/msfs/ -o exports/dedukti/
-verum export --format=metamath theorems/msfs/ -o exports/metamath/
+verum export --to lean --output exports/lean/export.lean
+verum export --to coq --output exports/coq/export.v
+verum export --to metamath --output exports/mm/export.mm  # agda is not in the roster
+verum export --to dedukti --output exports/dk/export.dk
+verum export --to metamath --output exports/mm/export.mm
 
 # Each export must independently re-check successfully
 
@@ -2054,38 +2054,50 @@ UHM-formalization continues independently as Path-B program, building on now-ver
 ## 27. Final corpus audit
 
 ```bash
-# Полный audit всего корпуса MSFS + Diakrisis
+# Full audit of the MSFS + Diakrisis corpus.
+#
+# `verum audit` runs over the WORKSPACE and writes its reports to
+# `target/audit-reports/` itself: it takes neither a positional path
+# nor `-o`. Measured 2026-09-07 — `verum audit --coord theorems/`
+# exits 2.
 
-# 1. Theorem count
-verum count theorems/
-# Expected: 27 MSFS + 142 Diakrisis = 169 verified theorems
-
-# 2. Coordinate distribution
-verum audit --coord theorems/ -o audit-reports/coord.json
+# 1. Coordinate distribution -> target/audit-reports/
+verum audit --coord
 # Per-stratum (Fw, ν, τ) distribution
 
-# 3. Round-trip 108.T
-verum audit --round-trip theorems/ -o audit-reports/round-trip.json
+# 2. Round-trip 108.T
+verum audit --round-trip
 # Expected: 100% pass for finitely-axiomatized
 
-# 4. Operational coherence
-verum audit --coherent theorems/ -o audit-reports/coherent.json
+# 3. Operational coherence
+verum audit --coherent
 # Expected: 100% on finitely-axiomatized; reports semi-decidable for unbounded
 
-# 5. ε-distribution
-verum audit --epsilon theorems/ -o audit-reports/epsilon.json
+# 4. ε-distribution
+verum audit --epsilon
 # Maps each theorem to its ε-coordinate
 
-# 6. Cross-export validation
-for fmt in lean coq agda dedukti metamath; do
-    verum export --format=$fmt theorems/ -o exports/$fmt/
+# 5. Cross-export validation
+for fmt in lean coq dedukti metamath; do
+    verum export --to $fmt --output exports/$fmt/export.$fmt
     cd exports/$fmt && check_external_$fmt
 done
-
-# 7. Open questions tracking
-verum audit --open-questions theorems/
-# Expected: MSFS Q2 still open; Q1, Q3, Q4, Q5 closed in Diakrisis-extensions
 ```
+
+Two steps this section used to list have no command behind them and are
+kept here as requirements rather than instructions:
+
+* **Theorem count** — `verum count theorems/` does not exist (expected:
+  27 MSFS + 142 Diakrisis = 169 verified theorems). Nothing in the
+  toolchain counts theorems; `verum audit --dependent-theorems <axiom>`
+  answers the adjacent question — which theorems lose their discharge
+  when one axiom is rejected.
+* **Open-questions tracking** — `verum audit --open-questions` is not a
+  band the audit has (expected: MSFS Q2 still open; Q1, Q3, Q4, Q5
+  closed in Diakrisis-extensions).
+
+`agda` is also absent from the export roster, which is
+`dedukti | coq | lean | metamath`.
 
 ---
 

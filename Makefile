@@ -123,6 +123,11 @@ check-doc-iterator-items: ## Gate: a doc line naming a core iterator type AND it
 check-doc-cli-flags: ## Gate: every CLI flag the docs show must exist in the binary — needs a build
 	python3 scripts/ci/check_doc_cli_flags.py --self-test
 	python3 scripts/ci/check_doc_cli_flags.py
+#	 The repo's own docs/ were never read by this gate — measured
+#	 2026-09-07: 55 invocations, 46 carrying flags, across 5 files, and
+#	 five defects among them (`verum count`, `audit --by-theorem`,
+#	 `repl --proof`, `export --all-formats`, `export --format`).
+	VERUM_DOCS_DIR=docs python3 scripts/ci/check_doc_cli_flags.py
 
 check-doc-indented-blocks: ## Gate: an indented block in a `///` comment is a Rust doctest — fence it
 	python3 scripts/ci/check_doc_indented_blocks.py --selftest
