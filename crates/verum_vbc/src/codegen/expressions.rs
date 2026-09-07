@@ -8360,7 +8360,18 @@ impl VbcCodegen {
                 .iter()
                 .find(|f| f.descriptor.id.0 == func_id)
                 .map(|f| f.descriptor.return_type.clone()),
-            self.ctx.current_return_type_name.clone(),
+            // T1228: prefer the FULL annotation. The sibling field is
+            // unwrapped for containers (`List<Int>` -> `Int`) to serve the
+            // bare-variant disambiguator, and binding a return-only param
+            // against the ELEMENT type leaves the collection parameter
+            // `Generic` — measured on `Range.collect`, whose seed printed
+            // `type_args=[Generic(0), Concrete(Int)]`. Falls back to the
+            // hint so a non-container annotation, where the two agree,
+            // keeps today's behaviour exactly.
+            self.ctx
+                .current_return_type_full
+                .clone()
+                .or_else(|| self.ctx.current_return_type_name.clone()),
         ) && ret_tr.is_generic()
             && let Some(expected_tr) =
                 self.type_name_to_type_ref_mono(&strip_ref(&expected_name))

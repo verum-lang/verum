@@ -1228,6 +1228,16 @@ impl VbcCodegen {
                 .map(|base| {
                     let saved = self.ctx.current_return_type_name.clone();
                     self.ctx.current_return_type_name = Some(base);
+                    // T1228: the WHOLE annotation, alongside the unwrapped
+                    // hint. `extract_let_variant_hint` above recurses into a
+                    // container (`List<Int>` -> `Int`) because its consumer
+                    // disambiguates a bare variant constructor. The T0622
+                    // return-vs-annotation witness leg needs the opposite —
+                    // `List<Int>` itself — or it binds the element to the
+                    // collection's type parameter and leaves the callee's
+                    // `LoadT{Generic}` unresolved.
+                    self.ctx.current_return_type_full =
+                        Some(Self::extract_type_name_from_ast(ty));
                     saved
                 })
         } else {
@@ -1328,6 +1338,10 @@ impl VbcCodegen {
         self.ctx.pending_i128_literal_signed = saved_i128_lit;
         if let Some(saved) = saved_return_type {
             self.ctx.current_return_type_name = saved;
+            // Bounded to the initializer exactly like its sibling: a stale
+            // full-annotation would bind a LATER call's return param to
+            // this binding's type.
+            self.ctx.current_return_type_full = None;
         }
 
         // MUT-LITERAL-OWNED (#17): a MUTABLE binding initialized from a plain

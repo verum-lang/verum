@@ -159,6 +159,24 @@ pub struct CodegenContext {
     /// the variant whose parent type matches the function's return type.
     pub current_return_type_name: Option<String>,
 
+    /// The let-annotation's FULL spelling (`List<Int>`), for the ONE
+    /// consumer that needs the whole type rather than a disambiguation
+    /// hint: the T0622 return-vs-annotation witness leg in
+    /// `record_generic_instantiation`.
+    ///
+    /// `current_return_type_name` cannot serve it. That field is
+    /// deliberately UNWRAPPED for containers — `extract_let_variant_hint`
+    /// recurses into `List<Int>` and yields `Int` — because its own
+    /// consumer disambiguates a bare variant constructor and needs the
+    /// element. Feeding the unwrapped form to the return-binder binds
+    /// the wrong slot: `let xs: List<Int> = it.collect()` left
+    /// `Range.collect`'s collection parameter `Generic` and the
+    /// specialized body kept its `LoadT{Generic}` (T1228).
+    ///
+    /// Two consumers, two needs, so two fields — changing what the
+    /// existing one holds would move a defect rather than fix one.
+    pub current_return_type_full: Option<String>,
+
     /// Inner generic args of the current function's return type, when
     /// known.  For `fn f() -> Result<T, ConnectionError>` this carries
     /// `vec!["T", "ConnectionError"]`; the variant disambiguator
@@ -906,6 +924,8 @@ pub struct ClosureCompilationContext {
     /// AFTER a closure argument in the same chain
     /// (`…map(|x| ..).partition(..)`).
     pub current_return_type_name: Option<String>,
+    /// Saved alongside its sibling — same reason, same lifetime.
+    pub current_return_type_full: Option<String>,
     /// Saved reference-binding names (for the `*reference` Deref lowering).
     pub reference_bindings: std::collections::HashSet<String>,
     /// Saved object-ref param registers (Pillar 1 typed-ref emission) —
@@ -1541,6 +1561,7 @@ impl CodegenContext {
             in_function: false,
             return_type: None,
             current_return_type_name: None,
+            current_return_type_full: None,
             current_impl_type_name: None,
             current_return_type_inner: None,
             constants: Vec::new(),
@@ -2535,6 +2556,7 @@ impl CodegenContext {
         self.in_function = false;
         self.return_type = None;
         self.current_return_type_name = None;
+        self.current_return_type_full = None;
         self.current_return_type_inner = None;
         self.current_impl_type_name = None;
 
@@ -4267,6 +4289,7 @@ impl CodegenContext {
             defer_stack: self.defer_stack.clone(),
             variable_type_names: self.variable_type_names.clone(),
             current_return_type_name: self.current_return_type_name.clone(),
+            current_return_type_full: self.current_return_type_full.clone(),
             reference_bindings: self.reference_bindings.clone(),
             object_ref_param_regs: self.object_ref_param_regs.clone(),
         }
@@ -4279,6 +4302,7 @@ impl CodegenContext {
     pub fn restore_closure_context(&mut self, saved: ClosureCompilationContext) {
         self.label_counter = saved.label_counter;
         self.current_return_type_name = saved.current_return_type_name;
+        self.current_return_type_full = saved.current_return_type_full;
         self.labels = saved.labels;
         self.forward_jumps = saved.forward_jumps;
         self.loop_stack = saved.loop_stack;
