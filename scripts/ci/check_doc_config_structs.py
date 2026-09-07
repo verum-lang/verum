@@ -52,6 +52,17 @@ DOCS_ENV = os.environ.get("VERUM_DOCS_DIR")
 DOCS = Path(DOCS_ENV) if DOCS_ENV else REPO.parent / "website" / "docs"
 
 HEAD = re.compile(r"^#{2,4} `?([A-Z][A-Za-z0-9]+)`? [—-]")
+# A table introduced by PROSE rather than a heading:
+#   Defaults per `QuicServerOptions.from_cert`:
+#   Defaults (from `ClientOptions.default`):
+#   … controlled by `verum_error.crash.CrashReporterConfig`:
+# Four of the nine pages carrying a `| Field | Default |` table name
+# their struct this way and no other. A gate keyed only on headings
+# reads them as having no config sections at all — and one of them
+# (tensor-types) documented a struct name that does not exist, with two
+# of its three field names wrong.
+PROSE_OWNER = re.compile(r"`([A-Za-z_][A-Za-z0-9_.:]*)`")
+FIELD_TABLE = re.compile(r"^\|\s*Field\s*\|\s*Default\s*\|")
 OWNER = re.compile(r"^\*\*Owner\*\*:\s*`([^`]+)`")
 ROW = re.compile(r"^\|\s*`([a-z_][a-z0-9_]*)`\s*\|\s*`?([^`|]*)`?\s*\|(.*)$")
 WRAPPERS = ("Some", "None", "Maybe", "Option")
@@ -67,30 +78,67 @@ def is_config_name(name: str) -> bool:
     # (stdlib/context.md has one) is prose about configuration, not a
     # struct named `Config`, and asking the tree about it produces a
     # phantom defect on a page that is perfectly correct.
-    for suffix in ("Config", "Settings"):
+    for suffix in ("Config", "Settings", "Options"):
         if name.endswith(suffix) and len(name) > len(suffix):
             return True
     return False
 
 
 def load_sources(root: Path):
+    """Rust crates AND the Verum standard library.
+
+    `QuicServerOptions` and `ClientOptions` are `public type X is { … }`
+    in `core/net/**.vr`, not Rust structs. A gate that reads only
+    `crates/` reports them as absent — a false positive on two pages
+    that are perfectly correct, which is worse than not checking them.
+    """
     out = {}
-    crates = root / "crates"
-    if not crates.is_dir():
-        return out
-    for p in crates.rglob("*.rs"):
-        if "/target/" in str(p):
+    for sub, pat in (("crates", "*.rs"), ("core", "*.vr")):
+        d = root / sub
+        if not d.is_dir():
             continue
-        try:
-            out[p] = p.read_text(errors="ignore")
-        except OSError:
-            continue
+        for p in d.rglob(pat):
+            if "/target/" in str(p):
+                continue
+            try:
+                out[p] = p.read_text(errors="ignore")
+            except OSError:
+                continue
     return out
 
 
+# One pass over the corpus builds a name index; the alternative — a
+# regex scan of every file per lookup — is O(names x files) and, with
+# `core/`'s 2562 `.vr` files on top of the crates, turned a gate that
+# ran in a second into one that ran in minutes.
+_DECL = {
+    "struct": re.compile(r"^\s*pub struct ([A-Za-z_][A-Za-z0-9_]*)", re.M),
+    "enum": re.compile(r"^\s*pub enum ([A-Za-z_][A-Za-z0-9_]*)", re.M),
+}
+_VR_TYPE = re.compile(r"^\s*(?:public\s+)?type ([A-Za-z_][A-Za-z0-9_]*) is\b", re.M)
+_INDEX: dict[str, dict[str, list]] = {}
+
+
+def build_index(blobs):
+    idx = {"struct": {}, "enum": {}}
+    for p, s in blobs.items():
+        for kind, pat in _DECL.items():
+            for m in pat.finditer(s):
+                idx[kind].setdefault(m.group(1), []).append(p)
+        if p.suffix == ".vr":
+            # A Verum record type is the same thing a Rust struct is,
+            # for this gate's purpose: `QuicServerOptions` lives in
+            # `core/net/quic/api/server.vr`, not in any crate.
+            for m in _VR_TYPE.finditer(s):
+                idx["struct"].setdefault(m.group(1), []).append(p)
+    return idx
+
+
 def find_item(blobs, kind: str, name: str):
-    pat = re.compile(rf"pub {kind} {re.escape(name)}\b")
-    return [p for p, s in blobs.items() if pat.search(s)]
+    key = id(blobs)
+    if key not in _INDEX:
+        _INDEX[key] = build_index(blobs)
+    return _INDEX[key].get(kind, {}).get(name, [])
 
 
 def _balanced(s: str, start: int) -> str:
@@ -103,7 +151,10 @@ def _balanced(s: str, start: int) -> str:
 
 def struct_fields(blobs, name: str):
     pat = re.compile(rf"pub struct {re.escape(name)}\s*\{{")
-    for _, s in blobs.items():
+    # Only the files the index says declare this name — scanning all
+    # 5 500 of them per lookup is what made this gate take half a minute.
+    for _p in find_item(blobs, "struct", name):
+        s = blobs[_p]
         m = pat.search(s)
         if not m:
             continue
@@ -117,7 +168,8 @@ def struct_fields(blobs, name: str):
 
 def enum_variants(blobs, name: str):
     pat = re.compile(rf"pub enum {re.escape(name)}\s*\{{")
-    for p, s in blobs.items():
+    for p in find_item(blobs, "enum", name):
+        s = blobs[p]
         m = pat.search(s)
         if not m:
             continue
@@ -135,7 +187,12 @@ def enum_variants(blobs, name: str):
 
 def impl_default(blobs, name: str):
     pat = re.compile(r"impl Default for " + re.escape(name) + r"\b")
+    # `impl Default for X` need not live in X's own file, so this one
+    # cannot use the declaration index — but it CAN skip everything
+    # that never mentions the name at all.
     for p, s in blobs.items():
+        if name not in s:
+            continue
         m = pat.search(s)
         if not m:
             continue
@@ -186,6 +243,17 @@ def norm(v: str) -> str:
     m = re.fullmatch(r"(\d+)\*1024\*1024", v)
     if m:
         v = f"{m.group(1)}MB"
+    # A doc writes the STRING; the code writes how it is built.
+    #   "verum".into()          / String::from("verum") / from("verum")
+    #   env!("X").into()        -> env!("X")
+    # Four of the first five hits on the widened corpus were this.
+    m = re.fullmatch(r"(?:String::|Text::)?from\((.*)\)", v)
+    if m:
+        v = m.group(1)
+    m = re.fullmatch(r"(.*)\.into\(\)", v)
+    if m:
+        v = m.group(1)
+    v = v.strip('"')
     return v
 
 
@@ -196,7 +264,41 @@ def audit_page(blobs, page: Path):
     doc: dict[str, dict[str, tuple[str, str]]] = {}
     owners: list[tuple[str, str]] = []
     cur = None
-    for line in page.read_text(errors="ignore").splitlines():
+    lines = page.read_text(errors="ignore").splitlines()
+    # Pre-pass: a `| Field | Default |` table with NO config heading
+    # above it takes its struct from the nearest prose mention.
+    prose_at: dict[int, str] = {}
+    for i, line in enumerate(lines):
+        if not FIELD_TABLE.match(line):
+            continue
+        if any(HEAD.match(l) and is_config_name(HEAD.match(l).group(1))
+               for l in lines[max(0, i - 30):i]):
+            continue  # a heading already provides the context
+        for back in range(1, 6):
+            if i - back < 0:
+                break
+            for tok in PROSE_OWNER.findall(lines[i - back]):
+                last = tok.replace("::", ".").split(".")
+                for seg in reversed(last):
+                    if is_config_name(seg):
+                        prose_at[i] = seg
+                        break
+                if i in prose_at:
+                    break
+            if i in prose_at:
+                break
+
+    for idx_line, line in enumerate(lines):
+        if idx_line in prose_at:
+            cur = prose_at[idx_line]
+            heads += 1
+            doc.setdefault(cur, {})
+            if not find_item(blobs, "struct", cur):
+                defects.append(
+                    f"table introduced by prose names `{cur}`, "
+                    "which is neither a Rust struct nor a Verum type"
+                )
+            continue
         h = HEAD.match(line)
         if h:
             cur = h.group(1) if is_config_name(h.group(1)) else None
@@ -313,6 +415,9 @@ def self_test() -> int:
             fails.append(f"normalisation split {a!r} from {b!r}: "
                          f"{norm(a)!r} != {norm(b)!r}")
     for a, b in [
+        ('"verum"', '"verum".into()'),
+        ("verum", 'String::from("verum")'),
+        ('env!("CARGO_PKG_VERSION")', 'env!("CARGO_PKG_VERSION").into()'),
         ("30 000", "Maybe::Some(30000)"),
         ("8 192", "Maybe::Some(8192)"),
         ("None", "Maybe::None"),
@@ -359,7 +464,14 @@ def main() -> int:
         # skipped every page. The gate printed "0 pages, 0 defects" for
         # a corpus with thirteen config sections — a clean zero that
         # meant the pre-filter never found its input.
-        if not any(HEAD.match(l) for l in text.splitlines()):
+        # A page qualifies by EITHER signal — a config heading, or a
+        # `| Field | Default |` table. Keying the pre-filter on headings
+        # alone re-created the very blindness the prose branch was added
+        # to remove: four pages never reached `audit_page` at all.
+        _ls = text.splitlines()
+        if not any(HEAD.match(l) for l in _ls) and not any(
+            FIELD_TABLE.match(l) for l in _ls
+        ):
             continue
         defects, heads, _ = audit_page(blobs, md)
         if heads == 0:
