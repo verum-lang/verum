@@ -1,0 +1,58 @@
+// @test: differential
+// @level: L0
+// @tier: 0,1
+// @tags: vbc, codegen, aot, typed-array, allocation, element-width, regression
+// @timeout: 30000
+// @expected-exit: 0
+// @expected-stdout-begin
+// a0=7
+// a63=7
+// sum_a=448
+// b0=111
+// b7=111
+// @expected-stdout-end
+//
+// T1223 — `NewTypedArray` (MemExtended sub-op 0x34) allocated the
+// ELEMENT COUNT as a BYTE SIZE at Tier 1. A `[Int; 64]` asked
+// `verum_cbgr_allocate` for 64 bytes and then wrote 64 eight-byte
+// elements into them: eight times the buffer.
+//
+// The instruction's own operand layout says the count and the width are
+// separate, and the interpreter reads both — `mem_extended.rs`:
+//
+//     // Format: dst:reg, count:reg, elem_size:u8, init:reg
+//     let elem_size_byte = read_u8(state)?;
+//     let is_float = (elem_size_byte & 0x80) != 0;
+//     let elem_size = (elem_size_byte & 0x7f) as usize;
+//
+// The AOT arm read the count and never read the width, while its own
+// comment said "size = count * element_size". Comment and code
+// disagreed and the comment was right.
+//
+// THE VALUES ARE NAMED, NOT ONLY THE AGREEMENT. `sum_a=448` is 64 x 7,
+// so a fill that writes only part of the array fails here even if both
+// tiers agree on the elements it did reach.
+//
+// `b` IS THE OVERRUN DETECTOR and is the half that would survive a
+// wrong fix. It is allocated AFTER `a`; if `a` is under-allocated,
+// writing `a`'s tail lands in `b`'s storage and `b0`/`b7` come back as
+// 7 instead of 111. A spec that checked only `a` would pass on a fix
+// that allocated correctly but still filled past the end.
+
+mount core.prelude.*;
+
+fn main() {
+    // The shape where count != bytes: 8 bytes per element.
+    let a: [Int; 64] = [7; 64];
+    print(f"a0={a[0]}");
+    print(f"a63={a[63]}");
+
+    // Allocated after `a`. An under-allocated `a` overwrites this.
+    let b: [Int; 8] = [111; 8];
+    let mut i: Int = 0;
+    let mut s: Int = 0;
+    while i < 64 { s = s + a[i as usize]; i = i + 1; }
+    print(f"sum_a={s}");
+    print(f"b0={b[0]}");
+    print(f"b7={b[7]}");
+}

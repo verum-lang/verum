@@ -28722,10 +28722,63 @@ fn lower_mem_extended<'ctx>(
             if sub_op == 0x34 {
                 // Allocate: same as NewByteArray but size = count * element_size
                 //
-                let size = if operands.len() >= 2 {
+                // T1223 — THE COMMENT SAID THIS AND THE CODE DID NOT DO IT.
+                // Operand 1 is the ELEMENT COUNT and it went to
+                // `verum_cbgr_allocate` as a BYTE size, so a `[Int; 100]`
+                // got 100 bytes for 800 and every element from index 12
+                // onward was written past the allocation. For a
+                // `[Byte; N]` count == size, which is why this arm and
+                // `NewByteArray` looked like the same code.
+                //
+                // The interpreter is the oracle here — the pair really
+                // does differ: `handlers/mem_extended.rs` computes
+                // `count.checked_mul(elem_size)` and fills per element.
+                //
+                // THE WIDTH IS A RAW BYTE, NOT A REGISTER. `op_reg`
+                // decodes VARIABLE-LENGTH register operands, so on a
+                // float array — bit 0x80 set — it would swallow two bytes
+                // as a wide register. `TypedArrayStore` (0x37) walks the
+                // cursor by hand for this reason; this mirrors it. Mask
+                // 0x80 before using the width: that bit is the float
+                // marker for the heap TypeId, and multiplying by the
+                // unmasked byte would give a `[Float; N]` N * 136 bytes.
+                //
+                // DEFAULT 1, NOT 8, unlike the sibling 0x36 arm: there
+                // the default is a read STRIDE, here an allocation SIZE,
+                // so a wrong guess is either waste or a heap overflow.
+                // Falling back to 1 multiplies by nothing and leaves this
+                // arm behaving exactly as it does today.
+                //
+                // NO OVERFLOW CHECK, unlike the interpreter's
+                // `checked_mul`: its count is a runtime `Value`, while
+                // this register holds the `LoadI` of the ANNOTATION's `N`.
+                // Overflowing i64 needs N > 2^60, which the type system
+                // rejects long before here.
+                let mut cursor = 0usize;
+                for _ in 0..2 {
+                    if cursor >= operands.len() {
+                        break;
+                    }
+                    cursor += if operands[cursor] & 0x80 != 0 { 2 } else { 1 };
+                }
+                let elem_byte = *operands.get(cursor).unwrap_or(&1);
+                let elem_width: u64 = match elem_byte & 0x7F {
+                    w @ (1 | 2 | 4 | 8) => w as u64,
+                    _ => 1,
+                };
+                let count = if operands.len() >= 2 {
                     ctx.get_register(op_reg(operands, 1))?
                 } else {
                     ctx.types().i64_type().const_int(0, false).into()
+                };
+                let size: BasicValueEnum = if count.is_int_value() && elem_width > 1 {
+                    let w = ctx.types().i64_type().const_int(elem_width, false);
+                    ctx.builder()
+                        .build_int_mul(count.into_int_value(), w, "ta_bytes")
+                        .or_llvm_err()?
+                        .into()
+                } else {
+                    count
                 };
                 let module = ctx.get_module();
                 let ptr_ty = ctx.types().ptr_type();
@@ -28740,6 +28793,106 @@ fn lower_mem_extended<'ctx>(
                     .or_llvm_err()?
             .basic_value_or("NewTypedArray: expected return value")?;
                 ctx.set_register(dst_reg, result);
+                // T1223 (second half) — operand 3 is the INIT VALUE and
+                // this arm ignored it, exactly as `NewByteArray` ignored
+                // its own. The interpreter fills; Tier 1 left the block
+                // untouched, so `[Int; N] = [7; N]` read zeros — and
+                // `[0; N]` was correct BY ACCIDENT there too.
+                //
+                // A PER-ELEMENT LOOP, NOT `llvm.memset`. That was my
+                // first attempt and it is wrong for every width above 1:
+                // memset fills BYTES, so `[Int; 64] = [7; 64]` would read
+                // 0x0707070707070707 rather than 7. The interpreter says
+                // so in its own shape — four branches, `*(p as *mut u8)`,
+                // `u16`, `u32`, `u64` — and caught the mistake before a
+                // build did.
+                let init_idx = cursor + 1;
+                if init_idx < operands.len() && count.is_int_value() {
+                    let init_reg = {
+                        let mut pos = init_idx;
+                        read_reg_varlen(operands, &mut pos).unwrap_or(0)
+                    };
+                    let init = ctx.get_register(init_reg)?;
+                    if init.is_int_value() {
+                        let llvm_ctx = ctx.llvm_context();
+                        let cur_bb = ctx
+                            .builder()
+                            .get_insert_block()
+                            .or_internal("NewTypedArray: no insert block")?;
+                        let func = cur_bb
+                            .get_parent()
+                            .or_internal("NewTypedArray: block has no parent")?;
+                        let bb_check = llvm_ctx.append_basic_block(func, "ta_fill_check");
+                        let bb_body = llvm_ctx.append_basic_block(func, "ta_fill_body");
+                        let bb_done = llvm_ctx.append_basic_block(func, "ta_fill_done");
+                        let base = as_ptr(ctx, result, "ta_fill_base")?;
+                        let zero = i64_ty.const_zero();
+                        let one = i64_ty.const_int(1, false);
+                        ctx.builder()
+                            .build_unconditional_branch(bb_check)
+                            .or_llvm_err()?;
+
+                        ctx.builder().position_at_end(bb_check);
+                        let i_phi = ctx
+                            .builder()
+                            .build_phi(i64_ty, "ta_i")
+                            .or_llvm_err()?;
+                        i_phi.add_incoming(&[(&zero, cur_bb)]);
+                        let iv = i_phi.as_basic_value().into_int_value();
+                        let more = ctx
+                            .builder()
+                            .build_int_compare(
+                                IntPredicate::SLT,
+                                iv,
+                                count.into_int_value(),
+                                "ta_more",
+                            )
+                            .or_llvm_err()?;
+                        ctx.builder()
+                            .build_conditional_branch(more, bb_body, bb_done)
+                            .or_llvm_err()?;
+
+                        ctx.builder().position_at_end(bb_body);
+                        let elem_ty = match elem_width {
+                            1 => ctx.types().i8_type(),
+                            2 => ctx.llvm_context().i16_type(),
+                            4 => ctx.llvm_context().i32_type(),
+                            _ => i64_ty,
+                        };
+                        // SAFETY: `base` is the allocation just returned
+                        // for `count * elem_width` bytes and `iv` is
+                        // bounded by `count` on this arm, so the address
+                        // is inside it by construction.
+                        let slot = unsafe {
+                            ctx.builder()
+                                .build_in_bounds_gep(elem_ty, base, &[iv], "ta_slot")
+                                .or_llvm_err()?
+                        };
+                        let v = if elem_width == 8 {
+                            init.into_int_value()
+                        } else {
+                            ctx.builder()
+                                .build_int_truncate(init.into_int_value(), elem_ty, "ta_v")
+                                .or_llvm_err()?
+                        };
+                        ctx.builder().build_store(slot, v).or_llvm_err()?;
+                        let next = ctx
+                            .builder()
+                            .build_int_add(iv, one, "ta_next")
+                            .or_llvm_err()?;
+                        let body_end = ctx
+                            .builder()
+                            .get_insert_block()
+                            .or_internal("NewTypedArray: body has no block")?;
+                        ctx.builder()
+                            .build_unconditional_branch(bb_check)
+                            .or_llvm_err()?;
+                        i_phi.add_incoming(&[(&next, body_end)]);
+
+                        ctx.builder().position_at_end(bb_done);
+                    }
+                }
+
             } else {
                 // Element addr: base + index * 8 (assuming 8-byte elements)
                 let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ta_base")?;
