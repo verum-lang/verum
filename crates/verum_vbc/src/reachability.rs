@@ -87,7 +87,15 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
     for (pos, f) in module.functions.iter().enumerate() {
         by_id.insert(f.id.0, pos);
         if let Some(name) = module.strings.get(f.name) {
+            // T1214: a specialisation's bare name is its METHOD's.
+            // `Range.collect$mono$2_512i2` splits to
+            // `collect$mono$2_512i2`, which matches nothing in
+            // `called_method_names` (that set holds `collect`), so no
+            // `$mono$` body was ever a by-name candidate. The module
+            // carries 441 of them — measured by the trace below — and
+            // the walk indexed every one under a key nobody asks for.
             let bare = name.rsplit('.').next().unwrap_or(name);
+            let bare = bare.split("$mono$").next().unwrap_or(bare);
             by_bare_name.entry(bare).or_default().push(f.id.0);
         }
     }
@@ -291,6 +299,78 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
             eprintln!(
                 "[reach-byname]   probe={probe:?} in_called={called} candidates={bucket}"
             );
+        }
+        // DOES THE MODULE THIS WALK SEES CARRY SPECIALISATIONS AT ALL?
+        //
+        // Two edits aimed at "the specialisation is in the module but
+        // never marked reachable" measured inert, and the reasoning
+        // behind them assumed the walk sees a merged module. That is an
+        // assumption, and it is the one thing this loop can settle for
+        // free: count the `$mono$` names it indexed, and show a few.
+        // Zero means the walk runs BEFORE the merge and the whole
+        // by-name line of enquiry is about the wrong module.
+        let mono_names: Vec<&str> = module
+            .functions
+            .iter()
+            .filter_map(|f| module.strings.get(f.name))
+            .filter(|n| n.contains("$mono$"))
+            .collect();
+        eprintln!(
+            "[reach-byname] module carries {} `$mono$` function name(s) of {}",
+            mono_names.len(),
+            module.functions.len()
+        );
+        for n in mono_names.iter().take(4) {
+            eprintln!("[reach-byname]   mono={n:?}");
+        }
+        // THE LAST FORK. With the bare-name fix the `collect` bucket
+        // grows 160 -> 166 (measured), i.e. the six `collect$mono$`
+        // bodies ARE candidates now — and the emitted module is still
+        // identical, 515 defines and no `Range.collect$mono`. So either
+        // `candidate_possible` rejects them, or they enter
+        // `reachable_ids` and a LATER stage drops them.
+        //
+        // Print, for each `$mono$` body in the `collect` bucket, the id,
+        // its `parent_type`, and the predicate's verdict. Whether it
+        // then reaches `reachable_ids` is printed after the loop, so the
+        // two possibilities are distinguished in one run.
+        // How many `$mono$` bodies end up reachable AT ALL. The
+        // lowering counts what it skips (`skipped_unreachable` in
+        // `llvm/vbc_lowering.rs`) but reports it through `tracing::info!`,
+        // which does not reach stderr in a normal run — so the one
+        // number that would say "was this body lowered" is unavailable.
+        // This is the same quantity one stage earlier, and it prints.
+        let mono_reachable = mono_names
+            .iter()
+            .filter_map(|n| {
+                module
+                    .functions
+                    .iter()
+                    .find(|f| module.strings.get(f.name) == Some(*n))
+                    .map(|f| f.id.0)
+            })
+            .filter(|id| out.reachable_ids.contains(id))
+            .count();
+        eprintln!(
+            "[reach-byname] `$mono$` bodies reachable BEFORE the by-name closure: {} of {}",
+            mono_reachable,
+            mono_names.len()
+        );
+        if let Some(ids) = by_bare_name.get("collect") {
+            for id in ids {
+                let Some(&pos) = by_id.get(id) else { continue };
+                let name = module.strings.get(module.functions[pos].name).unwrap_or("?");
+                if !name.contains("$mono$") {
+                    continue;
+                }
+                eprintln!(
+                    "[reach-collect] id={} parent_type={:?} possible={} name={:?}",
+                    id,
+                    module.functions[pos].parent_type.map(|t| t.0),
+                    candidate_possible(*id, &out),
+                    name
+                );
+            }
         }
     }
     loop {
