@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-"""Every CLI flag the documentation shows must exist in the binary.
+"""Every CLI flag the documentation shows must exist in the binary —
+and every flag a doc says does NOT exist must still be absent.
+
+THE DENOMINATOR WAS 22%. Until 2026-09-07 the invocation pattern
+required a `$ ` shell prompt, so it read 138 of the 625 `verum …` lines
+in the corpus. The other 487 — 385 of them carrying flags, 221 distinct
+command+flag pairs — were invisible, which is where a stale flag
+survives longest: nobody writes the prompt inside a `bash` fence that is
+showing a sequence. Three more sat behind a `- ` bullet and 41 behind a
+trailing `\\` continuation, whose flags are precisely the ones a
+per-line reader cannot see. All four shapes are read now.
+
+BOTH POLARITIES. A line whose comment says NOT IMPLEMENTED used to be
+dropped entirely, which excused it FOREVER: the day the command ships,
+the page still tells the reader not to use it and the gate stays green.
+Such a line is now checked the other way — the claim must still hold.
+Measured 2026-09-07: 3 such lines (`expand-macros`, `doc --search`,
+`api --signature`), all three still true.
 
 Measured 2026-09-05 on the website docs: 17 commands, 40 flag mentions,
 FIVE flags that no `--help` lists — `check --tier-report` (three times,
@@ -23,10 +40,11 @@ WHAT IS DEEMED FINE
 
 INSTRUMENT CONTROL
   The check runs `<binary> <cmd> --help` and reads the flags out of it.
-  If that produces NO flags at all the command is reported as
-  unreadable rather than silently contributing zero findings — a
-  `--help` that fails would otherwise make every flag look present by
-  making the "does not have it" branch unreachable.
+  A NON-ZERO EXIT means the command is not there (or the help failed)
+  and it is reported as unreadable rather than silently contributing
+  zero findings. Reading the flag COUNT instead was wrong and was
+  measured wrong: an unrecognized subcommand's error text ends with
+  "try '--help'", so it parses as one flag and looks readable.
 """
 from __future__ import annotations
 
@@ -47,57 +65,150 @@ DOCS = Path(DOCS_ENV) if DOCS_ENV else REPO.parent / "website" / "docs"
 # sitting after a filename was invisible — the exact place a stale flag
 # survives longest.
 #
-# The tail stops at a pipe or `&&`: `verum doc | grep --color` names a
-# flag of grep, not of verum.
-INVOCATION = re.compile(r"\$ verum ([a-z][a-z0-9-]*)((?:(?! *[|&;#])[^\n])*)")
+# The tail stops at a SPACED pipe or `&&`: `verum doc | grep --color`
+# names a flag of grep, not of verum. The space is the discriminator —
+# stopping at any `|` truncated `verum extract [--target verum|ocaml|
+# lean|coq] [--out DIR]` at the first alternation and hid `--out`, which
+# does not exist either. Shell pipelines are spaced; placeholder
+# alternations are not.
+# A `$ ` prompt anywhere in the line, OR a line that BEGINS with the
+# command (optionally behind a `- `/`* `/`> ` marker). The `^` is not
+# MULTILINE and the caller feeds one line at a time, so prose that
+# merely names a command mid-sentence still does not match — "Run verum
+# test --workspace to check everything" has no anchor at position 0 and
+# `^` cannot match anywhere else. That case is in the self-test.
+# The `(?=\s|$)` is load-bearing: `verum hello.vr` invokes a FILE, not a
+# subcommand called `hello`, and without the boundary the name matched up
+# to the dot and three pages were reported as naming a missing command.
+INVOCATION = re.compile(
+    r"(?:\$ |^\s*(?:[-*>]\s+)?)verum ([a-z][a-z0-9-]*)(?=\s|$)"
+    r"((?:(?!\s[|&;#])[^\n])*)")
 FLAG = re.compile(r"--[a-z][a-z0-9-]*")
 EXCUSED = re.compile(
     r"#[^\n]*\b(NOT IMPLEMENTED|does not exist|not implemented|"
     r"not yet supported|not supported)\b", re.I)
 UNIVERSAL = {"--help", "--version"}
 
+# A GAP IS DOCUMENTED IN THE LINE'S OWN COMMENT, and that is the whole
+# convention. Inferring it from the prose beside the fence was tried and
+# abandoned: an admonition that says "none of these four commands
+# exists" is easy, but the next one says "`verum doc` … is the nearest
+# thing that ships" two clauses after an absence phrase, and the one
+# after that lists the REAL roster inside the same parenthesis. Each
+# rescue bred the next false positive. The machine-checkable signal is
+# the comment; the prose stays for the reader.
+# What clap says when the name is not a subcommand at all.
+ABSENT_MSG = re.compile(
+    r"unrecognized subcommand|unexpected argument|no such subcommand|"
+    r"invalid subcommand", re.I)
+
 
 def binary() -> str:
     return os.environ.get("VERUM_BIN") or str(REPO / "target" / "debug" / "verum")
 
 
-def shown(docs: Path) -> dict[str, dict[str, list[str]]]:
-    """{command: {flag: [where, …]}} for every flag the docs show."""
-    out: dict[str, dict[str, list[str]]] = {}
+def logical_lines(text: str) -> list[tuple[int, str]]:
+    """(first line number, line) with `\\`-continuations joined.
+
+    41 lines in the corpus end with a backslash, and the flags after the
+    break are exactly the ones a per-line reader cannot see. The number
+    reported is where the command STARTS, which is where a reader looks.
+    """
+    lines = text.split("\n")
+    out: list[tuple[int, str]] = []
+    i = 0
+    while i < len(lines):
+        start, buf = i + 1, lines[i]
+        # Bounded by the file: a run of continuations ends at EOF.
+        while buf.rstrip().endswith("\\") and i + 1 < len(lines):
+            buf = buf.rstrip()[:-1] + " " + lines[i + 1].strip()
+            i += 1
+        out.append((start, buf))
+        i += 1
+    return out
+
+
+def parse_line(line: str) -> tuple[str, list[str], bool] | None:
+    """(subcommand path, flags, is-a-documented-gap), or None.
+
+    ONE parser, used by both the corpus walk and the self-test. They
+    used to be two copies of the same logic, which is a gate that can
+    pass its own test while doing something else.
+    """
+    m = INVOCATION.search(line)
+    if not m:
+        return None
+    tail = m.group(2)
+    # `--` ends verum's own arguments: `verum run -- --json a.txt`
+    # passes `--json` to the PROGRAM. Measured — without this the
+    # gate reports the program's flag as a missing verum flag.
+    tail = tail.split(" -- ", 1)[0]
+    # Leading bare words are a SUBCOMMAND PATH, not arguments:
+    # `verum cog-registry publish --manifest` asks about
+    # `cog-registry publish`, whose flags `cog-registry --help`
+    # does not list. Measured — treating them as one command
+    # reported nine flags that all exist, one level down.
+    # A SUBCOMMAND PATH IS SINGLE-SPACED. A run of two or more spaces is
+    # column alignment, and what follows it is another column:
+    # `verum run             shape ok` is a table row reporting that the
+    # tier-0 run prints "shape ok", not a call of `verum run shape ok`.
+    head = re.split(r"  +", tail)[0]
+    words = []
+    for w in head.split():
+        if w.startswith("-"):
+            break
+        if not re.fullmatch(r"[a-z][a-z0-9-]*", w):
+            break
+        words.append(w)
+    flags = [f for f in FLAG.findall(tail) if f not in UNIVERSAL]
+    return " ".join([m.group(1)] + words), flags, bool(EXCUSED.search(line))
+
+
+Where = list[tuple[str, int]]
+
+
+def shown(docs: Path) -> tuple[dict[str, dict[str, Where]],
+                              list[tuple[str, int, str, list[str]]],
+                              dict[str, Where]]:
+    """Two populations, read from the same lines.
+
+    First: {command: {flag: [(file, line), …]}} — flags the docs SHOW,
+    which must exist.  Second: one (file, line, command, flags) per line
+    claiming ABSENCE, judged whole. Third: where each command is shown,
+    so a missing one can be reported with a place to fix.
+    """
+    present: dict[str, dict[str, Where]] = {}
+    # A GAP COMMENT MARKS THE LINE, not one flag on it. Keyed by site so
+    # the claim can be judged whole: `verum build --release --pgo …
+    # # NOT IMPLEMENTED` stays true while `--pgo` is missing, however
+    # real `--release` is.
+    absent: list[tuple[str, int, str, list[str]]] = []
+    cmd_where: dict[str, Where] = {}
     for md in sorted(docs.rglob("*.md")):
         try:
             text = md.read_text(errors="ignore")
         except OSError:
             continue
-        for line in text.split("\n"):
-            m = INVOCATION.search(line)
-            if not m or EXCUSED.search(line):
+        rel = md.relative_to(docs).as_posix()
+        rows = logical_lines(text)
+        for lineno, line in rows:
+            parsed = parse_line(line)
+            if parsed is None:
                 continue
-            cmd = m.group(1)
-            tail = m.group(2)
-            # `--` ends verum's own arguments: `verum run -- --json a.txt`
-            # passes `--json` to the PROGRAM. Measured — without this the
-            # gate reports the program's flag as a missing verum flag.
-            tail = tail.split(" -- ", 1)[0]
-            # Leading bare words are a SUBCOMMAND PATH, not arguments:
-            # `verum cog-registry publish --manifest` asks about
-            # `cog-registry publish`, whose flags `cog-registry --help`
-            # does not list. Measured — treating them as one command
-            # reported nine flags that all exist, one level down.
-            words = []
-            for w in tail.split():
-                if w.startswith("-"):
-                    break
-                if not re.fullmatch(r"[a-z][a-z0-9-]*", w):
-                    break
-                words.append(w)
-            path = " ".join([cmd] + words)
-            for fl in FLAG.findall(tail):
-                if fl in UNIVERSAL:
-                    continue
-                out.setdefault(path, {}).setdefault(fl, []).append(
-                    md.relative_to(docs).as_posix())
-    return out
+            path, flags, excused = parsed
+            if excused:
+                absent.append((rel, lineno, path, flags))
+            else:
+                # RECORDED EVEN WITH NO FLAGS. A shown command must exist
+                # whether or not the line happens to carry a `--flag`, and
+                # keying on flags made three of the four wrong `verum
+                # cache …` lines invisible while catching the fourth —
+                # the one difference between them being a `--older-than`.
+                present.setdefault(path, {})
+                for fl in flags:
+                    present[path].setdefault(fl, []).append((rel, lineno))
+                cmd_where.setdefault(path, []).append((rel, lineno))
+    return present, absent, cmd_where
 
 
 def real_flags(bin_path: str, cmd: str) -> set[str] | None:
@@ -110,54 +221,118 @@ def real_flags(bin_path: str, cmd: str) -> set[str] | None:
                            capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         return None
-    found = set(FLAG.findall(p.stdout + p.stderr))
-    # Every subcommand's help lists at least --help. Nothing at all means
-    # the command does not exist or the help failed — say so, do not
-    # quietly report its flags as present.
+    # NEITHER THE FLAG COUNT NOR THE EXIT CODE ALONE. Both were tried and
+    # both are wrong:
+    #
+    #   flag count — "no flags means no command" is false. clap answers
+    #     an unrecognized subcommand with `error: unrecognized subcommand
+    #     'eval' … try '--help'`, which parses as ONE flag and looks
+    #     readable. That answer reported two documented gaps as closed.
+    #
+    #   exit code — sound on its own for every command measured, but it
+    #     is a PROXY: it cannot tell "this name is not a subcommand"
+    #     from "this help legitimately exited non-zero".
+    #
+    #     (A claim that `verum cubical primitives --help` prints its help
+    #     and exits 2 stood here briefly and was WRONG — the probe passed
+    #     "cubical primitives" as ONE argv element, because zsh does not
+    #     word-split an unquoted parameter the way bash does. Measured
+    #     properly it is rc=0. Struck rather than deleted: the reading was
+    #     about the shell, not the binary, and that is worth knowing at
+    #     the next probe.)
+    #
+    # So require BOTH — a non-zero exit AND clap saying in words that the
+    # name is not a subcommand. Each alone admits a failure the other
+    # catches.
+    text = p.stdout + p.stderr
+    if p.returncode != 0 and ABSENT_MSG.search(text):
+        return None
+    found = set(FLAG.findall(text))
     return found or None
 
 
 SELF_TEST = [
-    # (line, expected (cmd, flags) or None)
-    ("$ verum audit --bundle", ("audit", ["--bundle"])),
+    # (line, (cmd, flags, is-documented-gap) or None)
+    ("$ verum audit --bundle", ("audit", ["--bundle"], False)),
     # A subcommand path, not a command plus an argument.
     ("$ verum cog-registry publish --manifest cog.json",
-     ("cog-registry publish", ["--manifest"])),
-    ("$ verum repl --preload x.vr --skip-verify", ("repl", ["--preload", "--skip-verify"])),
-    # An excused line contributes nothing — documenting a gap is correct.
-    ("$ verum api --signature \"fn map\"       # NOT IMPLEMENTED", None),
-    ("$ verum doc --search x   # does not exist", None),
-    # Prose that merely names a command is not an invocation.
+     ("cog-registry publish", ["--manifest"], False)),
+    ("$ verum repl --preload x.vr --skip-verify",
+     ("repl", ["--preload", "--skip-verify"], False)),
+    # A documented gap is now VISIBLE and flagged as such — it is checked
+    # the other way, not dropped. Dropping it excused the claim forever.
+    ("$ verum api --signature \"fn map\"       # NOT IMPLEMENTED",
+     ("api", ["--signature"], True)),
+    ("$ verum doc --search x   # does not exist", ("doc", ["--search"], True)),
+    # A gap with no flag at all is a claim about the COMMAND.
+    ("verum expand-macros src/user.vr   # not implemented",
+     ("expand-macros", [], True)),
+    # NO PROMPT: the shape that made the gate blind to 487 of 625 lines.
+    ("verum eval \"1 + 2 + 3\"              # NOT IMPLEMENTED",
+     ("eval", [], True)),
+    ("    verum build --emit-vbc app.vr", ("build", ["--emit-vbc"], False)),
+    # Behind a list marker.
+    ("- verum lint --validate-config", ("lint", ["--validate-config"], False)),
+    # Prose that merely names a command is STILL not an invocation: `^`
+    # is not MULTILINE, so there is no anchor at "verum" mid-sentence.
     ("Run verum test --workspace to check everything", None),
+    ("see verum build --release for details", None),
     # `--help` alone is universal and never reported.
-    ("$ verum build --help", ("build", [])),
+    ("$ verum build --help", ("build", [], False)),
     # Everything after `--` belongs to the program being run, not verum.
-    ("$ verum run -- --json /tmp/a.txt", ("run", [])),
-    ("$ verum run --release -- --json a.txt", ("run", ["--release"])),
+    ("$ verum run -- --json /tmp/a.txt", ("run", [], False)),
+    ("$ verum run --release -- --json a.txt", ("run", ["--release"], False)),
+    # A pipeline's tail names another tool's flags, not verum's.
+    ("$ verum lint --format json | jq --raw-output .",
+     ("lint", ["--format"], False)),
+    # An alternation inside a placeholder is not a pipeline: every flag
+    # on the line must still be read.
+    ("verum extract [--target verum|ocaml|lean|coq] [--out DIR]",
+     ("extract", ["--target", "--out"], False)),
+    ("verum doc --format html|markdown|json", ("doc", ["--format"], False)),
+    # A FILE, not a subcommand: `verum hello.vr` runs the script.
+    ("$ verum hello.vr", None),
+    ("$ verum script.vr        # frontmatter wins", None),
+    ("$ verum --allow-all untrusted.vr", None),
+    # Column alignment, not a subcommand path: this row says what the
+    # tier-0 run PRINTS.
+    ("verum run             shape ok", ("run", [], False)),
+    ("verum cache stats                        # cache hit rates",
+     ("cache stats", [], False)),
+]
+
+# (text, expected joined lines) — the continuation joiner, tested apart
+# because it runs BEFORE the pattern and a break in it makes the pattern
+# look innocent.
+JOIN_TEST = [
+    ("verum build \\\n    --release \\\n    --target x\nnext",
+     # The continuation's own indentation is dropped, as a shell drops
+     # it: one space joins the pieces.
+     [(1, "verum build  --release  --target x"), (4, "next")]),
+    ("plain\nlines", [(1, "plain"), (2, "lines")]),
+    # A trailing backslash on the LAST line must not run off the end.
+    ("verum build \\", [(1, "verum build \\")]),
 ]
 
 
 def self_test() -> int:
     bad = 0
     for line, want in SELF_TEST:
-        m = INVOCATION.search(line)
-        got = None
-        if m and not EXCUSED.search(line):
-            tail = m.group(2).split(" -- ", 1)[0]
-            words = []
-            for w in tail.split():
-                if w.startswith("-") or not re.fullmatch(r"[a-z][a-z0-9-]*", w):
-                    break
-                words.append(w)
-            flags = [f for f in FLAG.findall(tail) if f not in UNIVERSAL]
-            got = (" ".join([m.group(1)] + words), flags)
+        got = parse_line(line)
+        if got is not None:
+            got = (got[0], got[1], got[2])
         if got != want:
             bad += 1
             print(f"FAIL {line!r} -> {got}, expected {want}", file=sys.stderr)
+    for text, want in JOIN_TEST:
+        got = logical_lines(text)
+        if got != want:
+            bad += 1
+            print(f"FAIL join {text!r} -> {got}, expected {want}", file=sys.stderr)
     if bad:
         print(f"self-test: {bad} case(s) FAILED", file=sys.stderr)
         return 1
-    print(f"self-test: {len(SELF_TEST)} case(s) OK")
+    print(f"self-test: {len(SELF_TEST)} parse + {len(JOIN_TEST)} join case(s) OK")
     return 0
 
 
@@ -205,27 +380,59 @@ def main() -> int:
     if not DOCS.is_dir():
         return _skip_or_fail(sys.argv, f"check-doc-cli-flags: no docs directory at {DOCS}")
 
-    pairs = shown(DOCS)
+    present, absent, cmd_where = shown(DOCS)
     missing: list[tuple[str, str, list[str]]] = []
+    stale: list[tuple[str, str | None, list[str]]] = []
     unreadable: list[str] = []
     checked = 0
-    for cmd, flags in sorted(pairs.items()):
-        real = real_flags(bin_path, cmd)
-        if real is None:
+
+    # `--help` is one subprocess per command; the two populations share
+    # commands, so ask once.
+    help_of: dict[str, set[str] | None] = {}
+    for cmd in sorted(set(present) | {a[2] for a in absent}):
+        help_of[cmd] = real_flags(bin_path, cmd)
+
+    for cmd, flags in sorted(present.items()):
+        if help_of[cmd] is None:
             unreadable.append(cmd)
             continue
         for fl, where in sorted(flags.items()):
             checked += 1
-            if fl not in real:
-                missing.append((cmd, fl, sorted(set(where))))
+            if fl not in help_of[cmd]:
+                missing.append((cmd, fl, sorted({f"{f}:{n}" for f, n in where})))
+
+    # THE OTHER POLARITY. A line saying a thing does not exist is a claim,
+    # and a claim that has come true in reverse is worse than a missing
+    # one: the reader is told not to use a working command.
+    for rel, lineno, cmd, flags in sorted(absent):
+        checked += 1
+        real = help_of[cmd]
+        if real is None:
+            continue  # the command still does not exist — claim holds
+        if flags and not all(f in real for f in flags):
+            continue  # at least one flag is still missing — claim holds
+        what = f"{cmd} {' '.join(flags)}".strip()
+        stale.append((what, None, [f"{rel}:{lineno}"]))
 
     if unreadable:
-        print("[fail] the docs invoke commands whose `--help` says nothing:")
+        print(f"[fail] {len(unreadable)} command(s) the docs invoke and the "
+              f"binary does not have:")
         for cmd in unreadable:
-            print(f"    verum {cmd}")
+            where = sorted({f"{f}:{n}" for f, n in cmd_where.get(cmd, [])})
+            print(f"    verum {cmd}    — {', '.join(where[:3]) or 'shown with a flag'}")
         print("\nEither the subcommand is gone, or `--help` failed. Both are\n"
               "findings: a flag cannot be checked against a help text that is\n"
               "not there, so this is reported rather than counted as clean.")
+        return 1
+
+    if stale:
+        print(f"[fail] {len(stale)} documented gap(s) the binary has since closed:")
+        for cmd, fl, where in stale:
+            what = f"verum {cmd} {fl}" if fl else f"verum {cmd}"
+            print(f"    {what}    — {', '.join(where[:3])}")
+        print("\nThe page says this does not exist and it now does. Drop the\n"
+              "NOT IMPLEMENTED comment and any note beside it, and show what\n"
+              "the command actually prints.")
         return 1
 
     if missing:
@@ -234,10 +441,13 @@ def main() -> int:
             print(f"    verum {cmd} {fl}    — {', '.join(where[:3])}")
         print("\nRun the command to see what it does have. If the flag is gone,\n"
               "name the replacement; if it never existed, say so in the line's\n"
-              "own comment (`# NOT IMPLEMENTED`) — a documented gap passes.")
+              "own comment (`# NOT IMPLEMENTED`) — a documented gap is checked\n"
+              "the other way, not excused.")
         return 1
 
-    print(f"check-doc-cli-flags: {len(pairs)} command(s), {checked} flag mention(s), 0 unknown")
+    print(f"check-doc-cli-flags: {len(help_of)} command(s), {checked} claim(s) "
+          f"({sum(len(v) for v in present.values())} shown, "
+          f"{len(absent)} documented gaps), 0 unknown")
     return 0
 
 
