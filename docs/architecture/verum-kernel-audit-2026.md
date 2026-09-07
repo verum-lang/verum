@@ -292,5 +292,6 @@ All items below have been discharged.
   release.
 * `docs/architecture/external-prover-verification.md` — the
   external-prover replay gate's user-facing documentation.
-* `docs/architecture/trusted-kernel.md` — the kernel architecture
-  this audit critiques.
+* `docs/architecture/no-libc-architecture.md` — the architecture this
+  audit critiques. (This line named `trusted-kernel.md`, which has never
+  existed in either repository.)

@@ -147,7 +147,7 @@ Discharge plan: lift `Mathlib.Logic.Equiv` + `Quotient.mk` /
 `K_Inductive`, `K_Elim`
 
 Discharge plan: port Verum's strict-positivity checker
-(`crates/verum_kernel/src/positivity.rs`) into a Lean
+(`crates/verum_types/src/positivity.rs`) into a Lean
 `Decidable` instance.
 
 ### SMT/Axiom (1) — replay correctness
@@ -164,8 +164,10 @@ derivation" as a Lean predicate over a model of SMT certificates.
 
 Discharge plan: these depend on Schreiber DCCT (`schreiber_dcct`
 framework, 5 axioms in `core/math/frameworks/`), Shulman 2018 §3, and
-Lurie HTT — none has a mature mathlib port today. Tracked separately
-under `docs/architecture/diakrisis-bridge-roster.md`.
+Lurie HTT — none has a mature mathlib port today. Tracked separately under `docs/architecture/diakrisis-bridge-roster.md`,
+which does not exist — measured 2026-09-07, no file of that name is in
+either repository. The roster is the requirement; the document is the
+gap.
 
 ## 5. Running locally
 
@@ -242,5 +244,7 @@ When **promoting** an admit to a real proof:
   verification strategy this gate is one node of.
 - `docs/architecture/MSFS-VERIFICATION-ROADMAP.md` — discharge plans
   for the IOUs.
-- `docs/architecture/trusted-kernel.md` — the TCB this gate gives an
-  external second opinion on.
+- `docs/architecture/verum-kernel-audit-2026.md` — the TCB this gate
+  gives an external second opinion on. (This line named
+  `trusted-kernel.md`, which has never existed; the kernel audit is the
+  document that records the TCB and its defects.)

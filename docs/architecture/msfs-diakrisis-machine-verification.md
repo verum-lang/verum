@@ -136,7 +136,7 @@ verum-msfs-corpus/
 
 ### 1.2 Conventions module
 
-Первый файл, который должен compile cleanly — `core/math/conventions.vr`:
+Первый файл, который должен compile cleanly — `core/math/conventions.vr` (планируемый; на 2026-09-07 не создан):
 
 ```verum
 // core/math/conventions.vr
@@ -203,7 +203,7 @@ verum export --to lean --output exports/lean/export.lean  # one per format
 
 ### 2.1 Convention 1.1 — ZFC + 2-inacc
 
-Уже включено в `core/math/conventions.vr` (см. §1.2 выше).
+Уже включено в `core/math/conventions.vr` (см. §1.2 выше — файл планируемый, не создан).
 
 **Verification**: `@axiom` declaration — нет proof needed (это convention).
 

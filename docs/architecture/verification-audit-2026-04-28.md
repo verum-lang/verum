@@ -131,7 +131,9 @@ Today there's no CI check enforcing this — `verum audit
 3. CI gate: `verum audit --bridge-admits` reporting trusted-boundary
    delta per PR.
 4. Document each preprint-blocked admit in
-   `docs/architecture/diakrisis-bridge-roster.md` with V3 promotion path.
+   `docs/architecture/diakrisis-bridge-roster.md` (does not exist as of
+   2026-09-07 — the roster is the requirement, the document is the gap)
+   with V3 promotion path.
 
 ### Tier 2 — NEXT MONTH
 

@@ -105,7 +105,9 @@ Modifications to existing methods:
 
 **Acceptance criteria:**
 - `cargo test -p verum_vbc` green.
-- `vcs/specs/L2-standard/async/multi_threaded_basic.vr` spawns 1000 CPU-bound
+- `vcs/specs/L2-standard/async/multi_threaded_basic.vr` (REQUIRED, not
+  written — measured 2026-09-07: no file of that name in `vcs/`) spawns
+  1000 CPU-bound
   tasks with `async_worker_threads=4` and asserts wall-clock < 2× single-thread
   baseline (proves observable parallelism).
 

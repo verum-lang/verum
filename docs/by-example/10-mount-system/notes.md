@@ -111,4 +111,6 @@ a `Constraint` of their own, avoidable.
 - Mount syntax: `grammar/verum.ebnf` §2.2 (`mount_stmt`).
 - Mount kinds: `grammar/verum.ebnf` §2.2 (`mount_path`).
 - `super` paths: `grammar/verum.ebnf` §2.2 (`module_path`).
-- Module system: `docs/detailed/15-cog-distribution-architecture.md`.
+- Module system: `crates/verum_modules/` (loader + resolver). This line
+  named `docs/detailed/15-cog-distribution-architecture.md`; `docs/detailed/`
+  does not exist.

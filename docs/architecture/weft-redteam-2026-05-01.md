@@ -161,7 +161,7 @@ NaN-boxed Value = 8 bytes per element vs 1 byte for `List<Byte>`
 *if* the runtime uses a packed-byte backing.
 
 ### Status
-Type-system migration **complete**: `core/io/async_protocols.vr`'s
+Type-system migration **complete**: `core/async/io_protocols.vr`'s
 `AsyncRead` / `AsyncWrite` / `AsyncBufRead` protocols speak
 `List<Byte>` end-to-end; every implementer (TcpStream, UnixStream,
 TlsStream) drops the int↔byte marshalling code (~30 LOC saved per
