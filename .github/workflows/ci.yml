@@ -728,6 +728,23 @@ jobs:
           python3 scripts/ci/check_doc_anchors.py
           python3 scripts/ci/check_doc_error_codes_exist.py
           python3 scripts/ci/check_grammar_docs_match.py
+          # Two more that need only the website checkout, added
+          # 2026-09-07 with a CALLER from the start — the whole reason
+          # this step's comment exists is that gates landed as Makefile
+          # targets and sat dormant for weeks.
+          #
+          # Both take a FLOOR rather than checking for zero defects,
+          # because a gate that stops reaching its input prints the same
+          # clean line as a clean corpus. `check_doc_config_structs`
+          # reported "0 pages, 0 defects" for a corpus with thirteen
+          # config sections while its heading pattern was wrong;
+          # `check_doc_module_paths` counted 210 citations while its
+          # pattern could not see a path followed by a call signature.
+          python3 scripts/ci/check_doc_config_structs.py --self-test
+          python3 scripts/ci/check_doc_config_structs.py --min-pages 9
+          python3 scripts/ci/check_doc_module_paths.py --self-test
+          python3 scripts/ci/check_doc_module_paths.py --min-citations 200
+          VERUM_DOCS_DIR=docs python3 scripts/ci/check_doc_module_paths.py --min-citations 40
 
       # `check_doc_blocks_parse` has been in the tree for weeks as a
       # Makefile target with NO CI caller and no `--check` flag on the one
