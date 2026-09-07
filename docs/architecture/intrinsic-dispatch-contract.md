@@ -23,7 +23,7 @@ there is no parallel Verum body.
 
 Pre-fix the table pre-registered a stub-shape `FunctionInfo` with
 `id = next_func_id++`, empty body, and `intrinsic_name = "<bare>"`.
-The user-side intercept at `expressions.rs:4608` resolved
+The user-side intercept — `expressions.rs`, the sites that read `func_info.intrinsic_name`; the line number this document carried had drifted onto an unrelated tuple-index arm — resolved
 `func_info.intrinsic_name` and dispatched the inline emit, but the
 collision with the body-decl produced register corruption in some
 cases (most visibly: `clz(1 as UInt64) = ()` instead of 63 — see

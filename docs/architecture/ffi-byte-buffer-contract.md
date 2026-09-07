@@ -99,7 +99,7 @@ healthy code.
 > (packed) or `backing + OBJECT_HEADER_SIZE` (list).**
 
 Canonical constructor: `container_to_slice_fat_ref`
-(`interpreter/dispatch_table/handlers/cbgr.rs:949`).
+(`interpreter/dispatch_table/handlers/cbgr.rs`, the function of that name — the line number this anchor used to carry had drifted onto an unrelated bridge-store arm, and `SliceGet` with it).
 `SliceGet` / `Unslice` / `SliceLen` all honour `reserved` as the stride; a
 fixed `*const Value` read would truncate a byte slice to the first element's
 tag bits.
