@@ -1,0 +1,102 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: io, filesystem, coverage
+// @timeout: 20000
+// @expected-stdout-begin
+// create ok
+// dir-exists true
+// absent-file false
+// write ok
+// metadata ok
+// rename ok
+// old-gone true
+// new-there true
+// read_dir ok
+// remove-file ok
+// file-gone true
+// remove-dir ok
+// dir-gone true
+// @expected-stdout-end
+// @description: The filesystem basics RUN, and each one is checked by its
+//   EFFECT rather than by its return code.
+//
+// WHY THIS FILE EXISTS. `fs_test.vr` beside it already calls four of
+// these and is `@test: typecheck-pass` — it proves they TYPE, never that
+// they DO anything. Measured 2026-09-07: every method here was
+// documented on the stdlib reference and executed by nothing in the
+// tree — no spec marked `run`, no un-ignored core-test, no by-example
+// programme.
+//
+// "Returns Ok" is not the assertion. A call that answers Ok and changes
+// nothing has happened in this tree before, so every mutating step is
+// followed by an `exists` that asks the filesystem whether it took
+// effect. `old-gone` / `new-there` after the rename, `file-gone` after
+// the removal, `dir-gone` at the end: those four lines ARE the spec and
+// the `ok`s are its setup.
+//
+// Paths are built with `Path.new` and passed to the qualified call.
+// The shorter `mount core.io.fs; fs.exists(&some_text)` also compiles
+// today — a Text, and even an Int, is accepted where `&Path` is
+// declared — but writing the spec that way would pin a leniency instead
+// of the behaviour.
+//
+// NO HELPER, and that is deliberate: naming `IoResult<T>` in any
+// signature in this file makes every `match` on an IoResult elsewhere in
+// it stop resolving to a variant (measured 2026-09-07; recorded on the
+// alias row alongside the same blindness in the `?` operator). Inline
+// matches cost four lines each and cannot trip it.
+//
+// Deterministic from any starting state: the first three calls clear the
+// path and their results are deliberately NOT printed, because whether
+// there was anything to clear is not what this measures.
+
+mount core.io.path.{Path};
+
+fn main() {
+    let dir_s: Text = "/tmp/vcs_fs_ops_run";
+    let a_s: Text = "/tmp/vcs_fs_ops_run/a.txt";
+    let b_s: Text = "/tmp/vcs_fs_ops_run/b.txt";
+    let dir = Path.new(&dir_s);
+    let a = Path.new(&a_s);
+    let b = Path.new(&b_s);
+
+    let _ = core.io.fs.remove_file(&a);
+    let _ = core.io.fs.remove_file(&b);
+    let _ = core.io.fs.remove_dir(&dir);
+
+    match core.io.fs.create_dir(&dir) {
+        Ok(_) => print("create ok"), Err(e) => print(f"create ERR {e}"),
+    }
+    print(f"dir-exists {core.io.fs.exists(&dir)}");
+    print(f"absent-file {core.io.fs.exists(&a)}");
+
+    match core.io.file.write(&a_s, &"payload") {
+        Ok(_) => print("write ok"),
+        Err(e) => print(f"write ERR {e}"),
+    }
+    match core.io.fs.metadata(&a) {
+        Ok(m) => print("metadata ok"),
+        Err(e) => print(f"metadata ERR {e}"),
+    }
+
+    match core.io.fs.rename(&a, &b) {
+        Ok(_) => print("rename ok"), Err(e) => print(f"rename ERR {e}"),
+    }
+    print(f"old-gone {!core.io.fs.exists(&a)}");
+    print(f"new-there {core.io.fs.exists(&b)}");
+
+    match core.io.fs.read_dir(&dir) {
+        Ok(rd) => print("read_dir ok"),
+        Err(e) => print(f"read_dir ERR {e}"),
+    }
+
+    match core.io.fs.remove_file(&b) {
+        Ok(_) => print("remove-file ok"), Err(e) => print(f"remove-file ERR {e}"),
+    }
+    print(f"file-gone {!core.io.fs.exists(&b)}");
+    match core.io.fs.remove_dir(&dir) {
+        Ok(_) => print("remove-dir ok"), Err(e) => print(f"remove-dir ERR {e}"),
+    }
+    print(f"dir-gone {!core.io.fs.exists(&dir)}");
+}
