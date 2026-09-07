@@ -1816,11 +1816,21 @@ impl CodegenContext {
     ///
     /// `[Byte; N]` is a fixed-size TYPE, so N cannot change under a
     /// binding and `arr.len()` on such a variable is a compile-time
-    /// constant. Recording it here is the only place the count survives:
-    /// the allocation is `verum_cbgr_allocate(N)`, which returns a
-    /// HEADERLESS block — no object header in front of the pointer and
-    /// no length word inside it — so nothing downstream can ask the
-    /// value how long it is (T1192).
+    /// constant. Recording it here is the only place the count survives.
+    ///
+    /// PRECISELY WHY, because "headerless" is the tempting shorthand and
+    /// it is wrong: `verum_cbgr_allocate` DOES prefix a 32-byte
+    /// `AllocationHeader`, and returns the USER address — the header sits
+    /// BEHIND the pointer. So every forward offset a consumer might probe
+    /// (0, 24, 32) lands in DATA, and that header carries
+    /// `{base_offset, total}` for dealloc/realloc, not a `type_id` and
+    /// not a length. Nothing reachable from the pointer can answer "how
+    /// long is this" (T1192).
+    ///
+    /// The interpreter differs, which is the whole tier disagreement:
+    /// its `[Byte; N]` is `heap.alloc(TypeId::U8, size)`, an OBJECT
+    /// header carrying a type_id, so the probes written against that
+    /// shape find one — and at Tier 1 they read the array's own bytes.
     pub fn set_byte_array_size(&mut self, name: &str, size: usize) {
         self.byte_array_sizes.insert(name.to_string(), size);
     }

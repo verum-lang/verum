@@ -12,10 +12,23 @@
 // T1192 — `len()` on a packed `[Byte; N]` read the array's OWN DATA and
 // called the result a length, at Tier 1.
 //
-// `[Byte; N]` lowers to `verum_cbgr_allocate(N)`, which returns a
-// HEADERLESS block: the pointer addresses the first data byte, so there
-// is no `ObjectHeader` in front of it and no length word anywhere in the
-// allocation. Every probe in `lower_len` assumes otherwise — the
+// `[Byte; N]` lowers to `verum_cbgr_allocate(N)`, and the pointer it
+// returns is the USER address. There IS a header — a 32-byte
+// `AllocationHeader` — but it sits BEHIND that pointer and carries
+// `{base_offset, total}` for dealloc and realloc: no `type_id`, no
+// length. Every forward offset a consumer probes therefore lands in
+// DATA.
+//
+// "Headerless" was the shorthand this comment used first and it is
+// wrong in a way that matters: a reader would conclude the block has no
+// header at all and reason incorrectly about freeing it. The precise
+// statement is that nothing REACHABLE FROM THE POINTER can answer how
+// long the array is.
+//
+// The interpreter's `[Byte; N]` is allocated with the U8 heap type id — an
+// OBJECT header carrying a type_id — which is exactly why probes
+// written against that shape find one there and read this array's own
+// bytes here. Every probe in `lower_len` assumes otherwise — the
 // slice-cell probe reads word 0, the List arm reads a `type_id` at
 // offset 0 and a length at 24, the Pack arm reads 32 — so each of them
 // reads this array's contents. The length is known only at the
