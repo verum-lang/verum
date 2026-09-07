@@ -21191,13 +21191,27 @@ fn lower_call_method<'ctx>(
                     method_name_str, cur_fn
                 );
             }
+            // NAME THE FUNCTION THE ABORT IS IN. Without it the runtime
+            // message says only which METHOD could not be resolved, and
+            // one method is unresolved in many bodies at once — measured
+            // on one programme: `from_iter` unresolved in `Args.collect`,
+            // `ChainIter.collect` and `ChunksIter.collect` simultaneously,
+            // while `Range.collect` and `MappedIter.collect` resolved
+            // fine. Which of them the process actually reached could not
+            // be read off the panic at all, so the question "is this the
+            // body I just fixed?" cost a compile-log cross-reference —
+            // and the compile log is REPLAYED FROM THE OBJECT CACHE
+            // unless that cache is cleared, so the cross-reference could
+            // be answering about a different binary.
+            //
+            // `cur_fn` is already in hand one line above.
             let abort_msg = format!(
                 "AOT dispatch fault: method '{}' has no compiled candidate in \
-                 this module — the static resolver could not name the call and \
-                 no `Type.{}` body exists to switch over (compiler defect: \
-                 type-carry / missing monomorphisation). Refusing to fabricate \
-                 a result.",
-                method_name_str, method_name_str
+                 this module (in `{}`) — the static resolver could not name \
+                 the call and no `Type.{}` body exists to switch over \
+                 (compiler defect: type-carry / missing monomorphisation). \
+                 Refusing to fabricate a result.",
+                method_name_str, cur_fn, method_name_str
             );
             emit_runtime_abort(ctx, &abort_msg, "callm_unresolved_msg")?;
             ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
@@ -36152,8 +36166,9 @@ fn build_runtime_type_switch<'ctx>(
          (in which case the call needs a value-semantics fallback, as \
          `clone` has), or the receiver's value carries a type id the \
          compiler did not emit an arm for. Tier 0 dispatches this call \
-         by value tag; refusing to fabricate a result here.",
-        method_name
+         by value tag; refusing to fabricate a result here (in `{}`).",
+        method_name,
+        ctx.function_name().as_str()
     );
     let mut incoming: Vec<(BasicValueEnum<'ctx>, _)> = Vec::new();
 
