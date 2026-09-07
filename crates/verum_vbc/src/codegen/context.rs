@@ -2455,7 +2455,7 @@ impl CodegenContext {
         if self.ref_pinned_regs.contains(&reg.0) {
             return;
         }
-        self.raw_pointer_regs.remove(&reg);
+        self.clear_raw_pointer(reg);
         self.registers.free_temp(reg);
     }
 
@@ -2506,14 +2506,14 @@ impl CodegenContext {
         // and generators (their compiles also route through here) must
         // ALSO see the enclosing function's generics, so not clearing is
         // correct for them too.
-        self.byte_array_vars.clear();
+        self.clear_byte_array_vars();
         // T1192 — the SIZES go with the marks. Same key (variable name),
         // same lifetime; separating them would give one of the two a
         // stale entry the other cannot see.
         self.byte_array_sizes.clear();
-        self.typed_array_vars.clear();
+        self.clear_typed_array_vars();
         self.active_pattern_cache.clear();
-        self.raw_pointer_regs.clear();
+        self.clear_all_raw_pointers();
 
         self.current_function = Some(name.to_string());
         self.in_function = true;
@@ -4430,7 +4430,7 @@ impl CodegenContext {
         self.generic_type_params.clear();
         self.generic_type_params_ordered.clear();
         self.const_generic_params.clear();
-        self.required_contexts.clear();
+        self.clear_required_contexts();
     }
 
     // ==================== Context System (using/provide) ====================

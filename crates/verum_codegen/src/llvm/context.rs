@@ -541,8 +541,6 @@ pub struct FunctionContext<'a, 'ctx> {
     /// allocations too: that one counts BYTES for `Clone`, and reading
     /// it in `Len` would answer bytes where elements are meant. For a
     /// byte array the two coincide, which is exactly why sharing the
-    /// field would be a trap the first time a `[Int; N]` reached it.
-    byte_array_lens: std::collections::HashMap<u16, u64>,
 
     /// Method dispatch table for declarative method routing.
     ///
@@ -891,7 +889,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_closure_captures: Vec::new(),
             reg_types: RegisterTypeMap::new(),
             obj_alloc_sizes: std::collections::HashMap::new(),
-            byte_array_lens: std::collections::HashMap::new(),
             dispatch_table: MethodDispatchTable::new(),
             tuple_element_types: HashMap::new(),
             generic_type_args: HashMap::new(),
@@ -1002,7 +999,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_closure_captures: Vec::new(),
             reg_types: RegisterTypeMap::new(),
             obj_alloc_sizes: std::collections::HashMap::new(),
-            byte_array_lens: std::collections::HashMap::new(),
             dispatch_table: MethodDispatchTable::new(),
             tuple_element_types: HashMap::new(),
             generic_type_args: HashMap::new(),
@@ -1558,22 +1554,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// non-allocation producer).
     pub fn clear_obj_alloc_size(&mut self, reg: u16) {
         self.obj_alloc_sizes.remove(&reg);
-    }
-
-    /// Record a packed byte array's ELEMENT COUNT, known statically at
-    /// its allocation site. See `byte_array_lens` for why this is not
-    /// `obj_alloc_sizes`.
-    pub fn set_byte_array_len(&mut self, reg: u16, len: u64) {
-        self.byte_array_lens.insert(reg, len);
-    }
-
-    /// Read back a packed byte array's statically-known length.
-    ///
-    /// `None` means "not known here", never "zero" — a caller must fall
-    /// through to whatever it did before rather than treat the absence
-    /// as an answer.
-    pub fn get_byte_array_len(&self, reg: u16) -> Option<u64> {
-        self.byte_array_lens.get(&reg).copied()
     }
 
     /// Mark a register as holding a generic type parameter value-as-pointer.
@@ -2531,17 +2511,12 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         // a reused register made Clone memcpy the wrong byte count
         // (observed: Text handle cloned with a record's size → OOB
         // write in memmove).
-        self.obj_alloc_sizes.remove(&reg);
+        self.clear_obj_alloc_size(reg);
         // Element stride is a per-VALUE fact; a redefined register must
         // not inherit the previous value's stride (temp reuse turned the
         // Text.ptr stride-1 marks into under-advancing walks on
         // unrelated later objects — 24 scattered AOT regressions).
         self.element_stride_registers.remove(&reg);
-        // BYTE-ARRAY-STATIC-LEN-1 (T1192): same discipline — the length
-        // belongs to the VALUE, not to the register number, and VBC
-        // reuses register numbers. A surviving mark would answer 64 for
-        // whatever the register holds next.
-        self.byte_array_lens.remove(&reg);
         self.string_registers.remove(&reg);
         self.text_registers.remove(&reg);
         self.bool_registers.remove(&reg);
