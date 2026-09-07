@@ -2758,8 +2758,36 @@ impl VbcCodegen {
         // Infer operand types to select int/float/generic instructions
         let left_type = self.infer_expr_type_kind(left);
         let right_type = self.infer_expr_type_kind(right);
+        // T1242: the same fallback the TEXT half already has, for the same
+        // reason. `infer_expr_type_kind` ENUMERATES operand shapes —
+        // Binary, Call, Cast, Field, If, Index, Literal, Paren, Path,
+        // TupleIndex, Unary — and has no `MethodCall` arm, so
+        // `let e = x.exp(); e + e` classified as an INTEGER add on two
+        // Floats. The #41 comment below describes exactly this for Text
+        // ("blind to method-call operands … classified as INTEGER add …
+        // Tier-1 summed two POINTERS") and fixes it by consulting the full
+        // name inference; the float half was never given the same.
+        //
+        // The names are computed a few lines down for `is_text`, so this
+        // reuses that work rather than adding a `MethodCall` arm to the
+        // kind inferencer: an enumeration of shapes leaks again at the
+        // next shape nobody listed, which is how this defect arrived.
+        let left_type_name = self
+            .extract_expr_type_name(left)
+            .or_else(|| self.infer_expr_type_name(left));
+        let right_type_name = self
+            .extract_expr_type_name(right)
+            .or_else(|| self.infer_expr_type_name(right));
         let is_float = matches!(left_type, Some(verum_ast::ty::TypeKind::Float))
-            || matches!(right_type, Some(verum_ast::ty::TypeKind::Float));
+            || matches!(right_type, Some(verum_ast::ty::TypeKind::Float))
+            || left_type_name
+                .as_deref()
+                .map(verum_common::well_known_types::type_names::is_float_type)
+                .unwrap_or(false)
+            || right_type_name
+                .as_deref()
+                .map(verum_common::well_known_types::type_names::is_float_type)
+                .unwrap_or(false);
         // Text detection: both the direct primitive `Text` AND `&Text`
         // (typical for stdlib param signatures) must route through the
         // generic CmpG path so the runtime's deep-string equality
@@ -2779,12 +2807,6 @@ impl VbcCodegen {
         // and normalise reference spellings before the name test —
         // AOT Text is a headerless flat record, so the EMISSION is the
         // only honest place to make `+` mean concat.
-        let left_type_name = self
-            .extract_expr_type_name(left)
-            .or_else(|| self.infer_expr_type_name(left));
-        let right_type_name = self
-            .extract_expr_type_name(right)
-            .or_else(|| self.infer_expr_type_name(right));
         let is_text = matches!(left_type, Some(verum_ast::ty::TypeKind::Text))
             || matches!(right_type, Some(verum_ast::ty::TypeKind::Text))
             || Self::type_name_is_text(left_type_name.as_deref())
