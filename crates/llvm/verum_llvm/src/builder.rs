@@ -3726,14 +3726,31 @@ impl<'ctx> Builder<'ctx> {
     /// Get the debug info source location of the instruction currently pointed at by the builder,
     /// if available.
     pub fn get_current_debug_location(&self) -> Option<DILocation<'ctx>> {
-        use verum_llvm_sys::core::LLVMGetCurrentDebugLocation;
-        use verum_llvm_sys::core::LLVMValueAsMetadata;
-        let metadata_ref = unsafe { LLVMGetCurrentDebugLocation(self.builder) };
+        // THE 2-SUFFIXED API, to match the setter. `set_current_debug_location`
+        // uses `LLVMSetCurrentDebugLocation2` — the METADATA api — while this
+        // used `LLVMGetCurrentDebugLocation`, the LLVM-3-era VALUE api. The v1
+        // getter does not read back what the v2 setter wrote: it answers an
+        // EMPTY node, and `LLVMValueAsMetadata` converted the emptiness
+        // faithfully.
+        //
+        // What that cost, measured on internal/registry-next at Tier 1:
+        // 106,729 `invalid !dbg metadata attachment` verifier errors from ONE
+        // node (`!77196 = !{}`), because the runtime-dispatch stub captures
+        // the location once with this getter and re-applies it after every
+        // block switch — the right pattern against a broken read.
+        //
+        // `verum_llvm_sys` marks the v1 SETTER deprecated with the note "Use
+        // LLVMGetCurrentDebugLocation2 instead"; the 2-form was already bound
+        // and unused. Measured with word boundaries, this getter was the ONLY
+        // genuine v1 call left in the binding — a substring count says
+        // thirteen and is wrong.
+        use verum_llvm_sys::core::LLVMGetCurrentDebugLocation2;
+        let metadata_ref = unsafe { LLVMGetCurrentDebugLocation2(self.builder) };
         if metadata_ref.is_null() {
             return None;
         }
         Some(DILocation {
-            metadata_ref: unsafe { LLVMValueAsMetadata(metadata_ref) },
+            metadata_ref,
             _marker: PhantomData,
         })
     }
