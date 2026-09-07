@@ -844,8 +844,25 @@ pub fn check_no_unresolved_generic_calls() -> Result<()> {
     // stdlib build (the strict gate still counts every unique site).
     // REACHABLE sites list first — they are the ones that can actually
     // compute wrong results in THIS program.
-    const MAX_SHOWN: usize = 15;
-    let mut lines: Vec<String> = Vec::with_capacity(MAX_SHOWN + 3);
+    // HOW MANY TO SHOW — fifteen by default, `VERUM_UNRESOLVED_SHOW=N`
+    // to widen (0 shows all).
+    //
+    // The cap is right as a default: a hundred and eighty lines of stderr
+    // on every build is noise nobody reads. It is wrong as the ONLY option,
+    // because the window is the whole evidence anyone has and a census
+    // taken over it reads as a census over the population. Two sessions
+    // did exactly that today — "collect() is dead for ALL receivers" from
+    // seven names, and a breakdown by call kind "out of 182" — both true
+    // of fifteen rows and neither measured.
+    //
+    // The `… and N more` line below already says the window is a window;
+    // this gives the reader a way to act on it instead of only knowing it.
+    let max_shown: usize = std::env::var("VERUM_UNRESOLVED_SHOW")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|n| if n == 0 { usize::MAX } else { n })
+        .unwrap_or(15);
+    let mut lines: Vec<String> = Vec::with_capacity(max_shown.min(64) + 3);
     lines.push(format!(
         "{} unresolved call(s) degraded to a const-zero stub during AOT \
          lowering ({} in REACHABLE code, {} in dead/unreached baked bodies) \
@@ -857,7 +874,7 @@ pub fn check_no_unresolved_generic_calls() -> Result<()> {
     ));
     let mut ordered: Vec<&&UnresolvedGenericCall> = unique.iter().collect();
     ordered.sort_by_key(|c| !c.reachable);
-    for c in ordered.iter().take(MAX_SHOWN) {
+    for c in ordered.iter().take(max_shown) {
         lines.push(format!(
             "  in `{}`{}: {}",
             c.caller,
@@ -865,8 +882,27 @@ pub fn check_no_unresolved_generic_calls() -> Result<()> {
             c.detail
         ));
     }
-    if unique.len() > MAX_SHOWN {
-        lines.push(format!("  … and {} more", unique.len() - MAX_SHOWN));
+    // COMPLETENESS IS PRINTED, NOT INFERRED FROM SILENCE. Raising the cap
+    // removes the "and N more" line, and a reader who widened the window
+    // would then have to conclude the list is complete from the ABSENCE of
+    // a marker — which is the same "silence means nothing happened" that
+    // one-sided instruments trade on. verum-35 named this before it
+    // shipped; both polarities say which they are.
+    if unique.len() <= max_shown {
+        lines.push(format!("  (showing all {} sites)", unique.len()));
+    }
+    if unique.len() > max_shown {
+        // SAY WHAT THE WINDOW IS, not just that there is one. "and N more"
+        // invites a census over the visible rows; naming the window and the
+        // way to widen it does not.
+        lines.push(format!(
+            "  … and {} more — this list is a WINDOW of {} over {} sites, \
+             ordered reachable-first; set VERUM_UNRESOLVED_SHOW=0 for all of \
+             them before counting anything from it",
+            unique.len() - max_shown,
+            max_shown,
+            unique.len()
+        ));
     }
     lines.push(
         "cause: typically a generic function calling a protocol method on a \
