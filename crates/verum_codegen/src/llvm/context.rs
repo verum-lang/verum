@@ -2463,6 +2463,30 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Get a register value.
     /// In alloca mode, loads from the alloca slot; otherwise reads from the SSA value map.
     /// Float registers use f64 allocas; all others use i64.
+    /// **THE VALUE THIS RETURNS IS NEVER AN LLVM CONSTANT.**
+    ///
+    /// Alloca mode is enabled UNCONDITIONALLY — `vbc_lowering.rs` says so
+    /// in its own words, "Fix: always enable alloca mode", deliberately,
+    /// so that mem2reg + SROA promote every alloca back to SSA and the
+    /// full `default<O2>` pipeline stays on. In that mode the arm below
+    /// emits a `build_load`, and a load is not a constant.
+    ///
+    /// So `get_zero_extended_constant()` on a value from here answers
+    /// `None` in EVERY program, and any "extract the constant if
+    /// possible" written against it is dead on arrival. Two have been:
+    ///
+    ///   * the atomic-RMW ordering (T1218) — every
+    ///     `verum_atomic_fetch_*` takes the `else` arm and lowers as
+    ///     `SequentiallyConsistent`, so `MemoryOrdering.Relaxed` is
+    ///     inert at Tier 1 and nothing says so.
+    ///   * a per-register `[Byte; N]` length keyed on the size operand
+    ///     (T1192) — the guard could not fire once, and the fix moved to
+    ///     the frontend, where the count is a compile-time fact rather
+    ///     than an LLVM value.
+    ///
+    /// A compile-time constant that the LOWERING needs must travel on
+    /// the instruction wire, the way `lower_atomic_load` takes
+    /// `ordering: u8` as a parameter — not be recovered from a register.
     pub fn get_register(&self, reg: u16) -> Result<BasicValueEnum<'ctx>> {
         // Phase 5: Warn on use-after-transfer (FFI ownership)
         if self.reg_types.is_consumed_ffi(reg) {
