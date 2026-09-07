@@ -43,6 +43,7 @@ use verum_common::{List, Maybe, Set, Text};
 
 // Use our Context wrapper, not z3::Context directly
 use crate::Context;
+use serde::{Deserialize, Serialize};
 
 // ==================== Core Types ====================
 
@@ -112,7 +113,7 @@ pub struct InterpolantSource {
 }
 
 /// Strength of interpolant
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InterpolantStrength {
     /// Weakest interpolant (Pudlák)
     Weakest,
@@ -158,7 +159,8 @@ pub struct InterpolantNode {
 }
 
 /// Configuration for interpolation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct InterpolationConfig {
     /// Interpolation algorithm
     pub algorithm: InterpolationAlgorithm,
@@ -194,7 +196,7 @@ impl Default for InterpolationConfig {
 }
 
 /// Interpolation algorithms
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InterpolationAlgorithm {
     /// McMillan's algorithm (resolution-proof based, strongest)
     McMillan,

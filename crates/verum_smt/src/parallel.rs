@@ -29,11 +29,13 @@ use z3::{Params, SatResult, Solver, ast::Bool};
 
 use verum_common::Maybe;
 use verum_common::{List, Map, Text};
+use serde::{Deserialize, Serialize};
 
 // ==================== Core Types ====================
 
 /// Parallel solver configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct ParallelConfig {
     /// Number of worker threads
     pub num_workers: usize,
@@ -93,7 +95,7 @@ impl ParallelConfig {
 }
 
 /// Solving strategy for a worker
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SolvingStrategy {
     /// Default Z3 strategy
     Default,
@@ -112,7 +114,7 @@ pub enum SolvingStrategy {
 }
 
 /// Custom strategy parameters
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StrategyParams {
     /// Random seed
     pub random_seed: Maybe<u32>,
@@ -151,7 +153,7 @@ impl StrategyParams {
 }
 
 /// Case splitting strategy
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CaseSplitStrategy {
     Sequential,
     Random,
@@ -159,7 +161,7 @@ pub enum CaseSplitStrategy {
 }
 
 /// Restart strategy
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RestartStrategy {
     None,
     Linear,
@@ -168,7 +170,7 @@ pub enum RestartStrategy {
 }
 
 /// Phase selection strategy
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PhaseSelection {
     Always(bool),
     Random,

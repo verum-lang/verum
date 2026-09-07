@@ -53,11 +53,13 @@ use verum_common::{Heap, List, Map, Maybe, Set, Text};
 
 use crate::context::Context as VerumContext;
 use crate::proof_search::{ProofError, ProofGoal, ProofSearchEngine, ProofTerm};
+use serde::{Deserialize, Serialize};
 
 // ==================== Configuration ====================
 
 /// Configuration for separation logic verification
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct SepLogicConfig {
     /// Timeout for individual entailment checks (ms)
     pub entailment_timeout_ms: u64,
@@ -3139,12 +3141,23 @@ pub struct SepLogicStats {
 }
 
 impl SeparationLogic {
+    /// The configuration this verifier is running on.
+    ///
+    /// Exists so the manifest wiring is OBSERVABLE (T1233): `new()`
+    /// reads `verum_smt::config::effective()`, and without an accessor
+    /// the only way to check that a `[verify.solver.sep_logic]` value
+    /// arrived is to compare `effective()` against itself, which proves
+    /// nothing about the object the solver actually uses.
+    pub fn config(&self) -> &SepLogicConfig {
+        &self.config
+    }
+
     /// Create a new separation logic verifier
     pub fn new() -> Self {
         Self {
             engine: ProofSearchEngine::new(),
             var_counter: std::cell::Cell::new(0),
-            config: SepLogicConfig::default(),
+            config: crate::config::effective().sep_logic.clone(),
             stats: RefCell::new(SepLogicStats::default()),
         }
     }

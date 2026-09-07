@@ -873,8 +873,8 @@ pub fn split_separation_obligation<'a>(
     // Verify the separation portion via the existing V4 path.
     let pre_sep = pre_partition.combined_separation();
     let post_sep = post_partition.combined_separation();
-    use crate::separation_logic::{EntailmentResult, SepLogicConfig, SepLogicEncoder};
-    let encoder = SepLogicEncoder::new(SepLogicConfig::default());
+    use crate::separation_logic::{EntailmentResult, SepLogicEncoder};
+    let encoder = SepLogicEncoder::new(crate::config::effective().sep_logic.clone());
     let separation_outcome = match encoder.verify_entailment(&pre_sep, &post_sep) {
         Ok(EntailmentResult::Valid { .. }) => SepObligationOutcome::Valid,
         Ok(EntailmentResult::Invalid { counterexample, .. }) => SepObligationOutcome::Invalid {
@@ -966,8 +966,8 @@ pub fn split_separation_obligation_with_descent<'a>(
 
     let pre_sep = pre_partition.combined_separation();
     let post_sep = post_partition.combined_separation();
-    use crate::separation_logic::{EntailmentResult, SepLogicConfig, SepLogicEncoder};
-    let encoder = SepLogicEncoder::new(SepLogicConfig::default());
+    use crate::separation_logic::{EntailmentResult, SepLogicEncoder};
+    let encoder = SepLogicEncoder::new(crate::config::effective().sep_logic.clone());
     let separation_outcome = match encoder.verify_entailment(&pre_sep, &post_sep) {
         Ok(EntailmentResult::Valid { .. }) => SepObligationOutcome::Valid,
         Ok(EntailmentResult::Invalid { counterexample, .. }) => SepObligationOutcome::Invalid {
@@ -1019,9 +1019,9 @@ pub fn verify_separation_obligation_multi(
         None => return SepObligationOutcome::NotSeparationGoal,
     };
 
-    use crate::separation_logic::{EntailmentResult, SepLogicConfig, SepLogicEncoder};
+    use crate::separation_logic::{EntailmentResult, SepLogicEncoder};
 
-    let encoder = SepLogicEncoder::new(SepLogicConfig::default());
+    let encoder = SepLogicEncoder::new(crate::config::effective().sep_logic.clone());
     match encoder.verify_entailment(&pre_assertion, &post_assertion) {
         Ok(EntailmentResult::Valid { .. }) => SepObligationOutcome::Valid,
         Ok(EntailmentResult::Invalid { counterexample, .. }) => SepObligationOutcome::Invalid {
@@ -1084,9 +1084,9 @@ pub fn verify_separation_obligation(
     // entailment.  Use default config — callers wanting custom
     // timeout / unfolding-depth can use the lower-level encoder
     // API directly.
-    use crate::separation_logic::{EntailmentResult, SepLogicConfig, SepLogicEncoder};
+    use crate::separation_logic::{EntailmentResult, SepLogicEncoder};
 
-    let encoder = SepLogicEncoder::new(SepLogicConfig::default());
+    let encoder = SepLogicEncoder::new(crate::config::effective().sep_logic.clone());
     match encoder.verify_entailment(&pre_assertion, &post_assertion) {
         Ok(EntailmentResult::Valid { .. }) => SepObligationOutcome::Valid,
         Ok(EntailmentResult::Invalid { counterexample, .. }) => SepObligationOutcome::Invalid {

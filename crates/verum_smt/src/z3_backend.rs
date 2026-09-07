@@ -38,11 +38,13 @@ use crate::option_to_maybe;
 use crate::tactics::{
     FormulaGoalAnalyzer, TacticCombinator, auto_select_tactic_cached_for_goal, global_tactic_cache,
 };
+use serde::{Deserialize, Serialize};
 
 // ==================== Core Types ====================
 
 /// Advanced Z3 configuration with full feature support
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct Z3Config {
     /// Enable proof generation for formal verification
     pub enable_proofs: bool,
@@ -1656,7 +1658,7 @@ impl Default for ParallelSolver {
 /// - **NonLinear**: NLSAT algorithm for polynomial arithmetic
 /// - **Quantifiers**: Pattern-based instantiation for quantified formulas
 /// - **ModelBased**: Model-guided search (MBQI)
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub enum SolvingStrategy {
     /// General-purpose SAT/SMT combination solver
     Default,

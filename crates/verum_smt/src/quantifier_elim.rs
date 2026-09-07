@@ -57,6 +57,7 @@ use z3::{
 };
 
 use verum_common::{List, Map, Maybe, Set, Text, option_to_maybe};
+use serde::{Deserialize, Serialize};
 
 // ==================== Variable Extraction Utilities ====================
 
@@ -807,7 +808,8 @@ fn is_smt_keyword(token: &str) -> bool {
 // ==================== Core Types ====================
 
 /// Quantifier eliminator configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct QEConfig {
     /// Timeout for QE operations (default: 5 seconds)
     pub timeout_ms: u64,
@@ -984,7 +986,7 @@ pub struct QuantifierEliminator {
 impl QuantifierEliminator {
     /// Create a new quantifier eliminator
     pub fn new() -> Self {
-        Self::with_config(QEConfig::default())
+        Self::with_config(crate::config::effective().qe.clone())
     }
 
     /// Create with custom configuration

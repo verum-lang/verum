@@ -69,11 +69,13 @@ use crate::option_to_maybe;
 use crate::unsat_core::{
     AssertionCategory, TrackedAssertion, UnsatCore, UnsatCoreConfig, UnsatCoreExtractor,
 };
+use serde::{Deserialize, Serialize};
 
 // ==================== Configuration ====================
 
 /// Configuration for static verification
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct StaticVerificationConfig {
     /// Global timeout for verification queries (ms)
     pub timeout_ms: u64,
@@ -515,7 +517,7 @@ impl StaticVerifier {
 
     /// Create with default configuration
     pub fn default_config() -> Self {
-        Self::new(StaticVerificationConfig::default())
+        Self::new(crate::config::effective().static_verification.clone())
     }
 
     /// Push a new verification context

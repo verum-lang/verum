@@ -32,6 +32,7 @@ use crate::verify::VerificationError;
 use verum_ast::{ContextList, Expr, ExprKind, Type, TypeKind};
 use verum_common::ToText;
 use verum_common::{Heap, List, Map, Maybe, Set, Text};
+use serde::{Deserialize, Serialize};
 
 // ==================== Type Registry ====================
 
@@ -1366,7 +1367,8 @@ pub fn process_type(input_type: Type, output_type: Type) -> CoinductiveType {
 // ==================== Enhanced Bisimulation with Bounded Unfolding ====================
 
 /// Configuration for bisimulation checking
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct BisimulationConfig {
     /// Maximum unfolding depth for recursive destructors.
     /// Reached at line 1513 in `check_bounded` — every recursion
@@ -1397,7 +1399,7 @@ impl Default for BisimulationConfig {
 }
 
 /// Strategy for handling infinite structures in bisimulation
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InfiniteStrategy {
     /// Unfold up to a fixed depth and assume bisimilarity beyond
     BoundedUnfolding,

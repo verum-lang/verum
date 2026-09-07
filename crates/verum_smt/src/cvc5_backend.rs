@@ -57,6 +57,7 @@ use std::ffi::{CStr, CString};
 use std::time::Instant;
 
 use verum_common::{List, Map, Maybe, Text};
+use serde::{Deserialize, Serialize};
 
 // ==================== FFI Bindings ====================
 // These bindings are only active when cvc5-ffi feature is enabled.
@@ -213,7 +214,8 @@ mod cvc5_sys {
 // ==================== Core Configuration ====================
 
 /// CVC5 configuration with full feature support
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct Cvc5Config {
     /// SMT-LIB logic (QF_LIA, QF_LRA, QF_BV, QF_NRA, etc.)
     pub logic: SmtLogic,
@@ -342,7 +344,7 @@ impl QuantifierMode {
 }
 
 /// Quantifier instantiation modes
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QuantifierMode {
     /// Automatic selection
     Auto,

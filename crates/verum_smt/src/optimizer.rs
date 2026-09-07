@@ -22,6 +22,7 @@ use num_traits::ToPrimitive;
 
 use verum_common::Maybe;
 use verum_common::{List, Map, Text};
+use serde::{Deserialize, Serialize};
 
 // ==================== Core Types ====================
 
@@ -92,7 +93,8 @@ impl Weight {
 }
 
 /// Optimization problem configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct OptimizerConfig {
     /// Enable incremental solving
     pub incremental: bool,
@@ -119,7 +121,7 @@ impl Default for OptimizerConfig {
 }
 
 /// Optimization method for multiple objectives
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OptimizationMethod {
     /// Lexicographic (prioritized) optimization
     Lexicographic,

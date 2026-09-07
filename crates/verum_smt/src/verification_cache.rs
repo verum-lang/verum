@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use verum_ast::{Expr, Type};
 use verum_common::ToText;
 use verum_common::{List, Map, Maybe, Text};
+use serde::{Deserialize, Serialize};
 
 // ==================== Cache Key ====================
 
@@ -585,7 +586,8 @@ impl CacheStats {
 // ==================== Configuration ====================
 
 /// Configuration for verification cache.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct CacheConfig {
     /// Maximum number of cached entries (default: 2,000)
     pub max_size: usize,
@@ -876,7 +878,14 @@ fn parse_z3_rational(s: &str) -> Option<f64> {
 // ==================== Distributed Cache ====================
 
 /// Distributed cache configuration for S3 backend.
-#[derive(Debug, Clone)]
+// NOT `#[serde(default)]`: this section has no meaningful default —
+// `s3_url` and `cache_dir` are addresses, and inventing an empty one
+// would be a NEW INPUT rather than a fallback. The section is absent by
+// default (`Maybe::None` on `CacheConfig.distributed_cache`), so a
+// partial table has nothing to fall back TO. Write it whole or omit it;
+// `deny_unknown_fields` still catches a misspelled key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DistributedCacheConfig {
     /// S3 bucket URL (e.g., "s3://my-bucket/verum-cache")
     pub s3_url: Text,
@@ -889,7 +898,7 @@ pub struct DistributedCacheConfig {
 }
 
 /// Trust level for distributed cache entries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TrustLevel {
     /// Trust all cache entries (no verification)
     All,

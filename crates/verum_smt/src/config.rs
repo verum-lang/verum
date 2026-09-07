@@ -16,7 +16,28 @@
 //! 3. Environment variables (override file)
 //! 4. Programmatic API (override all)
 //!
-//! ## Example Configuration File (TOML)
+//! ## Two TOML surfaces, and which one a project uses
+//!
+//! `SmtConfig` below is loaded by [`SmtConfig::from_toml_file`], which
+//! reads a STANDALONE `[smt]` file. That entry point is used by the
+//! `backend_switching` example and by tests; it is NOT what a project
+//! manifest goes through.
+//!
+//! A project's `Verum.toml` reaches the solver through
+//! [`SolverConfig`] at the bottom of this file, under
+//! `[verify.solver.*]` — `[verify.solver.qe]`,
+//! `[verify.solver.sep_logic]`, `[verify.solver.z3]` and the rest.
+//! `verum_cli` deserializes it as `VerifyConfig.solver` and hands it
+//! to [`install`].
+//!
+//! Both spellings are live; they are not alternatives for the same
+//! file. A key written under `[smt.qe]` in a `Verum.toml` reaches
+//! nothing, because nothing loads `Verum.toml` through
+//! `from_toml_file`. This module used to document only the `[smt]`
+//! form, which is how forty-seven documented keys came to be set by
+//! readers and read by no one (T1233).
+//!
+//! ## Example standalone `[smt]` file (TOML)
 //!
 //! ```toml
 //! [smt]
@@ -832,4 +853,173 @@ mod to_switcher_config_tests {
         }
         assert_eq!(switcher.timeout_ms, 12345);
     }
+}
+
+// ============================================================================
+// Manifest surface for `[verify.solver.*]`  (T1233)
+// ============================================================================
+
+/// Every `[verify.solver.<sub>]` table a project manifest can set.
+///
+/// Before this existed the sub-tables were documented — 47 keys across
+/// ten sections in the reference and the solver-tuning manual — and
+/// none of them was read.  `VerifyConfig` in `verum_cli::config` had no
+/// `solver` field, so serde dropped `[verify.solver]` and everything
+/// under it without a warning: a reader who set
+/// `entailment_timeout_ms = 5_000` got silence.
+///
+/// The fields are the SAME structs the solver already runs on, held by
+/// reference to their defining modules rather than re-declared here.
+/// Re-declaring was the tempting shortcut and is the one this tree has
+/// already been burned by: `Cvc5Config` and `Z3Config` each exist twice
+/// (a manifest-schema copy and an impl-side copy), and a first-hit
+/// lookup for "does this derive Deserialize?" found the wrong one and
+/// answered no.  One definition per config, one source of truth.
+///
+/// Every field is `#[serde(default)]`, and so is every field INSIDE
+/// each config, so a manifest may set one key of one sub-table and
+/// leave the other forty-six alone.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SolverConfig {
+    /// `[verify.solver] backend` — which SMT backend to prefer.
+    ///
+    /// A scalar rather than a sub-table, and it must be declared here
+    /// or `deny_unknown_fields` would reject the very line the
+    /// reference documents at the top of the `[verify.solver]` block.
+    pub backend: crate::backend_switcher::BackendChoice,
+    /// `[verify.solver.bisimulation]` — coinductive equivalence.
+    pub bisimulation: crate::coinductive::BisimulationConfig,
+    /// `[verify.solver.interpolation]` — Craig interpolation.
+    pub interpolation: crate::interpolation::InterpolationConfig,
+    /// `[verify.solver.optimizer]` — MaxSAT / Pareto.
+    pub optimizer: crate::optimizer::OptimizerConfig,
+    /// `[verify.solver.parallel]` — portfolio + cube-and-conquer.
+    pub parallel: crate::parallel::ParallelConfig,
+    /// `[verify.solver.qe]` — quantifier elimination.
+    pub qe: crate::quantifier_elim::QEConfig,
+    /// `[verify.solver.sep_logic]` — separation logic.
+    pub sep_logic: crate::separation_logic::SepLogicConfig,
+    /// `[verify.solver.unsat_core]` — minimal-core extraction.
+    pub unsat_core: crate::unsat_core::UnsatCoreConfig,
+    /// `[verify.solver.static]` — bounds / safety elimination.
+    #[serde(rename = "static")]
+    pub static_verification: crate::static_verification::StaticVerificationConfig,
+    /// `[verify.solver.cache]` — the verification-result cache.
+    ///
+    /// The audit that opened T1233 recorded this section as possibly
+    /// fine because "a CacheConfig with Deserialize exists". It does —
+    /// in `verum_codegen::mlir::jit::incremental`, a JIT cache in a
+    /// different crate with nothing to do with SMT results. The SMT one
+    /// (`verum_smt::verification_cache`) carried `#[derive(Debug,
+    /// Clone)]` like the other eight. A namesake is not a match.
+    pub cache: crate::verification_cache::CacheConfig,
+    /// `[verify.solver.z3]` — Z3 context tuning.
+    ///
+    /// This is the IMPL-side `Z3Config` (`crate::z3_backend`), not the
+    /// eight-field `[smt.z3]` schema copy declared above in this file.
+    /// Two reasons, and the second is the load-bearing one: the impl
+    /// copy is what a solver actually reads, and taking it straight
+    /// from the manifest removes the schema-to-impl translation step —
+    /// the step whose dropped fields are exactly what the pin tests in
+    /// `to_switcher_config_tests` were written to catch.
+    pub z3: crate::z3_backend::Z3Config,
+    /// `[verify.solver.cvc5]` — cvc5 adapter tuning (impl-side
+    /// `Cvc5Config`, for the same reason as `z3`).
+    pub cvc5: crate::cvc5_backend::Cvc5Config,
+}
+
+impl SolverConfig {
+    /// True when nothing has been set — every sub-table still equals its
+    /// `Default`.
+    ///
+    /// The caller needs this to tell "the manifest said nothing" from
+    /// "the manifest deliberately asked for the defaults", because only
+    /// the second should log that solver configuration is in force.
+    /// Compared through the serialized form so a new field cannot be
+    /// forgotten here: adding one to `SolverConfig` extends the
+    /// comparison automatically.
+    pub fn is_default(&self) -> bool {
+        match (
+            serde_json::to_value(self),
+            serde_json::to_value(Self::default()),
+        ) {
+            (Ok(a), Ok(b)) => a == b,
+            // Serialization cannot fail for these plain-data structs, but
+            // answering "it is the default" on an error would silence the
+            // log the caller wants.  Answer the other way.
+            _ => false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Process-wide installation of the manifest's solver settings  (T1233)
+// ---------------------------------------------------------------------------
+
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static INSTALLED: OnceLock<SolverConfig> = OnceLock::new();
+static FALLBACK: OnceLock<SolverConfig> = OnceLock::new();
+static WAS_READ: AtomicBool = AtomicBool::new(false);
+
+/// Error returned by [`install`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallError {
+    /// `install` was called twice.
+    AlreadyInstalled,
+    /// Some component already read [`effective`], so it is holding the
+    /// defaults; installing now would make two components disagree.
+    AlreadyRead,
+}
+
+impl std::fmt::Display for InstallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AlreadyInstalled => f.write_str("solver configuration was already installed"),
+            Self::AlreadyRead => f.write_str(
+                "solver configuration was already read by a component; install it earlier",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for InstallError {}
+
+/// Install the manifest's `[verify.solver.*]` for this process.
+///
+/// Call once, before any verification work starts. `verum_cli` does
+/// this from the `verify` and `build` commands, right after the
+/// manifest is loaded.
+///
+/// Installing after something has already called [`effective`] is
+/// refused rather than accepted: a late install leaves the early
+/// reader on the defaults and the late one on the manifest, which is
+/// the silent-disagreement failure this whole task exists to remove.
+pub fn install(cfg: SolverConfig) -> Result<(), InstallError> {
+    if WAS_READ.load(Ordering::Acquire) {
+        return Err(InstallError::AlreadyRead);
+    }
+    INSTALLED.set(cfg).map_err(|_| InstallError::AlreadyInstalled)
+}
+
+/// The solver configuration in force: what the manifest installed, or
+/// each struct's `Default` when nothing was installed.
+///
+/// `Default::default()` is deliberately NOT rerouted through this. A
+/// test that writes `QEConfig::default()` means the literal defaults,
+/// and should keep meaning that whatever a manifest elsewhere says.
+/// The `new()` constructors — the ones whose contract is "give me the
+/// configured object" — are what consult this.
+pub fn effective() -> &'static SolverConfig {
+    WAS_READ.store(true, Ordering::Release);
+    INSTALLED
+        .get()
+        .unwrap_or_else(|| FALLBACK.get_or_init(SolverConfig::default))
+}
+
+/// True when [`install`] has run — i.e. a manifest was consulted.
+pub fn is_installed() -> bool {
+    INSTALLED.get().is_some()
 }

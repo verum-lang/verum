@@ -33,6 +33,7 @@
 
 use std::fmt::Debug;
 use verum_common::{List, Map, Maybe, Result, Text};
+use serde::{Deserialize, Serialize};
 
 // ==================== Core Trait ====================
 
@@ -382,7 +383,7 @@ pub trait SmtBackend: Send + Sync + Debug {
 // ==================== Supporting Types ====================
 
 /// SMT-LIB logic specification
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SmtLogic {
     /// Quantifier-free linear integer arithmetic
     QF_LIA,

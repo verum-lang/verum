@@ -16,6 +16,7 @@ use z3::ast::Ast;
 use z3::{SatResult, Solver, ast::Bool};
 
 use verum_common::{List, Map, Maybe, Set, Text};
+use serde::{Deserialize, Serialize};
 
 // ==================== Core Types ====================
 
@@ -123,7 +124,8 @@ impl UnsatCore {
 }
 
 /// Configuration for unsat core extraction
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct UnsatCoreConfig {
     /// Enable core minimization (more expensive)
     pub minimize: bool,
