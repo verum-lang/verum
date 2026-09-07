@@ -225,7 +225,6 @@ pub struct FunctionContext<'a, 'ctx> {
     exception_handlers: Vec<ExceptionHandler<'ctx>>,
 
     /// Pointer to the current exception value (allocated on first use).
-    exception_value_slot: Option<PointerValue<'ctx>>,
 
     /// When true, registers use alloca-based storage (for multi-block functions).
     /// This ensures values persist across basic block boundaries.
@@ -835,7 +834,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             function_name: function_name.into(),
             cbgr_elimination_stats: CbgrEliminationStats::default(),
             exception_handlers: Vec::new(),
-            exception_value_slot: None,
             alloca_mode: false,
             alloca_registers: HashMap::new(),
             alloca_register_types: HashMap::new(),
@@ -947,7 +945,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             function_name: function_name.into(),
             cbgr_elimination_stats: CbgrEliminationStats::default(),
             exception_handlers: Vec::new(),
-            exception_value_slot: None,
             alloca_mode: false,
             alloca_registers: HashMap::new(),
             alloca_register_types: HashMap::new(),
@@ -3259,99 +3256,23 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         !self.exception_handlers.is_empty()
     }
 
-    /// Get or create the exception value slot.
-    ///
-    /// This allocates a stack slot to store the current exception value.
-    /// The slot is reused across all exception handlers in the function.
-    pub fn get_or_create_exception_slot(&mut self) -> Result<PointerValue<'ctx>> {
-        if let Some(slot) = self.exception_value_slot {
-            return Ok(slot);
-        }
-
-        // Allocate in entry block for proper dominance
-        let entry = self
-            .entry_block()
-            .or_internal("No entry block for exception slot")?;
-
-        // Save current position
-        let current_block = self.builder.get_insert_block();
-
-        // Position at end of entry block (before terminator if any)
-        if let Some(terminator) = entry.get_terminator() {
-            self.builder.position_before(&terminator);
-        } else {
-            self.builder.position_at_end(entry);
-        }
-
-        // Allocate i64 slot for exception value (alloca mode uses i64 for all values)
-        let i64_type = self.types.i64_type();
-        let slot = self
-            .builder
-            .build_alloca(i64_type, "exception_value")
-            .or_llvm_err()?;
-
-        // Initialize to zero
-        let zero = i64_type.const_zero();
-        self.builder
-            .build_store(slot, zero)
-            .or_llvm_err()?;
-
-        // Restore position
-        if let Some(block) = current_block {
-            self.builder.position_at_end(block);
-        }
-
-        self.exception_value_slot = Some(slot);
-        Ok(slot)
-    }
-
-    /// Store the exception value.
-    pub fn store_exception_value(&mut self, value: BasicValueEnum<'ctx>) -> Result<()> {
-        let slot = self.get_or_create_exception_slot()?;
-        // Coerce value to i64 if needed (exception slot is always i64)
-        let i64_type = self.types.i64_type();
-        let store_val = if value.is_int_value() {
-            let iv = value.into_int_value();
-            if iv.get_type().get_bit_width() != 64 {
-                self.builder
-                    .build_int_z_extend(iv, i64_type, "exc_ext")
-                    .or_llvm_err()?
-                    .into()
-            } else {
-                value
-            }
-        } else if value.is_pointer_value() {
-            self.builder
-                .build_ptr_to_int(value.into_pointer_value(), i64_type, "exc_ptr2int")
-                .or_llvm_err()?
-                .into()
-        } else {
-            value
-        };
-        self.builder
-            .build_store(slot, store_val)
-            .or_llvm_err()?;
-        Ok(())
-    }
-
-    /// Load the current exception value.
-    pub fn load_exception_value(&mut self) -> Result<BasicValueEnum<'ctx>> {
-        let slot = self.get_or_create_exception_slot()?;
-        let i64_type = self.types.i64_type();
-        self.builder
-            .build_load(i64_type, slot, "exception_load")
-            .or_llvm_err()
-    }
-
-    /// Clear the current exception value (set to zero).
-    pub fn clear_exception_value(&mut self) -> Result<()> {
-        let slot = self.get_or_create_exception_slot()?;
-        let zero = self.types.i64_type().const_zero();
-        self.builder
-            .build_store(slot, zero)
-            .or_llvm_err()?;
-        Ok(())
-    }
+    // THE EXCEPTION-VALUE SLOT FAMILY WAS DELETED HERE (T1221).
+    //
+    // `get_or_create_exception_slot`, `store_exception_value`,
+    // `load_exception_value` and `clear_exception_value` — plus the
+    // `exception_value_slot` field — had ZERO callers between them: the
+    // family was reachable only from itself.
+    //
+    // It is a superseded design, not a gap. Tier 1 carries an exception
+    // through the RUNTIME, not through an alloca: `lower_throw` calls
+    // `verum_exception_throw`, `lower_get_exception` calls
+    // `verum_exception_get`, and the handler pop calls
+    // `verum_exception_pop`. A stack slot in the lowering context has no
+    // part in that and never did.
+    //
+    // Kept as a comment rather than a silent deletion because the next
+    // reader searching for "where does the exception value live" should
+    // find the answer here instead of the shape of a second mechanism.
 }
 
 /// Statistics for function lowering.
