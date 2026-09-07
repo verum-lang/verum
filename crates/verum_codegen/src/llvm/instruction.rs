@@ -36405,10 +36405,33 @@ fn build_runtime_type_switch<'ctx>(
     }
 
     // RTS-SCALAR-GUARD: implausible-pointer receivers cannot be
-    // dispatched either — same abort, not a fabricated zero.
+    // dispatched either — abort, not a fabricated zero.
+    //
+    // ITS OWN MESSAGE, though. The three abort paths out of this switch
+    // shared one string, so "no runtime candidate for method 'next'"
+    // could mean any of three different things:
+    //
+    //   * the receiver is not a plausible pointer at all (below the
+    //     2^32 floor or unaligned) — the value is a scalar or a
+    //     NaN-boxed immediate, and NOTHING was ever read from memory;
+    //   * it IS a pointer and the first word it holds matches no arm;
+    //   * it matches no arm and no deref-wrapper either.
+    //
+    // The first is a question about where the VALUE came from; the
+    // other two are about the dispatch table. Measured on T1214: a
+    // `MappedIter` receiver aborts here while the switch demonstrably
+    // CARRIES an arm for `MappedIter` (`i64 1033, label %rts_1033`,
+    // among 347), so which of the three fired decides whether the next
+    // question is about tags or about arms — and one shared string made
+    // that unanswerable from the output.
+    let guard_msg = format!(
+        "AOT dispatch fault: receiver for method '{}' is not a dispatchable          pointer (in `{}`) — its value is below the object floor or          unaligned, so no type id could be read at all. The dispatch table          is not at fault: this is a value that never carried an object          header. Refusing to fabricate a result.",
+        method_name,
+        ctx.function_name().as_str()
+    );
     ctx.builder().position_at_end(guard_default_bb);
     if let Some(l) = dbg_loc { ctx.builder().set_current_debug_location(l); }
-    emit_runtime_abort(ctx, &abort_msg, "rts_unresolved_msg")?;
+    emit_runtime_abort(ctx, &guard_msg, "rts_scalar_guard_msg")?;
     ctx.builder().build_unreachable().or_llvm_err()?;
 
     for (bb, fname) in &case_blocks {
