@@ -414,8 +414,23 @@ impl ModuleMerger {
                 .join("_");
             let spec_name = format!("{}$mono${}", generic_name, mangle);
             let name_id = output.intern_string(&spec_name);
+            // The name filter answers only about names someone already
+            // suspected — `poll_sync` and `ready`. Asking "was
+            // `Range.collect`'s specialisation appended at all, and under
+            // what name?" therefore cost a source edit and a build, and
+            // the question mattered: the module holds
+            // `MappedIter.collect$mono$…` and no `Range.collect$mono$…`
+            // while BOTH are seeded and BOTH are routed, so whether the
+            // second is ever appended is the whole remaining question of
+            // T1214.
+            //
+            // `VERUM_TRACE_MONO_ALL=1` lifts it, the same lever and the
+            // same reason as the `[mono-record]` filter in
+            // `codegen/expressions.rs`. Diagnostic only.
             if std::env::var_os("VERUM_TRACE_MONO").is_some()
-                && (spec_name.contains("poll_sync") || spec_name.contains("ready"))
+                && (std::env::var_os("VERUM_TRACE_MONO_ALL").is_some()
+                    || spec_name.contains("poll_sync")
+                    || spec_name.contains("ready"))
             {
                 eprintln!(
                     "[mono-spec-name] specialized fn id={} name='{}'",
