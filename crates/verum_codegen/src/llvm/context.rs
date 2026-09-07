@@ -1520,6 +1520,18 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.reg_types.is_pass_through_ref_list(reg)
     }
 
+    /// T1260 — the register holds a `Maybe`/variant whose payload is a
+    /// REFERENCE, so the payload word is an ADDRESS. Set at the call that
+    /// produced it; read by `GetVariantData`, which otherwise cannot tell
+    /// a reference payload from a value one.
+    pub fn mark_maybe_ref_payload(&mut self, reg: u16) {
+        self.reg_types.mark_maybe_ref_payload(reg);
+    }
+
+    pub fn is_maybe_ref_payload(&self, reg: u16) -> bool {
+        self.reg_types.is_maybe_ref_payload(reg)
+    }
+
     /// Mark a register as the interior reference result of `&list[i]`
     /// (RefListElement). Used by `lower_get_field` to insert an extra
     /// slot → value load before header-offset field access.

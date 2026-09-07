@@ -1,0 +1,74 @@
+// @test: differential
+// @level: L0
+// @tier: 0,1
+// @tags: vbc, codegen, iterator, reference, variant, deref, regression
+// @timeout: 120000
+// @expected-exit: 0
+// @expected-stdout-begin
+// raw=1
+// deref=1
+// byval=1
+// byval=2
+// byval=3
+// byref=1
+// byref=2
+// byref=3
+// @expected-stdout-end
+//
+// T1260. `ListIter<T>` declares `Item = &T`, so `xs.iter().next()` yields
+// `Maybe<&Int>` and its payload word is the ELEMENT'S ADDRESS. Tier 0
+// formats a reference as its pointee; Tier 1 has to LOAD, and did not:
+//
+//     tier 0    raw=1            deref=1
+//     tier 1    raw=4421320704   deref=4421320704
+//
+// Note the second column. The explicit `*v` printed the SAME address,
+// byte for byte — the dereference was not merely absent, it was INERT,
+// because `GetVariantData` marks every extraction pass-through for
+// `Deref` on the ground that "extracted variant fields ARE the values
+// themselves". True of `Maybe<Int>`; false of `Maybe<&Int>`.
+//
+// FOUR CELLS, not one, and each answers a different question:
+//
+//   raw    the reference used as a value, with no `*` — the everyday
+//          shape, and the one a reader would never suspect;
+//   deref  the same through an explicit `*`, which pins the inertness
+//          rather than the absence;
+//   byval  `for x in xs` — `IntoIterator for List` has `Item = T`, so
+//          this leg never had the defect and must stay green;
+//   byref  `for y in xs.iter()` — `Item = &T`, the SAME fact as `raw`,
+//          and green throughout, because `IterNext` already peels the
+//          slot for custom iterators. That cell is the control that
+//          says the fix belongs at the OTHER producer and not in the
+//          loop lowering.
+//
+// The `byref` cell also refutes a plausible story: it stays green with
+// `VERUM_NO_ITER_EAGER_WALK=1`, so the eager-walk band-aid is not what
+// was hiding this.
+//
+// `&mut` is deliberately absent from this spec: a `Maybe<&mut T>`
+// payload must KEEP its address so a write-through lands, and a fix
+// that peeled both would pass here while corrupting `iter_mut`.
+
+mount core.prelude.*;
+
+fn main() {
+    let xs = [1, 2, 3];
+
+    match xs.iter().next() {
+        Maybe.Some(v) => {
+            print(f"raw={v}");
+            let d = *v;
+            print(f"deref={d}");
+        },
+        Maybe.None => print("raw=none"),
+    }
+
+    for x in xs {
+        print(f"byval={x}");
+    }
+
+    for y in xs.iter() {
+        print(f"byref={y}");
+    }
+}

@@ -15,7 +15,7 @@ happened to be.
 
 ---
 
-## 0. TL;DR — the four rules
+## 0. TL;DR — the five rules
 
 1. **A reference is produced by one of three opcodes, and they do not
    agree about what the register holds.** Two yield an ADDRESS; one
@@ -31,6 +31,12 @@ happened to be.
    this are allowed to be incomplete and are not allowed to be wrong; an
    unreadable instruction ends a walk with the answer that reproduces the
    behaviour the compiler had before the rule existed.
+5. **A reference can also arrive WRAPPED.** `Maybe<&T>` crosses the
+   boundary as a variant payload: no producer opcode runs in the caller,
+   and the extraction marks the register "already a value" — so the
+   caller owes a load *and* has been told it owes nothing. This one is
+   decidable at the call site, because here the descriptor does keep the
+   `&`.
 
 ---
 
@@ -76,6 +82,61 @@ performs the load itself and marks its register `interior_list_ref`, so
 the `Deref` arm passes the value through instead of loading a second
 time (`DEREF-INTERIOR-1`). That is correct *within* a function and it is
 what makes the boundary dangerous.
+
+### A fourth path: the reference that arrives WRAPPED
+
+The three producers above answer "what did this opcode put in my
+register". None of them covers a reference that crosses the boundary
+*inside* a value:
+
+    fn next(&mut self) -> Maybe<&T> { … Maybe.Some(item) }
+
+No producer opcode runs in the caller at all. `CallM` returns a `Maybe`,
+`GetVariantData` extracts field 0, and the register holds the payload
+word — which is the slot ADDRESS, because that is what the callee
+wrapped. Measured (T1260) on `[1, 2, 3]`:
+
+```text
+match xs.iter().next() {
+    Maybe.Some(v) => { print(f"raw={v}"); let d = *v; print(f"deref={d}"); },
+    Maybe.None => print("raw=none"),
+}
+
+           raw            deref
+tier 0     1              1
+tier 1     4421320704     4421320704
+```
+
+Read the second column. The explicit `*` was INERT, not merely absent:
+`GetVariantData` marks every extraction `pass_through_ref` on the stated
+ground that "extracted variant fields ARE the values themselves" — true
+of `Maybe<Int>`, false of `Maybe<&Int>` — and that mark makes the `Deref`
+arm identity. So the wrapped case breaks rule 3 twice over: the caller
+owes a load, and has been told it owes nothing.
+
+This is rule 2 read from the other side. The descriptor DOES carry the
+`&` here — `ListIter.next`'s return-type name dumps as `Maybe<&T>` — so
+the call site can decide without the callee's body. What the name cannot
+give is the associated-type projection: `Maybe<Self.Item>` renders as
+`Maybe<T0>` and the `&` is gone, so the fact is taken from the receiver
+type's `Item` binding instead. Both sources are consulted, and either
+suffices.
+
+Scope, stated because guessing here is expensive:
+
+* **`Maybe<&…>` only.** `Result<&T, E>` carries a payload at field 0 in
+  BOTH variants, so a mark on the whole result would peel an `Err`
+  payload that is not a reference. That needs the resolved tag, not the
+  type name.
+* **Immutable only.** `Maybe<&mut T>` must keep its address, or the
+  consumer's write-through lands somewhere arbitrary.
+
+Regression guard:
+`vcs/specs/L0-critical/vbc/ref-payload-from-variant-loads-its-element.vr`.
+Its four cells separate the load from the mark on purpose: a
+`List<Point>` element now reaches `p.x` (which used to PANIC, not
+misprint), while a `List<Text>` element still prints as a number — the
+load is fixed, the register's text mark is a different row.
 
 ---
 
@@ -273,5 +334,5 @@ Regression guard:
   `CallM.method_id` inside a body, which a call site gets for free and a
   body walk does not.
 
-Both are omissions of coverage, not of correctness: in each case the
+These are omissions of coverage, not of correctness: in each case the
 compiler does what it did before this contract existed.

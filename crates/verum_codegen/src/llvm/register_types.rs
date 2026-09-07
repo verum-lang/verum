@@ -574,6 +574,12 @@ pub struct RegisterTypeMap {
     pass_through_ref: HashSet<u16>,
     /// Orthogonal flags: pass-through ref list (List whose elements are pass-through refs).
     pass_through_ref_list: HashSet<u16>,
+    /// The register holds a `Maybe`/variant whose payload is a REFERENCE
+    /// (`Maybe<&T>`), so the payload word is an ADDRESS rather than the
+    /// value. `GetVariantData` peels it; without the flag the extraction
+    /// keeps the address and the pass-through mark makes a later `*v`
+    /// identity on it (T1260).
+    maybe_ref_payload: HashSet<u16>,
     /// Interior reference produced by `&list[i]` (RefListElement).
     /// The register holds a pointer to a List *slot* whose content is a
     /// NaN-boxed Value — typically an object pointer for struct elements.
@@ -600,6 +606,7 @@ impl RegisterTypeMap {
             types: HashMap::new(),
             pass_through_ref: HashSet::new(),
             pass_through_ref_list: HashSet::new(),
+            maybe_ref_payload: HashSet::new(),
             interior_list_ref: HashSet::new(),
             prescan_float: HashSet::new(),
             prescan_text: HashSet::new(),
@@ -614,6 +621,7 @@ impl RegisterTypeMap {
         self.types.remove(&reg);
         self.pass_through_ref.remove(&reg);
         self.pass_through_ref_list.remove(&reg);
+        self.maybe_ref_payload.remove(&reg);
         self.interior_list_ref.remove(&reg);
     }
 
@@ -855,6 +863,16 @@ impl RegisterTypeMap {
 
     pub fn is_pass_through_ref_list(&self, reg: u16) -> bool {
         self.pass_through_ref_list.contains(&reg)
+    }
+
+    /// Mark a register whose `Maybe`/variant payload is a REFERENCE
+    /// (`Maybe<&T>` — the payload word is the pointee's address).
+    pub fn mark_maybe_ref_payload(&mut self, reg: u16) {
+        self.maybe_ref_payload.insert(reg);
+    }
+
+    pub fn is_maybe_ref_payload(&self, reg: u16) -> bool {
+        self.maybe_ref_payload.contains(&reg)
     }
 
     /// Mark a register as an interior reference into a List<T> slot

@@ -3995,7 +3995,16 @@ pub fn lower_instruction<'ctx>(
             receiver,
             method_id,
             args,
-        } => lower_call_method(ctx, *dst, *receiver, *method_id, args),
+        } => {
+            lower_call_method(ctx, *dst, *receiver, *method_id, args)?;
+            // **T1260** — the mark goes on AFTER the call lowering, because
+            // `set_register(dst)` inside it clears every per-register fact
+            // (T1194's lesson, arriving here for the third time).
+            if callee_yields_ref_payload(ctx, *receiver, *method_id) {
+                ctx.mark_maybe_ref_payload(dst.0);
+            }
+            Ok(())
+        }
 
         Instruction::CallClosure { dst, closure, args } => {
             let closure_val = ctx.get_register(closure.0)?;
@@ -5412,9 +5421,23 @@ pub fn lower_instruction<'ctx>(
             // row was about a mark written BEFORE a store that erases it;
             // this is a mark READ after one.
             let pre_store_tag = ctx.variant_match_tag_by_value(variant.0);
+            // **T1260** — read BEFORE anything stores into `dst`, which may be
+            // the same register as `variant`.
+            let payload_is_ref = ctx.is_maybe_ref_payload(variant.0);
             let variant_ptr = as_ptr(ctx, ctx.get_register(variant.0)?, "variant_ptr")?;
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             let value = runtime.lower_get_variant_data(ctx.builder(), variant_ptr, *field)?;
+            // **T1260** — a `Maybe<&T>` payload word is the pointee's ADDRESS.
+            // Peel it HERE, at the producer, which is the convention the
+            // `IterNext` arm already follows (#30 ITER-REF-PAYLOAD-DEREF-1):
+            // afterwards `dst` holds the VALUE, so the pass-through mark at
+            // the bottom of this arm stays TRUE instead of freezing an
+            // address, and `f"{v}"` matches Tier 0 without a `*`.
+            let value = if payload_is_ref {
+                load_ref_payload_slot(ctx, value, "refpay_val")?
+            } else {
+                value
+            };
             // If this field was stored as float, bitcast i64 back to f64
             if ctx.is_variant_float_field(variant.0, *field) {
                 let f64_val = ctx
@@ -5914,6 +5937,48 @@ pub fn lower_instruction<'ctx>(
 
         Instruction::Deref { dst, ref_reg } => {
             let val = ctx.get_register(ref_reg.0)?;
+
+            // Diagnostic (VERUM_TRACE_DEREF=<fn-name substring>): name the
+            // exit this arm will take. Six exits leave through this arm and
+            // five of them are value-IDENTITY, so "the deref did nothing" is
+            // not one symptom but five — only the predicate set says which.
+            // Measured need (T1259): `match xs.iter().next() { Maybe.Some(v)
+            // => print(f"{*v}") }` printed the SLOT ADDRESS at Tier 1 while
+            // Tier 0 printed the element, and `*v` was inert — the VBC does
+            // carry a real `Deref` (main #22 in the dump), so the identity is
+            // chosen HERE and the question is by which predicate.
+            if let Some(want) = std::env::var_os("VERUM_TRACE_DEREF") {
+                let fname = ctx
+                    .builder()
+                    .get_insert_block()
+                    .and_then(|b| b.get_parent())
+                    .map(|f| f.get_name().to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let want = want.to_string_lossy().into_owned();
+                if want.is_empty() || want == "1" || fname.contains(&want) {
+                    eprintln!(
+                        "[deref] {fname}: r{} -> r{} shared={} passthru={} genptr={} inline={} struct={} objty={:?} list={} text={} val={}",
+                        ref_reg.0,
+                        dst.0,
+                        ctx.get_obj_register_type(ref_reg.0)
+                            .is_some_and(|t| is_shared_wrapper(t)),
+                        ctx.is_pass_through_ref(ref_reg.0),
+                        ctx.is_generic_ptr_register(ref_reg.0),
+                        ctx.is_inline_struct_register(ref_reg.0),
+                        ctx.is_struct_register(ref_reg.0),
+                        ctx.get_obj_register_type(ref_reg.0),
+                        ctx.is_list_register(ref_reg.0),
+                        ctx.is_text_register(ref_reg.0),
+                        if val.is_struct_value() {
+                            "struct"
+                        } else if val.is_pointer_value() {
+                            "ptr"
+                        } else {
+                            "int"
+                        },
+                    );
+                }
+            }
 
             // **AOT-SHARED-CARRIER-PEEL-1 (T0393)** — `*s` on a
             // `Shared<T>` must reach the wrapped value; without this it
@@ -38873,6 +38938,328 @@ fn mark_call_result_from_retname<'ctx>(
     ctx.set_obj_register_type(dst, base.to_string());
 }
 
+/// **T1260** — the callee wrapped a reference into a variant payload; does the
+/// caller owe a LOAD on it, or is it already the value?
+///
+/// The return type says `Maybe<&T>` either way, so the name cannot answer.
+/// The BODY can, and the two shapes are unmistakable when dumped:
+///
+/// ```text
+/// fn 'ListIter.next'                       fn 'Maybe.as_ref'
+///  11: GetF { dst: r4, obj: r0, f: 0 }      2: GetVariantDataRef { dst: r2, … }
+///  12: Mov  { dst: r5, src: r4 }            3: Mov { dst: r3, src: r2 }
+///  19: MakeVariantTyped { tag: 1, … }       4: MakeVariantTyped { tag: 1, … }
+///  20: SetVariantData { field: 0, val: r5 } 5: SetVariantData { field: 0, val: r3 }
+/// ```
+///
+/// `ListIter.next` wraps `self.ptr` — a `&unsafe T` field read with `GetF`,
+/// i.e. a SLOT ADDRESS one load away from the element. `Maybe.as_ref` wraps
+/// what `GetVariantDataRef` handed it, which under Tier 1 IS the value. Peel
+/// the first, never the second: measured, peeling `Maybe<Point>.as_ref()`
+/// loads the object's header word and the program SIGSEGVs.
+///
+/// This is the contract's rule 1 arriving at the wrapped case — two producers
+/// yield an address, one yields the already-loaded value — and its rule 4:
+/// anything the walk cannot read answers "already a value", which is what
+/// every caller did before this existed.
+fn wrapped_payload_is_slot_address(instrs: &[verum_vbc::Instruction]) -> bool {
+    let mut saw_site = false;
+    for (i, ins) in instrs.iter().enumerate() {
+        let verum_vbc::Instruction::SetVariantData { field, value, .. } = ins else {
+            continue;
+        };
+        if *field != 0 {
+            continue;
+        }
+        saw_site = true;
+        let mut r = value.0;
+        let mut from_getf = false;
+        for prev in instrs[..i].iter().rev() {
+            use verum_vbc::Instruction as I;
+            // The payload register is set SEVERAL instructions before the
+            // `SetVariantData` that consumes it — `ListIter.next` puts the
+            // whole pointer bump in between — so a walk that treats every
+            // unrecognised instruction as a barrier stops immediately and
+            // answers "no". (It did: the first version of this walk turned
+            // the fix off entirely, measured, and the tell was that BOTH
+            // polarities of the kill switch printed the same address.)
+            //
+            // So the arms below say, for each instruction, whether it can
+            // define `r`. An instruction this list does not know is still a
+            // barrier — the coverage is allowed to be incomplete, the answer
+            // is not allowed to be wrong.
+            match prev {
+                I::Mov { dst, src } if dst.0 == r => r = src.0,
+                I::GetF { dst, .. } if dst.0 == r => {
+                    from_getf = true;
+                    break;
+                }
+                // Known definers that are NOT a slot-address read: reaching
+                // one means the payload is already the value.
+                I::GetVariantData { dst, .. } | I::GetVariantDataRef { dst, .. }
+                    if dst.0 == r =>
+                {
+                    break;
+                }
+                // Known instructions that do not define `r` here — walk on.
+                I::Mov { .. } | I::GetF { .. } => {}
+                I::GetVariantData { .. } | I::GetVariantDataRef { .. } => {}
+                I::MakeVariant { dst, .. } | I::MakeVariantTyped { dst, .. } if dst.0 != r => {}
+                I::LoadI { dst, .. } | I::LoadK { dst, .. } | I::LoadUnit { dst } if dst.0 != r => {}
+                I::BinaryI { dst, .. } | I::CmpI { dst, .. } | I::CvtToI { dst, .. }
+                    if dst.0 != r => {}
+                I::SetF { .. }
+                | I::SetVariantData { .. }
+                | I::DropRef { .. }
+                | I::Jmp { .. }
+                | I::JmpNot { .. } => {}
+                _ => break,
+            }
+        }
+        if !from_getf {
+            return false;
+        }
+    }
+    saw_site
+}
+
+/// **T1260** — does this method hand back a `Maybe<&T>`, whose payload word
+/// is an ADDRESS rather than the value?
+///
+/// `GetVariantData` marks EVERY extraction pass-through for `Deref` on the
+/// stated ground that "extracted variant fields ARE the values themselves".
+/// That is true of a value payload and false of a reference one, and with no
+/// fact to the contrary the address survives into the binding. Measured on
+/// `match xs.iter().next() { Maybe.Some(v) => … }`: Tier 1 printed
+/// `4421320704` for BOTH `v` and `*v` where Tier 0 prints `1` — the explicit
+/// `*` was inert because the pass-through mark had already made it identity.
+///
+/// Two sources, ORed, mirroring the `IterNext` custom-iterator arm
+/// (#30 ITER-REF-PAYLOAD-DEREF-1), because neither alone covers the case:
+///
+///  1. the callee descriptor's return-type NAME carries the `&`
+///     (`Maybe<&T>`) — the direct signal, true of a plain
+///     `fn first(&self) -> Maybe<&T>`;
+///  2. the receiver's type declares `Item = &T` on a protocol impl — needed
+///     because an associated-type projection (`Maybe<Self.Item>`) renders as
+///     `Maybe<T0>` and LOSES the `&`, which is exactly `ListIter.next`.
+///
+/// IMMUTABLE only, on both legs. `Maybe<&mut T>` (`iter_mut`, `get_mut`) must
+/// keep its address: the consumer writes THROUGH it, and handing back a value
+/// would send that store to an arbitrary place — the same reason the
+/// `IterNext` arm gates on `Mutability::Immutable`.
+fn callee_yields_ref_payload(ctx: &FunctionContext<'_, '_>, receiver: Reg, method_id: u32) -> bool {
+    // A KILL SWITCH, so the peel can be priced in ONE binary instead of two.
+    // `VERUM_NO_REF_PAYLOAD_PEEL=1` restores the pre-T1260 behaviour exactly
+    // (no mark -> no peel -> the pass-through mark freezes the address), which
+    // is what makes "was this cell already red before the fix?" a measurement
+    // rather than an argument. Not a default-in-waiting: the default is the
+    // peel.
+    if std::env::var_os("VERUM_NO_REF_PAYLOAD_PEEL").is_some() {
+        return false;
+    }
+    let Some(m) = ctx.vbc_module() else {
+        return false;
+    };
+    let method_name = match m.get_string(StringId(method_id)) {
+        Some(n) if !n.is_empty() => n.to_string(),
+        _ => return false,
+    };
+    let bare = method_name
+        .rsplit('.')
+        .next()
+        .unwrap_or(method_name.as_str())
+        .to_string();
+
+    let recv_type = ctx
+        .get_custom_iter_type(receiver.0)
+        .map(|s| s.to_string())
+        .or_else(|| ctx.get_obj_register_type(receiver.0).map(|s| s.to_string()));
+
+    // (1) the descriptor's return-type NAME.
+    let qualified = if method_name.contains('.') {
+        Some(method_name.clone())
+    } else {
+        recv_type.as_ref().map(|t| format!("{t}.{bare}"))
+    };
+    let ret_name = qualified
+        .as_ref()
+        .and_then(|q| {
+            m.functions
+                .iter()
+                .find(|f| m.get_string(f.name).map(|n| n == q.as_str()).unwrap_or(false))
+        })
+        .and_then(|f| f.return_type_name)
+        .and_then(|sid| m.get_string(sid).map(|s| s.to_string()));
+    let ret_says_ref = ret_name
+        .as_ref()
+        .map(|rt| {
+            // `Maybe<&…>` ONLY, and deliberately not the general `<&`.
+            //
+            // A `Result<&T, E>` also contains `<&`, and BOTH its variants
+            // carry a payload at field 0 — so a mark placed on the whole
+            // result would make the `Err(e)` extraction peel a value that is
+            // not a reference. `Maybe` has exactly one payload-carrying
+            // variant, so every `GetVariantData` on it is the `Some` payload
+            // and the peel is unambiguous. The `Result<&T, E>` leg needs the
+            // resolved TAG, not just the type name, and is left to a row of
+            // its own rather than guessed at here.
+            let t = rt.trim();
+            t.starts_with("Maybe<&") && !t.contains("&mut")
+        })
+        .unwrap_or(false);
+
+    // (2) the receiver type's `Item` associated type.
+    //
+    // Gated on the callee actually returning a `Maybe<…>`: the `Item = &T`
+    // fact belongs to the TYPE, and a method merely NAMED `next` that returns
+    // something else must not inherit it. `Maybe<Self.Item>` renders as
+    // `Maybe<T0>` — the `&` is gone, the `Maybe` is not.
+    let returns_maybe = ret_name
+        .as_ref()
+        .map(|rt| rt.trim().starts_with("Maybe<"))
+        .unwrap_or(false);
+    let item_is_ref = bare == "next"
+        && returns_maybe
+        && recv_type
+            .as_deref()
+            .map(|t| t.rsplit('.').next().unwrap_or(t))
+            .map(|bare_ty| {
+                m.types.iter().any(|td| {
+                    m.get_type_name(td.id)
+                        .map(|n| n.rsplit('.').next().unwrap_or(n.as_str()) == bare_ty)
+                        .unwrap_or(false)
+                        && td.protocols.iter().any(|pi| {
+                            pi.associated_types.iter().any(|(sid, tref)| {
+                                m.get_string(*sid) == Some("Item")
+                                    && matches!(
+                                        tref,
+                                        TypeRef::Reference {
+                                            mutability: verum_vbc::types::Mutability::Immutable,
+                                            ..
+                                        }
+                                    )
+                            })
+                        })
+                })
+            })
+            .unwrap_or(false);
+
+    // The NAME says a reference travels in the payload; only the BODY says
+    // whether the caller owes a load on it. Without this the `Maybe.as_ref`
+    // family — whose payload is already the value — got peeled and faulted.
+    let owes_load = (ret_says_ref || item_is_ref)
+        && qualified
+            .as_ref()
+            .and_then(|q| {
+                m.functions
+                    .iter()
+                    .find(|f| m.get_string(f.name).map(|n| n == q.as_str()).unwrap_or(false))
+            })
+            .and_then(|f| f.instructions.as_ref())
+            .map(|instrs| wrapped_payload_is_slot_address(instrs))
+            .unwrap_or(false);
+
+    let out = owes_load;
+    if std::env::var_os("VERUM_TRACE_REFPAYLOAD").is_some() {
+        eprintln!(
+            "[refpay] method={method_name} recv=r{} recv_type={recv_type:?} \
+             ret={ret_name:?} ret_says_ref={ret_says_ref} \
+             item_is_ref={item_is_ref} owes_load={owes_load} -> {out}",
+            receiver.0
+        );
+    }
+    out
+}
+
+/// **T1260** — load through a payload word that is an ADDRESS.
+///
+/// Gated on POINTER PLAUSIBILITY rather than on the variant tag, because
+/// `GetVariantData` is not always dominated by its `IsVar`, and because a
+/// `None` payload travels as 0 under the unit-variant-as-0 encoding that
+/// `lower_get_variant_data` itself honours — 0 fails the gate, so the load
+/// never runs on it.
+///
+/// A REAL branch, not a `select`: a select evaluates both operands and would
+/// dereference the very address it is meant to skip. That lesson is recorded
+/// three times over in this file already.
+fn load_ref_payload_slot<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    value: IntValue<'ctx>,
+    name: &str,
+) -> Result<IntValue<'ctx>> {
+    let i64_type = ctx.types().i64_type();
+    let ptr_type = ctx.types().ptr_type();
+    let floor = super::target_triple::heap_floor(&ctx.get_module());
+
+    let cur_bb = ctx
+        .builder()
+        .get_insert_block()
+        .or_internal("ref payload: no insert block")?;
+    let func = cur_bb
+        .get_parent()
+        .or_internal("ref payload: no parent function")?;
+    let load_bb = ctx.llvm_context().append_basic_block(func, "refpay_load");
+    let done_bb = ctx.llvm_context().append_basic_block(func, "refpay_done");
+
+    let lo = ctx
+        .builder()
+        .build_int_compare(
+            IntPredicate::UGE,
+            value,
+            i64_type.const_int(floor, false),
+            "refpay_lo",
+        )
+        .or_llvm_err()?;
+    let hi = ctx
+        .builder()
+        .build_int_compare(
+            IntPredicate::ULE,
+            value,
+            i64_type.const_int(0x7FFF_FFFF_FFFF, false),
+            "refpay_hi",
+        )
+        .or_llvm_err()?;
+    let alm = ctx
+        .builder()
+        .build_and(value, i64_type.const_int(7, false), "refpay_alm")
+        .or_llvm_err()?;
+    let al = ctx
+        .builder()
+        .build_int_compare(IntPredicate::EQ, alm, i64_type.const_zero(), "refpay_al")
+        .or_llvm_err()?;
+    let r1 = ctx
+        .builder()
+        .build_and(lo, hi, "refpay_r1")
+        .or_llvm_err()?;
+    let ok = ctx.builder().build_and(r1, al, "refpay_ok").or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(ok, load_bb, done_bb)
+        .or_llvm_err()?;
+
+    ctx.builder().position_at_end(load_bb);
+    let p = ctx
+        .builder()
+        .build_int_to_ptr(value, ptr_type, "refpay_ptr")
+        .or_llvm_err()?;
+    let loaded = ctx
+        .builder()
+        .build_load(i64_type, p, name)
+        .or_llvm_err()?
+        .into_int_value();
+    ctx.builder()
+        .build_unconditional_branch(done_bb)
+        .or_llvm_err()?;
+
+    ctx.builder().position_at_end(done_bb);
+    let phi = ctx
+        .builder()
+        .build_phi(i64_type, "refpay_out")
+        .or_llvm_err()?;
+    phi.add_incoming(&[(&value, cur_bb), (&loaded, load_bb)]);
+    Ok(phi.as_basic_value().into_int_value())
+}
+
 fn mark_register_from_return_type<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     reg: u16,
@@ -41451,6 +41838,11 @@ fn propagate_value_type_facts<'ctx>(
     }
     if ctx.is_pass_through_ref_list(src.0) {
         ctx.mark_pass_through_ref_list(dst.0);
+    }
+    // T1260: a `Maybe<&T>` that travels through a MOV before its `match`
+    // is the same `Maybe<&T>` on the other side.
+    if ctx.is_maybe_ref_payload(src.0) {
+        ctx.mark_maybe_ref_payload(dst.0);
     }
     if ctx.is_generic_ptr_register(src.0) {
         ctx.mark_generic_ptr_register(dst.0);
