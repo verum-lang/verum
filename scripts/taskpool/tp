@@ -169,7 +169,54 @@ cmd_new() {
   done
   [ -n "$title" ] || die 'new: -t TITLE is required'
   case "$prio" in P0|P1|P2|P3) ;; *) die "new: priority must be P0..P3, got '$prio'" ;; esac
-  if [ -z "$body" ] && [ ! -t 0 ]; then body="$(cat)"; fi
+  # Read the spec from stdin ONLY when stdin is a PIPE or a REGULAR
+  # FILE — that covers `tp new … <<EOF`, `< spec.md` and `… | tp new`,
+  # and nothing else.
+  #
+  # The test used to be `[ ! -t 0 ]`, i.e. "not a terminal". Every
+  # non-interactive caller fails that test — an agent's tool shell, a
+  # CI step, a `nohup`ed script — so `tp new` without `-b` read from
+  # whatever descriptor it inherited and BLOCKED until that descriptor
+  # closed. Measured 2026-09-07: two `tp new` invocations from this
+  # session had been sitting for FOURTEEN HOURS, and the "empty task
+  # id" incidents recorded earlier (a `tp new` whose id never arrived,
+  # and the next command then retargeting whatever id it did have) are
+  # the same root. Reproduced in one line — `tp new -t x <&3` with fd 3
+  # an open pipe returns 124 under `timeout 5` and creates nothing.
+  #
+  # A socket, a terminal or an inherited pipe-that-never-closes now
+  # falls through to the default spec instead of hanging.
+  # Read the spec from stdin when one was piped in — but NEVER wait
+  # forever for it.
+  #
+  # The test is `[ ! -t 0 ]`, "not a terminal", and every
+  # non-interactive caller fails it: an agent's tool shell, a CI step, a
+  # `nohup`ed script. So `tp new` without `-b` read whatever descriptor
+  # it inherited and BLOCKED until that descriptor closed. Measured
+  # 2026-09-07: two invocations from one session had been sitting for
+  # FOURTEEN HOURS, and the "empty task id" incidents recorded earlier —
+  # a `tp new` whose id never arrived, after which the next command
+  # retargeted whatever id it did have — are the same root. Reproduced
+  # in one line: `tp new -t x <&3`, fd 3 an open pipe, returns 124 under
+  # `timeout 5` and creates nothing.
+  #
+  # WHICH DESCRIPTOR IT IS CANNOT BE TESTED. Process substitution is a
+  # pipe and a heredoc is a pipe or a temp file, so `-p`/`-f` do not
+  # separate "will deliver EOF" from "will not". The only decidable
+  # question is HOW LONG to wait, so the read is bounded: a heredoc or a
+  # real pipe returns instantly, an inherited never-closing descriptor
+  # costs two seconds and then falls through to the default spec.
+  if [ -z "$body" ] && [ ! -t 0 ]; then
+    if command -v timeout >/dev/null 2>&1; then
+      # `|| true` because the script runs under `set -e` and a timed-out
+      # `cat` exits 124 — without it the bound turns a slow stdin into a
+      # SILENT ABORT that files nothing, which is worse than the hang it
+      # replaced. Caught by measuring: rc=124 after 2s, no task created.
+      body="$(timeout 2 cat || true)"
+    else
+      body="$(cat)"
+    fi
+  fi
   [ -n "$body" ] || body='(no spec — see title)'
   owner="$(owner_id)"
 
