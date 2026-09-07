@@ -39082,13 +39082,15 @@ fn callee_yields_ref_payload(ctx: &FunctionContext<'_, '_>, receiver: Reg, metho
     } else {
         recv_type.as_ref().map(|t| format!("{t}.{bare}"))
     };
-    let ret_name = qualified
-        .as_ref()
-        .and_then(|q| {
-            m.functions
-                .iter()
-                .find(|f| m.get_string(f.name).map(|n| n == q.as_str()).unwrap_or(false))
-        })
+    // ONE scan of the function table, not one per fact. `m.functions` runs to
+    // tens of thousands of entries with the stdlib merged in, and this helper
+    // is called on every `CallM` in the module.
+    let callee = qualified.as_ref().and_then(|q| {
+        m.functions
+            .iter()
+            .find(|f| m.get_string(f.name).map(|n| n == q.as_str()).unwrap_or(false))
+    });
+    let ret_name = callee
         .and_then(|f| f.return_type_name)
         .and_then(|sid| m.get_string(sid).map(|s| s.to_string()));
     let ret_says_ref = ret_name
@@ -39149,13 +39151,7 @@ fn callee_yields_ref_payload(ctx: &FunctionContext<'_, '_>, receiver: Reg, metho
     // whether the caller owes a load on it. Without this the `Maybe.as_ref`
     // family — whose payload is already the value — got peeled and faulted.
     let owes_load = (ret_says_ref || item_is_ref)
-        && qualified
-            .as_ref()
-            .and_then(|q| {
-                m.functions
-                    .iter()
-                    .find(|f| m.get_string(f.name).map(|n| n == q.as_str()).unwrap_or(false))
-            })
+        && callee
             .and_then(|f| f.instructions.as_ref())
             .map(|instrs| wrapped_payload_is_slot_address(instrs))
             .unwrap_or(false);
