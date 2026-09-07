@@ -293,6 +293,29 @@ fn merge_with_manifest(cli: ProfileConfig) -> ProfileConfig {
     out
 }
 
+/// Say whether `[verify.solver.*]` reached the solver, when the user
+/// set anything there.
+///
+/// The INSTALL itself happens in `Manifest::from_file` — one place, so
+/// no verifying command can forget it. This only reports, and only
+/// when there is something to report: "the manifest said nothing" is
+/// the overwhelmingly common case and deserves no line of output.
+/// The two cases a user wants to know about are settings found and
+/// applied, and settings found and NOT applied.
+pub fn report_solver_config(solver: &verum_smt::config::SolverConfig) {
+    if solver.is_default() {
+        return;
+    }
+    if verum_smt::config::is_installed() {
+        ui::info("Solver configuration from [verify.solver] applied");
+    } else {
+        ui::warn(
+            "[verify.solver] was set but not applied — something read the \
+             solver configuration before the manifest was parsed",
+        );
+    }
+}
+
 /// Parse a human-readable duration string (e.g. `120s`, `2m`, `1h`).
 ///
 /// Accepts a bare number as seconds. Used by `--budget=...` at the CLI layer.
@@ -343,6 +366,15 @@ pub fn execute(
     // Merge [verify] block from verum.toml (if any) with CLI flags. CLI
     // wins — per spec §1.5 / §6.1 CLI arguments override manifest defaults.
     let profile = merge_with_manifest(profile);
+
+    // T1233: `[verify.solver.*]` was installed when the manifest was
+    // parsed (`Manifest::from_file`); say so if the user set anything.
+    if let Ok(dir) = crate::config::Manifest::find_manifest_dir()
+        && let Ok(m) =
+            crate::config::Manifest::from_file(&crate::config::Manifest::manifest_path(&dir))
+    {
+        report_solver_config(&m.verify.solver);
+    }
 
     if let Some(ref url) = profile.distributed_cache {
         ui::info(&format!(

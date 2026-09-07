@@ -72,6 +72,13 @@ pub fn execute(
     let manifest_path = Manifest::manifest_path(&manifest_dir);
     let mut manifest = Manifest::from_file(&manifest_path)?;
     crate::feature_overrides::apply_global(&mut manifest)?;
+
+    // T1233: `verum build` verifies too (`@verify(...)` attributes,
+    // refinement checking), so `[verify.solver.*]` matters here. The
+    // install already happened when the manifest was parsed — one
+    // place, so no verifying command can forget it — and this only
+    // reports, and only when the user set something.
+    crate::commands::verify::report_solver_config(&manifest.verify.solver);
     manifest.validate()?;
 
     // #119 / #110 manifest gate — when `[build].strict_codegen = true`

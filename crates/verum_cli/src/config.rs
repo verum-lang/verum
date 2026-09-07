@@ -387,6 +387,20 @@ pub struct VerifyConfig {
     /// CLI flag > profile override > base `[verify]` > default.
     #[serde(default)]
     pub profiles: Map<Text, VerifyProfileOverride>,
+
+    /// `[verify.solver.*]` — the solver sub-tables.
+    ///
+    /// T1233: this field is the whole reason forty-seven documented
+    /// keys did nothing. `[verify]` deserializes into this struct, and
+    /// with no `solver` field, no `#[serde(flatten)]` and no catch-all,
+    /// serde dropped `[verify.solver]` and every table under it in
+    /// silence — no warning, no error, no effect. The structs behind
+    /// those tables were fine; the manifest simply could not reach them.
+    ///
+    /// The sub-tables are `verum_smt`'s own config structs, held by
+    /// reference rather than re-declared here. See `SolverConfig`.
+    #[serde(default)]
+    pub solver: verum_smt::config::SolverConfig,
 }
 
 /// Per-profile override block in the `[verify.profiles.<name>]` section.
@@ -528,6 +542,7 @@ impl Default for VerifyConfig {
             profile_slow_functions: true,
             profile_threshold: None,
             profiles: Map::new(),
+            solver: verum_smt::config::SolverConfig::default(),
         }
     }
 }
@@ -1618,7 +1633,29 @@ impl Manifest {
         let content = std::fs::read_to_string(path)
             .map_err(|_| CliError::ProjectNotFound(path.to_path_buf()))?;
 
-        toml::from_str(&content).map_err(CliError::from)
+        let manifest: Self = toml::from_str(&content).map_err(CliError::from)?;
+
+        // T1233: hand `[verify.solver.*]` to the solver layer HERE, at
+        // the one place a manifest is parsed, rather than at each
+        // command that verifies.
+        //
+        // Eight commands reach verification — build, check, run, test,
+        // bench, verify, export, file — and a per-command install is
+        // eight copies of one block plus a ninth command, added later,
+        // that forgets. That is the same shape as the defect this task
+        // exists to fix: a mechanism present and a route that does not
+        // reach it.
+        //
+        // Silent by design. `install` refuses once anything has read
+        // the effective configuration, so the FIRST manifest load in a
+        // process wins and every later one is a no-op; a command that
+        // loads a manifest for an unrelated reason (`tree`, `deps`)
+        // installs a configuration nobody then reads, which costs
+        // nothing. The commands that verify report what happened —
+        // see `verify::report_solver_config`.
+        let _ = verum_smt::config::install(manifest.verify.solver.clone());
+
+        Ok(manifest)
     }
 
     pub fn to_file(&self, path: &Path) -> Result<()> {
