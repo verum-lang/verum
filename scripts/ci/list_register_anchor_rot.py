@@ -120,6 +120,12 @@ def named_symbol(text: str, end: int) -> str | None:
         # advisory rows were this.
         if cand.rsplit(".", 1)[-1] in ("rs", "vr", "py", "md", "toml", "ebnf"):
             continue
+        # A CRATE NAME IS NOT A SYMBOL AT A LINE. `link.rs:560`
+        # (… verum_codegen …) says which crate the row is about; looking
+        # for "verum_codegen" INSIDE link.rs reports rot on a correct
+        # anchor. Four of twenty advisory rows were this.
+        if cand.startswith("verum_") and "." not in cand:
+            continue
         if CODEY.search(cand) and len(cand) > 3:
             return cand
     return None
@@ -142,6 +148,9 @@ def self_test() -> int:
          named_symbol("`x.rs:1` (UNRESOLVED_FN_ID -> zero)", 8),
          lambda s: s == "UNRESOLVED_FN_ID"),
     ]
+    checks.append(("a crate name is not a symbol",
+                   named_symbol("`x.rs:1` (verum_codegen owns this)", 8),
+                   lambda s: s != "verum_codegen"))
     checks.append(("a name CUT BY THE WINDOW is dropped, not reported half",
                    named_symbol("`x.rs:1` sits in handle_deref which is long",
                                 8), lambda s: s != "handle_de"))
@@ -218,7 +227,15 @@ def main() -> int:
             sym = named_symbol(text, m.end())
             if sym:
                 lo, hi = max(0, line - 1 - WINDOW), min(len(body), line + WINDOW)
-                if not any(sym in b for b in body[lo:hi]):
+                # THE PROSE QUALIFIES, THE FILE DECLARES BARE. A row
+                # writing `BufRead.has_data_left` points at a line that
+                # reads `fn has_data_left(&mut self)`; searching only for
+                # the dotted form reports rot on an anchor that is exact
+                # to the line. Try the last segment too.
+                forms = {sym}
+                if "." in sym:
+                    forms.add(sym.rsplit(".", 1)[-1])
+                if not any(any(fm in b for fm in forms) for b in body[lo:hi]):
                     advisory.append((where, f"{path}:{line}", sym))
 
     # AN INSTRUMENT THAT CANNOT FIND ITS INPUT MUST GET STRICTER, never
