@@ -21062,7 +21062,34 @@ fn lower_call_method<'ctx>(
                     }
                     let qual = format!("{}.{}", tname, bare_method_early);
                     if let Some(f) = ctx.get_module().get_function(&qual) {
-                        if f.count_basic_blocks() > 0 {
+                        // "HAS A BODY" CANNOT BE ASKED OF THE LLVM
+                        // FUNCTION HERE. Bodies lower in MODULE ORDER, so
+                        // a candidate declared later still has zero basic
+                        // blocks while THIS function is being built, and
+                        // the arm for it was silently dropped.
+                        //
+                        // Measured (T1214): `List.from_iter` lowers at IR
+                        // line 103 955 and `Range.next` at 114 702 — so
+                        // when the switch inside `from_iter` was built,
+                        // `Range.next` was a bodyless declaration, no arm
+                        // was emitted for `Range`, and the programme died
+                        // with "no runtime candidate for method 'next' —
+                        // the receiver's runtime type id matched none of
+                        // the arms" on a receiver that IS a Range and
+                        // whose `next` IS in the module.
+                        //
+                        // The VBC descriptor answers it at the right
+                        // time: a descriptor carrying instructions gets a
+                        // body. Arity still comes from the declaration.
+                        let will_have_body = f.count_basic_blocks() > 0
+                            || vbc
+                                .functions
+                                .iter()
+                                .any(|fd| {
+                                    vbc.get_string(fd.name) == Some(qual.as_str())
+                                        && fd.instructions.is_some()
+                                });
+                        if will_have_body {
                             let pc = f.count_params() as usize;
                             if pc == args.count as usize + 1
                                 && seen_tids.insert(type_desc.id.0)
