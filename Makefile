@@ -129,6 +129,15 @@ check-doc-cli-flags: ## Gate: every CLI flag the docs show must exist in the bin
 #	 `repl --proof`, `export --all-formats`, `export --format`).
 	VERUM_DOCS_DIR=docs python3 scripts/ci/check_doc_cli_flags.py
 
+check-doc-config-structs: ## Gate: a doc page describing a config struct must name one that exists, with its real defaults and enum values
+	python3 scripts/ci/check_doc_config_structs.py --self-test
+#	 Floor of 2: the two pages that carry `## <Name>Config` sections
+#	 today. A floor rather than a zero-check, because zero defects and
+#	 zero pages print the same way — the first version of this gate
+#	 reported "0 pages, 0 defects" for a corpus with thirteen config
+#	 sections and looked green.
+	VERUM_DOCS_DIR="$(WEBSITE_DOCS)" python3 scripts/ci/check_doc_config_structs.py --min-pages 2
+
 check-doc-indented-blocks: ## Gate: an indented block in a `///` comment is a Rust doctest — fence it
 	python3 scripts/ci/check_doc_indented_blocks.py --selftest
 	python3 scripts/ci/check_doc_indented_blocks.py
