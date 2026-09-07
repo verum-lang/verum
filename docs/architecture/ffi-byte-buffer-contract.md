@@ -63,6 +63,39 @@ patterns below → `sent=4`, `recv=4`, payload bytes `112,105,110,103`
   `Repeat` arms) → `NewList`. Element `Value`s are 8-byte-strided; the low
   byte of `Value[i]` is `byte[i]`, but `byte[i+1]` lives 8 bytes on, not 1.
 
+### 1b. The two TIERS do not allocate it the same way (T1192, T1220)
+
+The paragraph above describes the INTERPRETER's packed object and reads
+as if it were universal. It is not, and two rules of this contract lean
+on the difference.
+
+| | interpreter | AOT |
+|---|---|---|
+| allocation | `heap.alloc` with the U8 heap type id | `verum_cbgr_allocate(bytes)` |
+| what precedes the data | an **ObjectHeader**, carrying a `type_id` and a size | a 32-byte **AllocationHeader**, carrying `{base_offset, total}` |
+| pointer handed out | the object base (data at `OBJECT_HEADER_SIZE`) | the **user address** — the header is BEHIND it |
+| filled with the init value | yes | **no, until T1220** |
+
+Two consequences, each one a measured defect rather than a caution:
+
+* **Nothing reachable from an AOT byte-array pointer says how long it
+  is.** Forward offsets 0, 24 and 32 all land in DATA, and the header
+  that exists carries no `type_id` and no length. Every probe in
+  `lower_len` was written against the interpreter's shape, so at Tier 1
+  they read the array's own bytes and called the result a length —
+  `[Byte; 16]` answered 16 at Tier 0 and **0** at Tier 1, rc=0, no
+  diagnostic (T1192, fixed by answering from the frontend where `N` is
+  part of the type).
+* **"Zeroed contiguous bytes" is the interpreter's guarantee.** The AOT
+  `NewByteArray` arm ignored the init operand entirely, so `[7; 4]` read
+  as zeros. `[0; N]` was correct BY ACCIDENT — a fresh allocation
+  already reads zero — which is why the defect was invisible in the
+  shape that uses it most, a zeroed scratch buffer (T1220).
+
+Neither is a reason to prefer the NaN-boxed form: the packed form is
+still the only contiguous ABI bytes. It is a reason not to reason about
+a Tier-1 byte buffer from the interpreter's layout.
+
 Consequence: `let mut b = [0_u8; 128]` is **not** contiguous ABI bytes — the
 kernel would write 16 contiguous bytes over `Value[0..1]` and corrupt the
 NaN-boxing. Always annotate: `let mut b: [Byte; 128] = [0; 128]`.
