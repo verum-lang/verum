@@ -7116,12 +7116,59 @@ pub fn lower_instruction<'ctx>(
             // read a stack slot and null-deref.  Marking here restores the
             // heap-reference ≡ object-pointer coherence between tiers.
             if produced_value {
-                mark_register_from_return_type(ctx, dst.0, &return_type);
+                // **T1207, second half — A `Generic(n)` RETURN TYPE IS
+                // RESOLVABLE FROM THE CALL'S OWN ARGS.** `fn identity<T>(x: T) -> T`
+                // returns `Generic(0)`, and `mark_register_from_return_type`
+                // has no arm for that, so the result was left unmarked and a
+                // `Text` came out of it as an address. The instruction
+                // carries `type_args`, so `Generic(0)` is `type_args[0]` —
+                // the same fact the stamp below records, read one step
+                // earlier for the return value itself.
+                //
+                // Falls back to the unresolved type when the index is out of
+                // range or the argument is itself generic: marking nothing is
+                // today's behaviour and no worse.
+                let resolved_return = match &return_type {
+                    TypeRef::Generic(param_id) => type_args
+                        .get(param_id.0 as usize)
+                        .filter(|t| !matches!(t, TypeRef::Generic(_)))
+                        .cloned()
+                        .unwrap_or_else(|| return_type.clone()),
+                    _ => return_type.clone(),
+                };
+                mark_register_from_return_type(ctx, dst.0, &resolved_return);
                 if returns_generator {
                     ctx.mark_gen_register(dst.0);
                 }
             }
-            let _ = type_args; // Consumed by monomorphization phase
+            // **T1207 — THE INSTANTIATION IS ON THE INSTRUCTION AND WAS
+            // DROPPED HERE.** The line this replaces read
+            // `let _ = type_args; // Consumed by monomorphization phase`,
+            // and the arm's own header says "treat as direct call ignoring
+            // type_args". Nothing downstream recovers them: a census of all
+            // 35 `set_generic_type_args` call sites finds none on the CallG
+            // path.
+            //
+            // What that costs, measured: `Store<Pkg>.get` carries
+            // `type_args: [Concrete(TypeId(5009))]` — `Pkg` — and the
+            // record it returns reaches a field read with no instantiation,
+            // so `Dated<T>.value` cannot resolve `Generic(0)`, the receiver
+            // stays untyped, `GetFieldNamed` takes the closed-world dynamic
+            // arm (96 of 96 decisions in that programme), and the value
+            // arrives at `ToString` unmarked — a `Text` prints as its
+            // address, a `Float` as the bits of 2.5, an `Int` correctly.
+            //
+            // AFTER every `set_register` above, never before: `set_register`
+            // clears a register's type facts, so a stamp written earlier is
+            // erased by the store it describes (T1194's shape).
+            //
+            // Recorded so the next reader has the falsifier rather than the
+            // story: if this stamp does NOT move `[byname-branch]` off
+            // 96/96 DYNAMIC, the loss is in propagation through
+            // `GetVariantData`/`Mov` rather than here.
+            if produced_value && !type_args.is_empty() {
+                ctx.set_generic_type_args(dst.0, type_args.clone());
+            }
             Ok(())
         }
 
