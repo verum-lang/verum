@@ -143,13 +143,33 @@ arithmetic**:
 
 * `push_str` does `memcpy(ptr_offset(self.ptr, self.len), s.as_ptr(),
   n)`. `self.ptr` is a `*mut Byte` (byte buffer).
-* `ptr_offset` lowers via `emit_ptr_offset`
-  (`intrinsics/codegen.rs:1194`) which HARD-CODES `stride = 8`
+* `ptr_offset` lowered via `emit_ptr_offset`
+  (`intrinsics/codegen.rs:1194` — file since DELETED, see below) which
+  HARD-CODED `stride = 8`
   ("VBC type-erases to 64-bit values; element stride is always 8
-  bytes") — it even ignores the `byte_width` param that
-  `emit_intrinsic_inline_sequence` threads. So it computes `self.ptr +
+  bytes") — it even ignored the `byte_width` param that
+  `emit_intrinsic_inline_sequence` threads. So it computed `self.ptr +
   self.len * 8` instead of `self.ptr + self.len * 1`.
-* Result: the appended bytes land **8× too far** into the buffer.
+* Result: the appended bytes landed **8× too far** into the buffer.
+
+> **THE ANCHOR ABOVE IS DEAD AND THE MECHANISM IT DESCRIBES IS GONE
+> (checked 2026-09-07).** `intrinsics/codegen.rs` no longer exists —
+> `60bfb5b45` deleted it wholesale as a zero-caller 3.8k-line parallel
+> strategy executor (T0195), and `emit_ptr_offset` went with it. The live
+> decision is `ptr_intrinsic_byte_stride`
+> (`crates/verum_vbc/src/codegen/expressions.rs`), which does the opposite
+> of hard-coding: it returns stride **1** for the genuine packed
+> `&unsafe Byte` idiom and 8 otherwise, and records why — a `*const`/`*mut`
+> byte pointer or a `List<Byte>` / `[Byte; N]` backing exposed through
+> `as_ptr` is an 8-byte NaN-boxed `Value` array despite its `Byte`
+> element type.
+>
+> **This retracts the LOCATION, not the SYMPTOM.** Whether `push_str`
+> still lands bytes 8× too far is a question for a run, and this document
+> does not carry one; the paragraph is kept in the past tense because a
+> deleted mechanism cannot be the reason for a present-day defect, and a
+> reader sent to a file that is not there concludes the analysis is
+> confused rather than the anchor.
   Short buffers → the append is invisible (content reads as the
   original, e.g. "hi" not "hiXYZ", even though `len` is 5); long
   buffers → the write runs off the allocation → SIGBUS.
